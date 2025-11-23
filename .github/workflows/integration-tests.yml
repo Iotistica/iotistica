@@ -419,7 +419,7 @@ jobs:
           
           echo ""
           echo "=== Checking PM2 environment ==="
-          sudo pm2 show iotistic-agent | grep -A 20 "env:"
+          sudo -u iotistic pm2 show iotistic-agent | grep -A 20 "env:" || echo "Could not retrieve PM2 environment"
 
       - name: Check systemd service status
         run: |
@@ -437,17 +437,17 @@ jobs:
       - name: Check PM2 status
         run: |
           echo "PM2 Process List:"
-          sudo pm2 list
+          sudo -u iotistic pm2 list
           
           echo ""
           echo "Agent Process Info:"
-          sudo pm2 info iotistic-agent || echo "Process not found"
+          sudo -u iotistic pm2 info iotistic-agent || echo "Process not found"
           
-          if sudo pm2 list | grep -q "online"; then
+          if sudo -u iotistic pm2 list | grep -q "online"; then
             echo "✓ Agent is running (online)"
           else
             echo "✗ Agent is not running properly"
-            sudo pm2 logs iotistic-agent --nostream --lines 100
+            sudo -u iotistic pm2 logs iotistic-agent --nostream --lines 100
             exit 1
           fi
 
@@ -460,7 +460,7 @@ jobs:
             echo "✓ Agent API is responding"
           else
             echo "⚠ Agent API not responding"
-            sudo pm2 logs iotistic-agent --nostream --lines 50
+            sudo -u iotistic pm2 logs iotistic-agent --nostream --lines 50
             exit 1
           fi
 
@@ -472,7 +472,7 @@ jobs:
           sleep 5
           
           # Extract Device manager initialization log
-          DEVICE_INFO=$(sudo pm2 logs iotistic-agent --nostream --lines 200 | grep "Device manager initialized" | tail -1)
+          DEVICE_INFO=$(sudo -u iotistic pm2 logs iotistic-agent --nostream --lines 200 | grep "Device manager initialized" | tail -1)
           
           if [ -z "$DEVICE_INFO" ]; then
             echo "✗ Device manager initialization log not found"
@@ -505,7 +505,7 @@ jobs:
             echo "✗ Agent is NOT provisioned (expected: true, got: $PROVISIONED)"
             echo ""
             echo "Full device manager logs:"
-            sudo pm2 logs iotistic-agent --nostream --lines 200 | grep -i "provision"
+            sudo -u iotistic pm2 logs iotistic-agent --nostream --lines 200 | grep -i "provision"
             exit 1
           fi
           
@@ -546,7 +546,7 @@ jobs:
           echo "========================================="
           echo "Agent Logs (PM2):"
           echo "========================================="
-          sudo pm2 logs iotistic-agent --nostream --lines 200
+          sudo -u iotistic pm2 logs iotistic-agent --nostream --lines 200
 
       - name: Check API logs
         if: always()
@@ -559,8 +559,8 @@ jobs:
       - name: Cleanup agent
         if: always()
         run: |
-          sudo pm2 stop iotistic-agent || true
-          sudo pm2 delete iotistic-agent || true
+          sudo -u iotistic pm2 stop iotistic-agent || true
+          sudo -u iotistic pm2 delete iotistic-agent || true
           sudo systemctl stop iotistic-agent || true
           sudo systemctl disable iotistic-agent || true
 
