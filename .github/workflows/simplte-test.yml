@@ -9,7 +9,7 @@ on:
 
 jobs:
   test-on-tagged-runner:
-    runs-on: [iotistic-lab-sc]
+    runs-on: [iotistic-lab-sc, Linux, self-hosted, x64]
 
     steps:
       - name: Checkout code
