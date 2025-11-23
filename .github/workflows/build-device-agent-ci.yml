@@ -279,7 +279,7 @@ jobs:
           echo "Agent image validated successfully!" >> $GITHUB_STEP_SUMMARY
 
   test-agent-systemd:
-    name: Test Systemd Installation (via install.sh)
+    name: Test Systemd Installation (via install.sh
     needs: [version]
     runs-on: [self-hosted, iotistic-lab-sc]
     
