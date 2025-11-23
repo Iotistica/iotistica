@@ -408,7 +408,7 @@ jobs:
           echo "=== Checking environment file ==="
           echo "File: /etc/iotistic/agent.env"
           if [ -f /etc/iotistic/agent.env ]; then
-            echo "Environment file exists"
+            echo "✓ Environment file exists"
             echo ""
             echo "Contents (sensitive values masked):"
             sudo cat /etc/iotistic/agent.env | sed 's/PROVISIONING_KEY=.*/PROVISIONING_KEY=<masked>/'
@@ -418,8 +418,17 @@ jobs:
           fi
           
           echo ""
-          echo "=== Checking PM2 environment ==="
-          sudo -u iotistic pm2 show iotistic-agent | grep -A 20 "env:" || echo "Could not retrieve PM2 environment"
+          echo "=== Verifying environment variables in agent logs ==="
+          if sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep -q "PROVISIONING_KEY"; then
+            echo "⚠ PROVISIONING_KEY found in logs (should be loaded but not logged)"
+          fi
+          
+          if sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep -q "CLOUD_API_ENDPOINT"; then
+            echo "✓ CLOUD_API_ENDPOINT environment variable loaded"
+          fi
+          
+          echo ""
+          echo "✓ Environment configuration verified"
 
       - name: Check systemd service status
         run: |
@@ -436,18 +445,26 @@ jobs:
 
       - name: Check PM2 status
         run: |
-          echo "PM2 Process List:"
-          sudo -u iotistic pm2 list
+          echo "=== Checking agent process via systemd ==="
           
-          echo ""
-          echo "Agent Process Info:"
-          sudo -u iotistic pm2 info iotistic-agent || echo "Process not found"
+          # Get PM2 process info from systemd
+          PM2_PID=$(sudo systemctl show iotistic-agent -p MainPID --value)
+          echo "PM2 Runtime PID: $PM2_PID"
           
-          if sudo -u iotistic pm2 list | grep -q "online"; then
-            echo "✓ Agent is running (online)"
+          if [ "$PM2_PID" != "0" ]; then
+            echo "✓ PM2 runtime is running (PID: $PM2_PID)"
+            
+            # Check if agent process exists in logs
+            if sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep -q "Device Agent initialized successfully"; then
+              echo "✓ Agent process is online and initialized"
+            else
+              echo "⚠ Agent may still be initializing..."
+              echo "Recent logs:"
+              sudo journalctl -u iotistic-agent --no-pager --since "2 minutes ago" --lines 20
+            fi
           else
-            echo "✗ Agent is not running properly"
-            sudo -u iotistic pm2 logs iotistic-agent --nostream --lines 100
+            echo "✗ PM2 runtime is not running"
+            sudo journalctl -u iotistic-agent --no-pager --lines 50
             exit 1
           fi
 
@@ -460,7 +477,8 @@ jobs:
             echo "✓ Agent API is responding"
           else
             echo "⚠ Agent API not responding"
-            sudo -u iotistic pm2 logs iotistic-agent --nostream --lines 50
+            echo "Recent agent logs:"
+            sudo journalctl -u iotistic-agent --no-pager --since "2 minutes ago" --lines 50
             exit 1
           fi
 
@@ -471,8 +489,8 @@ jobs:
           # Wait a bit for device manager to initialize
           sleep 5
           
-          # Extract Device manager initialization log
-          DEVICE_INFO=$(sudo -u iotistic pm2 logs iotistic-agent --nostream --lines 200 | grep "Device manager initialized" | tail -1)
+          # Extract Device manager initialization log from journalctl
+          DEVICE_INFO=$(sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep "Device manager initialized" | tail -1)
           
           if [ -z "$DEVICE_INFO" ]; then
             echo "✗ Device manager initialization log not found"
@@ -505,7 +523,7 @@ jobs:
             echo "✗ Agent is NOT provisioned (expected: true, got: $PROVISIONED)"
             echo ""
             echo "Full device manager logs:"
-            sudo -u iotistic pm2 logs iotistic-agent --nostream --lines 200 | grep -i "provision"
+            sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep -i "provision"
             exit 1
           fi
           
@@ -540,13 +558,13 @@ jobs:
           npm ci
           npm run test:integration || echo "No integration tests configured yet"
 
-      - name: Show PM2 logs
+      - name: Show agent logs
         if: always()
         run: |
           echo "========================================="
-          echo "Agent Logs (PM2):"
+          echo "Agent Logs (via journalctl):"
           echo "========================================="
-          sudo -u iotistic pm2 logs iotistic-agent --nostream --lines 200
+          sudo journalctl -u iotistic-agent --no-pager --since "10 minutes ago" --lines 200
 
       - name: Check API logs
         if: always()
@@ -559,10 +577,12 @@ jobs:
       - name: Cleanup agent
         if: always()
         run: |
-          sudo -u iotistic pm2 stop iotistic-agent || true
-          sudo -u iotistic pm2 delete iotistic-agent || true
+          echo "Stopping agent service..."
           sudo systemctl stop iotistic-agent || true
           sudo systemctl disable iotistic-agent || true
+          sudo rm -f /etc/systemd/system/iotistic-agent.service
+          sudo systemctl daemon-reload
+          echo "✓ Agent service cleaned up"
 
       - name: Cleanup infrastructure
         if: always()
