@@ -409,12 +409,6 @@ jobs:
           echo "========================================="
           sudo pm2 logs iotistic-agent --nostream --lines 200
 
-      - name: Cleanup
-        if: always()
-        run: |
-          sudo pm2 stop iotistic-agent || true
-          sudo pm2 delete iotistic-agent || true
-
       - name: Generate systemd test summary
         if: always()
         run: |
@@ -747,7 +741,8 @@ jobs:
   cleanup:
       name: Clean up
       runs-on: [self-hosted, iotistic-lab-sc]
-      needs: [trigger-integration-tests, report]
+      needs: [version, buildx, test-agent-docker, test-agent-systemd]
+      if: always()
       steps:
        - name: Cleanup systemd service and PM2
          if: always()
