@@ -806,9 +806,9 @@ jobs:
       - name: Start infrastructure
         if: steps.prev-version.outputs.can_test == 'true'
         run: |
-          echo "Starting infrastructure (PostgreSQL, Redis, Neo4j, Mosquitto, API)..."
-          docker compose -f $COMPOSE_FILE up -d postgres redis neo4j mosquitto api
-          
+          echo "Starting infrastructure (PostgreSQL, Redis, Mosquitto, API)..."
+          docker compose -f $COMPOSE_FILE up -d 
+                    
       - name: Wait for infrastructure
         if: steps.prev-version.outputs.can_test == 'true'
         run: |
