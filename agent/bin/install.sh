@@ -514,6 +514,7 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory=/opt/iotistic/agent
+EnvironmentFile=/etc/iotistic/agent.env
 Environment=PM2_HOME=/root/.pm2
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
