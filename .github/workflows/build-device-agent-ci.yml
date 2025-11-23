@@ -453,7 +453,7 @@ jobs:
   upload-install-scripts:
     name: Upload Installation Scripts
     needs: [version, buildx, test-agent-docker, test-agent-systemd]
-    runs-on: [ephemeral]
+    runs-on: [iotistic-lab-sc]
     if: success()
     
     steps:
@@ -626,7 +626,7 @@ jobs:
   report:
     name: Generate Reports
     needs: [version, buildx, test-agent-docker, test-agent-systemd, upload-install-scripts]
-    runs-on: [ephemeral]
+    runs-on: [iotistic-lab-sc]
     if: success() && needs.version.outputs.package_version != ''
     
     steps:
