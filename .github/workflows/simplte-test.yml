@@ -2,14 +2,18 @@ name: Test Runner
 
 # Trigger on push to main or manual workflow dispatch
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:  # allows manual run from GitHub UI
+  workflow_dispatch:
+    inputs:
+      chosen-os:
+        required: true
+        type: choice
+        options:
+        - iotistic-lab-sc
+        - ephemeral
 
 jobs:
   test-on-tagged-runner:
-    runs-on: [ephemeral]
+    runs-on: ["${{ inputs.chosen-os }}"]
 
     steps:
       - name: Checkout code
