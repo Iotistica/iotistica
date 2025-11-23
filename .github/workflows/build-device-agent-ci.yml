@@ -12,7 +12,7 @@ on:
 jobs:
   test:
     name: Run Unit Tests
-    runs-on: [ephemeral]
+    runs-on: [self-hosted, iotistic-lab-sc]
     if: false  # Temporarily disabled while fixing UUID ESM/CommonJS compatibility
     
     steps:
@@ -41,7 +41,7 @@ jobs:
   version:
     name: Bump Version
     # needs: [test]  # Temporarily removed dependency while tests disabledett
-    runs-on: [ephemeral]
+    runs-on: [self-hosted, iotistic-lab-sc]
     permissions:
       contents: write
     outputs:
@@ -90,7 +90,7 @@ jobs:
   buildx:
     name: Build & Push to Docker
     needs: version
-    runs-on: [ephemeral]
+    runs-on: [self-hosted, iotistic-lab-sc]
     permissions:
       contents: write
 
@@ -177,7 +177,7 @@ jobs:
   test-agent-docker:
     name: Test Docker Installation (via install.sh)
     needs: [version, buildx]
-    runs-on: [ephemeral]
+    runs-on: [self-hosted, iotistic-lab-sc]
     
     steps:
       - name: Checkout repository
@@ -281,7 +281,7 @@ jobs:
   test-agent-systemd:
     name: Test Systemd Installation (via install.sh)
     needs: [version, test-agent-docker]
-    runs-on: [ephemeral]
+    runs-on: [self-hosted, iotistic-lab-sc]
     
     steps:
       - name: Checkout repository
@@ -453,7 +453,7 @@ jobs:
   upload-install-scripts:
     name: Upload Installation Scripts
     needs: [version, buildx, test-agent-docker, test-agent-systemd]
-    runs-on: [ephemeral]
+    runs-on: [self-hosted, iotistic-lab-sc]
     if: success()
     
     steps:
@@ -626,7 +626,7 @@ jobs:
   report:
     name: Generate Reports
     needs: [version, buildx, test-agent-docker, test-agent-systemd, upload-install-scripts]
-    runs-on: [ephemeral]
+    runs-on: [self-hosted, iotistic-lab-sc]
     if: success() && needs.version.outputs.package_version != ''
     
     steps:
@@ -714,7 +714,7 @@ jobs:
   trigger-integration-tests:
     name: Trigger Integration Tests
     needs: [version, buildx, test-agent-docker, test-agent-systemd, upload-install-scripts]
-    runs-on: [ephemeral]
+    runs-on: [self-hosted, iotistic-lab-sc]
     permissions:
       actions: write
       contents: read
@@ -740,7 +740,7 @@ jobs:
 
   cleanup:
       name: Clean up
-      runs-on: [ephemeral]
+      runs-on: [self-hosted, iotistic-lab-sc]
       needs: [version, buildx, test-agent-docker, test-agent-systemd]
       if: always()
       steps:
