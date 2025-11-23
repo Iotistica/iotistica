@@ -421,13 +421,13 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
     echo "✓ Agent built successfully"
 
     # Install update script
-    # if [ -f /opt/iotistic/agent/bin/update-agent-systemd.sh ]; then
-    #     echo ""
-    #     echo "Installing update script..."
-    #     cp /opt/iotistic/agent/bin/update-agent-systemd.sh /usr/local/bin/update-agent-systemd.sh
-    #     chmod +x /usr/local/bin/update-agent-systemd.sh
-    #     echo "✓ Update script installed"
-    # fi
+    if [ -f /opt/iotistic/agent/bin/update-agent-systemd.sh ]; then
+        echo ""
+        echo "Installing update script..."
+        cp /opt/iotistic/agent/bin/update-agent-systemd.sh /usr/local/bin/update-agent-systemd.sh
+        chmod +x /usr/local/bin/update-agent-systemd.sh
+        echo "✓ Update script installed"
+    fi
 
     # Create environment file
     echo ""
@@ -514,7 +514,7 @@ WorkingDirectory=/opt/iotistic/agent
 Environment=PM2_HOME=/root/.pm2
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-ExecStart=$PM2_PATH start /opt/iotistic/agent/ecosystem.config.js --no-daemon
+ExecStart=$PM2_PATH start /opt/iotistic/agent/ecosystem.config.js 
 ExecReload=$PM2_PATH reload /opt/iotistic/agent/ecosystem.config.js
 ExecStop=$PM2_PATH kill
 
