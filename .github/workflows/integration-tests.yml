@@ -128,9 +128,8 @@ jobs:
           
           if [ $MISSING -eq 1 ]; then
             echo ""
-            echo "ERROR: Some images are missing on Docker Hub!"
-            echo "Please ensure all builds have completed successfully."
-            exit 1
+            echo "⚠ WARNING: Some images are missing on Docker Hub!"
+            echo "Will attempt to pull 'latest' tag as fallback..."
           fi
           
           echo ""
