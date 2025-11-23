@@ -6,7 +6,7 @@ on:
 jobs:
   runner-health:
     name: Check Self-Hosted Runner Health
-    runs-on: [self-hosted, iotistic-lab-sc]
+    runs-on: [self-hosted]
     steps:
       - name: Print runner info
         run: |
