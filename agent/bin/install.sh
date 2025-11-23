@@ -551,7 +551,7 @@ EOFSVC
         
         echo ""
         echo "Recent logs:"
-        journalctl -u iotistic-agent -n 20 --no-pager
+        journalctl -u iotistic-agent -n 200 --no-pager
         
         echo ""
         echo "====================================="
