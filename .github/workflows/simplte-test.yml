@@ -19,11 +19,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Print runner info
-        run: |
-          echo "Running on $(hostname)"
-          echo "Runner labels: $RUNNER_LABELS"
-
       - name: Run a test command
         run: |
-          echo "Hello from a self-hosted runner with the correct tags!"
+          apt list --installed
