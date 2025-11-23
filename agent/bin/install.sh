@@ -497,7 +497,8 @@ EOFCONFIG
     # Create systemd service
     echo ""
     echo "Creating systemd service..."
-    PM2_PATH=$(which pm2)
+   # PM2_PATH=$(which pm2)
+    PM2_PATH=$(which pm2-runtime)
     
     cat > /etc/systemd/system/iotistic-agent.service << EOFSVC
 [Unit]
