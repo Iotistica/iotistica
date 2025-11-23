@@ -157,7 +157,7 @@ jobs:
 
       - name: Deploy customer instance
         run: |
-          helm upgrade --install ${{ env.DEPLOY_NAMESPACE }} ./charts/customer-instance \
+          helm upgrade --install ${{ env.DEPLOY_NAMESPACE }} ./k8s/charts/customer-instance \
             --namespace ${{ env.DEPLOY_NAMESPACE }} \
             --set customerId=${{ env.DEPLOY_NAMESPACE }} \
             --set api.image.tag=${{ github.sha }} \
