@@ -3,12 +3,8 @@ name: Test Runner
 
 jobs:
   test-on-tagged-runner:
-    runs-on: 
-      self-hosted: true
-      # Specify your runner tags here
-      # Example: linux, gpu, or any custom tag you set in your runner
-      tags:
-        - iotistic-lab-sc
+    runs-on: [iotistic-lab-sc]
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
