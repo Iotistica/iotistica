@@ -1,5 +1,11 @@
-# .github/workflows/test-runner.yml
 name: Test Runner
+
+# Trigger on push to main or manual workflow dispatch
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # allows manual run from GitHub UI
 
 jobs:
   test-on-tagged-runner:
