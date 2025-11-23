@@ -280,7 +280,7 @@ jobs:
 
   test-agent-systemd:
     name: Test Systemd Installation (via install.sh)
-    needs: [version, test-agent-docker]
+    needs: [version]
     runs-on: [self-hosted, iotistic-lab-sc]
     
     steps:
