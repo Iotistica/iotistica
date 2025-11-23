@@ -177,7 +177,7 @@ jobs:
   test-agent-docker:
     name: Test Docker Installation (via install.sh)
     needs: [version, buildx]
-    runs-on: [self-hosted, iotistic-lab-sc]
+    runs-on: [ephemeral]
     
     steps:
       - name: Checkout repository
