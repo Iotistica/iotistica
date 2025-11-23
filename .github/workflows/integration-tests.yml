@@ -193,7 +193,16 @@ jobs:
       - name: Pull Docker images
         run: |
           echo "Pulling versioned Docker images..."
-          docker pull iotistic/agent:${{ needs.determine-versions.outputs.agent_version }}
+          
+          # Try to pull agent image, fallback to latest if not found
+          if docker pull iotistic/agent:${{ needs.determine-versions.outputs.agent_version }} 2>/dev/null; then
+            echo "✓ Pulled iotistic/agent:${{ needs.determine-versions.outputs.agent_version }}"
+          else
+            echo "⚠ Version ${{ needs.determine-versions.outputs.agent_version }} not found, pulling latest..."
+            docker pull iotistic/agent:latest
+            docker tag iotistic/agent:latest iotistic/agent:${{ needs.determine-versions.outputs.agent_version }}
+          fi
+          
           docker pull iotistic/api:${{ needs.determine-versions.outputs.api_version }}
           docker pull iotistic/dashboard:${{ needs.determine-versions.outputs.dashboard_version }}
           echo "Images pulled successfully!"
