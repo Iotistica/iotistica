@@ -315,6 +315,7 @@ jobs:
           
           if sudo systemctl is-active --quiet iotistic-agent; then
             echo "✓ Agent service is running"
+            sudo journalctl -u iotistic-agent -n 100 --no-pager
           else
             echo "✗ Agent service is not running"
             sudo journalctl -u iotistic-agent -n 50 --no-pager
