@@ -8,7 +8,7 @@ SET
   value = value 
     || jsonb_build_object('protocol', 'mqtts')
     || jsonb_build_object('port', 8883)
-    || jsonb_build_object('useTls', true)
+    || jsonb_build_object('useTls', false)
     || jsonb_build_object('updatedAt', CURRENT_TIMESTAMP),
   updated_at = CURRENT_TIMESTAMP
 WHERE key = 'mqtt.brokers.1';
