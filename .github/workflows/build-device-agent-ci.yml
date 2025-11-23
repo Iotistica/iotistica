@@ -747,7 +747,7 @@ jobs:
        - name: Cleanup systemd service and PM2
          if: always()
          run: |
-            # Stop and disable systemd service
+            # Stop and disable systemd service1
             sudo systemctl stop iotistic-agent || true
             sudo systemctl disable iotistic-agent || true
             sudo rm -f /etc/systemd/system/iotistic-agent.service
