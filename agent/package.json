@@ -1,6 +1,6 @@
 {
   "name": "device-agent",
-  "version": "1.0.94",
+  "version": "1.0.95",
   "description": "Standalone device agent",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
