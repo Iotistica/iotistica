@@ -13,7 +13,7 @@ jobs:
   test:
     name: Run Unit Tests
     runs-on: ubuntu-20.04
-    if: false  # Temporarily disabled while fixing UUID ESM/CommonJS compatibility
+    if: false  # Temporarily udisabled while fixing UUID ESM/CommonJS compatibility
     
     steps:
       - name: Checkout repository
