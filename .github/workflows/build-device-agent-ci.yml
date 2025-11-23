@@ -281,7 +281,7 @@ jobs:
   test-agent-systemd:
     name: Test Systemd Installation (via install.sh
     needs: [version, buildx]
-    runs-on: [self-hosted]
+    runs-on: [iotistic-lab-sc]
     
     steps:
       - name: Checkout repository
