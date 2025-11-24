@@ -54,7 +54,7 @@ on:
 jobs:
   determine-versions:
     name: Determine Versions to Test
-    runs-on: ubuntu-24.04
+    runs-on: [iotistic-lab-sc]
     outputs:
       agent_version: ${{ steps.versions.outputs.agent_version }}
       api_version: ${{ steps.versions.outputs.api_version }}
@@ -161,7 +161,7 @@ jobs:
   setup:
     name: Setup Environment
     needs: determine-versions
-    runs-on: ubuntu-24.04
+    runs-on: [iotistic-lab-sc]
     
     steps:
       - name: Display test suite information
@@ -210,7 +210,7 @@ jobs:
   test-api:
     name: Test API Server
     needs: [determine-versions, setup]
-    runs-on: ubuntu-24.04
+    runs-on: [iotistic-lab-sc]
     timeout-minutes: 10
     
     env:
@@ -313,7 +313,7 @@ jobs:
   test-agents:
     name: Test Agent (Systemd Installation)
     needs: [determine-versions, setup]
-    runs-on: ubuntu-24.04
+    runs-on: [iotistic-lab-sc]
     timeout-minutes: 15
     
     env:
@@ -603,7 +603,7 @@ jobs:
   test-sensors:
     name: Test Simulators
     needs: [determine-versions, setup]
-    runs-on: ubuntu-24.04
+    runs-on: [iotistic-lab-sc]
     timeout-minutes: 10
     
     env:
@@ -654,7 +654,7 @@ jobs:
   test-dashboard:
     name: Test Dashboard
     needs: [determine-versions, setup]
-    runs-on: ubuntu-24.04
+    runs-on: [iotistic-lab-sc]
     timeout-minutes: 10
     
     env:
@@ -756,4 +756,45 @@ jobs:
         if: always()
         run: docker compose -f $COMPOSE_FILE down -v
 
- 
+  cleanup:
+    name: Cleanup Environment
+    needs: [determine-versions, setup, test-api, test-agents, test-sensors, test-dashboard]
+    runs-on: [iotistic-lab-sc]
+    if: always()
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Stop all containers
+        run: |
+          echo "Stopping all E2E containers..."
+          docker compose -f docker-compose.e2e.yml down -v --remove-orphans || true
+
+      - name: Remove dangling images
+        run: |
+          echo "Removing dangling images..."
+          docker image prune -f || true
+
+      - name: Remove unused volumes
+        run: |
+          echo "Removing unused volumes..."
+          docker volume prune -f || true
+
+      - name: Clean up networks
+        run: |
+          echo "Cleaning up networks..."
+          docker network prune -f || true
+
+      - name: Show remaining resources
+        if: always()
+        run: |
+          echo "=== Remaining Docker Resources ==="
+          echo "Containers:"
+          docker ps -a | grep -E "iotistic|e2e" || echo "None"
+          echo ""
+          echo "Volumes:"
+          docker volume ls | grep -E "iotistic|e2e" || echo "None"
+          echo ""
+          echo "Networks:"
+          docker network ls | grep -E "iotistic|e2e" || echo "None"
