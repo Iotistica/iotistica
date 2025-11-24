@@ -71,6 +71,15 @@ mosquitto:
     limits:
       cpu: 200m
       memory: 128Mi
+  # Authentication configuration
+  auth:
+    allowAnonymous: false
+    hasher: bcrypt
+    hasherCost: 10
+    logLevel: info
+  # Persistence for message queues
+  persistence:
+    enabled: true
 
 # API service
 api:

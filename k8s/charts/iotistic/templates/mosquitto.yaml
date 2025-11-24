@@ -8,31 +8,74 @@ metadata:
     app.kubernetes.io/component: mosquitto
 data:
   mosquitto.conf: |
-    listener 1883
+    # Mosquitto configuration with Go-Auth plugin
+    # HTTP backend authentication via API service
+    
+    # Basic Mosquitto settings
+    listener {{ .Values.mosquitto.ports.mqtt }} 0.0.0.0
     protocol mqtt
-    allow_anonymous false
     
-    listener 9001
+    listener {{ .Values.mosquitto.ports.websocket }} 0.0.0.0
     protocol websockets
-    allow_anonymous false
     
+    # Disable anonymous access (require authentication)
+    allow_anonymous {{ .Values.mosquitto.auth.allowAnonymous }}
+    
+    # Logging
+    log_dest stdout
+    log_type error
+    log_type warning
+    log_type notice
+    log_type information
+    
+    # System statistics publishing (required for metrics exporter)
+    sys_interval 10
+    
+    # Load Go-Auth plugin
     auth_plugin /mosquitto/go-auth.so
-    auth_opt_backends postgres
-    auth_opt_log_level info
+    
+    # Backend configuration - HTTP authentication via API
+    auth_opt_backends http
+    
+    # HTTP backend settings (connects to API service)
+    auth_opt_http_host {{ include "iotistic.fullname" . }}-api
+    auth_opt_http_port {{ .Values.api.port }}
+    auth_opt_http_getuser_uri /mosquitto-auth/user
+    auth_opt_http_superuser_uri /mosquitto-auth/superuser
+    auth_opt_http_aclcheck_uri /mosquitto-auth/acl
+    
+    # HTTP request configuration
+    auth_opt_http_method POST
+    auth_opt_http_request_type json
+    auth_opt_http_response_mode status
+    auth_opt_http_timeout 5
+    
+    # Password hashing configuration (validated by API)
+    auth_opt_hasher {{ .Values.mosquitto.auth.hasher }}
+    auth_opt_hasher_cost {{ .Values.mosquitto.auth.hasherCost }}
+    
+    {{- if .Values.redis.enabled }}
+    # Redis cache configuration
     auth_opt_cache true
+    auth_opt_cache_type redis
+    auth_opt_cache_host {{ include "iotistic.fullname" . }}-redis
+    auth_opt_cache_port {{ .Values.redis.port }}
+    auth_opt_cache_db 1
+    auth_opt_auth_cache_seconds 300
+    auth_opt_acl_cache_seconds 300
+    auth_opt_auth_jitter_seconds 10
     auth_opt_cache_reset true
+    {{- end }}
     
-    auth_opt_pg_host {{ include "iotistic.fullname" . }}-postgres
-    auth_opt_pg_port {{ .Values.postgres.port }}
-    auth_opt_pg_dbname {{ .Values.postgres.database }}
-    auth_opt_pg_user {{ .Values.postgres.username }}
-    auth_opt_pg_password {{ .Values.postgres.password }}
-    auth_opt_pg_userquery SELECT password FROM mqtt_users WHERE username = $1 AND enabled = true LIMIT 1
-    auth_opt_pg_superquery SELECT COUNT(*) FROM mqtt_users WHERE username = $1 AND enabled = true AND is_superuser = true
-    auth_opt_pg_aclquery SELECT topic FROM mqtt_acls WHERE (username = $1) AND rw >= $2
+    # Logging level
+    auth_opt_log_level {{ .Values.mosquitto.auth.logLevel }}
+    auth_opt_log_dest stdout
     
-    auth_opt_hasher bcrypt
-    auth_opt_hasher_cost 10
+    {{- if .Values.mosquitto.persistence.enabled }}
+    # Persistence for message queues
+    persistence true
+    persistence_location /mosquitto/data/
+    {{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -97,10 +140,28 @@ spec:
               mountPath: /etc/mosquitto/mosquitto.conf
               subPath: mosquitto.conf
               readOnly: true
+            {{- if .Values.mosquitto.persistence.enabled }}
+            - name: data
+              mountPath: /mosquitto/data
+            {{- end }}
           resources:
             {{- toYaml .Values.mosquitto.resources | nindent 12 }}
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.mosquitto.ports.mqtt }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.mosquitto.ports.mqtt }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
       volumes:
         - name: mosquitto-config
           configMap:
             name: {{ include "iotistic.fullname" . }}-mosquitto-config
+        {{- if .Values.mosquitto.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
 {{- end }}

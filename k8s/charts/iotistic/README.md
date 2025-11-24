@@ -6,10 +6,24 @@ A Kubernetes Helm chart for deploying the complete Iotistic IoT platform stack f
 
 This chart deploys a complete Iotistic stack including:
 - **PostgreSQL** - Database for device data and MQTT ACLs (StatefulSet)
-- **Redis** - Cache and real-time metrics
-- **Mosquitto** - MQTT broker with PostgreSQL authentication
-- **API** - Backend API service
+- **Redis** - Cache and real-time metrics (also used for MQTT auth caching)
+- **Mosquitto** - MQTT broker with **HTTP authentication via API service**
+- **API** - Backend API service (handles MQTT auth, device management)
 - **Dashboard** - Frontend web UI
+
+### Key Architecture Patterns
+
+**MQTT Authentication Flow:**
+```
+Device/Client → Mosquitto (go-auth plugin) → HTTP POST → API (/mosquitto-auth/*) → PostgreSQL
+                                                            ↓
+                                                       Redis Cache
+```
+
+- Mosquitto uses **HTTP backend authentication** (not direct PostgreSQL access)
+- API provides endpoints: `/mosquitto-auth/user`, `/mosquitto-auth/superuser`, `/mosquitto-auth/acl`
+- Redis caches auth results (5 min TTL) to reduce API load
+- Supports MQTT wildcards in ACL rules (`+` for single-level, `#` for multi-level)
 
 ### Deployment Options
 
@@ -78,6 +92,11 @@ helm uninstall iotistic --namespace iotistic
 | `mosquitto.enabled` | Enable Mosquitto MQTT broker | `true` |
 | `mosquitto.serviceType` | Service type (NodePort/ClusterIP) | `NodePort` |
 | `mosquitto.nodePorts.mqtt` | NodePort for MQTT | `30883` |
+| `mosquitto.auth.allowAnonymous` | Allow anonymous connections | `false` |
+| `mosquitto.auth.hasher` | Password hasher (bcrypt) | `bcrypt` |
+| `mosquitto.auth.hasherCost` | Bcrypt cost factor | `10` |
+| `mosquitto.auth.logLevel` | Auth logging level | `info` |
+| `mosquitto.persistence.enabled` | Enable message persistence | `true` |
 | `api.enabled` | Enable API service | `true` |
 | `api.image.tag` | API image tag | `latest` |
 | `api.nodePort` | NodePort for API | `30002` |
@@ -249,9 +268,25 @@ kubectl get pvc -n iotistic
 ### MQTT Connection Issues
 
 ```bash
+# Check Mosquitto logs
+kubectl logs -n iotistic -l app.kubernetes.io/component=mosquitto -f
+
+# Check API logs (auth endpoint)
+kubectl logs -n iotistic -l app.kubernetes.io/component=api -f | grep MosquittoAuth
+
 # Test MQTT connection from inside cluster
-kubectl run mqtt-test --rm -it --image=eclipse-mosquitto:latest -- mosquitto_pub -h iotistic-mosquitto -p 1883 -t test -m "hello"
+kubectl run mqtt-test --rm -it --image=eclipse-mosquitto:latest -- \
+  mosquitto_pub -h iotistic-mosquitto -p 1883 \
+  -u admin -P iotistic42! -t test -m "hello"
+
+# Check Redis cache (auth caching)
+kubectl exec -n iotistic deployment/iotistic-redis -- redis-cli -n 1 KEYS "*"
 ```
+
+**Common Issues:**
+- **Connection refused**: Check if API service is running (Mosquitto depends on API for auth)
+- **Authentication failed**: Check API `/mosquitto-auth/*` endpoints and database `mqtt_users` table
+- **Slow auth**: Check Redis cache connection (should cache auth for 5 min)
 
 ## Comparison with Docker Compose
 
@@ -266,6 +301,10 @@ This chart is equivalent to `docker-compose.k8s.yml` with these key differences:
 | **Health Checks** | Basic | Liveness + Readiness probes |
 | **Configuration** | .env files | ConfigMaps + Values |
 | **Port Exposure** | Host ports | NodePort/LoadBalancer |
+| **MQTT Auth** | HTTP via API (same) | HTTP via API (same) |
+| **Postgres for MQTT** | StatefulSet (K8s only) | Deployment (Docker) |
+
+**Note:** Both environments use **HTTP authentication** via the API service for Mosquitto. The API provides `/mosquitto-auth/*` endpoints that query PostgreSQL and cache results in Redis.
 
 ## License
 
