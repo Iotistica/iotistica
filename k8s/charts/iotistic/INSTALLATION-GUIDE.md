@@ -336,9 +336,9 @@ The chart includes custom template helpers in `_helpers.tpl`:
 
 | Docker Compose Service | Kubernetes Resources | Notes |
 |------------------------|---------------------|-------|
-| `postgres` | Deployment + Service + PVC + ConfigMap | PostgreSQL with custom config |
-| `redis` | Deployment + Service + PVC | Redis with persistence |
-| `mosquitto` | Deployment + Service + ConfigMap | MQTT with PostgreSQL auth |
+| `postgres` | StatefulSet + Service (headless + regular) + volumeClaimTemplates + ConfigMap | PostgreSQL with stable pod identity |
+| `redis` | StatefulSet + Service (headless + regular) + volumeClaimTemplates | Redis with stable pod identity and persistent queues |
+| `mosquitto` | Deployment + Service + ConfigMap | MQTT with HTTP auth via API |
 | `api` | Deployment + Service | Backend API with all env vars |
 | `dashboard` | Deployment + Service | Frontend UI |
 | (optional) | Ingress | For production domain access |

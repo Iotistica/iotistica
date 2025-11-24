@@ -6,7 +6,7 @@ A Kubernetes Helm chart for deploying the complete Iotistic IoT platform stack f
 
 This chart deploys a complete Iotistic stack including:
 - **PostgreSQL** - Database for device data and MQTT ACLs (StatefulSet)
-- **Redis** - Cache and real-time metrics (also used for MQTT auth caching)
+- **Redis** - Cache, Bull queues, and real-time metrics (StatefulSet)
 - **Mosquitto** - MQTT broker with **HTTP authentication via API service**
 - **API** - Backend API service (handles MQTT auth, device management)
 - **Dashboard** - Frontend web UI
@@ -24,6 +24,10 @@ Device/Client → Mosquitto (go-auth plugin) → HTTP POST → API (/mosquitto-a
 - API provides endpoints: `/mosquitto-auth/user`, `/mosquitto-auth/superuser`, `/mosquitto-auth/acl`
 - Redis caches auth results (5 min TTL) to reduce API load
 - Supports MQTT wildcards in ACL rules (`+` for single-level, `#` for multi-level)
+
+**Stateful Services:**
+- **PostgreSQL**: StatefulSet with volumeClaimTemplates (stable storage, ordered scaling)
+- **Redis**: StatefulSet with volumeClaimTemplates (stable pod identity, persistent queues)
 
 ### Deployment Options
 
@@ -234,6 +238,22 @@ PostgreSQL is deployed as a **StatefulSet** (not Deployment) for production-grad
 - To fully clean up: `kubectl delete statefulset,pvc -l app.kubernetes.io/component=postgres -n iotistic`
 - For high availability, consider using PostgreSQL operators (e.g., Zalando Postgres Operator, CloudNativePG)
 
+### Redis StatefulSet
+
+Redis is deployed as a **StatefulSet** for stable pod identity and persistent storage:
+
+- **Stable pod name**: `iotistic-redis-0` (never changes, even after restarts)
+- **Automatic PVC**: Created per pod via volumeClaimTemplates
+- **Persistent queues**: Bull job queues survive pod restarts
+- **Metrics streams**: Redis Streams data persisted across restarts
+- **Future-ready**: Foundation for Redis Sentinel or Cluster mode
+
+**Important Notes:**
+- Pod hostname: `iotistic-redis-0.iotistic-redis-headless.iotistic.svc.cluster.local`
+- PVC name: `redis-data-iotistic-redis-0` (automatically managed)
+- To clean up: `kubectl delete statefulset,pvc -l app.kubernetes.io/component=redis -n iotistic`
+- Persistence controlled by `redis.persistence.enabled` (default: true)
+
 ### Check Pod Status
 
 ```bash
@@ -263,6 +283,28 @@ kubectl get statefulset -n iotistic
 
 # Check PVC (Persistent Volume Claim)
 kubectl get pvc -n iotistic
+```
+
+### Redis Connection Issues
+
+```bash
+# Test Redis connection
+kubectl exec -n iotistic -it statefulset/iotistic-redis -- redis-cli ping
+
+# Check Redis data persistence
+kubectl exec -n iotistic -it statefulset/iotistic-redis -- redis-cli INFO persistence
+
+# Check Bull queue jobs
+kubectl exec -n iotistic -it statefulset/iotistic-redis -- redis-cli KEYS "bull:*"
+
+# Check MQTT auth cache (DB 1)
+kubectl exec -n iotistic -it statefulset/iotistic-redis -- redis-cli -n 1 KEYS "*"
+
+# Check StatefulSet status
+kubectl get statefulset/iotistic-redis -n iotistic
+
+# Check PVC
+kubectl get pvc -l app.kubernetes.io/component=redis -n iotistic
 ```
 
 ### MQTT Connection Issues
@@ -296,13 +338,14 @@ This chart is equivalent to `docker-compose.k8s.yml` with these key differences:
 |---------|----------------|-----------------|
 | **Orchestration** | Docker Compose | Kubernetes |
 | **Networking** | Bridge network | Services + DNS |
-| **Storage** | Named volumes | PersistentVolumeClaims |
+| **Storage** | Named volumes | PersistentVolumeClaims (StatefulSet) |
 | **Scaling** | Manual | Declarative (replicas) |
 | **Health Checks** | Basic | Liveness + Readiness probes |
 | **Configuration** | .env files | ConfigMaps + Values |
 | **Port Exposure** | Host ports | NodePort/LoadBalancer |
 | **MQTT Auth** | HTTP via API (same) | HTTP via API (same) |
-| **Postgres for MQTT** | StatefulSet (K8s only) | Deployment (Docker) |
+| **PostgreSQL** | Deployment | StatefulSet with volumeClaimTemplates |
+| **Redis** | Deployment | StatefulSet with volumeClaimTemplates |
 
 **Note:** Both environments use **HTTP authentication** via the API service for Mosquitto. The API provides `/mosquitto-auth/*` endpoints that query PostgreSQL and cache results in Redis.
 
