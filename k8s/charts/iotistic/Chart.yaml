@@ -1,0 +1,15 @@
+apiVersion: v2
+name: iotistic
+description: Iotistic IoT Platform - Complete integration stack for development and testing
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - iot
+  - monitoring
+  - sensors
+  - mqtt
+  - postgresql
+  - redis
+maintainers:
+  - name: Iotistic Team

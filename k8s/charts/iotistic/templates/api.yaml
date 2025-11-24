@@ -1,0 +1,123 @@
+{{- if .Values.api.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "iotistic.fullname" . }}-api
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: {{ .Values.api.serviceType }}
+  ports:
+    - port: {{ .Values.api.port }}
+      targetPort: api
+      protocol: TCP
+      name: api
+      {{- if and (eq .Values.api.serviceType "NodePort") .Values.api.nodePort }}
+      nodePort: {{ .Values.api.nodePort }}
+      {{- end }}
+  selector:
+    {{- include "iotistic.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "iotistic.fullname" . }}-api
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      {{- include "iotistic.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        {{- include "iotistic.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      containers:
+        - name: api
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          ports:
+            - name: api
+              containerPort: {{ .Values.api.port }}
+              protocol: TCP
+          env:
+            - name: PORT
+              value: {{ .Values.api.port | quote }}
+            - name: NODE_ENV
+              value: {{ .Values.api.env.NODE_ENV | quote }}
+            - name: DB_HOST
+              value: {{ include "iotistic.fullname" . }}-postgres
+            - name: DB_PORT
+              value: {{ .Values.postgres.port | quote }}
+            - name: DB_NAME
+              value: {{ .Values.postgres.database | quote }}
+            - name: DB_USER
+              value: {{ .Values.postgres.username | quote }}
+            - name: DB_PASSWORD
+              value: {{ .Values.postgres.password | quote }}
+            - name: DB_POOL_SIZE
+              value: {{ .Values.api.env.DB_POOL_SIZE | quote }}
+            - name: MQTT_BROKER_URL
+              value: {{ include "iotistic.mosquitto.url" . }}
+            - name: MQTT_BROKER_HOST
+              value: {{ include "iotistic.mosquitto.host" . }}
+            - name: MQTT_BROKER_PORT
+              value: {{ .Values.mosquitto.ports.mqtt | quote }}
+            - name: MQTT_BROKER_USE_TLS
+              value: "false"
+            - name: MQTT_BROKER_PROTOCOL
+              value: "mqtt"
+            - name: MQTT_USERNAME
+              value: {{ .Values.api.mqtt.username | quote }}
+            - name: MQTT_PASSWORD
+              value: {{ .Values.api.mqtt.password | quote }}
+            - name: MQTT_PERSIST_TO_DB
+              value: {{ .Values.api.env.MQTT_PERSIST_TO_DB | quote }}
+            - name: MQTT_DB_SYNC_INTERVAL
+              value: {{ .Values.api.env.MQTT_DB_SYNC_INTERVAL | quote }}
+            - name: MQTT_MONITOR_ENABLED
+              value: {{ .Values.api.env.MQTT_MONITOR_ENABLED | quote }}
+            - name: LOG_COMPRESSION
+              value: {{ .Values.api.env.LOG_COMPRESSION | quote }}
+            - name: VPN_ENABLED
+              value: {{ .Values.api.env.VPN_ENABLED | quote }}
+            - name: FORCE_COLOR
+              value: {{ .Values.api.env.FORCE_COLOR | quote }}
+            - name: REDIS_HOST
+              value: {{ include "iotistic.redis.host" . }}
+            - name: REDIS_PORT
+              value: {{ .Values.redis.port | quote }}
+            {{- if .Values.api.license.publicKey }}
+            - name: LICENSE_PUBLIC_KEY
+              value: {{ .Values.api.license.publicKey | quote }}
+            {{- end }}
+            {{- if .Values.api.license.key }}
+            - name: IOTISTIC_LICENSE_KEY
+              value: {{ .Values.api.license.key | quote }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: api
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: api
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+{{- end }}

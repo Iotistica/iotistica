@@ -1,0 +1,106 @@
+{{- if .Values.mosquitto.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "iotistic.fullname" . }}-mosquitto-config
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mosquitto
+data:
+  mosquitto.conf: |
+    listener 1883
+    protocol mqtt
+    allow_anonymous false
+    
+    listener 9001
+    protocol websockets
+    allow_anonymous false
+    
+    auth_plugin /mosquitto/go-auth.so
+    auth_opt_backends postgres
+    auth_opt_log_level info
+    auth_opt_cache true
+    auth_opt_cache_reset true
+    
+    auth_opt_pg_host {{ include "iotistic.fullname" . }}-postgres
+    auth_opt_pg_port {{ .Values.postgres.port }}
+    auth_opt_pg_dbname {{ .Values.postgres.database }}
+    auth_opt_pg_user {{ .Values.postgres.username }}
+    auth_opt_pg_password {{ .Values.postgres.password }}
+    auth_opt_pg_userquery SELECT password FROM mqtt_users WHERE username = $1 AND enabled = true LIMIT 1
+    auth_opt_pg_superquery SELECT COUNT(*) FROM mqtt_users WHERE username = $1 AND enabled = true AND is_superuser = true
+    auth_opt_pg_aclquery SELECT topic FROM mqtt_acls WHERE (username = $1) AND rw >= $2
+    
+    auth_opt_hasher bcrypt
+    auth_opt_hasher_cost 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "iotistic.fullname" . }}-mosquitto
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mosquitto
+spec:
+  type: {{ .Values.mosquitto.serviceType }}
+  ports:
+    - port: {{ .Values.mosquitto.ports.mqtt }}
+      targetPort: mqtt
+      protocol: TCP
+      name: mqtt
+      {{- if and (eq .Values.mosquitto.serviceType "NodePort") .Values.mosquitto.nodePorts.mqtt }}
+      nodePort: {{ .Values.mosquitto.nodePorts.mqtt }}
+      {{- end }}
+    - port: {{ .Values.mosquitto.ports.websocket }}
+      targetPort: websocket
+      protocol: TCP
+      name: websocket
+      {{- if and (eq .Values.mosquitto.serviceType "NodePort") .Values.mosquitto.nodePorts.websocket }}
+      nodePort: {{ .Values.mosquitto.nodePorts.websocket }}
+      {{- end }}
+  selector:
+    {{- include "iotistic.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: mosquitto
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "iotistic.fullname" . }}-mosquitto
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mosquitto
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "iotistic.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mosquitto
+  template:
+    metadata:
+      labels:
+        {{- include "iotistic.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mosquitto
+    spec:
+      containers:
+        - name: mosquitto
+          image: "{{ .Values.mosquitto.image.repository }}:{{ .Values.mosquitto.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: mqtt
+              containerPort: {{ .Values.mosquitto.ports.mqtt }}
+              protocol: TCP
+            - name: websocket
+              containerPort: {{ .Values.mosquitto.ports.websocket }}
+              protocol: TCP
+          volumeMounts:
+            - name: mosquitto-config
+              mountPath: /etc/mosquitto/mosquitto.conf
+              subPath: mosquitto.conf
+              readOnly: true
+          resources:
+            {{- toYaml .Values.mosquitto.resources | nindent 12 }}
+      volumes:
+        - name: mosquitto-config
+          configMap:
+            name: {{ include "iotistic.fullname" . }}-mosquitto-config
+{{- end }}
