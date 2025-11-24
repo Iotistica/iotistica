@@ -698,21 +698,33 @@ jobs:
             exit 1
           fi
           
-          # Wait for dashboard to respond (dashboard is nginx/static, should be quick)
-          sleep 10
+          # Wait for nginx to fully initialize
+          sleep 5
           
-          # Try to connect
+          # Check from inside container first (more reliable for nginx)
+          if docker exec iotistic-dashboard-e2e wget -q -O- http://localhost:3000 > /dev/null; then
+            echo "✓ Dashboard responding inside container"
+          else
+            echo "✗ Dashboard not responding inside container"
+            docker compose -f $COMPOSE_FILE logs dashboard --tail=100
+            exit 1
+          fi
+          
+          # Now check from host (verifies port mapping)
           for i in {1..10}; do
-            if curl -s http://localhost:3000 > /dev/null; then
-              echo "✓ Dashboard is ready!"
+            if curl -f -s http://localhost:3000 > /dev/null 2>&1; then
+              echo "✓ Dashboard is ready and accessible from host!"
               break
             fi
             if [ $i -eq 10 ]; then
-              echo "✗ Dashboard did not become ready"
+              echo "✗ Dashboard not accessible from host after 10 attempts"
+              echo "Checking port binding..."
+              docker ps | grep dashboard
+              netstat -tuln | grep 3000 || ss -tuln | grep 3000 || true
               docker compose -f $COMPOSE_FILE logs dashboard --tail=100
               exit 1
             fi
-            echo "Waiting... (attempt $i/10)"
+            echo "Waiting for host connectivity... (attempt $i/10)"
             sleep 3
           done
 
@@ -808,7 +820,7 @@ jobs:
         run: |
           echo "Starting infrastructure (PostgreSQL, Redis, Mosquitto, API)..."
           docker compose -f $COMPOSE_FILE up -d 
-                    
+
       - name: Wait for infrastructure
         if: steps.prev-version.outputs.can_test == 'true'
         run: |
