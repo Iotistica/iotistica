@@ -11,7 +11,11 @@ COPY package*.json ./
 
 # Install production dependencies only - using cache mount
 # Set PYTHON env var for node-gyp to find Python
+# Add retry logic and longer timeouts for network issues
 RUN --mount=type=cache,target=/root/.npm \
+    npm config set fetch-retries 5 && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
     PYTHON=python3 npm ci --omit=dev --legacy-peer-deps
 
 # ---- Build stage ----
@@ -27,7 +31,11 @@ COPY package*.json tsconfig.json tsconfig.build.json ./
 
 # Install all deps (including dev) - using cache mount for faster builds
 # Set PYTHON env var for node-gyp to find Python
+# Add retry logic and longer timeouts for network issues
 RUN --mount=type=cache,target=/root/.npm \
+    npm config set fetch-retries 5 && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
     PYTHON=python3 npm ci --legacy-peer-deps
 
 # Copy source code
