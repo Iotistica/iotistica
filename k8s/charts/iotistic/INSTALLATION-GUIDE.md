@@ -216,10 +216,12 @@ kubectl port-forward -n iotistic svc/iotistic-api 3002:3002
 # Access PostgreSQL
 kubectl exec -it -n iotistic deployment/iotistic-postgres -- psql -U postgres -d iotistic
 
-# Run migrations
+# Access API pod shell (if needed)
 $API_POD = kubectl get pods -n iotistic -l app.kubernetes.io/component=api -o jsonpath='{.items[0].metadata.name}'
-kubectl exec -n iotistic $API_POD -- npm run migrate
+kubectl exec -it -n iotistic $API_POD -- sh
 ```
+
+> **Note:** Database migrations are automatically applied when the API service starts. No manual migration step is required.
 
 ## 🔐 Security Considerations
 
@@ -241,8 +243,8 @@ kubectl exec -n iotistic $API_POD -- npm run migrate
 ### Using install.ps1 Script
 
 ```powershell
-# Full installation with migrations
-.\install.ps1 -WaitReady -RunMigrations
+# Full installation
+.\install.ps1 -WaitReady
 
 # Custom namespace
 .\install.ps1 -Namespace iotistic-dev

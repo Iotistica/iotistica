@@ -6,7 +6,6 @@ param(
     [string]$ReleaseName = "iotistic",
     [string]$ValuesFile = "",
     [switch]$WaitReady = $false,
-    [switch]$RunMigrations = $false,
     [switch]$Uninstall = $false
 )
 
@@ -98,28 +97,8 @@ if ($WaitReady) {
     }
 }
 
-# Run migrations
-if ($RunMigrations) {
-    Write-Host ""
-    Write-Host "🔧 Running database migrations..." -ForegroundColor Cyan
-    
-    # Wait a bit for API pod to be fully running
-    Start-Sleep -Seconds 5
-    
-    $apiPod = kubectl get pods -n $Namespace -l "app.kubernetes.io/component=api" -o jsonpath='{.items[0].metadata.name}'
-    
-    if ($apiPod) {
-        kubectl exec -n $Namespace $apiPod -- npm run migrate
-        
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "✅ Migrations completed!" -ForegroundColor Green
-        } else {
-            Write-Host "⚠️  Migrations failed or not needed" -ForegroundColor Yellow
-        }
-    } else {
-        Write-Host "⚠️  API pod not found, skipping migrations" -ForegroundColor Yellow
-    }
-}
+Write-Host ""
+Write-Host "ℹ️  Database migrations are automatically applied on API startup" -ForegroundColor Cyan
 
 # Show access information
 Write-Host ""

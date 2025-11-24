@@ -145,23 +145,15 @@ helm install iotistic ./k8s/charts/iotistic --namespace iotistic --create-namesp
 kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=iotistic -n iotistic --timeout=300s
 ```
 
-### 3. Run Database Migrations
+> **Note:** Database migrations are automatically applied when the API service starts up. No manual migration step required.
 
-```bash
-# Get API pod name
-API_POD=$(kubectl get pods -n iotistic -l app.kubernetes.io/component=api -o jsonpath='{.items[0].metadata.name}')
-
-# Run migrations
-kubectl exec -n iotistic $API_POD -- npm run migrate
-```
-
-### 4. Access the Application
+### 3. Access the Application
 
 Open your browser:
 - Dashboard: http://localhost:30000
 - API Health: http://localhost:30002/health
 
-### 5. View Logs
+### 4. View Logs
 
 ```bash
 # API logs
@@ -174,7 +166,7 @@ kubectl logs -n iotistic -l app.kubernetes.io/component=dashboard -f
 kubectl logs -n iotistic -l app.kubernetes.io/instance=iotistic -f --all-containers
 ```
 
-### 6. Upgrade
+### 5. Upgrade
 
 ```bash
 # After making changes to values or templates

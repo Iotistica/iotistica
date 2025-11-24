@@ -5,11 +5,13 @@
 ```powershell
 # Quick install (recommended)
 cd k8s/charts/iotistic
-.\install.ps1 -WaitReady -RunMigrations
+.\install.ps1 -WaitReady
 
 # Or with Helm directly
 helm install iotistic . --namespace iotistic --create-namespace
 ```
+
+> **Note:** Database migrations run automatically on API startup.
 
 ## 🌐 Access URLs (Default NodePort)
 
@@ -28,10 +30,6 @@ kubectl get pods -n iotistic
 
 # View logs
 kubectl logs -n iotistic -l app.kubernetes.io/instance=iotistic -f
-
-# Run migrations
-$POD = kubectl get pods -n iotistic -l app.kubernetes.io/component=api -o jsonpath='{.items[0].metadata.name}'
-kubectl exec -n iotistic $POD -- npm run migrate
 
 # Upgrade
 helm upgrade iotistic . --namespace iotistic
