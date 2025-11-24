@@ -134,7 +134,7 @@ services:
     container_name: iotistic-dashboard-e2e
     restart: unless-stopped
     ports:
-      - "${DASHBOARD_PORT_EXT:-3000}:3000"
+      - "${DASHBOARD_PORT_EXT:-3000}:80"
     environment:
       - VITE_API_URL=http://localhost:${API_PORT_EXT:-4002}
       - NODE_ENV=development

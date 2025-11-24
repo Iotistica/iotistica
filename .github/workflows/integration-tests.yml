@@ -701,8 +701,8 @@ jobs:
           # Wait for nginx to fully initialize (with retries)
           echo "Waiting for nginx to start..."
           for i in {1..15}; do
-            if docker exec iotistic-dashboard-e2e wget -q -O- http://localhost:3000 > /dev/null 2>&1; then
-              echo "✓ Dashboard responding inside container"
+            if docker exec iotistic-dashboard-e2e wget -q -O- http://localhost:80 > /dev/null 2>&1; then
+              echo "✓ Dashboard responding inside container (port 80)"
               break
             fi
             if [ $i -eq 15 ]; then
