@@ -1,22 +1,5 @@
 {{- if .Values.postgres.enabled }}
 apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: {{ include "iotistic.fullname" . }}-postgres-pvc
-  labels:
-    {{- include "iotistic.labels" . | nindent 4 }}
-    app.kubernetes.io/component: postgres
-spec:
-  accessModes:
-    - ReadWriteOnce
-  {{- if .Values.postgres.storage.storageClass }}
-  storageClassName: {{ .Values.postgres.storage.storageClass }}
-  {{- end }}
-  resources:
-    requests:
-      storage: {{ .Values.postgres.storage.size }}
----
-apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "iotistic.fullname" . }}-postgres-config
@@ -56,6 +39,7 @@ metadata:
     app.kubernetes.io/component: postgres
 spec:
   type: ClusterIP
+  clusterIP: None  # Headless service for StatefulSet
   ports:
     - port: {{ .Values.postgres.port }}
       targetPort: postgres
@@ -66,16 +50,15 @@ spec:
     app.kubernetes.io/component: postgres
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: {{ include "iotistic.fullname" . }}-postgres
   labels:
     {{- include "iotistic.labels" . | nindent 4 }}
     app.kubernetes.io/component: postgres
 spec:
+  serviceName: {{ include "iotistic.fullname" . }}-postgres
   replicas: 1
-  strategy:
-    type: Recreate
   selector:
     matchLabels:
       {{- include "iotistic.selectorLabels" . | nindent 6 }}
@@ -101,6 +84,8 @@ spec:
               value: {{ .Values.postgres.username | quote }}
             - name: POSTGRES_PASSWORD
               value: {{ .Values.postgres.password | quote }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           args:
             - "postgres"
             - "-c"
@@ -136,14 +121,33 @@ spec:
           resources:
             {{- toYaml .Values.postgres.resources | nindent 12 }}
       volumes:
-        - name: postgres-data
-          {{- if .Values.postgres.persistence.enabled }}
-          persistentVolumeClaim:
-            claimName: {{ include "iotistic.fullname" . }}-postgres-pvc
-          {{- else }}
-          emptyDir: {}
-          {{- end }}
         - name: postgres-config
           configMap:
             name: {{ include "iotistic.fullname" . }}-postgres-config
+  {{- if .Values.postgres.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+        labels:
+          {{- include "iotistic.labels" . | nindent 10 }}
+          app.kubernetes.io/component: postgres
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- if .Values.postgres.storage.storageClass }}
+        storageClassName: {{ .Values.postgres.storage.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage.size }}
+  {{- else }}
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage.size }}
+  {{- end }}
 {{- end }}

@@ -175,6 +175,20 @@ helm upgrade iotistic ./k8s/charts/iotistic --namespace iotistic
 
 ## Troubleshooting
 
+### PostgreSQL StatefulSet
+
+PostgreSQL is deployed as a **StatefulSet** (not Deployment) for production-grade stateful workloads. This provides:
+
+- **Stable network identity**: Each pod gets a predictable hostname
+- **Ordered deployment/scaling**: Pods are created and terminated in order
+- **Persistent storage**: Each pod gets its own PersistentVolumeClaim
+- **Stable storage**: PVC remains even if pod is rescheduled
+
+**Important Notes:**
+- Deleting the StatefulSet does NOT delete PVCs automatically (prevents data loss)
+- To fully clean up: `kubectl delete statefulset,pvc -l app.kubernetes.io/component=postgres -n iotistic`
+- For high availability, consider using PostgreSQL operators (e.g., Zalando Postgres Operator, CloudNativePG)
+
 ### Check Pod Status
 
 ```bash
@@ -197,7 +211,13 @@ kubectl get svc -n iotistic
 
 ```bash
 # Test PostgreSQL connection
-kubectl exec -n iotistic -it deployment/iotistic-postgres -- psql -U postgres -d iotistic
+kubectl exec -n iotistic -it statefulset/iotistic-postgres -- psql -U postgres -d iotistic
+
+# Check StatefulSet status
+kubectl get statefulset -n iotistic
+
+# Check PVC (Persistent Volume Claim)
+kubectl get pvc -n iotistic
 ```
 
 ### MQTT Connection Issues

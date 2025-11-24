@@ -93,7 +93,13 @@ kubectl get svc -n iotistic
 kubectl get endpoints -n iotistic
 
 # Database connection
-kubectl exec -it -n iotistic deployment/iotistic-postgres -- psql -U postgres -d iotistic
+kubectl exec -it -n iotistic statefulset/iotistic-postgres -- psql -U postgres -d iotistic
+
+# Check StatefulSet
+kubectl get statefulset -n iotistic
+
+# Check PVCs
+kubectl get pvc -n iotistic
 
 # Validate chart
 helm lint .
@@ -110,8 +116,9 @@ helm template iotistic . --debug
 - [ ] Set up monitoring
 - [ ] Configure backups
 - [ ] Use ClusterIP + Ingress
+- [ ] Consider PostgreSQL HA operator (CloudNativePG)
 
-## 📚 More Info
+## � Tips
 
 - Full README: `k8s/charts/iotistic/README.md`
 - Installation Guide: `k8s/charts/iotistic/INSTALLATION-GUIDE.md`

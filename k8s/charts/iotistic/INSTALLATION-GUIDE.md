@@ -213,8 +213,8 @@ kubectl port-forward -n iotistic svc/iotistic-api 3002:3002
 ### Execute Commands in Pods
 
 ```powershell
-# Access PostgreSQL
-kubectl exec -it -n iotistic deployment/iotistic-postgres -- psql -U postgres -d iotistic
+# Access PostgreSQL (StatefulSet)
+kubectl exec -it -n iotistic statefulset/iotistic-postgres -- psql -U postgres -d iotistic
 
 # Access API pod shell (if needed)
 $API_POD = kubectl get pods -n iotistic -l app.kubernetes.io/component=api -o jsonpath='{.items[0].metadata.name}'
@@ -222,6 +222,46 @@ kubectl exec -it -n iotistic $API_POD -- sh
 ```
 
 > **Note:** Database migrations are automatically applied when the API service starts. No manual migration step is required.
+
+## 🏗️ Architecture Decisions
+
+### PostgreSQL as StatefulSet
+
+PostgreSQL is deployed as a **StatefulSet** instead of a Deployment for production-grade stateful workloads:
+
+**Benefits:**
+- ✅ **Stable network identity**: Pods get predictable DNS names (`iotistic-postgres-0`)
+- ✅ **Ordered operations**: Pods start/stop in sequence (critical for replicas)
+- ✅ **Persistent storage**: Each pod has its own PersistentVolumeClaim
+- ✅ **Stable storage**: PVCs survive pod rescheduling
+- ✅ **Graceful scaling**: Safe scale-up/scale-down operations
+
+**Key Differences from Deployment:**
+
+| Feature | Deployment | StatefulSet |
+|---------|-----------|-------------|
+| Pod identity | Random | Stable, ordered (postgres-0, postgres-1) |
+| Storage | Shared or manual PVC | Automatic per-pod PVCs |
+| Network identity | Variable | Stable DNS hostname |
+| Scaling | Parallel | Sequential (ordered) |
+| Use case | Stateless apps | Databases, queues, etc. |
+
+**Important Notes:**
+- Deleting StatefulSet **does NOT delete PVCs** (prevents accidental data loss)
+- To fully clean up including data:
+  ```bash
+  kubectl delete statefulset,pvc -l app.kubernetes.io/component=postgres -n iotistic
+  ```
+- For production HA PostgreSQL, consider operators:
+  - **CloudNativePG** (recommended, CNCF project)
+  - **Zalando Postgres Operator**
+  - **Crunchy PostgreSQL Operator**
+
+**When to use StatefulSet:**
+- Databases (PostgreSQL, MySQL, MongoDB)
+- Message queues (Kafka, RabbitMQ)
+- Caching layers requiring persistent state
+- Any app needing stable network identity or ordered deployment
 
 ## 🔐 Security Considerations
 
