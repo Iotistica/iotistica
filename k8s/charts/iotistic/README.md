@@ -5,11 +5,20 @@ A Kubernetes Helm chart for deploying the complete Iotistic IoT platform stack f
 ## Overview
 
 This chart deploys a complete Iotistic stack including:
-- **PostgreSQL** - Database for device data and MQTT ACLs
+- **PostgreSQL** - Database for device data and MQTT ACLs (StatefulSet)
 - **Redis** - Cache and real-time metrics
 - **Mosquitto** - MQTT broker with PostgreSQL authentication
 - **API** - Backend API service
 - **Dashboard** - Frontend web UI
+
+### Deployment Options
+
+| Option | Use Case | Values File | Guide |
+|--------|----------|-------------|-------|
+| **Local Development** | Docker Desktop K8s, Minikube | `values.yaml` | [INSTALLATION-GUIDE.md](./INSTALLATION-GUIDE.md) |
+| **Azure AKS (All-in-K8s)** | Production, self-managed DB | `values-aks.yaml` | [AKS-DEPLOYMENT-GUIDE.md](./AKS-DEPLOYMENT-GUIDE.md) |
+| **Azure AKS (Hybrid)** | Production, managed Azure PaaS | `values-aks-paas.yaml` | [AKS-DEPLOYMENT-GUIDE.md](./AKS-DEPLOYMENT-GUIDE.md#option-2-hybrid-azure-paas--k8s) |
+| **General Production** | Any K8s cluster | `values-production.yaml` | [INSTALLATION-GUIDE.md](./INSTALLATION-GUIDE.md) |
 
 ## Prerequisites
 
@@ -19,7 +28,7 @@ This chart deploys a complete Iotistic stack including:
 
 ## Installation
 
-### Install from local chart
+### Local Development
 
 ```bash
 # Install with default values
@@ -30,6 +39,23 @@ helm install iotistic ./k8s/charts/iotistic --namespace iotistic --create-namesp
 
 # Install with custom values
 helm install iotistic ./k8s/charts/iotistic -f custom-values.yaml
+```
+
+### Azure AKS Production
+
+For deploying to Azure Kubernetes Service (AKS), see the **[AKS Deployment Guide](./AKS-DEPLOYMENT-GUIDE.md)** which includes:
+- Complete AKS cluster setup
+- Azure PaaS integration (Azure Database for PostgreSQL, Azure Cache for Redis)
+- SSL/TLS with cert-manager and Let's Encrypt
+- Monitoring with Azure Monitor and Prometheus
+- Security hardening and cost optimization
+
+Quick start for AKS:
+```bash
+helm install iotistic ./k8s/charts/iotistic \
+  --namespace iotistic \
+  --create-namespace \
+  -f values-aks.yaml
 ```
 
 ### Uninstall
