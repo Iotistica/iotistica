@@ -698,19 +698,24 @@ jobs:
             exit 1
           fi
           
-          # Wait for nginx to fully initialize
-          sleep 5
-          
-          # Check from inside container first (more reliable for nginx)
-          if docker exec iotistic-dashboard-e2e wget -q -O- http://localhost:3000 > /dev/null; then
-            echo "✓ Dashboard responding inside container"
-          else
-            echo "✗ Dashboard not responding inside container"
-            docker compose -f $COMPOSE_FILE logs dashboard --tail=100
-            exit 1
-          fi
+          # Wait for nginx to fully initialize (with retries)
+          echo "Waiting for nginx to start..."
+          for i in {1..15}; do
+            if docker exec iotistic-dashboard-e2e wget -q -O- http://localhost:3000 > /dev/null 2>&1; then
+              echo "✓ Dashboard responding inside container"
+              break
+            fi
+            if [ $i -eq 15 ]; then
+              echo "✗ Dashboard not responding inside container after 15 attempts"
+              docker compose -f $COMPOSE_FILE logs dashboard --tail=100
+              exit 1
+            fi
+            echo "Nginx initializing... (attempt $i/15)"
+            sleep 2
+          done
           
           # Now check from host (verifies port mapping)
+          echo "Checking host connectivity..."
           for i in {1..10}; do
             if curl -f -s http://localhost:3000 > /dev/null 2>&1; then
               echo "✓ Dashboard is ready and accessible from host!"
