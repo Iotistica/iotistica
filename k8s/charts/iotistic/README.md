@@ -26,7 +26,7 @@ This chart deploys a complete Iotistic stack including:
 helm install iotistic ./k8s/charts/iotistic
 
 # Install with custom namespace
-helm install iotistic ./k8s/charts/iotistic --namespace iotistic-e2e --create-namespace
+helm install iotistic ./k8s/charts/iotistic --namespace iotistic --create-namespace
 
 # Install with custom values
 helm install iotistic ./k8s/charts/iotistic -f custom-values.yaml
@@ -35,7 +35,7 @@ helm install iotistic ./k8s/charts/iotistic -f custom-values.yaml
 ### Uninstall
 
 ```bash
-helm uninstall iotistic --namespace iotistic-e2e
+helm uninstall iotistic --namespace iotistic
 ```
 
 ## Configuration
@@ -139,20 +139,20 @@ docker build -t iotistic/dashboard:latest .
 
 ```bash
 # Install chart
-helm install iotistic ./k8s/charts/iotistic --namespace iotistic-e2e --create-namespace
+helm install iotistic ./k8s/charts/iotistic --namespace iotistic --create-namespace
 
 # Wait for pods to be ready
-kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=iotistic -n iotistic-e2e --timeout=300s
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=iotistic -n iotistic --timeout=300s
 ```
 
 ### 3. Run Database Migrations
 
 ```bash
 # Get API pod name
-API_POD=$(kubectl get pods -n iotistic-e2e -l app.kubernetes.io/component=api -o jsonpath='{.items[0].metadata.name}')
+API_POD=$(kubectl get pods -n iotistic -l app.kubernetes.io/component=api -o jsonpath='{.items[0].metadata.name}')
 
 # Run migrations
-kubectl exec -n iotistic-e2e $API_POD -- npm run migrate
+kubectl exec -n iotistic $API_POD -- npm run migrate
 ```
 
 ### 4. Access the Application
@@ -165,20 +165,20 @@ Open your browser:
 
 ```bash
 # API logs
-kubectl logs -n iotistic-e2e -l app.kubernetes.io/component=api -f
+kubectl logs -n iotistic -l app.kubernetes.io/component=api -f
 
 # Dashboard logs
-kubectl logs -n iotistic-e2e -l app.kubernetes.io/component=dashboard -f
+kubectl logs -n iotistic -l app.kubernetes.io/component=dashboard -f
 
 # All logs
-kubectl logs -n iotistic-e2e -l app.kubernetes.io/instance=iotistic -f --all-containers
+kubectl logs -n iotistic -l app.kubernetes.io/instance=iotistic -f --all-containers
 ```
 
 ### 6. Upgrade
 
 ```bash
 # After making changes to values or templates
-helm upgrade iotistic ./k8s/charts/iotistic --namespace iotistic-e2e
+helm upgrade iotistic ./k8s/charts/iotistic --namespace iotistic
 ```
 
 ## Troubleshooting
@@ -186,26 +186,26 @@ helm upgrade iotistic ./k8s/charts/iotistic --namespace iotistic-e2e
 ### Check Pod Status
 
 ```bash
-kubectl get pods -n iotistic-e2e
+kubectl get pods -n iotistic
 ```
 
 ### Describe Pod Issues
 
 ```bash
-kubectl describe pod -n iotistic-e2e -l app.kubernetes.io/instance=iotistic
+kubectl describe pod -n iotistic -l app.kubernetes.io/instance=iotistic
 ```
 
 ### Check Service Endpoints
 
 ```bash
-kubectl get svc -n iotistic-e2e
+kubectl get svc -n iotistic
 ```
 
 ### PostgreSQL Connection Issues
 
 ```bash
 # Test PostgreSQL connection
-kubectl exec -n iotistic-e2e -it deployment/iotistic-postgres -- psql -U postgres -d iotistic
+kubectl exec -n iotistic -it deployment/iotistic-postgres -- psql -U postgres -d iotistic
 ```
 
 ### MQTT Connection Issues

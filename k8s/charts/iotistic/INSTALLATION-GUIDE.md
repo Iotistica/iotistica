@@ -35,7 +35,7 @@ cd C:\Users\dsamborschi\iotistic\k8s\charts\iotistic
 .\install.ps1 -WaitReady -RunMigrations
 
 # Or manually with Helm
-helm install iotistic . --namespace iotistic-e2e --create-namespace
+helm install iotistic . --namespace iotistic --create-namespace
 ```
 
 ### Install for Production
@@ -53,7 +53,7 @@ helm install iotistic . \
 .\install.ps1 -Uninstall
 
 # Or manually
-helm uninstall iotistic --namespace iotistic-e2e
+helm uninstall iotistic --namespace iotistic
 ```
 
 ## 🔧 Key Features
@@ -176,12 +176,12 @@ helm install iotistic . --dry-run --debug
 helm template iotistic . > rendered.yaml
 ```
 
-### 4. Check Deployed Resources
+### Check Deployed Resources
 
 ```powershell
-kubectl get all -n iotistic-e2e
-kubectl get pvc -n iotistic-e2e
-kubectl get configmaps -n iotistic-e2e
+kubectl get all -n iotistic
+kubectl get pvc -n iotistic
+kubectl get configmaps -n iotistic
 ```
 
 ## 📊 Monitoring & Debugging
@@ -189,36 +189,36 @@ kubectl get configmaps -n iotistic-e2e
 ### View Pod Status
 
 ```powershell
-kubectl get pods -n iotistic-e2e
-kubectl describe pod <pod-name> -n iotistic-e2e
+kubectl get pods -n iotistic
+kubectl describe pod <pod-name> -n iotistic
 ```
 
 ### View Logs
 
 ```powershell
 # API logs
-kubectl logs -n iotistic-e2e -l app.kubernetes.io/component=api -f
+kubectl logs -n iotistic -l app.kubernetes.io/component=api -f
 
 # All services
-kubectl logs -n iotistic-e2e -l app.kubernetes.io/instance=iotistic -f --all-containers
+kubectl logs -n iotistic -l app.kubernetes.io/instance=iotistic -f --all-containers
 ```
 
 ### Port Forward (if not using NodePort)
 
 ```powershell
-kubectl port-forward -n iotistic-e2e svc/iotistic-dashboard 3000:80
-kubectl port-forward -n iotistic-e2e svc/iotistic-api 3002:3002
+kubectl port-forward -n iotistic svc/iotistic-dashboard 3000:80
+kubectl port-forward -n iotistic svc/iotistic-api 3002:3002
 ```
 
 ### Execute Commands in Pods
 
 ```powershell
 # Access PostgreSQL
-kubectl exec -it -n iotistic-e2e deployment/iotistic-postgres -- psql -U postgres -d iotistic
+kubectl exec -it -n iotistic deployment/iotistic-postgres -- psql -U postgres -d iotistic
 
 # Run migrations
-$API_POD = kubectl get pods -n iotistic-e2e -l app.kubernetes.io/component=api -o jsonpath='{.items[0].metadata.name}'
-kubectl exec -n iotistic-e2e $API_POD -- npm run migrate
+$API_POD = kubectl get pods -n iotistic -l app.kubernetes.io/component=api -o jsonpath='{.items[0].metadata.name}'
+kubectl exec -n iotistic $API_POD -- npm run migrate
 ```
 
 ## 🔐 Security Considerations
@@ -258,23 +258,23 @@ kubectl exec -n iotistic-e2e $API_POD -- npm run migrate
 
 ```powershell
 # Upgrade with new values
-helm upgrade iotistic . --namespace iotistic-e2e -f custom-values.yaml
+helm upgrade iotistic . --namespace iotistic -f custom-values.yaml
 
 # Force recreation of pods
-helm upgrade iotistic . --namespace iotistic-e2e --force
+helm upgrade iotistic . --namespace iotistic --force
 ```
 
 ### Helm Rollback
 
 ```powershell
 # List revisions
-helm history iotistic --namespace iotistic-e2e
+helm history iotistic --namespace iotistic
 
 # Rollback to previous version
-helm rollback iotistic --namespace iotistic-e2e
+helm rollback iotistic --namespace iotistic
 
 # Rollback to specific revision
-helm rollback iotistic 1 --namespace iotistic-e2e
+helm rollback iotistic 1 --namespace iotistic
 ```
 
 ## 📚 Template Helpers
@@ -332,8 +332,8 @@ The chart includes custom template helpers in `_helpers.tpl`:
 ## 📞 Support
 
 For issues or questions:
-- Check logs: `kubectl logs -n iotistic-e2e -l app.kubernetes.io/instance=iotistic`
-- Describe resources: `kubectl describe pod -n iotistic-e2e`
+- Check logs: `kubectl logs -n iotistic -l app.kubernetes.io/instance=iotistic`
+- Describe resources: `kubectl describe pod -n iotistic`
 - Review chart README: `k8s/charts/iotistic/README.md`
 
 ---

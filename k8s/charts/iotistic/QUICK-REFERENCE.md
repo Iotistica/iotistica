@@ -8,7 +8,7 @@ cd k8s/charts/iotistic
 .\install.ps1 -WaitReady -RunMigrations
 
 # Or with Helm directly
-helm install iotistic . --namespace iotistic-e2e --create-namespace
+helm install iotistic . --namespace iotistic --create-namespace
 ```
 
 ## 🌐 Access URLs (Default NodePort)
@@ -24,21 +24,21 @@ helm install iotistic . --namespace iotistic-e2e --create-namespace
 
 ```powershell
 # Check status
-kubectl get pods -n iotistic-e2e
+kubectl get pods -n iotistic
 
 # View logs
-kubectl logs -n iotistic-e2e -l app.kubernetes.io/instance=iotistic -f
+kubectl logs -n iotistic -l app.kubernetes.io/instance=iotistic -f
 
 # Run migrations
-$POD = kubectl get pods -n iotistic-e2e -l app.kubernetes.io/component=api -o jsonpath='{.items[0].metadata.name}'
-kubectl exec -n iotistic-e2e $POD -- npm run migrate
+$POD = kubectl get pods -n iotistic -l app.kubernetes.io/component=api -o jsonpath='{.items[0].metadata.name}'
+kubectl exec -n iotistic $POD -- npm run migrate
 
 # Upgrade
-helm upgrade iotistic . --namespace iotistic-e2e
+helm upgrade iotistic . --namespace iotistic
 
 # Uninstall
 .\install.ps1 -Uninstall
-# OR: helm uninstall iotistic --namespace iotistic-e2e
+# OR: helm uninstall iotistic --namespace iotistic
 ```
 
 ## 📝 Key Files
@@ -88,14 +88,14 @@ helm upgrade iotistic . -f custom-values.yaml
 
 ```powershell
 # Pod not starting
-kubectl describe pod <pod-name> -n iotistic-e2e
+kubectl describe pod <pod-name> -n iotistic
 
 # Service issues
-kubectl get svc -n iotistic-e2e
-kubectl get endpoints -n iotistic-e2e
+kubectl get svc -n iotistic
+kubectl get endpoints -n iotistic
 
 # Database connection
-kubectl exec -it -n iotistic-e2e deployment/iotistic-postgres -- psql -U postgres -d iotistic
+kubectl exec -it -n iotistic deployment/iotistic-postgres -- psql -U postgres -d iotistic
 
 # Validate chart
 helm lint .

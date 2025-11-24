@@ -2,7 +2,7 @@ services:
   # Database Services
   postgres:
     image: postgres:16-alpine
-    container_name: iotistic-postgres-e2e
+    container_name: iotistic-postgres
     restart: unless-stopped
     environment:
       - POSTGRES_DB=${POSTGRES_DB:-iotistic}
@@ -28,7 +28,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: iotistic-redis-e2e
+    container_name: iotistic-redis
     restart: unless-stopped
     command: >
       redis-server
@@ -51,7 +51,7 @@ services:
   # MQTT Broker
   mosquitto:
     image: iegomez/mosquitto-go-auth
-    container_name: iotistic-mosquitto-e2e
+    container_name: iotistic-mosquitto
     restart: unless-stopped
     ports:
       - "${MOSQUITTO_PORT_EXT:-5883}:1883"
@@ -67,7 +67,7 @@ services:
   # API Server
   api:
     image: iotistic/api:${API_VERSION:-latest}
-    container_name: iotistic-api-e2e
+    container_name: iotistic-api
     restart: unless-stopped
     tty: true
     stdin_open: true
@@ -116,7 +116,7 @@ services:
   # Dashboard UI
   dashboard:
     image: iotistic/dashboard:${DASHBOARD_VERSION:-latest}
-    container_name: iotistic-dashboard-e2e
+    container_name: iotistic-dashboard
     restart: unless-stopped
     ports:
       - "${DASHBOARD_PORT_EXT:-3000}:80"

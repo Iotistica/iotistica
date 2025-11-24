@@ -3,7 +3,7 @@
 
 # Global configuration
 global:
-  namespace: iotistic-e2e
+  namespace: iotistic
 
 # PostgreSQL database
 postgres:

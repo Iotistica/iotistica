@@ -2,7 +2,7 @@
 # Iotistic Helm Chart - Quick Install Script
 
 param(
-    [string]$Namespace = "iotistic-e2e",
+    [string]$Namespace = "iotistic",
     [string]$ReleaseName = "iotistic",
     [string]$ValuesFile = "",
     [switch]$WaitReady = $false,
