@@ -1,8 +1,8 @@
-import { Application, ApplicationsCard } from "./ApplicationsCard";
-import { Device } from "./DeviceSidebar";
-import { MetricCard } from "./ui/metric-card";
+import { Application, ApplicationsCard } from "../components/ApplicationsCard";
+import { Device } from "../components/DeviceSidebar";
+import { MetricCard } from "../components/ui/metric-card";
 import { Package, Layers, Activity, AlertCircle } from "lucide-react";
-import { ContainerLogsCard } from "./ContainerLogsCard";
+import { ContainerLogsCard } from "../components/ContainerLogsCard";
 import { useDeviceState } from "../contexts/DeviceStateContext";
 
 interface ApplicationsPageProps {

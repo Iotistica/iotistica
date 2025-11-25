@@ -4,9 +4,9 @@
 
 import { useState } from "react";
 import { Activity } from "lucide-react";
-import { Badge } from "./ui/badge";
-import { Device } from "./DeviceSidebar";
-import { ApplicationsCard, Application } from "./ApplicationsCard";
+import { Badge } from "../components/ui/badge";
+import { Device } from "../components/DeviceSidebar";
+import { ApplicationsCard, Application } from "../components/ApplicationsCard";
 
 interface ApplicationPageProps {
    device: Device;

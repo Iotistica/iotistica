@@ -3,10 +3,10 @@
  */
 
 import { useState, useEffect } from "react";
-import { MetricCard } from "./ui/metric-card";
-import { Badge } from "./ui/badge";
-import { Device } from "./DeviceSidebar";
-import JobsCard from "./JobsCard";
+import { MetricCard } from "../components/ui/metric-card";
+import { Badge } from "../components/ui/badge";
+import { Device } from "../components/DeviceSidebar";
+import JobsCard from "../components/JobsCard";
 import { CheckCircle2, XCircle, Clock, PlayCircle, Activity, AlertTriangle } from "lucide-react";
 import { buildApiUrl } from "@/config/api";
 

@@ -4,10 +4,10 @@
 
 import { useState, useMemo, useCallback } from "react";
 import { Users, MessageSquare, Zap, TrendingUp } from "lucide-react";
-import { MetricCard } from "./ui/metric-card";
-import { Device } from "./DeviceSidebar";
-import { MqttBrokerCard } from "./MqttBrokerCard";
-import { MqttMetricsCard } from "./MqttMetricsCard";
+import { MetricCard } from "../components/ui/metric-card";
+import { Device } from "../components/DeviceSidebar";
+import { MqttBrokerCard } from "../components/MqttBrokerCard";
+import { MqttMetricsCard } from "../components/MqttMetricsCard";
 import { useWebSocket, useGlobalWebSocketConnection } from "@/hooks/useWebSocket";
 import type { MqttStatsData } from "@/services/websocket";
 
