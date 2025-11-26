@@ -50,12 +50,29 @@ export async function getBrokerConfigForDevice(deviceUuid: string): Promise<Mqtt
     // Use SystemConfig to get broker (uses device-specific or default)
     const config = await SystemConfig.getMqttBroker(brokerId);
     
+    console.log(`[MQTT Config] DB config for device ${deviceUuid}:`, {
+      id: config.id,
+      name: config.name,
+      protocol: config.protocol,
+      host: config.host,
+      port: config.port,
+      use_tls: config.use_tls,
+      broker_type: config.broker_type
+    });
+    
     // Override with environment variables if TLS is disabled and env vars are set
     if (config.use_tls === false && envHost && envPort) {
       config.host = envHost;
       config.port = parseInt(envPort, 10);
       console.log(`[MQTT Config] TLS disabled for device ${deviceUuid}, using env override: ${envHost}:${envPort}`);
-    }   
+    }
+    
+    console.log(`[MQTT Config] Final config returned for device ${deviceUuid}:`, {
+      protocol: config.protocol,
+      host: config.host,
+      port: config.port,
+      use_tls: config.use_tls
+    });
     
     return config || null;
   } catch (error) {
