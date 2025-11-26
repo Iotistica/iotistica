@@ -28,7 +28,7 @@ jobs:
           kubectl get nodes -o wide
 
       - name: Deploy simple app (helm)
-        if: ${{ inputs.destroy == 'false' }}
+#       if: ${{ inputs.destroy == 'false' }}
         run: |
           set -e
           CHART_PATH=./charts/simple-app
