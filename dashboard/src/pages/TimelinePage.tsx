@@ -1,6 +1,6 @@
-import { Badge } from "./ui/badge";
-import { Device } from "./DeviceSidebar";
-import { TimelineCard } from "./TimelineCard";
+import { Badge } from "../components/ui/badge";
+import { Device } from "../components/DeviceSidebar";
+import { TimelineCard } from "../components/TimelineCard";
 
 interface TimelinePageProps {
   device: Device;
