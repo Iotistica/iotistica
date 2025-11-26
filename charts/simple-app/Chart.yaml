@@ -1,0 +1,6 @@
+apiVersion: v2
+name: simple-app
+description: A simple application exposed via NodePort
+type: application
+version: 0.1.0
+appVersion: "1.24"

@@ -1,9 +1,19 @@
 # ...existing code...
-name: Validate Kubeconfig
+name: Validate Kubeconfig and Deploy Simple App
 
-# Trigger on push to main or manual workflow dispatch
+# Trigger manually
 on:
   workflow_dispatch:
+    inputs:
+      destroy:
+        description: 'If true will destroy the deployed sample app'
+        required: false
+        default: 'false'
+        type: boolean
+      kubeconfig:
+        description: 'Optional kubeconfig content (base64 or plain). If empty the runner kubeconfig will be used'
+        required: false
+        type: string
 
 jobs:
   test-on-tagged-runner:
@@ -11,14 +21,32 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      # Run kubectl only when using the iotistic-lab-sc runner tag
-      - name: Run kubectl get nodes
+      - name: Show cluster nodes
         run: |
-          if command -v kubectl >/dev/null 2>&1; then
-            echo "kubectl found, showing cluster nodes"
-            kubectl get nodes --no-headers || kubectl version --client
-          else
-            echo "kubectl not installed on runner"
-          fi
+          kubectl get nodes -o wide
+
+      - name: Deploy simple app (helm)
+        if: ${{ inputs.destroy == 'false' }}
+        run: |
+          set -e
+          CHART_PATH=./charts/simple-app
+          NAMESPACE=sample-app
+          helm upgrade --install simple-app "${CHART_PATH}" --namespace "${NAMESPACE}" --create-namespace
+          kubectl -n "${NAMESPACE}" rollout status deploy/simple-app --timeout=120s || true
+          echo "Service info:"
+          kubectl -n "${NAMESPACE}" get svc simple-app -o wide
+
+      - name: Destroy deployed sample app (helm)
+        if: ${{ inputs.destroy == 'true' }}
+        run: |
+          set -e
+          NAMESPACE=sample-app
+          helm uninstall simple-app -n "${NAMESPACE}" || true
+          kubectl delete namespace "${NAMESPACE}" --wait --ignore-not-found
+
+      - name: Final pods/services (debug)
+        run: |
+          kubectl get pods -A || true
+          kubectl get svc -A || true
