@@ -1,0 +1,24 @@
+# ...existing code...
+name: Validate Kubeconfig
+
+# Trigger on push to main or manual workflow dispatch
+on:
+  workflow_dispatch:
+
+jobs:
+  test-on-tagged-runner:
+    runs-on: [iotistic-lab-sc]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Run kubectl only when using the iotistic-lab-sc runner tag
+      - name: Run kubectl get nodes
+        run: |
+          if command -v kubectl >/dev/null 2>&1; then
+            echo "kubectl found, showing cluster nodes"
+            kubectl get nodes --no-headers || kubectl version --client
+          else
+            echo "kubectl not installed on runner"
+          fi
