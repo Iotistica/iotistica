@@ -142,7 +142,7 @@ export class SensorDataSimulation implements SimulationScenario {
 	}
 	
 	/**
-	 * Publish sensor data for all configured sensors
+	 * Publish sensor data for all Configured Endpoints
 	 * 
 	 * Matches the real sensor-publish format:
 	 * - Topic: iot/device/{deviceUuid}/sensor/{mqttTopic}

@@ -205,7 +205,7 @@ router.delete('/devices/:uuid/sensors/:name', async (req, res) => {
 
 /**
  * Get device sensor overview
- * Shows configured sensors with protocol breakdown
+ * Shows Configured Endpoints with protocol breakdown
  * GET /api/v1/devices/:uuid/device-health
  */
 router.get('/devices/:uuid/device-health', async (req, res) => {

@@ -66,7 +66,7 @@ interface SensorConfig {
    POST   /api/v1/devices/:uuid/sensors          // Add sensor
    PATCH  /api/v1/devices/:uuid/sensors/:name    // Edit sensor
    DELETE /api/v1/devices/:uuid/sensors/:name    // Remove sensor
-   GET    /api/v1/devices/:uuid/sensors/config   // List configured sensors
+   GET    /api/v1/devices/:uuid/sensors/config   // List Configured Endpoints
    ```
 
 2. **Update Target State Schema**:
@@ -100,7 +100,7 @@ interface SensorConfig {
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ Configured Sensors                           [+ Add] │
+│ Configured Endpoints                           [+ Add] │
 ├─────────────────────────────────────────────────────┤
 │ 📡 temperature-sensor          MODBUS    [Edit] [×] │
 │    192.168.1.100:502 (Unit 1)                       │

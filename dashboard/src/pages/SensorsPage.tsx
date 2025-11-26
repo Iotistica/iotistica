@@ -296,7 +296,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         {/* Sensors List */}
         <Card>
           <CardHeader>
-            <CardTitle>Configured Sensors</CardTitle>
+            <CardTitle>Configured Endpoints</CardTitle>
             <CardDescription>
               {sensors.length === 0 
                 ? 'No sensors configured yet. Click "Add Sensor" to get started.' 
