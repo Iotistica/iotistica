@@ -1,0 +1,57 @@
+# Auto-generated docker-compose file for 1 agents
+# Generated: 2025-11-25 08:32:09
+# Agents: 25 to 25
+# Ports: 48505 to 48505
+
+services:
+  agent-25:
+    container_name: agent-25
+    image: zemfyre-sensor-agent:latest
+    restart: always
+    mem_limit: 512m
+    mem_reservation: 256m
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - agent-25-data:/app/data
+      - ./certs/ca.crt:/app/certs/ca.crt:ro
+    environment:
+      - DEVICE_API_PORT=48505
+      - CLOUD_API_ENDPOINT=http://api:3002
+      - NODE_ENV=development
+      - REPORT_INTERVAL_MS=20000
+      - METRICS_INTERVAL_MS=30000
+      - LOG_COMPRESSION=true
+      - REQUIRE_PROVISIONING=false
+      - PROVISIONING_KEY=059a2d9085002a66380f0d6609385cfbe92416b8ee88acc1aa24a79f38f9d35d
+      - API_SECURITY_MODE=LOCALHOST_ONLY
+      - MEMORY_CHECK_INTERVAL_MS=30000
+      - MEMORY_THRESHOLD_MB=15
+      - LOG_FILE_PERSISTANCE=true
+      - LOG_MAX_AGE=86400000
+      - MAX_LOG_FILE_SIZE=52428800
+      - MAX_LOGS=10000
+      - ANOMALY_DETECTION_ENABLED=true
+      - SIMULATION_MODE=false
+      - SIMULATION_CONFIG={}
+      - SIMULATE_MEMORY_LEAK=false
+      - FIREWALL_ENABLED=false
+      - ENABLE_PROTOCOL_ADAPTERS=true
+      - ENABLE_SENSOR_PUBLISH=true
+      - ENABLE_FIRST_BOOT_DISCOVERY=true
+      - ENABLE_PERIODIC_DISCOVERY=true
+      - DISCOVERY_LIGHT_INTERVAL_MS=14400000
+      - DISCOVERY_FULL_INTERVAL_MS=86400000
+      - MODBUS_TCP_HOST=iotistic-modbus-sim
+      - MODBUS_TCP_PORT=502
+      - MODBUS_SLAVE_RANGE_START=1
+      - MODBUS_SLAVE_RANGE_END=10
+      - MODBUS_TIMEOUT=2000
+      - OPCUA_DISCOVERY_URLS=
+    networks:
+      - iotistic-net
+volumes:
+  agent-25-data:
+    driver: local
+networks:
+  iotistic-net:
+    driver: bridge
