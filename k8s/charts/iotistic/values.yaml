@@ -87,7 +87,7 @@ api:
   image:
     repository: iotistic/api
     tag: latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Never  # Use local images only (prevents pulling from registry)
   replicas: 1
   port: 3002
   serviceType: NodePort
@@ -123,13 +123,16 @@ dashboard:
   enabled: true
   image:
     repository: iotistic/dashboard
-    tag: latest
-    pullPolicy: IfNotPresent
+    tag: local-k8s
+    pullPolicy: Never  # Use local images only (prevents pulling from registry)
   replicas: 1
   port: 80
   serviceType: NodePort
   nodePort: 30000
   # API URL for browser access - use localhost for local dev, internal service name for production
+  # NOTE: This is a BUILD-TIME variable. After changing this value, rebuild the dashboard image:
+  #   cd dashboard && docker build --build-arg VITE_API_URL=<value> -t iotistic/dashboard:local-k8s .
+  #   Then upgrade: helm upgrade iotistic . --namespace iotistic
   apiUrl: "http://localhost:30002"
   resources:
     requests:

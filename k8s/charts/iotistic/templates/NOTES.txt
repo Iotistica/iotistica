@@ -65,6 +65,18 @@ Database migrations are automatically applied when the API service starts.
 No manual migration step is required.
 
 ===================================
+⚠️  IMPORTANT: Dashboard Image Rebuild
+===================================
+
+If you changed dashboard.apiUrl in values.yaml, you MUST rebuild the dashboard image:
+
+  cd dashboard
+  docker build --build-arg VITE_API_URL={{ .Values.dashboard.apiUrl }} -t iotistic/dashboard:latest .
+  kubectl rollout restart deployment/{{ include "iotistic.fullname" . }}-dashboard -n {{ .Release.Namespace }}
+
+This is required because VITE_API_URL is a build-time variable, not a runtime variable.
+
+===================================
 📊 VIEW LOGS
 ===================================
 
