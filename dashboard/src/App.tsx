@@ -7,7 +7,7 @@ import { SystemMetrics } from "./components/SystemMetrics";
 import { MqttPage } from "./pages/MqttPage";
 import { JobsPage } from "./pages/JobsPage";
 import { ApplicationsPage } from "./pages/ApplicationsPage";
-import { TimelinePage } from "./components/TimelinePage";
+import { TimelinePage } from "./pages/TimelinePage";
 import { UsagePage } from "./pages/UsagePage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { SecurityPage } from "./pages/SecurityPage";

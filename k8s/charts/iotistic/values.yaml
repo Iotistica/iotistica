@@ -129,6 +129,8 @@ dashboard:
   port: 80
   serviceType: NodePort
   nodePort: 30000
+  # API URL for browser access - use localhost for local dev, internal service name for production
+  apiUrl: "http://localhost:30002"
   resources:
     requests:
       cpu: 100m
