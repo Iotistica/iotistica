@@ -28,7 +28,7 @@ jobs:
           kubectl get nodes -o wide
 
       - name: Deploy simple app (helm)
-#       if: ${{ inputs.destroy == 'false' }}
+        if: ${{ inputs.destroy == false }}
         run: |
           set -e
           CHART_PATH=./charts/simple-app
@@ -39,7 +39,7 @@ jobs:
           kubectl -n "${NAMESPACE}" get svc simple-app -o wide
 
       - name: Destroy deployed sample app (helm)
-        if: ${{ inputs.destroy == 'true' }}
+        if: ${{ inputs.destroy == true }}
         run: |
           set -e
           NAMESPACE=sample-app
