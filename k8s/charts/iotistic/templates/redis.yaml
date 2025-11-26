@@ -1,0 +1,123 @@
+{{- if .Values.redis.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "iotistic.fullname" . }}-redis-headless
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: {{ .Values.redis.port }}
+      targetPort: redis
+      protocol: TCP
+      name: redis
+  selector:
+    {{- include "iotistic.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "iotistic.fullname" . }}-redis
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.redis.port }}
+      targetPort: redis
+      protocol: TCP
+      name: redis
+  selector:
+    {{- include "iotistic.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "iotistic.fullname" . }}-redis
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  serviceName: {{ include "iotistic.fullname" . }}-redis-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "iotistic.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        {{- include "iotistic.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: redis
+    spec:
+      containers:
+        - name: redis
+          image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: redis
+              containerPort: {{ .Values.redis.port }}
+              protocol: TCP
+          args:
+            - "redis-server"
+            - "--maxmemory"
+            - "{{ .Values.redis.maxMemory }}"
+            - "--maxmemory-policy"
+            - "{{ .Values.redis.maxMemoryPolicy }}"
+            - "--save"
+            - "60"
+            - "1000"
+            - "--appendonly"
+            - "yes"
+            - "--dir"
+            - "/data"
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+  {{- if .Values.redis.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+        labels:
+          {{- include "iotistic.labels" . | nindent 10 }}
+          app.kubernetes.io/component: redis
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- if .Values.redis.storage.storageClass }}
+        storageClassName: {{ .Values.redis.storage.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.redis.storage.size }}
+  {{- else }}
+  # No volumeClaimTemplates - will use emptyDir if persistence disabled
+  # Note: emptyDir must be defined in pod spec volumes if persistence is false
+  {{- end }}
+{{- end }}
