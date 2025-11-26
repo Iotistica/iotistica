@@ -91,6 +91,10 @@ export default class DeviceAgent {
   
   // Scheduled restart timer (controlled from cloud config)
   private scheduledRestartTimer?: NodeJS.Timeout;
+  
+  // Periodic discovery timers
+  private discoveryLightTimer?: NodeJS.Timeout;
+  private discoveryFullTimer?: NodeJS.Timeout;
 
   private readonly DEVICE_API_PORT = parseInt(
     process.env.DEVICE_API_PORT || "48484",
@@ -98,6 +102,16 @@ export default class DeviceAgent {
   );
   private readonly RECONCILIATION_INTERVAL = parseInt(
     process.env.RECONCILIATION_INTERVAL_MS || "30000",
+    10
+  );
+  
+  // Discovery intervals (configurable via env vars)
+  private readonly DISCOVERY_LIGHT_INTERVAL_MS = parseInt(
+    process.env.DISCOVERY_LIGHT_INTERVAL_MS || "14400000", // 4 hours default
+    10
+  );
+  private readonly DISCOVERY_FULL_INTERVAL_MS = parseInt(
+    process.env.DISCOVERY_FULL_INTERVAL_MS || "86400000", // 24 hours default
     10
   );
   // Cloud API endpoint with fallback logic for network_mode: host
@@ -688,6 +702,9 @@ export default class DeviceAgent {
         component: LogComponents.agent,
         firstBootDiscovery: enableFirstBootDiscovery,
       });
+      
+      // Start periodic discovery if enabled
+      this.startPeriodicDiscovery();
     } catch (error) {
       this.agentLogger?.errorSync(
         "Failed to initialize Discovery Service",
@@ -697,6 +714,68 @@ export default class DeviceAgent {
       // Don't fail startup - discovery is optional
       this.discoveryService = undefined;
     }
+  }
+  
+  /**
+   * Start periodic discovery timers
+   * - Light discovery: Fast scan (ping only) every 4 hours (default)
+   * - Full discovery: Deep validation every 24 hours (default)
+   */
+  private startPeriodicDiscovery(): void {
+    if (!this.discoveryService) {
+      return;
+    }
+    
+    const enablePeriodicDiscovery = process.env.ENABLE_PERIODIC_DISCOVERY !== 'false'; // Default: enabled
+    
+    if (!enablePeriodicDiscovery) {
+      this.agentLogger?.infoSync('Periodic discovery disabled', {
+        component: LogComponents.agent,
+      });
+      return;
+    }
+    
+    this.agentLogger?.infoSync('Starting periodic discovery timers', {
+      component: LogComponents.agent,
+      lightIntervalHours: this.DISCOVERY_LIGHT_INTERVAL_MS / (60 * 60 * 1000),
+      fullIntervalHours: this.DISCOVERY_FULL_INTERVAL_MS / (60 * 60 * 1000),
+    });
+    
+    // Light discovery: Fast scan (ping only)
+    this.discoveryLightTimer = setInterval(() => {
+      this.agentLogger?.infoSync('Running scheduled light discovery', {
+        component: LogComponents.agent,
+      });
+      
+      this.discoveryService?.runDiscovery({
+        trigger: 'scheduled',
+        validate: false, // Ping only, no deep validation
+      }).catch(error => {
+        this.agentLogger?.errorSync(
+          'Scheduled light discovery failed',
+          error as Error,
+          { component: LogComponents.agent }
+        );
+      });
+    }, this.DISCOVERY_LIGHT_INTERVAL_MS);
+    
+    // Full discovery: Deep validation with device info reads
+    this.discoveryFullTimer = setInterval(() => {
+      this.agentLogger?.infoSync('Running scheduled full discovery', {
+        component: LogComponents.agent,
+      });
+      
+      this.discoveryService?.runDiscovery({
+        trigger: 'scheduled',
+        validate: true, // Full validation with device info
+      }).catch(error => {
+        this.agentLogger?.errorSync(
+          'Scheduled full discovery failed',
+          error as Error,
+          { component: LogComponents.agent }
+        );
+      });
+    }, this.DISCOVERY_FULL_INTERVAL_MS);
   }
 
   private async initializeSimulationMode(): Promise<void> {
@@ -1527,6 +1606,21 @@ export default class DeviceAgent {
         clearTimeout(this.scheduledRestartTimer);
         this.scheduledRestartTimer = undefined;
         this.agentLogger?.infoSync("Scheduled restart timer cleared", {
+          component: LogComponents.agent,
+        });
+      }
+      
+      // Clear discovery timers
+      if (this.discoveryLightTimer) {
+        clearInterval(this.discoveryLightTimer);
+        this.discoveryLightTimer = undefined;
+      }
+      if (this.discoveryFullTimer) {
+        clearInterval(this.discoveryFullTimer);
+        this.discoveryFullTimer = undefined;
+      }
+      if (this.discoveryLightTimer || this.discoveryFullTimer) {
+        this.agentLogger?.infoSync("Discovery timers cleared", {
           component: LogComponents.agent,
         });
       }

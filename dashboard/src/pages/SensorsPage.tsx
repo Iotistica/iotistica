@@ -256,9 +256,9 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-2">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">Sensors</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">Endpoints</h1>
             <p className="text-sm text-muted-foreground">
-              Configure and monitor your connected sensors
+              Monitor your connected devices
             </p>
           </div>
         </div>
@@ -266,7 +266,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         {/* Error Alert */}
         {error && (
           <Alert variant="destructive">
-            <AlertDescription>Failed to load sensors: {error}</AlertDescription>
+            <AlertDescription>Failed to load endpoints: {error}</AlertDescription>
           </Alert>
         )}
 
@@ -282,33 +282,23 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           />
         )}
 
-        {/* Add Sensor Button */}
-        <div className="flex justify-end items-center">
-          <Button 
-            onClick={() => setAddSensorDialogOpen(true)} 
-            className="flex items-center gap-2 ml-auto"
-          >
-            <Plus className="h-4 w-4" />
-            Add Sensor
-          </Button>
-        </div>
-
+       
         {/* Sensors List */}
         <Card>
           <CardHeader>
             <CardTitle>Configured Endpoints</CardTitle>
             <CardDescription>
               {sensors.length === 0 
-                ? 'No sensors configured yet. Click "Add Sensor" to get started.' 
-                : `${sensors.length} sensor(s) configured`}
+                ? 'No endpoints configured yet.' 
+                : `${sensors.length} endpoint(s) configured`}
             </CardDescription>
           </CardHeader>
           <CardContent>
             {sensors.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
                 <Activity className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                <p className="text-lg font-medium mb-2">No sensors yet</p>
-                <p className="text-sm">Add your first sensor to start collecting data</p>
+                <p className="text-lg font-medium mb-2">No endpoints yet</p>
+               
               </div>
             ) : (
               <div className="space-y-3">

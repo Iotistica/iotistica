@@ -1118,6 +1118,94 @@ This standalone version is a simplified extraction that:
 - Requires additional work to be production-ready
 
 
+## 🔍 Protocol Discovery
+
+**Automatic device discovery** for industrial protocols with two-phase architecture and periodic scanning.
+
+### Discovery Features
+
+- **Auto-discovery on boot** - Finds devices on first startup
+- **Periodic light scans** - Fast ping-only checks every 4 hours (default)
+- **Periodic full scans** - Deep validation with device info every 24 hours (default)
+- **Manual triggers** - On-demand discovery via API/CLI
+- **Multi-protocol support** - Modbus, OPC-UA, CAN Bus
+- **SQLite persistence** - Discovered devices saved to database
+- **Rate limiting** - Prevents excessive scanning (min 1 hour between scheduled scans)
+
+### Two-Phase Discovery Architecture
+
+**Phase 1 - Fast Discovery** (ping only):
+- Quick scan to detect responding devices
+- No deep validation or device info reads
+- Minimal network overhead
+- Used for scheduled light scans
+
+**Phase 2 - Deep Validation** (optional):
+- Reads device identification and metadata
+- Validates protocol compliance
+- Slower but comprehensive
+- Used for first boot and periodic full scans
+
+### Configuration
+
+```bash
+# Environment variables
+ENABLE_FIRST_BOOT_DISCOVERY=true          # Run discovery on agent startup
+ENABLE_PERIODIC_DISCOVERY=true            # Enable scheduled discovery (default: true)
+DISCOVERY_LIGHT_INTERVAL_MS=14400000      # Light scan interval (4 hours default)
+DISCOVERY_FULL_INTERVAL_MS=86400000       # Full scan interval (24 hours default)
+
+# Modbus-specific
+MODBUS_TCP_HOST=192.168.1.100             # Modbus TCP host to scan
+MODBUS_TCP_PORT=502                       # Modbus TCP port (default: 502)
+MODBUS_SERIAL_PORT=/dev/ttyUSB0           # Serial port for RTU (optional)
+MODBUS_BAUD_RATE=9600                     # Serial baud rate (default: 9600)
+MODBUS_SLAVE_RANGE_START=1                # Start of slave ID range
+MODBUS_SLAVE_RANGE_END=247                # End of slave ID range
+MODBUS_TIMEOUT=2000                       # Timeout per slave scan (ms)
+
+# OPC-UA-specific
+OPCUA_DISCOVERY_URLS=opc.tcp://localhost:4840  # OPC-UA server URLs (comma-separated)
+
+# CAN-specific
+CAN_INTERFACE=can0                        # CAN bus interface
+```
+
+### Discovery Schedule
+
+| Trigger | Timing | Validation | Use Case |
+|---------|--------|------------|----------|
+| **First Boot** | On startup | Full (with device info) | Initial device inventory |
+| **Light Scan** | Every 4 hours | None (ping only) | Detect online/offline changes |
+| **Full Scan** | Every 24 hours | Full (with device info) | Update device metadata |
+| **Manual** | On demand | Configurable | Troubleshooting, testing |
+
+### Discovered Device Storage
+
+Devices are automatically saved to SQLite `sensors` table with:
+- Unique fingerprint (protocol + connection details)
+- Protocol type (modbus, opcua, can)
+- Connection info (host, port, slave ID, etc.)
+- Device metadata (vendor, model, firmware)
+- Discovery timestamp
+- Status: `enabled=false` (requires manual enablement)
+
+### Best Practices
+
+**Industrial IoT Requirements:**
+- ✅ Detect new devices added to network
+- ✅ Identify failed/offline devices
+- ✅ Handle IP address changes
+- ✅ Support hot-swapped equipment
+- ✅ Minimize network overhead with two-phase scans
+
+**Why Periodic Discovery Matters:**
+Discovery only on boot is **not sufficient** for industrial environments where:
+- Devices are added during maintenance
+- Network configurations change
+- Equipment fails and needs replacement
+- Hot-swap scenarios are common
+
 ## 📡 Protocol Adapters
 
 Industrial protocol adapters for sensor data collection with production-grade reliability and performance.

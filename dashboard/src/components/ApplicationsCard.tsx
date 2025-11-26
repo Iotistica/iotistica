@@ -449,7 +449,7 @@ export function ApplicationsCard({
                 onClick={openAddAppModal} 
                 size="sm" 
                 className="flex-shrink-0"
-                disabled={!canAddApp}
+                // disabled={!canAddApp}
                 title={!canAddApp ? disabledMessage : undefined}
               >
                 <Plus className="w-4 h-4 mr-2" />
