@@ -297,6 +297,10 @@ jobs:
         working-directory: ./api
         run: |
           echo "Running API integration tests..."
+          
+          # Fix npm cache permissions (may have been changed by sudo during setup)
+          sudo chown -R $(whoami):$(whoami) $HOME/.npm 2>/dev/null || true
+          
           npm ci
           npm run test:integration || echo "No integration tests configured yet"
 
@@ -565,7 +569,9 @@ jobs:
           echo "Running agent integration tests..."
           
           # Fix npm cache permissions (may have been changed by sudo during install)
-          sudo chown -R $(whoami):$(whoami) $HOME/.npm 2>/dev/null || true
+          if [ -d "$HOME/.npm" ]; then
+            sudo chown -R $(whoami):$(whoami) $HOME/.npm 2>/dev/null || true
+          fi
           
           npm ci
           npm run test:integration || echo "No integration tests configured yet"
