@@ -250,6 +250,22 @@ services:
                 max-size: "5m"
                 max-file: "2"
     
+    snmp-simulator:
+        build:
+            context: ./sensors/snmp-simulator
+            dockerfile: Dockerfile
+        container_name: iotistic-snmp-sim
+        restart: unless-stopped
+        ports:
+            - "161:161/udp"
+        networks:
+            - iotistic-net
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "5m"
+                max-file: "2"
+    
     canbus-simulator:
         build:
             context: ./sensors/canbus-simulator

@@ -7,7 +7,7 @@ import { models } from '../connection';
 
 export interface DeviceSensorOutput {
   id?: number;
-  protocol: 'modbus' | 'can' | 'opcua';
+  protocol: 'modbus' | 'can' | 'opcua' | 'snmp';
   socket_path: string;
   data_format: string;
   delimiter: string;

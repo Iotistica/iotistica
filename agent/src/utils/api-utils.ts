@@ -33,6 +33,7 @@ export function getPackageVersion(): string {
 	}
 }
 
+
 /**
  * Get API version from environment variable
  * Defaults to 'v1' if not specified

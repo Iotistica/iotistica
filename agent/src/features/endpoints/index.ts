@@ -26,6 +26,9 @@ import { DeviceSensorModel } from '../../db/models/sensors.model.js';
 import type { OPCUAAdapter } from './opcua/opcua-adapter.js';
 import type { OPCUAAdapterConfig } from './opcua/types.js';
 
+// SNMP imports
+import { SNMPAdapter } from './snmp/adapter.js';
+
 export interface SensorConfig extends FeatureConfig {
   modbus?: {
     enabled: boolean;
@@ -37,6 +40,9 @@ export interface SensorConfig extends FeatureConfig {
   opcua?: {
     enabled: boolean;
     config?: OPCUAAdapterConfig; // Optional: provide config directly, otherwise load from database
+  };
+  snmp?: {
+    enabled: boolean;
   };
 }
 
@@ -71,6 +77,11 @@ export class SensorsFeature extends BaseFeature {
     // Start OPC-UA adapter if enabled
     if ((this.config as SensorConfig).opcua?.enabled) {
       await this.startOPCUAAdapter();
+    }
+
+    // Start SNMP adapter if enabled
+    if ((this.config as SensorConfig).snmp?.enabled) {
+      await this.startSNMPAdapter();
     }
 
     // TODO: Start CAN adapter when implemented
@@ -306,6 +317,96 @@ export class SensorsFeature extends BaseFeature {
   }
 
   /**
+   * Start SNMP adapter
+   */
+  private async startSNMPAdapter(): Promise<void> {
+    try {
+      // Load devices from database
+      const dbDevices = await DeviceSensorModel.getEnabled('snmp');
+      
+      if (dbDevices.length === 0) {
+        this.logger.info('No enabled SNMP devices found');
+        return;
+      }
+
+      // Load output config from database
+      const dbOutput = await SensorOutputModel.getOutput('snmp');
+      if (!dbOutput) {
+        this.logger.error('SNMP output configuration not found in database');
+        return;
+      }
+
+      const outputConfig: SocketOutput = {
+        socketPath: dbOutput.socket_path,
+        dataFormat: dbOutput.data_format as 'json' | 'csv',
+        delimiter: dbOutput.delimiter,
+        includeTimestamp: dbOutput.include_timestamp,
+        includeDeviceName: dbOutput.include_device_name
+      };
+
+      // Create socket server for SNMP protocol
+      const snmpSocket = new SocketServer(outputConfig, this.logger);
+      await snmpSocket.start();
+      this.socketServers.set('snmp', snmpSocket);
+      this.logger.info(`SNMP socket server started at: ${outputConfig.socketPath}`);
+
+      // Map database devices to SNMPDeviceConfig format
+      const snmpDevices = dbDevices.map(d => ({
+        name: d.name,
+        protocol: 'snmp' as const,
+        enabled: d.enabled,
+        connection: d.connection,
+        pollInterval: d.poll_interval,
+        dataPoints: (d.data_points || []).map((dp: any) => ({
+          name: dp.name,
+          oid: dp.oid,
+          unit: dp.unit || '',
+          dataType: dp.dataType || 'integer',
+          scalingFactor: dp.scalingFactor || dp.scale,
+          offset: dp.offset
+        })),
+        metadata: d.metadata || {}
+      }));
+
+      // Create SNMP adapter (socket-agnostic)
+      const snmpAdapter = new SNMPAdapter(snmpDevices, this.logger);
+      this.adapters.set('snmp', snmpAdapter);
+
+      // Wire up event handlers
+      snmpAdapter.on('started', () => {
+        this.logger.info('SNMP adapter started');
+      });
+
+      snmpAdapter.on('data', (dataPoints: SensorDataPoint[]) => {
+        // Route data from adapter to socket server
+        snmpSocket.sendData(dataPoints);
+      });
+
+      snmpAdapter.on('device-connected', (deviceName: string) => {
+        this.logger.info(`SNMP device connected: ${deviceName}`);
+      });
+
+      snmpAdapter.on('device-disconnected', (deviceName: string) => {
+        this.logger.warn(`SNMP device disconnected: ${deviceName}`);
+      });
+
+      snmpAdapter.on('device-error', (deviceName: string, error: Error) => {
+        this.logger.error(`SNMP device error [${deviceName}]: ${error.message}`);
+      });
+
+      // Start adapter
+      await snmpAdapter.start();
+      
+      this.logger.info(`SNMP adapter started with ${dbDevices.length} device(s)`);
+      
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to start SNMP adapter: ${errorMessage}`);
+      throw error;
+    }
+  }
+
+  /**
    * Get Modbus adapter instance (for testing/debugging)
    */
   getModbusAdapter(): ModbusAdapter | undefined {
@@ -317,6 +418,13 @@ export class SensorsFeature extends BaseFeature {
    */
   getOPCUAAdapter(): OPCUAAdapter | undefined {
     return this.adapters.get('opcua') as OPCUAAdapter | undefined;
+  }
+
+  /**
+   * Get SNMP adapter instance (for testing/debugging)
+   */
+  getSNMPAdapter(): SNMPAdapter | undefined {
+    return this.adapters.get('snmp') as SNMPAdapter | undefined;
   }
 
   /**
@@ -377,9 +485,11 @@ export class SensorsFeature extends BaseFeature {
             if (Array.isArray(statuses)) {
               for (const device of statuses) {
                 if (health[device.deviceName]) {
-                  // Overlay runtime status
+                  // Overlay runtime status (preserve status field from database)
+                  const currentStatus = health[device.deviceName].status;
                   health[device.deviceName] = {
                     protocol,
+                    status: currentStatus, // Preserve status from database
                     connected: device.connected,
                     lastPoll: device.lastPoll?.toISOString() || null,
                     lastSeen: device.lastSeen?.toISOString() || null,

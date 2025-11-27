@@ -12,7 +12,7 @@ export interface DeviceSensor {
   id?: number;
   uuid?: string; // Stable identifier for cloud/edge sync (survives name changes)
   name: string;
-  protocol: 'modbus' | 'can' | 'opcua';
+  protocol: 'modbus' | 'can' | 'opcua' | 'snmp';
   enabled: boolean;
   poll_interval: number;
   connection: Record<string, any>; // Connection config (host, port, serial, etc.)

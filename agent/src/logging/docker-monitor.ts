@@ -7,7 +7,7 @@
 
 import type Docker from 'dockerode';
 import type { LogMessage, LogStreamOptions, ContainerLogAttachment, LogBackend } from './types';
-import type { AgentLogger } from './agent-logger';
+import { AgentLogger } from './agent-logger';
 import { LogComponents } from './types';
 
 export class ContainerLogMonitor {
@@ -16,11 +16,10 @@ export class ContainerLogMonitor {
 	private logBackends: LogBackend[];
 	private logger?: AgentLogger;
 
-	constructor(docker: Docker, logBackend: LogBackend | LogBackend[], logger?: AgentLogger) {
+	constructor(docker: Docker, logger?: AgentLogger) {
 		this.docker = docker;
-		// Support both single backend and multiple backends
-		this.logBackends = Array.isArray(logBackend) ? logBackend : [logBackend];
 		this.logger = logger;
+		this.logBackends = logger?.getBackends() || [];
 	}
 
 	/**

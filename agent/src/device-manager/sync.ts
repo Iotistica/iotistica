@@ -368,12 +368,15 @@ export class CloudSync extends EventEmitter {
 		
 		// Start polling loop
 		await this.pollLoop();
+
+		//Start reporting loop
+		await this.startReporting();
 	}
 	
 	/**
 	 * Start reporting current state to cloud
 	 */
-	public async startReporting(): Promise<void> {
+	private async startReporting(): Promise<void> {
 		if (this.isReporting) {
 			this.logger?.warnSync('CloudSync already reporting', { component: LogComponents.cloudSync });
 			return;
@@ -398,7 +401,7 @@ export class CloudSync extends EventEmitter {
 	 * Stop polling and reporting
 	 */
 	public async stop(): Promise<void> {
-		this.logger?.infoSync('Stopping API Binder', { component: LogComponents.cloudSync });
+		this.logger?.infoSync('Stopping CloudSync', { component: LogComponents.cloudSync });
 		
 		try {
 			// Clear timers FIRST to prevent new iterations
@@ -430,7 +433,7 @@ export class CloudSync extends EventEmitter {
 			
 			this.removeAllListeners();
 			
-			this.logger?.infoSync('API Binder stopped successfully', { component: LogComponents.cloudSync });
+			this.logger?.infoSync('CloudSync stopped successfully', { component: LogComponents.cloudSync });
 		} catch (error) {
 			// Always clear timers even if error occurs
 			if (this.pollTimer) clearTimeout(this.pollTimer);
@@ -438,7 +441,7 @@ export class CloudSync extends EventEmitter {
 			this.pollTimer = undefined;
 			this.reportTimer = undefined;
 			
-			this.logger?.errorSync('Error stopping API Binder', error instanceof Error ? error : new Error(String(error)), {
+			this.logger?.errorSync('Error stopping CloudSync', error instanceof Error ? error : new Error(String(error)), {
 				component: LogComponents.cloudSync
 			});
 			throw error;
@@ -993,7 +996,7 @@ export class CloudSync extends EventEmitter {
 			const metrics = await systemMetrics.getSystemMetrics();
 			const metricsElapsedMs = Date.now() - metricsStartTime;
 			
-			this.logger?.infoSync('System metrics collection completed', {
+			this.logger?.debugSync('System metrics collection completed', {
 				component: LogComponents.cloudSync,
 				operation: 'collect-metrics',
 				elapsedMs: metricsElapsedMs,
@@ -1026,7 +1029,8 @@ export class CloudSync extends EventEmitter {
 			error: error instanceof Error ? error.message : String(error)
 		});
 	}		// Add sensor health stats (if sensor-publish is enabled)
-		if (this.sensorPublish) {
+
+	if (this.sensorPublish) {
 			try {
 				const sensorStats = this.sensorPublish.getStats();
 				(stateReport[deviceInfo.uuid] as any).sensor_health = sensorStats;
@@ -1037,17 +1041,16 @@ export class CloudSync extends EventEmitter {
 					error: error instanceof Error ? error.message : String(error)
 				});
 			}
-		}
+	}
 		
-		
-
 		// Log complete metrics report if metrics were collected
-		if (includeMetrics) {
+	   if (includeMetrics) {
 			this.logger?.debugSync('Metrics Report', {
 				component: LogComponents.metrics,
 				report: stateReport[deviceInfo.uuid],
 			});
-		}
+	}
+
 	}	// Build state-only report for diff comparison (without metrics)
 	// This represents the CURRENT state that should be compared for changes
 	const stateOnlyReport: DeviceStateReport = {

@@ -33,9 +33,10 @@ import type { BaseDiscoveryPlugin, DiscoveredDevice } from './base.discovery';
 import { ModbusDiscoveryPlugin } from './modbus.discovery';
 import { OPCUADiscoveryPlugin } from './opcua.discovery';
 import { CANDiscoveryPlugin } from './can.discovery';
+import { SNMPDiscoveryPlugin } from './snmp.discovery';
 
 export type DiscoveryTrigger = 'first_boot' | 'manual' | 'scheduled';
-export type DiscoveryProtocol = 'modbus' | 'opcua' | 'can';
+export type DiscoveryProtocol = 'modbus' | 'opcua' | 'can' | 'snmp';
 
 export interface DiscoveryOptions {
   trigger: DiscoveryTrigger;
@@ -80,6 +81,24 @@ export interface CANDiscoveryOptions {
   validationDuration?: number; // ms to collect messages for validation
 }
 
+export interface SNMPDiscoveryOptions {
+  ipRanges?: string[];      // e.g., ['192.168.1.0/24', '10.0.0.1-10.0.0.50']
+  port?: number;            // Default: 161
+  community?: string;       // SNMPv1/v2c community (default: 'public')
+  version?: 'v1' | 'v2c' | 'v3'; // SNMP version (default: 'v2c')
+  timeout?: number;         // ms per device scan (default: 2000)
+  retries?: number;         // Retry count (default: 1)
+  concurrency?: number;     // Concurrent scans (default: 10)
+  validate?: boolean;       // Run validation phase (read device info)
+  validationTimeout?: number; // ms per device validation
+  // SNMPv3 options (if version='v3')
+  v3Username?: string;
+  v3AuthProtocol?: 'MD5' | 'SHA';
+  v3AuthKey?: string;
+  v3PrivProtocol?: 'DES' | 'AES';
+  v3PrivKey?: string;
+}
+
 export class DiscoveryService {
   private logger?: AgentLogger;
   private metadata: DiscoveryMetadata;
@@ -109,6 +128,7 @@ export class DiscoveryService {
     plugins.set('modbus', new ModbusDiscoveryPlugin(this.logger));
     plugins.set('opcua', new OPCUADiscoveryPlugin(this.logger));
     plugins.set('can', new CANDiscoveryPlugin(this.logger));
+    plugins.set('snmp', new SNMPDiscoveryPlugin(this.logger));
     
     return plugins;
   }
@@ -273,6 +293,8 @@ export class DiscoveryService {
         return this.getOPCUAOptions();
       case 'can':
         return this.getCANOptions();
+      case 'snmp':
+        return this.getSNMPOptions();
       default:
         return undefined;
     }
@@ -356,6 +378,57 @@ export class DiscoveryService {
         ? parseInt(process.env.CAN_LISTEN_DURATION, 10)
         : undefined
     };
+  }
+
+  /**
+   * Get SNMP discovery options from environment
+   */
+  private getSNMPOptions(): SNMPDiscoveryOptions | undefined {
+    const ipRanges = process.env.SNMP_IP_RANGES;
+    
+    if (!ipRanges) {
+      return undefined; // Use plugin defaults (auto-detect local network)
+    }
+
+    const options: SNMPDiscoveryOptions = {
+      ipRanges: ipRanges.split(',').map(r => r.trim())
+    };
+
+    // Optional: Port, community, version
+    if (process.env.SNMP_PORT) {
+      options.port = parseInt(process.env.SNMP_PORT, 10);
+    }
+    
+    if (process.env.SNMP_COMMUNITY) {
+      options.community = process.env.SNMP_COMMUNITY;
+    }
+    
+    if (process.env.SNMP_VERSION) {
+      options.version = process.env.SNMP_VERSION as 'v1' | 'v2c' | 'v3';
+    }
+    
+    if (process.env.SNMP_TIMEOUT) {
+      options.timeout = parseInt(process.env.SNMP_TIMEOUT, 10);
+    }
+    
+    if (process.env.SNMP_RETRIES) {
+      options.retries = parseInt(process.env.SNMP_RETRIES, 10);
+    }
+    
+    if (process.env.SNMP_CONCURRENCY) {
+      options.concurrency = parseInt(process.env.SNMP_CONCURRENCY, 10);
+    }
+
+    // SNMPv3 authentication
+    if (options.version === 'v3') {
+      options.v3Username = process.env.SNMP_V3_USERNAME;
+      options.v3AuthProtocol = process.env.SNMP_V3_AUTH_PROTOCOL as 'MD5' | 'SHA';
+      options.v3AuthKey = process.env.SNMP_V3_AUTH_KEY;
+      options.v3PrivProtocol = process.env.SNMP_V3_PRIV_PROTOCOL as 'DES' | 'AES';
+      options.v3PrivKey = process.env.SNMP_V3_PRIV_KEY;
+    }
+
+    return options;
   }
 
   /**
