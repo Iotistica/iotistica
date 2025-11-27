@@ -459,7 +459,7 @@ export class Sensor extends EventEmitter {
     
     try {
       // Build topic with device UUID (no leading $ - reserved for broker system topics)
-      const topic = `iot/device/${this.deviceUuid}/sensor/${this.config.mqttTopic}`;
+      const topic = `iot/device/${this.deviceUuid}/endpoints/${this.config.mqttTopic}`;
       
       // Publish as JSON array
       const payload = JSON.stringify({
@@ -589,7 +589,7 @@ export class Sensor extends EventEmitter {
     }
     
     try {
-      const topic = `iot/device/${this.deviceUuid}/sensor/${this.config.mqttHeartbeatTopic}`;
+      const topic = `iot/device/${this.deviceUuid}/endpoints/${this.config.mqttHeartbeatTopic}`;
       const payload = JSON.stringify({
         sensor: this.getSensorName(),
         timestamp: new Date().toISOString(),

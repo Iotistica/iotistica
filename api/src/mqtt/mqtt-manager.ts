@@ -246,7 +246,7 @@ export class MqttManager extends EventEmitter {
     const topicPatterns = topics.map(type => {
       switch (type) {
         case 'sensor':
-          return `iot/device/${mqttDevicePattern}/sensor/+`;
+          return `iot/device/${mqttDevicePattern}/endpoints/+`;
         case 'state':
           return `iot/device/${mqttDevicePattern}/state`;
         case 'agent':
