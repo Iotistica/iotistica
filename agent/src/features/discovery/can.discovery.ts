@@ -27,7 +27,7 @@ export class CANDiscoveryPlugin extends BaseDiscoveryPlugin {
     const discovered: DiscoveredDevice[] = [];
 
     this.logger?.infoSync('Starting CAN discovery', {
-      component: LogComponents.agent,
+      component: LogComponents.discovery,
       protocol: this.protocol,
       phase: 'discovery'
     });
@@ -48,7 +48,7 @@ export class CANDiscoveryPlugin extends BaseDiscoveryPlugin {
         if (!seenIds.has(msg.id)) {
           seenIds.add(msg.id);
           this.logger?.debugSync(`Discovered CAN ID: 0x${msg.id.toString(16)}`, {
-            component: LogComponents.agent,
+            component: LogComponents.discovery,
             phase: 'discovery'
           });
         }
@@ -102,13 +102,13 @@ export class CANDiscoveryPlugin extends BaseDiscoveryPlugin {
       }
 
       this.logger?.infoSync(`Discovered ${discovered.length} CAN IDs`, {
-        component: LogComponents.agent,
+        component: LogComponents.discovery,
         interface: canInterface,
         phase: 'discovery'
       });
     } catch (error) {
       this.logger?.warnSync('CAN discovery failed', {
-        component: LogComponents.agent,
+        component: LogComponents.discovery,
         error: (error as Error).message
       });
     }
@@ -121,7 +121,7 @@ export class CANDiscoveryPlugin extends BaseDiscoveryPlugin {
    */
   async validate(device: DiscoveredDevice, timeout = 10000): Promise<any> {
     this.logger?.infoSync('Validating CAN messages', {
-      component: LogComponents.agent,
+      component: LogComponents.discovery,
       canId: device.metadata?.canId,
       phase: 'validation'
     });

@@ -58,7 +58,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
     const discovered: DiscoveredDevice[] = [];
 
     this.logger?.infoSync('Starting SNMP discovery', {
-      component: LogComponents.agent,
+      component: LogComponents.discovery,
       protocol: this.protocol,
       phase: 'discovery'
     });
@@ -74,13 +74,13 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
 
     if (ipRanges.length === 0) {
       this.logger?.warnSync('No IP ranges specified for SNMP discovery', {
-        component: LogComponents.agent
+        component: LogComponents.discovery
       });
       return [];
     }
 
     this.logger?.infoSync('SNMP discovery configuration', {
-      component: LogComponents.agent,
+      component: LogComponents.discovery,
       ipRanges,
       port,
       version,
@@ -88,9 +88,20 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
     });
 
     // Expand IP ranges to individual IPs
-    const ips = this.expandIPRanges(ipRanges);
+    let ips = this.expandIPRanges(ipRanges);
+
+    // --- skip gateway IPs ---
+    const gatewayIPs = ips.filter(ip => ip.endsWith('.1'));
+    if (gatewayIPs.length) {
+      this.logger?.infoSync(`Skipping gateway IPs: ${gatewayIPs.join(', ')}`, {
+        component: LogComponents.discovery
+      });
+      ips = ips.filter(ip => !ip.endsWith('.1'));
+    }
+ 
+
     this.logger?.infoSync(`Scanning ${ips.length} IP addresses for SNMP devices`, {
-      component: LogComponents.agent,
+      component: LogComponents.discovery,
       totalIPs: ips.length
     });
 
@@ -150,7 +161,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
               };
 
               this.logger?.infoSync(`Discovered SNMP device at ${ip}`, {
-                component: LogComponents.agent,
+                component: LogComponents.discovery,
                 phase: 'discovery',
                 sysDescr: deviceInfo.sysDescr?.substring(0, 50) + '...'
               });
@@ -161,7 +172,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
             return null;
           } catch (error) {
             this.logger?.debugSync(`No SNMP response from ${ip}`, {
-              component: LogComponents.agent,
+              component: LogComponents.discovery,
               error: (error as Error).message
             });
             return null;
@@ -178,7 +189,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
     }
 
     this.logger?.infoSync(`SNMP discovery complete: ${discovered.length} devices found`, {
-      component: LogComponents.agent,
+      component: LogComponents.discovery,
       totalScanned: ips.length,
       discovered: discovered.length
     });
@@ -191,7 +202,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
    */
   async validate(device: DiscoveredDevice, timeout = 5000): Promise<ValidationResult | null> {
     this.logger?.infoSync('Validating SNMP device', {
-      component: LogComponents.agent,
+      component: LogComponents.discovery,
       host: device.connection.host,
       phase: 'validation'
     });
@@ -238,7 +249,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
       };
 
       this.logger?.infoSync('SNMP device validated', {
-        component: LogComponents.agent,
+        component: LogComponents.discovery,
         host: device.connection.host,
         manufacturer,
         model: modelNumber,
@@ -250,7 +261,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
 
     } catch (error) {
       this.logger?.warnSync('SNMP validation failed', {
-        component: LogComponents.agent,
+        component: LogComponents.discovery,
         host: device.connection.host,
         error: (error as Error).message
       });
@@ -267,7 +278,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
       return true;
     } catch {
       this.logger?.debugSync('net-snmp library not available', {
-        component: LogComponents.agent
+        component: LogComponents.discovery
       });
       return false;
     }
@@ -432,7 +443,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
     
     if (mask < 16 || mask > 32) {
       this.logger?.warnSync(`Skipping CIDR ${cidr}: mask must be /16 to /32`, {
-        component: LogComponents.agent
+        component: LogComponents.discovery
       });
       return [];
     }

@@ -34,6 +34,7 @@ import { ModbusDiscoveryPlugin } from './modbus.discovery';
 import { OPCUADiscoveryPlugin } from './opcua.discovery';
 import { CANDiscoveryPlugin } from './can.discovery';
 import { SNMPDiscoveryPlugin } from './snmp.discovery';
+import { autoDetectLocalSubnets } from '../../utils/network';
 
 export type DiscoveryTrigger = 'first_boot' | 'manual' | 'scheduled';
 export type DiscoveryProtocol = 'modbus' | 'opcua' | 'can' | 'snmp';
@@ -143,7 +144,7 @@ export class DiscoveryService {
     // Check rate limiting
     if (!forceRun && !this.shouldRunDiscovery(trigger)) {
       this.logger?.infoSync('Discovery skipped due to rate limiting', {
-        component: LogComponents.agent,
+        component: LogComponents.discovery,
         traceId,
         trigger,
         lastDiscoveryAt: this.metadata.lastDiscoveryAt,
@@ -153,7 +154,7 @@ export class DiscoveryService {
     }
 
     this.logger?.infoSync('Starting discovery', {
-      component: LogComponents.agent,
+      component: LogComponents.discovery,
       traceId,
       trigger,
       validate,
@@ -172,7 +173,7 @@ export class DiscoveryService {
       const plugin = this.plugins.get(protocol);
       if (!plugin) {
         this.logger?.warnSync(`Unknown protocol: ${protocol}`, {
-          component: LogComponents.agent,
+          component: LogComponents.discovery,
           traceId
         });
         continue;
@@ -181,7 +182,7 @@ export class DiscoveryService {
       // Check if plugin is available on this platform
       if (!(await plugin.isAvailable())) {
         this.logger?.debugSync(`Plugin ${protocol} not available`, {
-          component: LogComponents.agent,
+          component: LogComponents.discovery,
           traceId
         });
         continue;
@@ -197,7 +198,7 @@ export class DiscoveryService {
         // Phase 2: Validation (optional)
         if (validate && discovered.length > 0) {
           this.logger?.infoSync(`Validating ${discovered.length} ${protocol} devices`, {
-            component: LogComponents.agent,
+            component: LogComponents.discovery,
             traceId,
             protocol,
             phase: 'validation',
@@ -224,7 +225,7 @@ export class DiscoveryService {
                 }
               } catch (error) {
                 this.logger?.warnSync(`Validation failed for ${device.name}`, {
-                  component: LogComponents.agent,
+                  component: LogComponents.discovery,
                   traceId,
                   error: (error as Error).message
                 });
@@ -236,7 +237,7 @@ export class DiscoveryService {
         this.logger?.errorSync(
           `Discovery failed for protocol ${protocol}`,
           error as Error,
-          { component: LogComponents.agent, traceId }
+          { component: LogComponents.discovery, traceId }
         );
       }
     }
@@ -244,7 +245,7 @@ export class DiscoveryService {
     const duration = Date.now() - startTime;
 
     this.logger?.infoSync(`Discovery complete: ${allDiscovered.length} devices found`, {
-      component: LogComponents.agent,
+      component: LogComponents.discovery,
       traceId,
       duration,
       validated: validate,
@@ -386,13 +387,16 @@ export class DiscoveryService {
   private getSNMPOptions(): SNMPDiscoveryOptions | undefined {
     const ipRanges = process.env.SNMP_IP_RANGES;
     
-    if (!ipRanges) {
-      return undefined; // Use plugin defaults (auto-detect local network)
+    let ranges: string[];
+
+    if (ipRanges) {
+      ranges = ipRanges.split(',').map(r => r.trim());
+    } else {
+      ranges = autoDetectLocalSubnets();
+      this.logger?.infoSync(`Auto-detected local subnets: ${ranges.join(', ')}`, {component:LogComponents.discovery});
     }
 
-    const options: SNMPDiscoveryOptions = {
-      ipRanges: ipRanges.split(',').map(r => r.trim())
-    };
+    const options: SNMPDiscoveryOptions = { ipRanges: ranges };
 
     // Optional: Port, community, version
     if (process.env.SNMP_PORT) {
@@ -457,12 +461,12 @@ export class DiscoveryService {
       };
 
       this.logger?.debugSync('Discovery metadata loaded from database', {
-        component: LogComponents.agent,
+        component: LogComponents.discovery,
         metadata: this.metadata
       });
     } catch (error) {
       this.logger?.warnSync('Failed to load discovery metadata, using defaults', {
-        component: LogComponents.agent,
+        component: LogComponents.discovery,
         error: (error as Error).message
       });
     }
@@ -497,14 +501,14 @@ export class DiscoveryService {
       }
 
       this.logger?.debugSync('Discovery metadata persisted', {
-        component: LogComponents.agent,
+        component: LogComponents.discovery,
         trigger,
         validated,
         discoveryCount: this.metadata.discoveryCount
       });
     } catch (error) {
       this.logger?.warnSync('Failed to persist discovery metadata', {
-        component: LogComponents.agent,
+        component: LogComponents.discovery,
         error: (error as Error).message
       });
     }
@@ -524,14 +528,14 @@ export class DiscoveryService {
   private async saveToDatabase(discovered: DiscoveredDevice[], traceId: string): Promise<{ saved: number; skipped: number }> {
     if (discovered.length === 0) {
       this.logger?.infoSync('No discovered sensors to save', {
-        component: LogComponents.agent,
+        component: LogComponents.discovery,
         traceId
       });
       return { saved: 0, skipped: 0 };
     }
 
     this.logger?.infoSync(`Saving ${discovered.length} discovered sensors to database`, {
-      component: LogComponents.agent,
+      component: LogComponents.discovery,
       traceId,
       operation: 'saveToDatabase'
     });
@@ -566,7 +570,7 @@ export class DiscoveryService {
           
           if (configChanged) {
             this.logger?.infoSync(`Device "${sensor.name}" moved/reconfigured`, {
-              component: LogComponents.agent,
+              component: LogComponents.discovery,
               traceId,
               oldConnection: existing.connection,
               newConnection: sensor.connection
@@ -574,14 +578,14 @@ export class DiscoveryService {
             // Could update connection here if desired
           } else if (fingerprintChanged) {
             this.logger?.debugSync(`Device "${sensor.name}" fingerprint changed (dynamic data)`, {
-              component: LogComponents.agent,
+              component: LogComponents.discovery,
               traceId,
               oldFingerprint: existing.metadata?.fingerprint,
               newFingerprint: sensor.fingerprint
             });
           } else {
             this.logger?.debugSync(`Device "${sensor.name}" already known`, {
-              component: LogComponents.agent,
+              component: LogComponents.discovery,
               traceId
             });
           }
@@ -619,7 +623,7 @@ export class DiscoveryService {
         saved++;
 
         this.logger?.infoSync(`Saved discovered sensor "${sensor.name}" (${sensor.protocol})`, {
-          component: LogComponents.agent,
+          component: LogComponents.discovery,
           traceId,
           confidence: sensor.confidence
         });
@@ -627,13 +631,13 @@ export class DiscoveryService {
         this.logger?.errorSync(
           `Failed to save sensor "${sensor.name}"`,
           error as Error,
-          { component: LogComponents.agent, traceId }
+          { component: LogComponents.discovery, traceId }
         );
       }
     }
 
     this.logger?.infoSync(`Discovery save complete: ${saved} saved, ${skipped} skipped`, {
-      component: LogComponents.agent,
+      component: LogComponents.discovery,
       traceId
     });
 
@@ -653,7 +657,7 @@ export class DiscoveryService {
       
       if (staleDevices.length > 0) {
         this.logger?.warnSync(`Found ${staleDevices.length} stale devices (not seen in ${daysThreshold}+ days)`, {
-          component: LogComponents.agent,
+          component: LogComponents.discovery,
           traceId,
           staleCount: staleDevices.length,
           devices: staleDevices.map(d => ({
@@ -666,7 +670,7 @@ export class DiscoveryService {
       }
     } catch (error) {
       this.logger?.debugSync('Failed to check stale devices', {
-        component: LogComponents.agent,
+        component: LogComponents.discovery,
         traceId,
         error: (error as Error).message
       });

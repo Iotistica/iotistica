@@ -16,7 +16,7 @@ import { LogComponents } from './types';
 import { buildApiEndpoint } from '../utils/api-utils';
 import type { AgentLogger } from '../logging/agent-logger';
 import { RetryPolicy } from '../utils/retry-policy';
-import { isRetryableNetworkError, getNetworkErrorType } from '../utils/network-errors';
+import { isRetryableNetworkError, getNetworkErrorType } from '../utils/network';
 import { HttpClient, FetchHttpClient } from '../lib/http-client';
 
 /**

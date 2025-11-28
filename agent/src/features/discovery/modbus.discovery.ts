@@ -46,7 +46,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     const discovered: DiscoveredDevice[] = [];
 
     this.logger?.infoSync('Starting Modbus discovery', {
-      component: LogComponents.agent,
+      component: LogComponents.discovery,
       protocol: this.protocol,
       phase: 'discovery'
     });
@@ -61,7 +61,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 
     if (!isSerial && !isTCP) {
       this.logger?.warnSync('No Modbus connection specified', {
-        component: LogComponents.agent
+        component: LogComponents.discovery
       });
       return [];
     }
@@ -72,13 +72,13 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 
       if (!this.connection?.isOpen) {
         this.logger?.warnSync('Failed to open Modbus connection', {
-          component: LogComponents.agent
+          component: LogComponents.discovery
         });
         return [];
       }
 
       this.logger?.infoSync('Modbus connection established, scanning slave IDs', {
-        component: LogComponents.agent,
+        component: LogComponents.discovery,
         range: slaveIdRange,
         type: this.connection.type
       });
@@ -126,14 +126,14 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
             });
 
             this.logger?.infoSync(`Discovered Modbus slave ${slaveId}`, {
-              component: LogComponents.agent,
+              component: LogComponents.discovery,
               phase: 'discovery',
               method: deviceInfo.method
             });
           }
         } catch (error) {
           this.logger?.debugSync(`No response from slave ${slaveId}`, {
-            component: LogComponents.agent,
+            component: LogComponents.discovery,
             error: (error as Error).message
           });
         }
@@ -151,7 +151,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
    */
   async validate(device: DiscoveredDevice, timeout = 2000): Promise<any> {
     this.logger?.infoSync('Validating Modbus device', {
-      component: LogComponents.agent,
+      component: LogComponents.discovery,
       slaveId: device.metadata?.slaveId,
       phase: 'validation'
     });
@@ -250,13 +250,13 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
       try {
         this.connection.client.close(() => {
           this.logger?.infoSync('Closed Modbus connection', {
-            component: LogComponents.agent,
+            component: LogComponents.discovery,
             type: this.connection?.type
           });
         });
       } catch (error) {
         this.logger?.warnSync('Error closing Modbus connection', {
-          component: LogComponents.agent,
+          component: LogComponents.discovery,
           error: (error as Error).message
         });
       } finally {

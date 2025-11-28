@@ -35,14 +35,14 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
     // Skip if no URLs configured
     if (discoveryUrls.length === 0) {
       this.logger?.debugSync('OPC-UA discovery skipped - no URLs configured', {
-        component: LogComponents.agent,
+        component: LogComponents.discovery,
         protocol: this.protocol
       });
       return [];
     }
 
     this.logger?.infoSync('Starting OPC-UA discovery', {
-      component: LogComponents.agent,
+      component: LogComponents.discovery,
       protocol: this.protocol,
       phase: 'discovery'
     });
@@ -103,14 +103,14 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
           });
 
           this.logger?.infoSync(`Discovered OPC-UA endpoint at ${url}`, {
-            component: LogComponents.agent,
+            component: LogComponents.discovery,
             endpoints: endpoints.length,
             phase: 'discovery'
           });
         }
       } catch (error) {
         this.logger?.debugSync(`No OPC-UA server at ${url}`, {
-          component: LogComponents.agent
+          component: LogComponents.discovery
         });
       }
     }
@@ -123,7 +123,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
    */
   async validate(device: DiscoveredDevice, timeout = 5000): Promise<any> {
     this.logger?.infoSync('Validating OPC-UA server', {
-      component: LogComponents.agent,
+      component: LogComponents.discovery,
       endpoint: device.connection.endpointUrl,
       phase: 'validation'
     });

@@ -328,7 +328,6 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
       - MODBUS_SLAVE_RANGE_END=$ModbusSlaveRangeEnd
       - MODBUS_TIMEOUT=$ModbusTimeout
       - OPCUA_DISCOVERY_URLS=$OpcuaDiscoveryUrls
-      - SNMP_IP_RANGES=172.18.0.7
       - SNMP_PORT=161
     networks:
       - iotistic-net
