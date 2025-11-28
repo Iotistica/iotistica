@@ -10,8 +10,8 @@ export { DeviceModel } from './device.model';
 export type { Device } from './device.model';
 
 // Endpoint device models (CRUD operations for protocol endpoints)
-export { DeviceSensorModel } from './sensors.model';
-export type { DeviceSensor } from './sensors.model';
+export { DeviceEndpointModel as DeviceSensorModel } from './endpoint.model';
+export type { DeviceEndpoint as DeviceSensor } from './endpoint.model';
 
 // Sensor output configuration (protocol adapter outputs)
 export { SensorOutputModel } from './sensor-outputs.model';

@@ -12,7 +12,7 @@
 import { EventEmitter } from 'events';
 import _ from 'lodash';
 import { models as db } from '../db/connection.js';
-import { DeviceSensorModel } from '../db/models/sensors.model.js';
+import { DeviceEndpointModel, type DeviceEndpoint } from '../db/models/endpoint.model.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents } from '../logging/types.js';
 import type {
@@ -56,12 +56,14 @@ export class ConfigManager extends EventEmitter {
 	 * Set target configuration
 	 */
 	public async setTarget(config: DeviceConfig): Promise<void> {
+		const devices = config.endpoints || [];
+		
 		this.logger?.infoSync('Setting target config', {
 			component: LogComponents.configManager,
 			operation: 'setTarget',
-			deviceCount: config.sensors?.length || 0,
-			sensorNames: config.sensors?.map(s => s.name) || [],
-			hasSensors: !!config.sensors && config.sensors.length > 0,
+			deviceCount: devices.length,
+			endpointNames: devices.map(s => s.name),
+			hasDevices: devices.length > 0,
 		});
 
 		this.targetConfig = _.cloneDeep(config);
@@ -79,14 +81,14 @@ export class ConfigManager extends EventEmitter {
 
 	/**
 	 * Get current configuration
-	 * Augments with all sensors from database (including discovered ones)
+	 * Augments with all endpoints from database (including discovered ones)
 	 */
 	public async getCurrentConfig(): Promise<DeviceConfig> {
 		// Get all sensors from database (includes discovered devices)
-		const allSensors = await DeviceSensorModel.getAll();
+		const allSensors = await DeviceEndpointModel.getAll();
 		
 		// Convert to ProtocolAdapterDevice format
-		const sensorsConfig: ProtocolAdapterDevice[] = allSensors.map(sensor => ({
+		const endpointsConfig: ProtocolAdapterDevice[] = allSensors.map(sensor => ({
 			id: sensor.uuid || sensor.name,  // Use UUID as id, fallback to name
 			name: sensor.name,
 			protocol: sensor.protocol,
@@ -98,7 +100,7 @@ export class ConfigManager extends EventEmitter {
 		
 		const result: DeviceConfig = {
 			..._.cloneDeep(this.currentConfig),
-			sensors: sensorsConfig  // Override with full database state
+			endpoints: endpointsConfig
 		};
 		
 		return result;
@@ -122,21 +124,19 @@ export class ConfigManager extends EventEmitter {
 			timestamp: new Date(),
 		};
 
-		try {
-			// First, copy all non-sensor fields from target to current config
+			try {
+			// First, copy all non-device fields from target to current config
 			// This ensures logging, features, settings, etc. are always up-to-date
-			const { sensors: _targetSensors, ...otherTargetFields } = this.targetConfig;
-			const { sensors: currentSensors, ...otherCurrentFields } = this.currentConfig;
+			const { endpoints: _targetEndpoints, ...otherTargetFields } = this.targetConfig;
+			const { endpoints: currentEndpoints, ...otherCurrentFields } = this.currentConfig;
 			
-			// Merge non-sensor fields into current config
+			// Merge non-device fields into current config
 			Object.assign(this.currentConfig, otherTargetFields);
 			
-			// Restore sensors array (will be reconciled separately)
-			if (currentSensors) {
-				this.currentConfig.sensors = currentSensors;
-			}
-			
-			// Calculate steps for sensor reconciliation
+			// Restore endpoints array (will be reconciled separately)
+			if (currentEndpoints) {
+				this.currentConfig.endpoints = currentEndpoints;
+			}			// Calculate steps for sensor reconciliation
 			const steps = this.calculateSteps();
 
 			if (steps.length === 0) {
@@ -227,8 +227,8 @@ export class ConfigManager extends EventEmitter {
 	private calculateSteps(): ConfigStep[] {
 		const steps: ConfigStep[] =[];
 		
-		const targetDevices = this.targetConfig.sensors || [];
-		const currentDevices = this.currentConfig.sensors || [];
+		const targetDevices = this.targetConfig.endpoints || [];
+		const currentDevices = this.currentConfig.endpoints || [];
 		
 		// Build maps for easier comparison
 		const targetMap = new Map(targetDevices.map(d => [d.id, d]));
@@ -296,19 +296,19 @@ export class ConfigManager extends EventEmitter {
 		switch (step.action) {
 			case 'registerDevice':
 				if (step.device) {
-					await this.registerDevice(step.device);
+					await this.registerEndpoint(step.device);
 				}
 				break;
 
 			case 'updateDevice':
 				if (step.device) {
-					await this.updateDevice(step.device);
+					await this.updateEndpoint(step.device);
 				}
 				break;
 
 			case 'unregisterDevice':
 				if (step.deviceId) {
-					await this.unregisterDevice(step.deviceId);
+					await this.unregisterEndpoint(step.deviceId);
 				}
 				break;
 		}
@@ -317,7 +317,7 @@ export class ConfigManager extends EventEmitter {
 	/**
 	 * Register a protocol adapter device
 	 */
-	private async registerDevice(device: ProtocolAdapterDevice): Promise<void> {
+	private async registerEndpoint(device: ProtocolAdapterDevice): Promise<void> {
 		this.logger?.infoSync('Registering protocol adapter device', {
 			component: LogComponents.configManager,
 			operation: 'registerDevice',
@@ -328,7 +328,7 @@ export class ConfigManager extends EventEmitter {
 
 		// Save device to SQLite sensors table
 		try {
-			const { DeviceSensorModel: DeviceSensorModel } = await import('../db/models/sensors.model.js');
+			const { DeviceEndpointModel: DeviceSensorModel } = await import('../db/models/endpoint.model.js');
 			
 			// Handle both connectionString and connection formats
 			let connection: Record<string, any> = {};
@@ -348,23 +348,19 @@ export class ConfigManager extends EventEmitter {
 				connection = (device as any).connection;
 			}
 			
-			// Extract protocol-specific metadata
-			let metadata: Record<string, any> = {};
+			// Extract protocol-specific metadata (preserve existing metadata from device)
+			let metadata: Record<string, any> = (device as any).metadata || {};
+			
+			// Add protocol-specific metadata if needed
 			if (device.protocol === 'modbus' && connection.unitId !== undefined) {
 				// For Modbus: store unitId as slaveId in metadata
-				metadata = { slaveId: connection.unitId };
-			} else if (device.protocol === 'can') {
-				// For CAN: add CAN-specific metadata here if needed
-				metadata = {};
-			} else if (device.protocol === 'opcua') {
-				// For OPC-UA: add OPC-UA-specific metadata here if needed
-				metadata = {};
+				metadata.slaveId = connection.unitId;
 			}
 			
 			// Normalize property names (camelCase → snake_case)
-			const normalizedDevice = {
+			const normalizedEndpoint: Partial<DeviceEndpoint> = {
 				name: device.name,
-				protocol: device.protocol as 'modbus' | 'can' | 'opcua',
+				protocol: device.protocol as any, // Accept any protocol string
 				enabled: device.enabled !== undefined ? device.enabled : true,
 				poll_interval: device.pollInterval || 5000,
 				connection: connection,
@@ -372,7 +368,8 @@ export class ConfigManager extends EventEmitter {
 				metadata: metadata
 			};
 			
-			await DeviceSensorModel.create(normalizedDevice);
+			// Use upsert to handle devices that may already exist (e.g., discovered devices)
+			await DeviceSensorModel.upsert(normalizedEndpoint as DeviceEndpoint);
 			
 			this.logger?.infoSync('Device saved to sensors table', {
 				component: LogComponents.configManager,
@@ -390,11 +387,11 @@ export class ConfigManager extends EventEmitter {
 		}
 
 		// Update current config to reflect the change
-		if (!this.currentConfig.sensors) {
-			this.currentConfig.sensors = [];
+		if (!this.currentConfig.endpoints) {
+			this.currentConfig.endpoints = [];
 		}
 
-		this.currentConfig.sensors.push(_.cloneDeep(device));
+		this.currentConfig.endpoints.push(_.cloneDeep(device));
 
 		// Persist current config to database
 		await this.saveCurrentConfigToDB();
@@ -404,14 +401,14 @@ export class ConfigManager extends EventEmitter {
 		this.logger?.infoSync('Device registered successfully', {
 			component: LogComponents.configManager,
 			operation: 'registerDevice',
-			deviceId: device.id,
+			deviceName: device.name,
 		});
 	}
 
 	/**
 	 * Update a protocol adapter device
 	 */
-	private async updateDevice(device: ProtocolAdapterDevice): Promise<void> {
+	private async updateEndpoint(device: ProtocolAdapterDevice): Promise<void> {
 		this.logger?.infoSync('Updating protocol adapter device', {
 			component: LogComponents.configManager,
 			operation: 'updateDevice',
@@ -421,7 +418,7 @@ export class ConfigManager extends EventEmitter {
 
 		// Update device in SQLite sensors table (or create if doesn't exist)
 		try {
-			const { DeviceSensorModel: DeviceSensorModel } = await import('../db/models/sensors.model.js');
+			const { DeviceEndpointModel: DeviceSensorModel } = await import('../db/models/endpoint.model.js');
 			
 			// Handle both connectionString and connection formats
 			let connection: Record<string, any> = {};
@@ -500,16 +497,16 @@ export class ConfigManager extends EventEmitter {
 		}
 
 		// Update current config
-		if (!this.currentConfig.sensors) {
-			this.currentConfig.sensors = [];
+		if (!this.currentConfig.endpoints) {
+			this.currentConfig.endpoints = [];
 		}
 
-		const index = this.currentConfig.sensors.findIndex(
-			d => d.id === device.id
+		const endpointIndex = this.currentConfig.endpoints.findIndex(
+			(d) => d.id === device.id
 		);
 
-		if (index !== -1) {
-			this.currentConfig.sensors[index] = _.cloneDeep(device);
+		if (endpointIndex !== -1) {
+			this.currentConfig.endpoints[endpointIndex] = _.cloneDeep(device);
 		}
 
 		// Persist current config to database
@@ -527,7 +524,7 @@ export class ConfigManager extends EventEmitter {
 	/**
 	 * Unregister a protocol adapter device
 	 */
-	private async unregisterDevice(deviceId: string): Promise<void> {
+	private async unregisterEndpoint(deviceId: string): Promise<void> {
 		this.logger?.infoSync('Unregistering protocol adapter device', {
 			component: LogComponents.configManager,
 			operation: 'unregisterDevice',
@@ -535,12 +532,12 @@ export class ConfigManager extends EventEmitter {
 		});
 
 		// Find device name from current config
-		const device = this.currentConfig.sensors?.find(d => d.id === deviceId);
+		const device = this.currentConfig.endpoints?.find(d => d.id === deviceId);
 		
 		// Remove device from SQLite sensors table
 		if (device) {
 			try {
-				const { DeviceSensorModel: DeviceSensorModel } = await import('../db/models/sensors.model.js');
+				const { DeviceEndpointModel: DeviceSensorModel } = await import('../db/models/endpoint.model.js');
 				await DeviceSensorModel.delete(device.name);
 				
 				this.logger?.infoSync('Device removed from sensors table', {
@@ -560,9 +557,9 @@ export class ConfigManager extends EventEmitter {
 		}
 
 		// Update current config
-		if (this.currentConfig.sensors) {
-			this.currentConfig.sensors = 
-				this.currentConfig.sensors.filter(d => d.id !== deviceId);
+		if (this.currentConfig.endpoints) {
+			this.currentConfig.endpoints = 
+				this.currentConfig.endpoints.filter(d => d.id !== deviceId);
 		}
 
 		// Persist current config to database
@@ -594,7 +591,7 @@ export class ConfigManager extends EventEmitter {
 			this.logger?.infoSync('Loaded current config from database', {
 				component: LogComponents.configManager,
 				operation: 'loadCurrentConfig',
-				deviceCount: this.currentConfig.sensors?.length || 0,
+				deviceCount: this.currentConfig.endpoints?.length || 0,
 			});
 			} else {
 				this.logger?.debugSync('No current config in database, starting fresh', {

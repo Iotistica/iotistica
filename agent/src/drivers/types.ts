@@ -289,7 +289,7 @@ export interface ProtocolAdapterDevice {
  * Device configuration state
  */
 export interface DeviceConfig {
-	sensors?: ProtocolAdapterDevice[];
+	endpoints?: ProtocolAdapterDevice[];
 	features?: Record<string, any>;
 	[key: string]: any;
 }

@@ -99,7 +99,7 @@ export class StateReconciler extends EventEmitter {
 			component: LogComponents.stateReconciler,
 			operation: 'setTarget',
 			appsCount: Object.keys(state.apps).length,
-			devicesCount: state.config?.sensors?.length || 0,
+			endpointCount: state.config?.endpoints?.length || 0,
 		});
 
 		this.targetState = _.cloneDeep(state);
@@ -134,6 +134,13 @@ export class StateReconciler extends EventEmitter {
 			apps: containerState.apps || {},
 			config: currentConfig || {},
 		};
+
+		this.logger?.debugSync('Retrieved current state', {
+			component: LogComponents.stateReconciler,
+			operation: 'getCurrentState',
+			appsCount: Object.keys(state.apps).length,
+			endpointCount: currentConfig.endpoints?.length || 0,
+		});
 
 		return state;
 	}
@@ -229,7 +236,7 @@ export class StateReconciler extends EventEmitter {
 				component: LogComponents.stateReconciler,
 				operation: 'loadTargetState',
 				appsCount: Object.keys(this.targetState.apps).length,
-				devicesCount: this.targetState.config?.sensors?.length || 0,
+				devicesCount: this.targetState.config?.endpoints?.length || 0,
 			});
 			}
 		} catch (error) {
@@ -325,8 +332,8 @@ export class StateReconciler extends EventEmitter {
 			isReconciling: this.isReconciling,
 			currentApps: containerStatus.currentApps,
 			targetApps: containerStatus.targetApps,
-			currentDevices: currentConfig.sensors?.length || 0,
-			targetDevices: this.targetState.config?.sensors?.length || 0,
+			currentDevices: currentConfig.endpoints?.length || 0,
+			targetDevices: this.targetState.config?.endpoints?.length || 0,
 		};
 	}
 

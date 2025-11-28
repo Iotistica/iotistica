@@ -27,7 +27,7 @@
 import crypto from 'crypto';
 import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
-import { DeviceSensorModel, DeviceSensor } from '../../db/models/sensors.model';
+import { DeviceEndpointModel, DeviceEndpoint } from '../../db/models/endpoint.model';
 import { MetadataModel } from '../../db/models';
 import type { BaseDiscoveryPlugin, DiscoveredDevice } from './base.discovery';
 import { ModbusDiscoveryPlugin } from './modbus.discovery';
@@ -537,7 +537,7 @@ export class DiscoveryService {
     });
 
     // Fetch existing sensors ONCE before loop (avoid O(N²) performance)
-    const existingSensors = await DeviceSensorModel.getAll();
+    const existingSensors = await DeviceEndpointModel.getAll();
 
     let saved = 0;
     let skipped = 0;
@@ -558,7 +558,7 @@ export class DiscoveryService {
         
         if (existing) {
           // Device already known - update lastSeenAt
-          await DeviceSensorModel.updateLastSeen(sensor.fingerprint);
+          await DeviceEndpointModel.updateLastSeen(sensor.fingerprint);
           
           // Check if config changed
           const configChanged = JSON.stringify(existing.connection) !== JSON.stringify(sensor.connection);
@@ -590,7 +590,7 @@ export class DiscoveryService {
         }
 
         // Convert to DeviceSensor format and save
-        const deviceSensor: DeviceSensor = {
+        const deviceSensor: DeviceEndpoint = {
           name: sensor.name,
           protocol: sensor.protocol as 'modbus' | 'can' | 'opcua',
           enabled: false, // IMPORTANT: Disabled by default, user must enable
@@ -615,7 +615,7 @@ export class DiscoveryService {
           }
         };
 
-        await DeviceSensorModel.create(deviceSensor);
+        await DeviceEndpointModel.create(deviceSensor);
         saved++;
 
         this.logger?.infoSync(`Saved discovered sensor "${sensor.name}" (${sensor.protocol})`, {
@@ -649,7 +649,7 @@ export class DiscoveryService {
    */
   private async checkStaleDevices(traceId: string, daysThreshold = 7): Promise<void> {
     try {
-      const staleDevices = await DeviceSensorModel.getStaleDevices(daysThreshold);
+      const staleDevices = await DeviceEndpointModel.getStaleDevices(daysThreshold);
       
       if (staleDevices.length > 0) {
         this.logger?.warnSync(`Found ${staleDevices.length} stale devices (not seen in ${daysThreshold}+ days)`, {

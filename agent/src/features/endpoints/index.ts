@@ -20,7 +20,7 @@ import { ModbusAdapterConfig } from './modbus/types.js';
 import { SocketServer } from './common/socket-server.js';
 import { SensorDataPoint, SocketOutput } from './types.js';
 import { SensorOutputModel } from '../../db/models/sensor-outputs.model.js';
-import { DeviceSensorModel } from '../../db/models/sensors.model.js';
+import { DeviceEndpointModel } from '../../db/models/endpoint.model.js';
 
 // Type imports only (no runtime loading)
 import type { OPCUAAdapter } from './opcua/opcua-adapter.js';
@@ -129,7 +129,7 @@ export class SensorsFeature extends BaseFeature {
         modbusConfig = this.config.modbus!.config;
       } else {
         // Load devices from database
-        const dbDevices = await DeviceSensorModel.getEnabled('modbus');
+        const dbDevices = await DeviceEndpointModel.getEnabled('modbus');
         
         // Create config even if no devices (adapter can discover devices)
         modbusConfig = {
@@ -239,7 +239,7 @@ export class SensorsFeature extends BaseFeature {
         opcuaDevices = this.config.opcua!.config.devices;
       } else {
         // Load devices from database
-        const dbDevices = await DeviceSensorModel.getEnabled('opcua');
+        const dbDevices = await DeviceEndpointModel.getEnabled('opcua');
         
         // Create config even if no devices (adapter can discover devices)
         opcuaDevices = dbDevices.map(d => ({
@@ -322,7 +322,7 @@ export class SensorsFeature extends BaseFeature {
   private async startSNMPAdapter(): Promise<void> {
     try {
       // Load devices from database
-      const dbDevices = await DeviceSensorModel.getEnabled('snmp');
+      const dbDevices = await DeviceEndpointModel.getEnabled('snmp');
       
       if (dbDevices.length === 0) {
         this.logger.info('No enabled SNMP devices found');
@@ -439,7 +439,7 @@ export class SensorsFeature extends BaseFeature {
 
     // Get all sensors directly from database (includes discovered devices)
     try {
-      const allSensors = await DeviceSensorModel.getAll();
+      const allSensors = await DeviceEndpointModel.getAll();
       
       this.logger.debug(`Found ${allSensors.length} sensors in database`);
       

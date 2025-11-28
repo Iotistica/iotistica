@@ -144,7 +144,7 @@ export class FeatureInitializer {
     try {
       // Load sensor output configurations from database
       const { SensorOutputModel } = await import('../db/models/sensor-outputs.model.js');
-      const { DeviceSensorModel } = await import('../db/models/sensors.model.js');
+      const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
       
       const sensorOutputs = await SensorOutputModel.getAll();
 
@@ -157,9 +157,9 @@ export class FeatureInitializer {
       }
 
       // Get all enabled protocols
-      const allSensors = await DeviceSensorModel.getAll();
+      const allEndpoints = await DeviceEndpointModel.getAll();
       const enabledProtocols = new Set(
-        allSensors.filter(s => s.enabled).map(s => s.protocol)
+        allEndpoints.filter((s: any) => s.enabled).map((s: any) => s.protocol)
       );
 
       if (enabledProtocols.size === 0) {

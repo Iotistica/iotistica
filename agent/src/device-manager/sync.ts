@@ -672,7 +672,7 @@ export class CloudSync extends EventEmitter {
 				version: targetVersion,
 				appCount: Object.keys(newTargetState.apps).length,
 				configKeyCount: Object.keys(newTargetState.config || {}).length,
-				sensorsCount: deviceState.config?.sensors?.length || 0,
+				endpointsCount: deviceState.config?.endpoints?.length || 0,
 		        newTargetStateApps: Object.keys(newTargetState.apps).length,
 		        newTargetStateConfigKeys: Object.keys(newTargetState.config || {}).length,
 				hasChanges: true
@@ -970,7 +970,7 @@ export class CloudSync extends EventEmitter {
 				component: LogComponents.cloudSync,
 				operation: 'config-change-detected',
 				configHash,
-				sensorCount: currentState.config?.sensors?.length || 0
+				endpointCount: currentState.config?.endpoints?.length || 0
 			});
 		}
 		
@@ -1183,8 +1183,8 @@ export class CloudSync extends EventEmitter {
 			this.logger?.infoSync('Reported current state', {
 				...optimizationDetails,
 				reportKeys: Object.keys(reportToSend[deviceInfo.uuid] || {}),
-				sensorCount: reportToSend[deviceInfo.uuid]?.config?.sensors?.length || 0,
-				endpointCount: Object.keys(endpointHealth).length
+				endpointCount: reportToSend[deviceInfo.uuid]?.config?.endpoints?.length || 0,
+				endpointHealthCount: Object.keys(endpointHealth).length
 			});
 			
 		} catch (error) {

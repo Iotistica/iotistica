@@ -8,11 +8,11 @@ import { SensorOutputModel } from './sensor-outputs.model';
 // Use require for uuid to avoid ESM/CommonJS mismatch in Jest
 const { v4: uuidv4 } = require('uuid');
 
-export interface DeviceSensor {
+export interface DeviceEndpoint {
   id?: number;
   uuid?: string; // Stable identifier for cloud/edge sync (survives name changes)
   name: string;
-  protocol: 'modbus' | 'can' | 'opcua' | 'snmp';
+  protocol: 'modbus' | 'can' | 'opcua' | 'snmp' | 'mqtt';
   enabled: boolean;
   poll_interval: number;
   connection: Record<string, any>; // Connection config (host, port, serial, etc.)
@@ -23,13 +23,13 @@ export interface DeviceSensor {
   updated_at?: Date;
 }
 
-export class DeviceSensorModel {
+export class DeviceEndpointModel {
   private static table = 'endpoints';
 
   /**
    * Get all protocol adapter devices
    */
-  static async getAll(protocol?: string): Promise<DeviceSensor[]> {
+  static async getAll(protocol?: string): Promise<DeviceEndpoint[]> {
     const query = models(this.table).select('*');
     if (protocol) {
       query.where('protocol', protocol);
@@ -48,7 +48,7 @@ export class DeviceSensorModel {
   /**
    * Get device by name
    */
-  static async getByName(name: string): Promise<DeviceSensor | null> {
+  static async getByName(name: string): Promise<DeviceEndpoint | null> {
     const device = await models(this.table)
       .where('name', name)
       .first();
@@ -67,7 +67,7 @@ export class DeviceSensorModel {
   /**
    * Get enabled devices for a protocol
    */
-  static async getEnabled(protocol: string): Promise<DeviceSensor[]> {
+  static async getEnabled(protocol: string): Promise<DeviceEndpoint[]> {
     const devices = await models(this.table)
       .where({ protocol, enabled: true })
       .orderBy('name');
@@ -84,7 +84,7 @@ export class DeviceSensorModel {
   /**
    * Create new device
    */
-  static async create(device: DeviceSensor): Promise<DeviceSensor> {
+  static async create(device: DeviceEndpoint): Promise<DeviceEndpoint> {
     const [id] = await models(this.table).insert({
       ...device,
       uuid: device.uuid || uuidv4(), // Generate UUID if not provided
@@ -98,9 +98,25 @@ export class DeviceSensorModel {
   }
 
   /**
+   * Upsert device (insert or update if name exists)
+   * Used when target state may contain devices that were already discovered
+   */
+  static async upsert(device: DeviceEndpoint): Promise<DeviceEndpoint> {
+    const existing = await this.getByName(device.name);
+    
+    if (existing) {
+      // Update existing device
+      return await this.update(device.name, device) as DeviceEndpoint;
+    } else {
+      // Create new device
+      return await this.create(device);
+    }
+  }
+
+  /**
    * Update device
    */
-  static async update(name: string, updates: Partial<DeviceSensor>): Promise<DeviceSensor | null> {
+  static async update(name: string, updates: Partial<DeviceEndpoint>): Promise<DeviceEndpoint | null> {
     const updateData: any = {
       ...updates,
       updated_at: new Date(),
@@ -139,7 +155,7 @@ export class DeviceSensorModel {
   /**
    * Get device by ID
    */
-  private static async getById(id: number): Promise<DeviceSensor> {
+  private static async getById(id: number): Promise<DeviceEndpoint> {
     const device = await models(this.table)
       .where('id', id)
       .first();
@@ -157,7 +173,7 @@ export class DeviceSensorModel {
    * Get stale devices (not seen in X days)
    * NEVER auto-deletes - just marks for user review
    */
-  static async getStaleDevices(daysThreshold = 7): Promise<DeviceSensor[]> {
+  static async getStaleDevices(daysThreshold = 7): Promise<DeviceEndpoint[]> {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysThreshold);
 
