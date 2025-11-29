@@ -293,49 +293,37 @@ jobs:
               ${CORE_IMAGE_EXTRA_INSTALL} \
           "
           
-          # Systemd and init
+          # Systemd and init (systemd-networkd and systemd-resolved are included in systemd package)
           IMAGE_INSTALL:append = " \
               systemd \
-              systemd-networkd \
-              systemd-resolved \
               dbus \
           "
           
           # Networking with NetworkManager
           IMAGE_INSTALL:append = " \
               networkmanager \
-              networkmanager-nmtui \
-              modemmanager \
               wpa-supplicant \
               iw \
-              wireless-regdb-static \
           "
           
-          # Container runtime essentials
+          # Container runtime essentials (simplified for dunfell compatibility)
           IMAGE_INSTALL:append = " \
-              nodejs \
-              npm \
-              pm2 \
-              sqlite3 \
               curl \
               wget \
               ca-certificates \
           "
           
           # Iotistic agent for container orchestration
-          IMAGE_INSTALL:append = " \
-              iotistic-agent \
-          "
+          # IMAGE_INSTALL:append = " \
+          #     iotistic-agent \
+          # "
           
           # Development tools (removable for production)
           IMAGE_INSTALL:append = " \
               openssh \
               openssh-sftp-server \
               nano \
-              htop \
-              tmux \
               git \
-              jq \
           "
           
           # Filesystem utilities
