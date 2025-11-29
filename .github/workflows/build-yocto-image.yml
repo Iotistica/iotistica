@@ -619,21 +619,43 @@ jobs:
           # Add layers
           source ../oe-init-build-env
           
+          # Show current layers
+          echo "=== Current layers ==="
+          bitbake-layers show-layers || echo "No layers yet"
+          
           # Add meta-raspberrypi if needed
           if [[ "${{ inputs.machine }}" == *"raspberrypi"* ]]; then
-            bitbake-layers add-layer ../../meta-raspberrypi || true
+            echo "Adding meta-raspberrypi layer..."
+            bitbake-layers add-layer ../../meta-raspberrypi || echo "meta-raspberrypi already added or not found"
           fi
           
           # Add meta-iotistic
-          bitbake-layers add-layer ../../meta-iotistic || true
+          echo "Adding meta-iotistic layer..."
+          bitbake-layers add-layer ../../meta-iotistic || echo "meta-iotistic already added or not found"
+          
+          # Verify layers are added
+          echo "=== Layers after adding ==="
+          bitbake-layers show-layers
+          
+          # Check if meta-iotistic distro conf exists
+          if [ -f "../../meta-iotistic/conf/distro/iotistic.conf" ]; then
+            echo "✓ iotistic.conf found"
+          else
+            echo "❌ iotistic.conf NOT found at ../../meta-iotistic/conf/distro/iotistic.conf"
+            ls -la ../../meta-iotistic/conf/distro/ || echo "distro directory doesn't exist"
+          fi
           
           # Set variables for local.conf
           MACHINE_VAR="${{ inputs.machine }}"
           DL_DIR_VAR="${{ env.DL_DIR }}"
           SSTATE_DIR_VAR="${{ env.SSTATE_DIR }}"
           
-          # Configure local.conf with proper variable substitution
-          cat >> conf/local.conf << EOF
+          # Check if configuration already exists, if not add it
+          if ! grep -q "IotisticOS Configuration" conf/local.conf 2>/dev/null; then
+            echo "Adding IotisticOS configuration to local.conf..."
+            
+            # Configure local.conf with proper variable substitution
+            cat >> conf/local.conf << EOF
           
           # IotisticOS Configuration
           # ========================
@@ -671,6 +693,13 @@ jobs:
           # License compliance
           LICENSE_FLAGS_ACCEPTED:append = " commercial"
           EOF
+          else
+            echo "IotisticOS configuration already in local.conf"
+          fi
+          
+          # Show what was written
+          echo "=== local.conf DISTRO and MACHINE settings ==="
+          grep -E "^DISTRO|^MACHINE" conf/local.conf
           
           echo "✓ Build configuration complete"
 
