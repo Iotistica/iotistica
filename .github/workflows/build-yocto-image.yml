@@ -626,8 +626,8 @@ jobs:
             export PATH="$HOME/.local/bin:$PATH"
           fi
           
-          # Add layers
-          source ../oe-init-build-env
+          # DON'T re-source oe-init-build-env - it was already sourced in Initialize step
+          # Re-sourcing creates a nested build/build directory!
           
           # Show current layers
           echo "=== Current layers ==="
@@ -747,7 +747,7 @@ jobs:
             export PATH="$HOME/.local/bin:$PATH"
           fi
           
-          source ../oe-init-build-env
+          # DON'T re-source oe-init-build-env - it was already sourced
           
           # Verify configuration before building
           echo "=== Verifying build configuration ==="
