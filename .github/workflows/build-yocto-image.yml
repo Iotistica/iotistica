@@ -466,6 +466,16 @@ jobs:
           WantedBy=local-fs.target
           EOF
           
+          # Verify layer was created
+          echo ""
+          echo "=== Verifying meta-iotistic layer creation ==="
+          ls -la $LAYER_DIR/conf/
+          ls -la $LAYER_DIR/conf/distro/
+          echo ""
+          echo "iotistic.conf exists:" 
+          [ -f "$LAYER_DIR/conf/distro/iotistic.conf" ] && echo "✓ YES" || echo "❌ NO"
+          echo ""
+          
           echo "✓ meta-iotistic layer created"
 
       - name: Create agent recipe
@@ -623,15 +633,40 @@ jobs:
           echo "=== Current layers ==="
           bitbake-layers show-layers || echo "No layers yet"
           
+          # Check if layers exist before adding
+          echo ""
+          echo "=== Checking layer directories ==="
+          ls -la ../../ | grep meta || echo "No meta layers found"
+          
           # Add meta-raspberrypi if needed
           if [[ "${{ inputs.machine }}" == *"raspberrypi"* ]]; then
+            echo ""
             echo "Adding meta-raspberrypi layer..."
-            bitbake-layers add-layer ../../meta-raspberrypi || echo "meta-raspberrypi already added or not found"
+            if [ -d "../../meta-raspberrypi" ]; then
+              bitbake-layers add-layer ../../meta-raspberrypi
+              echo "✓ meta-raspberrypi added"
+            else
+              echo "❌ meta-raspberrypi directory not found at ../../meta-raspberrypi"
+            fi
           fi
           
           # Add meta-iotistic
+          echo ""
           echo "Adding meta-iotistic layer..."
-          bitbake-layers add-layer ../../meta-iotistic || echo "meta-iotistic already added or not found"
+          if [ -d "../../meta-iotistic" ]; then
+            if [ -f "../../meta-iotistic/conf/layer.conf" ]; then
+              bitbake-layers add-layer ../../meta-iotistic
+              echo "✓ meta-iotistic added"
+            else
+              echo "❌ meta-iotistic/conf/layer.conf not found"
+            fi
+          else
+            echo "❌ meta-iotistic directory not found at ../../meta-iotistic"
+            echo "BUILD_DIR is: $BUILD_DIR"
+            echo "Current directory: $(pwd)"
+            echo "Parent directory contents:"
+            ls -la ../../
+          fi
           
           # Verify layers are added
           echo "=== Layers after adding ==="
