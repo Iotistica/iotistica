@@ -33,17 +33,17 @@ jobs:
           set -e
           CHART_PATH=./k8s/charts/iotistic
           NAMESPACE=iotistic-nodeport
-          helm upgrade --install iotistic-nodeport "${CHART_PATH}" --namespace "${NAMESPACE}" --create-namespace
-          kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-nodeport --timeout=120s || true
+          helm upgrade --install iotistic "${CHART_PATH}" --namespace "${NAMESPACE}" --create-namespace
+          kubectl -n "${NAMESPACE}" rollout status deploy/iotistic --timeout=120s || true
           echo "Service info:"
-          kubectl -n "${NAMESPACE}" get svc iotistic-nodeport -o wide
+          kubectl -n "${NAMESPACE}" get svc iotistic -o wide
 
       - name: Destroy deployed Iotistic NodePort (helm)
         if: ${{ inputs.destroy == true }}
         run: |
           set -e
           NAMESPACE=iotistic-nodeport
-          helm uninstall iotistic-nodeport -n "${NAMESPACE}" || true
+          helm uninstall iotistic -n "${NAMESPACE}" || true
           kubectl delete namespace "${NAMESPACE}" --wait --ignore-not-found
 
       - name: Final pods/services (debug)
