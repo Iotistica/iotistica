@@ -405,7 +405,13 @@ jobs:
         run: |
           sudo mkdir -p /opt/iotistic/agent
           sudo cp -r agent/* /opt/iotistic/agent/
+          
+          # Copy vendors folder (required for Modbus discovery)
+          sudo mkdir -p /opt/iotistic/agent/vendors
+          sudo cp -r vendors/dataPoints.json /opt/iotistic/agent/vendors/
+          
           echo "✓ Agent code copied for testing"
+          echo "✓ Vendors data copied"
 
       - name: Make install script executable
         run: chmod +x agent/bin/install.sh
