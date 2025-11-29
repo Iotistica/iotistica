@@ -318,12 +318,10 @@ jobs:
           #     iotistic-agent \
           # "
           
-          # Development tools (removable for production)
+          # Development tools (ssh access only)
           IMAGE_INSTALL:append = " \
               openssh \
               openssh-sftp-server \
-              nano \
-              git \
           "
           
           # Filesystem utilities
