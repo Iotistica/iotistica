@@ -23,6 +23,10 @@ on:
         description: 'Dashboard version to test'
         required: false
         type: string
+      modbus_simulator_version:
+        description: 'Modbus Simulator version to test'
+        required: false
+        type: string
   workflow_dispatch:
     inputs:
       test_mode:
@@ -45,6 +49,10 @@ on:
         description: 'Dashboard version to test (default: latest from package.json)'
         required: false
         type: string
+      modbus_simulator_version:
+        description: 'Modbus Simulator version to test (default: latest from package.json)'
+        required: false
+        type: string
   release:
     types: [published]
   schedule:
@@ -59,6 +67,7 @@ jobs:
       agent_version: ${{ steps.versions.outputs.agent_version }}
       api_version: ${{ steps.versions.outputs.api_version }}
       dashboard_version: ${{ steps.versions.outputs.dashboard_version }}
+      modbus_simulator_version: ${{ steps.versions.outputs.modbus_simulator_version }}
     
     steps:
       - name: Checkout repository
@@ -95,14 +104,22 @@ jobs:
             DASHBOARD_VERSION=$(jq -r '.version' dashboard/package.json)
           fi
           
+          if [ -n "${{ inputs.modbus_simulator_version }}" ]; then
+            MODBUS_SIMULATOR_VERSION="${{ inputs.modbus_simulator_version }}"
+          else
+            MODBUS_SIMULATOR_VERSION=$(jq -r '.version' sensors/modbus-simulator/package.json)
+          fi
+          
           echo "agent_version=$AGENT_VERSION" >> $GITHUB_OUTPUT
           echo "api_version=$API_VERSION" >> $GITHUB_OUTPUT
           echo "dashboard_version=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
+          echo "modbus_simulator_version=$MODBUS_SIMULATOR_VERSION" >> $GITHUB_OUTPUT
           
           echo "Testing versions:"
           echo "  - Agent: $AGENT_VERSION"
           echo "  - API: $API_VERSION"
           echo "  - Dashboard: $DASHBOARD_VERSION"
+          echo "  - Modbus Simulator: $MODBUS_SIMULATOR_VERSION"
           
           # Check if images exist on Docker Hub
           echo ""
@@ -125,6 +142,7 @@ jobs:
           check_image "iotistic/agent:$AGENT_VERSION" || MISSING=1
           check_image "iotistic/api:$API_VERSION" || MISSING=1
           check_image "iotistic/dashboard:$DASHBOARD_VERSION" || MISSING=1
+          check_image "iotistic/modbus-simulator:$MODBUS_SIMULATOR_VERSION" || MISSING=1
           
           if [ $MISSING -eq 1 ]; then
             echo ""
@@ -151,11 +169,13 @@ jobs:
             echo "- **Agent**: \`${{ steps.versions.outputs.agent_version }}\`"
             echo "- **API**: \`${{ steps.versions.outputs.api_version }}\`"
             echo "- **Dashboard**: \`${{ steps.versions.outputs.dashboard_version }}\`"
+            echo "- **Modbus Simulator**: \`${{ steps.versions.outputs.modbus_simulator_version }}\`"
             echo ""
             echo "### Docker Images"
             echo "- [\`iotistic/agent:${{ steps.versions.outputs.agent_version }}\`](https://hub.docker.com/r/iotistic/agent/tags?name=${{ steps.versions.outputs.agent_version }})"
             echo "- [\`iotistic/api:${{ steps.versions.outputs.api_version }}\`](https://hub.docker.com/r/iotistic/api/tags?name=${{ steps.versions.outputs.api_version }})"
             echo "- [\`iotistic/dashboard:${{ steps.versions.outputs.dashboard_version }}\`](https://hub.docker.com/r/iotistic/dashboard/tags?name=${{ steps.versions.outputs.dashboard_version }})"
+            echo "- [\`iotistic/modbus-simulator:${{ steps.versions.outputs.modbus_simulator_version }}\`](https://hub.docker.com/r/iotistic/modbus-simulator/tags?name=${{ steps.versions.outputs.modbus_simulator_version }})"
           } >> $GITHUB_STEP_SUMMARY
 
   setup:
@@ -173,6 +193,7 @@ jobs:
           echo "  - Agent: ${{ needs.determine-versions.outputs.agent_version }}"
           echo "  - API: ${{ needs.determine-versions.outputs.api_version }}"
           echo "  - Dashboard: ${{ needs.determine-versions.outputs.dashboard_version }}"
+          echo "  - Modbus Simulator: ${{ needs.determine-versions.outputs.modbus_simulator_version }}"
           echo ""
           echo "Test Stack (docker-compose.e2e.yml):"
           echo "  - PostgreSQL 16"
@@ -205,6 +226,16 @@ jobs:
           
           docker pull iotistic/api:${{ needs.determine-versions.outputs.api_version }}
           docker pull iotistic/dashboard:${{ needs.determine-versions.outputs.dashboard_version }}
+          
+          # Try to pull modbus-simulator image, fallback to latest if not found
+          if docker pull iotistic/modbus-simulator:${{ needs.determine-versions.outputs.modbus_simulator_version }} 2>/dev/null; then
+            echo "✓ Pulled iotistic/modbus-simulator:${{ needs.determine-versions.outputs.modbus_simulator_version }}"
+          else
+            echo "⚠ Version ${{ needs.determine-versions.outputs.modbus_simulator_version }} not found, pulling latest..."
+            docker pull iotistic/modbus-simulator:latest
+            docker tag iotistic/modbus-simulator:latest iotistic/modbus-simulator:${{ needs.determine-versions.outputs.modbus_simulator_version }}
+          fi
+          
           echo "Images pulled successfully!"
 
   test-api:
