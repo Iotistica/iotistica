@@ -39,6 +39,7 @@ export const LogComponents = {
   driverFactory: 'DriverFactory',
   
   // Protocol Adapters
+  discovery: 'EndpointsDiscovery',
   modbus: 'Modbus',
   modbusRtu: 'ModbusRTU',
   modbusTcp: 'ModbusTCP',

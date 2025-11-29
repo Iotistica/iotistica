@@ -128,9 +128,9 @@ CREATE TABLE device_sensors (
 );
 ```
 
-**`sensor_outputs`** - Sensor output definitions:
+**`endpoint_outputs`** - Sensor output definitions:
 ```sql
-CREATE TABLE sensor_outputs (
+CREATE TABLE endpoint_outputs (
   id INTEGER PRIMARY KEY,
   sensorId INTEGER NOT NULL,          -- FK to device_sensors
   name TEXT NOT NULL,

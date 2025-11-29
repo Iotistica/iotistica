@@ -135,7 +135,6 @@ export class JobsFeature extends BaseFeature {
     const config = this.config as JobsConfig;
     
     this.logger.info(`Initializing Jobs Feature`);
-    this.logger.info(`Cloud API: ${config.cloudApiUrl}`);
     this.logger.info(`Polling interval: ${config.pollingIntervalMs || 30000}ms`);
     this.logger.info(`Handler directory: ${config.handlerDirectory || '/app/data/job-handlers'}`);
   }

@@ -3,6 +3,9 @@
  * Used for retry decision making across the agent
  */
 
+import os from 'os';
+import ip from 'ip';
+
 /**
  * DNS resolution errors
  */
@@ -100,3 +103,25 @@ export function getNetworkErrorType(error: unknown): string {
 	if (isNetworkUnreachable(error)) return 'NETWORK_UNREACHABLE';
 	return 'UNKNOWN';
 }
+
+
+
+export function autoDetectLocalSubnets(): string[] {
+  const ifaces = os.networkInterfaces();
+  const ranges: string[] = [];
+
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        const subnet = ip.subnet(iface.address, iface.netmask);
+        // avoid host-only / docker internal
+        if (subnet.numHosts > 10) {
+          ranges.push(`${subnet.networkAddress}/${subnet.subnetMaskLength}`);
+        }
+      }
+    }
+  }
+
+  return ranges;
+}
+

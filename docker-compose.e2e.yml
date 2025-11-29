@@ -145,15 +145,22 @@ services:
 
   # Protocol Simulators for Testing
   modbus-simulator:
-    build:
-      context: ./sensors/modbus-simulator
-      dockerfile: Dockerfile
-    container_name: iotistic-modbus-sim-e2e
-    restart: unless-stopped
-    ports:
-      - "502:502"
-    networks:
-      - iotistic-net
+        image: iotistic/modbus-simulator:${MODBUS_SIMULATOR_VERSION:-latest}
+        container_name: iotistic-modbus-sim
+        restart: unless-stopped
+        volumes:
+            - ./vendors:/app/vendors:ro
+        environment:
+          - MODBUS_VENDOR=COMAP
+        ports:
+            - "502:502"
+        networks:
+            - iotistic-net
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "5m"
+                max-file: "2"
 
 volumes:
   postgres-data:

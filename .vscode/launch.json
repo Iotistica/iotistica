@@ -30,11 +30,16 @@
       "ENABLE_FIRST_BOOT_DISCOVERY": "true",
       "MODBUS_TCP_HOST":"localhost",
       "MODBUS_TCP_PORT":"502",
+      "MODBUS_VENDOR":"COMAP",
       "MODBUS_SLAVE_RANGE_START":"1",
       "MODBUS_SLAVE_RANGE_END":"10",
       "MODBUS_TIMEOUT":"2000",
       "OPCUA_DISCOVERY_URLS":"",
-			"PROVISIONING_API_KEY": "33cf28f52469425038896504b5604d84f0878f733b226c22f83de031db77d15e",      }
+      "SNMP_IP_RANGES":"iotistic-snmp-sim",
+      "SNMP_PORT":"161",
+      "MEMORY_THRESHOLD_MB":"50",
+			"PROVISIONING_API_KEY": "ead6b5ced480f31a4789a306f2a0ab3f6c62e1158ff4b4de4476afc216e4bead"
+      }
     },
     {
       "name": "Debug API",

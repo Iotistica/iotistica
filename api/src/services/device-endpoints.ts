@@ -18,11 +18,11 @@ import { v4 as uuidv4 } from 'uuid';
 
 const eventPublisher = new EventPublisher();
 
-export interface SensorDeviceConfig {
+export interface EndpointDeviceConfig {
   id?: string; // UUID - generated at creation, persists through lifecycle
   uuid?: string; // Stable identifier for cloud/edge sync (survives name changes)
   name: string;
-  protocol: 'modbus' | 'can' | 'opcua' | 'mqtt';
+  protocol: 'modbus' | 'can' | 'opcua' | 'mqtt' | 'snmp';
   enabled: boolean;
   pollInterval: number;
   connection: any;
@@ -41,12 +41,12 @@ export class DeviceSensorSyncService {
    */
   async syncConfigToTable(
     deviceUuid: string,
-    configDevices: SensorDeviceConfig[],
+    configDevices: EndpointDeviceConfig[],
     configVersion: number,
     userId?: string
   ): Promise<void> {
     const isReconciliation = userId === 'agent-reconciliation';
-    logger.info(`Syncing ${configDevices.length} sensors from config to table for device ${deviceUuid.substring(0, 8)}... (${isReconciliation ? 'RECONCILIATION' : 'DEPLOYMENT'})`);
+    logger.info(`Syncing ${configDevices.length} endpoints from config to table for device ${deviceUuid.substring(0, 8)}... (${isReconciliation ? 'RECONCILIATION' : 'DEPLOYMENT'})`);
 
     try {
       // Get existing sensors from table
@@ -58,8 +58,8 @@ export class DeviceSensorSyncService {
       const configUuids = new Set(configDevices.map(d => d.uuid).filter(Boolean));
 
       // 1. Insert or update sensors from config
-      for (const sensor of configDevices) {
-        if (sensor.uuid && existingUuids.has(sensor.uuid)) {
+      for (const endpoint of configDevices) {
+        if (endpoint.uuid && existingUuids.has(endpoint.uuid)) {
           // Update existing sensor by UUID (stable identifier)
           // If reconciliation from agent, mark as deployed
           // Otherwise, mark as pending (just triggered deployment)
@@ -81,22 +81,22 @@ export class DeviceSensorSyncService {
               config_id = $11
             WHERE device_uuid = $12 AND uuid = $13`,
             [
-              sensor.name,
-              sensor.protocol,
-              sensor.enabled,
-              sensor.pollInterval,
-              JSON.stringify(sensor.connection),
-              JSON.stringify(sensor.dataPoints),
-              JSON.stringify(sensor.metadata || {}),
+              endpoint.name,
+              endpoint.protocol,
+              endpoint.enabled,
+              endpoint.pollInterval,
+              JSON.stringify(endpoint.connection),
+              JSON.stringify(endpoint.dataPoints),
+              JSON.stringify(endpoint.metadata || {}),
               userId || 'system',
               configVersion,
               deploymentStatus,
-              sensor.id || null, // Populate config_id from config JSON
+              endpoint.id || null, // Populate config_id from config JSON
               deviceUuid,
-              sensor.uuid
+              endpoint.uuid
             ]
           );
-          logger.info(`Updated: ${sensor.name} (${sensor.protocol}) - ${deploymentStatus}`);
+          logger.info(`Updated: ${endpoint.name} (${endpoint.protocol}) - ${deploymentStatus}`);
         } else {
           // Insert new sensor into table
           // If reconciliation from agent, mark as deployed (agent confirms it's running)
@@ -111,26 +111,26 @@ export class DeviceSensorSyncService {
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, true, $13, $14)`,
             [
               deviceUuid,
-              sensor.uuid,
-              sensor.name,
-              sensor.protocol,
-              sensor.enabled,
-              sensor.pollInterval,
-              JSON.stringify(sensor.connection),
-              JSON.stringify(sensor.dataPoints),
-              JSON.stringify(sensor.metadata || {}),
+              endpoint.uuid,
+              endpoint.name,
+              endpoint.protocol,
+              endpoint.enabled,
+              endpoint.pollInterval,
+              JSON.stringify(endpoint.connection),
+              JSON.stringify(endpoint.dataPoints),
+              JSON.stringify(endpoint.metadata || {}),
               userId || 'system',
               userId || 'system',
               configVersion,
               deploymentStatus,
-              sensor.id || null // Populate config_id from config JSON
+              endpoint.id || null // Populate config_id from config JSON
             ]
           );
-          logger.info(`Inserted: ${sensor.name} (${sensor.protocol}) - ${deploymentStatus}`);
+          logger.info(`Inserted: ${endpoint.name} (${endpoint.protocol}) - ${deploymentStatus}`);
         }
       }
 
-      // 2. Delete sensors removed from config (by UUID)
+      // 2. Delete endpoints removed from config (by UUID)
       for (const row of existingResult.rows) {
         if (row.uuid && !configUuids.has(row.uuid)) {
           await query(
@@ -172,9 +172,8 @@ export class DeviceSensorSyncService {
       }
 
       const state = stateResult.rows[0];
-      const apps = typeof state.apps === 'string' ? JSON.parse(state.apps) : state.apps;
       const config = typeof state.config === 'string' ? JSON.parse(state.config) : state.config;
-      const sensors: SensorDeviceConfig[] = config.sensors || [];
+      const endpoints: EndpointDeviceConfig[] = config.endpoints || [];
 
       // 2. Increment version and set needs_deployment flag
       const updateResult = await query(
@@ -190,7 +189,7 @@ export class DeviceSensorSyncService {
       const newVersion = updateResult.rows[0].version;
 
       // 3. Sync config → table with deployment_status='pending'
-      await this.syncConfigToTable(deviceUuid, sensors, newVersion, userId);
+      await this.syncConfigToTable(deviceUuid, endpoints, newVersion, userId);
 
       // 4. Publish event
       await eventPublisher.publish(
@@ -199,7 +198,7 @@ export class DeviceSensorSyncService {
         deviceUuid,
         {
           version: newVersion,
-          sensor_count: sensors.length
+          endpoints_count: endpoints.length
         }
       );
 
@@ -208,7 +207,7 @@ export class DeviceSensorSyncService {
       return {
         version: newVersion,
         config,
-        message: 'Config deployed. Sensors marked as pending. Waiting for agent confirmation.'
+        message: 'Config deployed. Endpoints marked as pending. Waiting for agent confirmation.'
       };
     } catch (error) {
       logger.error('Error deploying config:', error);
@@ -221,7 +220,7 @@ export class DeviceSensorSyncService {
    * Called when sensor is added/updated via API
    */
   async syncTableToConfig(deviceUuid: string, userId?: string): Promise<any> {
-    logger.info(`Syncing sensors from table to config for device ${deviceUuid.substring(0, 8)}...`);
+    logger.info(`Syncing endpoints from table to config for device ${deviceUuid.substring(0, 8)}...`);
 
     try {
       // Get all sensors from table
@@ -261,8 +260,8 @@ export class DeviceSensorSyncService {
         config = typeof state.config === 'string' ? JSON.parse(state.config) : state.config;
       }
 
-      // Update config with sensors from table
-      config.sensors = configDevices;
+      // Update config with endpoints from table
+      config.endpoints = configDevices;
 
       // Save updated target state
       const updateResult = await query(
@@ -309,32 +308,33 @@ export class DeviceSensorSyncService {
         ? JSON.parse(currentState.config) 
         : currentState.config;
       
-      const agentSensors = config?.sensors || [];
+    
+      const agentEndpoints = config?.endpoints;
       const currentVersion = currentState.version || 0;
 
-      logger.info(`Agent reports ${agentSensors.length} running sensors (version ${currentVersion})`);
+      logger.info(`Agent reports ${agentEndpoints.length} running endpoints (version ${currentVersion})`);
 
       // Convert agent format (ProtocolAdapterDevice) to API format (SensorDeviceConfig)
       // Agent sends: { id, name, protocol, connectionString (JSON string), pollInterval, enabled (number 0/1), metadata }
       // API expects: { id, uuid, name, protocol, connection (object), dataPoints, pollInterval, enabled (boolean), metadata }
-      const runningSensors: SensorDeviceConfig[] = agentSensors.map((sensor: any) => ({
-        id: sensor.id,
-        uuid: sensor.id, // Agent uses UUID as id
-        name: sensor.name,
-        protocol: sensor.protocol,
-        enabled: Boolean(sensor.enabled), // Convert 0/1 to boolean
-        pollInterval: sensor.pollInterval,
-        connection: typeof sensor.connectionString === 'string' 
-          ? JSON.parse(sensor.connectionString) 
-          : sensor.connection || {},
-        dataPoints: sensor.dataPoints || [],
-        metadata: sensor.metadata || {}
+      const runningEndpoints: EndpointDeviceConfig[] = agentEndpoints.map((endpoint: any) => ({
+        id: endpoint.id,
+        uuid: endpoint.id, // Agent uses UUID as id
+        name: endpoint.name,
+        protocol: endpoint.protocol,
+        enabled: Boolean(endpoint.enabled), // Convert 0/1 to boolean
+        pollInterval: endpoint.pollInterval,
+        connection: typeof endpoint.connectionString === 'string' 
+          ? JSON.parse(endpoint.connectionString) 
+          : endpoint.connection || {},
+        dataPoints: endpoint.dataPoints || [],
+        metadata: endpoint.metadata || {}
       }));
 
-      logger.info(`Converted ${runningSensors.length} sensors from agent format to API format`);
+      logger.info(`Converted ${runningEndpoints.length} endpoints from agent format to API format`);
 
       // Sync table to match agent's reality (not desired state!)
-      await this.syncConfigToTable(deviceUuid, runningSensors, currentVersion, 'agent-reconciliation');
+      await this.syncConfigToTable(deviceUuid, runningEndpoints, currentVersion, 'agent-reconciliation');
 
       logger.info(`Reconciliation complete: agent reality → table (version ${currentVersion})`);
     } catch (error) {
@@ -348,7 +348,7 @@ export class DeviceSensorSyncService {
    * Reads from device_sensors table which represents agent's actual running state
    * Table is kept in sync via reconciliation when agent reports current state
    */
-  async getSensors(deviceUuid: string, protocol?: string): Promise<any[]> {
+  async getEndpoints(deviceUuid: string, protocol?: string): Promise<any[]> {
     try {
       // Read from TABLE (deployed/running state)
       let sql = `
@@ -401,170 +401,78 @@ export class DeviceSensorSyncService {
   }
 
   /**
-   * Add a new sensor device (DRAFT PATTERN: Save to config first, deploy adds to table)
-   * Draft workflow:
-   * 1. User adds sensor → Saved to device_target_state.config only (not to table yet)
-   * 2. User clicks "Deploy" → Increments version AND adds sensor to table with deployment_status='pending'
-   * 3. Agent reports current state → Reconciliation updates table to deployment_status='deployed'
+   * Update sensor device (CORRECT PATTERN: Update table first, then sync to config)
+   * NOTE: endpointIdentifier can be either UUID (preferred) or name (backward compatibility)
    * 
-   * This makes the table a pure read model - only populated after deployment is triggered.
+   * This method handles both:
+   * 1. Manual configuration (exists in config) - update config → table
+   * 2. Discovered endpoints (only in table) - update table → config
    */
-  async addSensor(
+  async updateEndpoint(
     deviceUuid: string,
-    sensor: SensorDeviceConfig,
+    endpointIdentifier: string,
+    updates: Partial<EndpointDeviceConfig>,
     userId?: string
   ): Promise<any> {
-    logger.info(`Adding sensor "${sensor.name}" (${sensor.protocol}) for device ${deviceUuid.substring(0, 8)}... (draft mode - config only)`);
+    logger.info(`Updating endpoint "${endpointIdentifier}" for device ${deviceUuid.substring(0, 8)}...`);
 
     try {
-      // ALWAYS save to config first (draft in config, not in table yet)
-      // 1. Get current target state
-      const stateResult = await query(
-        'SELECT apps, config, version FROM device_target_state WHERE device_uuid = $1',
-        [deviceUuid]
+      // 1. Check if endpoint exists in device_sensors table (source of truth)
+      const tableResult = await query(
+        `SELECT id, uuid, name, protocol, enabled, poll_interval, connection, data_points, metadata
+         FROM device_sensors 
+         WHERE device_uuid = $1 AND (uuid::text = $2 OR name = $2)`,
+        [deviceUuid, endpointIdentifier]
       );
 
-      let apps = {};
-      let config: any = {};
-      let existingDevices: SensorDeviceConfig[] = [];
-
-      if (stateResult.rows.length > 0) {
-        const state = stateResult.rows[0];
-        apps = typeof state.apps === 'string' ? JSON.parse(state.apps) : state.apps;
-        config = typeof state.config === 'string' ? JSON.parse(state.config) : state.config;
-        existingDevices = config.sensors || [];
+      if (tableResult.rows.length === 0) {
+        throw new Error(`Endpoint "${endpointIdentifier}" not found`);
       }
 
-      // 2. Check for duplicate name in config
-      if (existingDevices.some(d => d.name === sensor.name)) {
-        throw new Error(`Sensor with name "${sensor.name}" already exists`);
-      }
+      const existingEndpoint = tableResult.rows[0];
 
-      // 3. Add sensor to config (SOURCE OF TRUTH)
-      // Generate UUID if not provided (stable identifier for cloud/edge sync)
-      const sensorWithUuid = {
-        ...sensor,
-        uuid: sensor.uuid || uuidv4()
+      // 2. Apply updates to table record
+      const updatedEndpoint = {
+        name: updates.name ?? existingEndpoint.name,
+        protocol: updates.protocol ?? existingEndpoint.protocol,
+        enabled: updates.enabled ?? existingEndpoint.enabled,
+        poll_interval: updates.pollInterval ?? existingEndpoint.poll_interval,
+        connection: updates.connection ? JSON.stringify(updates.connection) : existingEndpoint.connection,
+        data_points: updates.dataPoints ? JSON.stringify(updates.dataPoints) : existingEndpoint.data_points,
+        metadata: updates.metadata ? JSON.stringify(updates.metadata) : existingEndpoint.metadata
       };
-      existingDevices.push(sensorWithUuid);
-      config.sensors = existingDevices;
 
-      // 4. Save updated config WITHOUT incrementing version (draft state)
-      // Version stays the same until user clicks "Deploy"
-      // Set needs_deployment = true so Deploy button appears in UI
+      // 3. Update table directly (source of truth)
       await query(
-        `INSERT INTO device_target_state (device_uuid, apps, config, version, updated_at, needs_deployment)
-         VALUES ($1, $2, $3, 1, NOW(), true)
-         ON CONFLICT (device_uuid) DO UPDATE SET
-           config = $3,
+        `UPDATE device_sensors SET
+           name = $1,
+           protocol = $2,
+           enabled = $3,
+           poll_interval = $4,
+           connection = $5,
+           data_points = $6,
+           metadata = $7,
+           updated_by = $8,
            updated_at = NOW(),
-           needs_deployment = true
-         RETURNING version`,
-        [deviceUuid, JSON.stringify(apps), JSON.stringify(config)]
+           synced_to_config = false
+         WHERE device_uuid = $9 AND uuid = $10`,
+        [
+          updatedEndpoint.name,
+          updatedEndpoint.protocol,
+          updatedEndpoint.enabled,
+          updatedEndpoint.poll_interval,
+          updatedEndpoint.connection,
+          updatedEndpoint.data_points,
+          updatedEndpoint.metadata,
+          userId || 'system',
+          deviceUuid,
+          existingEndpoint.uuid
+        ]
       );
 
-      // 5. Publish event (draft saved)
-      await eventPublisher.publish(
-        'device_sensor.draft_saved',
-        'device',
-        deviceUuid,
-        {
-          sensor_name: sensor.name,
-          protocol: sensor.protocol
-        }
-      );
 
-      logger.info(`Added sensor "${sensor.name}" to config as DRAFT (not deployed yet)`);
-      logger.info(`User must click "Deploy" to trigger deployment and add to sensors table`);
-
-      return {
-        sensor: sensorWithUuid,
-        isDraft: true,
-        message: 'Sensor saved to config. Click "Deploy" to trigger deployment.'
-      };
-    } catch (error) {
-      logger.error('Error adding sensor:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Update sensor device (CORRECT PATTERN: Update config first)
-   * NOTE: sensorIdentifier can be either UUID (preferred) or name (backward compatibility)
-   */
-  async updateSensor(
-    deviceUuid: string,
-    sensorIdentifier: string,
-    updates: Partial<SensorDeviceConfig>,
-    userId?: string
-  ): Promise<any> {
-    logger.info(`Updating sensor "${sensorIdentifier}" for device ${deviceUuid.substring(0, 8)}...`);
-
-    try {
-      // 1. Get current target state
-      const stateResult = await query(
-        'SELECT apps, config, version FROM device_target_state WHERE device_uuid = $1',
-        [deviceUuid]
-      );
-
-      if (stateResult.rows.length === 0) {
-        throw new Error('Device not found');
-      }
-
-      const state = stateResult.rows[0];
-      const apps = typeof state.apps === 'string' ? JSON.parse(state.apps) : state.apps;
-      const config = typeof state.config === 'string' ? JSON.parse(state.config) : state.config;
-      const existingDevices: SensorDeviceConfig[] = config.sensors || [];
-
-      // 2. Find sensor - check both config and table
-      // First try to find in config by UUID or name
-      let sensorIndex = existingDevices.findIndex(d => 
-        d.uuid === sensorIdentifier || d.name === sensorIdentifier
-      );
-      
-      // If not in config, check if it exists in device_sensors table
-      if (sensorIndex === -1) {
-        const tableResult = await query(
-          'SELECT uuid, name FROM device_sensors WHERE device_uuid = $1 AND (uuid = $2 OR name = $2)',
-          [deviceUuid, sensorIdentifier]
-        );
-        
-        if (tableResult.rows.length === 0) {
-          throw new Error(`Sensor "${sensorIdentifier}" not found`);
-        }
-        
-        // Found in table but not in config - find by name as fallback
-        const tableSensor = tableResult.rows[0];
-        sensorIndex = existingDevices.findIndex(d => d.name === tableSensor.name);
-        
-        if (sensorIndex === -1) {
-          throw new Error(`Sensor "${sensorIdentifier}" exists in table but not in config`);
-        }
-      }
-
-      existingDevices[sensorIndex] = {
-        ...existingDevices[sensorIndex],
-        ...updates
-      };
-      config.sensors = existingDevices;
-
-      // 3. Save updated target state
-      const updateResult = await query(
-        `UPDATE device_target_state SET
-           apps = $1,
-           config = $2,
-           version = version + 1,
-           updated_at = NOW(),
-           needs_deployment = true
-         WHERE device_uuid = $3
-         RETURNING version`,
-        [JSON.stringify(apps), JSON.stringify(config), deviceUuid]
-      );
-
-      const newVersion = updateResult.rows[0].version;
-
-      // 4. Sync config → table
-      await this.syncConfigToTable(deviceUuid, existingDevices, newVersion, userId);
+      // 4. Sync table → config (this will increment version and trigger deployment)
+      const syncResult = await this.syncTableToConfig(deviceUuid, userId);
 
       // 5. Publish event
       await eventPublisher.publish(
@@ -572,21 +480,38 @@ export class DeviceSensorSyncService {
         'device',
         deviceUuid,
         {
-          sensor_name: existingDevices[sensorIndex].name,
-          sensor_uuid: existingDevices[sensorIndex].uuid,
+          endpoint_name: updatedEndpoint.name,
+          endpoint_uuid: existingEndpoint.uuid,
           updates,
-          version: newVersion
+          version: syncResult.version
         }
       );
 
-      logger.info(`Updated sensor "${existingDevices[sensorIndex].name}" in config (version: ${newVersion})`);
+      logger.info(`Updated endpoint "${updatedEndpoint.name}" and synced to config (version: ${syncResult.version})`);
 
+      // 6. Return updated endpoint
       return {
-        sensor: existingDevices[sensorIndex],
-        version: newVersion
+        sensor: {
+          id: existingEndpoint.id,
+          uuid: existingEndpoint.uuid,
+          name: updatedEndpoint.name,
+          protocol: updatedEndpoint.protocol,
+          enabled: updatedEndpoint.enabled,
+          pollInterval: updatedEndpoint.poll_interval,
+          connection: typeof updatedEndpoint.connection === 'string' 
+            ? JSON.parse(updatedEndpoint.connection) 
+            : updatedEndpoint.connection,
+          dataPoints: typeof updatedEndpoint.data_points === 'string'
+            ? JSON.parse(updatedEndpoint.data_points)
+            : updatedEndpoint.data_points,
+          metadata: typeof updatedEndpoint.metadata === 'string'
+            ? JSON.parse(updatedEndpoint.metadata)
+            : updatedEndpoint.metadata
+        },
+        version: syncResult.version
       };
     } catch (error) {
-      logger.error('Error updating sensor:', error);
+      logger.error('Error updating endpoint:', error);
       throw error;
     }
   }
@@ -595,12 +520,12 @@ export class DeviceSensorSyncService {
    * Delete sensor device (CORRECT PATTERN: Delete from config first)
    * NOTE: sensorIdentifier can be either UUID (preferred) or name (backward compatibility)
    */
-  async deleteSensor(
+  async deleteEndpoint(
     deviceUuid: string,
     sensorIdentifier: string,
     userId?: string
   ): Promise<any> {
-    logger.info(`Deleting sensor "${sensorIdentifier}" for device ${deviceUuid.substring(0, 8)}...`);
+    logger.info(`Deleting endpoint "${sensorIdentifier}" for device ${deviceUuid.substring(0, 8)}...`);
 
     try {
       // 1. Get current target state
@@ -616,7 +541,7 @@ export class DeviceSensorSyncService {
       const state = stateResult.rows[0];
       const apps = typeof state.apps === 'string' ? JSON.parse(state.apps) : state.apps;
       const config = typeof state.config === 'string' ? JSON.parse(state.config) : state.config;
-      let existingDevices: SensorDeviceConfig[] = config.sensors || [];
+      let existingDevices: EndpointDeviceConfig[] = config.endpoints || [];
 
       // 2. Find sensor to delete (for event logging)
       const sensorToDelete = existingDevices.find(d => 
@@ -630,7 +555,7 @@ export class DeviceSensorSyncService {
       existingDevices = existingDevices.filter(d => 
         d.uuid !== sensorIdentifier && d.name !== sensorIdentifier
       );
-      config.sensors = existingDevices;
+      config.endpoints = existingDevices;
 
       // 4. Save updated target state
       const updateResult = await query(

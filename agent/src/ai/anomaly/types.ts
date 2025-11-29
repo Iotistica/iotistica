@@ -9,7 +9,7 @@
  * Unified data point for all monitored values
  */
 export interface DataPoint {
-	source: 'sensor' | 'system' | 'container';
+	source: 'sensor' | 'system' | 'container' | 'endpoint';
 	metric: string;           // e.g., 'temperature', 'cpu_usage', 'memory_percent'
 	value: number;
 	unit: string;

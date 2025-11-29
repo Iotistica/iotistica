@@ -19,7 +19,7 @@ import {
 } from '../db/models';
 import { EventPublisher, objectsAreEqual } from './event-sourcing';
 import EventSourcingConfig from '../events/event-sourcing';
-import { deviceSensorSync } from './device-sensor-sync';
+import { deviceSensorSync } from './device-endpoints';
 import logger from '../utils/logger';
 
 const eventPublisher = new EventPublisher();
@@ -66,19 +66,14 @@ export async function processDeviceStateReport(
   for (const uuid in stateReport) {
     const deviceState = stateReport[uuid];
 
-    logger.info(`Received state report from device ${uuid.substring(0, 8)}... (${options.source})`, {
+    logger.debug(`Device ${uuid.substring(0, 8)} state report details:`, {
+      appsKeys: deviceState.apps ? Object.keys(deviceState.apps) : 'empty',
+      configKeys: deviceState.config ? Object.keys(deviceState.config) : 'empty',
+      hasConfigEndpoints: deviceState.config?.endpoints ? deviceState.config.endpoints.length : 'missing',
       version: deviceState.version,
       hasVersion: deviceState.version !== undefined,
       versionType: typeof deviceState.version
     });
-
-    // 🔍 DEBUG: Log complete device state keys to verify all fields
-    logger.info('DEBUG - Agent state report keys:', Object.keys(deviceState));
-    logger.info('DEBUG - Agent state report structure:');
-    logger.info('  - apps:', deviceState.apps ? Object.keys(deviceState.apps).slice(0, 3) : 'empty');
-    logger.info('  - config:', deviceState.config ? Object.keys(deviceState.config).slice(0, 3) : 'empty');
-    logger.info('  - config.sensors:', deviceState.config?.sensors ? `${deviceState.config.sensors.length} sensors` : 'missing');
-    logger.info('  - version field:', deviceState.version);
     
     // Ensure device exists and mark as online
     await DeviceModel.getOrCreate(uuid);
@@ -99,11 +94,11 @@ export async function processDeviceStateReport(
     );
 
     // 🔄 RECONCILIATION: Sync agent's current state to device_sensors table
-    try {
-      await deviceSensorSync.syncCurrentStateToTable(uuid, deviceState);
-    } catch (error) {
-      logger.error(`Failed to reconcile sensors for device ${uuid.substring(0, 8)}:`, error);
-      // Don't fail the entire state report if reconciliation fails
+    // Only reconcile if config is present in the report (agent only sends config when changed)
+    if (deviceState.config) {
+        await deviceSensorSync.syncCurrentStateToTable(uuid, deviceState);
+    } else {
+      logger.debug(`Skipping endpoints reconciliation for ${uuid.substring(0, 8)} (config not in report)`);
     }
 
     // EVENT SOURCING: Publish current state updated event

@@ -6,7 +6,7 @@
 
 import { query } from '../db/connection';
 import type { SensorData, MetricsData } from './mqtt-manager';
-import { processDeviceStateReport } from '../services/device-state-handler';
+import { processDeviceStateReport } from '../services/device-state';
 import logger from '../utils/logger';
 
 /**

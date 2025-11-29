@@ -11,9 +11,9 @@ if (Test-Path $dbPath) {
     exit 1
 }
 
-# 2. Check sensor_outputs table
+# 2. Check endpoint_outputs table
 Write-Host "`n2. Sensor Outputs (socket configuration):" -ForegroundColor Yellow
-node -e "const db = require('better-sqlite3')('$($dbPath.Replace('\','\\'))'); console.log(db.prepare('SELECT protocol, socket_path, data_format FROM sensor_outputs').all());"
+node -e "const db = require('better-sqlite3')('$($dbPath.Replace('\','\\'))'); console.log(db.prepare('SELECT protocol, socket_path, data_format FROM endpoint_outputs').all());"
 
 # 3. Check if protocol adapters feature is enabled
 Write-Host "`n3. Checking target state config:" -ForegroundColor Yellow

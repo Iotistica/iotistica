@@ -22,12 +22,13 @@ import { LocalLogBackend } from "./logging/local-backend.js";
 import { CloudLogBackend } from "./logging/cloud-backend.js";
 import { ContainerLogMonitor } from "./logging/docker-monitor.js";
 import { AgentLogger } from "./logging/agent-logger.js";
-import type { LogBackend } from "./logging/types.js";
+import type { LogBackend, LogLevel } from "./logging/types.js";
 import { LogComponents } from "./logging/types.js";
 import { JobsFeature } from "./features/jobs/src/monitor.js";
 import { SensorPublishFeature } from "./features/sensor-publish/index.js";
 import { SensorConfigHandler } from "./features/sensor-publish/config-handler.js";
 import { MqttManager } from "./mqtt/manager.js";
+import { getPackageVersion } from "./utils/api-utils";
 import {
   SensorsFeature as SensorsFeature,
   SensorConfig,
@@ -48,19 +49,8 @@ import { AnomalyDetectionService } from "./ai/anomaly/index.js";
 import { loadConfigFromEnv } from "./ai/anomaly/utils.js";
 import { SimulationOrchestrator, loadSimulationConfig } from "./simulation/index.js";
 import { DiscoveryService } from "./features/discovery/discovery-service.js";
-import { readFileSync } from "fs";
-import { join } from "path";
+import { FeatureInitializer, type FeatureContext } from "./bootstrap/feature-initializer";
 
-// Read version from package.json
-const getPackageVersion = (): string => {
-  try {
-    const packageJsonPath = join(process.cwd(), "package.json");
-    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
-    return packageJson.version || "unknown";
-  } catch (error) {
-    return "unknown";
-  }
-};
 
 export default class DeviceAgent {
   private stateReconciler!: StateReconciler; // Main state manager
@@ -69,16 +59,14 @@ export default class DeviceAgent {
   private deviceInfo!: DeviceInfo; // Cache device info after initialization
   private deviceAPI!: DeviceAPI;
   private cloudSync?: CloudSync;
-  private logBackend!: LocalLogBackend;
-  private logBackends: LogBackend[] = [];
   private logMonitor?: ContainerLogMonitor;
   private agentLogger!: AgentLogger; // Structured logging for agent-level events
   private firewall?: AgentFirewall; // Network firewall protection
   private updater?: AgentUpdater; // Agent self-update handler
+  private featureInitializer?: FeatureInitializer;
   private jobs?: JobsFeature;
   private sensorPublish?: SensorPublishFeature;
   private sensors?: SensorsFeature;
-  private sensorConfigHandler?: SensorConfigHandler;
   private anomalyService?: AnomalyDetectionService; // Edge-based AI anomaly detection for metrics and sensors
   private simulationOrchestrator?: SimulationOrchestrator; // Simulation framework for testing
   private discoveryService?: DiscoveryService; // Protocol discovery (Modbus, OPC-UA, CAN, etc.)
@@ -88,48 +76,26 @@ export default class DeviceAgent {
 
   // System settings (config-driven with env var defaults)
   private reconciliationIntervalMs: number;
-  
+  private discoveryFullIntervalMs: number;    
+  private discoveryLightIntervalMs: number; 
+  private targetStatePollIntervalMs: number; 
+  private deviceReportIntervalMs: number; 
+  private metricsIntervalMs: number; 
   // Scheduled restart timer (controlled from cloud config)
   private scheduledRestartTimer?: NodeJS.Timeout;
+
+  // API endpoint URL
+  private apiUrl: string;
+
+  // Device API port
+  private deviceApiPort : number;
   
   // Periodic discovery timers
   private discoveryLightTimer?: NodeJS.Timeout;
   private discoveryFullTimer?: NodeJS.Timeout;
 
-  private readonly DEVICE_API_PORT = parseInt(
-    process.env.DEVICE_API_PORT || "48484",
-    10
-  );
-  private readonly RECONCILIATION_INTERVAL = parseInt(
-    process.env.RECONCILIATION_INTERVAL_MS || "30000",
-    10
-  );
-  
-  // Discovery intervals (configurable via env vars)
-  private readonly DISCOVERY_LIGHT_INTERVAL_MS = parseInt(
-    process.env.DISCOVERY_LIGHT_INTERVAL_MS || "14400000", // 4 hours default
-    10
-  );
-  private readonly DISCOVERY_FULL_INTERVAL_MS = parseInt(
-    process.env.DISCOVERY_FULL_INTERVAL_MS || "86400000", // 24 hours default
-    10
-  );
-  // Cloud API endpoint with fallback logic for network_mode: host
-  // When using host networking, container names don't resolve - use localhost instead
-  private readonly CLOUD_API_ENDPOINT =
-    process.env.CLOUD_API_ENDPOINT || this.getDefaultCloudEndpoint();
 
-  private getDefaultCloudEndpoint(): string {
-    // If running in container with host networking, use localhost
-    // If running in bridge network, use container name 'api'
-    // Check if we're in Docker with host networking
-    if (process.env.CLOUD_API_ENDPOINT) {
-      return process.env.CLOUD_API_ENDPOINT;
-    }
-    // Default to localhost for host networking (most common edge device setup)
-    return "http://localhost:3002";
-  }
-
+ 
   // Event handler for target state changes (stored for cleanup)
   private targetStateChangeHandler = (newState: DeviceState) => {
     this.updateCachedTargetState();
@@ -139,22 +105,47 @@ export default class DeviceAgent {
   };
 
   constructor() {
-    // Initialize with default from env var
-    this.reconciliationIntervalMs = this.RECONCILIATION_INTERVAL;
+    this.reconciliationIntervalMs = parseInt(process.env.RECONCILIATION_INTERVAL_MS || "30000",10);
+    this.apiUrl = process.env.CLOUD_API_ENDPOINT || "http://localhost:3002";
+    this.deviceApiPort = parseInt(process.env.DEVICE_API_PORT || "48484",10);
+    this.discoveryFullIntervalMs = parseInt(process.env.DISCOVERY_FULL_INTERVAL_MS || "86400000", 10 ); // 24 hours default
+    this.discoveryLightIntervalMs = parseInt(process.env.DISCOVERY_LIGHT_INTERVAL_MS || "14400000", 10 ); // 4 hours default
+    this.targetStatePollIntervalMs = parseInt(process.env.POLL_INTERVAL_MS || "60000", 10);
+    this.deviceReportIntervalMs = parseInt(process.env.REPORT_INTERVAL_MS || "60000", 10);
+    this.metricsIntervalMs = parseInt(process.env.METRICS_INTERVAL_MS || "300000", 10);
+  
   }
 
   public async init(): Promise<void> {
 
-      // 1. Initialize logging FIRST (so all other components can use agentLogger)
-      await this.initializeLogging();
 
-      // 2. Initialize database
+     // Get all configuration from database
+      const config = this.getAgentConfiguration();
+
+      // Initialize logging FIRST (so all other components can use agentLogger)
+      const logLevel = (config.logging.level as LogLevel) || "info";
+      
+      const localBackend = new LocalLogBackend({
+        maxLogs: parseInt(process.env.MAX_LOGS || "1000", 10),
+        maxAge: parseInt(process.env.LOG_MAX_AGE || "3600000", 10), // 1 hour
+        enableFilePersistence: process.env.LOG_FILE_PERSISTANCE === 'true',
+        logDir: process.env.LOG_DIR || "/app/data/logs",
+        maxFileSize: parseInt(process.env.MAX_LOG_FILE_SIZE || "5242880", 10), // 5MB
+      });
+      await localBackend.initialize();
+      
+      this.agentLogger = new AgentLogger(localBackend, logLevel);
+
+      // Initialize database
       await this.initializeDatabase();
 
-      // 3. Initialize device provisioning
+      // Initialize device provisioning
       await this.initializeDeviceManager();
 
-      // 4-5. Parallelize independent initializations (MQTT and Container Manager)
+      // Initialize cloud logging if device is provisioned
+      await this.initializeCloudLogging();
+
+      // Parallelize independent initializations (MQTT and Container Manager)
       // These don't depend on each other, so run them concurrently
       await Promise.all([
         this.initializeMqttManager(),      // ~300-500ms
@@ -162,61 +153,34 @@ export default class DeviceAgent {
       ]);
       // Saves ~300-500ms compared to sequential execution
 
-      // 6. Initialize device API
+      // Initialize device API
       await this.initializeDeviceAPI();
 
-      const configFeatures = this.getConfigFeatures();
-      const configSettings = this.getConfigSettings();
-      const configLogging = this.getConfigLogging();
+     
+      // Initialize optional features using FeatureInitializer
+      const featureContext: FeatureContext = {
+        logger: this.agentLogger,
+        deviceInfo: this.deviceInfo,
+        deviceManager: this.deviceManager,
+        stateReconciler: this.stateReconciler,
+        mqttManager: MqttManager.getInstance(),
+        containerManager: this.containerManager,
+        configSettings: config.settings,
+        configFeatures: config.features,
+        cloudApiEndpoint: this.apiUrl,
+        deviceApiPort: this.deviceApiPort,
+        anomalyService: this.anomalyService
+      };
 
-      const enableJobs = configFeatures.enableDeviceJobs ?? process.env.ENABLE_CLOUD_JOBS === "true";
-      const enableSensorPublish = configFeatures.enableDeviceSensorPublish ??process.env.ENABLE_SENSOR_PUBLISH === "true";
+      this.featureInitializer = new FeatureInitializer(featureContext);
 
-      // Auto-enable protocol adapters if sensors are configured in target state OR env var is set
-      const hasSensors = (this.cachedTargetState?.config?.sensors &&Array.isArray(this.cachedTargetState.config.sensors) &&this.cachedTargetState.config.sensors.length > 0) || process.env.ENABLE_PROTOCOL_ADAPTERS === "true";
+      await this.featureInitializer.initializeOptionalFeatures();
 
-      // Get system settings from config (with defaults)
-      const reconciliationIntervalMs = configSettings.reconciliationIntervalMs || this.RECONCILIATION_INTERVAL;
-
-      // Get logging settings from config
-      const logLevel = configLogging.level || "info";
-
-      // Apply log level if configured
-      if (
-        this.agentLogger &&
-        ["debug", "info", "warn", "error"].includes(logLevel)
-      ) {
-        this.agentLogger.setLogLevel(
-          logLevel as "debug" | "info" | "warn" | "error"
-        );
-      }
-
-      // Update instance variable with config value
-      this.reconciliationIntervalMs = reconciliationIntervalMs;
-
-      // 7-9. Parallelize optional feature initialization
-      // These features are independent and can start concurrently
-      const featurePromises: Promise<void>[] = [];
-      
-      // 7. Initialize Jobs Feature (MQTT primary + HTTP fallback)
-      if (enableJobs) {
-        featurePromises.push(this.initializeJobs(configSettings));
-      }
-
-      // 8. Initialize Sensor Publish Feature (if enabled by config)
-      if (enableSensorPublish) {
-        featurePromises.push(this.initializeSensorPublish());
-      }
-
-      // 9. Initialize Protocol Adapters Feature (if enabled by config)
-      if (hasSensors) {
-        featurePromises.push(this.initializeDeviceSensors(configFeatures));
-      }
-
-      // Wait for all optional features to initialize
-      if (featurePromises.length > 0) {
-        await Promise.all(featurePromises);
-      }
+      // Store references to features for backward compatibility
+      const features = this.featureInitializer.getFeatures();
+      this.jobs = features.jobs;
+      this.sensorPublish = features.sensorPublish;
+      this.sensors = features.sensors;
 
       // 10. Initialize Anomaly Detection Service (BEFORE API Binder so it can be passed to CloudSync)
       this.initializeAnomalyDetection();
@@ -228,15 +192,14 @@ export default class DeviceAgent {
       await this.initializeDiscoveryService();
 
       // 11. Initialize API Binder (AFTER features are initialized so it can access sensor health)
-      await this.initializeDeviceSync(configSettings);
+      await this.initializeDeviceSync(config.settings);
 
-      // 11-13. Parallelize final setup tasks
-      // These are lightweight and independent
-      await Promise.all([
-        this.initializeSensorConfigHandler(),  // Sensor config handler
-        this.initializeAgentUpdater(),         // Agent updater
-        this.initializeFirewall(configSettings) // Firewall
-      ]);
+      // 11-13. Initialize supporting features (updater, firewall, sensor config handler)
+      await this.featureInitializer.initializeSupportingFeatures();
+
+      // Store references for backward compatibility
+      this.updater = features.updater;
+      this.firewall = features.firewall;
 
       // 14. Start auto-reconciliation
       this.startAutoReconciliation();
@@ -248,46 +211,72 @@ export default class DeviceAgent {
       this.handleScheduledRestartConfig();
 
       //Final words
-      const mode = this.deviceInfo.provisioned
+      const mode: "Cloud-connected" | "Standalone (not provisioned)" = this.deviceInfo.provisioned
         ? "Cloud-connected"
-        : this.CLOUD_API_ENDPOINT
-        ? "Standalone (not provisioned)"
-        : "Standalone (no cloud endpoint)";
+        : "Standalone (not provisioned)";
 
       this.agentLogger.infoSync("Device Agent initialized successfully", {
         component: LogComponents.agent,
         mode,
-        deviceApiPort: this.DEVICE_API_PORT,
-        reconciliationInterval: this.reconciliationIntervalMs,
-        cloudApiEndpoint: this.CLOUD_API_ENDPOINT || "Not configured",
+        deviceApiPort: this.deviceApiPort,
+        reconciliationInterval: config.settings.reconciliationIntervalMs || this.reconciliationIntervalMs,
+        cloudApiEndpoint: this.apiUrl,
         cloudFeaturesEnabled: this.deviceInfo.provisioned && !!this.cloudSync,
       });
 
      
   }
 
-  private async initializeLogging(): Promise<void> {
-    // Local backend (always enabled)
+  private async initializeCloudLogging(): Promise<void> {
+    const enableCloudLogging = process.env.ENABLE_CLOUD_LOGGING !== "false";
 
-    this.logBackend = new LocalLogBackend({
-      maxLogs: parseInt(process.env.MAX_LOGS || "1000", 10),
-      maxAge: parseInt(process.env.LOG_MAX_AGE || "3600000", 10), // 1 hour
-      enableFilePersistence: process.env.LOG_FILE_PERSISTANCE === 'true', //TODO: should be coming from target state later
-      logDir: process.env.LOG_DIR || "/app/data/logs",
-      maxFileSize: parseInt(process.env.MAX_LOG_FILE_SIZE || "5242880", 10), // 5MB
-    });
-    await this.logBackend.initialize();
-    this.logBackends.push(this.logBackend);
+    // Only initialize cloud logging if device is provisioned
+    if (
+      !this.apiUrl ||
+      !enableCloudLogging ||
+      !this.deviceInfo.provisioned ||
+      !this.deviceInfo.deviceApiKey
+    ) {
+      if (this.apiUrl && enableCloudLogging && !this.deviceInfo.provisioned) {
+        this.agentLogger.warnSync(
+          "Cloud logging disabled - device not provisioned",
+          {
+            component: LogComponents.agent,
+            note: "Device must be provisioned before enabling cloud log streaming",
+          }
+        );
+      }
+      return;
+    }
 
-    // Create AgentLogger for structured agent-level logging
+    try {
+      const cloudLogBackend = new CloudLogBackend(
+        {
+          cloudEndpoint: this.apiUrl,
+          deviceUuid: this.deviceInfo.uuid,
+          deviceApiKey: this.deviceInfo.apiKey,
+          compression: process.env.LOG_COMPRESSION !== "false",
+        },
+        this.agentLogger
+      );
+      await cloudLogBackend.initialize();
+      
+      // Add cloud backend to AgentLogger
+      this.agentLogger.addBackend(cloudLogBackend);
 
-    this.agentLogger = new AgentLogger(this.logBackends);
-
-    // We'll set device ID after device manager initialization
-    this.agentLogger.infoSync("Agent logger initialized", {
-      component: LogComponents.agent,
-      backendCount: this.logBackends.length,
-    });
+      this.agentLogger.infoSync("Cloud log backend initialized", {
+        component: LogComponents.agent,
+        cloudEndpoint: this.apiUrl,
+      });
+    } catch (error) {
+      this.agentLogger.errorSync(
+        "Failed to initialize cloud log backend. Continuing without cloud logging",
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          component: LogComponents.agent,
+        }
+      );
+    }
   }
 
   private async initializeDatabase(): Promise<void> {
@@ -309,14 +298,14 @@ export default class DeviceAgent {
       provisioningKeyLength: provisioningApiKey?.length || 0,
       provisioningKeyPrefix: provisioningApiKey ? provisioningApiKey.substring(0, 20) + '...' : 'not set',
       isProvisioned: deviceInfo.provisioned,
-      hasCloudEndpoint: !!this.CLOUD_API_ENDPOINT,
-      cloudEndpoint: this.CLOUD_API_ENDPOINT || 'not set',
+      hasCloudEndpoint: !!this.apiUrl,
+      cloudEndpoint: this.apiUrl || 'not set',
     });
 
     if (
       !deviceInfo.provisioned &&
       provisioningApiKey &&
-      this.CLOUD_API_ENDPOINT
+      this.apiUrl
     ) {
       this.agentLogger.infoSync(
         "Auto-provisioning device with two-phase authentication",
@@ -342,10 +331,7 @@ export default class DeviceAgent {
           deviceName:
             process.env.DEVICE_NAME || `device-${deviceInfo.uuid.slice(0, 8)}`,
           deviceType: process.env.DEVICE_TYPE || "standalone",
-          apiEndpoint: this.CLOUD_API_ENDPOINT,
-          applicationId: process.env.APPLICATION_ID
-            ? parseInt(process.env.APPLICATION_ID, 10)
-            : undefined,
+          apiEndpoint: this.apiUrl,
           macAddress,
           osVersion,
           agentVersion: process.env.AGENT_VERSION || getPackageVersion(),
@@ -365,21 +351,21 @@ export default class DeviceAgent {
         );
 
       }
-    } else if (!deviceInfo.provisioned && this.CLOUD_API_ENDPOINT && !provisioningApiKey
+    } else if (!deviceInfo.provisioned && this.apiUrl && !provisioningApiKey
     ) {
       this.agentLogger.warnSync("Device not provisioned", {
         component: LogComponents.agent,
         note: "Set PROVISIONING_KEY environment variable to enable auto-provisioning",
       });
 
-    } else if (!deviceInfo.provisioned && !this.CLOUD_API_ENDPOINT) {
+    } else if (!deviceInfo.provisioned && !this.apiUrl) {
       // Local mode - device never provisioned and no cloud endpoint
       this.agentLogger.infoSync("Running in local mode (no cloud connection)", {
         component: LogComponents.agent,
       });
       await this.deviceManager.markAsLocalMode();
       deviceInfo = this.deviceManager.getDeviceInfo();
-    } else if (deviceInfo.provisioned && !this.CLOUD_API_ENDPOINT) {
+    } else if (deviceInfo.provisioned && !this.apiUrl) {
       // Device was previously provisioned but now running in local mode
       this.agentLogger.infoSync("Switching to local mode (no cloud connection)", {
         component: LogComponents.agent,
@@ -483,58 +469,6 @@ export default class DeviceAgent {
         mqttManager.setDebug(true);
       }
 
-      // Add MQTT backend to logging
-      const enableCloudLogging = process.env.ENABLE_CLOUD_LOGGING !== "false";
-
-      // Add Cloud backend if configured AND device is provisioned
-      if (
-        this.CLOUD_API_ENDPOINT &&
-        enableCloudLogging &&
-        this.deviceInfo.provisioned &&
-        this.deviceInfo.deviceApiKey
-      ) {
-        try {
-          const cloudLogBackend = new CloudLogBackend(
-            {
-              cloudEndpoint: this.CLOUD_API_ENDPOINT,
-              deviceUuid: this.deviceInfo.uuid,
-              deviceApiKey: this.deviceInfo.apiKey,
-              compression: process.env.LOG_COMPRESSION !== "false",
-            },
-            this.agentLogger
-          );
-          await cloudLogBackend.initialize();
-          this.logBackends.push(cloudLogBackend);
-
-          // Update agentLogger with new backend
-          (this.agentLogger as any).logBackends = this.logBackends;
-
-          this.agentLogger.infoSync("Cloud log backend initialized", {
-            component: LogComponents.agent,
-            cloudEndpoint: this.CLOUD_API_ENDPOINT,
-          });
-        } catch (error) {
-          this.agentLogger.errorSync(
-            "Failed to initialize cloud log backend. Continuing without cloud logging",
-            error instanceof Error ? error : new Error(String(error)),
-            {
-              component: LogComponents.agent,
-            }
-          );
-        }
-      } else if (
-        this.CLOUD_API_ENDPOINT &&
-        enableCloudLogging &&
-        !this.deviceInfo.provisioned
-      ) {
-        this.agentLogger.warnSync(
-          "Cloud logging disabled - device not provisioned",
-          {
-            component: LogComponents.agent,
-            note: "Device must be provisioned before enabling cloud log streaming",
-          }
-        );
-      }
       this.agentLogger.infoSync("MQTT Manager connected", {
         component: LogComponents.agent,
         brokerUrl: mqttBrokerUrl,
@@ -544,7 +478,7 @@ export default class DeviceAgent {
           ? "provisioning"
           : "environment",
         debugMode: process.env.MQTT_DEBUG === "true",
-        totalLogBackends: this.logBackends.length,
+        totalLogBackends: this.agentLogger.getBackends().length,
       });
     } catch (error) {
       this.agentLogger.errorSync(
@@ -575,12 +509,12 @@ export default class DeviceAgent {
     const docker = this.containerManager.getDocker();
     if (docker) {
       // Use all configured log backends
-      this.logMonitor = new ContainerLogMonitor(docker, this.logBackends);
+      this.logMonitor = new ContainerLogMonitor(docker, this.agentLogger);
       this.containerManager.setLogMonitor(this.logMonitor);
       await this.containerManager.attachLogsToAllContainers();
-      this.agentLogger?.infoSync("Log monitor attached to container manager", {
+      this.agentLogger.infoSync("Log monitor attached to container manager", {
         component: LogComponents.agent,
-        backendCount: this.logBackends.length,
+        backendCount: this.agentLogger.getBackends().length,
       });
     }
 
@@ -632,10 +566,10 @@ export default class DeviceAgent {
     });
 
     // Start listening
-    await this.deviceAPI.listen(this.DEVICE_API_PORT);
+    await this.deviceAPI.listen(this.deviceApiPort);
     this.agentLogger?.infoSync("Device API started", {
       component: LogComponents.agent,
-      port: this.DEVICE_API_PORT,
+      port: this.deviceApiPort,
     });
   }
 
@@ -737,8 +671,8 @@ export default class DeviceAgent {
     
     this.agentLogger?.infoSync('Starting periodic discovery timers', {
       component: LogComponents.agent,
-      lightIntervalHours: this.DISCOVERY_LIGHT_INTERVAL_MS / (60 * 60 * 1000),
-      fullIntervalHours: this.DISCOVERY_FULL_INTERVAL_MS / (60 * 60 * 1000),
+      lightIntervalHours: this.discoveryLightIntervalMs / (60 * 60 * 1000),
+      fullIntervalHours: this.discoveryFullIntervalMs / (60 * 60 * 1000),
     });
     
     // Light discovery: Fast scan (ping only)
@@ -757,7 +691,7 @@ export default class DeviceAgent {
           { component: LogComponents.agent }
         );
       });
-    }, this.DISCOVERY_LIGHT_INTERVAL_MS);
+    }, this.discoveryLightIntervalMs);
     
     // Full discovery: Deep validation with device info reads
     this.discoveryFullTimer = setInterval(() => {
@@ -775,7 +709,7 @@ export default class DeviceAgent {
           { component: LogComponents.agent }
         );
       });
-    }, this.DISCOVERY_FULL_INTERVAL_MS);
+    }, this.discoveryFullIntervalMs);
   }
 
   private async initializeSimulationMode(): Promise<void> {
@@ -831,7 +765,7 @@ export default class DeviceAgent {
   private async initializeDeviceSync(
     configSettings: Record<string, any>
   ): Promise<void> {
-    if (!this.CLOUD_API_ENDPOINT) {
+    if (!this.apiUrl) {
       this.agentLogger?.warnSync(
         "Cloud API endpoint not configured - running in standalone mode",
         {
@@ -856,21 +790,11 @@ export default class DeviceAgent {
       return;
     }
 
-    this.agentLogger?.infoSync("Initializing API Binder", {
-      component: LogComponents.agent,
-      cloudApiEndpoint: this.CLOUD_API_ENDPOINT,
-    });
-
     // Get intervals from config (passed as parameter during init)
-    const targetStatePollIntervalMs =
-      configSettings.targetStatePollIntervalMs ||
-      parseInt(process.env.POLL_INTERVAL_MS || "60000", 10);
-    const deviceReportIntervalMs =
-      configSettings.deviceReportIntervalMs ||
-      parseInt(process.env.REPORT_INTERVAL_MS || "60000", 10);
-    const metricsIntervalMs =
-      configSettings.metricsIntervalMs ||
-      parseInt(process.env.METRICS_INTERVAL_MS || "300000", 10);
+    this.targetStatePollIntervalMs = configSettings.targetStatePollIntervalMs;
+    this.deviceReportIntervalMs = configSettings.deviceReportIntervalMs;
+    this.metricsIntervalMs = configSettings.metricsIntervalMs;
+ 
 
     // Configure edge AI anomaly detection for system metrics and sensors
     if (this.anomalyService) {
@@ -886,7 +810,7 @@ export default class DeviceAgent {
       const { configureAnomalyFeed: configureSensorAnomaly } = await import('./features/sensor-publish/sensor.js');
       configureSensorAnomaly(this.anomalyService);
       
-      this.agentLogger?.infoSync('Edge AI anomaly detection configured for system metrics and sensors', {
+      this.agentLogger?.infoSync('Anomaly detection configured for system metrics and sensors', {
         component: LogComponents.agent,
       });
     }
@@ -895,10 +819,10 @@ export default class DeviceAgent {
       this.stateReconciler, // Use StateReconciler instead of ContainerManager
       this.deviceManager,
       {
-        cloudApiEndpoint: this.CLOUD_API_ENDPOINT,
-        pollInterval: targetStatePollIntervalMs, // Use config value or default 60s
-        reportInterval: deviceReportIntervalMs, // Use config value or default 60s
-        metricsInterval: metricsIntervalMs, // Use config value or default 5min
+        cloudApiEndpoint: this.apiUrl,
+        pollInterval: this.targetStatePollIntervalMs, // Use config value or default 60s
+        reportInterval: this.deviceReportIntervalMs, // Use config value or default 60s
+        metricsInterval: this.metricsIntervalMs, // Use config value or default 5min
       },
       this.agentLogger, // Pass the agent logger
       this.sensorPublish, // Pass sensor-publish for health reporting
@@ -916,396 +840,12 @@ export default class DeviceAgent {
       this.simulationOrchestrator
     );
 
-    // Config updates are now handled automatically by ConfigManager
-    // No need to listen for target-state-changed here
 
     // Start polling for target state
     await this.cloudSync.startPoll();
 
-    // Start reporting current state
-    await this.cloudSync.startReporting();
   }
 
-  private async initializeJobs(
-    configSettings: Record<string, any>
-  ): Promise<void> {
-    try {
-      // Get cloud API URL from environment
-      const cloudApiUrl = process.env.CLOUD_API_URL || this.CLOUD_API_ENDPOINT;
-
-      // Get polling interval from config (passed as parameter during init)
-      const pollingIntervalMs =
-        configSettings.cloudJobsPollingIntervalMs ||
-        parseInt(process.env.CLOUD_JOBS_POLLING_INTERVAL || "30000", 10);
-
-      // Create and start Jobs Feature
-      this.jobs = new JobsFeature(
-        {
-          enabled: true,
-          cloudApiUrl,
-          deviceApiKey: this.deviceInfo.apiKey,
-          pollingIntervalMs,
-          maxRetries: 3,
-          handlerDirectory:
-            process.env.JOB_HANDLER_DIR || "/app/data/job-handlers",
-          maxConcurrentJobs: 1,
-          defaultHandlerTimeout: 60000,
-        },
-        this.agentLogger,
-        this.deviceInfo.uuid
-      );
-
-      await this.jobs.start();
-
-      this.agentLogger?.infoSync("Jobs Feature initialized", {
-        component: LogComponents.agent,
-        mode: this.jobs.getCurrentMode(),
-        mqttActive: this.jobs.isMqttActive(),
-        httpActive: this.jobs.isHttpActive(),
-      });
-    } catch (error) {
-      this.agentLogger?.errorSync(
-        "Failed to initialize Jobs Feature",
-        error instanceof Error ? error : new Error(String(error)),
-        {
-          component: LogComponents.agent,
-          note: "Continuing without Jobs",
-        }
-      );
-      this.jobs = undefined;
-    }
-  }
-
-  private async initializeSensorPublish(): Promise<void> {
-    this.agentLogger?.infoSync("Initializing Sensor Publish Feature", {
-      component: LogComponents.agent,
-    });
-
-    try {
-      // Load sensor output configurations from database (socket paths for Protocol Adapters)
-      const { SensorOutputModel } = await import('./db/models/sensor-outputs.model.js');
-      const { DeviceSensorModel } = await import('./db/models/sensors.model.js');
-      
-      const sensorOutputs = await SensorOutputModel.getAll();
-
-      if (sensorOutputs.length === 0) {
-        this.agentLogger?.warnSync("No sensor outputs configured in database", {
-          component: LogComponents.agent,
-          note: "Run migrations to create default sensor_outputs entries",
-        });
-        return;
-      }
-
-      // Get all enabled protocols (only create pipes for enabled protocol adapters)
-      const allSensors = await DeviceSensorModel.getAll();
-      const enabledProtocols = new Set(
-        allSensors.filter(s => s.enabled).map(s => s.protocol)
-      );
-
-      if (enabledProtocols.size === 0) {
-        this.agentLogger?.warnSync("No enabled protocol adapters found", {
-          component: LogComponents.agent,
-          note: "Enable protocol adapters in database before starting Sensor Publish",
-        });
-        return;
-      }
-
-      // Build sensor configs only for enabled protocols
-      const sensors = sensorOutputs
-        .filter(output => enabledProtocols.has(output.protocol))
-        .map((output) => ({
-          name: `${output.protocol}-pipe`,
-          addr: output.socket_path,
-          eomDelimiter: output.delimiter || '\n',
-          mqttTopic: output.protocol, // Will become: iot/device/{uuid}/sensor/{protocol}
-          bufferCapacity: 4096,
-          bufferSize: 12, // Batch up to 12 messages (1 minute worth at 5s poll)
-          bufferTimeMs: 60000, // Or publish every 60 seconds
-          enabled: true,
-        }));
-
-      if (sensors.length === 0) {
-        this.agentLogger?.warnSync("No pipes to read from (no enabled protocols)", {
-          component: LogComponents.agent,
-          enabledProtocols: Array.from(enabledProtocols),
-        });
-        return;
-      }
-
-      // Build final configuration
-      const sensorConfig = {
-        enabled: true,
-        sensors,
-      };
-
-      // Create and start sensor publish feature
-      this.sensorPublish = new SensorPublishFeature(
-        sensorConfig as any,
-        this.agentLogger!,
-        this.deviceInfo.uuid
-      );
-
-      // Configure edge AI anomaly detection for sensors (if enabled)
-      if (this.anomalyService) {
-        const { configureAnomalyFeed } = await import(
-          './features/sensor-publish/sensor.js'
-        );
-        configureAnomalyFeed(this.anomalyService);
-
-        this.agentLogger?.infoSync(
-          'Configured edge AI anomaly detection for sensor data',
-          {
-            component: LogComponents.agent,
-            sensorCount: sensors.length,
-          }
-        );
-      }
-
-      await this.sensorPublish.start();
-
-      this.agentLogger?.infoSync("Sensor Publish Feature initialized", {
-        component: LogComponents.agent,
-        pipeCount: sensors.length,
-        enabledProtocols: Array.from(enabledProtocols),
-        pipes: sensors.map(s => s.addr),
-        mqttTopicPattern: "iot/device/{deviceUuid}/sensor/{topic}",
-      });
-    } catch (error) {
-      this.agentLogger?.errorSync(
-        "Failed to initialize Sensor Publish",
-        error instanceof Error ? error : new Error(String(error)),
-        {
-          component: LogComponents.agent,
-          note: "Continuing without Sensor Publish",
-        }
-      );
-      this.sensorPublish = undefined;
-    }
-  }
-
-  private async initializeDeviceSensors(
-    configFeatures: Record<string, any>
-  ): Promise<void> {
-    try {
-      // Get protocol adapters configuration (passed as parameter during init)
-      const sensorsConfig: SensorConfig = {
-        enabled: true,
-        ...configFeatures.protocolAdapters,
-      };
-
-      // Enable Modbus by default if ENABLE_PROTOCOL_ADAPTERS is set
-      if (process.env.ENABLE_PROTOCOL_ADAPTERS === 'true') {
-        sensorsConfig.modbus = {
-          enabled: true,
-          ...(sensorsConfig.modbus || {})
-        };
-        this.agentLogger?.debugSync(
-          "Enabled Modbus protocol adapter from ENABLE_PROTOCOL_ADAPTERS",
-          {
-            component: LogComponents.agent,
-          }
-        );
-      }
-
-      // Check environment variable for config override
-      const envConfigStr = process.env.PROTOCOL_ADAPTERS_CONFIG;
-      if (envConfigStr) {
-        try {
-          const envConfig = JSON.parse(envConfigStr);
-          Object.assign(sensorsConfig, envConfig);
-          this.agentLogger?.debugSync(
-            "Loaded protocol adapters config from PROTOCOL_ADAPTERS_CONFIG",
-            {
-              component: LogComponents.agent,
-            }
-          );
-        } catch (error) {
-          this.agentLogger?.warnSync(
-            "Failed to parse PROTOCOL_ADAPTERS_CONFIG, using target state config",
-            {
-              component: LogComponents.agent,
-            }
-          );
-        }
-      }
-
-      // Create and start protocol adapters feature using BaseFeature pattern
-      this.sensors = new SensorsFeature(
-        sensorsConfig,
-        this.agentLogger,
-        this.deviceInfo.uuid
-      );
-      await this.sensors.start();
-    } catch (error) {
-      this.agentLogger?.errorSync(
-        "Failed to initialize Protocol Adapters",
-        error instanceof Error ? error : new Error(String(error)),
-        {
-          component: LogComponents.agent,
-          note: "Continuing without Protocol Adapters",
-        }
-      );
-      this.sensors = undefined;
-    }
-  }
-
-  private async initializeSensorConfigHandler(): Promise<void> {
-    // Only initialize if Sensor Publish is enabled
-    if (!this.sensorPublish) {
-      return;
-    }
-
-    this.agentLogger?.infoSync("Initializing Sensor Config Handler", {
-      component: LogComponents.agent,
-    });
-
-    try {
-      // Create sensor config handler
-      this.sensorConfigHandler = new SensorConfigHandler(this.sensorPublish);
-
-      // Start listening for delta events
-      this.sensorConfigHandler.start();
-
-      // Report initial sensor state
-      try {
-        const sensors = this.sensorPublish.getSensors();
-        const sensorStates: Record<string, any> = {};
-
-        // Add sensor-publish sensors
-        sensors.forEach((sensor) => {
-          sensorStates[sensor.name] = {
-            enabled: sensor.enabled,
-            addr: sensor.addr,
-            publishInterval: sensor.publishInterval,
-          };
-        });
-
-        // Add protocol adapter device statuses (modbus, can, opcua, etc.)
-        if (this.sensors) {
-          const allDeviceStatuses = await this.sensors.getAllDeviceStatuses();
-
-          // Iterate through each device in the record
-          Object.entries(allDeviceStatuses).forEach(([deviceName, device]) => {
-            // Use device name as key since getAllDeviceStatuses returns a flat record
-            sensorStates[deviceName] = {
-              type: device.protocol || 'unknown',
-              deviceName: device.name || deviceName,
-              connected: device.status === 'online',
-              lastPoll: device.lastSeenAt || null,
-              errorCount: 0, // Not available in current structure
-              lastError: null, // Not available in current structure
-            };
-          });
-        }
-      } catch (error) {
-        this.agentLogger?.errorSync(
-          "Failed to report initial sensor state",
-          error instanceof Error ? error : new Error(String(error)),
-          {
-            component: LogComponents.agent,
-          }
-        );
-      }
-    } catch (error) {
-      this.agentLogger?.errorSync(
-        "Failed to initialize Sensor Config Handler",
-        error instanceof Error ? error : new Error(String(error)),
-        {
-          component: LogComponents.agent,
-          note: "Continuing without remote sensor configuration",
-        }
-      );
-      this.sensorConfigHandler = undefined;
-    }
-  }
-
-  /**
-   * Initialize Agent Updater for remote updates via MQTT
-   */
-  private async initializeAgentUpdater(): Promise<void> {
-    try {
-      const currentVersion = process.env.AGENT_VERSION || getPackageVersion();
-      
-      this.updater = new AgentUpdater({
-        deviceUuid: this.deviceInfo.uuid,
-        currentVersion,
-        logger: this.agentLogger
-      });
-
-      await this.updater.initialize();
-    } catch (error) {
-      this.agentLogger?.errorSync(
-        "Failed to initialize Agent Updater",
-        error instanceof Error ? error : new Error(String(error)),
-        {
-          component: LogComponents.agent,
-          note: "Remote agent updates will not be available"
-        }
-      );
-      this.updater = undefined;
-    }
-  }
-
-  /**
-   * Initialize network firewall protection
-   * Protects Device API and MQTT from unauthorized access
-   */
-  private async initializeFirewall(
-    configSettings: Record<string, any>
-  ): Promise<void> {
-    // Get firewall configuration from config or environment
-    const firewallMode = 
-      configSettings.firewallMode || 
-      process.env.FIREWALL_MODE || 
-      'auto';
-    
-    // Check if firewall is enabled
-    if (firewallMode === 'disabled' || process.env.FIREWALL_ENABLED === 'false') {
-      this.agentLogger?.infoSync('Firewall disabled by configuration', {
-        component: LogComponents.agent,
-      });
-      return;
-    }
-    
-    // Check if running as root (required for iptables)
-    // getuid() may not exist on all platforms
-    const hasGetuid = typeof process.getuid === 'function';
-    
-    if (!hasGetuid) {
-      this.agentLogger?.warnSync('Firewall disabled - cannot detect root privileges', {
-        component: LogComponents.agent,
-        note: 'Set FIREWALL_ENABLED=false to suppress this warning',
-      });
-      return;
-    }
-    
-    const uid = process.getuid!();
-    if (uid !== 0) {
-      this.agentLogger?.warnSync('Firewall disabled - requires root privileges', {
-        component: LogComponents.agent,
-        note: 'Run container with --privileged or set FIREWALL_ENABLED=false',
-        uid,
-      });
-      return;
-    }
-
-    // Determine MQTT port (if Mosquitto is running locally)
-    const mqttPort = process.env.MQTT_LOCAL_PORT 
-      ? parseInt(process.env.MQTT_LOCAL_PORT) 
-      : undefined;
-
-    this.firewall = new AgentFirewall(
-      {
-        enabled: true,
-        mode: firewallMode as 'on' | 'off' | 'auto',
-        deviceApiPort: this.DEVICE_API_PORT,
-        mqttPort,
-      },
-      this.agentLogger
-    );
-
-    await this.firewall.initialize();
-  }
 
   private startAutoReconciliation(): void {
     this.containerManager.startAutoReconciliation(
@@ -1383,8 +923,8 @@ export default class DeviceAgent {
    * Controlled via target state config.settings.scheduledRestart
    */
   private handleScheduledRestartConfig(): void {
-    const configSettings = this.getConfigSettings();
-    const restartConfig = configSettings.scheduledRestart;
+    const config = this.getAgentConfiguration();
+    const restartConfig = config.settings.scheduledRestart;
 
     // Clear existing timer if present
     if (this.scheduledRestartTimer) {
@@ -1475,34 +1015,10 @@ export default class DeviceAgent {
     this.agentLogger?.infoSync("Stopping Device Agent", { component: LogComponents.agent });
 
     try {
-      // Stop Sensor Publish
-      if (this.sensorPublish) {
-        await this.sensorPublish.stop();
-        this.agentLogger?.infoSync("Sensor Publish stopped", {
-          component: LogComponents.agent,
-        });
-      }
-
-      // Stop Protocol Adapters
-      if (this.sensors) {
-        await this.sensors.stop();
-        this.agentLogger?.infoSync("Protocol Adapters stopped", {
-          component: LogComponents.agent,
-        });
-      }
-
-      // Stop Sensor Config Handler
-      if (this.sensorConfigHandler) {
-        // No explicit stop method, just clear reference
-        this.agentLogger?.infoSync("Sensor Config Handler cleanup", {
-          component: LogComponents.agent,
-        });
-      }
-
-      // Stop Jobs Feature (handles both MQTT and HTTP)
-      if (this.jobs) {
-        await this.jobs.stop();
-        this.agentLogger?.infoSync("Jobs Feature stopped", {
+      // Stop all features managed by FeatureInitializer
+      if (this.featureInitializer) {
+        await this.featureInitializer.cleanup();
+        this.agentLogger?.infoSync("Features stopped", {
           component: LogComponents.agent,
         });
       } 
@@ -1555,7 +1071,7 @@ export default class DeviceAgent {
       this.agentLogger?.infoSync("Stopping log backends", {
         component: LogComponents.agent,
       });
-      for (const backend of this.logBackends) {
+      for (const backend of this.agentLogger.getBackends()) {
         try {
           if (
             "disconnect" in backend &&
@@ -1653,18 +1169,18 @@ export default class DeviceAgent {
     this.cachedTargetState = this.stateReconciler.getTargetState();
   }
 
-  private getConfigFeatures(): Record<string, any> {
-    return this.cachedTargetState?.config?.features || {};
+  /**
+   * Get all agent configuration sections in one call
+   * Reduces repeated property access and makes config usage clearer
+   */
+  private getAgentConfiguration() {
+    return {
+      features: this.cachedTargetState?.config?.features || {},
+      settings: this.cachedTargetState?.config?.settings || {},
+      logging: this.cachedTargetState?.config?.logging || {}
+    };
   }
 
-
-  private getConfigSettings(): Record<string, any> {
-    return this.cachedTargetState?.config?.settings || {};
-  }
-
-  private getConfigLogging(): Record<string, any> {
-    return this.cachedTargetState?.config?.logging || {};
-  }
 
   // Getters for external access (if needed)
   public getContainerManager(): ContainerManager {

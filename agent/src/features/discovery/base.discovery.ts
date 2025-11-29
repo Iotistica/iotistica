@@ -25,7 +25,7 @@ export interface ValidationResult {
  */
 export interface DiscoveredDevice {
   // Identity (REQUIRED)
-  protocol: 'modbus' | 'opcua' | 'can'; // Strongly typed protocol
+  protocol: 'modbus' | 'opcua' | 'can' | 'snmp'; // Strongly typed protocol
   name: string; // Human-readable name
   fingerprint: string; // Cryptographic hash (survives moves/reconfigs)
   

@@ -18,7 +18,7 @@
 
 import { EventEmitter } from 'events';
 import type { AgentLogger } from '../logging/agent-logger.js';
-import { DeviceSensorModel } from '../db/models/sensors.model.js';
+import { DeviceEndpointModel } from '../db/models/endpoint.model.js';
 
 export interface ConfigChangeEvent {
 	key: string;
@@ -145,12 +145,12 @@ export class ConfigManager extends EventEmitter {
 			// Get all sensors from database (includes discovered devices)
 			console.log('[ConfigManager] getCurrentConfig called');
 			console.log('[ConfigManager] About to call DeviceSensorModel.getAll()');
-			const allSensors = await DeviceSensorModel.getAll();
+			const allSensors = await DeviceEndpointModel.getAll();
 			console.log('[ConfigManager] Loaded sensors:', allSensors.length, 'sensors');
 			console.log('[ConfigManager] Sensor details:', JSON.stringify(allSensors, null, 2));
 			
 			// Convert to config format
-			const sensorsConfig = allSensors.map(sensor => ({
+			const endpointsConfig = allSensors.map(sensor => ({
 				uuid: sensor.uuid,
 				name: sensor.name,
 				protocol: sensor.protocol,
@@ -161,14 +161,19 @@ export class ConfigManager extends EventEmitter {
 				metadata: sensor.metadata
 			}));
 			
-			console.log('[ConfigManager] Returning config with sensors:', sensorsConfig.length);
-			console.log('[ConfigManager] currentConfig keys:', Object.keys(this.currentConfig));
-			const result = { 
-				...this.currentConfig,
-				sensors: sensorsConfig // Override with full database state
-			};
-			console.log('[ConfigManager] Final result sensors count:', result.sensors?.length || 0);
-			return result;
+		console.log('[ConfigManager] Returning config with endpoints:', endpointsConfig.length);
+		console.log('[ConfigManager] currentConfig keys:', Object.keys(this.currentConfig));
+		const result = { 
+			...this.currentConfig,
+			endpoints: endpointsConfig, // Use endpoints (API expects this)
+			sensors: endpointsConfig // Keep sensors for backward compatibility
+		};
+		console.log('[ConfigManager] Final result keys:', Object.keys(result));
+		console.log('[ConfigManager] Final result endpoints count:', result.endpoints?.length || 0);
+		console.log('[ConfigManager] Final result endpoints count:', result.endpoints?.length || 0);
+		console.log('[ConfigManager] Has endpoints field:', 'endpoints' in result);
+		console.log('[ConfigManager] Has sensors field:', 'sensors' in result);
+		return result;
 		} catch (error) {
 			console.error('[ConfigManager] ERROR loading sensors:', error);
 			return { ...this.currentConfig };

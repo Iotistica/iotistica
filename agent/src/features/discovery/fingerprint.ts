@@ -66,3 +66,24 @@ export function generateCANFingerprint(
     .digest('hex')
     .substring(0, 32);
 }
+
+/**
+ * Generate SNMP fingerprint
+ * Based on sysObjectID (most stable SNMP identifier) + IP address
+ * 
+ * @param ipAddress - Device IP address
+ * @param sysObjectID - SNMP sysObjectID (1.3.6.1.2.1.1.2.0) or fallback to sysDescr
+ */
+export function generateSNMPFingerprint(
+  ipAddress: string,
+  sysObjectID: string
+): string {
+  // Use sysObjectID if available (most stable), otherwise sysDescr
+  const identity = `${ipAddress}:${sysObjectID}`;
+  
+  return crypto
+    .createHash('sha256')
+    .update(`snmp:${identity}`)
+    .digest('hex')
+    .substring(0, 32);
+}

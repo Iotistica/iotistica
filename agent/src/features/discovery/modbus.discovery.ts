@@ -15,6 +15,8 @@ import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, DiscoveredDevice } from './base.discovery';
 import { generateModbusFingerprint } from './fingerprint';
+import fs from 'fs';
+import path from 'path';
 
 export interface ModbusDiscoveryOptions {
   serialPort?: string; // e.g., '/dev/ttyUSB0' or 'COM3'
@@ -31,6 +33,21 @@ interface ModbusConnection {
   isOpen: boolean;
 }
 
+interface DataPoint {
+  name: string;
+  address: number;
+  type: string;
+  dataType: string;
+}
+
+interface VendorMap {
+  [vendor: string]: { dataPoints: DataPoint[] };
+}
+
+const VENDOR_ENV = process.env.MODBUS_VENDOR || 'Generic';
+const vendorFile = path.resolve(__dirname, '../../../vendors', 'dataPoints.json');
+const vendorMap: VendorMap = JSON.parse(fs.readFileSync(vendorFile, 'utf-8'));
+
 export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
   private connection?: ModbusConnection;
 
@@ -43,10 +60,14 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
    * Opens connection ONCE, cycles through all slave IDs
    */
   async discover(options?: ModbusDiscoveryOptions): Promise<DiscoveredDevice[]> {
+
+    const vendorKey = VENDOR_ENV;
+    const dataPoints = vendorMap[vendorKey]?.dataPoints || vendorMap['Generic'].dataPoints;
+
     const discovered: DiscoveredDevice[] = [];
 
     this.logger?.infoSync('Starting Modbus discovery', {
-      component: LogComponents.agent,
+      component: LogComponents.discovery,
       protocol: this.protocol,
       phase: 'discovery'
     });
@@ -61,7 +82,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 
     if (!isSerial && !isTCP) {
       this.logger?.warnSync('No Modbus connection specified', {
-        component: LogComponents.agent
+        component: LogComponents.discovery
       });
       return [];
     }
@@ -72,13 +93,13 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 
       if (!this.connection?.isOpen) {
         this.logger?.warnSync('Failed to open Modbus connection', {
-          component: LogComponents.agent
+          component: LogComponents.discovery
         });
         return [];
       }
 
       this.logger?.infoSync('Modbus connection established, scanning slave IDs', {
-        component: LogComponents.agent,
+        component: LogComponents.discovery,
         range: slaveIdRange,
         type: this.connection.type
       });
@@ -109,12 +130,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
                     port: options?.tcpPort || 502,
                     slaveId
                   },
-              dataPoints: [{
-                name: 'holding_register_0',
-                address: 40001,
-                type: 'holding',
-                dataType: 'uint16'
-              }],
+              dataPoints,
               confidence: 'low',
               discoveredAt: new Date().toISOString(),
               validated: false,
@@ -126,14 +142,14 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
             });
 
             this.logger?.infoSync(`Discovered Modbus slave ${slaveId}`, {
-              component: LogComponents.agent,
+              component: LogComponents.discovery,
               phase: 'discovery',
               method: deviceInfo.method
             });
           }
         } catch (error) {
           this.logger?.debugSync(`No response from slave ${slaveId}`, {
-            component: LogComponents.agent,
+            component: LogComponents.discovery,
             error: (error as Error).message
           });
         }
@@ -151,7 +167,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
    */
   async validate(device: DiscoveredDevice, timeout = 2000): Promise<any> {
     this.logger?.infoSync('Validating Modbus device', {
-      component: LogComponents.agent,
+      component: LogComponents.discovery,
       slaveId: device.metadata?.slaveId,
       phase: 'validation'
     });
@@ -250,13 +266,13 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
       try {
         this.connection.client.close(() => {
           this.logger?.infoSync('Closed Modbus connection', {
-            component: LogComponents.agent,
+            component: LogComponents.discovery,
             type: this.connection?.type
           });
         });
       } catch (error) {
         this.logger?.warnSync('Error closing Modbus connection', {
-          component: LogComponents.agent,
+          component: LogComponents.discovery,
           error: (error as Error).message
         });
       } finally {
@@ -271,49 +287,64 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
    * 1. Try reading device identification (0x2B/0x0E) - proper way
    * 2. Fallback to holding register read (40001) - compatibility
    */
-  private async testSlaveId(slaveId: number, timeout: number): Promise<{ name?: string; method: string; deviceId?: string } | null> {
-    if (!this.connection?.isOpen) {
-      return null;
-    }
+private async testSlaveId(
+  slaveId: number,
+  timeout: number
+): Promise<{ name?: string; method: string; deviceId?: string } | null> {
 
-    const client = this.connection.client;
+  if (!this.connection?.isOpen) return null;
+  const client = this.connection.client;
 
-    try {
-      // Set slave ID for this request
-      client.setID(slaveId);
+  client.setID(slaveId);
+  client.setTimeout(timeout);
 
-      // METHOD 1: Try Read Device Identification (function code 0x2B, MEI type 0x0E)
-      // This is the proper Modbus way to get device info
-      try {
-        // Note: modbus-serial may not support this directly
-        // Would need raw function code support or custom implementation
-        // For now, we'll use the fallback method
-        
-        // TODO: Implement when modbus-serial supports custom function codes
-        // const deviceId = await client.readDeviceIdentification(0x00, 0x00);
-      } catch (error) {
-        // Device ID not supported, try fallback
-      }
+  //
+  // METHOD 1 — MEI WITH HARD TIMEOUT
+  //
+  const meiResult = await Promise.race([
+    client.readDeviceIdentification(1),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("MEI timeout")), timeout)
+    )
+  ]).catch(err => {
+    this.logger?.debugSync(
+      `Slave ${slaveId}: MEI failed or timed out: ${String(err?.message || err)}`,
+      { component: LogComponents.discovery }
+    );
+    return null;
+  });
 
-      // METHOD 2: Fallback - Try reading a common holding register
-      // Most Modbus devices support holding register reads
-      const result = await client.readHoldingRegisters(0, 1); // Address 40001
-      
-      if (result && result.data && result.data.length > 0) {
-        // Use register value as device identifier for fingerprint
-        const registerValue = result.data[0];
-        
-        return {
-          method: 'register_read',
-          name: undefined, // No name from register read
-          deviceId: registerValue.toString() // Use for fingerprint
-        };
-      }
+  if (meiResult && meiResult.Basic?.VendorName) {
+    const vendor = meiResult.Basic.VendorName.toString();
 
-      return null;
-    } catch (error) {
-      // No response or error - slave doesn't exist
-      return null;
-    }
+    return {
+      method: "device_identification",
+      name: vendor,
+      deviceId: vendor
+    };
   }
+
+  //
+  // METHOD 2 — Guaranteed fallback (register)
+  //
+  try {
+    const reg = await client.readHoldingRegisters(0, 1);
+
+    if (reg?.data?.length) {
+      return {
+        method: "register_read",
+        deviceId: reg.data[0].toString()
+      };
+    }
+
+    return null;
+  } catch (err: any) {
+    this.logger?.debugSync(
+      `Slave ${slaveId}: no response on fallback read: ${String(err?.message || err)}`,
+      { component: LogComponents.discovery }
+    );
+    return null;
+  }
+}
+
 }

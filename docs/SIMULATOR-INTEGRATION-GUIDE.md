@@ -132,9 +132,9 @@ CREATE TABLE sensors (
 );
 ```
 
-**Agent SQLite - `sensor_outputs` table:**
+**Agent SQLite - `endpoint_outputs` table:**
 ```sql
-CREATE TABLE sensor_outputs (
+CREATE TABLE endpoint_outputs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     protocol TEXT NOT NULL UNIQUE,
     socket_path TEXT NOT NULL,
@@ -507,9 +507,9 @@ class ModbusAdapter {
         AND enabled = 1
     `);
     
-    // Query sensor_outputs for socket configuration
+    // Query endpoint_outputs for socket configuration
     const output = await this.db.get(`
-      SELECT * FROM sensor_outputs 
+      SELECT * FROM endpoint_outputs 
       WHERE protocol = 'modbus'
     `);
     

@@ -12,6 +12,7 @@
  */
 
 import type { LogBackend, LogLevel } from './types';
+import { LocalLogBackend, LocalLogBackendOptions } from './local-backend';
 
 export interface LogContext {
 	component?: string;
@@ -52,6 +53,23 @@ export class AgentLogger {
 	constructor(backends: LogBackend | LogBackend[], initialLogLevel: LogLevel = 'info') {
 		this.backends = Array.isArray(backends) ? backends : [backends];
 		this.minLogLevel = initialLogLevel;
+	
+	}
+
+
+	/**
+	 * Add a log backend after initialization
+	 * Useful for adding cloud logging after device provisioning
+	 */
+	public addBackend(backend: LogBackend): void {
+		this.backends.push(backend);
+	}
+
+	/**
+	 * Get all configured log backends
+	 */
+	public getBackends(): LogBackend[] {
+		return this.backends;
 	}
 
 	/**

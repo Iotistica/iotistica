@@ -6,7 +6,7 @@
 import { query, transaction } from './connection';
 import { PoolClient } from 'pg';
 import crypto from 'crypto';
-import { DeviceSensorSyncService } from '../services/device-sensor-sync';
+import { DeviceSensorSyncService } from '../services/device-endpoints';
 
 // Types
 export interface Device {
@@ -323,7 +323,7 @@ export class DeviceTargetStateModel {
   /**
    * Deploy target state to device
    * This increments version so device will pick up changes
-   * Also syncs config.sensors to device_sensors table
+   * Also syncs config.endpoints to device_sensors table
    */
   static async deploy(
     deviceUuid: string,
@@ -347,12 +347,12 @@ export class DeviceTargetStateModel {
 
     const deployedState = result.rows[0];
 
-    // Sync config.sensors to device_sensors table
-    if (deployedState.config && deployedState.config.sensors) {
+    // Sync config.endpoints to device_sensors table
+    if (deployedState.config && deployedState.config.endpoints) {
       const syncService = new DeviceSensorSyncService();
       await syncService.syncConfigToTable(
         deviceUuid,
-        deployedState.config.sensors,
+        deployedState.config.endpoints,
         deployedState.version,
         deployedBy
       );

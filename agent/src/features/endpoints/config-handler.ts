@@ -61,7 +61,7 @@ export class ProtocolAdaptersHandler extends BaseConfigHandler {
 		});
 
 		try {
-			const { DeviceSensorModel: DeviceSensorModel } = await import('../../db/models/sensors.model.js');
+			const { DeviceEndpointModel: DeviceSensorModel } = await import('../../db/models/endpoint.model.js');
 
 			// Get current devices from SQLite to detect deletions
 			const currentDevices = await DeviceSensorModel.getAll();

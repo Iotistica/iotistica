@@ -20,7 +20,7 @@ import { ModbusAdapterConfig } from './modbus/types.js';
 import { SocketServer } from './common/socket-server.js';
 import { SensorDataPoint, SocketOutput } from './types.js';
 import { SensorOutputModel } from '../../db/models/sensor-outputs.model.js';
-import { DeviceSensorModel } from '../../db/models/sensors.model.js';
+import { DeviceEndpointModel } from '../../db/models/endpoint.model.js';
 
 // Type imports only (no runtime loading)
 import type { OPCUAAdapter } from './opcua/opcua-adapter.js';
@@ -124,7 +124,7 @@ export class SensorsFeature extends BaseFeature {
         modbusConfig = this.config.modbus!.config;
       } else {
         // Load devices from database
-        const dbDevices = await DeviceSensorModel.getEnabled('modbus');
+        const dbDevices = await DeviceEndpointModel.getEnabled('modbus');
         if (dbDevices.length === 0) {
           this.logger.warn('No Modbus devices found in database');
           return;
@@ -238,7 +238,7 @@ export class SensorsFeature extends BaseFeature {
         opcuaDevices = this.config.opcua!.config.devices;
       } else {
         // Load devices from database
-        const dbDevices = await DeviceSensorModel.getEnabled('opcua');
+        const dbDevices = await DeviceEndpointModel.getEnabled('opcua');
         if (dbDevices.length === 0) {
           this.logger.warn('No OPC-UA devices found in database');
           return;

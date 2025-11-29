@@ -9,7 +9,7 @@ exports.up = async function(knex) {
   const isWindows = process.platform === 'win32';
   
   // Insert default output configurations for each protocol
-  await knex('sensor_outputs').insert([
+  await knex('endpoint_outputs').insert([
     {
       protocol: 'modbus',
       socket_path: isWindows ? '\\\\.\\pipe\\modbus' : '/tmp/modbus.sock',
@@ -42,5 +42,5 @@ exports.up = async function(knex) {
 
 exports.down = async function(knex) {
   // Remove default configurations
-  await knex('sensor_outputs').whereIn('protocol', ['modbus', 'can', 'opcua']).del();
+  await knex('endpoint_outputs').whereIn('protocol', ['modbus', 'can', 'opcua']).del();
 };

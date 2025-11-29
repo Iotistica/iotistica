@@ -23,6 +23,10 @@ on:
         description: 'Dashboard version to test'
         required: false
         type: string
+      modbus_simulator_version:
+        description: 'Modbus Simulator version to test'
+        required: false
+        type: string
   workflow_dispatch:
     inputs:
       test_mode:
@@ -45,6 +49,10 @@ on:
         description: 'Dashboard version to test (default: latest from package.json)'
         required: false
         type: string
+      modbus_simulator_version:
+        description: 'Modbus Simulator version to test (default: latest from package.json)'
+        required: false
+        type: string
   release:
     types: [published]
   schedule:
@@ -59,6 +67,7 @@ jobs:
       agent_version: ${{ steps.versions.outputs.agent_version }}
       api_version: ${{ steps.versions.outputs.api_version }}
       dashboard_version: ${{ steps.versions.outputs.dashboard_version }}
+      modbus_simulator_version: ${{ steps.versions.outputs.modbus_simulator_version }}
     
     steps:
       - name: Checkout repository
@@ -95,14 +104,22 @@ jobs:
             DASHBOARD_VERSION=$(jq -r '.version' dashboard/package.json)
           fi
           
+          if [ -n "${{ inputs.modbus_simulator_version }}" ]; then
+            MODBUS_SIMULATOR_VERSION="${{ inputs.modbus_simulator_version }}"
+          else
+            MODBUS_SIMULATOR_VERSION=$(jq -r '.version' sensors/modbus-simulator/package.json)
+          fi
+          
           echo "agent_version=$AGENT_VERSION" >> $GITHUB_OUTPUT
           echo "api_version=$API_VERSION" >> $GITHUB_OUTPUT
           echo "dashboard_version=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
+          echo "modbus_simulator_version=$MODBUS_SIMULATOR_VERSION" >> $GITHUB_OUTPUT
           
           echo "Testing versions:"
           echo "  - Agent: $AGENT_VERSION"
           echo "  - API: $API_VERSION"
           echo "  - Dashboard: $DASHBOARD_VERSION"
+          echo "  - Modbus Simulator: $MODBUS_SIMULATOR_VERSION"
           
           # Check if images exist on Docker Hub
           echo ""
@@ -125,6 +142,7 @@ jobs:
           check_image "iotistic/agent:$AGENT_VERSION" || MISSING=1
           check_image "iotistic/api:$API_VERSION" || MISSING=1
           check_image "iotistic/dashboard:$DASHBOARD_VERSION" || MISSING=1
+          check_image "iotistic/modbus-simulator:$MODBUS_SIMULATOR_VERSION" || MISSING=1
           
           if [ $MISSING -eq 1 ]; then
             echo ""
@@ -151,11 +169,13 @@ jobs:
             echo "- **Agent**: \`${{ steps.versions.outputs.agent_version }}\`"
             echo "- **API**: \`${{ steps.versions.outputs.api_version }}\`"
             echo "- **Dashboard**: \`${{ steps.versions.outputs.dashboard_version }}\`"
+            echo "- **Modbus Simulator**: \`${{ steps.versions.outputs.modbus_simulator_version }}\`"
             echo ""
             echo "### Docker Images"
             echo "- [\`iotistic/agent:${{ steps.versions.outputs.agent_version }}\`](https://hub.docker.com/r/iotistic/agent/tags?name=${{ steps.versions.outputs.agent_version }})"
             echo "- [\`iotistic/api:${{ steps.versions.outputs.api_version }}\`](https://hub.docker.com/r/iotistic/api/tags?name=${{ steps.versions.outputs.api_version }})"
             echo "- [\`iotistic/dashboard:${{ steps.versions.outputs.dashboard_version }}\`](https://hub.docker.com/r/iotistic/dashboard/tags?name=${{ steps.versions.outputs.dashboard_version }})"
+            echo "- [\`iotistic/modbus-simulator:${{ steps.versions.outputs.modbus_simulator_version }}\`](https://hub.docker.com/r/iotistic/modbus-simulator/tags?name=${{ steps.versions.outputs.modbus_simulator_version }})"
           } >> $GITHUB_STEP_SUMMARY
 
   setup:
@@ -173,6 +193,7 @@ jobs:
           echo "  - Agent: ${{ needs.determine-versions.outputs.agent_version }}"
           echo "  - API: ${{ needs.determine-versions.outputs.api_version }}"
           echo "  - Dashboard: ${{ needs.determine-versions.outputs.dashboard_version }}"
+          echo "  - Modbus Simulator: ${{ needs.determine-versions.outputs.modbus_simulator_version }}"
           echo ""
           echo "Test Stack (docker-compose.e2e.yml):"
           echo "  - PostgreSQL 16"
@@ -205,6 +226,16 @@ jobs:
           
           docker pull iotistic/api:${{ needs.determine-versions.outputs.api_version }}
           docker pull iotistic/dashboard:${{ needs.determine-versions.outputs.dashboard_version }}
+          
+          # Try to pull modbus-simulator image, fallback to latest if not found
+          if docker pull iotistic/modbus-simulator:${{ needs.determine-versions.outputs.modbus_simulator_version }} 2>/dev/null; then
+            echo "✓ Pulled iotistic/modbus-simulator:${{ needs.determine-versions.outputs.modbus_simulator_version }}"
+          else
+            echo "⚠ Version ${{ needs.determine-versions.outputs.modbus_simulator_version }} not found, pulling latest..."
+            docker pull iotistic/modbus-simulator:latest
+            docker tag iotistic/modbus-simulator:latest iotistic/modbus-simulator:${{ needs.determine-versions.outputs.modbus_simulator_version }}
+          fi
+          
           echo "Images pulled successfully!"
 
   test-api:
@@ -297,6 +328,10 @@ jobs:
         working-directory: ./api
         run: |
           echo "Running API integration tests..."
+          
+          # Fix npm cache permissions (may have been changed by sudo during setup)
+          sudo chown -R $(whoami):$(whoami) $HOME/.npm 2>/dev/null || true
+          
           npm ci
           npm run test:integration || echo "No integration tests configured yet"
 
@@ -410,6 +445,20 @@ jobs:
           sudo -E bash agent/bin/install.sh
           
           echo "✓ Agent installed"
+
+      - name: Copy vendors folder (after install)
+        run: |
+          # Copy vendors folder AFTER install completes (required for Modbus discovery)
+          sudo mkdir -p /opt/iotistic/agent/vendors
+          sudo cp -r vendors/dataPoints.json /opt/iotistic/agent/vendors/
+          sudo chown -R iotistic:iotistic /opt/iotistic/agent/vendors
+          
+          echo "✓ Vendors data copied"
+          
+          # Restart agent to pick up vendors folder
+          sudo systemctl restart iotistic-agent
+          sleep 5
+          echo "✓ Agent restarted"
 
       - name: Verify environment configuration
         run: |
@@ -565,7 +614,9 @@ jobs:
           echo "Running agent integration tests..."
           
           # Fix npm cache permissions (may have been changed by sudo during install)
-          sudo chown -R $(whoami):$(whoami) /home/runner/.npm || true
+          if [ -d "$HOME/.npm" ]; then
+            sudo chown -R $(whoami):$(whoami) $HOME/.npm 2>/dev/null || true
+          fi
           
           npm ci
           npm run test:integration || echo "No integration tests configured yet"
@@ -648,6 +699,302 @@ jobs:
   
 
       - name: Cleanup
+        if: always()
+        run: docker compose -f $COMPOSE_FILE down -v
+
+  test-modbus-discovery:
+    name: Test Modbus Discovery (Full Stack)
+    needs: [determine-versions, setup]
+    runs-on: [iotistic-lab-sc]
+    timeout-minutes: 20
+    
+    env:
+      AGENT_VERSION: ${{ needs.determine-versions.outputs.agent_version }}
+      API_VERSION: ${{ needs.determine-versions.outputs.api_version }}
+      DASHBOARD_VERSION: ${{ needs.determine-versions.outputs.dashboard_version }}
+      MODBUS_SIMULATOR_VERSION: ${{ needs.determine-versions.outputs.modbus_simulator_version }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup environment
+        run: |
+          chmod +x .github/scripts/setup-env.sh
+          LICENSE_PUBLIC_KEY="${{ secrets.LICENSE_PUBLIC_KEY }}" \
+          IOTISTIC_LICENSE_KEY="${{ secrets.IOTISTIC_LICENSE_KEY }}" \
+          .github/scripts/setup-env.sh
+
+      - name: Start full infrastructure stack
+        run: |
+          echo "Starting full stack (postgres, redis, mosquitto, api, dashboard, modbus-simulator)..."
+          docker compose -f $COMPOSE_FILE up -d postgres redis mosquitto api dashboard modbus-simulator
+
+      - name: Wait for infrastructure to be ready
+        run: |
+          echo "Waiting for PostgreSQL..."
+          timeout 60 bash -c '
+            until docker compose -f $COMPOSE_FILE exec -T postgres pg_isready -U postgres > /dev/null 2>&1; do
+              sleep 2
+            done
+          '
+          
+          echo "Waiting for Redis..."
+          timeout 30 bash -c '
+            until docker compose -f $COMPOSE_FILE exec -T redis redis-cli ping > /dev/null 2>&1; do
+              sleep 2
+            done
+          '
+          
+          echo "Waiting for Mosquitto..."
+          sleep 15
+          
+          echo "Waiting for API..."
+          timeout 120 bash -c '
+            until curl -f http://localhost:4002/health 2>/dev/null; do
+              echo "API not ready yet..."
+              sleep 3
+            done
+          '
+          
+          echo "Waiting for Modbus simulator..."
+          sleep 10
+          
+          echo "✓ Full stack ready!"
+
+      - name: Verify Modbus simulator is running
+        run: |
+          echo "=== Checking Modbus Simulator ==="
+          docker compose -f $COMPOSE_FILE ps modbus-simulator
+          
+          echo ""
+          echo "=== Testing Modbus TCP port 502 ==="
+          nc -zv localhost 502 || echo "Port check completed"
+          
+          echo ""
+          echo "=== Modbus Simulator Logs ==="
+          docker compose -f $COMPOSE_FILE logs modbus-simulator --tail=50
+
+      - name: Copy agent code to /opt/iotistic/agent
+        run: |
+          sudo mkdir -p /opt/iotistic/agent
+          sudo cp -r agent/* /opt/iotistic/agent/
+          echo "✓ Agent code copied"
+
+      - name: Make install script executable
+        run: chmod +x agent/bin/install.sh
+
+      - name: Generate provisioning key via API
+        id: provision
+        run: |
+          echo "Generating provisioning key via API..."
+          
+          RESPONSE=$(curl -s -X POST http://localhost:4002/api/v1/provisioning-keys/generate \
+            -H "Content-Type: application/json" \
+            -d '{"fleetId":"modbus-test-fleet","newKey":false}')
+          
+          PROVISIONING_KEY=$(echo "$RESPONSE" | jq -r '.key')
+          
+          if [ -z "$PROVISIONING_KEY" ] || [ "$PROVISIONING_KEY" == "null" ]; then
+            echo "Failed to generate provisioning key"
+            echo "Response: $RESPONSE"
+            exit 1
+          fi
+          
+          echo "✓ Provisioning key generated: ${PROVISIONING_KEY:0:20}..."
+          echo "provisioning_key=$PROVISIONING_KEY" >> $GITHUB_OUTPUT
+
+      - name: Install agent via systemd method
+        env:
+          CI: true
+          IOTISTIC_INSTALL_METHOD: systemd
+          IOTISTIC_AGENT_VERSION: ${{ needs.determine-versions.outputs.agent_version }}
+          IOTISTIC_DEVICE_PORT: 48484
+          CLOUD_API_ENDPOINT: http://localhost:4002
+          PROVISIONING_KEY: ${{ steps.provision.outputs.provisioning_key }}
+        run: |
+          echo "Installing agent with systemd method..."
+          echo "Provisioning key (first 20 chars): ${PROVISIONING_KEY:0:20}..."
+          echo "Cloud API endpoint: $CLOUD_API_ENDPOINT"
+          sudo -E bash agent/bin/install.sh
+          
+          echo "✓ Agent installed"
+
+      - name: Copy vendors folder (after install)
+        run: |
+          # Copy vendors folder AFTER install completes (required for Modbus discovery)
+          sudo mkdir -p /opt/iotistic/agent/vendors
+          sudo cp -r vendors/dataPoints.json /opt/iotistic/agent/vendors/
+          sudo chown -R iotistic:iotistic /opt/iotistic/agent/vendors
+          
+          echo "✓ Vendors data copied"
+          
+          # Restart agent to pick up vendors folder
+          sudo systemctl restart iotistic-agent
+          sleep 5
+          echo "✓ Agent restarted"
+
+      - name: Configure Modbus discovery
+        run: |
+          echo "Configuring Modbus discovery for localhost:502..."
+          
+          # Add Modbus discovery configuration to environment
+          sudo tee -a /etc/iotistic/agent.env > /dev/null << 'EOF'
+          ENABLE_MODBUS_DISCOVERY=true
+          MODBUS_IP_RANGES=localhost
+          MODBUS_PORT=502
+          MODBUS_DISCOVERY_INTERVAL=60000
+          EOF
+          
+          echo "✓ Modbus discovery configured"
+          
+          # Restart agent to apply configuration
+          sudo systemctl restart iotistic-agent
+          sleep 10
+          echo "✓ Agent restarted with Modbus discovery enabled"
+
+      - name: Wait for agent to stabilize
+        run: |
+          echo "Waiting for agent to stabilize and perform discovery..."
+          sleep 30
+          
+          # Check agent is still running
+          if sudo systemctl is-active --quiet iotistic-agent; then
+            echo "✓ Agent is running"
+          else
+            echo "✗ Agent is not running"
+            sudo journalctl -u iotistic-agent -n 100 --no-pager
+            exit 1
+          fi
+
+      - name: Trigger Modbus discovery manually
+        run: |
+          echo "Triggering Modbus discovery via API..."
+          
+          # Get device UUID from agent
+          DEVICE_UUID=$(sudo cat /var/lib/iotistic/agent/device-uuid)
+          echo "Device UUID: $DEVICE_UUID"
+          
+          # Trigger discovery via agent API
+          curl -X POST http://localhost:48484/api/discovery/modbus \
+            -H "Content-Type: application/json" \
+            -d '{"ipRanges":["localhost"],"port":502}' || echo "Discovery endpoint may not be available yet"
+          
+          echo "✓ Discovery triggered, waiting for completion..."
+          sleep 20
+
+      - name: Check discovered endpoints in SQLite
+        run: |
+          echo "=== Checking SQLite database for discovered endpoints ==="
+          
+          DB_PATH="/var/lib/iotistic/agent/agent.db"
+          
+          if [ ! -f "$DB_PATH" ]; then
+            echo "✗ SQLite database not found at $DB_PATH"
+            exit 1
+          fi
+          
+          echo "✓ Database found"
+          
+          # Check endpoints table
+          echo ""
+          echo "=== Endpoints Table Schema ==="
+          sudo sqlite3 "$DB_PATH" ".schema endpoints"
+          
+          echo ""
+          echo "=== All Discovered Endpoints ==="
+          ENDPOINTS=$(sudo sqlite3 "$DB_PATH" "SELECT * FROM endpoints;")
+          
+          if [ -z "$ENDPOINTS" ]; then
+            echo "⚠ No endpoints discovered yet"
+            echo ""
+            echo "Checking agent logs for discovery activity..."
+            sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep -i modbus || echo "No Modbus activity in logs"
+          else
+            echo "$ENDPOINTS"
+            
+            # Count endpoints
+            ENDPOINT_COUNT=$(sudo sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM endpoints;")
+            echo ""
+            echo "✓ Found $ENDPOINT_COUNT discovered endpoint(s)"
+            
+            # Show detailed endpoint info
+            echo ""
+            echo "=== Endpoint Details (JSON) ==="
+            sudo sqlite3 "$DB_PATH" -json "SELECT id, protocol, address, port, metadata, discovered_at, last_seen FROM endpoints;"
+          fi
+
+      - name: Verify Modbus endpoints discovered
+        run: |
+          echo "=== Verifying Modbus Discovery Results ==="
+          
+          DB_PATH="/var/lib/iotistic/agent/agent.db"
+          
+          # Check for Modbus endpoints specifically
+          MODBUS_COUNT=$(sudo sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM endpoints WHERE protocol = 'modbus';")
+          
+          echo "Modbus endpoints discovered: $MODBUS_COUNT"
+          
+          if [ "$MODBUS_COUNT" -gt 0 ]; then
+            echo "✓ Modbus discovery successful!"
+            
+            # Show Modbus endpoint details
+            echo ""
+            echo "=== Modbus Endpoint Details ==="
+            sudo sqlite3 "$DB_PATH" -json "SELECT * FROM endpoints WHERE protocol = 'modbus';" | jq '.'
+            
+          else
+            echo "✗ No Modbus endpoints discovered"
+            echo ""
+            echo "Debugging information:"
+            echo "1. Modbus Simulator Status:"
+            docker compose -f $COMPOSE_FILE ps modbus-simulator
+            
+            echo ""
+            echo "2. Recent Agent Logs (Modbus discovery):"
+            sudo journalctl -u iotistic-agent --no-pager --since "10 minutes ago" | grep -i modbus | tail -50
+            
+            echo ""
+            echo "3. Agent Configuration:"
+            sudo cat /etc/iotistic/agent.env | grep -i modbus
+            
+            exit 1
+          fi
+
+      - name: Show agent logs
+        if: always()
+        run: |
+          echo "========================================="
+          echo "Agent Logs (Full):"
+          echo "========================================="
+          sudo journalctl -u iotistic-agent --no-pager --since "20 minutes ago" --lines 300
+
+      - name: Show Modbus simulator logs
+        if: always()
+        run: |
+          echo "========================================="
+          echo "Modbus Simulator Logs:"
+          echo "========================================="
+          docker compose -f $COMPOSE_FILE logs modbus-simulator --tail=100
+
+      - name: Cleanup agent
+        if: always()
+        run: |
+          echo "Stopping agent service..."
+          sudo systemctl stop iotistic-agent || true
+          sudo systemctl disable iotistic-agent || true
+          sudo rm -f /etc/systemd/system/iotistic-agent.service
+          sudo systemctl daemon-reload
+          
+          # Clean up agent files
+          sudo rm -rf /opt/iotistic/agent
+          sudo rm -rf /var/lib/iotistic/agent
+          sudo rm -rf /var/log/iotistic
+          sudo rm -rf /etc/iotistic
+          
+          echo "✓ Agent cleaned up"
+
+      - name: Cleanup infrastructure
         if: always()
         run: docker compose -f $COMPOSE_FILE down -v
 

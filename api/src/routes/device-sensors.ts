@@ -19,7 +19,7 @@
 
 import express from 'express';
 import { query } from '../db/connection';
-import { deviceSensorSync } from '../services/device-sensor-sync';
+import { deviceSensorSync } from '../services/device-endpoints';
 import { logger } from '../utils/logger';
 
 export const router = express.Router();
@@ -35,7 +35,7 @@ router.get('/devices/:uuid/sensors', async (req, res) => {
     const { uuid } = req.params;
     const { protocol } = req.query; // Optional filter by protocol
 
-    const sensors = await deviceSensorSync.getSensors(
+    const sensors = await deviceSensorSync.getEndpoints(
       uuid, 
       protocol as string | undefined
     );
@@ -54,71 +54,6 @@ router.get('/devices/:uuid/sensors', async (req, res) => {
 });
 
 /**
- * Add new sensor
- * POST /api/v1/devices/:uuid/sensors
- * 
- * Dual-write: table + config (sync service handles both)
- */
-router.post('/devices/:uuid/sensors', async (req, res) => {
-  try {
-    const { uuid } = req.params;
-    const sensorConfig = req.body;
-
-    // Validate required fields
-    if (!sensorConfig.name || !sensorConfig.protocol || !sensorConfig.connection) {
-      return res.status(400).json({
-        error: 'Invalid sensor configuration',
-        message: 'Required fields: name, protocol, connection'
-      });
-    }
-
-    // Build complete sensor configuration
-    const completeSensorConfig = {
-      name: sensorConfig.name,
-      protocol: sensorConfig.protocol,
-      enabled: sensorConfig.enabled !== undefined ? sensorConfig.enabled : true,
-      pollInterval: sensorConfig.pollInterval || 5000,
-      connection: sensorConfig.connection,
-      dataPoints: sensorConfig.dataPoints || [],
-      metadata: sensorConfig.metadata || {}
-    };
-
-    // Add sensor using sync service (draft mode by default)
-    const result = await deviceSensorSync.addSensor(
-      uuid,
-      completeSensorConfig,
-      (req as any).user?.id || 'system'
-      // deployImmediately defaults to false (draft mode)
-    );
-
-    res.json({
-      status: 'ok',
-      message: result.isDraft 
-        ? 'Sensor saved to config. Click "Deploy" to trigger deployment.' 
-        : 'Sensor added and deployed',
-      device: result.sensor, // Return the saved sensor config
-      version: result.version, // Config version (undefined for drafts)
-      isDraft: result.isDraft || false
-    });
-  } catch (error: any) {
-    logger.error('Error adding sensor:', error);
-    
-    // Handle duplicate name error
-    if (error.message.includes('already exists')) {
-      return res.status(400).json({
-        error: 'Sensor already exists',
-        message: error.message
-      });
-    }
-    
-    res.status(500).json({
-      error: 'Failed to add sensor',
-      message: error.message
-    });
-  }
-});
-
-/**
  * Update sensor
  * PUT /api/v1/devices/:uuid/sensors/:name
  * 
@@ -130,7 +65,7 @@ router.put('/devices/:uuid/sensors/:name', async (req, res) => {
     const updates = req.body;
 
     // Update sensor using sync service (handles dual-write)
-    const result = await deviceSensorSync.updateSensor(
+    const result = await deviceSensorSync.updateEndpoint(
       uuid,
       name,
       updates,
@@ -171,7 +106,7 @@ router.delete('/devices/:uuid/sensors/:name', async (req, res) => {
     const { uuid, name } = req.params;
 
     // Delete sensor using sync service (handles dual-write)
-    const result = await deviceSensorSync.deleteSensor(
+    const result = await deviceSensorSync.deleteEndpoint(
       uuid,
       name,
       (req as any).user?.id || 'system'

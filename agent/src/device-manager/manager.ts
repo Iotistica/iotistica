@@ -266,7 +266,6 @@ export class DeviceManager {
 		this.deviceInfo.deviceType = config.deviceType || this.deviceInfo.deviceType || 'generic';
 		this.deviceInfo.apiEndpoint = config.apiEndpoint || this.deviceInfo.apiEndpoint;
 		this.deviceInfo.provisioningApiKey = config.provisioningApiKey;
-		this.deviceInfo.applicationId = config.applicationId;
 		this.deviceInfo.macAddress = config.macAddress;
 		this.deviceInfo.osVersion = config.osVersion;
 		this.deviceInfo.agentVersion = config.agentVersion;		// If UUID is provided in config, use it (useful for pre-configured devices)
@@ -292,7 +291,6 @@ export class DeviceManager {
 				deviceName: this.deviceInfo.deviceName!,
 				deviceType: this.deviceInfo.deviceType!,
 				deviceApiKey: this.deviceInfo.deviceApiKey!,
-				applicationId: this.deviceInfo.applicationId,
 				macAddress: this.deviceInfo.macAddress,
 				osVersion: this.deviceInfo.osVersion,
 				agentVersion: this.deviceInfo.agentVersion,
@@ -339,7 +337,6 @@ export class DeviceManager {
 				uuid: this.deviceInfo.uuid,
 				deviceId: this.deviceInfo.deviceId,
 				deviceName: this.deviceInfo.deviceName,
-				applicationId: this.deviceInfo.applicationId,
 				mqttUsername: this.deviceInfo.mqttUsername,
 				mqttBrokerUrl: this.deviceInfo.mqttBrokerUrl,
 				mqttBrokerConfig: this.deviceInfo.mqttBrokerConfig,
@@ -575,7 +572,6 @@ export class DeviceManager {
 		this.deviceInfo.apiEndpoint = undefined;
 		this.deviceInfo.registeredAt = undefined;
 		this.deviceInfo.provisioned = false;
-		this.deviceInfo.applicationId = undefined;
 		
 		// Clear MQTT credentials (these are cloud-assigned)
 		this.deviceInfo.mqttUsername = undefined;
@@ -670,7 +666,7 @@ export class DeviceManager {
 		await safeDelete('service');
 		await safeDelete('app');
 		await safeDelete('image');
-		await safeDelete('sensor_outputs');
+		await safeDelete('endpoint_outputs');
 		await safeDelete('sensors');
 		
 		// Reset device info but preserve UUID for hardware identification
@@ -685,7 +681,6 @@ export class DeviceManager {
 		this.deviceInfo.apiEndpoint = undefined;
 		this.deviceInfo.registeredAt = undefined;
 		this.deviceInfo.provisioned = false;
-		this.deviceInfo.applicationId = undefined;
 		this.deviceInfo.macAddress = undefined;
 		this.deviceInfo.osVersion = undefined;
 		this.deviceInfo.agentVersion = undefined;
