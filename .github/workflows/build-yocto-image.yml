@@ -588,8 +588,8 @@ jobs:
           # Add meta-iotistic
           bitbake-layers add-layer ../../meta-iotistic || true
           
-          # Configure local.conf
-          cat >> conf/local.conf << 'EOF'
+          # Configure local.conf with proper variable substitution
+          cat >> conf/local.conf << EOF
           
           # IotisticOS Configuration
           # ========================
