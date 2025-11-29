@@ -299,11 +299,11 @@ jobs:
               dbus \
           "
           
-          # Networking with NetworkManager
+          # Basic networking (NetworkManager requires meta-openembedded)
           IMAGE_INSTALL:append = " \
-              networkmanager \
               wpa-supplicant \
-              iw \
+              iproute2 \
+              iputils \
           "
           
           # Container runtime essentials (simplified for dunfell compatibility)
