@@ -87,7 +87,7 @@ api:
   image:
     repository: iotistic/api
     tag: latest
-    pullPolicy: Never  # Use local images only (prevents pulling from registry)
+    pullPolicy: IfNotPresent  # Use local images only (prevents pulling from registry)
   replicas: 1
   port: 3002
   serviceType: NodePort
@@ -123,8 +123,8 @@ dashboard:
   enabled: true
   image:
     repository: iotistic/dashboard
-    tag: local-k8s
-    pullPolicy: Never  # Use local images only (prevents pulling from registry)
+    tag: latest
+    pullPolicy: IfNotPresent  # Use local images only (prevents pulling from registry)
   replicas: 1
   port: 80
   serviceType: NodePort

@@ -27,23 +27,23 @@ jobs:
         run: |
           kubectl get nodes -o wide
 
-      - name: Deploy simple app (helm)
+      - name: Deploy Iotistic NodePort (helm)
         if: ${{ inputs.destroy == false }}
         run: |
           set -e
-          CHART_PATH=./charts/simple-app
-          NAMESPACE=sample-app
-          helm upgrade --install simple-app "${CHART_PATH}" --namespace "${NAMESPACE}" --create-namespace
-          kubectl -n "${NAMESPACE}" rollout status deploy/simple-app --timeout=120s || true
+          CHART_PATH=./k8s/charts/iotistic
+          NAMESPACE=iotistic-nodeport
+          helm upgrade --install iotistic-nodeport "${CHART_PATH}" --namespace "${NAMESPACE}" --create-namespace
+          kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-nodeport --timeout=120s || true
           echo "Service info:"
-          kubectl -n "${NAMESPACE}" get svc simple-app -o wide
+          kubectl -n "${NAMESPACE}" get svc iotistic-nodeport -o wide
 
-      - name: Destroy deployed sample app (helm)
+      - name: Destroy deployed Iotistic NodePort (helm)
         if: ${{ inputs.destroy == true }}
         run: |
           set -e
-          NAMESPACE=sample-app
-          helm uninstall simple-app -n "${NAMESPACE}" || true
+          NAMESPACE=iotistic-nodeport
+          helm uninstall iotistic-nodeport -n "${NAMESPACE}" || true
           kubectl delete namespace "${NAMESPACE}" --wait --ignore-not-found
 
       - name: Final pods/services (debug)
