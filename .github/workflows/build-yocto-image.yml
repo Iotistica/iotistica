@@ -321,8 +321,6 @@ jobs:
               wget \
               ca-certificates \
           "
-                sudo apt-get update
-                sudo apt-get install -y software-properties-common
           
           # Iotistic agent for container orchestration
           IMAGE_INSTALL:append = " \
