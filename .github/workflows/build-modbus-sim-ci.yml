@@ -54,14 +54,14 @@ jobs:
           rm -rf ~/.cache/pip || true
 
   version:
-    name: Generate Version
+    name: Bump Version
     needs: test
     runs-on: [iotistic-lab-sc]
     permissions:
       contents: write
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      sha_short: ${{ steps.version.outputs.sha_short }}
+      package_version: ${{ steps.bump.outputs.package_version }}
+      sha_short: ${{ steps.bump.outputs.sha_short }}
     
     steps:
       - name: Checkout repository
@@ -69,24 +69,52 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Generate version from git
-        id: version
+      - name: Bump version in package.json
+        id: bump
         run: |
-          # Use date-based versioning: YYYY.MM.DD.BUILD_NUMBER
-          DATE_VERSION=$(date +'%Y.%m.%d')
-          BUILD_NUMBER=$(git rev-list --count HEAD -- sensors/modbus-simulator/)
-          VERSION="${DATE_VERSION}.${BUILD_NUMBER}"
+          cd sensors/modbus-simulator
           
-          echo "Generated version: $VERSION"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          # Check if package.json exists, if not create it
+          if [ ! -f package.json ]; then
+            echo '{"name":"modbus-simulator","version":"1.0.0"}' > package.json
+            git add package.json
+          fi
+          
+          # Get current version
+          CURRENT_VERSION=$(jq -r '.version' package.json)
+          echo "Current version: $CURRENT_VERSION"
+          
+          # Bump patch version (e.g., 1.0.0 -> 1.0.1)
+          IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
+          MAJOR="${VERSION_PARTS[0]}"
+          MINOR="${VERSION_PARTS[1]}"
+          PATCH="${VERSION_PARTS[2]}"
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+          
+          echo "New version: $NEW_VERSION"
+          
+          # Update package.json
+          jq --arg v "$NEW_VERSION" '.version = $v' package.json > tmp.json && mv tmp.json package.json
+          
+          # Set outputs
+          echo "package_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Commit and push version bump
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add sensors/modbus-simulator/package.json
+          git commit -m "chore: bump modbus-simulator version to ${{ steps.bump.outputs.package_version }} [skip ci]"
+          git push origin HEAD
 
       - name: Display version info
         run: |
-          echo "## Version Generated" >> $GITHUB_STEP_SUMMARY
+          echo "## Version Bumped" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Git SHA:** \`${{ steps.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**New Version:** \`${{ steps.bump.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ steps.bump.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
 
   buildx:
     name: Build & Push to Docker
@@ -103,16 +131,16 @@ jobs:
 
       - name: Display Version Update
         run: |
-          echo "## Building Version ${{ needs.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "## Building Version ${{ needs.version.outputs.package_version }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Platforms:** \`linux/amd64,linux/arm64,linux/arm/v7\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker Tags:" >> $GITHUB_STEP_SUMMARY
           echo "- \`iotistic/modbus-simulator:latest\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`iotistic/modbus-simulator:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/modbus-simulator:${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/modbus-simulator:${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -151,7 +179,7 @@ jobs:
           tags: |
             iotistic/modbus-simulator:latest
             iotistic/modbus-simulator:${{ needs.version.outputs.sha_short }}
-            iotistic/modbus-simulator:${{ needs.version.outputs.version }}
+            iotistic/modbus-simulator:${{ needs.version.outputs.package_version }}
 
       - name: Cleanup Docker build artifacts
         if: always()
@@ -202,17 +230,17 @@ jobs:
           echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
           
           # Pull the image (amd64 only for size check)
-          docker pull --platform linux/amd64 iotistic/modbus-simulator:${{ needs.version.outputs.version }}
+          docker pull --platform linux/amd64 iotistic/modbus-simulator:${{ needs.version.outputs.package_version }}
           
           # Get image size
-          SIZE_BYTES=$(docker image inspect iotistic/modbus-simulator:${{ needs.version.outputs.version }} --format='{{.Size}}')
+          SIZE_BYTES=$(docker image inspect iotistic/modbus-simulator:${{ needs.version.outputs.package_version }} --format='{{.Size}}')
           SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
           
           echo "size_mb=$SIZE_MB" >> $GITHUB_OUTPUT
           echo "size_bytes=$SIZE_BYTES" >> $GITHUB_OUTPUT
           
           # Get layer count
-          LAYERS=$(docker image inspect iotistic/modbus-simulator:${{ needs.version.outputs.version }} --format='{{len .RootFS.Layers}}')
+          LAYERS=$(docker image inspect iotistic/modbus-simulator:${{ needs.version.outputs.package_version }} --format='{{len .RootFS.Layers}}')
           echo "layers=$LAYERS" >> $GITHUB_OUTPUT
 
       - name: Generate Summary Report
@@ -221,7 +249,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           
           echo "## Version Information" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Platforms:** \`linux/amd64, linux/arm64, linux/arm/v7\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -233,7 +261,7 @@ jobs:
           echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
           echo "- \`iotistic/modbus-simulator:latest\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`iotistic/modbus-simulator:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/modbus-simulator:${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/modbus-simulator:${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           echo "## Changelog (Modbus Simulator)" >> $GITHUB_STEP_SUMMARY
@@ -259,7 +287,7 @@ jobs:
         if: always()
         run: |
           # Remove the pulled image from report job
-          docker rmi iotistic/modbus-simulator:${{ needs.version.outputs.version }} || true
+          docker rmi iotistic/modbus-simulator:${{ needs.version.outputs.package_version }} || true
           # Clean up old Docker images (keep last 3 versions)
           docker images 'iotistic/modbus-simulator' --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" | \
             sort -k2 -r | tail -n +4 | awk '{print $1}' | xargs -r docker rmi || true
