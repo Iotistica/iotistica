@@ -37,7 +37,7 @@ jobs:
           helm upgrade --install iotistic "${CHART_PATH}" --namespace "${NAMESPACE}" --create-namespace -f "${VALUES_FILE}"
           kubectl -n "${NAMESPACE}" rollout status deploy/iotistic --timeout=120s || true
           echo "Service info:"
-          kubectl -n "${NAMESPACE}" get svc iotistic -o wide
+          kubectl -n "${NAMESPACE}" get svc -o wide
 
       - name: Destroy deployed Iotistic NodePort (helm)
         if: ${{ inputs.destroy == true }}
