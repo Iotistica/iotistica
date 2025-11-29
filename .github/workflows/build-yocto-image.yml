@@ -714,6 +714,27 @@ jobs:
           
           source ../oe-init-build-env
           
+          # Verify configuration before building
+          echo "=== Verifying build configuration ==="
+          echo "Checking layers..."
+          bitbake-layers show-layers
+          
+          echo ""
+          echo "Checking DISTRO and MACHINE in local.conf..."
+          grep -E "^DISTRO|^MACHINE" conf/local.conf || echo "No DISTRO/MACHINE found in local.conf!"
+          
+          echo ""
+          echo "Checking if iotistic distro conf exists..."
+          IOTISTIC_CONF=$(find .. -name "iotistic.conf" -path "*/conf/distro/*" 2>/dev/null | head -n1)
+          if [ -n "$IOTISTIC_CONF" ]; then
+            echo "✓ Found: $IOTISTIC_CONF"
+          else
+            echo "❌ iotistic.conf not found in any layer!"
+            echo "Available distros:"
+            find .. -name "*.conf" -path "*/conf/distro/*" 2>/dev/null || echo "No distro configs found"
+          fi
+          
+          echo ""
           echo "Starting IotisticOS build..."
           echo "Building iotistic-image with:"
           echo "  - Read-only rootfs"
