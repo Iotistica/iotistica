@@ -887,7 +887,7 @@ jobs:
         run: |
           echo "=== Checking SQLite database for discovered endpoints ==="
           
-          DB_PATH="/app/data/device.sqlite"
+          DB_PATH="/var/lib/iotistic/agent/agent.db"
           
           if [ ! -f "$DB_PATH" ]; then
             echo "✗ SQLite database not found at $DB_PATH"
@@ -928,7 +928,7 @@ jobs:
         run: |
           echo "=== Verifying Modbus Discovery Results ==="
           
-          DB_PATH="/app/data/device.sqlite"
+          DB_PATH="/var/lib/iotistic/agent/agent.db"
           
           # Check for Modbus endpoints specifically
           MODBUS_COUNT=$(sudo sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM endpoints WHERE protocol = 'modbus';")
