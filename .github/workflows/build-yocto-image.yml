@@ -557,8 +557,10 @@ jobs:
           # Use Python 3.8 for older Yocto versions
           if [ "${{ inputs.yocto_version }}" = "dunfell" ] || [ "${{ inputs.yocto_version }}" = "kirkstone" ]; then
             echo "Using Python 3.8 for compatibility with ${{ inputs.yocto_version }}"
-            export PYTHON=$(which python3.8)
-            python3.8 --version
+            # Make python3 point to python3.8 system-wide
+            sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.8 1
+            sudo update-alternatives --set python3 /usr/bin/python3.8
+            python3 --version
           fi
           
           # Source Yocto environment
@@ -569,6 +571,11 @@ jobs:
       - name: Configure build
         run: |
           cd $BUILD_DIR/poky/build
+          
+          # Ensure Python 3.8 is active for older Yocto versions
+          if [ "${{ inputs.yocto_version }}" = "dunfell" ] || [ "${{ inputs.yocto_version }}" = "kirkstone" ]; then
+            sudo update-alternatives --set python3 /usr/bin/python3.8
+          fi
           
           # Add layers
           source ../oe-init-build-env
@@ -627,9 +634,9 @@ jobs:
         run: |
           cd $BUILD_DIR/poky/build
           
-          # Use Python 3.8 for older Yocto versions
+          # Ensure Python 3.8 is active for older Yocto versions
           if [ "${{ inputs.yocto_version }}" = "dunfell" ] || [ "${{ inputs.yocto_version }}" = "kirkstone" ]; then
-            export PYTHON=$(which python3.8)
+            sudo update-alternatives --set python3 /usr/bin/python3.8
           fi
           
           source ../oe-init-build-env
