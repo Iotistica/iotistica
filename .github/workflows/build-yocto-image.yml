@@ -262,6 +262,9 @@ jobs:
           VIRTUAL-RUNTIME_initscripts = ""
           VIRTUAL-RUNTIME_login_manager = "shadow-base"
           
+          # Use ipk package manager instead of RPM (fixes "No file attributes configured" error in dunfell)
+          PACKAGE_CLASSES = "package_ipk"
+          
           # Read-only root filesystem for reliability
           IMAGE_FEATURES:append = " read-only-rootfs"
           
