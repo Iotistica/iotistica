@@ -8,10 +8,10 @@ on:
         required: true
         type: choice
         options:
-          - scarthgap  # Latest LTS (5.0)
-          - kirkstone  # LTS (4.0)
-          - dunfell    # LTS (3.1)
-        default: kirkstone
+          - scarthgap  # Latest LTS (5.0) - Python 3.12+ compatible
+          - kirkstone  # LTS (4.0) - Requires Python 3.10 or older
+          - dunfell    # LTS (3.1) - Requires Python 3.8 or older
+        default: scarthgap
       machine:
         description: 'Target machine (e.g., raspberrypi4-64, qemux86-64)'
         required: true
