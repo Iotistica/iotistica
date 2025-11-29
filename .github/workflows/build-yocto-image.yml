@@ -171,6 +171,9 @@ jobs:
           LAYER_DIR="$BUILD_DIR/meta-iotistic"
           mkdir -p $LAYER_DIR/conf
           mkdir -p $LAYER_DIR/recipes-iotistic/agent
+          mkdir -p $LAYER_DIR/recipes-core/images
+          mkdir -p $LAYER_DIR/recipes-connectivity/networkmanager
+          mkdir -p $LAYER_DIR/recipes-support/resin-init
           
           # Layer configuration
           cat > $LAYER_DIR/conf/layer.conf << 'EOF'
@@ -187,6 +190,226 @@ jobs:
           
           LAYERDEPENDS_meta-iotistic = "core"
           LAYERSERIES_COMPAT_meta-iotistic = "kirkstone dunfell scarthgap"
+          EOF
+          
+          # IotisticOS distro configuration
+          cat > $LAYER_DIR/conf/distro/iotistic.conf << 'EOF'
+          # IotisticOS - IoT distribution with container orchestration
+          
+          require conf/distro/poky.conf
+          
+          DISTRO = "iotistic"
+          DISTRO_NAME = "IotisticOS"
+          DISTRO_VERSION = "1.0.0"
+          DISTRO_CODENAME = "iotistic-core"
+          
+          # Systemd as init system
+          DISTRO_FEATURES:append = " systemd"
+          DISTRO_FEATURES_BACKFILL_CONSIDERED = "sysvinit"
+          VIRTUAL-RUNTIME_init_manager = "systemd"
+          VIRTUAL-RUNTIME_initscripts = ""
+          VIRTUAL-RUNTIME_login_manager = "shadow-base"
+          
+          # Read-only root filesystem for reliability
+          IMAGE_FEATURES:append = " read-only-rootfs"
+          
+          # Networking support with WiFi and Bluetooth
+          DISTRO_FEATURES:append = " wifi bluetooth"
+          
+          # Container support
+          DISTRO_FEATURES:append = " virtualization"
+          
+          # Security features
+          DISTRO_FEATURES:append = " pam"
+          
+          # Remove unnecessary features for embedded
+          DISTRO_FEATURES:remove = "x11 wayland vulkan"
+          EOF
+          
+          # Custom image recipe
+          cat > $LAYER_DIR/recipes-core/images/iotistic-image.bb << 'EOF'
+          SUMMARY = "IotisticOS - IoT platform image with container orchestration"
+          DESCRIPTION = "Minimal embedded Linux with agent-based container orchestration"
+          LICENSE = "MIT"
+          
+          inherit core-image
+          
+          # Base system packages
+          IMAGE_INSTALL:append = " \
+              packagegroup-core-boot \
+              packagegroup-base-wifi \
+              ${CORE_IMAGE_EXTRA_INSTALL} \
+          "
+          
+          # Systemd and init
+          IMAGE_INSTALL:append = " \
+              systemd \
+              systemd-networkd \
+              systemd-resolved \
+              dbus \
+          "
+          
+          # Networking with NetworkManager
+          IMAGE_INSTALL:append = " \
+              networkmanager \
+              networkmanager-nmtui \
+              modemmanager \
+              wpa-supplicant \
+              iw \
+              wireless-regdb-static \
+          "
+          
+          # Container runtime essentials
+          IMAGE_INSTALL:append = " \
+              nodejs \
+              npm \
+              pm2 \
+              sqlite3 \
+              curl \
+              wget \
+              ca-certificates \
+          "
+          
+          # Iotistic agent for container orchestration
+          IMAGE_INSTALL:append = " \
+              iotistic-agent \
+          "
+          
+          # Development tools (removable for production)
+          IMAGE_INSTALL:append = " \
+              openssh \
+              openssh-sftp-server \
+              nano \
+              htop \
+              tmux \
+              git \
+              jq \
+          "
+          
+          # Filesystem utilities
+          IMAGE_INSTALL:append = " \
+              e2fsprogs \
+              e2fsprogs-resize2fs \
+              parted \
+              dosfstools \
+          "
+          
+          # Persistent data partition initialization
+          IMAGE_INSTALL:append = " \
+              iotistic-init-datapartition \
+          "
+          
+          # Read-only root with overlay for reliability
+          IMAGE_FEATURES:append = " read-only-rootfs"
+          
+          # Extra space for applications
+          IMAGE_ROOTFS_EXTRA_SPACE = "524288"
+          
+          # Boot partition size
+          BOOT_SPACE = "65536"
+          
+          # WIC image for SD card deployment
+          IMAGE_FSTYPES = "wic.bz2 tar.bz2"
+          WKS_FILE = "iotistic-raspberrypi.wks"
+          EOF
+          
+          # WIC partition layout (boot + rootfs + data)
+          cat > $LAYER_DIR/recipes-core/images/iotistic-raspberrypi.wks << 'EOF'
+          # IotisticOS partition layout
+          # - boot: FAT32 boot partition (kernel, device tree)
+          # - rootfs: ext4 read-only root filesystem
+          # - data: ext4 persistent data partition (for containers, configs)
+          
+          part /boot --source bootimg-partition --ondisk mmcblk0 --fstype=vfat --label boot --active --align 4096 --size 64M
+          part / --source rootfs --ondisk mmcblk0 --fstype=ext4 --label rootfs --align 4096 --size 2G
+          part /data --ondisk mmcblk0 --fstype=ext4 --label data --align 4096 --size 4G
+          EOF
+          
+          # Data partition init service
+          mkdir -p $LAYER_DIR/recipes-support/resin-init/files
+          cat > $LAYER_DIR/recipes-support/resin-init/iotistic-init-datapartition.bb << 'EOF'
+          SUMMARY = "Initialize persistent data partition"
+          LICENSE = "MIT"
+          LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
+          
+          SRC_URI = "file://iotistic-init-data.sh \
+                     file://iotistic-init-data.service"
+          
+          inherit systemd
+          
+          SYSTEMD_SERVICE:${PN} = "iotistic-init-data.service"
+          SYSTEMD_AUTO_ENABLE = "enable"
+          
+          do_install() {
+              install -d ${D}${sbindir}
+              install -m 0755 ${WORKDIR}/iotistic-init-data.sh ${D}${sbindir}/
+              
+              install -d ${D}${systemd_system_unitdir}
+              install -m 0644 ${WORKDIR}/iotistic-init-data.service ${D}${systemd_system_unitdir}/
+          }
+          EOF
+          
+          cat > $LAYER_DIR/recipes-support/resin-init/files/iotistic-init-data.sh << 'EOF'
+          #!/bin/sh
+          # Initialize /data partition on first boot
+          
+          set -e
+          
+          DATA_PARTITION="/dev/mmcblk0p3"
+          MOUNT_POINT="/data"
+          
+          # Check if data partition exists
+          if [ ! -b "$DATA_PARTITION" ]; then
+              echo "Data partition not found: $DATA_PARTITION"
+              exit 0
+          fi
+          
+          # Create mount point
+          mkdir -p "$MOUNT_POINT"
+          
+          # Check if already formatted
+          if ! blkid "$DATA_PARTITION" | grep -q "TYPE="; then
+              echo "Formatting data partition..."
+              mkfs.ext4 -F -L data "$DATA_PARTITION"
+          fi
+          
+          # Mount data partition
+          if ! mountpoint -q "$MOUNT_POINT"; then
+              echo "Mounting data partition..."
+              mount "$DATA_PARTITION" "$MOUNT_POINT"
+          fi
+          
+          # Create application directories
+          mkdir -p /data/iotistic
+          mkdir -p /data/docker
+          mkdir -p /data/logs
+          
+          # Link agent data directory
+          if [ ! -L /var/lib/iotistic ]; then
+              rm -rf /var/lib/iotistic
+              ln -s /data/iotistic /var/lib/iotistic
+          fi
+          
+          echo "Data partition initialized"
+          EOF
+          
+          cat > $LAYER_DIR/recipes-support/resin-init/files/iotistic-init-data.service << 'EOF'
+          [Unit]
+          Description=Initialize IotisticOS data partition
+          DefaultDependencies=no
+          After=systemd-udev-settle.service
+          Before=local-fs.target
+          RequiresMountsFor=/data
+          
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/usr/sbin/iotistic-init-data.sh
+          StandardOutput=journal+console
+          StandardError=journal+console
+          
+          [Install]
+          WantedBy=local-fs.target
           EOF
           
           echo "✓ meta-iotistic layer created"
@@ -335,37 +558,41 @@ jobs:
           # Configure local.conf
           cat >> conf/local.conf << 'EOF'
           
-          # Iotistic IoT Platform Configuration
+          # IotisticOS Configuration
+          # ========================
+          
+          # Use IotisticOS distro
+          DISTRO = "iotistic"
           MACHINE = "${{ inputs.machine }}"
           
-          # Use shared download directory
+          # Use shared download directory for build cache
           DL_DIR = "${{ env.DL_DIR }}"
           SSTATE_DIR = "${{ env.SSTATE_DIR }}"
           
-          # Parallel build settings (adjust for your runner)
+          # Parallel build settings
           BB_NUMBER_THREADS = "8"
           PARALLEL_MAKE = "-j 8"
           
-          # Add systemd support
-          DISTRO_FEATURES:append = " systemd"
-          VIRTUAL-RUNTIME_init_manager = "systemd"
-          DISTRO_FEATURES_BACKFILL_CONSIDERED = "sysvinit"
-          VIRTUAL-RUNTIME_initscripts = ""
+          # Read-only root filesystem
+          IMAGE_FEATURES:append = " read-only-rootfs"
           
-          # Add networking support
-          IMAGE_INSTALL:append = " openssh openssh-sftp-server"
-          
-          # Add Node.js and dependencies
-          IMAGE_INSTALL:append = " nodejs npm pm2 sqlite3"
-          
-          # Add Iotistic agent
-          IMAGE_INSTALL:append = " iotistic-agent"
-          
-          # Add useful tools
-          IMAGE_INSTALL:append = " curl wget nano htop tmux git"
-          
-          # Enable UART for Raspberry Pi
+          # Boot partition configuration
+          RPI_USE_U_BOOT = "1"
           ENABLE_UART = "1"
+          
+          # Package management for OTA updates
+          PACKAGE_CLASSES = "package_ipk"
+          EXTRA_IMAGE_FEATURES:append = " package-management"
+          
+          # Development features (remove for production)
+          EXTRA_IMAGE_FEATURES:append = " debug-tweaks"
+          EXTRA_IMAGE_FEATURES:append = " ssh-server-openssh"
+          
+          # Reduce image size
+          INHERIT += "rm_work"
+          
+          # License compliance
+          LICENSE_FLAGS_ACCEPTED:append = " commercial"
           EOF
           
           echo "✓ Build configuration complete"
@@ -375,13 +602,17 @@ jobs:
           cd $BUILD_DIR/poky/build
           source ../oe-init-build-env
           
-          echo "Starting Yocto build (this will take several hours)..."
-          echo "Building core-image-minimal with Iotistic agent..."
+          echo "Starting IotisticOS build..."
+          echo "Building iotistic-image with:"
+          echo "  - Read-only rootfs"
+          echo "  - Persistent /data partition"
+          echo "  - NetworkManager connectivity"
+          echo "  - Iotistic agent pre-installed"
           
-          # Build the image
-          bitbake core-image-minimal
+          # Build the custom IotisticOS image
+          bitbake iotistic-image
           
-          echo "✓ Image built successfully"
+          echo "✓ IotisticOS image built successfully"
 
       - name: Show build artifacts
         run: |
@@ -475,20 +706,47 @@ jobs:
         if: always()
         run: |
           {
-            echo "## Yocto Build Summary"
+            echo "## IotisticOS Build Summary"
             echo ""
             echo "### Configuration"
+            echo "- **Distribution**: IotisticOS v1.0.0"
             echo "- **Yocto Version**: ${{ inputs.yocto_version }}"
             echo "- **Machine**: ${{ inputs.machine }}"
             echo "- **Agent Version**: ${{ steps.version.outputs.agent_version }}"
             echo ""
+            echo "### Architecture Features"
+            echo "- ✅ Read-only root filesystem"
+            echo "- ✅ Persistent /data partition (4GB)"
+            echo "- ✅ Systemd init system"
+            echo "- ✅ NetworkManager connectivity"
+            echo "- ✅ Container orchestration agent"
+            echo "- ✅ OTA update capable"
+            echo ""
+            echo "### Partition Layout"
+            echo "\`\`\`"
+            echo "/dev/mmcblk0p1: /boot (64MB FAT32) - Kernel + device tree"
+            echo "/dev/mmcblk0p2: /     (2GB ext4)   - Read-only rootfs"
+            echo "/dev/mmcblk0p3: /data (4GB ext4)   - Persistent data"
+            echo "\`\`\`"
+            echo ""
             echo "### Build Status"
-            if [ -f "$BUILD_DIR/poky/build/tmp/deploy/images/${{ inputs.machine }}/core-image-minimal-${{ inputs.machine }}.wic.bz2" ]; then
+            if [ -f "$BUILD_DIR/poky/build/tmp/deploy/images/${{ inputs.machine }}/iotistic-image-${{ inputs.machine }}.wic.bz2" ]; then
               echo "✅ Build successful"
               echo ""
               echo "### Artifacts"
               echo "\`\`\`"
-              ls -lh $BUILD_DIR/poky/build/tmp/deploy/images/${{ inputs.machine }}/ | grep -E "\.(wic|ext4|tar)" || echo "No images found"
+              ls -lh $BUILD_DIR/poky/build/tmp/deploy/images/${{ inputs.machine }}/ | grep -E "iotistic-image.*\.(wic|tar)" || echo "No images found"
+              echo "\`\`\`"
+              echo ""
+              echo "### Flash Instructions"
+              echo "\`\`\`bash"
+              echo "# Extract and flash to SD card (Linux/macOS)"
+              echo "bunzip2 iotistic-image-${{ inputs.machine }}.wic.bz2"
+              echo "sudo dd if=iotistic-image-${{ inputs.machine }}.wic of=/dev/sdX bs=4M status=progress"
+              echo "sync"
+              echo ""
+              echo "# Or use Etcher for GUI flashing (all platforms)"
+              echo "# https://etcher.balena.io/"
               echo "\`\`\`"
             else
               echo "❌ Build failed or image not found"
