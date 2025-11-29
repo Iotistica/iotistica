@@ -170,6 +170,7 @@ jobs:
           
           LAYER_DIR="$BUILD_DIR/meta-iotistic"
           mkdir -p $LAYER_DIR/conf
+          mkdir -p $LAYER_DIR/conf/distro
           mkdir -p $LAYER_DIR/recipes-iotistic/agent
           mkdir -p $LAYER_DIR/recipes-core/images
           mkdir -p $LAYER_DIR/recipes-connectivity/networkmanager
