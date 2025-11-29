@@ -588,6 +588,11 @@ jobs:
           # Add meta-iotistic
           bitbake-layers add-layer ../../meta-iotistic || true
           
+          # Set variables for local.conf
+          MACHINE_VAR="${{ inputs.machine }}"
+          DL_DIR_VAR="${{ env.DL_DIR }}"
+          SSTATE_DIR_VAR="${{ env.SSTATE_DIR }}"
+          
           # Configure local.conf with proper variable substitution
           cat >> conf/local.conf << EOF
           
@@ -596,11 +601,11 @@ jobs:
           
           # Use IotisticOS distro
           DISTRO = "iotistic"
-          MACHINE = "${{ inputs.machine }}"
+          MACHINE = "${MACHINE_VAR}"
           
           # Use shared download directory for build cache
-          DL_DIR = "${{ env.DL_DIR }}"
-          SSTATE_DIR = "${{ env.SSTATE_DIR }}"
+          DL_DIR = "${DL_DIR_VAR}"
+          SSTATE_DIR = "${SSTATE_DIR_VAR}"
           
           # Parallel build settings
           BB_NUMBER_THREADS = "8"
