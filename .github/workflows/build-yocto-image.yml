@@ -1,0 +1,481 @@
+name: Build Yocto Linux Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      yocto_version:
+        description: 'Yocto release (e.g., kirkstone, dunfell, scarthgap)'
+        required: true
+        type: choice
+        options:
+          - scarthgap  # Latest LTS (5.0)
+          - kirkstone  # LTS (4.0)
+          - dunfell    # LTS (3.1)
+        default: kirkstone
+      machine:
+        description: 'Target machine (e.g., raspberrypi4-64, qemux86-64)'
+        required: true
+        type: string
+        default: 'raspberrypi4-64'
+      agent_version:
+        description: 'Agent version to embed (default: latest from package.json)'
+        required: false
+        type: string
+      include_agent:
+        description: 'Include Iotistic agent in image'
+        required: true
+        type: boolean
+        default: true
+  schedule:
+    # Build weekly on Sunday at 3 AM UTC
+    - cron: '0 3 * * 0'
+
+env:
+  # Yocto build requires lots of disk space
+  BUILD_DIR: /opt/yocto-builds
+  DL_DIR: /opt/yocto-downloads
+  SSTATE_DIR: /opt/yocto-sstate-cache
+
+jobs:
+  build-yocto-image:
+    name: Build Yocto Image
+    runs-on: [iotistic-lab-sc]  # Self-hosted runner with lots of disk space
+    timeout-minutes: 480  # 8 hours for full build
+    
+    steps:
+      - name: Check disk space
+        run: |
+          echo "=== Disk Space Before Build ==="
+          df -h
+          
+          # Yocto needs at least 100GB free
+          AVAILABLE=$(df -BG /opt | tail -1 | awk '{print $4}' | sed 's/G//')
+          if [ "$AVAILABLE" -lt 100 ]; then
+            echo "❌ Insufficient disk space: ${AVAILABLE}GB available, 100GB required"
+            exit 1
+          fi
+          
+          echo "✓ Sufficient disk space: ${AVAILABLE}GB available"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine agent version
+        id: version
+        run: |
+          if [ -n "${{ inputs.agent_version }}" ]; then
+            AGENT_VERSION="${{ inputs.agent_version }}"
+          else
+            AGENT_VERSION=$(jq -r '.version' agent/package.json)
+          fi
+          
+          echo "agent_version=$AGENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Building with agent version: $AGENT_VERSION"
+
+      - name: Install Yocto dependencies
+        run: |
+          echo "Installing Yocto build dependencies..."
+          
+          # Check if already installed
+          if command -v bitbake &> /dev/null; then
+            echo "✓ Yocto tools already installed"
+            exit 0
+          fi
+          
+          # Install dependencies (Ubuntu/Debian)
+          sudo apt-get update
+          sudo apt-get install -y \
+            gawk wget git diffstat unzip texinfo gcc build-essential \
+            chrpath socat cpio python3 python3-pip python3-pexpect \
+            xz-utils debianutils iputils-ping python3-git python3-jinja2 \
+            libegl1-mesa libsdl1.2-dev pylint xterm python3-subunit mesa-common-dev \
+            zstd liblz4-tool file locales libacl1
+          
+          # Set locale
+          sudo locale-gen en_US.UTF-8
+          
+          echo "✓ Dependencies installed"
+
+      - name: Setup Yocto build directories
+        run: |
+          echo "Setting up Yocto build directories..."
+          
+          # Create persistent directories
+          sudo mkdir -p $BUILD_DIR
+          sudo mkdir -p $DL_DIR
+          sudo mkdir -p $SSTATE_DIR
+          
+          # Set ownership to runner user
+          sudo chown -R $(whoami):$(whoami) $BUILD_DIR
+          sudo chown -R $(whoami):$(whoami) $DL_DIR
+          sudo chown -R $(whoami):$(whoami) $SSTATE_DIR
+          
+          echo "✓ Build directories ready"
+
+      - name: Clone Poky (Yocto reference distribution)
+        run: |
+          YOCTO_VERSION="${{ inputs.yocto_version }}"
+          
+          if [ -d "$BUILD_DIR/poky" ]; then
+            echo "Poky already cloned, updating..."
+            cd $BUILD_DIR/poky
+            git fetch origin
+            git checkout $YOCTO_VERSION
+            git pull origin $YOCTO_VERSION
+          else
+            echo "Cloning Poky ($YOCTO_VERSION)..."
+            cd $BUILD_DIR
+            git clone -b $YOCTO_VERSION git://git.yoctoproject.org/poky.git
+          fi
+          
+          echo "✓ Poky ready (branch: $YOCTO_VERSION)"
+
+      - name: Clone meta-raspberrypi layer
+        if: contains(inputs.machine, 'raspberrypi')
+        run: |
+          YOCTO_VERSION="${{ inputs.yocto_version }}"
+          
+          if [ -d "$BUILD_DIR/meta-raspberrypi" ]; then
+            echo "meta-raspberrypi already cloned, updating..."
+            cd $BUILD_DIR/meta-raspberrypi
+            git fetch origin
+            git checkout $YOCTO_VERSION
+            git pull origin $YOCTO_VERSION
+          else
+            echo "Cloning meta-raspberrypi ($YOCTO_VERSION)..."
+            cd $BUILD_DIR
+            git clone -b $YOCTO_VERSION https://github.com/agherzan/meta-raspberrypi.git
+          fi
+          
+          echo "✓ meta-raspberrypi ready"
+
+      - name: Create meta-iotistic layer
+        run: |
+          echo "Creating custom meta-iotistic layer..."
+          
+          LAYER_DIR="$BUILD_DIR/meta-iotistic"
+          mkdir -p $LAYER_DIR/conf
+          mkdir -p $LAYER_DIR/recipes-iotistic/agent
+          
+          # Layer configuration
+          cat > $LAYER_DIR/conf/layer.conf << 'EOF'
+          # We have a conf and classes directory, add to BBPATH
+          BBPATH .= ":${LAYERDIR}"
+          
+          # We have recipes-* directories, add to BBFILES
+          BBFILES += "${LAYERDIR}/recipes-*/*/*.bb \
+                      ${LAYERDIR}/recipes-*/*/*.bbappend"
+          
+          BBFILE_COLLECTIONS += "meta-iotistic"
+          BBFILE_PATTERN_meta-iotistic = "^${LAYERDIR}/"
+          BBFILE_PRIORITY_meta-iotistic = "6"
+          
+          LAYERDEPENDS_meta-iotistic = "core"
+          LAYERSERIES_COMPAT_meta-iotistic = "kirkstone dunfell scarthgap"
+          EOF
+          
+          echo "✓ meta-iotistic layer created"
+
+      - name: Create agent recipe
+        if: inputs.include_agent == true
+        run: |
+          LAYER_DIR="$BUILD_DIR/meta-iotistic"
+          AGENT_VERSION="${{ steps.version.outputs.agent_version }}"
+          
+          echo "Creating iotistic-agent recipe..."
+          
+          # Create recipe directory
+          mkdir -p $LAYER_DIR/recipes-iotistic/agent/files
+          
+          # Copy agent files
+          cp -r agent/* $LAYER_DIR/recipes-iotistic/agent/files/
+          
+          # Create BitBake recipe
+          cat > $LAYER_DIR/recipes-iotistic/agent/iotistic-agent_${AGENT_VERSION}.bb << 'EOF'
+          SUMMARY = "Iotistic IoT Device Agent"
+          DESCRIPTION = "Container orchestrator and cloud sync agent for Iotistic IoT platform"
+          LICENSE = "MIT"
+          LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
+          
+          DEPENDS = "nodejs-native"
+          RDEPENDS:${PN} = "nodejs pm2 sqlite3"
+          
+          SRC_URI = "file://*"
+          S = "${WORKDIR}"
+          
+          inherit systemd
+          
+          SYSTEMD_SERVICE:${PN} = "iotistic-agent.service"
+          SYSTEMD_AUTO_ENABLE = "enable"
+          
+          do_install() {
+              # Install agent to /opt/iotistic/agent
+              install -d ${D}/opt/iotistic/agent
+              cp -r ${S}/* ${D}/opt/iotistic/agent/
+              
+              # Install systemd service
+              install -d ${D}${systemd_system_unitdir}
+              cat > ${D}${systemd_system_unitdir}/iotistic-agent.service << 'SERVICE'
+          [Unit]
+          Description=Iotistic Device Agent
+          After=network-online.target
+          Wants=network-online.target
+          
+          [Service]
+          Type=forking
+          User=iotistic
+          Group=iotistic
+          WorkingDirectory=/opt/iotistic/agent
+          EnvironmentFile=/etc/iotistic/agent.env
+          ExecStart=/usr/bin/pm2 start /opt/iotistic/agent/dist/index.js --name iotistic-agent --update-env
+          ExecStop=/usr/bin/pm2 stop iotistic-agent
+          ExecReload=/usr/bin/pm2 reload iotistic-agent
+          Restart=always
+          RestartSec=10
+          StandardOutput=journal
+          StandardError=journal
+          SyslogIdentifier=iotistic-agent
+          
+          [Install]
+          WantedBy=multi-user.target
+          SERVICE
+              
+              # Create directories
+              install -d ${D}/var/lib/iotistic/agent
+              install -d ${D}/var/log/iotistic
+              install -d ${D}/etc/iotistic
+              
+              # Create default environment file
+              cat > ${D}/etc/iotistic/agent.env << 'ENVFILE'
+          # Iotistic Agent Configuration
+          NODE_ENV=production
+          LOG_LEVEL=info
+          CLOUD_API_ENDPOINT=https://api.iotistic.ca
+          IOTISTIC_DEVICE_PORT=48484
+          ORCHESTRATOR_INTERVAL=30000
+          POLL_INTERVAL_MS=30000
+          REPORT_INTERVAL_MS=60000
+          ENVFILE
+          }
+          
+          do_compile() {
+              # Build agent
+              cd ${S}
+              npm ci --production
+              npm run build
+          }
+          
+          pkg_postinst:${PN}() {
+              #!/bin/sh -e
+              if [ -z "$D" ]; then
+                  # Create iotistic user/group
+                  if ! getent group iotistic >/dev/null; then
+                      groupadd -r iotistic
+                  fi
+                  if ! getent passwd iotistic >/dev/null; then
+                      useradd -r -g iotistic -d /opt/iotistic/agent -s /sbin/nologin -c "Iotistic Agent" iotistic
+                  fi
+                  
+                  # Set permissions
+                  chown -R iotistic:iotistic /opt/iotistic/agent
+                  chown -R iotistic:iotistic /var/lib/iotistic
+                  chown -R iotistic:iotistic /var/log/iotistic
+                  chmod 600 /etc/iotistic/agent.env
+              fi
+          }
+          
+          FILES:${PN} += "/opt/iotistic/agent/*"
+          FILES:${PN} += "/var/lib/iotistic/*"
+          FILES:${PN} += "/var/log/iotistic/*"
+          FILES:${PN} += "/etc/iotistic/*"
+          FILES:${PN} += "${systemd_system_unitdir}/iotistic-agent.service"
+          EOF
+          
+          echo "✓ Agent recipe created"
+
+      - name: Initialize build environment
+        run: |
+          cd $BUILD_DIR/poky
+          
+          # Source Yocto environment
+          source oe-init-build-env build
+          
+          echo "✓ Build environment initialized"
+
+      - name: Configure build
+        run: |
+          cd $BUILD_DIR/poky/build
+          
+          # Add layers
+          source ../oe-init-build-env
+          
+          # Add meta-raspberrypi if needed
+          if [[ "${{ inputs.machine }}" == *"raspberrypi"* ]]; then
+            bitbake-layers add-layer ../../meta-raspberrypi || true
+          fi
+          
+          # Add meta-iotistic
+          bitbake-layers add-layer ../../meta-iotistic || true
+          
+          # Configure local.conf
+          cat >> conf/local.conf << 'EOF'
+          
+          # Iotistic IoT Platform Configuration
+          MACHINE = "${{ inputs.machine }}"
+          
+          # Use shared download directory
+          DL_DIR = "${{ env.DL_DIR }}"
+          SSTATE_DIR = "${{ env.SSTATE_DIR }}"
+          
+          # Parallel build settings (adjust for your runner)
+          BB_NUMBER_THREADS = "8"
+          PARALLEL_MAKE = "-j 8"
+          
+          # Add systemd support
+          DISTRO_FEATURES:append = " systemd"
+          VIRTUAL-RUNTIME_init_manager = "systemd"
+          DISTRO_FEATURES_BACKFILL_CONSIDERED = "sysvinit"
+          VIRTUAL-RUNTIME_initscripts = ""
+          
+          # Add networking support
+          IMAGE_INSTALL:append = " openssh openssh-sftp-server"
+          
+          # Add Node.js and dependencies
+          IMAGE_INSTALL:append = " nodejs npm pm2 sqlite3"
+          
+          # Add Iotistic agent
+          IMAGE_INSTALL:append = " iotistic-agent"
+          
+          # Add useful tools
+          IMAGE_INSTALL:append = " curl wget nano htop tmux git"
+          
+          # Enable UART for Raspberry Pi
+          ENABLE_UART = "1"
+          EOF
+          
+          echo "✓ Build configuration complete"
+
+      - name: Build image
+        run: |
+          cd $BUILD_DIR/poky/build
+          source ../oe-init-build-env
+          
+          echo "Starting Yocto build (this will take several hours)..."
+          echo "Building core-image-minimal with Iotistic agent..."
+          
+          # Build the image
+          bitbake core-image-minimal
+          
+          echo "✓ Image built successfully"
+
+      - name: Show build artifacts
+        run: |
+          cd $BUILD_DIR/poky/build
+          
+          echo "=== Build Artifacts ==="
+          ls -lh tmp/deploy/images/${{ inputs.machine }}/
+          
+          # Find the image file
+          IMAGE_FILE=$(ls tmp/deploy/images/${{ inputs.machine }}/*.wic.bz2 2>/dev/null || \
+                       ls tmp/deploy/images/${{ inputs.machine }}/*.rootfs.ext4 2>/dev/null || \
+                       echo "No image found")
+          
+          if [ "$IMAGE_FILE" != "No image found" ]; then
+            IMAGE_SIZE=$(du -h "$IMAGE_FILE" | cut -f1)
+            echo "✓ Image: $(basename $IMAGE_FILE) ($IMAGE_SIZE)"
+          else
+            echo "⚠ No standard image format found"
+          fi
+
+      - name: Package artifacts
+        run: |
+          cd $BUILD_DIR/poky/build
+          
+          ARTIFACT_DIR="${{ github.workspace }}/yocto-artifacts"
+          mkdir -p $ARTIFACT_DIR
+          
+          # Copy images
+          cp tmp/deploy/images/${{ inputs.machine }}/*.wic.bz2 $ARTIFACT_DIR/ 2>/dev/null || true
+          cp tmp/deploy/images/${{ inputs.machine }}/*.rootfs.ext4 $ARTIFACT_DIR/ 2>/dev/null || true
+          cp tmp/deploy/images/${{ inputs.machine }}/*.rootfs.tar.bz2 $ARTIFACT_DIR/ 2>/dev/null || true
+          
+          # Create manifest
+          cat > $ARTIFACT_DIR/manifest.txt << EOF
+          Yocto Build Manifest
+          ====================
+          Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          Yocto Version: ${{ inputs.yocto_version }}
+          Machine: ${{ inputs.machine }}
+          Agent Version: ${{ steps.version.outputs.agent_version }}
+          
+          Build Configuration:
+          - Systemd init system
+          - Node.js runtime
+          - PM2 process manager
+          - Iotistic agent pre-installed
+          
+          Images:
+          $(ls -lh $ARTIFACT_DIR/)
+          EOF
+          
+          cat $ARTIFACT_DIR/manifest.txt
+          
+          echo "✓ Artifacts packaged"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: yocto-image-${{ inputs.machine }}-${{ steps.version.outputs.agent_version }}
+          path: yocto-artifacts/
+          retention-days: 30
+          compression-level: 0  # Already compressed
+
+      - name: Check disk space after build
+        if: always()
+        run: |
+          echo "=== Disk Space After Build ==="
+          df -h
+          
+          echo ""
+          echo "=== Build Directory Size ==="
+          du -sh $BUILD_DIR/* 2>/dev/null || true
+
+      - name: Cleanup old builds
+        if: always()
+        run: |
+          echo "Cleaning up old build artifacts..."
+          
+          # Keep sstate-cache and downloads, remove tmp directory
+          if [ -d "$BUILD_DIR/poky/build/tmp" ]; then
+            echo "Removing tmp directory..."
+            rm -rf $BUILD_DIR/poky/build/tmp
+          fi
+          
+          # Clean old downloads (keep last 30 days)
+          find $DL_DIR -type f -mtime +30 -delete 2>/dev/null || true
+          
+          echo "✓ Cleanup complete"
+
+      - name: Generate build summary
+        if: always()
+        run: |
+          {
+            echo "## Yocto Build Summary"
+            echo ""
+            echo "### Configuration"
+            echo "- **Yocto Version**: ${{ inputs.yocto_version }}"
+            echo "- **Machine**: ${{ inputs.machine }}"
+            echo "- **Agent Version**: ${{ steps.version.outputs.agent_version }}"
+            echo ""
+            echo "### Build Status"
+            if [ -f "$BUILD_DIR/poky/build/tmp/deploy/images/${{ inputs.machine }}/core-image-minimal-${{ inputs.machine }}.wic.bz2" ]; then
+              echo "✅ Build successful"
+              echo ""
+              echo "### Artifacts"
+              echo "\`\`\`"
+              ls -lh $BUILD_DIR/poky/build/tmp/deploy/images/${{ inputs.machine }}/ | grep -E "\.(wic|ext4|tar)" || echo "No images found"
+              echo "\`\`\`"
+            else
+              echo "❌ Build failed or image not found"
+            fi
+          } >> $GITHUB_STEP_SUMMARY
