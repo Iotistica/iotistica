@@ -32,8 +32,9 @@ jobs:
         run: |
           set -e
           CHART_PATH=./k8s/charts/iotistic
+          VALUES_FILE=./k8s/charts/iotistic/values.yaml
           NAMESPACE=iotistic-nodeport
-          helm upgrade --install iotistic "${CHART_PATH}" --namespace "${NAMESPACE}" --create-namespace
+          helm upgrade --install iotistic "${CHART_PATH}" --namespace "${NAMESPACE}" --create-namespace -f "${VALUES_FILE}"
           kubectl -n "${NAMESPACE}" rollout status deploy/iotistic --timeout=120s || true
           echo "Service info:"
           kubectl -n "${NAMESPACE}" get svc iotistic -o wide
