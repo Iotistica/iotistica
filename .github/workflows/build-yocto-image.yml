@@ -737,12 +737,12 @@ jobs:
           # Source build environment (specify build dir to avoid creating new one)
           source oe-init-build-env build
           
-          # FORCE CLEAN: Remove RPM cache completely (one-time fix for package manager switch)
-          echo "=== Cleaning RPM cache ==="
+          # Clean only package manager cache (preserve sstate-control for build state tracking)
+          echo "=== Cleaning package manager cache ==="
           if [ -d tmp ]; then
-            echo "Removing tmp/cache and tmp/work to ensure IPK is used..."
-            rm -rf tmp/cache tmp/work tmp/sstate-control
-            echo "✓ Cache directories removed"
+            echo "Removing tmp/cache and tmp/work (preserving sstate-control)..."
+            rm -rf tmp/cache tmp/work
+            echo "✓ Package cache cleaned, build state tracking preserved"
           fi
           
           # Verify configuration before building
