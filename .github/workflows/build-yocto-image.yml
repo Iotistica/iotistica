@@ -554,12 +554,16 @@ jobs:
         run: |
           cd $BUILD_DIR/poky
           
-          # Use Python 3.8 for older Yocto versions
+          # Set Python 3.8 for Yocto builds (don't change system default)
           if [ "${{ inputs.yocto_version }}" = "dunfell" ] || [ "${{ inputs.yocto_version }}" = "kirkstone" ]; then
-            echo "Using Python 3.8 for compatibility with ${{ inputs.yocto_version }}"
-            # Make python3 point to python3.8 system-wide
-            sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.8 1
-            sudo update-alternatives --set python3 /usr/bin/python3.8
+            echo "Configuring Python 3.8 for Yocto ${{ inputs.yocto_version }}"
+            export PYTHON=/usr/bin/python3.8
+            # Create a wrapper to ensure bitbake uses Python 3.8
+            mkdir -p $HOME/.local/bin
+            echo '#!/bin/bash' > $HOME/.local/bin/python3
+            echo 'exec /usr/bin/python3.8 "$@"' >> $HOME/.local/bin/python3
+            chmod +x $HOME/.local/bin/python3
+            export PATH="$HOME/.local/bin:$PATH"
             python3 --version
           fi
           
@@ -572,9 +576,9 @@ jobs:
         run: |
           cd $BUILD_DIR/poky/build
           
-          # Ensure Python 3.8 is active for older Yocto versions
+          # Set Python 3.8 for older Yocto versions (don't change system default)
           if [ "${{ inputs.yocto_version }}" = "dunfell" ] || [ "${{ inputs.yocto_version }}" = "kirkstone" ]; then
-            sudo update-alternatives --set python3 /usr/bin/python3.8
+            export PATH="$HOME/.local/bin:$PATH"
           fi
           
           # Add layers
@@ -639,9 +643,9 @@ jobs:
         run: |
           cd $BUILD_DIR/poky/build
           
-          # Ensure Python 3.8 is active for older Yocto versions
+          # Set Python 3.8 for older Yocto versions (don't change system default)
           if [ "${{ inputs.yocto_version }}" = "dunfell" ] || [ "${{ inputs.yocto_version }}" = "kirkstone" ]; then
-            sudo update-alternatives --set python3 /usr/bin/python3.8
+            export PATH="$HOME/.local/bin:$PATH"
           fi
           
           source ../oe-init-build-env
