@@ -96,6 +96,9 @@ jobs:
             libsdl1.2-dev pylint xterm python3-subunit mesa-common-dev \
             zstd liblz4-tool file locales libacl1
           
+          # Install pyinotify for older Yocto versions (fixes asyncore issue on Python 3.12+)
+          sudo pip3 install --break-system-packages pyinotify || sudo pip3 install pyinotify
+          
           # Set locale
           sudo locale-gen en_US.UTF-8
           
