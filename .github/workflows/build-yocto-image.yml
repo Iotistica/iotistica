@@ -77,6 +77,33 @@ jobs:
           echo "agent_version=$AGENT_VERSION" >> $GITHUB_OUTPUT
           echo "Building with agent version: $AGENT_VERSION"
 
+      - name: Fix Python alternatives if broken
+        run: |
+          echo "Checking Python configuration..."
+          
+          # Check if python3 is broken
+          if ! python3 --version 2>/dev/null; then
+            echo "Python3 appears broken, attempting to fix..."
+            
+            # Find the original system Python
+            SYSTEM_PYTHON=$(ls /usr/bin/python3.* | grep -E 'python3\.[0-9]+$' | grep -v python3.8 | head -n1)
+            
+            if [ -n "$SYSTEM_PYTHON" ]; then
+              echo "Found system Python: $SYSTEM_PYTHON"
+              # Remove all python3 alternatives
+              sudo update-alternatives --remove-all python3 2>/dev/null || true
+              # Set system Python as default
+              sudo update-alternatives --install /usr/bin/python3 python3 $SYSTEM_PYTHON 100
+              sudo update-alternatives --set python3 $SYSTEM_PYTHON
+              python3 --version
+              echo "✓ Python3 fixed"
+            else
+              echo "⚠ Could not find system Python, skipping fix"
+            fi
+          else
+            echo "✓ Python3 is working: $(python3 --version)"
+          fi
+
       - name: Install Yocto dependencies
         run: |
           echo "Installing Yocto build dependencies..."
