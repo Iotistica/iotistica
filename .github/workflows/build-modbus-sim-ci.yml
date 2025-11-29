@@ -48,6 +48,12 @@ jobs:
           cat vendors/dataPoints.json | jq . > /dev/null
           echo "✅ vendors/dataPoints.json is valid JSON"
 
+      - name: Cleanup test artifacts
+        if: always()
+        run: |
+          pip cache purge || true
+          rm -rf ~/.cache/pip || true
+
   version:
     name: Generate Version
     needs: test
@@ -148,6 +154,16 @@ jobs:
             iotistic/modbus-simulator:${{ needs.version.outputs.sha_short }}
             iotistic/modbus-simulator:${{ needs.version.outputs.version }}
 
+      - name: Cleanup Docker build artifacts
+        if: always()
+        run: |
+          # Remove dangling images
+          docker image prune -f
+          # Remove build cache
+          rm -rf /tmp/.buildx-cache || true
+          # Clean up Docker builder cache
+          docker buildx prune -f --keep-storage 5GB || true
+
   report:
     name: Generate Reports
     needs: [version, buildx]
@@ -239,3 +255,16 @@ jobs:
           
           echo "## Workflow Status" >> $GITHUB_STEP_SUMMARY
           echo "All jobs completed successfully! 🎉" >> $GITHUB_STEP_SUMMARY
+
+      - name: Final cleanup
+        if: always()
+        run: |
+          # Remove the pulled image from report job
+          docker rmi iotistic/modbus-simulator:${{ needs.version.outputs.version }} || true
+          # Clean up old Docker images (keep last 3 versions)
+          docker images 'iotistic/modbus-simulator' --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" | \
+            sort -k2 -r | tail -n +4 | awk '{print $1}' | xargs -r docker rmi || true
+          # Remove dangling images
+          docker image prune -f
+          # Clean up workspace artifacts
+          rm -f changelog.txt changelog_summary.txt || true
