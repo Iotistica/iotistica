@@ -737,6 +737,18 @@ jobs:
           # Source build environment (specify build dir to avoid creating new one)
           source oe-init-build-env build
           
+          # Clean build if package manager changed from RPM to IPK
+          if [ -f tmp/cache/bb_persist_data.sqlite3 ]; then
+            echo "Checking for package manager change..."
+            if grep -q "package_rpm" tmp/cache/bb_persist_data.sqlite3 2>/dev/null; then
+              echo "Detected RPM package manager in cache, cleaning build to switch to IPK..."
+              bitbake -c cleanall iotistic-image || true
+              rm -rf tmp/cache/*
+              rm -rf tmp/work/*
+              echo "✓ Build cache cleaned"
+            fi
+          fi
+          
           # Verify configuration before building
           echo "=== Verifying build configuration ==="
           echo "Checking layers..."
