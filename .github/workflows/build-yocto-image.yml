@@ -636,36 +636,36 @@ jobs:
           # Check if layers exist before adding
           echo ""
           echo "=== Checking layer directories ==="
-          ls -la ../ | grep meta || echo "No meta layers found"
+          ls -la ../../ | grep meta || echo "No meta layers found"
           
           # Add meta-raspberrypi if needed
           if [[ "${{ inputs.machine }}" == *"raspberrypi"* ]]; then
             echo ""
             echo "Adding meta-raspberrypi layer..."
-            if [ -d "../meta-raspberrypi" ]; then
-              bitbake-layers add-layer ../meta-raspberrypi
+            if [ -d "../../meta-raspberrypi" ]; then
+              bitbake-layers add-layer ../../meta-raspberrypi
               echo "✓ meta-raspberrypi added"
             else
-              echo "❌ meta-raspberrypi directory not found at ../meta-raspberrypi"
+              echo "❌ meta-raspberrypi directory not found at ../../meta-raspberrypi"
             fi
           fi
           
           # Add meta-iotistic
           echo ""
           echo "Adding meta-iotistic layer..."
-          if [ -d "../meta-iotistic" ]; then
-            if [ -f "../meta-iotistic/conf/layer.conf" ]; then
-              bitbake-layers add-layer ../meta-iotistic
+          if [ -d "../../meta-iotistic" ]; then
+            if [ -f "../../meta-iotistic/conf/layer.conf" ]; then
+              bitbake-layers add-layer ../../meta-iotistic
               echo "✓ meta-iotistic added"
             else
               echo "❌ meta-iotistic/conf/layer.conf not found"
             fi
           else
-            echo "❌ meta-iotistic directory not found at ../meta-iotistic"
+            echo "❌ meta-iotistic directory not found at ../../meta-iotistic"
             echo "BUILD_DIR is: $BUILD_DIR"
             echo "Current directory: $(pwd)"
             echo "Parent directory contents:"
-            ls -la ../
+            ls -la ../../
           fi
           
           # Verify layers are added
@@ -673,11 +673,11 @@ jobs:
           bitbake-layers show-layers
           
           # Check if meta-iotistic distro conf exists
-          if [ -f "../meta-iotistic/conf/distro/iotistic.conf" ]; then
+          if [ -f "../../meta-iotistic/conf/distro/iotistic.conf" ]; then
             echo "✓ iotistic.conf found"
           else
-            echo "❌ iotistic.conf NOT found at ../meta-iotistic/conf/distro/iotistic.conf"
-            ls -la ../meta-iotistic/conf/distro/ || echo "distro directory doesn't exist"
+            echo "❌ iotistic.conf NOT found at ../../meta-iotistic/conf/distro/iotistic.conf"
+            ls -la ../../meta-iotistic/conf/distro/ || echo "distro directory doesn't exist"
           fi
           
           # Set variables for local.conf
