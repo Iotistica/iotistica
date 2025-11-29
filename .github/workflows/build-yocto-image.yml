@@ -690,9 +690,9 @@ jobs:
           DL_DIR = "${DL_DIR_VAR}"
           SSTATE_DIR = "${SSTATE_DIR_VAR}"
           
-          # Parallel build settings
-          BB_NUMBER_THREADS = "8"
-          PARALLEL_MAKE = "-j 8"
+          # Parallel build settings (reduced to prevent OOM)
+          BB_NUMBER_THREADS = "4"
+          PARALLEL_MAKE = "-j 4"
           
           # Read-only root filesystem
           IMAGE_FEATURES:append = " read-only-rootfs"
