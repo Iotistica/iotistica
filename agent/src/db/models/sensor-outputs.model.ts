@@ -19,7 +19,7 @@ export interface DeviceSensorOutput {
 }
 
 export class SensorOutputModel {
-  private static table = 'sensor_outputs';
+  private static table = 'endpoint_outputs';
 
   /**
    * Get output configuration for a protocol

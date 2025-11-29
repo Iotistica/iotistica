@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """
-Modbus TCP Simulator for Iotistic Platform
-Simulates industrial sensors with realistic data patterns
+Generic Modbus TCP Simulator
+Supports multiple slave IDs with vendor-specific data points loaded from JSON.
+Environment Variables:
+- MODBUS_VENDOR: name of the vendor to simulate (default: 'Generic')
+- MODBUS_VENDOR_JSON: path to JSON file containing vendor data points (default: './vendors/dataPoints.json')
+- MODBUS_SLAVES: number of slave IDs to simulate (default: 3)
+- MODBUS_PORT: TCP port to listen on (default: 502)
 """
 import logging
 import time
 import random
-import math
+import os
+import json
 from pymodbus.server import StartTcpServer
 from pymodbus.device import ModbusDeviceIdentification
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusSlaveContext, ModbusServerContext
@@ -14,156 +20,93 @@ from pymodbus.datastore import ModbusSequentialDataBlock, ModbusSlaveContext, Mo
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Load vendor JSON
+VENDOR = os.environ.get("MODBUS_VENDOR", "Generic")
+JSON_FILE = os.environ.get("MODBUS_VENDOR_JSON", "./vendors/dataPoints.json")
 
-class SimulatedDataBlock(ModbusSequentialDataBlock):
-    """Data block that generates realistic sensor values"""
-    
-    def __init__(self, address, values):
+try:
+    with open(JSON_FILE, "r") as f:
+        vendor_data = json.load(f)
+except Exception as e:
+    logger.warning(f"Failed to load vendor JSON '{JSON_FILE}': {e}")
+    vendor_data = {}
+
+DATA_POINTS = vendor_data.get(VENDOR, {}).get("dataPoints", [])
+
+class VendorDataBlock(ModbusSequentialDataBlock):
+    """Simulate Modbus registers for any vendor"""
+    def __init__(self, address, values, is_coil=False):
         super().__init__(address, values)
         self.start_time = time.time()
-    
+        self.is_coil = is_coil
+
     def getValues(self, address, count=1):
-        """Generate realistic sensor data on read"""
         elapsed = time.time() - self.start_time
         values = []
-        
+
         for i in range(count):
             addr = address + i
-            
-            # Temperature sensors (registers 0-9): 20-30°C with sine wave
-            if 0 <= addr < 10:
-                base_temp = 25.0
-                variation = 5.0 * math.sin(elapsed / 30.0 + addr * 0.5)
-                noise = random.uniform(-0.5, 0.5)
-                value = int((base_temp + variation + noise) * 10)  # Scale by 10
-            
-            # Pressure sensors (registers 10-19): 1000-1200 mbar
-            elif 10 <= addr < 20:
-                base_pressure = 1100
-                variation = 50 * math.sin(elapsed / 45.0 + addr * 0.3)
-                noise = random.uniform(-5, 5)
-                value = int(base_pressure + variation + noise)
-            
-            # Flow sensors (registers 20-29): 0-100 L/min
-            elif 20 <= addr < 30:
-                base_flow = 50
-                variation = 30 * math.sin(elapsed / 20.0 + addr * 0.7)
-                noise = random.uniform(-2, 2)
-                value = int(max(0, base_flow + variation + noise))
-            
-            # Humidity sensors (registers 30-39): 40-70%
-            elif 30 <= addr < 40:
-                base_humidity = 55
-                variation = 15 * math.sin(elapsed / 60.0 + addr * 0.4)
-                noise = random.uniform(-1, 1)
-                value = int(max(0, min(100, base_humidity + variation + noise)))
-            
-            # Level sensors (registers 40-49): 0-1000 mm
-            elif 40 <= addr < 50:
-                base_level = 500
-                variation = 200 * math.sin(elapsed / 40.0 + addr * 0.6)
-                noise = random.uniform(-10, 10)
-                value = int(max(0, min(1000, base_level + variation + noise)))
-            
-            # Power sensors (registers 50-59): 0-10000 W
-            elif 50 <= addr < 60:
-                base_power = 5000
-                variation = 2000 * math.sin(elapsed / 25.0 + addr * 0.8)
-                noise = random.uniform(-50, 50)
-                value = int(max(0, base_power + variation + noise))
-            
-            # Vibration sensors (registers 60-69): 0-100 mm/s
-            elif 60 <= addr < 70:
-                base_vib = 20
-                variation = 15 * math.sin(elapsed / 10.0 + addr * 1.2)
-                spike = 30 if random.random() < 0.05 else 0  # Occasional spikes
-                noise = random.uniform(-2, 2)
-                value = int(max(0, base_vib + variation + spike + noise))
-            
-            # RPM sensors (registers 70-79): 1000-3000 RPM
-            elif 70 <= addr < 80:
-                base_rpm = 2000
-                variation = 500 * math.sin(elapsed / 35.0 + addr * 0.5)
-                noise = random.uniform(-20, 20)
-                value = int(max(0, base_rpm + variation + noise))
-            
-            # Generic sensors (registers 80-99): 0-65535
-            else:
-                value = int(32768 + 10000 * math.sin(elapsed / 30.0 + addr))
-            
-            values.append(value)
-        
+
+            if self.is_coil:
+                # Alarms / digital signals (random True/False)
+                values.append(bool(random.random() < 0.05))
+                continue
+
+            # Look up data point in JSON by address
+            dp = next((dp for dp in DATA_POINTS if dp["address"] == addr), None)
+            if dp:
+                base = dp.get("base", 100)  # default base if not specified
+                noise_pct = dp.get("noise_pct", 0.05)
+                val = int(base * (1 + random.uniform(-noise_pct, noise_pct)))
+                values.append(val)
+                continue
+
+            # Default placeholder for unspecified addresses
+            values.append(0)
+
         return values
 
+def setup_server(slaves=3):
+    """Setup Modbus TCP server simulating vendor devices"""
+    slave_contexts = {}
+    identities = {}
 
-def setup_server():
-    """Configure Modbus server with simulated data"""
-    
-    # Create data blocks for each function code
-    # Holding Registers (function code 3): 100 registers starting at address 0
-    holding_registers = SimulatedDataBlock(0, [0] * 100)
-    
-    # Input Registers (function code 4): 50 registers starting at address 0
-    input_registers = SimulatedDataBlock(0, [0] * 50)
-    
-    # Coils (function code 1): 20 coils starting at address 0
-    # Simulate alarm states and digital inputs
-    coils = ModbusSequentialDataBlock(0, [False] * 20)
-    
-    # Discrete Inputs (function code 2): 20 inputs starting at address 0
-    discrete_inputs = ModbusSequentialDataBlock(0, [True, False] * 10)
-    
-    # Create slave context
-    store = ModbusSlaveContext(
-        di=discrete_inputs,
-        co=coils,
-        hr=holding_registers,
-        ir=input_registers
-    )
-    
-    # Create server context with single slave (unit ID 1)
-    context = ModbusServerContext(slaves=store, single=True)
-    
-    # Device identification
-    identity = ModbusDeviceIdentification()
-    identity.VendorName = 'Iotistic'
-    identity.ProductCode = 'MODSIM'
-    identity.VendorUrl = 'https://iotistic.ca'
-    identity.ProductName = 'Modbus TCP Simulator'
-    identity.ModelName = 'Industrial Sensor Simulator'
-    identity.MajorMinorRevision = '1.0.0'
-    
-    return context, identity
+    for unit_id in range(1, slaves + 1):
+        hr = VendorDataBlock(0, [0]*200)
+        ir = VendorDataBlock(0, [0]*100)
+        co = VendorDataBlock(0, [False]*20, is_coil=True)
+        di = VendorDataBlock(0, [False]*20, is_coil=True)
 
+        store = ModbusSlaveContext(hr=hr, ir=ir, co=co, di=di)
+        slave_contexts[unit_id] = store
+
+        identity = ModbusDeviceIdentification()
+        identity.VendorName = VENDOR
+        identity.ProductCode = f"{VENDOR}-{unit_id}"
+        identity.VendorUrl = vendor_data.get(VENDOR, {}).get("vendorUrl", "")
+        identity.ProductName = f"{VENDOR} Modbus Simulator"
+        identity.ModelName = vendor_data.get(VENDOR, {}).get("model", "Generic Controller")
+        identity.MajorMinorRevision = vendor_data.get(VENDOR, {}).get("version", "1.0.0")
+        identities[unit_id] = identity
+
+    context = ModbusServerContext(slaves=slave_contexts, single=False)
+    return context, identities
 
 def main():
-    """Start Modbus TCP server"""
-    logger.info("Starting Modbus TCP Simulator")
-    logger.info("Listening on port 502")
-    logger.info("Available registers:")
-    logger.info("  - Holding Registers 0-9: Temperature sensors (°C * 10)")
-    logger.info("  - Holding Registers 10-19: Pressure sensors (mbar)")
-    logger.info("  - Holding Registers 20-29: Flow sensors (L/min)")
-    logger.info("  - Holding Registers 30-39: Humidity sensors (%)")
-    logger.info("  - Holding Registers 40-49: Level sensors (mm)")
-    logger.info("  - Holding Registers 50-59: Power sensors (W)")
-    logger.info("  - Holding Registers 60-69: Vibration sensors (mm/s)")
-    logger.info("  - Holding Registers 70-79: RPM sensors")
-    logger.info("  - Coils 0-19: Digital I/O")
-    
-    context, identity = setup_server()
-    
+    slaves_to_simulate = int(os.environ.get("MODBUS_SLAVES", 3))
+    tcp_port = int(os.environ.get("MODBUS_PORT", 502))
+    logger.info(f"Starting Modbus TCP Simulator for vendor '{VENDOR}' with {slaves_to_simulate} slaves on port {tcp_port}")
+
+    context, identities = setup_server(slaves=slaves_to_simulate)
+
     try:
         StartTcpServer(
             context=context,
-            identity=identity,
-            address=("0.0.0.0", 502)
+            identity=identities[1],  # use first slave's identity
+            address=("0.0.0.0", tcp_port)
         )
     except KeyboardInterrupt:
-        logger.info("Shutting down Modbus TCP Simulator")
-    except Exception as e:
-        logger.error(f"Error running server: {e}")
+        logger.info(f"Shutting down Modbus TCP Simulator for vendor '{VENDOR}'")
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

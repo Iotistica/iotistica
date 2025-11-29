@@ -5,8 +5,9 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc && npm run copy:migrations",
+    "build": "tsc && npm run copy:migrations && npm run copy:vendors",
     "copy:migrations": "node -e \"require('fs').cpSync('src/db/migrations', 'dist/db/migrations', {recursive: true})\"",
+    "copy:vendors": "node -e \"require('fs').cpSync('src/features/discovery/vendors', 'dist/src/features/discovery/vendors', {recursive: true})\"",
     "watch": "tsc --watch",
     "clean": "rimraf dist && rimraf protocol-adapters/dist",
     "dev": "tsx watch src/app.ts",

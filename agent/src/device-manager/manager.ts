@@ -666,7 +666,7 @@ export class DeviceManager {
 		await safeDelete('service');
 		await safeDelete('app');
 		await safeDelete('image');
-		await safeDelete('sensor_outputs');
+		await safeDelete('endpoint_outputs');
 		await safeDelete('sensors');
 		
 		// Reset device info but preserve UUID for hardware identification

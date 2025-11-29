@@ -114,9 +114,9 @@ CREATE INDEX idx_endpoints_protocol ON endpoints(protocol);
 CREATE INDEX idx_endpoints_enabled ON endpoints(enabled);
 ```
 
-**Table: `sensor_outputs`** (socket configuration per protocol)
+**Table: `endpoint_outputs`** (socket configuration per protocol)
 ```sql
-CREATE TABLE sensor_outputs (
+CREATE TABLE endpoint_outputs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   protocol TEXT NOT NULL UNIQUE,  -- 'modbus' | 'opcua' | 'can' | 'snmp' (NEW)
   socket_path TEXT NOT NULL,      -- Unix domain socket or named pipe path
@@ -977,7 +977,7 @@ protocol: 'modbus' | 'can' | 'opcua' | 'snmp'
 
 **3.3 Database Migration**
 
-**CRITICAL PREREQUISITE**: The `sensor_outputs` entry **MUST** be added before the protocol adapter can start. The SensorsFeature will fail to initialize if the output configuration is missing.
+**CRITICAL PREREQUISITE**: The `endpoint_outputs` entry **MUST** be added before the protocol adapter can start. The SensorsFeature will fail to initialize if the output configuration is missing.
 
 **Migration 1: SNMP Socket Output Configuration**
 
@@ -997,7 +997,7 @@ exports.up = async function(knex) {
   const isWindows = process.platform === 'win32';
   
   // Insert default output configuration for SNMP
-  await knex('sensor_outputs').insert({
+  await knex('endpoint_outputs').insert({
     protocol: 'snmp',
     socket_path: isWindows ? '\\\\.\\pipe\\snmp' : '/tmp/snmp.sock',
     data_format: 'json',
@@ -1010,7 +1010,7 @@ exports.up = async function(knex) {
 
 exports.down = async function(knex) {
   // Remove SNMP configuration
-  await knex('sensor_outputs').where('protocol', 'snmp').del();
+  await knex('endpoint_outputs').where('protocol', 'snmp').del();
 };
 ```
 
@@ -1662,7 +1662,7 @@ DISCOVERY_LIGHT_INTERVAL_MS=14400000  # 4 hours (light scan - ping only)
 - [ ] **CRITICAL**: Socket output migration MUST run BEFORE device migration or adapter start
 - [ ] Update `agent/src/bootstrap/feature-initializer.ts`
 - [ ] Run migrations: `cd agent && npx knex migrate:latest`
-- [ ] Verify output config exists: `sqlite3 data/iotistic.db "SELECT * FROM sensor_outputs WHERE protocol='snmp'"`
+- [ ] Verify output config exists: `sqlite3 data/iotistic.db "SELECT * FROM endpoint_outputs WHERE protocol='snmp'"`
 - [ ] Test database loading with `DeviceSensorModel.getEnabled('snmp')`
 
 ### Phase 4: Testing & Documentation (2-4 hours)
@@ -1847,7 +1847,7 @@ describe('SNMPAdapter Integration', () => {
 1. ✅ Implement BaseProtocolAdapter pattern (reuse infrastructure)
 2. ✅ Support SNMPv1, v2c, v3 (use `net-snmp` library)
 3. ✅ Basic discovery (IP range scanning + community strings)
-4. ✅ Database integration (sensors + sensor_outputs tables)
+4. ✅ Database integration (sensors + endpoint_outputs tables)
 5. ✅ Socket-based data output (JSON format)
 
 ### Priority 2 (Should Have)

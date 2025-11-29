@@ -1,5 +1,5 @@
 /**
- * Sensor Device Model
+ * Endpoint Device Model
  * Manages protocol adapter device configurations (Modbus, CAN, OPC-UA) in SQLite
  */
 
@@ -82,7 +82,7 @@ export class DeviceEndpointModel {
   }
 
   /**
-   * Create new device
+   * Create new endpoint
    */
   static async create(device: DeviceEndpoint): Promise<DeviceEndpoint> {
     const [id] = await models(this.table).insert({
@@ -98,7 +98,7 @@ export class DeviceEndpointModel {
   }
 
   /**
-   * Upsert device (insert or update if name exists)
+   * Upsert endpoint (insert or update if name exists)
    * Used when target state may contain devices that were already discovered
    */
   static async upsert(device: DeviceEndpoint): Promise<DeviceEndpoint> {
@@ -114,7 +114,7 @@ export class DeviceEndpointModel {
   }
 
   /**
-   * Update device
+   * Update endpoint
    */
   static async update(name: string, updates: Partial<DeviceEndpoint>): Promise<DeviceEndpoint | null> {
     const updateData: any = {
@@ -143,7 +143,7 @@ export class DeviceEndpointModel {
   }
 
   /**
-   * Delete device
+   * Delete endpoint
    */
   static async delete(name: string): Promise<boolean> {
     const deleted = await models(this.table)
@@ -153,7 +153,7 @@ export class DeviceEndpointModel {
   }
 
   /**
-   * Get device by ID
+   * Get endpoint by ID
    */
   private static async getById(id: number): Promise<DeviceEndpoint> {
     const device = await models(this.table)
@@ -170,7 +170,7 @@ export class DeviceEndpointModel {
   }
 
   /**
-   * Get stale devices (not seen in X days)
+   * Get stale endpoints (not seen in X days)
    * NEVER auto-deletes - just marks for user review
    */
   static async getStaleDevices(daysThreshold = 7): Promise<DeviceEndpoint[]> {
@@ -191,7 +191,7 @@ export class DeviceEndpointModel {
   }
 
   /**
-   * Update lastSeenAt timestamp for a device
+   * Update lastSeenAt timestamp for a endpoint
    */
   static async updateLastSeen(fingerprint: string): Promise<void> {
     await models(this.table)
@@ -200,7 +200,7 @@ export class DeviceEndpointModel {
   }
 
   /**
-   * Import devices from JSON config (migration helper)
+   * Import endpoints from JSON config (migration helper)
    */
   static async importFromJson(protocol: string, config: any): Promise<void> {
     const knex = getKnex();

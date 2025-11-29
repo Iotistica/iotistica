@@ -1,0 +1,241 @@
+name: CI Build & Push Modbus Simulator
+
+on: 
+  push:
+    branches:
+      - master
+    paths:
+      - 'sensors/modbus-simulator/**'
+      - 'vendors/dataPoints.json'
+      - '.github/workflows/build-modbus-sim-ci.yml'
+
+jobs:
+  test:
+    name: Validate Python & Syntax
+    runs-on: [iotistic-lab-sc]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        working-directory: ./sensors/modbus-simulator
+        run: |
+          pip install --no-cache-dir pymodbus==3.5.4
+          pip install pylint
+
+      - name: Check Python syntax
+        working-directory: ./sensors/modbus-simulator
+        run: python -m py_compile modbus_simulator.py
+
+      - name: Run pylint
+        working-directory: ./sensors/modbus-simulator
+        run: pylint --disable=all --enable=E,F modbus_simulator.py || true
+
+      - name: Validate vendors JSON
+        run: |
+          if [ ! -f vendors/dataPoints.json ]; then
+            echo "❌ vendors/dataPoints.json not found!"
+            exit 1
+          fi
+          echo "✅ vendors/dataPoints.json exists"
+          cat vendors/dataPoints.json | jq . > /dev/null
+          echo "✅ vendors/dataPoints.json is valid JSON"
+
+  version:
+    name: Generate Version
+    needs: test
+    runs-on: [iotistic-lab-sc]
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha_short: ${{ steps.version.outputs.sha_short }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate version from git
+        id: version
+        run: |
+          # Use date-based versioning: YYYY.MM.DD.BUILD_NUMBER
+          DATE_VERSION=$(date +'%Y.%m.%d')
+          BUILD_NUMBER=$(git rev-list --count HEAD -- sensors/modbus-simulator/)
+          VERSION="${DATE_VERSION}.${BUILD_NUMBER}"
+          
+          echo "Generated version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Display version info
+        run: |
+          echo "## Version Generated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ steps.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+
+  buildx:
+    name: Build & Push to Docker
+    needs: version
+    runs-on: [iotistic-lab-sc]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Display Version Update
+        run: |
+          echo "## Building Version ${{ needs.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platforms:** \`linux/amd64,linux/arm64,linux/arm/v7\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker Tags:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/modbus-simulator:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/modbus-simulator:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/modbus-simulator:${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: buildx-modbus-sim-v2-${{ github.sha }}
+          restore-keys: |
+            buildx-modbus-sim-v2-
+
+      # Login to Docker Hub (only if tests passed)
+      - name: Login to Docker Hub
+        if: success()
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      # Build and push to registry
+      - name: Build & Push final image
+        id: docker_build
+        if: success()
+        uses: docker/build-push-action@v5
+        with:
+          context: ./sensors/modbus-simulator
+          file: ./sensors/modbus-simulator/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
+          tags: |
+            iotistic/modbus-simulator:latest
+            iotistic/modbus-simulator:${{ needs.version.outputs.sha_short }}
+            iotistic/modbus-simulator:${{ needs.version.outputs.version }}
+
+  report:
+    name: Generate Reports
+    needs: [version, buildx]
+    runs-on: [iotistic-lab-sc]
+    if: always()
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag found, using all commits"
+            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges -- sensors/modbus-simulator/)
+          else
+            echo "Generating changelog from $PREV_TAG to HEAD"
+            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges -- sensors/modbus-simulator/)
+          fi
+          
+          # Save to file
+          echo "$COMMITS" > changelog.txt
+          
+          # Save first 20 lines for summary
+          echo "$COMMITS" | head -20 > changelog_summary.txt
+
+      - name: Get Docker image size
+        id: image_size
+        run: |
+          # Login to Docker Hub to pull the image
+          echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          
+          # Pull the image (amd64 only for size check)
+          docker pull --platform linux/amd64 iotistic/modbus-simulator:${{ needs.version.outputs.version }}
+          
+          # Get image size
+          SIZE_BYTES=$(docker image inspect iotistic/modbus-simulator:${{ needs.version.outputs.version }} --format='{{.Size}}')
+          SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
+          
+          echo "size_mb=$SIZE_MB" >> $GITHUB_OUTPUT
+          echo "size_bytes=$SIZE_BYTES" >> $GITHUB_OUTPUT
+          
+          # Get layer count
+          LAYERS=$(docker image inspect iotistic/modbus-simulator:${{ needs.version.outputs.version }} --format='{{len .RootFS.Layers}}')
+          echo "layers=$LAYERS" >> $GITHUB_OUTPUT
+
+      - name: Generate Summary Report
+        run: |
+          echo "# Build & Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Version Information" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platforms:** \`linux/amd64, linux/arm64, linux/arm/v7\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Docker Image" >> $GITHUB_STEP_SUMMARY
+          echo "**Size (amd64):** ${{ steps.image_size.outputs.size_mb }} MB" >> $GITHUB_STEP_SUMMARY
+          echo "**Layers:** ${{ steps.image_size.outputs.layers }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/modbus-simulator:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/modbus-simulator:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/modbus-simulator:${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Changelog (Modbus Simulator)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -s changelog_summary.txt ]; then
+            cat changelog_summary.txt >> $GITHUB_STEP_SUMMARY
+            
+            TOTAL_COMMITS=$(wc -l < changelog.txt)
+            SHOWN_COMMITS=$(wc -l < changelog_summary.txt)
+            if [ $TOTAL_COMMITS -gt $SHOWN_COMMITS ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "_...and $((TOTAL_COMMITS - SHOWN_COMMITS)) more commits_" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "No modbus-simulator commits found" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Workflow Status" >> $GITHUB_STEP_SUMMARY
+          echo "All jobs completed successfully! 🎉" >> $GITHUB_STEP_SUMMARY

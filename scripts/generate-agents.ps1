@@ -53,7 +53,7 @@ param(
     [string]$RequireProvisioning = "false",
     [string]$ApiSecurityMode = "LOCALHOST_ONLY",
     [int]$MemoryCheckInterval = 30000,
-    [int]$MemoryThreshold = 15,
+    [int]$MemoryThreshold = 30,
     [string]$LogFilePersistance = "true",
     [int]$LogMaxAge = 86400000,
     [int]$MaxLogFileSize = 52428800,
@@ -72,6 +72,8 @@ param(
     [int]$ModbusSlaveRangeEnd = 10,
     [int]$ModbusTimeout = 2000,
     [string]$OpcuaDiscoveryUrls = "",
+    [string]$SnmpIpRanges = "iotistic-snmp-sim",
+    [int]$SnmpPort = 161,
     
     # Simulation Control
     [switch]$EnableSimulation,
@@ -298,6 +300,7 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
       - /var/run/docker.sock:/var/run/docker.sock
       - $volumeName`:/app/data
       - ./certs/ca.crt:/app/certs/ca.crt:ro
+      - ./vendors:/app/vendors:ro
     environment:
       - DEVICE_API_PORT=$port
       - CLOUD_API_ENDPOINT=$CLOUD_API_ENDPOINT
@@ -322,13 +325,15 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
       - ENABLE_PROTOCOL_ADAPTERS=$EnableProtocolAdapters
       - ENABLE_SENSOR_PUBLISH=$EnableSensorPublish
       - ENABLE_FIRST_BOOT_DISCOVERY=$EnableFirstBootDiscovery
+      - MODBUS_VENDOR=COMAP
       - MODBUS_TCP_HOST=$ModbusTcpHost
       - MODBUS_TCP_PORT=$ModbusTcpPort
       - MODBUS_SLAVE_RANGE_START=$ModbusSlaveRangeStart
       - MODBUS_SLAVE_RANGE_END=$ModbusSlaveRangeEnd
       - MODBUS_TIMEOUT=$ModbusTimeout
       - OPCUA_DISCOVERY_URLS=$OpcuaDiscoveryUrls
-      - SNMP_PORT=161
+      - SNMP_IP_RANGES=$SnmpIpRanges
+      - SNMP_PORT=$SnmpPort
     networks:
       - iotistic-net
 "@

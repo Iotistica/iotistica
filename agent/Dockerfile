@@ -79,14 +79,12 @@ COPY --from=deps --chown=agentuser:agentgroup /app/node_modules ./node_modules
 COPY --from=builder --chown=agentuser:agentgroup /app/dist ./dist
 
 # Copy update scripts and entrypoint
-COPY --chown=agentuser:agentgroup bin/update-agent-docker.sh /app/bin/update-agent-docker.sh
-COPY --chown=agentuser:agentgroup bin/update-agent-systemd.sh /app/bin/update-agent-systemd.sh
+COPY --chown=agentuser:agentgroup bin/*.sh /app/bin/
 COPY --chown=agentuser:agentgroup docker-entrypoint.sh /app/docker-entrypoint.sh
 
 # Create iotctl symlink and set permissions
 RUN chmod +x /app/dist/cli/iotctl.js && \
-    chmod +x /app/bin/update-agent-docker.sh && \
-    chmod +x /app/bin/update-agent-systemd.sh && \
+    chmod +x /app/bin/*.sh && \
     chmod +x /app/docker-entrypoint.sh && \
     ln -s /app/dist/cli/iotctl.js /usr/local/bin/iotctl
 

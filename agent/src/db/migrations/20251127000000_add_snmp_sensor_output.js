@@ -9,7 +9,7 @@ exports.up = async function(knex) {
   const isWindows = process.platform === 'win32';
   
   // Insert default output configuration for SNMP
-  await knex('sensor_outputs').insert({
+  await knex('endpoint_outputs').insert({
     protocol: 'snmp',
     socket_path: isWindows ? '\\\\.\\pipe\\snmp' : '/tmp/snmp.sock',
     data_format: 'json',
@@ -22,5 +22,5 @@ exports.up = async function(knex) {
 
 exports.down = async function(knex) {
   // Remove SNMP configuration
-  await knex('sensor_outputs').where('protocol', 'snmp').del();
+  await knex('endpoint_outputs').where('protocol', 'snmp').del();
 };

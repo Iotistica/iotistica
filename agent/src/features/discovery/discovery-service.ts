@@ -387,15 +387,17 @@ export class DiscoveryService {
   private getSNMPOptions(): SNMPDiscoveryOptions | undefined {
     const ipRanges = process.env.SNMP_IP_RANGES;
     
-    let ranges: string[];
-
-    if (ipRanges) {
-      ranges = ipRanges.split(',').map(r => r.trim());
-    } else {
-      ranges = autoDetectLocalSubnets();
-      this.logger?.infoSync(`Auto-detected local subnets: ${ranges.join(', ')}`, {component:LogComponents.discovery});
+    // CRITICAL: Only run SNMP discovery if explicitly configured
+    // Don't auto-detect subnets (causes massive IP scans)
+    if (!ipRanges) {
+      this.logger?.debugSync('SNMP_IP_RANGES not configured, skipping SNMP discovery', {
+        component: LogComponents.discovery,
+        note: 'Set SNMP_IP_RANGES env var to enable (e.g., "snmp-simulator-1,192.168.1.100")'
+      });
+      return undefined;
     }
 
+    const ranges = ipRanges.split(',').map(r => r.trim());
     const options: SNMPDiscoveryOptions = { ipRanges: ranges };
 
     // Optional: Port, community, version
@@ -527,14 +529,14 @@ export class DiscoveryService {
    */
   private async saveToDatabase(discovered: DiscoveredDevice[], traceId: string): Promise<{ saved: number; skipped: number }> {
     if (discovered.length === 0) {
-      this.logger?.infoSync('No discovered sensors to save', {
+      this.logger?.infoSync('No discovered endpoints to save', {
         component: LogComponents.discovery,
         traceId
       });
       return { saved: 0, skipped: 0 };
     }
 
-    this.logger?.infoSync(`Saving ${discovered.length} discovered sensors to database`, {
+    this.logger?.infoSync(`Saving ${discovered.length} discovered endpoints to database`, {
       component: LogComponents.discovery,
       traceId,
       operation: 'saveToDatabase'

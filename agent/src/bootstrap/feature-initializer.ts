@@ -151,7 +151,7 @@ export class FeatureInitializer {
       if (sensorOutputs.length === 0) {
         logger.warnSync('No sensor outputs configured in database', {
           component: LogComponents.agent,
-          note: 'Run migrations to create default sensor_outputs entries'
+          note: 'Run migrations to create default endpoint_outputs entries'
         });
         return;
       }

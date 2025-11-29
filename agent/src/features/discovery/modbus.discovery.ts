@@ -15,6 +15,8 @@ import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, DiscoveredDevice } from './base.discovery';
 import { generateModbusFingerprint } from './fingerprint';
+import fs from 'fs';
+import path from 'path';
 
 export interface ModbusDiscoveryOptions {
   serialPort?: string; // e.g., '/dev/ttyUSB0' or 'COM3'
@@ -31,6 +33,21 @@ interface ModbusConnection {
   isOpen: boolean;
 }
 
+interface DataPoint {
+  name: string;
+  address: number;
+  type: string;
+  dataType: string;
+}
+
+interface VendorMap {
+  [vendor: string]: { dataPoints: DataPoint[] };
+}
+
+const VENDOR_ENV = process.env.MODBUS_VENDOR || 'Generic';
+const vendorFile = path.resolve(__dirname, '../../../vendors', 'dataPoints.json');
+const vendorMap: VendorMap = JSON.parse(fs.readFileSync(vendorFile, 'utf-8'));
+
 export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
   private connection?: ModbusConnection;
 
@@ -43,6 +60,10 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
    * Opens connection ONCE, cycles through all slave IDs
    */
   async discover(options?: ModbusDiscoveryOptions): Promise<DiscoveredDevice[]> {
+
+    const vendorKey = VENDOR_ENV;
+    const dataPoints = vendorMap[vendorKey]?.dataPoints || vendorMap['Generic'].dataPoints;
+
     const discovered: DiscoveredDevice[] = [];
 
     this.logger?.infoSync('Starting Modbus discovery', {
@@ -109,12 +130,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
                     port: options?.tcpPort || 502,
                     slaveId
                   },
-              dataPoints: [{
-                name: 'holding_register_0',
-                address: 40001,
-                type: 'holding',
-                dataType: 'uint16'
-              }],
+              dataPoints,
               confidence: 'low',
               discoveredAt: new Date().toISOString(),
               validated: false,

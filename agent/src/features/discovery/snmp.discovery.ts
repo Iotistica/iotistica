@@ -20,6 +20,10 @@ import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, DiscoveredDevice, ValidationResult } from './base.discovery';
 import { generateSNMPFingerprint } from './fingerprint';
 import * as net from 'net';
+import * as dns from 'dns';
+import { promisify } from 'util';
+
+const dnsLookup = promisify(dns.lookup);
 
 export interface SNMPDiscoveryOptions {
   ipRanges?: string[];          // e.g., ['192.168.1.0/24', '10.0.0.1-10.0.0.50']
@@ -87,8 +91,8 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
       concurrency
     });
 
-    // Expand IP ranges to individual IPs
-    let ips = this.expandIPRanges(ipRanges);
+    // Expand IP ranges to individual IPs (resolve hostnames)
+    let ips = await this.expandIPRanges(ipRanges);
 
     // --- skip gateway IPs ---
     const gatewayIPs = ips.filter(ip => ip.endsWith('.1'));
@@ -415,7 +419,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
    * Expand IP ranges to individual IPs
    * Supports CIDR notation (192.168.1.0/24) and ranges (192.168.1.1-192.168.1.50)
    */
-  private expandIPRanges(ranges: string[]): string[] {
+  private async expandIPRanges(ranges: string[]): Promise<string[]> {
     const ips: string[] = [];
 
     for (const range of ranges) {
@@ -425,13 +429,46 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
       } else if (range.includes('-')) {
         // IP range
         ips.push(...this.expandRange(range));
-      } else {
+      } else if (this.isValidIP(range)) {
         // Single IP
         ips.push(range);
+      } else {
+        // Hostname/container name - resolve to IP
+        this.logger?.infoSync(`Attempting to resolve hostname: ${range}`, {
+          component: LogComponents.discovery
+        });
+        try {
+          const resolved = await dnsLookup(range);
+          ips.push(resolved.address);
+          this.logger?.infoSync(`Resolved hostname ${range} to ${resolved.address}`, {
+            component: LogComponents.discovery
+          });
+        } catch (error) {
+          this.logger?.errorSync(
+            `Failed to resolve hostname: ${range}`,
+            error as Error,
+            {
+              component: LogComponents.discovery,
+              note: 'Make sure container/hostname is reachable'
+            }
+          );
+        }
       }
     }
 
     return ips;
+  }
+
+  /**
+   * Check if string is a valid IPv4 address
+   */
+  private isValidIP(str: string): boolean {
+    const parts = str.split('.');
+    if (parts.length !== 4) return false;
+    return parts.every(part => {
+      const num = parseInt(part, 10);
+      return num >= 0 && num <= 255 && part === num.toString();
+    });
   }
 
   /**

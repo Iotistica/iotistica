@@ -240,6 +240,10 @@ services:
             dockerfile: Dockerfile
         container_name: iotistic-modbus-sim
         restart: unless-stopped
+        volumes:
+            - ./vendors:/app/vendors:ro
+        environment:
+          - MODBUS_VENDOR=COMAP
         ports:
             - "502:502"
         networks:
@@ -258,22 +262,6 @@ services:
         restart: unless-stopped
         ports:
             - "161:161/udp"
-        networks:
-            - iotistic-net
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "5m"
-                max-file: "2"
-    
-    canbus-simulator:
-        build:
-            context: ./sensors/canbus-simulator
-            dockerfile: Dockerfile
-        container_name: iotistic-canbus-sim
-        restart: unless-stopped
-        ports:
-            - "11898:11898"
         networks:
             - iotistic-net
         logging:

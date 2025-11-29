@@ -1489,7 +1489,7 @@ API Handler
   ↓ Stores to PostgreSQL (sensor_data table)
 ```
 
-**Named Pipe Config** (in sensor_outputs table):
+**Named Pipe Config** (in endpoint_outputs table):
 ```json
 {
   "protocol": "modbus",
@@ -1787,10 +1787,10 @@ VALUES (
 );
 ```
 
-**sensor_outputs table** (pipe config - auto-created by migration):
+**endpoint_outputs table** (pipe config - auto-created by migration):
 ```sql
 -- Already created by migration 20251117000000_add_default_sensor_outputs.js
-SELECT * FROM sensor_outputs WHERE protocol = 'opcua';
+SELECT * FROM endpoint_outputs WHERE protocol = 'opcua';
 -- socket_path: \\.\pipe\opcua (Windows) or /tmp/opcua.sock (Linux)
 -- data_format: json
 -- delimiter: \n

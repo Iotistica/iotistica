@@ -2,9 +2,9 @@ Write-Host "=== Setting up Modbus Protocol Adapter ===" -ForegroundColor Cyan
 
 $dbPath = "C:\Users\Dan\zemfyre-sensor\agent\data\device.sqlite"
 
-# 1. Check if sensor_outputs table exists and has Modbus entry
-Write-Host "`n1. Checking sensor_outputs table..." -ForegroundColor Yellow
-$hasOutput = node -e "const db = require('better-sqlite3')('$($dbPath.Replace('\','\\'))'); const row = db.prepare('SELECT COUNT(*) as count FROM sensor_outputs WHERE protocol = ?').get('modbus'); console.log(row.count);" 2>$null
+# 1. Check if endpoint_outputs table exists and has Modbus entry
+Write-Host "`n1. Checking endpoint_outputs table..." -ForegroundColor Yellow
+$hasOutput = node -e "const db = require('better-sqlite3')('$($dbPath.Replace('\','\\'))'); const row = db.prepare('SELECT COUNT(*) as count FROM endpoint_outputs WHERE protocol = ?').get('modbus'); console.log(row.count);" 2>$null
 
 if ($hasOutput -eq "0") {
     Write-Host "✗ No Modbus output configuration found" -ForegroundColor Red
@@ -14,14 +14,14 @@ if ($hasOutput -eq "0") {
     $socketPath = "\\.\pipe\modbus"
     
     # Insert default Modbus output configuration
-    node -e "const db = require('better-sqlite3')('$($dbPath.Replace('\','\\'))'); db.prepare('INSERT INTO sensor_outputs (protocol, socket_path, data_format, delimiter, include_timestamp, include_device_name) VALUES (?, ?, ?, ?, ?, ?)').run('modbus', '$($socketPath.Replace('\','\\'))', 'json', ',', 1, 1); console.log('✓ Created Modbus output configuration');"
+    node -e "const db = require('better-sqlite3')('$($dbPath.Replace('\','\\'))'); db.prepare('INSERT INTO endpoint_outputs (protocol, socket_path, data_format, delimiter, include_timestamp, include_device_name) VALUES (?, ?, ?, ?, ?, ?)').run('modbus', '$($socketPath.Replace('\','\\'))', 'json', ',', 1, 1); console.log('✓ Created Modbus output configuration');"
     
     Write-Host "✓ Modbus output configured: $socketPath" -ForegroundColor Green
 } else {
     Write-Host "✓ Modbus output configuration exists" -ForegroundColor Green
     
     # Show current config
-    node -e "const db = require('better-sqlite3')('$($dbPath.Replace('\','\\'))'); const row = db.prepare('SELECT * FROM sensor_outputs WHERE protocol = ?').get('modbus'); console.log(JSON.stringify(row, null, 2));"
+    node -e "const db = require('better-sqlite3')('$($dbPath.Replace('\','\\'))'); const row = db.prepare('SELECT * FROM endpoint_outputs WHERE protocol = ?').get('modbus'); console.log(JSON.stringify(row, null, 2));"
 }
 
 # 2. Verify sensor exists
