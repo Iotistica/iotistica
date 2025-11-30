@@ -721,7 +721,35 @@ jobs:
           
           # Show what was written
           echo "=== local.conf DISTRO and MACHINE settings ==="
-          grep -E "^DISTRO|^MACHINE" conf/local.conf
+          grep -E "^DISTRO|^MACHINE|^PACKAGE_CLASSES" conf/local.conf
+          
+          # Verify distro configuration exists and contains IPK setting
+          echo ""
+          echo "=== Verifying distro configuration ==="
+          if [ -f "../../meta-iotistic/conf/distro/iotistic.conf" ]; then
+            echo "✓ iotistic.conf exists"
+            echo "PACKAGE_CLASSES setting in distro conf:"
+            grep "PACKAGE_CLASSES" ../../meta-iotistic/conf/distro/iotistic.conf
+          else
+            echo "❌ ERROR: iotistic.conf NOT FOUND!"
+            echo "This will cause RPM to be used by default!"
+            exit 1
+          fi
+          
+          # Force PACKAGE_CLASSES in local.conf to override everything
+          echo ""
+          echo "=== Enforcing IPK package manager ==="
+          # Remove any existing PACKAGE_CLASSES lines
+          sed -i '/^PACKAGE_CLASSES/d' conf/local.conf
+          # Add IPK configuration at the END (highest priority)
+          echo "" >> conf/local.conf
+          echo "# FORCE IPK package manager (workaround for dunfell RPM bug)" >> conf/local.conf
+          echo "PACKAGE_CLASSES = \"package_ipk\"" >> conf/local.conf
+          echo "✓ IPK forced in local.conf"
+          
+          # Show final PACKAGE_CLASSES setting
+          echo "Final PACKAGE_CLASSES:"
+          grep "PACKAGE_CLASSES" conf/local.conf | tail -1
           
           echo "✓ Build configuration complete"
 
@@ -746,7 +774,38 @@ jobs:
             echo "✓ tmp/ removed - BitBake will now build everything with IPK"
           fi
           
+          # Verify IPK configuration before building
+          echo ""
+          echo "=== CRITICAL: Verifying IPK package manager configuration ==="
+          echo "Checking PACKAGE_CLASSES in local.conf..."
+          PACKAGE_CLASSES_CONF=$(grep "^PACKAGE_CLASSES" conf/local.conf | tail -1)
+          echo "Found: $PACKAGE_CLASSES_CONF"
+          
+          if echo "$PACKAGE_CLASSES_CONF" | grep -q "package_ipk"; then
+            echo "✓ IPK configured in local.conf"
+          else
+            echo "❌ ERROR: IPK not configured in local.conf!"
+            echo "This WILL cause RPM errors!"
+            exit 1
+          fi
+          
+          echo ""
+          echo "Checking if iotistic distro conf exists and has IPK..."
+          IOTISTIC_CONF=$(find .. -name "iotistic.conf" -path "*/conf/distro/*" 2>/dev/null | head -n1)
+          if [ -n "$IOTISTIC_CONF" ]; then
+            echo "✓ Found: $IOTISTIC_CONF"
+            if grep -q "package_ipk" "$IOTISTIC_CONF"; then
+              echo "✓ IPK configured in distro conf"
+            else
+              echo "⚠ WARNING: IPK not in distro conf (but local.conf will override)"
+            fi
+          else
+            echo "❌ ERROR: iotistic.conf not found!"
+            exit 1
+          fi
+          
           # Verify configuration before building
+          echo ""
           echo "=== Verifying build configuration ==="
           echo "Checking layers..."
           bitbake-layers show-layers
