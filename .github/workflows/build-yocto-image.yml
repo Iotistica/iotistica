@@ -791,7 +791,8 @@ jobs:
           
           echo ""
           echo "Checking if iotistic distro conf exists and has IPK..."
-          IOTISTIC_CONF=$(find .. -name "iotistic.conf" -path "*/conf/distro/*" 2>/dev/null | head -n1)
+          # Search from BUILD_DIR (two levels up from build directory)
+          IOTISTIC_CONF=$(find $BUILD_DIR -name "iotistic.conf" -path "*/conf/distro/*" 2>/dev/null | head -n1)
           if [ -n "$IOTISTIC_CONF" ]; then
             echo "✓ Found: $IOTISTIC_CONF"
             if grep -q "package_ipk" "$IOTISTIC_CONF"; then
@@ -801,6 +802,15 @@ jobs:
             fi
           else
             echo "❌ ERROR: iotistic.conf not found!"
+            echo "Searching from: $BUILD_DIR"
+            echo "Directory structure:"
+            ls -la $BUILD_DIR/
+            echo ""
+            echo "meta-iotistic contents:"
+            ls -la $BUILD_DIR/meta-iotistic/ 2>/dev/null || echo "meta-iotistic directory doesn't exist!"
+            echo ""
+            echo "Looking for distro configs anywhere:"
+            find $BUILD_DIR -name "*.conf" -path "*/conf/distro/*" 2>/dev/null || echo "No distro configs found"
             exit 1
           fi
           
@@ -816,13 +826,12 @@ jobs:
           
           echo ""
           echo "Checking if iotistic distro conf exists..."
-          IOTISTIC_CONF=$(find .. -name "iotistic.conf" -path "*/conf/distro/*" 2>/dev/null | head -n1)
+          IOTISTIC_CONF=$(find $BUILD_DIR -name "iotistic.conf" -path "*/conf/distro/*" 2>/dev/null | head -n1)
           if [ -n "$IOTISTIC_CONF" ]; then
-            echo "✓ Found: $IOTISTIC_CONF"
+            echo "✓ Found: $IOTISTIC_CONF (already verified above)"
           else
-            echo "❌ iotistic.conf not found in any layer!"
-            echo "Available distros:"
-            find .. -name "*.conf" -path "*/conf/distro/*" 2>/dev/null || echo "No distro configs found"
+            echo "❌ ERROR: This should never happen - already checked above!"
+            exit 1
           fi
           
           echo ""
