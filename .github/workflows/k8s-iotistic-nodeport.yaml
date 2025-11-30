@@ -28,7 +28,7 @@ jobs:
       # OPTIONAL CLEAN BEFORE DEPLOY
       # ------------------------------------
       - name: Cleanup previous Helm release (before deploy)
-        if: ${{ inputs.destroy == 'false' && inputs.clean_before_deploy == 'true' }}
+        if: ${{ inputs.destroy == false && inputs.clean_before_deploy == true }}
         run: |
           set -e
           NAMESPACE=iotistic-nodeport
@@ -52,7 +52,7 @@ jobs:
       # DEPLOY
       # ------------------------------------
       - name: Deploy Iotistic NodePort (helm)
-        if: ${{ inputs.destroy == 'false' }}
+        if: ${{ inputs.destroy == false }}
         run: |
           set -e
           CHART_PATH=./k8s/charts/iotistic
@@ -72,7 +72,7 @@ jobs:
       # DESTROY
       # ------------------------------------
       - name: Destroy deployed Iotistic NodePort (helm)
-        if: ${{ inputs.destroy == 'true' }}
+        if: ${{ inputs.destroy == true }}
         run: |
           set -e
           NAMESPACE=iotistic-nodeport
