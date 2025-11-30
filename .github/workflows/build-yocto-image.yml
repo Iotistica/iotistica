@@ -765,14 +765,33 @@ jobs:
           # Source build environment (specify build dir to avoid creating new one)
           source oe-init-build-env build
           
-          # NUCLEAR OPTION: Remove entire tmp directory to force clean IPK build
-          echo "=== Force clean build with IPK package manager ==="
+          # ULTRA-NUCLEAR OPTION: Remove tmp AND sstate-cache native packages
+          echo "=== ULTRA-NUCLEAR: Force completely clean build with IPK ==="
+          echo "Problem: sstate-cache contains cached RPM native tools"
+          echo "Solution: Remove ALL native sysroots from sstate-cache"
+          echo ""
+          
           if [ -d tmp ]; then
-            echo "WARNING: Removing entire tmp/ directory to eliminate all RPM artifacts..."
-            echo "This will trigger a complete rebuild but ensures IPK is used from the start."
+            echo "Step 1: Removing entire tmp/ directory..."
             rm -rf tmp
-            echo "✓ tmp/ removed - BitBake will now build everything with IPK"
+            echo "✓ tmp/ removed"
           fi
+          
+          if [ -d "$SSTATE_DIR" ]; then
+            echo ""
+            echo "Step 2: Removing native sstate-cache (contains RPM tools)..."
+            echo "Before: $(du -sh $SSTATE_DIR 2>/dev/null || echo '0')"
+            
+            # Remove all x86_64 native packages (rpm, rpm-native, etc)
+            find "$SSTATE_DIR" -type d -name "*x86_64-linux*" -exec rm -rf {} + 2>/dev/null || true
+            find "$SSTATE_DIR" -type d -name "*allarch*" -exec rm -rf {} + 2>/dev/null || true
+            
+            echo "After: $(du -sh $SSTATE_DIR 2>/dev/null || echo '0')"
+            echo "✓ Native sstate-cache cleared"
+          fi
+          
+          echo ""
+          echo "✓ Complete clean - BitBake will build native tools (including opkg-utils) from scratch with IPK"
           
           # Verify IPK configuration before building
           echo ""
