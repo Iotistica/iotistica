@@ -738,14 +738,15 @@ jobs:
           
           # Force PACKAGE_CLASSES in local.conf to override everything
           echo ""
-          echo "=== Enforcing IPK package manager ==="
+          echo "=== Enforcing IPK package manager with HIGHEST priority ==="
           # Remove any existing PACKAGE_CLASSES lines
           sed -i '/^PACKAGE_CLASSES/d' conf/local.conf
-          # Add IPK configuration at the END (highest priority)
+          # Add IPK configuration with :forcevariable (highest BitBake priority)
           echo "" >> conf/local.conf
-          echo "# FORCE IPK package manager (workaround for dunfell RPM bug)" >> conf/local.conf
-          echo "PACKAGE_CLASSES = \"package_ipk\"" >> conf/local.conf
-          echo "✓ IPK forced in local.conf"
+          echo "# FORCE IPK package manager with :forcevariable (highest priority)" >> conf/local.conf
+          echo "# This overrides ALL other settings including distro defaults" >> conf/local.conf
+          echo "PACKAGE_CLASSES:forcevariable = \"package_ipk\"" >> conf/local.conf
+          echo "✓ IPK forced with :forcevariable in local.conf"
           
           # Show final PACKAGE_CLASSES setting
           echo "Final PACKAGE_CLASSES:"
@@ -850,6 +851,26 @@ jobs:
             echo "✓ Found: $IOTISTIC_CONF (already verified above)"
           else
             echo "❌ ERROR: This should never happen - already checked above!"
+            exit 1
+          fi
+          
+          echo ""
+          echo "=== CRITICAL: Verify BitBake sees IPK configuration ==="
+          echo "Running: bitbake-getvar PACKAGE_CLASSES"
+          BITBAKE_PKG_CLASSES=$(bitbake-getvar -r base-files PACKAGE_CLASSES 2>/dev/null | grep "^PACKAGE_CLASSES=" | head -n1)
+          echo "BitBake reports: $BITBAKE_PKG_CLASSES"
+          
+          if echo "$BITBAKE_PKG_CLASSES" | grep -q "package_ipk"; then
+            echo "✓ BitBake will use IPK package manager"
+          else
+            echo "❌ FATAL ERROR: BitBake is NOT configured for IPK!"
+            echo "This means forcevariable didn't work or was overridden"
+            echo ""
+            echo "Dumping local.conf PACKAGE_CLASSES:"
+            grep "PACKAGE_CLASSES" conf/local.conf || echo "No PACKAGE_CLASSES in local.conf!"
+            echo ""
+            echo "Dumping distro conf PACKAGE_CLASSES:"
+            grep "PACKAGE_CLASSES" "$IOTISTIC_CONF" || echo "No PACKAGE_CLASSES in distro conf!"
             exit 1
           fi
           
