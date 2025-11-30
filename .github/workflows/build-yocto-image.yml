@@ -737,12 +737,13 @@ jobs:
           # Source build environment (specify build dir to avoid creating new one)
           source oe-init-build-env build
           
-          # Clean package manager cache AND sstate-control to force IPK detection
-          echo "=== Cleaning package manager cache ==="
+          # NUCLEAR OPTION: Remove entire tmp directory to force clean IPK build
+          echo "=== Force clean build with IPK package manager ==="
           if [ -d tmp ]; then
-            echo "Removing tmp/cache, tmp/work, and tmp/sstate-control to force package manager re-detection..."
-            rm -rf tmp/cache tmp/work tmp/sstate-control
-            echo "✓ Cache cleaned - BitBake will now detect IPK from distro config"
+            echo "WARNING: Removing entire tmp/ directory to eliminate all RPM artifacts..."
+            echo "This will trigger a complete rebuild but ensures IPK is used from the start."
+            rm -rf tmp
+            echo "✓ tmp/ removed - BitBake will now build everything with IPK"
           fi
           
           # Verify configuration before building
