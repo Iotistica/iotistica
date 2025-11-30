@@ -472,11 +472,11 @@ jobs:
           
           echo "Creating iotistic-agent recipe..."
           
-          # Create recipe directory
-          mkdir -p $LAYER_DIR/recipes-iotistic/agent/files
+          # Create recipe directory structure
+          mkdir -p $LAYER_DIR/recipes-iotistic/agent/files/agent-src
           
-          # Copy agent files
-          cp -r agent/* $LAYER_DIR/recipes-iotistic/agent/files/
+          # Copy agent files into the files/agent-src subdirectory
+          cp -r agent/* $LAYER_DIR/recipes-iotistic/agent/files/agent-src/
           
           # Create BitBake recipe
           cat > $LAYER_DIR/recipes-iotistic/agent/iotistic-agent_${AGENT_VERSION}.bb << 'EOF'
@@ -488,8 +488,8 @@ jobs:
           DEPENDS = "nodejs-native"
           RDEPENDS:${PN} = "nodejs pm2 sqlite3"
           
-          SRC_URI = "file://*"
-          S = "${WORKDIR}"
+          SRC_URI = "file://agent-src"
+          S = "${WORKDIR}/agent-src"
           
           inherit systemd
           
