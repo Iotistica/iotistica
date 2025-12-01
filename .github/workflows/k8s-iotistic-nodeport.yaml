@@ -13,7 +13,7 @@ on:
       clean_before_deploy:
         description: 'If true, delete Helm release + namespace before deploying'
         required: false
-        default: 'false'
+        default: false
         type: boolean
 
 jobs:
