@@ -300,7 +300,7 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
       - /var/run/docker.sock:/var/run/docker.sock
       - $volumeName`:/app/data
       - ./certs/ca.crt:/app/certs/ca.crt:ro
-      - ./vendors:/app/vendors:ro
+      - ./vendors/dataPoints.json:/app/vendors/dataPoints.json:ro
     environment:
       - DEVICE_API_PORT=$port
       - CLOUD_API_ENDPOINT=$CLOUD_API_ENDPOINT
@@ -325,6 +325,7 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
       - ENABLE_PROTOCOL_ADAPTERS=$EnableProtocolAdapters
       - ENABLE_SENSOR_PUBLISH=$EnableSensorPublish
       - ENABLE_FIRST_BOOT_DISCOVERY=$EnableFirstBootDiscovery
+      - MODBUS_VENDOR_FILE=/app/config/vendors/dataPoints.json
       - MODBUS_VENDOR=COMAP
       - MODBUS_TCP_HOST=$ModbusTcpHost
       - MODBUS_TCP_PORT=$ModbusTcpPort

@@ -5,7 +5,7 @@
 
 import { models } from '../connection';
 
-export interface DeviceSensorOutput {
+export interface DeviceEndpointOutput {
   id?: number;
   protocol: 'modbus' | 'can' | 'opcua' | 'snmp';
   socket_path: string;
@@ -18,13 +18,13 @@ export interface DeviceSensorOutput {
   updated_at?: Date;
 }
 
-export class SensorOutputModel {
+export class EndpointOutputModel {
   private static table = 'endpoint_outputs';
 
   /**
    * Get output configuration for a protocol
    */
-  static async getOutput(protocol: string): Promise<DeviceSensorOutput | null> {
+  static async getOutput(protocol: string): Promise<DeviceEndpointOutput | null> {
     const output = await models(this.table)
       .where('protocol', protocol)
       .first();
@@ -34,7 +34,7 @@ export class SensorOutputModel {
   /**
    * Set output configuration for a protocol
    */
-  static async setOutput(output: DeviceSensorOutput): Promise<DeviceSensorOutput | null> {
+  static async setOutput(output: DeviceEndpointOutput): Promise<DeviceEndpointOutput | null> {
     const existing = await this.getOutput(output.protocol);
 
     const outputData = {
@@ -69,7 +69,7 @@ export class SensorOutputModel {
   /**
    * Get all output configurations
    */
-  static async getAll(): Promise<DeviceSensorOutput[]> {
+  static async getAll(): Promise<DeviceEndpointOutput[]> {
     return await models(this.table).select('*').orderBy('protocol');
   }
 }

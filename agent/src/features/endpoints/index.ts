@@ -19,7 +19,7 @@ import { ModbusAdapter } from './modbus/adapter.js';
 import { ModbusAdapterConfig } from './modbus/types.js';
 import { SocketServer } from './common/socket-server.js';
 import { SensorDataPoint, SocketOutput } from './types.js';
-import { SensorOutputModel } from '../../db/models/sensor-outputs.model.js';
+import { EndpointOutputModel } from '../../db/models/endpoint-outputs.model.js';
 import { DeviceEndpointModel } from '../../db/models/endpoint.model.js';
 
 // Type imports only (no runtime loading)
@@ -171,7 +171,7 @@ export class SensorsFeature extends BaseFeature {
       }
 
       // Load output config from database
-      const dbOutput = await SensorOutputModel.getOutput('modbus');
+      const dbOutput = await EndpointOutputModel.getOutput('modbus');
       if (!dbOutput) {
         throw new Error('Modbus output configuration not found in database');
       }
@@ -259,7 +259,7 @@ export class SensorsFeature extends BaseFeature {
       }
 
       // Load output config from database
-      const dbOutput = await SensorOutputModel.getOutput('opcua');
+      const dbOutput = await EndpointOutputModel.getOutput('opcua');
       if (!dbOutput) {
         throw new Error('OPC-UA output configuration not found in database');
       }
@@ -330,7 +330,7 @@ export class SensorsFeature extends BaseFeature {
       }
 
       // Load output config from database
-      const dbOutput = await SensorOutputModel.getOutput('snmp');
+      const dbOutput = await EndpointOutputModel.getOutput('snmp');
       if (!dbOutput) {
         this.logger.error('SNMP output configuration not found in database');
         return;

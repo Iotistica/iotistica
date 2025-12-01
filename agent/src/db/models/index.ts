@@ -14,8 +14,8 @@ export { DeviceEndpointModel as DeviceSensorModel } from './endpoint.model';
 export type { DeviceEndpoint as DeviceSensor } from './endpoint.model';
 
 // Sensor output configuration (protocol adapter outputs)
-export { SensorOutputModel } from './sensor-outputs.model';
-export type { DeviceSensorOutput } from './sensor-outputs.model';
+export { EndpointOutputModel as SensorOutputModel } from './endpoint-outputs.model';
+export type { DeviceEndpointOutput as DeviceSensorOutput } from './endpoint-outputs.model';
 
 // Agent metadata (discovery, etc.)
 export { MetadataModel } from './metadata.model';

@@ -158,7 +158,6 @@ export class ModbusAdapter extends EventEmitter {
       return;
     }
 
-    deviceConfig.enabled = false;
     
     if (this.running) {
       await this.cleanupDevice(deviceName);

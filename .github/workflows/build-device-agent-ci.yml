@@ -304,6 +304,7 @@ jobs:
           IOTISTIC_DEVICE_PORT: 48484
           CLOUD_API_ENDPOINT: ''
           PROVISIONING_KEY: ''
+          MODBUS_VENDOR_FILE: '/opt/iotistic/agent/vendors/dataPoints.json'
         run: |
           echo "Testing unified installation script with Systemd method..."
           sudo -E bash agent/bin/install.sh

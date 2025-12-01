@@ -85,6 +85,7 @@ export async function up(knex) {
     table.text('metadata').nullable(); // JSON: Protocol-specific config
     table.timestamp('created_at').notNullable().defaultTo(knex.fn.now());
     table.timestamp('updated_at').notNullable().defaultTo(knex.fn.now());
+    table.timestamp('lastSeenAt').nullable(); // Last discovery/validation timestamp
     
     table.index('protocol');
     table.index('enabled');

@@ -143,10 +143,10 @@ export class FeatureInitializer {
 
     try {
       // Load sensor output configurations from database
-      const { SensorOutputModel } = await import('../db/models/sensor-outputs.model.js');
+      const { EndpointOutputModel: EndpointOutputModel } = await import('../db/models/endpoint-outputs.model.js');
       const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
       
-      const sensorOutputs = await SensorOutputModel.getAll();
+      const sensorOutputs = await EndpointOutputModel.getAll();
 
       if (sensorOutputs.length === 0) {
         logger.warnSync('No sensor outputs configured in database', {
@@ -158,21 +158,21 @@ export class FeatureInitializer {
 
       // Get all enabled protocols
       const allEndpoints = await DeviceEndpointModel.getAll();
-      const enabledProtocols = new Set(
+      const enabledEndpoints = new Set(
         allEndpoints.filter((s: any) => s.enabled).map((s: any) => s.protocol)
       );
 
-      if (enabledProtocols.size === 0) {
+      if (enabledEndpoints.size === 0) {
         logger.warnSync('No enabled protocol adapters found', {
           component: LogComponents.agent,
-          note: 'Enable protocol adapters in database before starting Sensor Publish'
+          note: 'Enable endpoints in database before starting Sensor Publish'
         });
         return;
       }
 
       // Build sensor configs only for enabled protocols
       const sensors = sensorOutputs
-        .filter(output => enabledProtocols.has(output.protocol))
+        .filter(output => enabledEndpoints.has(output.protocol))
         .map((output) => ({
           name: `${output.protocol}-pipe`,
           addr: output.socket_path,
@@ -187,7 +187,7 @@ export class FeatureInitializer {
       if (sensors.length === 0) {
         logger.warnSync('No pipes to read from (no enabled protocols)', {
           component: LogComponents.agent,
-          enabledProtocols: Array.from(enabledProtocols)
+          enabledProtocols: Array.from(enabledEndpoints)
         });
         return;
       }
@@ -219,7 +219,7 @@ export class FeatureInitializer {
       logger.infoSync('Sensor Publish Feature initialized', {
         component: LogComponents.agent,
         pipeCount: sensors.length,
-        enabledProtocols: Array.from(enabledProtocols),
+        enabledProtocols: Array.from(enabledEndpoints),
         pipes: sensors.map(s => s.addr),
         mqttTopicPattern: 'iot/device/{deviceUuid}/sensor/{topic}'
       });

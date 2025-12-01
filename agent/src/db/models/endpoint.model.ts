@@ -4,7 +4,7 @@
  */
 
 import { models, getKnex } from '../connection';
-import { SensorOutputModel } from './sensor-outputs.model';
+import { EndpointOutputModel } from './endpoint-outputs.model';
 // Use require for uuid to avoid ESM/CommonJS mismatch in Jest
 const { v4: uuidv4 } = require('uuid');
 
@@ -227,10 +227,10 @@ export class DeviceEndpointModel {
 
       // Import output config (using SensorOutputModel)
       if (config.output) {
-        const existingOutput = await SensorOutputModel.getOutput(protocol);
+        const existingOutput = await EndpointOutputModel.getOutput(protocol);
         
         if (!existingOutput) {
-          await SensorOutputModel.setOutput({
+          await EndpointOutputModel.setOutput({
             protocol: protocol as 'modbus' | 'can' | 'opcua',
             socket_path: config.output.socketPath || config.output.socket_path,
             data_format: config.output.dataFormat || 'json',

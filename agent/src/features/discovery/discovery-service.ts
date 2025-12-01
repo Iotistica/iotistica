@@ -595,11 +595,11 @@ export class DiscoveryService {
           continue;
         }
 
-        // Convert to DeviceSensor format and save
+        // Convert to DeviceEndpoint format and save
         const deviceSensor: DeviceEndpoint = {
           name: sensor.name,
           protocol: sensor.protocol as 'modbus' | 'can' | 'opcua',
-          enabled: false, // IMPORTANT: Disabled by default, user must enable
+          enabled: true, // DEVELOPMENT: Auto-enable discovered devices (set to false for production)
           poll_interval: 5000, // Default 5 seconds
           connection: sensor.connection,
           data_points: sensor.dataPoints || [],
