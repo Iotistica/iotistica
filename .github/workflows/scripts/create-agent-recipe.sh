@@ -103,9 +103,9 @@ DATABASE_PATH=/data/iotistic/device.sqlite
 LOG_DIR=/data/logs
 STATE_FILE=/data/iotistic/target-state.json
 
-# Provisioning config (optional - can be overridden by /boot/iotistic-config.json)
-# PROVISIONING_API_KEY=  # Leave empty - will be read from boot config or runtime provisioning
-# BOOT_CONFIG_PATH=/data/iotistic/boot-config.json  # Auto-copied from /boot if exists
+# Provisioning config (optional - can be provided via /boot/iotistic-config.json)
+# PROVISIONING_KEY=  # Leave empty - will be read from boot config or set at runtime
+BOOT_CONFIG_PATH=/data/iotistic/boot-config.json
 ENVFILE
 }
 
@@ -139,8 +139,12 @@ pkg_postinst:${PN}() {
         if command -v npm >/dev/null 2>&1; then
             npm install -g pm2
             echo "✓ PM2 installed globally"
+            
+            # Install docker-compose (not available as Yocto package)
+            npm install -g docker-compose
+            echo "✓ docker-compose installed globally"
         else
-            echo "⚠ WARNING: npm not found - PM2 not installed"
+            echo "⚠ WARNING: npm not found - PM2 and docker-compose not installed"
         fi
         
         # NOTE: /var/lib/iotistic and /var/log/iotistic are created as symlinks

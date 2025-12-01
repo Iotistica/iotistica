@@ -96,9 +96,10 @@ IMAGE_INSTALL:append = " \
 "
 
 # Docker container runtime (requires meta-virtualization layer)
+# Note: docker-compose doesn't exist as a Yocto package
+# It will be installed via npm in agent's postinstall script
 IMAGE_INSTALL:append = " \
     docker \
-    docker-compose \
 "
 
 # Agent runtime dependencies
