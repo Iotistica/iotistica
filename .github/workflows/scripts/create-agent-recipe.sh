@@ -103,8 +103,12 @@ DATABASE_PATH=/data/iotistic/device.sqlite
 LOG_DIR=/data/logs
 STATE_FILE=/data/iotistic/target-state.json
 
-# Provisioning config (optional - can be provided via /boot/iotistic-config.json)
-# PROVISIONING_KEY=  # Leave empty - will be read from boot config or set at runtime
+# Provisioning: Multiple methods supported (priority order)
+# 1. PROVISIONING_KEY environment variable (highest priority - for manual override)
+# 2. Boot config file at BOOT_CONFIG_PATH (for Yocto manufacturing)
+#    - Simple: /boot/provisioning-key.txt → auto-converted to JSON
+#    - Full: /boot/iotistic-config.json with provisioningKey field
+# Leave PROVISIONING_KEY empty to use boot config
 BOOT_CONFIG_PATH=/data/iotistic/boot-config.json
 ENVFILE
 }

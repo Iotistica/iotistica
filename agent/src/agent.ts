@@ -36,6 +36,8 @@ import {
 import { AgentFirewall } from "./network/firewall.js";
 import { AgentUpdater } from "./updater.js";
 import { getMacAddress, getOsVersion } from "./system/metrics.js";
+import * as fs from 'fs';
+import * as path from 'path';
 import { 
   healthcheck as memoryHealthcheck, 
   setMemoryLogger,
@@ -51,6 +53,24 @@ import { SimulationOrchestrator, loadSimulationConfig } from "./simulation/index
 import { DiscoveryService } from "./features/discovery/discovery-service.js";
 import { FeatureInitializer, type FeatureContext } from "./bootstrap/feature-initializer";
 
+/**
+ * Load boot configuration from file
+ * Priority: /data/iotistic/boot-config.json (Yocto) or BOOT_CONFIG_PATH env var
+ */
+function loadBootConfig(): Record<string, any> | null {
+  const bootConfigPath = process.env.BOOT_CONFIG_PATH || '/data/iotistic/boot-config.json';
+  
+  try {
+    if (fs.existsSync(bootConfigPath)) {
+      const content = fs.readFileSync(bootConfigPath, 'utf-8');
+      return JSON.parse(content);
+    }
+  } catch (error) {
+    console.warn(`Failed to load boot config from ${bootConfigPath}:`, error);
+  }
+  
+  return null;
+}
 
 export default class DeviceAgent {
   private stateReconciler!: StateReconciler; // Main state manager
@@ -289,28 +309,39 @@ export default class DeviceAgent {
 
     let deviceInfo = this.deviceManager.getDeviceInfo();
 
-    // Auto-provision if not yet provisioned, cloud endpoint is set, AND provisioning key is available
-    const provisioningApiKey = process.env.PROVISIONING_KEY;
+    // Load boot config if available (Yocto images or manual config)
+    const bootConfig = loadBootConfig();
+    
+    // Get provisioning key from multiple sources (priority order):
+    // 1. Environment variable (highest priority - manual override)
+    // 2. Boot config file (Iotistic OS Yocto images)
+    const provisioningApiKey = process.env.PROVISIONING_KEY || bootConfig?.provisioningKey;
+    
+    // Get API endpoint (environment takes priority over boot config)
+    const cloudEndpoint = process.env.CLOUD_API_ENDPOINT || bootConfig?.cloudApiEndpoint || this.apiUrl;
     
     this.agentLogger.debugSync("Checking provisioning configuration", {
       component: LogComponents.agent,
       hasProvisioningKey: !!provisioningApiKey,
       provisioningKeyLength: provisioningApiKey?.length || 0,
       provisioningKeyPrefix: provisioningApiKey ? provisioningApiKey.substring(0, 20) + '...' : 'not set',
+      keySource: process.env.PROVISIONING_KEY ? 'environment' : (bootConfig?.provisioningKey ? 'boot-config' : 'none'),
       isProvisioned: deviceInfo.provisioned,
-      hasCloudEndpoint: !!this.apiUrl,
-      cloudEndpoint: this.apiUrl || 'not set',
+      hasCloudEndpoint: !!cloudEndpoint,
+      cloudEndpoint: cloudEndpoint || 'not set',
+      bootConfigLoaded: !!bootConfig,
     });
 
     if (
       !deviceInfo.provisioned &&
       provisioningApiKey &&
-      this.apiUrl
+      cloudEndpoint
     ) {
       this.agentLogger.infoSync(
         "Auto-provisioning device with two-phase authentication",
         {
           component: LogComponents.agent,
+          keySource: process.env.PROVISIONING_KEY ? 'environment variable' : 'boot config file',
         }
       );
       try {
@@ -329,9 +360,9 @@ export default class DeviceAgent {
         await this.deviceManager.provision({
           provisioningApiKey, // Required for two-phase auth
           deviceName:
-            process.env.DEVICE_NAME || `device-${deviceInfo.uuid.slice(0, 8)}`,
-          deviceType: process.env.DEVICE_TYPE || "standalone",
-          apiEndpoint: this.apiUrl,
+            process.env.DEVICE_NAME || bootConfig?.deviceName || `device-${deviceInfo.uuid.slice(0, 8)}`,
+          deviceType: process.env.DEVICE_TYPE || bootConfig?.deviceType || "standalone",
+          apiEndpoint: cloudEndpoint,
           macAddress,
           osVersion,
           agentVersion: process.env.AGENT_VERSION || getPackageVersion(),
@@ -346,16 +377,16 @@ export default class DeviceAgent {
           error instanceof Error ? error : new Error(error.message),
           {
             componet: LogComponents.agent,
-            note: "Device will remain unprovisioned. Set PROVISIONING_KEY to retry.",
+            note: "Device will remain unprovisioned. Check PROVISIONING_KEY or boot config file.",
           }
         );
 
       }
-    } else if (!deviceInfo.provisioned && this.apiUrl && !provisioningApiKey
+    } else if (!deviceInfo.provisioned && cloudEndpoint && !provisioningApiKey
     ) {
       this.agentLogger.warnSync("Device not provisioned", {
         component: LogComponents.agent,
-        note: "Set PROVISIONING_KEY environment variable to enable auto-provisioning",
+        note: "Set PROVISIONING_KEY environment variable or provide /data/iotistic/boot-config.json",
       });
 
     } else if (!deviceInfo.provisioned && !this.apiUrl) {

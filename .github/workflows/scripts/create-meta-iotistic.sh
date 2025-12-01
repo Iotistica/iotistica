@@ -215,13 +215,38 @@ mkdir -p /data/iotistic
 mkdir -p /data/docker
 mkdir -p /data/logs
 
-# Check for boot partition provisioning config
+# Check for boot partition provisioning (supports two formats)
+# Format 1: Simple text file with just the key (easiest for manufacturing)
+PROV_KEY_FILE="/boot/provisioning-key.txt"
+if [ -f "$PROV_KEY_FILE" ]; then
+    echo "Found provisioning key in /boot/provisioning-key.txt..."
+    PROV_KEY=$(cat "$PROV_KEY_FILE" | tr -d '\n\r' | tr -d ' ')
+    
+    # Create JSON boot config for agent
+    cat > /data/iotistic/boot-config.json << BOOTCONF
+{
+  "provisioningKey": "${PROV_KEY}"
+}
+BOOTCONF
+    chmod 600 /data/iotistic/boot-config.json
+    chown iotistic:iotistic /data/iotistic/boot-config.json
+    
+    # Securely delete the key file from boot partition (one-time use)
+    rm -f "$PROV_KEY_FILE"
+    echo "✓ Provisioning key configured, boot file removed"
+fi
+
+# Format 2: Full JSON config (supports additional parameters)
 BOOT_CONFIG="/boot/iotistic-config.json"
 if [ -f "$BOOT_CONFIG" ]; then
-    echo "Found provisioning config in /boot, copying to /data..."
+    echo "Found provisioning config in /boot/iotistic-config.json..."
     cp "$BOOT_CONFIG" /data/iotistic/boot-config.json
     chmod 600 /data/iotistic/boot-config.json
     chown iotistic:iotistic /data/iotistic/boot-config.json
+    
+    # Optionally delete from boot (comment out to keep)
+    # rm -f "$BOOT_CONFIG"
+    echo "✓ Provisioning config copied to /data"
 fi
 
 # Create symlinks from read-only locations to writable /data partition
