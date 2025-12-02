@@ -325,7 +325,6 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
       - ENABLE_PROTOCOL_ADAPTERS=$EnableProtocolAdapters
       - ENABLE_SENSOR_PUBLISH=$EnableSensorPublish
       - ENABLE_FIRST_BOOT_DISCOVERY=$EnableFirstBootDiscovery
-      - MODBUS_VENDOR_FILE=/app/config/vendors/dataPoints.json
       - MODBUS_VENDOR=COMAP
       - MODBUS_TCP_HOST=$ModbusTcpHost
       - MODBUS_TCP_PORT=$ModbusTcpPort

@@ -43,7 +43,7 @@ COPY src ./src
 COPY cli ./cli
 
 # Build TypeScript using build-specific config (excludes CLI)
-RUN npx tsc --project tsconfig.build.json && npm run copy:migrations
+RUN npx tsc --project tsconfig.build.json && npm run copy:migrations && npm run copy:vendors
 
 # Build CLI separately
 RUN npx tsc cli/iotctl.ts --outDir dist/cli --module commonjs --target es2020
