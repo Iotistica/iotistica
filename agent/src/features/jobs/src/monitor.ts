@@ -278,7 +278,13 @@ export class JobsFeature extends BaseFeature {
     } catch (error: any) {
       // 404 is expected when no jobs available, don't log it
       if (!error.response || error.response.status !== 404) {
-        this.logger.error(`HTTP polling error: ${error.message}`);
+        const errorMessage = error.message || error.cause?.message || String(error);
+        this.logger.error(`HTTP polling error: ${errorMessage}`, {
+          errorType: error.name || 'Unknown',
+          code: error.code,
+          cause: error.cause?.message,
+          url: `${this.baseUrl}/devices/${this.deviceUuid}/jobs/next`
+        });
       }
     }
   }
