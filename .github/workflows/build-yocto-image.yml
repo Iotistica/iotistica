@@ -39,7 +39,7 @@ jobs:
   build-yocto-image:
     name: Build Yocto Image
     
-    runs-on: [iotistic-lab-sc]    
+    runs-on: [iotistic-lab-sc-multi-cores]    
     timeout-minutes: 720  # 12 hours for full Yocto build (increased for self-hosted runner)
     
     steps:
