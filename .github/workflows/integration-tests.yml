@@ -859,10 +859,12 @@ jobs:
         run: |
           echo "=== Checking SQLite database for discovered endpoints ==="
           
-          DB_PATH="/var/lib/iotistic/agent/agent.db"
+          DB_PATH="/var/lib/iotistic/agent/device.sqlite"
           
           if [ ! -f "$DB_PATH" ]; then
             echo "✗ SQLite database not found at $DB_PATH"
+            echo "Checking /var/lib/iotistic/agent directory contents:"
+            sudo ls -la /var/lib/iotistic/agent/ || echo "Directory not found"
             exit 1
           fi
           
