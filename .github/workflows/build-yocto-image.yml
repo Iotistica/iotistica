@@ -40,11 +40,14 @@ jobs:
     name: Build Yocto Image
     
     runs-on: [iotistic-lab-sc-multi-cores]    
-    timeout-minutes: 580  # 8 hours for full build
+    timeout-minutes: 720  # 12 hours for full Yocto build (increased for self-hosted runner)
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Fix AppArmor user namespace restrictions
+        run: bash .github/workflows/scripts/fix-apparmor-userns.sh
 
       - name: Check disk space
         run: bash .github/workflows/scripts/check-disk-space.sh
