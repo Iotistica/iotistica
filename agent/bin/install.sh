@@ -450,6 +450,7 @@ LOG_LEVEL=info
 ORCHESTRATOR_TYPE=docker-compose
 ORCHESTRATOR_INTERVAL=30000
 STATE_FILE=/var/lib/iotistic/agent/target-state.json
+DATABASE_PATH=/var/lib/iotistic/agent/device.sqlite
 EOF
 
     if [ -n "$PROVISIONING_KEY" ]; then
