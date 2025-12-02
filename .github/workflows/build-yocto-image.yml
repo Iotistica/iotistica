@@ -40,7 +40,7 @@ jobs:
     name: Build Yocto Image
     
     runs-on: [iotistic-lab-sc-multi-cores]    
-    timeout-minutes: 480  # 8 hours for full build
+    timeout-minutes: 580  # 8 hours for full build
     
     steps:
       - name: Checkout repository
