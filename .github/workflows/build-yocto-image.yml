@@ -38,7 +38,8 @@ env:
 jobs:
   build-yocto-image:
     name: Build Yocto Image
-    runs-on: [iotistic-lab-sc]  # Self-hosted runner with lots of disk space
+    
+    runs-on: [iotistic-lab-sc-multi-cores]    
     timeout-minutes: 480  # 8 hours for full build
     
     steps:
