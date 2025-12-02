@@ -902,7 +902,7 @@ jobs:
         run: |
           echo "=== Verifying Modbus Discovery Results ==="
           
-          DB_PATH="/var/lib/iotistic/agent/agent.db"
+          DB_PATH="/var/lib/iotistic/agent/device.sqlite"
           
           # Check for Modbus endpoints specifically
           MODBUS_COUNT=$(sudo sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM endpoints WHERE protocol = 'modbus';")
