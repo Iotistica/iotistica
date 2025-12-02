@@ -89,7 +89,7 @@ jobs:
         run: bash .github/workflows/scripts/init-build-env.sh "$BUILD_DIR" "${{ inputs.yocto_version }}"
 
       - name: Configure build
-        run: bash .github/workflows/scripts/configure-build.sh "$BUILD_DIR" "${{ inputs.yocto_version }}" "$DL_DIR" "$SSTATE_DIR" "${{ inputs.include_agent }}" "${{ steps.version.outputs.agent_version }}"
+        run: bash .github/workflows/scripts/configure-build.sh "$BUILD_DIR" "${{ inputs.yocto_version }}" "${{ inputs.machine }}" "$DL_DIR" "$SSTATE_DIR" "${{ inputs.include_agent }}" "${{ steps.version.outputs.agent_version }}"
 
       - name: Build image
         run: bash .github/workflows/scripts/build-image.sh "$BUILD_DIR" "${{ inputs.yocto_version }}" "$SSTATE_DIR"
