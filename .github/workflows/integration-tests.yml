@@ -444,21 +444,7 @@ jobs:
           echo "Cloud API endpoint: $CLOUD_API_ENDPOINT"
           sudo -E bash agent/bin/install.sh
           
-          echo "✓ Agent installed"
-
-      - name: Copy vendors folder (after install)
-        run: |
-          # Copy vendors folder AFTER install completes (required for Modbus discovery)
-          sudo mkdir -p /opt/iotistic/agent/vendors
-          sudo cp -r vendors/dataPoints.json /opt/iotistic/agent/vendors/
-          sudo chown -R iotistic:iotistic /opt/iotistic/agent/vendors
-          
-          echo "✓ Vendors data copied"
-          
-          # Restart agent to pick up vendors folder
-          sudo systemctl restart iotistic-agent
-          sleep 5
-          echo "✓ Agent restarted"
+          echo "✓ Agent installed (vendors file bundled in dist/features/discovery/vendors/)"
 
       - name: Verify environment configuration
         run: |
@@ -818,21 +804,7 @@ jobs:
           echo "Cloud API endpoint: $CLOUD_API_ENDPOINT"
           sudo -E bash agent/bin/install.sh
           
-          echo "✓ Agent installed"
-
-      - name: Copy vendors folder (after install)
-        run: |
-          # Copy vendors folder AFTER install completes (required for Modbus discovery)
-          sudo mkdir -p /opt/iotistic/agent/vendors
-          sudo cp -r vendors/dataPoints.json /opt/iotistic/agent/vendors/
-          sudo chown -R iotistic:iotistic /opt/iotistic/agent/vendors
-          
-          echo "✓ Vendors data copied"
-          
-          # Restart agent to pick up vendors folder
-          sudo systemctl restart iotistic-agent
-          sleep 5
-          echo "✓ Agent restarted"
+          echo "✓ Agent installed (vendors file bundled in dist/features/discovery/vendors/)"
 
       - name: Configure Modbus discovery
         run: |
