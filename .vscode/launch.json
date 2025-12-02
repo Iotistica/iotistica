@@ -28,7 +28,6 @@
       "ENABLE_PROTOCOL_ADAPTERS" : "true",
       "ENABLE_SENSOR_PUBLISH" : "true",
       "ENABLE_FIRST_BOOT_DISCOVERY": "true",
-      "MODBUS_VENDOR_FILE":"C:\\Users\\Dan\\zemfyre-sensor\\vendors\\dataPoints.json",
       "MODBUS_TCP_HOST":"localhost",
       "MODBUS_TCP_PORT":"502",
       "MODBUS_VENDOR":"COMAP",
@@ -39,7 +38,7 @@
       "SNMP_IP_RANGES":"iotistic-snmp-sim",
       "SNMP_PORT":"161",
       "MEMORY_THRESHOLD_MB":"50",
-			"PROVISIONING_API_KEY": "6e33b41a8603ef2d0b2a8cdb1a6add14229c0bd89f151b57aa3bd73bff42f0da"
+			"PROVISIONING_API_KEY": "c6918ba3f115dcc39c0eb352f4170eab439ef44b6f014c8913926725e09001cd"
       }
     },
     {

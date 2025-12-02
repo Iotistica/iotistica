@@ -62,7 +62,7 @@ export class FeatureInitializer {
    * Initialize optional features (can run in parallel)
    * Jobs, SensorPublish, and Protocol Adapters are independent
    */
-  async initializeOptionalFeatures(): Promise<void> {
+  async initOptionalFeatures(): Promise<void> {
     await Promise.all([
       this.initJobs(),
       this.initSensorPublish(),
@@ -74,7 +74,7 @@ export class FeatureInitializer {
    * Initialize supporting features (can run in parallel)
    * Updater, Firewall, and Config Handler depend on optional features being initialized
    */
-  async initializeSupportingFeatures(): Promise<void> {
+  async initSupportingFeatures(): Promise<void> {
     await Promise.all([
       this.initAgentUpdater(),
       this.initFirewall(),
@@ -146,9 +146,9 @@ export class FeatureInitializer {
       const { EndpointOutputModel: EndpointOutputModel } = await import('../db/models/endpoint-outputs.model.js');
       const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
       
-      const sensorOutputs = await EndpointOutputModel.getAll();
+      const endpointOutputs = await EndpointOutputModel.getAll();
 
-      if (sensorOutputs.length === 0) {
+      if (endpointOutputs.length === 0) {
         logger.warnSync('No sensor outputs configured in database', {
           component: LogComponents.agent,
           note: 'Run migrations to create default endpoint_outputs entries'
@@ -170,8 +170,8 @@ export class FeatureInitializer {
         return;
       }
 
-      // Build sensor configs only for enabled protocols
-      const sensors = sensorOutputs
+      // Build endpoint configs only for enabled protocols
+      const endpoints = endpointOutputs
         .filter(output => enabledEndpoints.has(output.protocol))
         .map((output) => ({
           name: `${output.protocol}-pipe`,
@@ -184,7 +184,7 @@ export class FeatureInitializer {
           enabled: true,
         }));
 
-      if (sensors.length === 0) {
+      if (endpoints.length === 0) {
         logger.warnSync('No pipes to read from (no enabled protocols)', {
           component: LogComponents.agent,
           enabledProtocols: Array.from(enabledEndpoints)
@@ -192,13 +192,13 @@ export class FeatureInitializer {
         return;
       }
 
-      const sensorConfig = {
+      const endpointConfig = {
         enabled: true,
-        sensors,
+        endpoints,
       };
 
       this.features.sensorPublish = new SensorPublishFeature(
-        sensorConfig as any,
+        endpointConfig as any,
         logger,
         deviceInfo.uuid
       );
@@ -210,7 +210,7 @@ export class FeatureInitializer {
 
         logger.infoSync('Configured edge AI anomaly detection for sensor data', {
           component: LogComponents.agent,
-          sensorCount: sensors.length
+          sensorCount: endpoints.length
         });
       }
 
@@ -218,9 +218,9 @@ export class FeatureInitializer {
 
       logger.infoSync('Sensor Publish Feature initialized', {
         component: LogComponents.agent,
-        pipeCount: sensors.length,
+        pipeCount: endpoints.length,
         enabledProtocols: Array.from(enabledEndpoints),
-        pipes: sensors.map(s => s.addr),
+        pipes: endpoints.map(s => s.addr),
         mqttTopicPattern: 'iot/device/{deviceUuid}/sensor/{topic}'
       });
     } catch (error) {

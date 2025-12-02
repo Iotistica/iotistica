@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2025-12-01 15:30:29
+# Generated: 2025-12-01 21:57:23
 # Agents: 25 to 25
 # Ports: 48505 to 48505
 
@@ -23,7 +23,7 @@ services:
       - METRICS_INTERVAL_MS=30000
       - LOG_COMPRESSION=true
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=85d2df8e98a8ed1de991d7fba7a1e9d22c73e9a6ecd081130265c9b10ccfc23a
+      - PROVISIONING_KEY=c6918ba3f115dcc39c0eb352f4170eab439ef44b6f014c8913926725e09001cd
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - MEMORY_CHECK_INTERVAL_MS=30000
       - MEMORY_THRESHOLD_MB=30
@@ -39,7 +39,6 @@ services:
       - ENABLE_PROTOCOL_ADAPTERS=true
       - ENABLE_SENSOR_PUBLISH=true
       - ENABLE_FIRST_BOOT_DISCOVERY=true
-      - MODBUS_VENDOR_FILE=/app/config/vendors/dataPoints.json
       - MODBUS_VENDOR=COMAP
       - MODBUS_TCP_HOST=iotistic-modbus-sim
       - MODBUS_TCP_PORT=502

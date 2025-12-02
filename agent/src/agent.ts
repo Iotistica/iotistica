@@ -51,7 +51,7 @@ import { AnomalyDetectionService } from "./ai/anomaly/index.js";
 import { loadConfigFromEnv } from "./ai/anomaly/utils.js";
 import { SimulationOrchestrator, loadSimulationConfig } from "./simulation/index.js";
 import { DiscoveryService } from "./features/discovery/discovery-service.js";
-import { FeatureInitializer, type FeatureContext } from "./bootstrap/feature-initializer";
+import { FeatureInitializer, type FeatureContext } from "./bootstrap/init.js";
 
 /**
  * Load boot configuration from file
@@ -194,7 +194,7 @@ export default class DeviceAgent {
 
       this.featureInitializer = new FeatureInitializer(featureContext);
 
-      await this.featureInitializer.initializeOptionalFeatures();
+      await this.featureInitializer.initOptionalFeatures();
 
       // Store references to features for backward compatibility
       const features = this.featureInitializer.getFeatures();
@@ -209,13 +209,13 @@ export default class DeviceAgent {
       await this.initializeSimulationMode();
 
       // 10.7. Initialize Discovery Service (protocol auto-discovery)
-      await this.initializeDiscoveryService();
+      await this.initDiscoveryService ();
 
       // 11. Initialize API Binder (AFTER features are initialized so it can access sensor health)
-      await this.initializeDeviceSync(config.settings);
+      await this.initDeviceSync(config.settings);
 
       // 11-13. Initialize supporting features (updater, firewall, sensor config handler)
-      await this.featureInitializer.initializeSupportingFeatures();
+      await this.featureInitializer.initSupportingFeatures();
 
       // Store references for backward compatibility
       this.updater = features.updater;
@@ -632,7 +632,7 @@ export default class DeviceAgent {
     }
   }
 
-  private async initializeDiscoveryService(): Promise<void> {
+  private async initDiscoveryService (): Promise<void> {
     this.agentLogger?.infoSync("Initializing Discovery Service", {
       component: LogComponents.agent,
     });
@@ -793,7 +793,7 @@ export default class DeviceAgent {
     }
   }
 
-  private async initializeDeviceSync(
+  private async initDeviceSync(
     configSettings: Record<string, any>
   ): Promise<void> {
     if (!this.apiUrl) {
