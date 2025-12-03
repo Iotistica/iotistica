@@ -413,6 +413,7 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
     echo "Building agent..."
     npx tsc --project tsconfig.build.json
     npm run copy:migrations
+    npm run copy:vendors
 
     if [ ! -f dist/app.js ]; then
         echo "✗ Error: Build failed - dist/app.js not found"
