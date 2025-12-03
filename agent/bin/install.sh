@@ -549,7 +549,7 @@ Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 ExecStart=$PM2_PATH start /opt/iotistic/agent/ecosystem.config.js 
 ExecReload=$PM2_PATH reload /opt/iotistic/agent/ecosystem.config.js
-ExecStop=$PM2_PATH kill
+ExecStop=/bin/kill -s SIGTERM \$MAINPID
 
 Restart=always
 RestartSec=10
