@@ -1,10 +1,15 @@
 /**
  * MQTT Broker Configuration Utilities
- * Helper functions for managing and retrieving MQTT broker configurations
+ * 
+ * Priority order for broker configuration:
+ * 1. Environment variables (MQTT_BROKER_HOST, MQTT_BROKER_PORT, MQTT_BROKER_PROTOCOL)
+ * 2. Device-specific broker assignment (devices.mqtt_broker_id)
+ * 3. Default broker (mqtt_broker_config.is_default = true)
+ * 
+ * Database: Uses mqtt_broker_config table directly (not system_config)
  */
 
 import { query } from '../db/connection';
-import { SystemConfig } from '../config/system-config';
 
 export interface MqttBrokerConfig {
   id: number;
@@ -27,155 +32,138 @@ export interface MqttBrokerConfig {
 
 /**
  * Get broker configuration for a specific device
- * Falls back to default broker if device has no specific broker assigned
+ * 
+ * Priority order:
+ * 1. Environment variables (full override if all required vars present)
+ * 2. Device-specific broker from database
+ * 3. Default broker from database
  * 
  * @param deviceUuid - Device UUID
  * @returns Broker configuration or null if not found
  */
 export async function getBrokerConfigForDevice(deviceUuid: string): Promise<MqttBrokerConfig | null> {
   try {
-    // Priority 1: Check environment variable override
+    // Priority 1: Full environment override (e2e, docker-compose, k8s)
     const envHost = process.env.MQTT_BROKER_HOST;
     const envPort = process.env.MQTT_BROKER_PORT;
     const envProtocol = process.env.MQTT_BROKER_PROTOCOL;
-    const envUseTls = process.env.MQTT_BROKER_USE_TLS;
     
-    // If full environment override is present, use it directly (e2e mode)
     if (envHost && envPort && envProtocol) {
-      console.log(`[MQTT Config] Using full environment override for device ${deviceUuid}:`, {
+      console.log(`[MQTT Config] Environment override for device ${deviceUuid}:`, {
         protocol: envProtocol,
         host: envHost,
         port: envPort,
-        use_tls: envUseTls === 'true'
+        use_tls: process.env.MQTT_BROKER_USE_TLS === 'true'
       });
       
-      return {
-        id: 0, // Virtual config from environment
-        name: 'Environment Override',
-        protocol: envProtocol,
-        host: envHost,
-        port: parseInt(envPort, 10),
-        username: process.env.MQTT_BROKER_USERNAME || process.env.MQTT_USERNAME || null,
-        use_tls: envUseTls === 'true',
-        ca_cert: process.env.MQTT_BROKER_CA_CERT || null,
-        client_cert: process.env.MQTT_BROKER_CLIENT_CERT || null,
-        verify_certificate: process.env.MQTT_BROKER_VERIFY_CERT !== 'false',
-        client_id_prefix: process.env.MQTT_CLIENT_ID_PREFIX || 'Iotistic',
-        keep_alive: parseInt(process.env.MQTT_KEEP_ALIVE || '60', 10),
-        clean_session: process.env.MQTT_CLEAN_SESSION !== 'false',
-        reconnect_period: parseInt(process.env.MQTT_RECONNECT_PERIOD || '1000', 10),
-        connect_timeout: parseInt(process.env.MQTT_CONNECT_TIMEOUT || '30000', 10),
-        broker_type: process.env.MQTT_BROKER_TYPE || 'local'
-      };
+      return createConfigFromEnv();
     }
     
-    // Priority 2: Query database for device-specific broker ID, then use SystemConfig
+    // Priority 2: Device-specific broker from mqtt_broker_config table
     const deviceResult = await query(
-      `SELECT mqtt_broker_id FROM devices WHERE uuid = $1`,
+      `SELECT bc.* FROM mqtt_broker_config bc
+       JOIN devices d ON d.mqtt_broker_id = bc.id
+       WHERE d.uuid = $1 AND bc.is_active = true`,
       [deviceUuid]
     );
     
-    const brokerId = deviceResult.rows[0]?.mqtt_broker_id;
-    
-    // Use SystemConfig to get broker (uses device-specific or default)
-    const config = await SystemConfig.getMqttBroker(brokerId);
-    
-    console.log(`[MQTT Config] DB config for device ${deviceUuid}:`, {
-      id: config.id,
-      name: config.name,
-      protocol: config.protocol,
-      host: config.host,
-      port: config.port,
-      use_tls: config.use_tls,
-      broker_type: config.broker_type
-    });
-    
-    // Apply partial environment overrides if present (legacy behavior)
-    if (envHost && envPort) {
-      config.host = envHost;
-      config.port = parseInt(envPort, 10);
-      
-      if (envProtocol) {
-        config.protocol = envProtocol;
-      }
-      
-      if (envUseTls) {
-        config.use_tls = envUseTls === 'true';
-      }
-      
-      console.log(`[MQTT Config] Applied partial env override for device ${deviceUuid}:`, {
-        protocol: config.protocol,
-        host: config.host,
-        port: config.port,
-        use_tls: config.use_tls
+    if (deviceResult.rows.length > 0) {
+      console.log(`[MQTT Config] Device-specific broker for ${deviceUuid}:`, {
+        name: deviceResult.rows[0].name,
+        protocol: deviceResult.rows[0].protocol,
+        host: deviceResult.rows[0].host,
+        port: deviceResult.rows[0].port
       });
+      return deviceResult.rows[0];
     }
     
-    console.log(`[MQTT Config] Final config returned for device ${deviceUuid}:`, {
-      protocol: config.protocol,
-      host: config.host,
-      port: config.port,
-      use_tls: config.use_tls
-    });
+    // Priority 3: Default broker from mqtt_broker_config table
+    const defaultResult = await query(
+      `SELECT * FROM mqtt_broker_config 
+       WHERE is_default = true AND is_active = true 
+       LIMIT 1`
+    );
     
-    return config || null;
+    if (defaultResult.rows.length > 0) {
+      console.log(`[MQTT Config] Default broker for ${deviceUuid}:`, {
+        name: defaultResult.rows[0].name,
+        protocol: defaultResult.rows[0].protocol,
+        host: defaultResult.rows[0].host,
+        port: defaultResult.rows[0].port
+      });
+      return defaultResult.rows[0];
+    }
+    
+    console.warn(`[MQTT Config] No broker found for device ${deviceUuid}`);
+    return null;
   } catch (error) {
-    console.error('Error fetching broker config for device:', error);
+    console.error(`[MQTT Config] Error fetching broker config for device ${deviceUuid}:`, error);
     return null;
   }
 }
 
 /**
+ * Create broker configuration from environment variables
+ */
+function createConfigFromEnv(): MqttBrokerConfig {
+  return {
+    id: 0, // Virtual config (not from database)
+    name: 'Environment Override',
+    protocol: process.env.MQTT_BROKER_PROTOCOL || 'mqtt',
+    host: process.env.MQTT_BROKER_HOST || 'localhost',
+    port: parseInt(process.env.MQTT_BROKER_PORT || '1883', 10),
+    username: process.env.MQTT_BROKER_USERNAME || process.env.MQTT_USERNAME || null,
+    use_tls: process.env.MQTT_BROKER_USE_TLS === 'true',
+    ca_cert: process.env.MQTT_BROKER_CA_CERT || null,
+    client_cert: process.env.MQTT_BROKER_CLIENT_CERT || null,
+    verify_certificate: process.env.MQTT_BROKER_VERIFY_CERT !== 'false',
+    client_id_prefix: process.env.MQTT_CLIENT_ID_PREFIX || 'Iotistic',
+    keep_alive: parseInt(process.env.MQTT_KEEP_ALIVE || '60', 10),
+    clean_session: process.env.MQTT_CLEAN_SESSION !== 'false',
+    reconnect_period: parseInt(process.env.MQTT_RECONNECT_PERIOD || '1000', 10),
+    connect_timeout: parseInt(process.env.MQTT_CONNECT_TIMEOUT || '30000', 10),
+    broker_type: process.env.MQTT_BROKER_TYPE || 'local'
+  };
+}
+
+/**
  * Get the default broker configuration
- * Priority: Environment variables > Database > null
  * 
- * This allows:
- * - K8s deployments to inject namespace URLs via env vars
- * - Customers to configure external brokers via UI (database)
- * - Flexible override for cloud brokers (HiveMQ, AWS IoT, etc.)
+ * Priority order:
+ * 1. Environment variables (if all required vars present)
+ * 2. Default broker from mqtt_broker_config table
  * 
  * @returns Default broker configuration or null if not found
  */
 export async function getDefaultBrokerConfig(): Promise<MqttBrokerConfig | null> {
   try {
-    // Priority 1: Check environment variable override
+    // Priority 1: Environment override
     const envHost = process.env.MQTT_BROKER_HOST;
     const envPort = process.env.MQTT_BROKER_PORT;
+    const envProtocol = process.env.MQTT_BROKER_PROTOCOL;
     
-    if (envHost && envPort) {
-      console.log(`[MQTT Config] Using environment override: ${envHost}:${envPort}`);
-      return {
-        id: 0, // Virtual config, not from DB
-        name: 'Environment Override',
-        protocol: process.env.MQTT_BROKER_PROTOCOL || 'mqtt',
-        host: envHost,
-        port: parseInt(envPort, 10),
-        username: process.env.MQTT_BROKER_USERNAME || null,
-        use_tls: process.env.MQTT_BROKER_USE_TLS === 'true',
-        ca_cert: process.env.MQTT_BROKER_CA_CERT || null,
-        client_cert: process.env.MQTT_BROKER_CLIENT_CERT || null,
-        verify_certificate: process.env.MQTT_BROKER_VERIFY_CERT !== 'false', // Default true
-        client_id_prefix: process.env.MQTT_CLIENT_ID_PREFIX || 'Iotistic',
-        keep_alive: parseInt(process.env.MQTT_KEEP_ALIVE || '60', 10),
-        clean_session: process.env.MQTT_CLEAN_SESSION !== 'false', // Default true
-        reconnect_period: parseInt(process.env.MQTT_RECONNECT_PERIOD || '1000', 10),
-        connect_timeout: parseInt(process.env.MQTT_CONNECT_TIMEOUT || '30000', 10),
-        broker_type: process.env.MQTT_BROKER_TYPE || 'cloud'
-      };
+    if (envHost && envPort && envProtocol) {
+      console.log(`[MQTT Config] Environment override: ${envProtocol}://${envHost}:${envPort}`);
+      return createConfigFromEnv();
     }
     
-    // Priority 2: Fallback to database configuration via SystemConfig
-    const config = await SystemConfig.getMqttBroker(); // No ID = use default
+    // Priority 2: Default broker from database
+    const result = await query(
+      `SELECT * FROM mqtt_broker_config 
+       WHERE is_default = true AND is_active = true 
+       LIMIT 1`
+    );
     
-    if (!config) {
-      console.warn('[MQTT Config] No default broker configuration found');
+    if (result.rows.length === 0) {
+      console.warn('[MQTT Config] No default broker found in database');
       return null;
     }
     
-    console.log(`[MQTT Config] Using database default: ${config.host}:${config.port}`);
+    const config = result.rows[0];
+    console.log(`[MQTT Config] Database default: ${config.protocol}://${config.host}:${config.port}`);
     return config;
   } catch (error) {
-    console.error('Error fetching default broker config:', error);
+    console.error('[MQTT Config] Error fetching default broker:', error);
     return null;
   }
 }
@@ -194,19 +182,20 @@ export function buildBrokerUrl(config: MqttBrokerConfig): string {
  * Format broker configuration for API response
  * Removes sensitive information and formats for client consumption
  * 
- * @param config - Broker configuration (supports both snake_case and camelCase)
- * @returns Sanitized broker configuration object
+ * @param config - Broker configuration from database (snake_case)
+ * @returns Sanitized broker configuration object (camelCase)
  */
 export function formatBrokerConfigForClient(config: any) {
-  const useTls = config.useTls ?? false;
-  const caCert = config.caCert ?? null;
-  const clientCert = config.clientCert ?? null;
-  const verifyCertificate = config.verifyCertificate ??  true;
-  const clientIdPrefix = config.clientIdPrefix ?? 'Iotistic';
-  const keepAlive = config.keepAlive ?? 60;
-  const cleanSession = config.cleanSession ?? true;
-  const reconnectPeriod = config.reconnectPeriod ?? 1000;
-  const connectTimeout = config.connectTimeout ?? 30000;
+  // Support both snake_case (from database) and camelCase (from env)
+  const useTls = config.use_tls ?? config.useTls ?? false;
+  const caCert = config.ca_cert ?? config.caCert ?? null;
+  const clientCert = config.client_cert ?? config.clientCert ?? null;
+  const verifyCertificate = config.verify_certificate ?? config.verifyCertificate ?? true;
+  const clientIdPrefix = config.client_id_prefix ?? config.clientIdPrefix ?? 'Iotistic';
+  const keepAlive = config.keep_alive ?? config.keepAlive ?? 60;
+  const cleanSession = config.clean_session ?? config.cleanSession ?? true;
+  const reconnectPeriod = config.reconnect_period ?? config.reconnectPeriod ?? 1000;
+  const connectTimeout = config.connect_timeout ?? config.connectTimeout ?? 30000;
 
   return {
     protocol: config.protocol,
@@ -244,7 +233,7 @@ export async function assignBrokerToDevice(deviceUuid: string, brokerId: number 
     );
     return true;
   } catch (error) {
-    console.error('Error assigning broker to device:', error);
+    console.error('[MQTT Config] Error assigning broker to device:', error);
     return false;
   }
 }
