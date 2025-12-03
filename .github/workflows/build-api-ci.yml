@@ -11,7 +11,7 @@ on:
 jobs:
   test:
     name: Run Unit Tests
-    runs-on: [ephemeral]
+    runs-on: [iotistic-lab-sc]
     
     steps:
       - name: Checkout repository
@@ -42,7 +42,7 @@ jobs:
   version:
     name: Bump Version
     needs: test
-    runs-on: [ephemeral]
+    runs-on: [iotistic-lab-sc]
     permissions:
       contents: write
     outputs:
@@ -98,7 +98,7 @@ jobs:
   buildx:
     name: Build & Push to Docker
     needs: version
-    runs-on: [ephemeral]
+    runs-on: [iotistic-lab-sc]
     permissions:
       contents: write
 
@@ -178,7 +178,7 @@ jobs:
   report:
     name: Generate Reports
     needs: [version, buildx]
-    runs-on: [ephemeral]
+    runs-on: [iotistic-lab-sc]
     if: always()
     
     steps:
@@ -266,7 +266,7 @@ jobs:
   trigger-integration-tests:
     name: Trigger Integration Tests
     needs: [version, buildx]
-    runs-on: [ephemeral]
+    runs-on: [iotistic-lab-sc]
     permissions:
       actions: write
       contents: read
