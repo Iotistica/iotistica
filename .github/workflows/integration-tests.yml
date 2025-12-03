@@ -437,11 +437,15 @@ jobs:
           IOTISTIC_AGENT_VERSION: ${{ needs.determine-versions.outputs.agent_version }}
           IOTISTIC_DEVICE_PORT: 48484
           CLOUD_API_ENDPOINT: http://localhost:4002
+          MQTT_BROKER_HOST: localhost
+          MQTT_BROKER_PORT: 5883
+          MQTT_USE_TLS: false
           PROVISIONING_KEY: ${{ steps.provision.outputs.provisioning_key }}
         run: |
           echo "Installing agent with systemd method..."
           echo "Provisioning key (first 20 chars): ${PROVISIONING_KEY:0:20}..."
           echo "Cloud API endpoint: $CLOUD_API_ENDPOINT"
+          echo "MQTT broker: mqtt://${MQTT_BROKER_HOST}:${MQTT_BROKER_PORT}"
           sudo -E bash agent/bin/install.sh
           
           echo "✓ Agent installed"
@@ -658,8 +662,8 @@ jobs:
         if: always()
         run: docker compose -f $COMPOSE_FILE down -v
 
-  test-sensors:
-    name: Test Simulators
+  test-endpoints:
+    name: Test Endpoints
     needs: [determine-versions, setup]
     runs-on: [iotistic-lab-sc]
     timeout-minutes: 10
@@ -818,11 +822,15 @@ jobs:
           IOTISTIC_AGENT_VERSION: ${{ needs.determine-versions.outputs.agent_version }}
           IOTISTIC_DEVICE_PORT: 48484
           CLOUD_API_ENDPOINT: http://localhost:4002
+          MQTT_BROKER_HOST: localhost
+          MQTT_BROKER_PORT: 5883
+          MQTT_USE_TLS: false
           PROVISIONING_KEY: ${{ steps.provision.outputs.provisioning_key }}
         run: |
           echo "Installing agent with systemd method..."
           echo "Provisioning key (first 20 chars): ${PROVISIONING_KEY:0:20}..."
           echo "Cloud API endpoint: $CLOUD_API_ENDPOINT"
+          echo "MQTT broker: mqtt://${MQTT_BROKER_HOST}:${MQTT_BROKER_PORT}"
           sudo -E bash agent/bin/install.sh
           
           echo "✓ Agent installed"
