@@ -444,7 +444,28 @@ jobs:
           echo "Cloud API endpoint: $CLOUD_API_ENDPOINT"
           sudo -E bash agent/bin/install.sh
           
-          echo "✓ Agent installed (vendors file bundled in dist/features/discovery/vendors/)"
+          echo "✓ Agent installed"
+
+      - name: Verify vendors file exists
+        run: |
+          echo "=== Verifying vendors file after installation ==="
+          
+          if [ -f /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json ]; then
+            echo "✓ Vendors file exists at /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json"
+            echo "File size: $(stat -f%z /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json 2>/dev/null || stat -c%s /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json)"
+          else
+            echo "✗ Vendors file NOT FOUND at /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json"
+            echo ""
+            echo "Checking source file:"
+            ls -la /opt/iotistic/agent/src/features/discovery/vendors/ || echo "Source directory not found"
+            echo ""
+            echo "Checking dist structure:"
+            find /opt/iotistic/agent/dist -name "*.json" | head -20 || echo "No JSON files in dist"
+            echo ""
+            echo "Checking build logs:"
+            sudo journalctl -u iotistic-agent --no-pager --since "2 minutes ago" | grep -i "vendor\|copy" || echo "No vendor-related logs"
+            exit 1
+          fi
 
       - name: Verify environment configuration
         run: |
@@ -804,7 +825,25 @@ jobs:
           echo "Cloud API endpoint: $CLOUD_API_ENDPOINT"
           sudo -E bash agent/bin/install.sh
           
-          echo "✓ Agent installed (vendors file bundled in dist/features/discovery/vendors/)"
+          echo "✓ Agent installed"
+
+      - name: Verify vendors file exists
+        run: |
+          echo "=== Verifying vendors file after installation ==="
+          
+          if [ -f /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json ]; then
+            echo "✓ Vendors file exists at /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json"
+            echo "File size: $(stat -f%z /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json 2>/dev/null || stat -c%s /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json)"
+          else
+            echo "✗ Vendors file NOT FOUND at /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json"
+            echo ""
+            echo "Checking source file:"
+            ls -la /opt/iotistic/agent/src/features/discovery/vendors/ || echo "Source directory not found"
+            echo ""
+            echo "Checking dist structure:"
+            find /opt/iotistic/agent/dist -name "*.json" | head -20 || echo "No JSON files in dist"
+            exit 1
+          fi
 
       - name: Configure Modbus discovery
         run: |
