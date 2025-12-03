@@ -1126,7 +1126,7 @@ jobs:
 
   cleanup:
     name: Cleanup Environment
-    needs: [determine-versions, setup, test-api, test-agents, test-sensors, test-dashboard]
+    needs: [determine-versions, setup, test-api, test-agents, test-endpoints, test-dashboard]
     runs-on: [iotistic-lab-sc]
     if: always()
     
