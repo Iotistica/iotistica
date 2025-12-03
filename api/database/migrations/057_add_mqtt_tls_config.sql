@@ -1,17 +1,37 @@
 -- Migration: Update MQTT broker to use TLS/SSL (MQTTS)
 -- Purpose: Enable secure MQTT communication with TLS on port 8883
 -- Created: 2025-11-12
+-- Note: Skipped for e2e environment - use environment variables instead
 
--- Update existing mqtt.brokers.1 configuration to use MQTTS
-UPDATE system_config
-SET 
-  value = value 
-    || jsonb_build_object('protocol', 'mqtts')
-    || jsonb_build_object('port', 8883)
-    || jsonb_build_object('useTls', false)
-    || jsonb_build_object('updatedAt', CURRENT_TIMESTAMP),
-  updated_at = CURRENT_TIMESTAMP
-WHERE key = 'mqtt.brokers.1';
+-- Skip this migration in e2e environment (port 5883 indicates e2e/test mode)
+-- E2E uses mqtt://localhost:5883 without TLS, configured via environment variables
+DO $$
+DECLARE
+  current_port INTEGER;
+BEGIN
+  -- Get current port from mqtt.brokers.1
+  SELECT (value->>'port')::INTEGER INTO current_port
+  FROM system_config
+  WHERE key = 'mqtt.brokers.1';
+  
+  -- Only apply TLS migration if current port is NOT 5883 (not in e2e mode)
+  IF current_port IS NULL OR current_port != 5883 THEN
+    -- Update existing mqtt.brokers.1 configuration to use MQTTS
+    UPDATE system_config
+    SET 
+      value = value 
+        || jsonb_build_object('protocol', 'mqtts')
+        || jsonb_build_object('port', 8883)
+        || jsonb_build_object('useTls', false)
+        || jsonb_build_object('updatedAt', CURRENT_TIMESTAMP),
+      updated_at = CURRENT_TIMESTAMP
+    WHERE key = 'mqtt.brokers.1';
+    
+    RAISE NOTICE 'Updated MQTT broker to use TLS (mqtts:8883)';
+  ELSE
+    RAISE NOTICE 'Skipping TLS migration - e2e environment detected (port 5883)';
+  END IF;
+END $$;
 
 -- Add CA certificate as separate config entry for easier management
 INSERT INTO system_config (key, value, updated_at)

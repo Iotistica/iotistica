@@ -34,10 +34,40 @@ export interface MqttBrokerConfig {
  */
 export async function getBrokerConfigForDevice(deviceUuid: string): Promise<MqttBrokerConfig | null> {
   try {
-    // Priority 1: Check environment variable override (same as getDefaultBrokerConfig)
+    // Priority 1: Check environment variable override
     const envHost = process.env.MQTT_BROKER_HOST;
     const envPort = process.env.MQTT_BROKER_PORT;
+    const envProtocol = process.env.MQTT_BROKER_PROTOCOL;
+    const envUseTls = process.env.MQTT_BROKER_USE_TLS;
     
+    // If full environment override is present, use it directly (e2e mode)
+    if (envHost && envPort && envProtocol) {
+      console.log(`[MQTT Config] Using full environment override for device ${deviceUuid}:`, {
+        protocol: envProtocol,
+        host: envHost,
+        port: envPort,
+        use_tls: envUseTls === 'true'
+      });
+      
+      return {
+        id: 0, // Virtual config from environment
+        name: 'Environment Override',
+        protocol: envProtocol,
+        host: envHost,
+        port: parseInt(envPort, 10),
+        username: process.env.MQTT_BROKER_USERNAME || process.env.MQTT_USERNAME || null,
+        use_tls: envUseTls === 'true',
+        ca_cert: process.env.MQTT_BROKER_CA_CERT || null,
+        client_cert: process.env.MQTT_BROKER_CLIENT_CERT || null,
+        verify_certificate: process.env.MQTT_BROKER_VERIFY_CERT !== 'false',
+        client_id_prefix: process.env.MQTT_CLIENT_ID_PREFIX || 'Iotistic',
+        keep_alive: parseInt(process.env.MQTT_KEEP_ALIVE || '60', 10),
+        clean_session: process.env.MQTT_CLEAN_SESSION !== 'false',
+        reconnect_period: parseInt(process.env.MQTT_RECONNECT_PERIOD || '1000', 10),
+        connect_timeout: parseInt(process.env.MQTT_CONNECT_TIMEOUT || '30000', 10),
+        broker_type: process.env.MQTT_BROKER_TYPE || 'local'
+      };
+    }
     
     // Priority 2: Query database for device-specific broker ID, then use SystemConfig
     const deviceResult = await query(
@@ -60,11 +90,25 @@ export async function getBrokerConfigForDevice(deviceUuid: string): Promise<Mqtt
       broker_type: config.broker_type
     });
     
-    // Override with environment variables if TLS is disabled and env vars are set
-    if (config.use_tls === false && envHost && envPort) {
+    // Apply partial environment overrides if present (legacy behavior)
+    if (envHost && envPort) {
       config.host = envHost;
       config.port = parseInt(envPort, 10);
-      console.log(`[MQTT Config] TLS disabled for device ${deviceUuid}, using env override: ${envHost}:${envPort}`);
+      
+      if (envProtocol) {
+        config.protocol = envProtocol;
+      }
+      
+      if (envUseTls) {
+        config.use_tls = envUseTls === 'true';
+      }
+      
+      console.log(`[MQTT Config] Applied partial env override for device ${deviceUuid}:`, {
+        protocol: config.protocol,
+        host: config.host,
+        port: config.port,
+        use_tls: config.use_tls
+      });
     }
     
     console.log(`[MQTT Config] Final config returned for device ${deviceUuid}:`, {
