@@ -507,6 +507,26 @@ jobs:
             echo ""
             echo "Contents (sensitive values masked):"
             sudo cat /etc/iotistic/agent.env | sed 's/PROVISIONING_KEY=.*/PROVISIONING_KEY=<masked>/'
+            echo ""
+            echo "Verifying MQTT configuration:"
+            if sudo grep -q "MQTT_BROKER_HOST" /etc/iotistic/agent.env; then
+              echo "✓ MQTT_BROKER_HOST is set"
+              sudo grep "MQTT_BROKER_HOST" /etc/iotistic/agent.env
+            else
+              echo "✗ MQTT_BROKER_HOST is NOT set"
+            fi
+            if sudo grep -q "MQTT_BROKER_PORT" /etc/iotistic/agent.env; then
+              echo "✓ MQTT_BROKER_PORT is set"
+              sudo grep "MQTT_BROKER_PORT" /etc/iotistic/agent.env
+            else
+              echo "✗ MQTT_BROKER_PORT is NOT set"
+            fi
+            if sudo grep -q "MQTT_USE_TLS" /etc/iotistic/agent.env; then
+              echo "✓ MQTT_USE_TLS is set"
+              sudo grep "MQTT_USE_TLS" /etc/iotistic/agent.env
+            else
+              echo "✗ MQTT_USE_TLS is NOT set"
+            fi
           else
             echo "✗ Environment file NOT found!"
             exit 1
@@ -537,6 +557,14 @@ jobs:
             sudo journalctl -u iotistic-agent -n 50 --no-pager
             exit 1
           fi
+          
+          echo ""
+          echo "Waiting for agent to initialize..."
+          sleep 10
+          
+          echo ""
+          echo "=== Recent agent initialization logs ==="
+          sudo journalctl -u iotistic-agent --no-pager --since "2 minutes ago" --lines 50 | grep -E "(Device manager initialized|MQTT|Failed to initialize|ERROR)" || echo "No relevant initialization logs found"
 
       - name: Check PM2 status
         run: |
