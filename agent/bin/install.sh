@@ -412,14 +412,28 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
 
     echo "Building agent..."
     npx tsc --project tsconfig.build.json
+    
+    echo "Copying migrations..."
     npm run copy:migrations
+    if [ ! -d dist/db/migrations ]; then
+        echo "✗ Error: Migrations copy failed - dist/db/migrations not found"
+        exit 1
+    fi
+    
+    echo "Copying vendors file..."
     npm run copy:vendors
+    if [ ! -f dist/features/discovery/vendors/dataPoints.json ]; then
+        echo "✗ Error: Vendors copy failed - dist/features/discovery/vendors/dataPoints.json not found"
+        echo "Source file check:"
+        ls -la src/features/discovery/vendors/ || echo "Source vendors directory not found!"
+        exit 1
+    fi
 
     if [ ! -f dist/app.js ]; then
         echo "✗ Error: Build failed - dist/app.js not found"
         exit 1
     fi
-    echo "✓ Agent built successfully"
+    echo "✓ Agent built successfully (with vendors file)"
 
     # Install update script
     if [ -f /opt/iotistic/agent/bin/update-agent-systemd.sh ]; then
