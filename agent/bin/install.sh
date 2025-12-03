@@ -479,6 +479,19 @@ EOF
         echo "CLOUD_API_ENDPOINT=${CLOUD_API_ENDPOINT}" >> /etc/iotistic/agent.env
     fi
 
+    # Add MQTT broker configuration if provided
+    if [ -n "$MQTT_BROKER_HOST" ]; then
+        echo "MQTT_BROKER_HOST=${MQTT_BROKER_HOST}" >> /etc/iotistic/agent.env
+    fi
+    
+    if [ -n "$MQTT_BROKER_PORT" ]; then
+        echo "MQTT_BROKER_PORT=${MQTT_BROKER_PORT}" >> /etc/iotistic/agent.env
+    fi
+    
+    if [ -n "$MQTT_USE_TLS" ]; then
+        echo "MQTT_USE_TLS=${MQTT_USE_TLS}" >> /etc/iotistic/agent.env
+    fi
+
     # Create PM2 config
     echo ""
     echo "Creating PM2 configuration..."

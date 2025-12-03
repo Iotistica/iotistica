@@ -430,6 +430,33 @@ jobs:
           echo "✓ Provisioning key generated: ${PROVISIONING_KEY:0:20}..."
           echo "provisioning_key=$PROVISIONING_KEY" >> $GITHUB_OUTPUT
 
+      - name: Verify API and MQTT accessibility from host
+        run: |
+          echo "=== Verifying services are accessible from host ==="
+          
+          echo "Testing API endpoint (http://localhost:4002)..."
+          if curl -f http://localhost:4002/health 2>/dev/null; then
+            echo "✓ API is accessible"
+          else
+            echo "✗ API is NOT accessible from host"
+            exit 1
+          fi
+          
+          echo ""
+          echo "Testing MQTT port (localhost:5883)..."
+          if nc -zv localhost 5883 2>&1 | grep -q succeeded || nc -zv localhost 5883 2>&1 | grep -q open; then
+            echo "✓ MQTT port 5883 is accessible"
+          else
+            echo "✗ MQTT port 5883 is NOT accessible from host"
+            echo "Checking Mosquitto container status:"
+            docker compose -f $COMPOSE_FILE ps mosquitto
+            docker compose -f $COMPOSE_FILE logs mosquitto --tail=20
+            exit 1
+          fi
+          
+          echo ""
+          echo "✓ All services are accessible from host"
+
       - name: Install agent via systemd method
         env:
           CI: true
@@ -814,6 +841,33 @@ jobs:
           
           echo "✓ Provisioning key generated: ${PROVISIONING_KEY:0:20}..."
           echo "provisioning_key=$PROVISIONING_KEY" >> $GITHUB_OUTPUT
+
+      - name: Verify API and MQTT accessibility from host
+        run: |
+          echo "=== Verifying services are accessible from host ==="
+          
+          echo "Testing API endpoint (http://localhost:4002)..."
+          if curl -f http://localhost:4002/health 2>/dev/null; then
+            echo "✓ API is accessible"
+          else
+            echo "✗ API is NOT accessible from host"
+            exit 1
+          fi
+          
+          echo ""
+          echo "Testing MQTT port (localhost:5883)..."
+          if nc -zv localhost 5883 2>&1 | grep -q succeeded || nc -zv localhost 5883 2>&1 | grep -q open; then
+            echo "✓ MQTT port 5883 is accessible"
+          else
+            echo "✗ MQTT port 5883 is NOT accessible from host"
+            echo "Checking Mosquitto container status:"
+            docker compose -f $COMPOSE_FILE ps mosquitto
+            docker compose -f $COMPOSE_FILE logs mosquitto --tail=20
+            exit 1
+          fi
+          
+          echo ""
+          echo "✓ All services are accessible from host"
 
       - name: Install agent via systemd method
         env:
