@@ -27,9 +27,9 @@ jobs:
     runs-on: [iotistic-lab-sc]
     outputs:
       version: ${{ steps.version.outputs.version }}
-      api_version: ${{ steps.verify.outputs.api_version_final }}
-      dashboard_version: ${{ steps.verify.outputs.dashboard_version_final }}
-      mqtt_monitor_version: ${{ steps.verify.outputs.mqtt_monitor_version_final }}
+      api_version_final: ${{ steps.verify.outputs.api_version_final }}
+      dashboard_version_final: ${{ steps.verify.outputs.dashboard_version_final }}
+      mqtt_monitor_version_final: ${{ steps.verify.outputs.mqtt_monitor_version_final }}
     
     steps:
       - name: Checkout repository
