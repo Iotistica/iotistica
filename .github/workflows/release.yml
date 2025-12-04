@@ -1,22 +1,31 @@
-name: Release All Services
+name: Release Core Services
+
+# This workflow creates official releases by retagging the latest CI-built images
+# with semantic version tags. CI builds continuously push images with SHA and 
+# version tags, and this workflow makes them "official" releases.
+#
+# Tagging Strategy:
+# - CI builds push: <service>:latest, <service>:<sha>, <service>:<version>
+# - Release workflow reuses existing images and adds: <service>:v1.2.3
+# - No rebuilding - images already tested via CI
+#
+# Services included: API, Dashboard, MQTT Exporter (core user-facing services)
+# Excluded: Agent, simulators, internal tools (have their own CI workflows)
 
 on:
   push:
     tags:
-      - 'v*.*.*'  # e.g., v1.2.3, v2.0.0
-      - 'v*.*'    # e.g., v1.0, v2.1
+      - 'v*.*.*'  # e.g., v1.2.3, v2.0.0 (semantic versioning)
 
 jobs:
-  detect-changes:
-    name: Detect Changed Services
+  validate-release:
+    name: Validate Release Tag
     runs-on: ubuntu-24.04
     outputs:
-      api_changed: ${{ steps.changes.outputs.api }}
-      housekeeper_changed: ${{ steps.changes.outputs.housekeeper }}
-      dashboard_changed: ${{ steps.changes.outputs.dashboard }}
-      agent_changed: ${{ steps.changes.outputs.agent }}
-      billing_changed: ${{ steps.changes.outputs.billing }}
       version: ${{ steps.version.outputs.version }}
+      api_version: ${{ steps.versions.outputs.api_version }}
+      dashboard_version: ${{ steps.versions.outputs.dashboard_version }}
+      mqtt_exporter_version: ${{ steps.versions.outputs.mqtt_exporter_version }}
     
     steps:
       - name: Checkout repository
@@ -27,298 +36,167 @@ jobs:
       - name: Extract version from tag
         id: version
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          VERSION=${GITHUB_REF#refs/tags/}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Release version: $VERSION"
-
-      - name: Detect changes since last tag
-        id: changes
-        run: |
-          # Get previous tag
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           
-          echo "Previous tag: $PREV_TAG"
-          echo "Current tag: ${GITHUB_REF#refs/tags/}"
-          
-          if [ -z "$PREV_TAG" ]; then
-            echo "First release - building all services"
-            echo "api=true" >> $GITHUB_OUTPUT
-            echo "housekeeper=true" >> $GITHUB_OUTPUT
-            echo "dashboard=true" >> $GITHUB_OUTPUT
-            echo "agent=true" >> $GITHUB_OUTPUT
-            echo "billing=true" >> $GITHUB_OUTPUT
-          else
-            echo "Checking for changes since $PREV_TAG..."
-            
-            # Check each service directory for changes
-            if git diff --name-only $PREV_TAG HEAD | grep -q '^api/'; then
-              echo "API changed"
-              echo "api=true" >> $GITHUB_OUTPUT
-            else
-              echo "API unchanged"
-              echo "api=false" >> $GITHUB_OUTPUT
-            fi
-            
-            if git diff --name-only $PREV_TAG HEAD | grep -q '^housekeeper/'; then
-              echo "Housekeeper changed"
-              echo "housekeeper=true" >> $GITHUB_OUTPUT
-            else
-              echo "Housekeeper unchanged"
-              echo "housekeeper=false" >> $GITHUB_OUTPUT
-            fi
-            
-            if git diff --name-only $PREV_TAG HEAD | grep -q '^dashboard/'; then
-              echo "Dashboard changed"
-              echo "dashboard=true" >> $GITHUB_OUTPUT
-            else
-              echo "Dashboard unchanged"
-              echo "dashboard=false" >> $GITHUB_OUTPUT
-            fi
-            
-            if git diff --name-only $PREV_TAG HEAD | grep -q '^agent/'; then
-              echo "Agent changed"
-              echo "agent=true" >> $GITHUB_OUTPUT
-            else
-              echo "Agent unchanged"
-              echo "agent=false" >> $GITHUB_OUTPUT
-            fi
-            
-            if git diff --name-only $PREV_TAG HEAD | grep -q '^billing/'; then
-              echo "Billing changed"
-              echo "billing=true" >> $GITHUB_OUTPUT
-            else
-              echo "Billing unchanged"
-              echo "billing=false" >> $GITHUB_OUTPUT
-            fi
+          # Validate semantic versioning format
+          if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Invalid version format: $VERSION"
+            echo "Expected format: v1.2.3 (semantic versioning)"
+            exit 1
           fi
+          
+          echo "✅ Valid semantic version: $VERSION"
 
-      - name: Display detection results
+      - name: Get service versions from package.json
+        id: versions
         run: |
-          echo "## Change Detection Results" >> $GITHUB_STEP_SUMMARY
+          # Get current versions from package.json files
+          API_VERSION=$(jq -r '.version' api/package.json)
+          DASHBOARD_VERSION=$(jq -r '.version' dashboard/package.json)
+          MQTT_EXPORTER_VERSION=$(jq -r '.version' mqtt-exporter/package.json)
+          
+          echo "api_version=$API_VERSION" >> $GITHUB_OUTPUT
+          echo "dashboard_version=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
+          echo "mqtt_exporter_version=$MQTT_EXPORTER_VERSION" >> $GITHUB_OUTPUT
+          
+          echo "Service versions:"
+          echo "  - API: $API_VERSION"
+          echo "  - Dashboard: $DASHBOARD_VERSION"
+          echo "  - MQTT Exporter: $MQTT_EXPORTER_VERSION"
+
+      - name: Verify Docker images exist
+        run: |
+          echo "Verifying CI-built images exist on Docker Hub..."
+          
+          # Check if images with version tags exist
+          docker manifest inspect iotistic/api:${{ steps.versions.outputs.api_version }} || {
+            echo "❌ API image not found: iotistic/api:${{ steps.versions.outputs.api_version }}"
+            exit 1
+          }
+          
+          docker manifest inspect iotistic/dashboard:${{ steps.versions.outputs.dashboard_version }} || {
+            echo "❌ Dashboard image not found: iotistic/dashboard:${{ steps.versions.outputs.dashboard_version }}"
+            exit 1
+          }
+          
+          docker manifest inspect iotistic/mqtt-exporter:${{ steps.versions.outputs.mqtt_exporter_version }} || {
+            echo "❌ MQTT Exporter image not found: iotistic/mqtt-exporter:${{ steps.versions.outputs.mqtt_exporter_version }}"
+            exit 1
+          }
+          
+          echo "✅ All required Docker images exist"
+
+      - name: Display release summary
+        run: |
+          echo "## Release Validation" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Release Tag:** \`${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Service | Changed | Action |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|---------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| API | ${{ steps.changes.outputs.api }} | ${{ steps.changes.outputs.api == 'true' && 'Build' || 'Retag' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Housekeeper | ${{ steps.changes.outputs.housekeeper }} | ${{ steps.changes.outputs.housekeeper == 'true' && 'Build' || 'Retag' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Dashboard | ${{ steps.changes.outputs.dashboard }} | ${{ steps.changes.outputs.dashboard == 'true' && 'Build' || 'Retag' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Agent | ${{ steps.changes.outputs.agent }} | ${{ steps.changes.outputs.agent == 'true' && 'Build' || 'Retag' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Billing | ${{ steps.changes.outputs.billing }} | ${{ steps.changes.outputs.billing == 'true' && 'Build' || 'Retag' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "### Services to Release" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Current Version | Docker Image |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-----------------|--------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| API | \`${{ steps.versions.outputs.api_version }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dashboard | \`${{ steps.versions.outputs.dashboard_version }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
+          echo "| MQTT Exporter | \`${{ steps.versions.outputs.mqtt_exporter_version }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Strategy:** Retag existing CI-built images with release version" >> $GITHUB_STEP_SUMMARY
 
-  build-api:
-    name: Build API
-    needs: detect-changes
+  release-api:
+    name: Release API
+    needs: validate-release
     runs-on: ubuntu-24.04
     
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Build and push API (if changed)
-        if: needs.detect-changes.outputs.api_changed == 'true'
-        uses: docker/build-push-action@v5
-        with:
-          context: ./api
-          file: ./api/Dockerfile
-          push: true
-          platforms: linux/amd64
-          tags: |
-            iotistic/api:latest
-            iotistic/api:${{ needs.detect-changes.outputs.version }}
-            iotistic/api:${{ github.sha }}
-
-      - name: Retag existing API image (if unchanged)
-        if: needs.detect-changes.outputs.api_changed == 'false'
+      - name: Retag API image with release version
         run: |
-          echo "API unchanged - retagging latest image with version ${{ needs.detect-changes.outputs.version }}"
-          docker pull iotistic/api:latest
-          docker tag iotistic/api:latest iotistic/api:${{ needs.detect-changes.outputs.version }}
-          docker push iotistic/api:${{ needs.detect-changes.outputs.version }}
+          RELEASE_TAG="${{ needs.validate-release.outputs.version }}"
+          SOURCE_TAG="${{ needs.validate-release.outputs.api_version }}"
+          
+          echo "Retagging iotistic/api:$SOURCE_TAG → iotistic/api:$RELEASE_TAG"
+          
+          # Pull the CI-built image
+          docker pull iotistic/api:$SOURCE_TAG
+          
+          # Tag with release version
+          docker tag iotistic/api:$SOURCE_TAG iotistic/api:$RELEASE_TAG
+          
+          # Push release tag
+          docker push iotistic/api:$RELEASE_TAG
+          
+          echo "✅ API released as $RELEASE_TAG"
 
-  build-housekeeper:
-    name: Build Housekeeper
-    needs: detect-changes
+  release-dashboard:
+    name: Release Dashboard
+    needs: validate-release
     runs-on: ubuntu-24.04
     
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Build and push Housekeeper (if changed)
-        if: needs.detect-changes.outputs.housekeeper_changed == 'true'
-        uses: docker/build-push-action@v5
-        with:
-          context: ./housekeeper
-          file: ./housekeeper/Dockerfile
-          push: true
-          platforms: linux/amd64
-          tags: |
-            iotistic/housekeeper:latest
-            iotistic/housekeeper:${{ needs.detect-changes.outputs.version }}
-            iotistic/housekeeper:${{ github.sha }}
-
-      - name: Retag existing Housekeeper image (if unchanged)
-        if: needs.detect-changes.outputs.housekeeper_changed == 'false'
+      - name: Retag Dashboard image with release version
         run: |
-          echo "Housekeeper unchanged - retagging latest image with version ${{ needs.detect-changes.outputs.version }}"
-          docker pull iotistic/housekeeper:latest
-          docker tag iotistic/housekeeper:latest iotistic/housekeeper:${{ needs.detect-changes.outputs.version }}
-          docker push iotistic/housekeeper:${{ needs.detect-changes.outputs.version }}
+          RELEASE_TAG="${{ needs.validate-release.outputs.version }}"
+          SOURCE_TAG="${{ needs.validate-release.outputs.dashboard_version }}"
+          
+          echo "Retagging iotistic/dashboard:$SOURCE_TAG → iotistic/dashboard:$RELEASE_TAG"
+          
+          # Pull the CI-built image
+          docker pull iotistic/dashboard:$SOURCE_TAG
+          
+          # Tag with release version
+          docker tag iotistic/dashboard:$SOURCE_TAG iotistic/dashboard:$RELEASE_TAG
+          
+          # Push release tag
+          docker push iotistic/dashboard:$RELEASE_TAG
+          
+          echo "✅ Dashboard released as $RELEASE_TAG"
 
-  build-dashboard:
-    name: Build Dashboard
-    needs: detect-changes
+  release-mqtt-exporter:
+    name: Release MQTT Exporter
+    needs: validate-release
     runs-on: ubuntu-24.04
     
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Build and push Dashboard (if changed)
-        if: needs.detect-changes.outputs.dashboard_changed == 'true'
-        uses: docker/build-push-action@v5
-        with:
-          context: ./dashboard
-          file: ./dashboard/Dockerfile
-          push: true
-          platforms: linux/amd64
-          tags: |
-            iotistic/dashboard:latest
-            iotistic/dashboard:${{ needs.detect-changes.outputs.version }}
-            iotistic/dashboard:${{ github.sha }}
-
-      - name: Retag existing Dashboard image (if unchanged)
-        if: needs.detect-changes.outputs.dashboard_changed == 'false'
+      - name: Retag MQTT Exporter image with release version
         run: |
-          echo "Dashboard unchanged - retagging latest image with version ${{ needs.detect-changes.outputs.version }}"
-          docker pull iotistic/dashboard:latest
-          docker tag iotistic/dashboard:latest iotistic/dashboard:${{ needs.detect-changes.outputs.version }}
-          docker push iotistic/dashboard:${{ needs.detect-changes.outputs.version }}
+          RELEASE_TAG="${{ needs.validate-release.outputs.version }}"
+          SOURCE_TAG="${{ needs.validate-release.outputs.mqtt_exporter_version }}"
+          
+          echo "Retagging iotistic/mqtt-exporter:$SOURCE_TAG → iotistic/mqtt-exporter:$RELEASE_TAG"
+          
+          # Pull the CI-built image
+          docker pull iotistic/mqtt-exporter:$SOURCE_TAG
+          
+          # Tag with release version
+          docker tag iotistic/mqtt-exporter:$SOURCE_TAG iotistic/mqtt-exporter:$RELEASE_TAG
+          
+          # Push release tag
+          docker push iotistic/mqtt-exporter:$RELEASE_TAG
+          
+          echo "✅ MQTT Exporter released as $RELEASE_TAG"
 
-  build-agent:
-    name: Build Agent
-    needs: detect-changes
-    runs-on: ubuntu-24.04
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
-
-      - name: Build and push Agent (if changed)
-        if: needs.detect-changes.outputs.agent_changed == 'true'
-        uses: docker/build-push-action@v5
-        with:
-          context: ./agent
-          file: ./agent/Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
-          tags: |
-            iotistic/agent:latest
-            iotistic/agent:${{ needs.detect-changes.outputs.version }}
-            iotistic/agent:${{ github.sha }}
-
-      - name: Retag existing Agent image (if unchanged)
-        if: needs.detect-changes.outputs.agent_changed == 'false'
-        run: |
-          echo "Agent unchanged - retagging latest image with version ${{ needs.detect-changes.outputs.version }}"
-          docker pull iotistic/agent:latest
-          docker tag iotistic/agent:latest iotistic/agent:${{ needs.detect-changes.outputs.version }}
-          docker push iotistic/agent:${{ needs.detect-changes.outputs.version }}
-
-  build-billing:
-    name: Build Billing
-    needs: detect-changes
-    runs-on: ubuntu-24.04
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
-
-      - name: Build and push Billing (if changed)
-        if: needs.detect-changes.outputs.billing_changed == 'true'
-        uses: docker/build-push-action@v5
-        with:
-          context: ./billing
-          file: ./billing/Dockerfile
-          push: true
-          platforms: linux/amd64
-          tags: |
-            iotistic/billing:latest
-            iotistic/billing:${{ needs.detect-changes.outputs.version }}
-            iotistic/billing:${{ github.sha }}
-
-      - name: Retag existing Billing image (if unchanged)
-        if: needs.detect-changes.outputs.billing_changed == 'false'
-        run: |
-          echo "Billing unchanged - retagging latest image with version ${{ needs.detect-changes.outputs.version }}"
-          docker pull iotistic/billing:latest
-          docker tag iotistic/billing:latest iotistic/billing:${{ needs.detect-changes.outputs.version }}
-          docker push iotistic/billing:${{ needs.detect-changes.outputs.version }}
-
-  release-summary:
-    name: Release Summary
-    needs: [detect-changes, build-api, build-housekeeper, build-dashboard, build-agent, build-billing]
+  create-release:
+    name: Create GitHub Release
+    needs: [validate-release, release-api, release-dashboard, release-mqtt-exporter]
     runs-on: ubuntu-24.04
     if: always()
     
@@ -334,7 +212,7 @@ jobs:
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           
           if [ -z "$PREV_TAG" ]; then
-            echo "First release"
+            echo "First release - including all commits"
             COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges | head -50)
           else
             echo "Generating changelog from $PREV_TAG to ${GITHUB_REF#refs/tags/}"
@@ -342,56 +220,56 @@ jobs:
           fi
           
           echo "$COMMITS" > changelog.txt
-          echo "$COMMITS" | head -20 > changelog_summary.txt
 
       - name: Create GitHub Release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ needs.detect-changes.outputs.version }}
+          tag_name: ${{ needs.validate-release.outputs.version }}
+          name: Release ${{ needs.validate-release.outputs.version }}
           body_path: changelog.txt
           draft: false
           prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate Release Summary
         run: |
-          echo "# Release ${{ needs.detect-changes.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "# Release ${{ needs.validate-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          echo "## Docker Images" >> $GITHUB_STEP_SUMMARY
+          echo "## Docker Images Released" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "All services tagged with version \`${{ needs.detect-changes.outputs.version }}\`:" >> $GITHUB_STEP_SUMMARY
+          echo "All core services tagged with \`${{ needs.validate-release.outputs.version }}\`:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/api:${{ needs.detect-changes.outputs.version }}\` ${{ needs.detect-changes.outputs.api_changed == 'true' && '(rebuilt)' || '(retagged)' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/housekeeper:${{ needs.detect-changes.outputs.version }}\` ${{ needs.detect-changes.outputs.housekeeper_changed == 'true' && '(rebuilt)' || '(retagged)' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/dashboard:${{ needs.detect-changes.outputs.version }}\` ${{ needs.detect-changes.outputs.dashboard_changed == 'true' && '(rebuilt)' || '(retagged)' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/agent:${{ needs.detect-changes.outputs.version }}\` ${{ needs.detect-changes.outputs.agent_changed == 'true' && '(rebuilt)' || '(retagged)' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/billing:${{ needs.detect-changes.outputs.version }}\` ${{ needs.detect-changes.outputs.billing_changed == 'true' && '(rebuilt)' || '(retagged)' }}" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Source Version | Release Tag |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|----------------|-------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| API | \`${{ needs.validate-release.outputs.api_version }}\` | \`${{ needs.validate-release.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dashboard | \`${{ needs.validate-release.outputs.dashboard_version }}\` | \`${{ needs.validate-release.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| MQTT Exporter | \`${{ needs.validate-release.outputs.mqtt_exporter_version }}\` | \`${{ needs.validate-release.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           echo "## Changelog" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          cat changelog_summary.txt >> $GITHUB_STEP_SUMMARY
+          cat changelog.txt | head -20 >> $GITHUB_STEP_SUMMARY
           
           TOTAL=$(wc -l < changelog.txt)
-          SHOWN=$(wc -l < changelog_summary.txt)
-          if [ $TOTAL -gt $SHOWN ]; then
+          if [ $TOTAL -gt 20 ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "_...and $((TOTAL - SHOWN)) more commits_" >> $GITHUB_STEP_SUMMARY
+            echo "_...and $((TOTAL - 20)) more commits (see GitHub Release for full changelog)_" >> $GITHUB_STEP_SUMMARY
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          echo "## Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "## Deployment Commands" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Update your deployments to use version \`${{ needs.detect-changes.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Kubernetes" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "# Kubernetes" >> $GITHUB_STEP_SUMMARY
-          echo "kubectl set image deployment/api api=iotistic/api:${{ needs.detect-changes.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "kubectl set image deployment/housekeeper housekeeper=iotistic/housekeeper:${{ needs.detect-changes.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "kubectl set image deployment/api api=iotistic/api:${{ needs.validate-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "kubectl set image deployment/dashboard dashboard=iotistic/dashboard:${{ needs.validate-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "kubectl set image deployment/mqtt-exporter mqtt-exporter=iotistic/mqtt-exporter:${{ needs.validate-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "# Docker Compose" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker Compose" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# Update image tags in docker-compose.yml to ${{ needs.validate-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "docker-compose pull && docker-compose up -d" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
