@@ -11,7 +11,7 @@ on:
 jobs:
   test:
     name: Run Tests
-    runs-on: [self-hosted, iotistic-lab-sc]
+    runs-on: [iotistic-lab-sc]
     defaults:
       run:
         working-directory: ./dashboard
@@ -85,7 +85,7 @@ jobs:
   version:
     name: Bump Version
     needs: test
-    runs-on: [self-hosted, iotistic-lab-sc]
+    runs-on: [iotistic-lab-sc]
     outputs:
       new_version: ${{ steps.version_bump.outputs.new_version }}
     
@@ -133,7 +133,7 @@ jobs:
   buildx:
     name: Build & Push Dashboard Image
     needs: version
-    runs-on: [self-hosted, iotistic-lab-sc]
+    runs-on: [iotistic-lab-sc]
     strategy:
       matrix:
         include:

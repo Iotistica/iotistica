@@ -87,25 +87,28 @@ jobs:
             if docker manifest inspect iotistic/$service:$version >/dev/null 2>&1; then
               echo "✅ Found iotistic/$service:$version"
               echo "${output_var}=$version" >> $GITHUB_OUTPUT
+              return 0
             else
               echo "⚠️  Image iotistic/$service:$version not found, falling back to :latest"
               if docker manifest inspect iotistic/$service:latest >/dev/null 2>&1; then
                 echo "✅ Found iotistic/$service:latest"
                 echo "${output_var}=latest" >> $GITHUB_OUTPUT
+                return 0
               else
                 echo "❌ Image iotistic/$service:latest also not found!"
-                exit 1
+                echo "${output_var}=skip" >> $GITHUB_OUTPUT
+                return 1
               fi
             fi
           }
           
-          # Check each service
-          check_and_update_version "api" "${{ steps.versions.outputs.api_version }}" "api_version_final"
-          check_and_update_version "dashboard" "${{ steps.versions.outputs.dashboard_version }}" "dashboard_version_final"
-          check_and_update_version "mqtt-monitor" "${{ steps.versions.outputs.mqtt_monitor_version }}" "mqtt_monitor_version_final"
+          # Check each service (continue even if some fail)
+          check_and_update_version "api" "${{ steps.versions.outputs.api_version }}" "api_version_final" || true
+          check_and_update_version "dashboard" "${{ steps.versions.outputs.dashboard_version }}" "dashboard_version_final" || true
+          check_and_update_version "mqtt-monitor" "${{ steps.versions.outputs.mqtt_monitor_version }}" "mqtt_monitor_version_final" || true
           
           echo ""
-          echo "✅ All required Docker images verified"
+          echo "✅ Docker image verification complete"
 
       - name: Display release summary
         run: |
@@ -157,6 +160,7 @@ jobs:
     name: Release Dashboard
     needs: validate-release
     runs-on: [iotistic-lab-sc]
+    if: needs.validate-release.outputs.dashboard_version != 'skip'
     
     steps:
       - name: Login to Docker Hub

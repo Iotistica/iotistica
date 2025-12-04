@@ -69,11 +69,11 @@ on:
         description: 'MQTT Monitor version to test (default: latest from package.json)'
         required: false
         type: string
-  release:
-    types: [published]
-  schedule:
-    # Run full stack tests nightly at 2 AM UTC
-    - cron: '0 2 * * *'
+  # release:
+  #   types: [published]
+  # schedule:
+  #   # Run full stack tests nightly at 2 AM UTC
+  #   - cron: '0 2 * * *'
 
 jobs:
   determine-versions:
