@@ -401,7 +401,7 @@ jobs:
           
           echo "✓ Infrastructure ready!"
 
-      - name: Copy agent code to /opt/iotistic/agent (for CI mode)
+      - name: Copy agent code to /opt/iotistic/agent
         run: |
           sudo mkdir -p /opt/iotistic/agent
           sudo cp -r agent/* /opt/iotistic/agent/
@@ -941,48 +941,38 @@ jobs:
           
           # Add Modbus discovery configuration to environment
           sudo tee -a /etc/iotistic/agent.env > /dev/null << 'EOF'
-          ENABLE_MODBUS_DISCOVERY=true
-          MODBUS_IP_RANGES=localhost
-          MODBUS_PORT=502
-          MODBUS_DISCOVERY_INTERVAL=60000
+          ENABLE_FIRST_BOOT_DISCOVERY=true
+          MODBUS_TCP_HOST=localhost
+          MODBUS_TCP_PORT=502
+          MODBUS_SLAVE_RANGE_START=1
+          MODBUS_SLAVE_RANGE_END=10
           EOF
           
           echo "✓ Modbus discovery configured"
           
-          # Restart agent to apply configuration
+          # Restart agent to trigger first-boot discovery
           sudo systemctl restart iotistic-agent
           sleep 10
           echo "✓ Agent restarted with Modbus discovery enabled"
 
-      - name: Wait for agent to stabilize
+      - name: Wait for Modbus discovery to complete
         run: |
-          echo "Waiting for agent to stabilize and perform discovery..."
-          sleep 30
+          echo "Waiting for automatic Modbus discovery to complete..."
+          echo "Discovery runs on first boot when ENABLE_FIRST_BOOT_DISCOVERY=true"
+          echo ""
+          
+          # Discovery can take 30-60 seconds for 10 slave IDs
+          # Give it time to scan all slaves (1-10)
+          sleep 45
           
           # Check agent is still running
           if sudo systemctl is-active --quiet iotistic-agent; then
-            echo "✓ Agent is running"
+            echo "✓ Agent is running and discovery completed"
           else
             echo "✗ Agent is not running"
             sudo journalctl -u iotistic-agent -n 100 --no-pager
             exit 1
           fi
-
-      - name: Trigger Modbus discovery manually
-        run: |
-          echo "Triggering Modbus discovery via API..."
-          
-          # Get device UUID from agent
-          DEVICE_UUID=$(sudo cat /var/lib/iotistic/agent/device-uuid)
-          echo "Device UUID: $DEVICE_UUID"
-          
-          # Trigger discovery via agent API
-          curl -X POST http://localhost:48484/api/discovery/modbus \
-            -H "Content-Type: application/json" \
-            -d '{"ipRanges":["localhost"],"port":502}' || echo "Discovery endpoint may not be available yet"
-          
-          echo "✓ Discovery triggered, waiting for completion..."
-          sleep 20
 
       - name: Check discovered endpoints in SQLite
         run: |
