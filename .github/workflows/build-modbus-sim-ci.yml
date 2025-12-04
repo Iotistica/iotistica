@@ -107,20 +107,14 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           
-          # Add the version bump changes
+          # Add and commit the version bump
           git add sensors/modbus-simulator/package.json
-          
-          # Stash any other changes if they exist
-          git stash push -m "Temporary stash before rebase" || true
-          
-          # Pull latest changes with rebase
-          git pull --rebase origin master
-          
-          # Pop stashed changes if any
-          git stash pop || true
-          
-          # Commit and push
           git commit -m "chore: bump modbus-simulator version to ${{ steps.bump.outputs.package_version }} [skip ci]"
+          
+          # Pull with rebase strategy, auto-stashing if needed
+          git pull --rebase --autostash origin master
+          
+          # Push to master
           git push origin HEAD:master
 
       - name: Display version info
