@@ -9,7 +9,7 @@ name: Release Core Services
 # - Release workflow reuses existing images and adds: <service>:v1.2.3
 # - No rebuilding - images already tested via CI
 #
-# Services included: API, Dashboard, MQTT Exporter (core user-facing services)
+# Services included: API, Dashboard, MQTT Monitor (core user-facing services)
 # Excluded: Agent, simulators, internal tools (have their own CI workflows)
 
 on:
@@ -25,7 +25,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       api_version: ${{ steps.versions.outputs.api_version }}
       dashboard_version: ${{ steps.versions.outputs.dashboard_version }}
-      mqtt_exporter_version: ${{ steps.versions.outputs.mqtt_exporter_version }}
+      mqtt_monitor_version: ${{ steps.versions.outputs.mqtt_monitor_version }}
     
     steps:
       - name: Checkout repository
@@ -55,16 +55,16 @@ jobs:
           # Get current versions from package.json files
           API_VERSION=$(jq -r '.version' api/package.json)
           DASHBOARD_VERSION=$(jq -r '.version' dashboard/package.json)
-          MQTT_EXPORTER_VERSION=$(jq -r '.version' mqtt-exporter/package.json)
+          MQTT_MONITOR_VERSION=$(jq -r '.version' mqtt-monitor/package.json)
           
           echo "api_version=$API_VERSION" >> $GITHUB_OUTPUT
           echo "dashboard_version=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
-          echo "mqtt_exporter_version=$MQTT_EXPORTER_VERSION" >> $GITHUB_OUTPUT
+          echo "mqtt_monitor_version=$MQTT_MONITOR_VERSION" >> $GITHUB_OUTPUT
           
           echo "Service versions:"
           echo "  - API: $API_VERSION"
           echo "  - Dashboard: $DASHBOARD_VERSION"
-          echo "  - MQTT Exporter: $MQTT_EXPORTER_VERSION"
+          echo "  - MQTT Monitor: $MQTT_MONITOR_VERSION"
 
       - name: Verify Docker images exist
         run: |
@@ -81,8 +81,8 @@ jobs:
             exit 1
           }
           
-          docker manifest inspect iotistic/mqtt-exporter:${{ steps.versions.outputs.mqtt_exporter_version }} || {
-            echo "❌ MQTT Exporter image not found: iotistic/mqtt-exporter:${{ steps.versions.outputs.mqtt_exporter_version }}"
+          docker manifest inspect iotistic/mqtt-monitor:${{ steps.versions.outputs.mqtt_monitor_version }} || {
+            echo "❌ MQTT Monitor image not found: iotistic/mqtt-monitor:${{ steps.versions.outputs.mqtt_monitor_version }}"
             exit 1
           }
           
@@ -100,7 +100,7 @@ jobs:
           echo "|---------|-----------------|--------------|" >> $GITHUB_STEP_SUMMARY
           echo "| API | \`${{ steps.versions.outputs.api_version }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
           echo "| Dashboard | \`${{ steps.versions.outputs.dashboard_version }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
-          echo "| MQTT Exporter | \`${{ steps.versions.outputs.mqtt_exporter_version }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
+          echo "| MQTT Monitor | \`${{ steps.versions.outputs.mqtt_monitor_version }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Strategy:** Retag existing CI-built images with release version" >> $GITHUB_STEP_SUMMARY
 
@@ -164,8 +164,8 @@ jobs:
           
           echo "✅ Dashboard released as $RELEASE_TAG"
 
-  release-mqtt-exporter:
-    name: Release MQTT Exporter
+  release-mqtt-monitor:
+    name: Release MQTT Monitor
     needs: validate-release
     runs-on: [iotistic-lab-sc]
     
@@ -176,27 +176,27 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Retag MQTT Exporter image with release version
+      - name: Retag MQTT Monitor image with release version
         run: |
           RELEASE_TAG="${{ needs.validate-release.outputs.version }}"
-          SOURCE_TAG="${{ needs.validate-release.outputs.mqtt_exporter_version }}"
+          SOURCE_TAG="${{ needs.validate-release.outputs.mqtt_monitor_version }}"
           
-          echo "Retagging iotistic/mqtt-exporter:$SOURCE_TAG → iotistic/mqtt-exporter:$RELEASE_TAG"
+          echo "Retagging iotistic/mqtt-monitor:$SOURCE_TAG → iotistic/mqtt-monitor:$RELEASE_TAG"
           
           # Pull the CI-built image
-          docker pull iotistic/mqtt-exporter:$SOURCE_TAG
+          docker pull iotistic/mqtt-monitor:$SOURCE_TAG
           
           # Tag with release version
-          docker tag iotistic/mqtt-exporter:$SOURCE_TAG iotistic/mqtt-exporter:$RELEASE_TAG
+          docker tag iotistic/mqtt-monitor:$SOURCE_TAG iotistic/mqtt-monitor:$RELEASE_TAG
           
           # Push release tag
-          docker push iotistic/mqtt-exporter:$RELEASE_TAG
+          docker push iotistic/mqtt-monitor:$RELEASE_TAG
           
-          echo "✅ MQTT Exporter released as $RELEASE_TAG"
+          echo "✅ MQTT Monitor released as $RELEASE_TAG"
 
   create-release:
     name: Create GitHub Release
-    needs: [validate-release, release-api, release-dashboard, release-mqtt-exporter]
+    needs: [validate-release, release-api, release-dashboard, release-mqtt-monitor]
     runs-on: [iotistic-lab-sc]
     if: always()
     
@@ -245,7 +245,7 @@ jobs:
           echo "|---------|----------------|-------------|" >> $GITHUB_STEP_SUMMARY
           echo "| API | \`${{ needs.validate-release.outputs.api_version }}\` | \`${{ needs.validate-release.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Dashboard | \`${{ needs.validate-release.outputs.dashboard_version }}\` | \`${{ needs.validate-release.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| MQTT Exporter | \`${{ needs.validate-release.outputs.mqtt_exporter_version }}\` | \`${{ needs.validate-release.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| MQTT Monitor | \`${{ needs.validate-release.outputs.mqtt_monitor_version }}\` | \`${{ needs.validate-release.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           echo "## Changelog" >> $GITHUB_STEP_SUMMARY
@@ -265,7 +265,7 @@ jobs:
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
           echo "kubectl set image deployment/api api=iotistic/api:${{ needs.validate-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "kubectl set image deployment/dashboard dashboard=iotistic/dashboard:${{ needs.validate-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "kubectl set image deployment/mqtt-exporter mqtt-exporter=iotistic/mqtt-exporter:${{ needs.validate-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "kubectl set image deployment/mqtt-monitor mqtt-monitor=iotistic/mqtt-monitor:${{ needs.validate-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker Compose" >> $GITHUB_STEP_SUMMARY
