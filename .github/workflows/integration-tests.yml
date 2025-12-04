@@ -27,6 +27,10 @@ on:
         description: 'Modbus Simulator version to test'
         required: false
         type: string
+      comap_simulator_version:
+        description: 'COMAP Simulator version to test'
+        required: false
+        type: string
   workflow_dispatch:
     inputs:
       test_mode:
@@ -53,6 +57,10 @@ on:
         description: 'Modbus Simulator version to test (default: latest from package.json)'
         required: false
         type: string
+      comap_simulator_version:
+        description: 'COMAP Simulator version to test (default: latest from package.json)'
+        required: false
+        type: string
   release:
     types: [published]
   schedule:
@@ -68,6 +76,7 @@ jobs:
       api_version: ${{ steps.versions.outputs.api_version }}
       dashboard_version: ${{ steps.versions.outputs.dashboard_version }}
       modbus_simulator_version: ${{ steps.versions.outputs.modbus_simulator_version }}
+      comap_simulator_version: ${{ steps.versions.outputs.comap_simulator_version }}
     
     steps:
       - name: Checkout repository
@@ -110,16 +119,29 @@ jobs:
             MODBUS_SIMULATOR_VERSION=$(jq -r '.version' sensors/modbus-simulator/package.json)
           fi
           
+          if [ -n "${{ inputs.comap_simulator_version }}" ]; then
+            COMAP_SIMULATOR_VERSION="${{ inputs.comap_simulator_version }}"
+          else
+            # Check if package.json exists
+            if [ -f sensors/comap-simulator/package.json ]; then
+              COMAP_SIMULATOR_VERSION=$(jq -r '.version' sensors/comap-simulator/package.json)
+            else
+              COMAP_SIMULATOR_VERSION="latest"
+            fi
+          fi
+          
           echo "agent_version=$AGENT_VERSION" >> $GITHUB_OUTPUT
           echo "api_version=$API_VERSION" >> $GITHUB_OUTPUT
           echo "dashboard_version=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
           echo "modbus_simulator_version=$MODBUS_SIMULATOR_VERSION" >> $GITHUB_OUTPUT
+          echo "comap_simulator_version=$COMAP_SIMULATOR_VERSION" >> $GITHUB_OUTPUT
           
           echo "Testing versions:"
           echo "  - Agent: $AGENT_VERSION"
           echo "  - API: $API_VERSION"
           echo "  - Dashboard: $DASHBOARD_VERSION"
           echo "  - Modbus Simulator: $MODBUS_SIMULATOR_VERSION"
+          echo "  - COMAP Simulator: $COMAP_SIMULATOR_VERSION"
           
           # Check if images exist on Docker Hub
           echo ""
