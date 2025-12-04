@@ -1005,8 +1005,24 @@ jobs:
           if [ -z "$ENDPOINTS" ]; then
             echo "⚠ No endpoints discovered yet"
             echo ""
-            echo "Checking agent logs for discovery activity..."
-            sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep -i modbus || echo "No Modbus activity in logs"
+            echo "=== Checking agent logs for complete discovery flow ==="
+            echo "Discovery phase (finding slaves):"
+            sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep -i "discovered modbus slave" || echo "No slaves discovered"
+            echo ""
+            echo "Validation phase (checking slaves):"
+            sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep -i "validating" || echo "No validation logs"
+            echo ""
+            echo "Vendor identification:"
+            sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep -i "vendor" || echo "No vendor logs"
+            echo ""
+            echo "Save/persistence operations:"
+            sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep -i "sav\|persist\|insert\|endpoint" || echo "No save operations"
+            echo ""
+            echo "Errors and warnings:"
+            sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep -E "ERROR|WARN|error|warning" || echo "No errors/warnings"
+            echo ""
+            echo "=== Full discovery logs (last 100 lines) ==="
+            sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" --lines 100
           else
             echo "$ENDPOINTS"
             
