@@ -950,92 +950,15 @@ jobs:
           MODBUS_TCP_PORT=502
           MODBUS_SLAVE_RANGE_START=1
           MODBUS_SLAVE_RANGE_END=10
+          MODBUS_TIMEOUT=2000
           EOF
           
           echo "✓ Modbus discovery configured"
           
           # Restart agent to trigger first-boot discovery
           sudo systemctl restart iotistic-agent
-          sleep 10
-          echo "✓ Agent restarted with Modbus discovery enabled"
-
-      - name: Wait for Modbus discovery to complete
-        run: |
-          echo "Waiting for automatic Modbus discovery to complete..."
-          echo "Discovery runs on first boot when ENABLE_FIRST_BOOT_DISCOVERY=true"
-          echo ""
-          
-          # Discovery can take 30-60 seconds for 10 slave IDs
-          # Give it time to scan all slaves (1-10)
           sleep 45
-          
-          # Check agent is still running
-          if sudo systemctl is-active --quiet iotistic-agent; then
-            echo "✓ Agent is running and discovery completed"
-          else
-            echo "✗ Agent is not running"
-            sudo journalctl -u iotistic-agent -n 100 --no-pager
-            exit 1
-          fi
-
-      - name: Check discovered endpoints in SQLite
-        run: |
-          echo "=== Checking SQLite database for discovered endpoints ==="
-          
-          DB_PATH="/var/lib/iotistic/agent/device.sqlite"
-          
-          if [ ! -f "$DB_PATH" ]; then
-            echo "✗ SQLite database not found at $DB_PATH"
-            echo "Checking /var/lib/iotistic/agent directory contents:"
-            sudo ls -la /var/lib/iotistic/agent/ || echo "Directory not found"
-            exit 1
-          fi
-          
-          echo "✓ Database found"
-          
-          # Check endpoints table
-          echo ""
-          echo "=== Endpoints Table Schema ==="
-          sudo sqlite3 "$DB_PATH" ".schema endpoints"
-          
-          echo ""
-          echo "=== All Discovered Endpoints ==="
-          ENDPOINTS=$(sudo sqlite3 "$DB_PATH" "SELECT * FROM endpoints;")
-          
-          if [ -z "$ENDPOINTS" ]; then
-            echo "⚠ No endpoints discovered yet"
-            echo ""
-            echo "=== Checking agent logs for complete discovery flow ==="
-            echo "Discovery phase (finding slaves):"
-            sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep -i "discovered modbus slave" || echo "No slaves discovered"
-            echo ""
-            echo "Validation phase (checking slaves):"
-            sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep -i "validating" || echo "No validation logs"
-            echo ""
-            echo "Vendor identification:"
-            sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep -i "vendor" || echo "No vendor logs"
-            echo ""
-            echo "Save/persistence operations:"
-            sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep -i "sav\|persist\|insert\|endpoint" || echo "No save operations"
-            echo ""
-            echo "Errors and warnings:"
-            sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep -E "ERROR|WARN|error|warning" || echo "No errors/warnings"
-            echo ""
-            echo "=== Full discovery logs (last 100 lines) ==="
-            sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" --lines 100
-          else
-            echo "$ENDPOINTS"
-            
-            # Count endpoints
-            ENDPOINT_COUNT=$(sudo sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM endpoints;")
-            echo ""
-            echo "✓ Found $ENDPOINT_COUNT discovered endpoint(s)"
-            
-            # Show detailed endpoint info
-            echo ""
-            echo "=== Endpoint Details (JSON) ==="
-            sudo sqlite3 "$DB_PATH" -json "SELECT id, protocol, address, port, metadata, discovered_at, last_seen FROM endpoints;"
-          fi
+          echo "✓ Agent restarted with Modbus discovery enabled"
 
       - name: Verify Modbus endpoints discovered
         run: |
@@ -1082,13 +1005,6 @@ jobs:
           echo "========================================="
           sudo journalctl -u iotistic-agent --no-pager --since "20 minutes ago" --lines 300
 
-      - name: Show Modbus simulator logs
-        if: always()
-        run: |
-          echo "========================================="
-          echo "Modbus Simulator Logs:"
-          echo "========================================="
-          docker compose -f $COMPOSE_FILE logs modbus-simulator --tail=100
 
       - name: Cleanup agent
         if: always()
