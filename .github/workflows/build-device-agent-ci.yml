@@ -151,7 +151,7 @@ jobs:
         if: success()
         uses: docker/build-push-action@v5
         with:
-          context: ./agent
+          context: .
           file: ./agent/Dockerfile
           push: true
           

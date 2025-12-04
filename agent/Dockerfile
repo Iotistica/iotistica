@@ -7,7 +7,7 @@ WORKDIR /app
 RUN apk add --no-cache python3 make g++ sqlite-dev
 
 # Copy package files
-COPY package*.json ./
+COPY agent/package*.json ./
 
 # Install production dependencies only - using cache mount
 # Set PYTHON env var for node-gyp to find Python
@@ -27,7 +27,7 @@ WORKDIR /app
 RUN apk add --no-cache make g++ sqlite-dev
 
 # Copy package files
-COPY package*.json tsconfig.json tsconfig.build.json ./
+COPY agent/package*.json agent/tsconfig.json agent/tsconfig.build.json ./
 
 # Install all deps (including dev) - using cache mount for faster builds
 # Set PYTHON env var for node-gyp to find Python
@@ -39,9 +39,9 @@ RUN --mount=type=cache,target=/root/.npm \
     PYTHON=python3 npm ci --legacy-peer-deps
 
 # Copy source code and shared config
-COPY src ./src
-COPY cli ./cli
-COPY ../config ./config
+COPY agent/src ./src
+COPY agent/cli ./cli
+COPY config ./config
 
 # Build TypeScript using build-specific config (excludes CLI)
 RUN npx tsc --project tsconfig.build.json && npm run copy:migrations && npm run copy:vendors
@@ -80,8 +80,8 @@ COPY --from=deps --chown=agentuser:agentgroup /app/node_modules ./node_modules
 COPY --from=builder --chown=agentuser:agentgroup /app/dist ./dist
 
 # Copy update scripts and entrypoint
-COPY --chown=agentuser:agentgroup bin/*.sh /app/bin/
-COPY --chown=agentuser:agentgroup docker-entrypoint.sh /app/docker-entrypoint.sh
+COPY agent/bin/*.sh /app/bin/
+COPY agent/docker-entrypoint.sh /app/docker-entrypoint.sh
 
 # Create iotctl symlink and set permissions
 RUN chmod +x /app/dist/cli/iotctl.js && \
