@@ -1,0 +1,26 @@
+{
+  "COMAP": {
+    "dataPoints": [
+      { "name": "engine_rpm", "address": 100, "type": "holding", "dataType": "uint16" },
+      { "name": "gen_voltage_a", "address": 110, "type": "holding", "dataType": "uint16" },
+      { "name": "gen_voltage_b", "address": 111, "type": "holding", "dataType": "uint16" },
+      { "name": "gen_voltage_c", "address": 112, "type": "holding", "dataType": "uint16" },
+      { "name": "gen_current_a", "address": 120, "type": "holding", "dataType": "uint16" },
+      { "name": "gen_current_b", "address": 121, "type": "holding", "dataType": "uint16" },
+      { "name": "gen_current_c", "address": 122, "type": "holding", "dataType": "uint16" },
+      { "name": "frequency", "address": 130, "type": "holding", "dataType": "uint16" },
+      { "name": "power_kw", "address": 140, "type": "holding", "dataType": "uint16" },
+      { "name": "engine_temp", "address": 150, "type": "holding", "dataType": "uint16" },
+      { "name": "fuel_level", "address": 160, "type": "holding", "dataType": "uint16" },
+      { "name": "alarm_1", "address": 0, "type": "coil", "dataType": "boolean" },
+      { "name": "alarm_2", "address": 1, "type": "coil", "dataType": "boolean" },
+      { "name": "alarm_3", "address": 2, "type": "coil", "dataType": "boolean" },
+      { "name": "alarm_4", "address": 3, "type": "coil", "dataType": "boolean" }
+    ]
+  },
+  "Generic": {
+    "dataPoints": [
+      { "name": "holding_register_0", "address": 40001, "type": "holding", "dataType": "uint16" }
+    ]
+  }
+}

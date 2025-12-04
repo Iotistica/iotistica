@@ -38,9 +38,10 @@ RUN --mount=type=cache,target=/root/.npm \
     npm config set fetch-retry-maxtimeout 120000 && \
     PYTHON=python3 npm ci --legacy-peer-deps
 
-# Copy source code
+# Copy source code and shared config
 COPY src ./src
 COPY cli ./cli
+COPY ../config ./config
 
 # Build TypeScript using build-specific config (excludes CLI)
 RUN npx tsc --project tsconfig.build.json && npm run copy:migrations && npm run copy:vendors

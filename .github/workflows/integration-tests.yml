@@ -481,14 +481,14 @@ jobs:
         run: |
           echo "=== Verifying vendors file after installation ==="
           
-          if [ -f /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json ]; then
-            echo "✓ Vendors file exists at /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json"
-            echo "File size: $(stat -f%z /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json 2>/dev/null || stat -c%s /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json)"
+          if [ -f /opt/iotistic/agent/dist/config/vendors/dataPoints.json ]; then
+            echo "✓ Vendors file exists at /opt/iotistic/agent/dist/config/vendors/dataPoints.json"
+            echo "File size: $(stat -f%z /opt/iotistic/agent/dist/config/vendors/dataPoints.json 2>/dev/null || stat -c%s /opt/iotistic/agent/dist/config/vendors/dataPoints.json)"
           else
-            echo "✗ Vendors file NOT FOUND at /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json"
+            echo "✗ Vendors file NOT FOUND at /opt/iotistic/agent/dist/config/vendors/dataPoints.json"
             echo ""
             echo "Checking source file:"
-            ls -la /opt/iotistic/agent/src/features/discovery/vendors/ || echo "Source directory not found"
+            ls -la config/vendors/ || echo "Source directory not found"
             echo ""
             echo "Checking dist structure:"
             find /opt/iotistic/agent/dist -name "*.json" | head -20 || echo "No JSON files in dist"
@@ -921,14 +921,14 @@ jobs:
         run: |
           echo "=== Verifying vendors file after installation ==="
           
-          if [ -f /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json ]; then
-            echo "✓ Vendors file exists at /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json"
-            echo "File size: $(stat -f%z /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json 2>/dev/null || stat -c%s /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json)"
+          if [ -f /opt/iotistic/agent/dist/config/vendors/dataPoints.json ]; then
+            echo "✓ Vendors file exists at /opt/iotistic/agent/dist/config/vendors/dataPoints.json"
+            echo "File size: $(stat -f%z /opt/iotistic/agent/dist/config/vendors/dataPoints.json 2>/dev/null || stat -c%s /opt/iotistic/agent/dist/config/vendors/dataPoints.json)"
           else
-            echo "✗ Vendors file NOT FOUND at /opt/iotistic/agent/dist/features/discovery/vendors/dataPoints.json"
+            echo "✗ Vendors file NOT FOUND at /opt/iotistic/agent/dist/config/vendors/dataPoints.json"
             echo ""
             echo "Checking source file:"
-            ls -la /opt/iotistic/agent/src/features/discovery/vendors/ || echo "Source directory not found"
+            ls -la config/vendors/ || echo "Source directory not found"
             echo ""
             echo "Checking dist structure:"
             find /opt/iotistic/agent/dist -name "*.json" | head -20 || echo "No JSON files in dist"

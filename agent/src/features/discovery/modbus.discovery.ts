@@ -46,8 +46,10 @@ interface VendorMap {
 
 const VENDOR_ENV = process.env.MODBUS_VENDOR || 'Generic';
 
-// Flexible path resolution: env var > bundled file
-const vendorFile =  path.resolve(__dirname, 'vendors', 'dataPoints.json');
+// Flexible path resolution: env var > shared config file
+// In development: resolve to workspace config/vendors
+// In production (dist): resolve to dist/config/vendors (copied by npm build script)
+const vendorFile = path.resolve(__dirname, '..', '..', '..', 'config', 'vendors', 'dataPoints.json');
 const vendorMap: VendorMap = JSON.parse(fs.readFileSync(vendorFile, 'utf-8'));
 
 export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {

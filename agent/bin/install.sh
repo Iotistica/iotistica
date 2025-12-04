@@ -422,10 +422,10 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
     
     echo "Copying vendors file..."
     npm run copy:vendors
-    if [ ! -f dist/features/discovery/vendors/dataPoints.json ]; then
-        echo "✗ Error: Vendors copy failed - dist/features/discovery/vendors/dataPoints.json not found"
+    if [ ! -f dist/config/vendors/dataPoints.json ]; then
+        echo "✗ Error: Vendors copy failed - dist/config/vendors/dataPoints.json not found"
         echo "Source file check:"
-        ls -la src/features/discovery/vendors/ || echo "Source vendors directory not found!"
+        ls -la ../config/vendors/ || echo "Source vendors directory not found!"
         exit 1
     fi
 
