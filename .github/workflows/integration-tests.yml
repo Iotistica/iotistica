@@ -719,57 +719,6 @@ jobs:
         if: always()
         run: docker compose -f $COMPOSE_FILE down -v
 
-  test-endpoints:
-    name: Test Endpoints
-    needs: [determine-versions, setup]
-    runs-on: [iotistic-lab-sc]
-    timeout-minutes: 10
-    
-    env:
-      AGENT_VERSION: ${{ needs.determine-versions.outputs.agent_version }}
-      API_VERSION: ${{ needs.determine-versions.outputs.api_version }}
-      DASHBOARD_VERSION: ${{ needs.determine-versions.outputs.dashboard_version }}
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup environment
-        run: |
-          chmod +x .github/scripts/setup-env.sh
-          LICENSE_PUBLIC_KEY="${{ secrets.LICENSE_PUBLIC_KEY }}" \
-          IOTISTIC_LICENSE_KEY="${{ secrets.IOTISTIC_LICENSE_KEY }}" \
-          .github/scripts/setup-env.sh
-
-      - name: Start protocol simulators
-        run: docker compose -f $COMPOSE_FILE up -d 
-
-      - name: Wait for simulators to start
-        run: |
-          echo "Waiting for protocol simulators to start..."
-          sleep 15
-
-      - name: Check simulator status
-        run: |
-          echo "=== Protocol Simulator Status ==="
-          docker compose -f $COMPOSE_FILE ps | grep simulator
-
-      - name: Test Modbus simulator
-        run: |
-          echo "Testing Modbus simulator on port 502..."
-          nc -zv localhost 502 || echo "Modbus simulator port check"
-
-      - name: Check simulator logs
-        if: always()
-        run: |
-          echo "=== Modbus Simulator Logs ==="
-          docker compose -f $COMPOSE_FILE logs modbus-simulator --tail=50 || true
-  
-
-      - name: Cleanup
-        if: always()
-        run: docker compose -f $COMPOSE_FILE down -v
-
   test-modbus-discovery:
     name: Test Modbus Discovery (Full Stack)
     needs: [determine-versions, setup]
