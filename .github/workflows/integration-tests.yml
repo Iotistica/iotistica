@@ -937,7 +937,7 @@ jobs:
             
             echo ""
             echo "2. Recent Agent Logs (Modbus discovery):"
-            sudo journalctl -u iotistic-agent --no-pager --since "10 minutes ago" | grep -i modbus | tail -50
+            sudo journalctl -u iotistic-agent --no-pager --since "10 minutes ago" | grep -i modbus | tail -100
             
             echo ""
             echo "3. Agent Configuration:"
