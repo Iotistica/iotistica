@@ -327,12 +327,21 @@ jobs:
 
           echo "Deploying release $RELEASE_TAG to Kubernetes..."
           
+          # Get current Mosquitto image tag to preserve it
+          MOSQUITTO_TAG=$(kubectl get deployment iotistic-mosquitto -n "${NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | cut -d':' -f2 || echo "latest")
+          
+          echo "Preserving Mosquitto image tag: $MOSQUITTO_TAG"
+          
+          # Only update core services (API, Dashboard)
+          # Preserve Mosquitto, PostgreSQL, Redis tags
           helm upgrade --install iotistic "${CHART_PATH}" \
             --namespace "${NAMESPACE}" \
             --create-namespace \
             -f "${VALUES_FILE}" \
             --set api.image.tag="${RELEASE_TAG}" \
             --set dashboard.image.tag="${RELEASE_TAG}" \
+            --set mosquitto.image.pullPolicy="IfNotPresent" \
+            --set mosquitto.image.tag="${MOSQUITTO_TAG}" \
             --timeout 5m
 
           echo "Checking deployment status for core services only..."
