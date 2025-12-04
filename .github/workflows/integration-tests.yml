@@ -906,7 +906,7 @@ jobs:
           
           # Restart agent to trigger first-boot discovery
           sudo systemctl restart iotistic-agent
-          sleep 45
+          sleep 65
           echo "✓ Agent restarted with Modbus discovery enabled"
 
       - name: Verify Modbus endpoints discovered
