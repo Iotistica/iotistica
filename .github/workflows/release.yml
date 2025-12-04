@@ -20,7 +20,7 @@ on:
 jobs:
   validate-release:
     name: Validate Release Tag
-    runs-on: ubuntu-24.04
+    runs-on: [iotistic-lab-sc]
     outputs:
       version: ${{ steps.version.outputs.version }}
       api_version: ${{ steps.versions.outputs.api_version }}
@@ -107,7 +107,7 @@ jobs:
   release-api:
     name: Release API
     needs: validate-release
-    runs-on: ubuntu-24.04
+    runs-on: [iotistic-lab-sc]
     
     steps:
       - name: Login to Docker Hub
@@ -137,7 +137,7 @@ jobs:
   release-dashboard:
     name: Release Dashboard
     needs: validate-release
-    runs-on: ubuntu-24.04
+    runs-on: [iotistic-lab-sc]
     
     steps:
       - name: Login to Docker Hub
@@ -167,7 +167,7 @@ jobs:
   release-mqtt-exporter:
     name: Release MQTT Exporter
     needs: validate-release
-    runs-on: ubuntu-24.04
+    runs-on: [iotistic-lab-sc]
     
     steps:
       - name: Login to Docker Hub
@@ -197,7 +197,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs: [validate-release, release-api, release-dashboard, release-mqtt-exporter]
-    runs-on: ubuntu-24.04
+    runs-on: [iotistic-lab-sc]
     if: always()
     
     steps:
