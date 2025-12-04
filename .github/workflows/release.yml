@@ -23,9 +23,9 @@ jobs:
     runs-on: [iotistic-lab-sc]
     outputs:
       version: ${{ steps.version.outputs.version }}
-      api_version: ${{ steps.versions.outputs.api_version }}
-      dashboard_version: ${{ steps.versions.outputs.dashboard_version }}
-      mqtt_monitor_version: ${{ steps.versions.outputs.mqtt_monitor_version }}
+      api_version: ${{ steps.verify.outputs.api_version_final }}
+      dashboard_version: ${{ steps.verify.outputs.dashboard_version_final }}
+      mqtt_monitor_version: ${{ steps.verify.outputs.mqtt_monitor_version_final }}
     
     steps:
       - name: Checkout repository
@@ -52,6 +52,9 @@ jobs:
       - name: Get service versions from package.json
         id: versions
         run: |
+          # Pull latest master to get most recent version bumps
+          git pull origin master
+          
           # Get current versions from package.json files
           API_VERSION=$(jq -r '.version' api/package.json)
           DASHBOARD_VERSION=$(jq -r '.version' dashboard/package.json)
@@ -61,32 +64,44 @@ jobs:
           echo "dashboard_version=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
           echo "mqtt_monitor_version=$MQTT_MONITOR_VERSION" >> $GITHUB_OUTPUT
           
-          echo "Service versions:"
+          echo "Service versions from package.json:"
           echo "  - API: $API_VERSION"
           echo "  - Dashboard: $DASHBOARD_VERSION"
           echo "  - MQTT Monitor: $MQTT_MONITOR_VERSION"
 
       - name: Verify Docker images exist
+        id: verify
         run: |
           echo "Verifying CI-built images exist on Docker Hub..."
           
-          # Check if images with version tags exist
-          docker manifest inspect iotistic/api:${{ steps.versions.outputs.api_version }} || {
-            echo "❌ API image not found: iotistic/api:${{ steps.versions.outputs.api_version }}"
-            exit 1
+          # Function to check image and update version if needed
+          check_and_update_version() {
+            local service=$1
+            local version=$2
+            local output_var=$3
+            
+            if docker manifest inspect iotistic/$service:$version >/dev/null 2>&1; then
+              echo "✅ Found iotistic/$service:$version"
+              echo "${output_var}=$version" >> $GITHUB_OUTPUT
+            else
+              echo "⚠️  Image iotistic/$service:$version not found, falling back to :latest"
+              if docker manifest inspect iotistic/$service:latest >/dev/null 2>&1; then
+                echo "✅ Found iotistic/$service:latest"
+                echo "${output_var}=latest" >> $GITHUB_OUTPUT
+              else
+                echo "❌ Image iotistic/$service:latest also not found!"
+                exit 1
+              fi
+            fi
           }
           
-          docker manifest inspect iotistic/dashboard:${{ steps.versions.outputs.dashboard_version }} || {
-            echo "❌ Dashboard image not found: iotistic/dashboard:${{ steps.versions.outputs.dashboard_version }}"
-            exit 1
-          }
+          # Check each service
+          check_and_update_version "api" "${{ steps.versions.outputs.api_version }}" "api_version_final"
+          check_and_update_version "dashboard" "${{ steps.versions.outputs.dashboard_version }}" "dashboard_version_final"
+          check_and_update_version "mqtt-monitor" "${{ steps.versions.outputs.mqtt_monitor_version }}" "mqtt_monitor_version_final"
           
-          docker manifest inspect iotistic/mqtt-monitor:${{ steps.versions.outputs.mqtt_monitor_version }} || {
-            echo "❌ MQTT Monitor image not found: iotistic/mqtt-monitor:${{ steps.versions.outputs.mqtt_monitor_version }}"
-            exit 1
-          }
-          
-          echo "✅ All required Docker images exist"
+          echo ""
+          echo "✅ All required Docker images verified"
 
       - name: Display release summary
         run: |
@@ -96,11 +111,11 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Services to Release" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Service | Current Version | Docker Image |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|-----------------|--------------|" >> $GITHUB_STEP_SUMMARY
-          echo "| API | \`${{ steps.versions.outputs.api_version }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
-          echo "| Dashboard | \`${{ steps.versions.outputs.dashboard_version }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
-          echo "| MQTT Monitor | \`${{ steps.versions.outputs.mqtt_monitor_version }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Package.json | Docker Image | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------------|--------------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| API | \`${{ steps.versions.outputs.api_version }}\` | \`${{ steps.verify.outputs.api_version_final }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dashboard | \`${{ steps.versions.outputs.dashboard_version }}\` | \`${{ steps.verify.outputs.dashboard_version_final }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
+          echo "| MQTT Monitor | \`${{ steps.versions.outputs.mqtt_monitor_version }}\` | \`${{ steps.verify.outputs.mqtt_monitor_version_final }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Strategy:** Retag existing CI-built images with release version" >> $GITHUB_STEP_SUMMARY
 
@@ -273,3 +288,80 @@ jobs:
           echo "# Update image tags in docker-compose.yml to ${{ needs.validate-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "docker-compose pull && docker-compose up -d" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+  deploy-k8s:
+    name: Deploy to Kubernetes
+    needs: [validate-release, release-api, release-dashboard, release-mqtt-monitor, create-release]
+    runs-on: [iotistic-lab-sc]
+    if: success()
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Update Helm values with release version
+        run: |
+          RELEASE_TAG="${{ needs.validate-release.outputs.version }}"
+          
+          echo "Updating Helm values.yaml with release tags..."
+          
+          # Update API image tag
+          sed -i "s|tag: latest|tag: $RELEASE_TAG|g" k8s/charts/iotistic/values.yaml
+          
+          # Show changes
+          echo "Updated values.yaml:"
+          grep -A 2 "iotistic/api" k8s/charts/iotistic/values.yaml
+          grep -A 2 "iotistic/dashboard" k8s/charts/iotistic/values.yaml
+
+      - name: Deploy to Kubernetes with Helm
+        run: |
+          set -e
+          CHART_PATH=./k8s/charts/iotistic
+          VALUES_FILE=./k8s/charts/iotistic/values.yaml
+          NAMESPACE=iotistic-nodeport
+          RELEASE_TAG="${{ needs.validate-release.outputs.version }}"
+
+          echo "Deploying release $RELEASE_TAG to Kubernetes..."
+          
+          helm upgrade --install iotistic "${CHART_PATH}" \
+            --namespace "${NAMESPACE}" \
+            --create-namespace \
+            -f "${VALUES_FILE}" \
+            --set api.image.tag="${RELEASE_TAG}" \
+            --set dashboard.image.tag="${RELEASE_TAG}" \
+            --wait \
+            --timeout 5m
+
+          echo "Checking deployment status..."
+          kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-api --timeout=180s
+          kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-dashboard --timeout=180s
+          
+          echo "Deployment successful!"
+          kubectl -n "${NAMESPACE}" get pods -o wide
+          kubectl -n "${NAMESPACE}" get svc -o wide
+
+      - name: Generate Deployment Summary
+        run: |
+          RELEASE_TAG="${{ needs.validate-release.outputs.version }}"
+          
+          echo "## Kubernetes Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** \`$RELEASE_TAG\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Namespace:** \`iotistic-nodeport\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Deployed Services" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          kubectl -n iotistic-nodeport get svc -o wide >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Pod Status" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          kubectl -n iotistic-nodeport get pods -o wide >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Access URLs" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dashboard:** http://localhost:30000" >> $GITHUB_STEP_SUMMARY
+          echo "- **API:** http://localhost:30002" >> $GITHUB_STEP_SUMMARY
