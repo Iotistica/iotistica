@@ -31,6 +31,10 @@ on:
         description: 'COMAP Simulator version to test'
         required: false
         type: string
+      mqtt_monitor_version:
+        description: 'MQTT Monitor version to test'
+        required: false
+        type: string
   workflow_dispatch:
     inputs:
       test_mode:
@@ -61,6 +65,10 @@ on:
         description: 'COMAP Simulator version to test (default: latest from package.json)'
         required: false
         type: string
+      mqtt_monitor_version:
+        description: 'MQTT Monitor version to test (default: latest from package.json)'
+        required: false
+        type: string
   release:
     types: [published]
   schedule:
@@ -77,6 +85,7 @@ jobs:
       dashboard_version: ${{ steps.versions.outputs.dashboard_version }}
       modbus_simulator_version: ${{ steps.versions.outputs.modbus_simulator_version }}
       comap_simulator_version: ${{ steps.versions.outputs.comap_simulator_version }}
+      mqtt_monitor_version: ${{ steps.versions.outputs.mqtt_monitor_version }}
     
     steps:
       - name: Checkout repository
@@ -130,11 +139,18 @@ jobs:
             fi
           fi
           
+          if [ -n "${{ inputs.mqtt_monitor_version }}" ]; then
+            MQTT_MONITOR_VERSION="${{ inputs.mqtt_monitor_version }}"
+          else
+            MQTT_MONITOR_VERSION=$(jq -r '.version' mqtt-monitor/package.json)
+          fi
+          
           echo "agent_version=$AGENT_VERSION" >> $GITHUB_OUTPUT
           echo "api_version=$API_VERSION" >> $GITHUB_OUTPUT
           echo "dashboard_version=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
           echo "modbus_simulator_version=$MODBUS_SIMULATOR_VERSION" >> $GITHUB_OUTPUT
           echo "comap_simulator_version=$COMAP_SIMULATOR_VERSION" >> $GITHUB_OUTPUT
+          echo "mqtt_monitor_version=$MQTT_MONITOR_VERSION" >> $GITHUB_OUTPUT
           
           echo "Testing versions:"
           echo "  - Agent: $AGENT_VERSION"
@@ -142,6 +158,7 @@ jobs:
           echo "  - Dashboard: $DASHBOARD_VERSION"
           echo "  - Modbus Simulator: $MODBUS_SIMULATOR_VERSION"
           echo "  - COMAP Simulator: $COMAP_SIMULATOR_VERSION"
+          echo "  - MQTT Monitor: $MQTT_MONITOR_VERSION"
           
           # Check if images exist on Docker Hub
           echo ""
