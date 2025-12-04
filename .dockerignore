@@ -13,9 +13,9 @@
 **/*.*proj.user
 **/*.dbmdl
 **/*.jfm
-**/bin
-**/charts
-**/compose*
+charts/
+docker-compose*.yml
+docker-compose*.yaml
 **/Dockerfile*
 **/node_modules
 **/npm-debug.log
