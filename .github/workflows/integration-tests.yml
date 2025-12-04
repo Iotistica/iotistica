@@ -404,8 +404,10 @@ jobs:
       - name: Copy agent code to /opt/iotistic/agent
         run: |
           sudo mkdir -p /opt/iotistic/agent
+          sudo mkdir -p /opt/iotistic/config
           sudo cp -r agent/* /opt/iotistic/agent/
-          echo "✓ Agent code copied for testing"
+          sudo cp -r config/* /opt/iotistic/config/
+          echo "✓ Agent code and config copied for testing"
 
       - name: Make install script executable
         run: chmod +x agent/bin/install.sh
@@ -844,8 +846,10 @@ jobs:
       - name: Copy agent code to /opt/iotistic/agent
         run: |
           sudo mkdir -p /opt/iotistic/agent
+          sudo mkdir -p /opt/iotistic/config
           sudo cp -r agent/* /opt/iotistic/agent/
-          echo "✓ Agent code copied"
+          sudo cp -r config/* /opt/iotistic/config/
+          echo "✓ Agent code and config copied"
 
       - name: Make install script executable
         run: chmod +x agent/bin/install.sh

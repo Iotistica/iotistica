@@ -290,8 +290,10 @@ jobs:
       - name: Copy agent code to /opt/iotistic/agent (for CI mode)
         run: |
           sudo mkdir -p /opt/iotistic/agent
+          sudo mkdir -p /opt/iotistic/config
           sudo cp -r agent/* /opt/iotistic/agent/
-          echo "✓ Agent code copied for CI testing"
+          sudo cp -r config/* /opt/iotistic/config/
+          echo "✓ Agent code and config copied for CI testing"
 
       - name: Build agent in /opt/iotistic/agent
         run: |
