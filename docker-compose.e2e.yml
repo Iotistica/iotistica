@@ -161,6 +161,36 @@ services:
             options:
                 max-size: "5m"
                 max-file: "2"
+  
+  # COMAP Generator Controller Simulator
+  comap-simulator:
+    build: ./sensors/comap-simulator
+    container_name: iotistic-comap-simulator
+    hostname: comap-simulator
+    restart: unless-stopped
+    ports:
+      - "5502:502"
+    environment:
+      - MODBUS_PORT=502
+      - MODBUS_SLAVES=3
+      - MODBUS_SLAVE_START=1
+      - GENERATOR_RATED_KW=100
+      - GENERATOR_RATED_VOLTAGE=240
+      - GENERATOR_FUEL_TANK_L=200
+      - AUTO_START=true
+      - STATE_CHANGE_INTERVAL=300
+      - NOISE_PERCENT=1.0
+      - INJECT_OVERSPEED=false
+      - INJECT_LOW_OIL=false
+      - INJECT_HIGH_TEMP=false
+      - INJECT_OVERLOAD=false
+    networks:
+      - iotistic-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
 
 volumes:
   postgres-data:
