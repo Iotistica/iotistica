@@ -390,6 +390,8 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
             rm -rf iotistic-agent-temp
             git clone --depth 1 https://github.com/Iotistica/iotistic.git iotistic-agent-temp
             cp -r iotistic-agent-temp/agent/* /opt/iotistic/agent/
+            mkdir -p /opt/iotistic/config
+            cp -r iotistic-agent-temp/config/* /opt/iotistic/config/
             rm -rf iotistic-agent-temp
             AGENT_VERSION="dev"
         else
@@ -399,6 +401,8 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
             wget -q https://github.com/Iotistica/iotistic/archive/refs/tags/${LATEST_TAG}.tar.gz
             tar -xzf ${LATEST_TAG}.tar.gz
             cp -r iotistic-${LATEST_TAG#v}/agent/* /opt/iotistic/agent/
+            mkdir -p /opt/iotistic/config
+            cp -r iotistic-${LATEST_TAG#v}/config/* /opt/iotistic/config/
             rm -rf iotistic-${LATEST_TAG#v} ${LATEST_TAG}.tar.gz
             AGENT_VERSION="${LATEST_TAG#v}"
         fi
