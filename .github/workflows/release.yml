@@ -17,6 +17,10 @@ on:
     tags:
       - 'v*.*.*'  # e.g., v1.2.3, v2.0.0 (semantic versioning)
 
+permissions:
+  contents: write  # Required for creating releases
+  packages: write  # Required for Docker operations
+
 jobs:
   validate-release:
     name: Validate Release Tag
