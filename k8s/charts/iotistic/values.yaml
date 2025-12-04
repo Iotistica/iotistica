@@ -55,7 +55,7 @@ mosquitto:
   enabled: true
   image:
     repository: iegomez/mosquitto-go-auth
-    tag: "2.0.5"  # Pinned to stable version
+    tag: "3.0.0-mosquitto_2.0.18"  # Pinned to stable version
     pullPolicy: IfNotPresent  # Don't pull on every deployment
   ports:
     mqtt: 1883
