@@ -183,7 +183,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      # Build and push to registry
+      # Build and push to registry.
       - name: Build & Push final image
         id: docker_build
         if: success()
