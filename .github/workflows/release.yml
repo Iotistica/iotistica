@@ -130,7 +130,7 @@ jobs:
     name: Release API
     needs: validate-release
     runs-on: [iotistic-lab-sc]
-    if: needs.validate-release.outputs.api_version_final != 'skip'
+    if: needs.validate-release.outputs.api_version_final != 'skip' && needs.validate-release.outputs.api_version_final != ''
     
     steps:
       - name: Login to Docker Hub
@@ -161,7 +161,7 @@ jobs:
     name: Release Dashboard
     needs: validate-release
     runs-on: [iotistic-lab-sc]
-    if: needs.validate-release.outputs.dashboard_version_final != 'skip'
+    if: needs.validate-release.outputs.dashboard_version_final != 'skip' && needs.validate-release.outputs.dashboard_version_final != ''
     
     steps:
       - name: Login to Docker Hub
@@ -192,7 +192,7 @@ jobs:
     name: Release MQTT Monitor
     needs: validate-release
     runs-on: [iotistic-lab-sc]
-    if: needs.validate-release.outputs.mqtt_monitor_version_final != 'skip'
+    if: needs.validate-release.outputs.mqtt_monitor_version_final != 'skip' && needs.validate-release.outputs.mqtt_monitor_version_final != ''
     
     steps:
       - name: Login to Docker Hub
