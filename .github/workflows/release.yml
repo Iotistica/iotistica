@@ -34,7 +34,7 @@ on:
       destroy:
         description: 'If true will destroy the deployed Iotistic app'
         required: false
-        default: 'false'
+        default: false
         type: boolean
       clean_before_deploy:
         description: 'If true, delete Helm release + namespace before deploying'
