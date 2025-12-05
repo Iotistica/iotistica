@@ -386,13 +386,14 @@ jobs:
           
           echo "Updating Helm values.yaml with release tags..."
           
-          # Update API image tag
+          # Update image tags for all services
           sed -i "s|tag: latest|tag: $RELEASE_TAG|g" k8s/charts/iotistic/values.yaml
           
           # Show changes
           echo "Updated values.yaml:"
           grep -A 2 "iotistic/api" k8s/charts/iotistic/values.yaml
           grep -A 2 "iotistic/dashboard" k8s/charts/iotistic/values.yaml
+          grep -A 2 "iotistic/mqtt-monitor" k8s/charts/iotistic/values.yaml
 
       - name: Deploy to Kubernetes with Helm
         run: |
@@ -409,7 +410,7 @@ jobs:
           
           echo "Preserving Mosquitto image tag: $MOSQUITTO_TAG"
           
-          # Only update core services (API, Dashboard)
+          # Update core services (API, Dashboard, MQTT Monitor)
           # Preserve Mosquitto, PostgreSQL, Redis tags
           helm upgrade --install iotistic "${CHART_PATH}" \
             --namespace "${NAMESPACE}" \
@@ -417,13 +418,15 @@ jobs:
             -f "${VALUES_FILE}" \
             --set api.image.tag="${RELEASE_TAG}" \
             --set dashboard.image.tag="${RELEASE_TAG}" \
+            --set mqttMonitor.image.tag="${RELEASE_TAG}" \
             --set mosquitto.image.pullPolicy="IfNotPresent" \
             --set mosquitto.image.tag="${MOSQUITTO_TAG}" \
             --timeout 5m
 
-          echo "Checking deployment status for core services only..."
+          echo "Checking deployment status for core services..."
           kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-api --timeout=180s || echo "⚠️ API deployment check failed"
           kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-dashboard --timeout=180s || echo "⚠️ Dashboard deployment check failed"
+          kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-mqtt-monitor --timeout=180s || echo "⚠️ MQTT Monitor deployment check failed"
           
           echo "Deployment successful!"
           kubectl -n "${NAMESPACE}" get pods -o wide
