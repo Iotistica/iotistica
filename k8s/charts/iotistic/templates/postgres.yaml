@@ -39,7 +39,6 @@ metadata:
     app.kubernetes.io/component: postgres
 spec:
   type: ClusterIP
-  clusterIP: None  # Headless service for StatefulSet
   ports:
     - port: {{ .Values.postgres.port }}
       targetPort: postgres
