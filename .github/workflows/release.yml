@@ -90,11 +90,17 @@ jobs:
               echo "Auto-bumped version (${{ inputs.bump_type }}): $VERSION"
             fi
             
-            # Create and push the tag
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git tag "$VERSION"
-            git push origin "$VERSION"
+            # Check if tag already exists
+            if git rev-parse "$VERSION" >/dev/null 2>&1; then
+              echo "⚠️  Tag $VERSION already exists, using existing tag"
+            else
+              # Create and push the tag
+              echo "Creating new tag: $VERSION"
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git tag "$VERSION"
+              git push origin "$VERSION"
+            fi
           else
             # Tag trigger - extract version from tag
             VERSION=${GITHUB_REF#refs/tags/}
