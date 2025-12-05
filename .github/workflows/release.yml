@@ -380,11 +380,111 @@ jobs:
           echo "docker-compose pull && docker-compose up -d" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
+  check-deployment-needed:
+    name: Check if Deployment Needed
+    runs-on: ubuntu-latest
+    needs: [validate-release, release-api, release-dashboard, release-mqtt-monitor]
+    outputs:
+      should_deploy: ${{ steps.compare.outputs.should_deploy }}
+      changes_summary: ${{ steps.compare.outputs.changes_summary }}
+    
+    steps:
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+      
+      - name: Configure kubectl
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+      
+      - name: Get current deployed versions
+        id: current
+        run: |
+          # Get current image tags from K8s deployment
+          API_IMAGE=$(kubectl get deployment iotistic-api -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
+          DASHBOARD_IMAGE=$(kubectl get deployment iotistic-dashboard -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
+          MQTT_MONITOR_IMAGE=$(kubectl get deployment iotistic-mqtt-monitor -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
+          
+          # Extract version tags (e.g., iotistic/api:v1.0.12 -> v1.0.12)
+          API_VERSION=$(echo "$API_IMAGE" | grep -oP '(?<=:)v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
+          DASHBOARD_VERSION=$(echo "$DASHBOARD_IMAGE" | grep -oP '(?<=:)v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
+          MQTT_MONITOR_VERSION=$(echo "$MQTT_MONITOR_IMAGE" | grep -oP '(?<=:)v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
+          
+          echo "api_version=$API_VERSION" >> $GITHUB_OUTPUT
+          echo "dashboard_version=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
+          echo "mqtt_monitor_version=$MQTT_MONITOR_VERSION" >> $GITHUB_OUTPUT
+          
+          echo "Currently deployed versions:"
+          echo "  API: $API_VERSION"
+          echo "  Dashboard: $DASHBOARD_VERSION"
+          echo "  MQTT Monitor: $MQTT_MONITOR_VERSION"
+      
+      - name: Compare versions and determine deployment need
+        id: compare
+        run: |
+          CURRENT_API="${{ steps.current.outputs.api_version }}"
+          CURRENT_DASHBOARD="${{ steps.current.outputs.dashboard_version }}"
+          CURRENT_MQTT_MONITOR="${{ steps.current.outputs.mqtt_monitor_version }}"
+          
+          NEW_VERSION="${{ needs.validate-release.outputs.new_version }}"
+          
+          CHANGES=""
+          CHANGED=false
+          
+          # Check each service
+          if [ "$CURRENT_API" != "$NEW_VERSION" ]; then
+            CHANGES="${CHANGES}API: $CURRENT_API → $NEW_VERSION\n"
+            CHANGED=true
+          fi
+          
+          if [ "$CURRENT_DASHBOARD" != "$NEW_VERSION" ]; then
+            CHANGES="${CHANGES}Dashboard: $CURRENT_DASHBOARD → $NEW_VERSION\n"
+            CHANGED=true
+          fi
+          
+          if [ "$CURRENT_MQTT_MONITOR" != "$NEW_VERSION" ]; then
+            CHANGES="${CHANGES}MQTT Monitor: $CURRENT_MQTT_MONITOR → $NEW_VERSION\n"
+            CHANGED=true
+          fi
+          
+          # Determine if deployment needed
+          SHOULD_DEPLOY="false"
+          
+          # Force deploy if triggered by tag push (production release)
+          if [ "${{ github.event_name }}" == "push" ]; then
+            SHOULD_DEPLOY="true"
+            echo "Deployment triggered by tag push (production release)"
+          # Force deploy if manually enabled
+          elif [ "${{ github.event.inputs.deploy_to_k8s }}" == "true" ]; then
+            SHOULD_DEPLOY="true"
+            echo "Deployment manually enabled via workflow_dispatch"
+          # Deploy if any version changed
+          elif [ "$CHANGED" == "true" ]; then
+            SHOULD_DEPLOY="true"
+            echo "Deployment needed - version changes detected"
+          else
+            echo "No deployment needed - all services already at $NEW_VERSION"
+          fi
+          
+          if [ -z "$CHANGES" ]; then
+            CHANGES="No version changes detected"
+          fi
+          
+          echo "should_deploy=$SHOULD_DEPLOY" >> $GITHUB_OUTPUT
+          echo "changes_summary<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$CHANGES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "Should deploy: $SHOULD_DEPLOY"
+          echo -e "Changes:\n$CHANGES"
+
   deploy-k8s:
     name: Deploy to Kubernetes
-    needs: [validate-release, release-api, release-dashboard, release-mqtt-monitor, create-release]
+    needs: [validate-release, release-api, release-dashboard, release-mqtt-monitor, create-release, check-deployment-needed]
     runs-on: [iotistic-lab-sc]
-    if: success()
+    if: needs.check-deployment-needed.outputs.should_deploy == 'true'
     
     steps:
       - name: Checkout repository
@@ -476,6 +576,12 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Release:** \`$RELEASE_TAG\`" >> $GITHUB_STEP_SUMMARY
           echo "**Namespace:** \`iotistic-nodeport\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Version Changes" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "${{ needs.check-deployment-needed.outputs.changes_summary }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           echo "### Deployed Services" >> $GITHUB_STEP_SUMMARY

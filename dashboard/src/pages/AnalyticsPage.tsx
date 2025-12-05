@@ -59,7 +59,7 @@ interface AnalyticsPageProps {
 
 export function AnalyticsPage({ device }: AnalyticsPageProps) {
   const [deviceTraffic, setDeviceTraffic] = useState<DeviceTrafficStats[]>([]);
-  // Default to selected device's UUID if available, otherwise "all"
+  // Default to selected device's UUID if available, otherwise "all"11
   const [selectedDevice, setSelectedDevice] = useState<string>(device?.deviceUuid || "all");
   const [mqttTopics, setMqttTopics] = useState<MqttTopicStats[]>([]);
   const [mqttCurrentPage, setMqttCurrentPage] = useState(1);
