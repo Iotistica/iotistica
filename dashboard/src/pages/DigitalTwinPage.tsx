@@ -4,9 +4,8 @@
  * with IFC file upload and device mapping capabilities8
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState} from 'react';
 import { Neo4jGraphVisualization } from '../components/Neo4jGraphVisualization';
-import { DeviceSidebar, Device } from '../components/DeviceSidebar';
 import { Upload, FileText, CheckCircle, XCircle } from 'lucide-react';
 import axios from 'axios';
 
