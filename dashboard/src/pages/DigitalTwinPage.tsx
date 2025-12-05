@@ -1,7 +1,7 @@
 /**
  * Digital Twin Page
  * Visualizes building hierarchy from Neo4j graph database
- * with IFC file upload and device mapping capabilities
+ * with IFC file upload and device mapping capabilities5
  */
 
 import React, { useState, useEffect } from 'react';
