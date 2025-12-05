@@ -87,6 +87,11 @@ jobs:
           git config user.email "github-actions@github.com"
           git add api/package.json
           git commit -m "chore: bump api version to ${{ steps.bump.outputs.package_version }} [skip ci]"
+          
+          # Pull latest changes and rebase our commit on top
+          git pull --rebase origin master
+          
+          # Push the rebased commit
           git push origin HEAD
 
       - name: Display version info
