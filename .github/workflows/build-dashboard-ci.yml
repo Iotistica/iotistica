@@ -209,8 +209,8 @@ jobs:
 
   report:
     name: Generate Build Report
-    needs: buildx
-    runs-on: [self-hosted, iotistic-lab-sc]
+    needs: [version, buildx]
+    runs-on: [iotistic-lab-sc]
     if: always()
     
     steps:
@@ -235,8 +235,10 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker Image Size" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          docker images iotistic/dashboard:latest --format "{{.Repository}}:{{.Tag}} - {{.Size}}" >> $GITHUB_STEP_SUMMARY || echo "Image not available" >> $GITHUB_STEP_SUMMARY
+          docker images iotistic/dashboard --format "{{.Repository}}:{{.Tag}} - {{.Size}}" | head -5 >> $GITHUB_STEP_SUMMARY || echo "Images not available" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags pushed:** \`latest\`, \`${{ github.sha }}\`, \`${{ needs.version.outputs.new_version }}\`" >> $GITHUB_STEP_SUMMARY
 
   trigger-integration-tests:
     name: Trigger Integration Tests
