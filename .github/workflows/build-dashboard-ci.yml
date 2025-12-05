@@ -131,9 +131,15 @@ jobs:
           # Set outputs
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           
-          git add package.json package-lock.json
-          git commit -m "chore(dashboard): bump version to $NEW_VERSION [skip ci]" || echo "No changes to commit"
-          git push origin master || echo "Nothing to push"
+          # Check if package-lock.json exists
+          if [ -f "package-lock.json" ]; then
+            git add package.json package-lock.json
+          else
+            git add package.json
+          fi
+          
+          git commit -m "chore(dashboard): bump version to $NEW_VERSION [skip ci]"
+          git push origin master
 
   buildx:
     name: Build & Push Dashboard Image
