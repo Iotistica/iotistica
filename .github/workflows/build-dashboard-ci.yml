@@ -111,21 +111,25 @@ jobs:
         id: version_bump
         working-directory: ./dashboard
         run: |
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          # Get current version
+          CURRENT_VERSION=$(jq -r '.version' package.json)
           echo "Current version: $CURRENT_VERSION"
           
+          # Bump patch version (e.g., 1.0.0 -> 1.0.1)
           IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
-          MAJOR=${VERSION_PARTS[0]}
-          MINOR=${VERSION_PARTS[1]}
-          PATCH=${VERSION_PARTS[2]}
-          
+          MAJOR="${VERSION_PARTS[0]}"
+          MINOR="${VERSION_PARTS[1]}"
+          PATCH="${VERSION_PARTS[2]}"
           NEW_PATCH=$((PATCH + 1))
-          NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
+          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
           
           echo "New version: $NEW_VERSION"
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           
-          npm version $NEW_VERSION --no-git-tag-version
+          # Update package.json
+          jq --arg v "$NEW_VERSION" '.version = $v' package.json > tmp.json && mv tmp.json package.json
+          
+          # Set outputs
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           
           git add package.json package-lock.json
           git commit -m "chore(dashboard): bump version to $NEW_VERSION [skip ci]" || echo "No changes to commit"
