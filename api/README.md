@@ -4,7 +4,7 @@ Unified REST API server combining Grafana management, Docker control, system not
 
 ## Features
 
-- **Grafana Management**: Control dashboards, alerts, and variables
+- **Grafana Management**: Control dashboards, alerts, and variablesdfff
 - **Docker Management**: List and control containers
 - **System Notifications**: Send desktop notifications
 - **Cloud Multi-Device Management**: Manage multiple IoT devices from a central server
