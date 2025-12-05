@@ -31,6 +31,7 @@ import {
 import { EventPublisher } from './event-sourcing';
 import {
   getBrokerConfigForDevice,
+  getBrokerConfigForExternalDevice,
   buildBrokerUrl,
   formatBrokerConfigForClient
 } from '../utils/mqtt-broker-config';
@@ -308,11 +309,11 @@ export class ProvisioningService {
   ): Promise<ProvisioningResponse> {
     const { uuid, deviceName, deviceType, applicationId } = data;
 
-    // Fetch broker configuration
-    const brokerConfig = await getBrokerConfigForDevice(device.uuid);
+    // Fetch broker configuration for external device (uses MQTT_BROKER_EXTERNAL_HOST if set)
+    const brokerConfig = await getBrokerConfigForExternalDevice(device.uuid);
     
     if (brokerConfig) {
-      logger.info(`Using MQTT broker: ${brokerConfig.name} (${buildBrokerUrl(brokerConfig)})`);
+      logger.info(`Using MQTT broker for external device: ${brokerConfig.name} (${buildBrokerUrl(brokerConfig)})`);
     } else {
       logger.info('No broker config in database, using environment fallback');
     }

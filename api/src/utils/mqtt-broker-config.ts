@@ -103,6 +103,47 @@ export async function getBrokerConfigForDevice(deviceUuid: string): Promise<Mqtt
 }
 
 /**
+ * Get broker configuration for external device provisioning
+ * Uses MQTT_BROKER_EXTERNAL_HOST/PORT for devices connecting from outside K8s
+ * 
+ * Priority order:
+ * 1. Environment variables with external host override (MQTT_BROKER_EXTERNAL_HOST)
+ * 2. Device-specific broker from database
+ * 3. Default broker from database
+ * 
+ * @param deviceUuid - Device UUID
+ * @returns Broker configuration with external address or null if not found
+ */
+export async function getBrokerConfigForExternalDevice(deviceUuid: string): Promise<MqttBrokerConfig | null> {
+  try {
+    // Priority 1: Environment override with external host
+    const envHost = process.env.MQTT_BROKER_HOST;
+    const envPort = process.env.MQTT_BROKER_PORT;
+    const envProtocol = process.env.MQTT_BROKER_PROTOCOL;
+    const externalHost = process.env.MQTT_BROKER_EXTERNAL_HOST;
+    const externalPort = process.env.MQTT_BROKER_EXTERNAL_PORT;
+    
+    if (envHost && envPort && envProtocol) {
+      console.log(`[MQTT Config] Environment override for external device ${deviceUuid}:`, {
+        protocol: envProtocol,
+        host: externalHost || envHost,
+        port: externalPort || envPort,
+        use_tls: process.env.MQTT_BROKER_USE_TLS === 'true'
+      });
+      
+      return createConfigFromEnvExternal();
+    }
+    
+    // Priority 2 & 3: Fall back to internal device broker lookup
+    // (Could be enhanced to also apply external host override to DB configs)
+    return getBrokerConfigForDevice(deviceUuid);
+  } catch (error) {
+    console.error(`[MQTT Config] Error fetching external broker config for device ${deviceUuid}:`, error);
+    return null;
+  }
+}
+
+/**
  * Create broker configuration from environment variables
  */
 function createConfigFromEnv(): MqttBrokerConfig {
@@ -124,6 +165,25 @@ function createConfigFromEnv(): MqttBrokerConfig {
     connect_timeout: parseInt(process.env.MQTT_CONNECT_TIMEOUT || '30000', 10),
     broker_type: process.env.MQTT_BROKER_TYPE || 'local'
   };
+}
+
+/**
+ * Create broker configuration from environment variables - EXTERNAL variant
+ * This uses MQTT_BROKER_EXTERNAL_HOST/PORT for device connections outside K8s
+ * Falls back to internal host if external not configured
+ */
+function createConfigFromEnvExternal(): MqttBrokerConfig {
+  const config = createConfigFromEnv();
+  
+  // Use external host/port if configured (for devices connecting from outside K8s)
+  if (process.env.MQTT_BROKER_EXTERNAL_HOST) {
+    config.host = process.env.MQTT_BROKER_EXTERNAL_HOST;
+  }
+  if (process.env.MQTT_BROKER_EXTERNAL_PORT) {
+    config.port = parseInt(process.env.MQTT_BROKER_EXTERNAL_PORT, 10);
+  }
+  
+  return config;
 }
 
 /**

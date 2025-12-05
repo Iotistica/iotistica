@@ -35,7 +35,7 @@ param(
     [int]$Count = 1,
     [int]$StartIndex = 25,
     [string]$OutputFile = "docker-compose.agents.yml",
-    [string]$ApiUrl = "http://localhost:4002",
+    [string]$ApiUrl = "http://23.233.80.107:30002",
     [string]$FleetId = "default-fleet",
     
     # Cleanup Mode
@@ -46,7 +46,7 @@ param(
     
     # Agent Configuration
     [string]$NodeEnv = "development",
-    [string]$CLOUD_API_ENDPOINT = "http://api:3002",
+    [string]$CLOUD_API_ENDPOINT = "http://23.233.80.107:30002",
     [int]$ReportInterval = 20000,
     [int]$MetricsInterval = 30000,
     [string]$LogCompression = "true",
@@ -300,7 +300,6 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
       - /var/run/docker.sock:/var/run/docker.sock
       - $volumeName`:/app/data
       - ./certs/ca.crt:/app/certs/ca.crt:ro
-      - ./vendors/dataPoints.json:/app/vendors/dataPoints.json:ro
     environment:
       - DEVICE_API_PORT=$port
       - CLOUD_API_ENDPOINT=$CLOUD_API_ENDPOINT
@@ -325,6 +324,7 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
       - ENABLE_PROTOCOL_ADAPTERS=$EnableProtocolAdapters
       - ENABLE_SENSOR_PUBLISH=$EnableSensorPublish
       - ENABLE_FIRST_BOOT_DISCOVERY=$EnableFirstBootDiscovery
+      - MODBUS_VENDOR_FILE=/app/dist/config/vendors/dataPoints.json
       - MODBUS_VENDOR=COMAP
       - MODBUS_TCP_HOST=$ModbusTcpHost
       - MODBUS_TCP_PORT=$ModbusTcpPort

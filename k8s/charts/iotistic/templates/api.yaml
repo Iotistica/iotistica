@@ -68,6 +68,10 @@ spec:
               value: {{ include "iotistic.mosquitto.url" . }}
             - name: MQTT_BROKER_HOST
               value: {{ include "iotistic.mosquitto.host" . }}
+            - name: MQTT_BROKER_EXTERNAL_HOST
+              value: {{ .Values.mosquitto.externalHost | default (printf "%s-mosquitto" (include "iotistic.fullname" .)) }}
+            - name: MQTT_BROKER_EXTERNAL_PORT
+              value: {{ .Values.mosquitto.nodePorts.mqtt | default .Values.mosquitto.ports.mqtt | quote }}
             - name: MQTT_BROKER_PORT
               value: {{ .Values.mosquitto.ports.mqtt | quote }}
             - name: MQTT_BROKER_USE_TLS

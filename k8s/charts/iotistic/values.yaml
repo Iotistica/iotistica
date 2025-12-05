@@ -65,6 +65,9 @@ mosquitto:
   nodePorts:
     mqtt: 30883
     websocket: 30901
+  # External host for device connections (set to your K8s node IP or LoadBalancer)
+  # This is what devices will use to connect to MQTT broker
+  externalHost: ""  # Empty = use MQTT_BROKER_EXTERNAL_HOST env var
   resources:
     requests:
       cpu: 100m
