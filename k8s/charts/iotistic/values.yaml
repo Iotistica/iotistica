@@ -156,6 +156,35 @@ dashboard:
   env:
     NODE_ENV: development
 
+# MQTT Monitor service
+mqttMonitor:
+  enabled: true
+  image:
+    repository: iotistic/mqtt-monitor
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 3500
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  env:
+    NODE_ENV: development
+    LOG_LEVEL: info
+    DB_POOL_SIZE: "10"
+    MQTT_PERSIST_DB: "true"
+    MQTT_DB_SYNC_INTERVAL: "30000"
+    MQTT_METRICS_UPDATE_INTERVAL: "5000"
+    MQTT_TOPIC_TREE_UPDATE_INTERVAL: "5000"
+  # MQTT credentials (should match mosquitto credentials)
+  mqtt:
+    username: admin
+    password: iotistic42!
+
 # Ingress configuration (optional for local dev)
 ingress:
   enabled: false

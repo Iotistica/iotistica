@@ -10,6 +10,7 @@ This chart deploys a complete Iotistic stack including:
 - **Mosquitto** - MQTT broker with **HTTP authentication via API service**
 - **API** - Backend API service (handles MQTT auth, device management)
 - **Dashboard** - Frontend web UI
+- **MQTT Monitor** - Real-time MQTT topic monitoring with schema generation
 
 ### Key Architecture Patterns
 
@@ -104,8 +105,11 @@ helm uninstall iotistic --namespace iotistic
 | `api.enabled` | Enable API service | `true` |
 | `api.image.tag` | API image tag | `latest` |
 | `api.nodePort` | NodePort for API | `30002` |
+| `api.corsOrigins` | CORS allowed origins | `http://*:30000` |
 | `dashboard.enabled` | Enable Dashboard | `true` |
 | `dashboard.nodePort` | NodePort for Dashboard | `30000` |
+| `mqttMonitor.enabled` | Enable MQTT Monitor | `true` |
+| `mqttMonitor.port` | Internal service port | `3500` |
 | `ingress.enabled` | Enable Ingress | `false` |
 
 ### Example: Custom Values

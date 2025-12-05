@@ -84,6 +84,10 @@ spec:
               value: {{ .Values.api.env.MQTT_DB_SYNC_INTERVAL | quote }}
             - name: MQTT_MONITOR_ENABLED
               value: {{ .Values.api.env.MQTT_MONITOR_ENABLED | quote }}
+            {{- if .Values.mqttMonitor.enabled }}
+            - name: MQTT_MONITOR_URL
+              value: "http://{{ include "iotistic.fullname" . }}-mqtt-monitor:{{ .Values.mqttMonitor.port }}"
+            {{- end }}
             - name: LOG_COMPRESSION
               value: {{ .Values.api.env.LOG_COMPRESSION | quote }}
             - name: VPN_ENABLED
