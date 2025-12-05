@@ -94,6 +94,8 @@ spec:
               value: {{ include "iotistic.redis.host" . }}
             - name: REDIS_PORT
               value: {{ .Values.redis.port | quote }}
+            - name: CORS_ORIGINS
+              value: {{ .Values.api.corsOrigins | default "http://localhost:5173,http://localhost:3001,http://localhost:3000,http://*:30000" | quote }}
             {{- if .Values.api.license.publicKey }}
             - name: LICENSE_PUBLIC_KEY
               value: {{ .Values.api.license.publicKey | quote }}

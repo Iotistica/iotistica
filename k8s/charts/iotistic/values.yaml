@@ -93,6 +93,9 @@ api:
   port: 3002
   serviceType: NodePort
   nodePort: 30002
+  # CORS configuration for cross-origin requests from dashboard
+  # Use wildcard pattern like "http://*:30000" to allow any IP on NodePort 30000
+  corsOrigins: "http://localhost:5173,http://localhost:3001,http://localhost:3000,http://*:30000"
   resources:
     requests:
       cpu: 250m
