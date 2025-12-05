@@ -1,11 +1,11 @@
 name: Deploy Dashboard
 
 on:
-  push:
-    branches:
-      - master
-    paths:
-      - 'dashboard/**'
+  # push:
+  #   branches:
+  #     - master
+  #   paths:
+  #     - 'dashboard/**'
   pull_request:
     types: [opened, synchronize, reopened, closed]
     branches:
