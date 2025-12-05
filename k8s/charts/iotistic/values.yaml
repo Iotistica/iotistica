@@ -130,11 +130,19 @@ dashboard:
   port: 80
   serviceType: NodePort
   nodePort: 30000
-  # API URL for browser access - use localhost for local dev, internal service name for production
-  # NOTE: This is a BUILD-TIME variable. After changing this value, rebuild the dashboard image:
-  #   cd dashboard && docker build --build-arg VITE_API_URL=<value> -t iotistic/dashboard:local-k8s .
-  #   Then upgrade: helm upgrade iotistic . --namespace iotistic
-  apiUrl: "http://localhost:30002"
+  # API URL for browser access
+  # Options:
+  # 1. Use node IP with NodePort: "http://<NODE_IP>:30002" (replace <NODE_IP> with your K8s node IP)
+  # 2. Use service name for internal access: "http://iotistic-api:3002" (works only from within cluster)
+  # 3. Use empty string "" to auto-detect from browser (uses window.location.host with API port)
+  # 4. Use ingress hostname: "https://api.iotistic.local" (requires ingress configuration)
+  #
+  # For local K8s (minikube, kind, k3d):
+  #   - Get node IP: kubectl get nodes -o wide
+  #   - Set to: "http://<NODE_IP>:30002"
+  # For production with ingress:
+  #   - Set to your API ingress URL
+  apiUrl: ""  # Empty = auto-detect from browser
   resources:
     requests:
       cpu: 100m
