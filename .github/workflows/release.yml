@@ -52,12 +52,54 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Extract version from tag
+      - name: Determine release version
         id: version
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Release version: $VERSION"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual trigger - calculate version
+            if [ -n "${{ inputs.custom_version }}" ]; then
+              # Use custom version
+              VERSION="v${{ inputs.custom_version }}"
+              echo "Using custom version: $VERSION"
+            else
+              # Auto-bump based on latest tag
+              LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+              echo "Latest tag: $LATEST_TAG"
+              
+              # Extract version numbers
+              LATEST_TAG=${LATEST_TAG#v}
+              IFS='.' read -r MAJOR MINOR PATCH <<< "$LATEST_TAG"
+              
+              # Bump version based on input
+              case "${{ inputs.bump_type }}" in
+                major)
+                  MAJOR=$((MAJOR + 1))
+                  MINOR=0
+                  PATCH=0
+                  ;;
+                minor)
+                  MINOR=$((MINOR + 1))
+                  PATCH=0
+                  ;;
+                patch)
+                  PATCH=$((PATCH + 1))
+                  ;;
+              esac
+              
+              VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+              echo "Auto-bumped version (${{ inputs.bump_type }}): $VERSION"
+            fi
+            
+            # Create and push the tag
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "$VERSION"
+            git push origin "$VERSION"
+          else
+            # Tag trigger - extract version from tag
+            VERSION=${GITHUB_REF#refs/tags/}
+            echo "Release version: $VERSION"
+          fi
           
           # Validate semantic versioning format
           if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -66,6 +108,7 @@ jobs:
             exit 1
           fi
           
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "✅ Valid semantic version: $VERSION"
 
       - name: Get service versions from package.json
