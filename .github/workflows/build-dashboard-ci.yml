@@ -87,6 +87,8 @@ jobs:
     name: Bump Version
     needs: test
     runs-on: [iotistic-lab-sc]
+    permissions:
+      contents: write
     outputs:
       new_version: ${{ steps.version_bump.outputs.new_version }}
     
