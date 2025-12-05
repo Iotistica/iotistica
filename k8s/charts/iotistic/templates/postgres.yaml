@@ -38,12 +38,13 @@ metadata:
     {{- include "iotistic.labels" . | nindent 4 }}
     app.kubernetes.io/component: postgres
 spec:
-  type: ClusterIP
+  type: NodePort
   ports:
     - port: {{ .Values.postgres.port }}
       targetPort: postgres
       protocol: TCP
       name: postgres
+      nodePort: {{ .Values.postgres.nodePort | default 30432 }}
   selector:
     {{- include "iotistic.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: postgres
