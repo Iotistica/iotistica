@@ -339,9 +339,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Service | Source Version | Release Tag |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|----------------|-------------|" >> $GITHUB_STEP_SUMMARY
-          echo "| API | \`${{ needs.validate-release.outputs.api_version }}\` | \`${{ needs.validate-release.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Dashboard | \`${{ needs.validate-release.outputs.dashboard_version }}\` | \`${{ needs.validate-release.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| MQTT Monitor | \`${{ needs.validate-release.outputs.mqtt_monitor_version }}\` | \`${{ needs.validate-release.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| API | \`${{ needs.validate-release.outputs.api_version_final }}\` | \`${{ needs.validate-release.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dashboard | \`${{ needs.validate-release.outputs.dashboard_version_final }}\` | \`${{ needs.validate-release.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| MQTT Monitor | \`${{ needs.validate-release.outputs.mqtt_monitor_version_final }}\` | \`${{ needs.validate-release.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           echo "## Changelog" >> $GITHUB_STEP_SUMMARY
