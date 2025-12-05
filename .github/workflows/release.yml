@@ -51,10 +51,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Determine release version
         id: version
         run: |
+          # Ensure we have all tags
+          git fetch --tags --force
+          
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # Manual trigger - calculate version
             if [ -n "${{ inputs.custom_version }}" ]; then
