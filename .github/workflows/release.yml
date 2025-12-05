@@ -1,4 +1,4 @@
-name: Release Core Services
+name: Release API, Dashboard and MQTT Monitor
 
 # This workflow creates official releases by retagging the latest CI-built images
 # with semantic version tags. CI builds continuously push images with SHA and 
@@ -16,6 +16,21 @@ on:
   push:
     tags:
       - 'v*.*.*'  # e.g., v1.2.3, v2.0.0 (semantic versioning)
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch  # 1.0.0 -> 1.0.1
+          - minor  # 1.0.0 -> 1.1.0
+          - major  # 1.0.0 -> 2.0.0
+        default: patch
+      custom_version:
+        description: 'Or enter custom version (e.g., 1.2.3, overrides bump_type)'
+        required: false
+        type: string
 
 permissions:
   contents: write  # Required for creating releases
