@@ -136,10 +136,10 @@ api:
   #   helm install --set mqtt.username=admin --set mqtt.password=secret
   mqtt:
     # Reference existing Kubernetes secret (recommended for production)
-    existingSecret: ""  # e.g., "iotistic-mqtt-credentials"
+    existingSecret: "iotistic-mqtt-credentials"
     # If existingSecret is empty, use these values (dev/test only)
     username: admin
-    password: CHANGE_ME_IN_PRODUCTION
+    password: iotistic42!  # Change for production or use existingSecret
   # License configuration (optional)
   license:
     publicKey: ""
@@ -208,10 +208,10 @@ mqttMonitor:
   # See api.mqtt configuration above for security options
   mqtt:
     # Reference existing Kubernetes secret (recommended for production)
-    existingSecret: ""  # e.g., "iotistic-mqtt-credentials"
+    existingSecret: "iotistic-mqtt-credentials"
     # If existingSecret is empty, use these values (dev/test only)
     username: admin
-    password: CHANGE_ME_IN_PRODUCTION
+    password: iotistic42!  # Change for production or use existingSecret
 
 # Ingress configuration (optional for local dev)
 ingress:
