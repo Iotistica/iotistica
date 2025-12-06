@@ -121,9 +121,25 @@ api:
     VPN_ENABLED: "false"
     FORCE_COLOR: "1"
   # MQTT credentials
+  # SECURITY: For production, use Kubernetes Secrets instead of hardcoding here
+  # Option 1 (Recommended): Create secret manually:
+  #   kubectl create secret generic iotistic-mqtt-credentials \
+  #     --from-literal=username=admin \
+  #     --from-literal=password='your-secure-password' \
+  #     -n iotistic-nodeport
+  #   Then set mqtt.existingSecret=iotistic-mqtt-credentials
+  #
+  # Option 2: Use separate values-secret.yaml (add to .gitignore):
+  #   helm install -f values.yaml -f values-secret.yaml
+  #
+  # Option 3: Pass via --set flag:
+  #   helm install --set mqtt.username=admin --set mqtt.password=secret
   mqtt:
+    # Reference existing Kubernetes secret (recommended for production)
+    existingSecret: ""  # e.g., "iotistic-mqtt-credentials"
+    # If existingSecret is empty, use these values (dev/test only)
     username: admin
-    password: iotistic42!
+    password: CHANGE_ME_IN_PRODUCTION
   # License configuration (optional)
   license:
     publicKey: ""
@@ -188,9 +204,14 @@ mqttMonitor:
     MQTT_METRICS_UPDATE_INTERVAL: "5000"
     MQTT_TOPIC_TREE_UPDATE_INTERVAL: "5000"
   # MQTT credentials (should match mosquitto credentials)
+  # SECURITY: For production, reference the same secret as API service
+  # See api.mqtt configuration above for security options
   mqtt:
+    # Reference existing Kubernetes secret (recommended for production)
+    existingSecret: ""  # e.g., "iotistic-mqtt-credentials"
+    # If existingSecret is empty, use these values (dev/test only)
     username: admin
-    password: iotistic42!
+    password: CHANGE_ME_IN_PRODUCTION
 
 # Ingress configuration (optional for local dev)
 ingress:

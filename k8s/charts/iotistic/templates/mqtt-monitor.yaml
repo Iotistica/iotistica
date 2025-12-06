@@ -67,10 +67,25 @@ spec:
               value: {{ .Values.mqttMonitor.env.DB_POOL_SIZE | quote }}
             - name: MQTT_BROKER_URL
               value: {{ include "iotistic.mosquitto.url" . }}
+            {{- if .Values.mqttMonitor.mqtt.existingSecret }}
+            # Read MQTT credentials from existing Kubernetes Secret
+            - name: MQTT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mqttMonitor.mqtt.existingSecret }}
+                  key: username
+            - name: MQTT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mqttMonitor.mqtt.existingSecret }}
+                  key: password
+            {{- else }}
+            # Use credentials from values.yaml (not recommended for production)
             - name: MQTT_USERNAME
               value: {{ .Values.mqttMonitor.mqtt.username | quote }}
             - name: MQTT_PASSWORD
               value: {{ .Values.mqttMonitor.mqtt.password | quote }}
+            {{- end }}
             - name: MQTT_PERSIST_DB
               value: {{ .Values.mqttMonitor.env.MQTT_PERSIST_DB | quote }}
             - name: MQTT_DB_SYNC_INTERVAL
