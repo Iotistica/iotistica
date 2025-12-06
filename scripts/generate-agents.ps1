@@ -32,7 +32,7 @@
 #>
 
 param(
-    [int]$Count = 50,
+    [int]$Count = 1,
     [int]$StartIndex = 25,
     [string]$OutputFile = "docker-compose.agents.yml",
     [string]$ApiUrl = "http://23.233.80.107:30002",

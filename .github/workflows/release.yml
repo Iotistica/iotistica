@@ -387,6 +387,42 @@ jobs:
       changes_summary: ${{ steps.compare.outputs.changes_summary }}
     
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Check for Helm chart changes
+        id: chart_changes
+        run: |
+          # Get the previous release tag to compare against
+          CURRENT_TAG="${{ needs.validate-release.outputs.version }}"
+          PREV_TAG=$(git tag -l "v*.*.*" --sort=-version:refname | grep -v "^${CURRENT_TAG}$" | head -n1)
+          
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag found - treating as chart changed"
+            echo "chart_changed=true" >> $GITHUB_OUTPUT
+            echo "chart_files=First release" >> $GITHUB_OUTPUT
+          else
+            echo "Comparing chart changes between $PREV_TAG and $CURRENT_TAG"
+            
+            # Check if any files in k8s/charts/iotistic/ changed
+            CHANGED_FILES=$(git diff --name-only $PREV_TAG..$CURRENT_TAG -- k8s/charts/iotistic/ || echo "")
+            
+            if [ -n "$CHANGED_FILES" ]; then
+              echo "Helm chart files changed:"
+              echo "$CHANGED_FILES"
+              echo "chart_changed=true" >> $GITHUB_OUTPUT
+              # Format for summary (escape newlines)
+              CHANGED_FILES_SUMMARY=$(echo "$CHANGED_FILES" | sed 's/^/  - /' | tr '\n' '|')
+              echo "chart_files=$CHANGED_FILES_SUMMARY" >> $GITHUB_OUTPUT
+            else
+              echo "No Helm chart changes detected"
+              echo "chart_changed=false" >> $GITHUB_OUTPUT
+              echo "chart_files=" >> $GITHUB_OUTPUT
+            fi
+          fi
+      
       - name: Set up kubectl
         uses: azure/setup-kubectl@v3
         with:
@@ -450,6 +486,14 @@ jobs:
             CHANGED=true
           fi
           
+          # Check if Helm chart changed
+          CHART_CHANGED="${{ steps.chart_changes.outputs.chart_changed }}"
+          if [ "$CHART_CHANGED" == "true" ]; then
+            CHART_FILES="${{ steps.chart_changes.outputs.chart_files }}"
+            CHANGES="${CHANGES}Helm Chart: Configuration updated\n"
+            CHANGED=true
+          fi
+          
           # Determine if deployment needed
           SHOULD_DEPLOY="false"
           
@@ -464,7 +508,11 @@ jobs:
           # Deploy if any version changed (excludes "none" -> version transitions)
           elif [ "$CHANGED" == "true" ]; then
             SHOULD_DEPLOY="true"
-            echo "Deployment needed - version changes detected"
+            if [ "$CHART_CHANGED" == "true" ]; then
+              echo "Deployment needed - Helm chart or version changes detected"
+            else
+              echo "Deployment needed - version changes detected"
+            fi
           else
             echo "No deployment needed - all services already at $NEW_VERSION"
           fi
