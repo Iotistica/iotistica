@@ -137,9 +137,6 @@ api:
   mqtt:
     # Reference existing Kubernetes secret (recommended for production)
     existingSecret: "iotistic-mqtt-credentials"
-    # If existingSecret is empty, use these values (dev/test only)
-    username: admin
-    password: iotistic42!  # Change for production or use existingSecret
   # License configuration (optional)
   license:
     publicKey: ""
@@ -209,9 +206,6 @@ mqttMonitor:
   mqtt:
     # Reference existing Kubernetes secret (recommended for production)
     existingSecret: "iotistic-mqtt-credentials"
-    # If existingSecret is empty, use these values (dev/test only)
-    username: admin
-    password: iotistic42!  # Change for production or use existingSecret
 
 # Ingress configuration (optional for local dev)
 ingress:
