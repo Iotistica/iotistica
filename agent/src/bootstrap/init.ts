@@ -170,7 +170,7 @@ export class FeatureInitializer {
         return;
       }
 
-      // Build endpoint configs only for enabled protocols
+      // Build sensor configs only for enabled protocols
       const endpoints = endpointOutputs
         .filter(output => enabledEndpoints.has(output.protocol))
         .map((output) => ({
@@ -192,13 +192,13 @@ export class FeatureInitializer {
         return;
       }
 
-      const endpointConfig = {
+      const sensorConfig = {
         enabled: true,
         endpoints,
       };
 
       this.features.sensorPublish = new SensorPublishFeature(
-        endpointConfig as any,
+        sensorConfig as any,
         logger,
         deviceInfo.uuid
       );

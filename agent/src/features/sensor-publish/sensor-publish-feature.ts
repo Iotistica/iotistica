@@ -44,21 +44,21 @@ export class SensorPublishFeature extends BaseFeature {
   protected validateConfig(): void {
     const sensorConfig = this.config as SensorPublishConfig;
     
-    if (!sensorConfig.sensors || !Array.isArray(sensorConfig.sensors)) {
-      throw new Error('Sensor Publish configuration must include sensors array');
+    if (!sensorConfig.endpoints || !Array.isArray(sensorConfig.endpoints)) {
+      throw new Error('Sensor Publish configuration must include endpoints array');
     }
 
     // Check max sensors limit
-    if (sensorConfig.sensors.length > SensorPublishFeature.MAX_SENSORS) {
-      throw new Error(`Maximum ${SensorPublishFeature.MAX_SENSORS} sensors supported, got ${sensorConfig.sensors.length}`);
+    if (sensorConfig.endpoints.length > SensorPublishFeature.MAX_SENSORS) {
+      throw new Error(`Maximum ${SensorPublishFeature.MAX_SENSORS} sensors supported, got ${sensorConfig.endpoints.length}`);
     }
 
     // Validate each sensor configuration
-    sensorConfig.sensors.forEach((config: SensorConfig) => {
+    sensorConfig.endpoints.forEach((config: SensorConfig) => {
       this.validateSensorConfig(config);
     });
 
-    this.logger.debug(`Validated configuration for ${sensorConfig.sensors.length} sensors`);
+    this.logger.debug(`Validated configuration for ${sensorConfig.endpoints.length} sensors`);
   }
 
   /**
@@ -67,12 +67,12 @@ export class SensorPublishFeature extends BaseFeature {
   protected async onInitialize(): Promise<void> {
     const sensorConfig = this.config as SensorPublishConfig;
     
-    if (sensorConfig.sensors.length === 0) {
+    if (sensorConfig.endpoints.length === 0) {
       this.logger.warn('No sensors configured');
       return;
     }
 
-    this.logger.info(`Starting Sensor Publish feature with ${sensorConfig.sensors.length} sensors`);
+    this.logger.info(`Starting Sensor Publish feature with ${sensorConfig.endpoints.length} sensors`);
   }
 
   /**
@@ -85,13 +85,13 @@ export class SensorPublishFeature extends BaseFeature {
 
     const sensorConfig = this.config as SensorPublishConfig;
     
-    if (sensorConfig.sensors.length === 0) {
+    if (sensorConfig.endpoints.length === 0) {
       return;
     }
     
     // Create and start all sensors
-    for (let i = 0; i < sensorConfig.sensors.length; i++) {
-      const config = sensorConfig.sensors[i];
+    for (let i = 0; i < sensorConfig.endpoints.length; i++) {
+      const config = sensorConfig.endpoints[i];
       
       // Set default name if not provided
       if (!config.name) {
@@ -184,7 +184,7 @@ export class SensorPublishFeature extends BaseFeature {
    */
   public getSensor(name: string): Sensor | undefined {
     const sensorConfig = this.config as SensorPublishConfig;
-    const index = sensorConfig.sensors.findIndex((s: SensorConfig) => s.name === name);
+    const index = sensorConfig.endpoints.findIndex((s: SensorConfig) => s.name === name);
     return index >= 0 ? this.sensors[index] : undefined;
   }
 
@@ -193,7 +193,7 @@ export class SensorPublishFeature extends BaseFeature {
    */
   public getSensors(): Array<{ name: string; enabled: boolean; addr: string; publishInterval: number }> {
     const sensorConfig = this.config as SensorPublishConfig;
-    return sensorConfig.sensors.map((config: SensorConfig, index: number) => {
+    return sensorConfig.endpoints.map((config: SensorConfig, index: number) => {
       return {
         name: config.name || `sensor-${index + 1}`,
         enabled: config.enabled !== false,
@@ -208,12 +208,12 @@ export class SensorPublishFeature extends BaseFeature {
    */
   public async enableSensor(sensorName: string): Promise<void> {
     const publishConfig = this.config as SensorPublishConfig;
-    const index = publishConfig.sensors.findIndex((s: SensorConfig) => s.name === sensorName);
+    const index = publishConfig.endpoints.findIndex((s: SensorConfig) => s.name === sensorName);
     if (index < 0) {
       throw new Error(`Sensor not found: ${sensorName}`);
     }
 
-    const sensorConfig = publishConfig.sensors[index];
+    const sensorConfig = publishConfig.endpoints[index];
     const sensor = this.sensors[index];
 
     if (sensorConfig.enabled === false) {
@@ -233,12 +233,12 @@ export class SensorPublishFeature extends BaseFeature {
    */
   public async disableSensor(sensorName: string): Promise<void> {
     const publishConfig = this.config as SensorPublishConfig;
-    const index = publishConfig.sensors.findIndex((s: SensorConfig) => s.name === sensorName);
+    const index = publishConfig.endpoints.findIndex((s: SensorConfig) => s.name === sensorName);
     if (index < 0) {
       throw new Error(`Sensor not found: ${sensorName}`);
     }
 
-    const sensorConfig = publishConfig.sensors[index];
+    const sensorConfig = publishConfig.endpoints[index];
     const sensor = this.sensors[index];
 
     if (sensorConfig.enabled !== false) {
@@ -258,12 +258,12 @@ export class SensorPublishFeature extends BaseFeature {
    */
   public async updateInterval(sensorName: string, intervalMs: number): Promise<void> {
     const publishConfig = this.config as SensorPublishConfig;
-    const index = publishConfig.sensors.findIndex((s: SensorConfig) => s.name === sensorName);
+    const index = publishConfig.endpoints.findIndex((s: SensorConfig) => s.name === sensorName);
     if (index < 0) {
       throw new Error(`Sensor not found: ${sensorName}`);
     }
 
-    const sensorConfig = publishConfig.sensors[index];
+    const sensorConfig = publishConfig.endpoints[index];
     const sensor = this.sensors[index];
 
     if (intervalMs < 1000) {
