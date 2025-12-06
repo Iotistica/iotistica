@@ -452,7 +452,10 @@ export class Sensor extends EventEmitter {
       return;
     }
     
-    if (!this.mqttConnection.isConnected()) {
+    const isConnected = this.mqttConnection.isConnected();
+    this.logger?.debug(`MQTT connection status: ${isConnected}`);
+    
+    if (!isConnected) {
       this.logger?.warn(`MQTT not connected, cannot publish batch from endpoint '${this.getSensorName()}'`);
       return;
     }
@@ -467,6 +470,8 @@ export class Sensor extends EventEmitter {
         timestamp: new Date().toISOString(),
         messages: this.messageBatch.messages
       });
+      
+      this.logger?.info(`Publishing to topic: ${topic}, payload size: ${payload.length} bytes`);
       
       await this.mqttConnection.publish(topic, payload, { qos: 1 });
       
