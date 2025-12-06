@@ -137,10 +137,8 @@ jobs:
       - name: Get service versions from package.json
         id: versions
         run: |
-          # Pull latest master to get most recent version bumps
-          git pull origin master
-          
-          # Get current versions from package.json files
+          # Get current versions from package.json files at the tagged commit
+          # (Do NOT pull master - we need versions from the specific tag/commit)
           API_VERSION=$(jq -r '.version' api/package.json)
           DASHBOARD_VERSION=$(jq -r '.version' dashboard/package.json)
           MQTT_MONITOR_VERSION=$(jq -r '.version' mqtt-monitor/package.json)
@@ -403,6 +401,9 @@ jobs:
         id: current
         run: |
           # Get current image tags from K8s deployment
+          # Note: Deployment names match Helm release name 'iotistic' + service suffix
+          # (e.g., iotistic-api, iotistic-dashboard, iotistic-mqtt-monitor)
+          # These must match the Helm chart's {{ include "iotistic.fullname" . }}-<service> pattern
           API_IMAGE=$(kubectl get deployment iotistic-api -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
           DASHBOARD_IMAGE=$(kubectl get deployment iotistic-dashboard -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
           MQTT_MONITOR_IMAGE=$(kubectl get deployment iotistic-mqtt-monitor -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
@@ -428,7 +429,7 @@ jobs:
           CURRENT_DASHBOARD="${{ steps.current.outputs.dashboard_version }}"
           CURRENT_MQTT_MONITOR="${{ steps.current.outputs.mqtt_monitor_version }}"
           
-          NEW_VERSION="${{ needs.validate-release.outputs.new_version }}"
+          NEW_VERSION="${{ needs.validate-release.outputs.version }}"
           
           CHANGES=""
           CHANGED=false
@@ -490,20 +491,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Update Helm values with release version
-        run: |
-          RELEASE_TAG="${{ needs.validate-release.outputs.version }}"
-          
-          echo "Updating Helm values.yaml with release tags..."
-          
-          # Update image tags for all services
-          sed -i "s|tag: latest|tag: $RELEASE_TAG|g" k8s/charts/iotistic/values.yaml
-          
-          # Show changes
-          echo "Updated values.yaml:"
-          grep -A 2 "iotistic/api" k8s/charts/iotistic/values.yaml
-          grep -A 2 "iotistic/dashboard" k8s/charts/iotistic/values.yaml
-          grep -A 2 "iotistic/mqtt-monitor" k8s/charts/iotistic/values.yaml
+      # NOTE: We do NOT modify values.yaml in-place (dangerous and causes dirty repo state)
+      # Instead, we override image tags via --set flags in helm upgrade command below
 
       # ------------------------------------
       # OPTIONAL CLEAN BEFORE DEPLOY
