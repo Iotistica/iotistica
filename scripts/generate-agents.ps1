@@ -437,7 +437,7 @@ Write-Host "  docker-compose -f $OutputFile down" -ForegroundColor Yellow
 if ($Run) {
     Write-Host "`n🚀 Starting agents..." -ForegroundColor Cyan
     $composeFile = Join-Path $PSScriptRoot ".." $OutputFile
-    docker compose -f $composeFile up -d
+    docker compose -f $composeFile up -d --build
     
     if ($LASTEXITCODE -eq 0) {
         Write-Host "✅ Agents started successfully!" -ForegroundColor Green

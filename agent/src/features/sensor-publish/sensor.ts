@@ -382,15 +382,15 @@ export class Sensor extends EventEmitter {
     // Append to buffer
     this.buffer = Buffer.concat([this.buffer, data]);
     
-    // Check if buffer capacity exceeded
+    // Parse messages from buffer first (this adds them to messageBatch)
+    this.parseMessages();
+    
+    // Check if buffer capacity exceeded after parsing
     if (this.buffer.length > this.config.bufferCapacity) {
       this.logger?.warn(`Buffer capacity exceeded for endpoint '${this.getSensorName()}', publishing batch`);
       this.publishBatch();
       return;
     }
-    
-    // Parse messages from buffer
-    this.parseMessages();
   }
 
   /**

@@ -461,10 +461,20 @@ export class MqttManager extends EventEmitter {
 
       // Route message based on type
       switch (messageType) {
+        case 'endpoints':
+          // Topic: iot/device/{uuid}/endpoints/{endpointTopic}
+          const endpointTopic = rest[0] || 'unknown';
+          logOperation.step('mqtt-message', 'Routing to endpoint handler', { 
+            deviceUuid: deviceUuid?.substring(0, 8) + '...',
+            endpointTopic
+          });
+          this.handleSensorData(deviceUuid, endpointTopic, data);
+          break;
+          
         case 'sensor':
-          // Topic: iot/device/{uuid}/sensor/{sensorTopic}
+          // Topic: iot/device/{uuid}/sensor/{sensorTopic} (legacy, deprecated)
           const sensorTopic = rest[0] || 'unknown';
-          logOperation.step('mqtt-message', 'Routing to sensor handler', { 
+          logOperation.step('mqtt-message', 'Routing to sensor handler (legacy)', { 
             deviceUuid: deviceUuid?.substring(0, 8) + '...',
             sensorTopic
           });
