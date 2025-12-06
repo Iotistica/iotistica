@@ -39,30 +39,6 @@ spec:
         {{- include "iotistic.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
     spec:
-      serviceAccountName: {{ include "iotistic.fullname" . }}-api
-      {{- if and (eq .Values.mosquitto.serviceType "NodePort") (not .Values.mosquitto.externalHost) }}
-      initContainers:
-        - name: detect-external-host
-          image: bitnami/kubectl:latest
-          command:
-            - sh
-            - -c
-            - |
-              # Detect node IP
-              NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-              echo "Detected node IP: $NODE_IP"
-              echo "MQTT_BROKER_EXTERNAL_HOST=$NODE_IP" > /shared/external-host.env
-          volumeMounts:
-            - name: external-host-config
-              mountPath: /shared
-          resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 100m
-              memory: 128Mi
-      {{- end }}
       containers:
         - name: api
           image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
@@ -154,9 +130,4 @@ spec:
             failureThreshold: 5
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
-      {{- if and (eq .Values.mosquitto.serviceType "NodePort") (not .Values.mosquitto.externalHost) }}
-      volumes:
-        - name: external-host-config
-          emptyDir: {}
-      {{- end }}
 {{- end }}
