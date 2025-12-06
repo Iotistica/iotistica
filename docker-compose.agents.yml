@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2025-12-06 11:41:22
+# Generated: 2025-12-06 12:13:02
 # Agents: 25 to 25
 # Ports: 48505 to 48505
 
@@ -16,13 +16,13 @@ services:
       - ./certs/ca.crt:/app/certs/ca.crt:ro
     environment:
       - DEVICE_API_PORT=48505
-      - CLOUD_API_ENDPOINT=http://23.233.80.107:30002
+      - CLOUD_API_ENDPOINT=http://api:3002
       - NODE_ENV=development
       - REPORT_INTERVAL_MS=20000
       - METRICS_INTERVAL_MS=30000
       - LOG_COMPRESSION=true
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=e778971b441280e4deb1064cbc75d0569a34648e91f72578dba1eccf08641f67
+      - PROVISIONING_KEY=9bdb1952b57ca8373dffce03423f5e9729679e66f16f08ca3ee7e7d0f72126d0
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - MEMORY_CHECK_INTERVAL_MS=30000
       - MEMORY_THRESHOLD_MB=30
