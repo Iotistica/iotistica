@@ -434,18 +434,18 @@ jobs:
           CHANGES=""
           CHANGED=false
           
-          # Check each service
-          if [ "$CURRENT_API" != "$NEW_VERSION" ]; then
+          # Check each service (skip if current version is "none" - deployment doesn't exist)
+          if [ "$CURRENT_API" != "none" ] && [ "$CURRENT_API" != "$NEW_VERSION" ]; then
             CHANGES="${CHANGES}API: $CURRENT_API → $NEW_VERSION\n"
             CHANGED=true
           fi
           
-          if [ "$CURRENT_DASHBOARD" != "$NEW_VERSION" ]; then
+          if [ "$CURRENT_DASHBOARD" != "none" ] && [ "$CURRENT_DASHBOARD" != "$NEW_VERSION" ]; then
             CHANGES="${CHANGES}Dashboard: $CURRENT_DASHBOARD → $NEW_VERSION\n"
             CHANGED=true
           fi
           
-          if [ "$CURRENT_MQTT_MONITOR" != "$NEW_VERSION" ]; then
+          if [ "$CURRENT_MQTT_MONITOR" != "none" ] && [ "$CURRENT_MQTT_MONITOR" != "$NEW_VERSION" ]; then
             CHANGES="${CHANGES}MQTT Monitor: $CURRENT_MQTT_MONITOR → $NEW_VERSION\n"
             CHANGED=true
           fi
@@ -461,7 +461,7 @@ jobs:
           elif [ "${{ github.event.inputs.deploy_to_k8s }}" == "true" ]; then
             SHOULD_DEPLOY="true"
             echo "Deployment manually enabled via workflow_dispatch"
-          # Deploy if any version changed
+          # Deploy if any version changed (excludes "none" -> version transitions)
           elif [ "$CHANGED" == "true" ]; then
             SHOULD_DEPLOY="true"
             echo "Deployment needed - version changes detected"
