@@ -480,7 +480,7 @@ export class Sensor extends EventEmitter {
       this.stats.bytesPublished += this.messageBatch.totalBytes;
       this.stats.lastPublishTime = new Date();
       
-      this.logger?.debug(
+      this.logger?.info(
         `Published ${this.messageBatch.messages.length} messages (${this.messageBatch.totalBytes} bytes) from sensor '${this.getSensorName()}'`
       );
       

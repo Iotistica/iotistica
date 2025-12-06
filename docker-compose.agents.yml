@@ -1,12 +1,12 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2025-12-06 16:28:15
+# Generated: 2025-12-06 17:25:24
 # Agents: 25 to 25
 # Ports: 48505 to 48505
 
 services:
   agent-25:
     container_name: agent-25
-    image: zemfyre-sensor-agent:latest
+    image: iotistic/agent:latest
     restart: always
     mem_limit: 512m
     mem_reservation: 256m
@@ -16,13 +16,13 @@ services:
       - ./certs/ca.crt:/app/certs/ca.crt:ro
     environment:
       - DEVICE_API_PORT=48505
-      - CLOUD_API_ENDPOINT=http://api:3002
+      - CLOUD_API_ENDPOINT=http://23.233.80.107:30002
       - NODE_ENV=development
       - REPORT_INTERVAL_MS=20000
       - METRICS_INTERVAL_MS=30000
       - LOG_COMPRESSION=true
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=a322b11fc9dfd56cdd13c265ee29c8b6f3dfffaa7d33c3994cb7efe6a59dbc1c
+      - PROVISIONING_KEY=85c91d929306cfff93cb8c8688c0da96acda105d5e810a836747e311ddbbcdef
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - MEMORY_CHECK_INTERVAL_MS=30000
       - MEMORY_THRESHOLD_MB=30
