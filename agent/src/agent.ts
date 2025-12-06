@@ -841,7 +841,7 @@ export default class DeviceAgent {
       const { configureAnomalyFeed: configureSensorAnomaly } = await import('./features/sensor-publish/sensor.js');
       configureSensorAnomaly(this.anomalyService);
       
-      this.agentLogger?.infoSync('Anomaly detection configured for system metrics and sensors', {
+      this.agentLogger?.infoSync('Anomaly detection configured for system metrics and endpoints', {
         component: LogComponents.agent,
       });
     }
