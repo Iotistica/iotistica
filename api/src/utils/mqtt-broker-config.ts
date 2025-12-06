@@ -35,8 +35,9 @@ export interface MqttBrokerConfig {
  * 
  * Priority order:
  * 1. Environment variables (full override if all required vars present)
- * 2. Device-specific broker from database
- * 3. Default broker from database
+ * 2. Environment MQTT_BROKER_TYPE preference ('local' or 'cloud')
+ * 3. Device-specific broker assignment (devices.mqtt_broker_id)
+ * 4. Default broker from database
  * 
  * @param deviceUuid - Device UUID
  * @returns Broker configuration or null if not found
@@ -59,7 +60,32 @@ export async function getBrokerConfigForDevice(deviceUuid: string): Promise<Mqtt
       return createConfigFromEnv();
     }
     
-    // Priority 2: Device-specific broker from mqtt_broker_config table
+    // Priority 2: Environment broker type preference (local vs cloud)
+    const preferredBrokerType = process.env.MQTT_BROKER_TYPE; // 'local' or 'cloud'
+    
+    if (preferredBrokerType) {
+      const typeResult = await query(
+        `SELECT * FROM mqtt_broker_config 
+         WHERE broker_type = $1 AND is_active = true 
+         ORDER BY is_default DESC, id ASC
+         LIMIT 1`,
+        [preferredBrokerType]
+      );
+      
+      if (typeResult.rows.length > 0) {
+        console.log(`[MQTT Config] Using ${preferredBrokerType} broker for device ${deviceUuid}:`, {
+          name: typeResult.rows[0].name,
+          protocol: typeResult.rows[0].protocol,
+          host: typeResult.rows[0].host,
+          port: typeResult.rows[0].port
+        });
+        return typeResult.rows[0];
+      } else {
+        console.log(`[MQTT Config] No ${preferredBrokerType} broker found, falling back to default`);
+      }
+    }
+    
+    // Priority 3: Device-specific broker from mqtt_broker_config table
     const deviceResult = await query(
       `SELECT bc.* FROM mqtt_broker_config bc
        JOIN devices d ON d.mqtt_broker_id = bc.id
@@ -77,7 +103,7 @@ export async function getBrokerConfigForDevice(deviceUuid: string): Promise<Mqtt
       return deviceResult.rows[0];
     }
     
-    // Priority 3: Default broker from mqtt_broker_config table
+    // Priority 4: Default broker from mqtt_broker_config table
     const defaultResult = await query(
       `SELECT * FROM mqtt_broker_config 
        WHERE is_default = true AND is_active = true 
@@ -108,8 +134,9 @@ export async function getBrokerConfigForDevice(deviceUuid: string): Promise<Mqtt
  * 
  * Priority order:
  * 1. Environment variables with external host override (MQTT_BROKER_EXTERNAL_HOST)
- * 2. Device-specific broker from database
- * 3. Default broker from database
+ * 2. Environment MQTT_BROKER_TYPE preference ('local' or 'cloud')
+ * 3. Device-specific broker from database
+ * 4. Default broker from database
  * 
  * @param deviceUuid - Device UUID
  * @returns Broker configuration with external address or null if not found
@@ -134,8 +161,32 @@ export async function getBrokerConfigForExternalDevice(deviceUuid: string): Prom
       return createConfigFromEnvExternal();
     }
     
-    // Priority 2 & 3: Fall back to internal device broker lookup
-    // (Could be enhanced to also apply external host override to DB configs)
+    // Priority 2: Environment broker type preference (local vs cloud)
+    const preferredBrokerType = process.env.MQTT_BROKER_TYPE;
+    
+    if (preferredBrokerType) {
+      const typeResult = await query(
+        `SELECT * FROM mqtt_broker_config 
+         WHERE broker_type = $1 AND is_active = true 
+         ORDER BY is_default DESC, id ASC
+         LIMIT 1`,
+        [preferredBrokerType]
+      );
+      
+      if (typeResult.rows.length > 0) {
+        console.log(`[MQTT Config] Using ${preferredBrokerType} broker for external device ${deviceUuid}:`, {
+          name: typeResult.rows[0].name,
+          protocol: typeResult.rows[0].protocol,
+          host: typeResult.rows[0].host,
+          port: typeResult.rows[0].port
+        });
+        return typeResult.rows[0];
+      } else {
+        console.log(`[MQTT Config] No ${preferredBrokerType} broker found, falling back to default`);
+      }
+    }
+    
+    // Priority 3 & 4: Fall back to device-specific or default broker
     return getBrokerConfigForDevice(deviceUuid);
   } catch (error) {
     console.error(`[MQTT Config] Error fetching external broker config for device ${deviceUuid}:`, error);

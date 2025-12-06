@@ -64,6 +64,47 @@ spec:
               value: {{ .Values.postgres.password | quote }}
             - name: DB_POOL_SIZE
               value: {{ .Values.api.env.DB_POOL_SIZE | quote }}
+            # MQTT Broker Configuration (supports local Mosquitto or cloud HiveMQ)
+            {{- if eq .Values.mqttBroker.type "cloud" }}
+            # Cloud broker configuration (HiveMQ, AWS IoT Core, etc.)
+            - name: MQTT_BROKER_TYPE
+              value: "cloud"
+            - name: MQTT_BROKER_URL
+              value: "{{ .Values.mqttBroker.cloud.protocol }}://{{ .Values.mqttBroker.cloud.host }}:{{ .Values.mqttBroker.cloud.port }}"
+            - name: MQTT_BROKER_HOST
+              value: {{ .Values.mqttBroker.cloud.host | quote }}
+            - name: MQTT_BROKER_EXTERNAL_HOST
+              value: {{ .Values.mqttBroker.cloud.host | quote }}
+            - name: MQTT_BROKER_PORT
+              value: {{ .Values.mqttBroker.cloud.port | quote }}
+            - name: MQTT_BROKER_EXTERNAL_PORT
+              value: {{ .Values.mqttBroker.cloud.port | quote }}
+            - name: MQTT_BROKER_PROTOCOL
+              value: {{ .Values.mqttBroker.cloud.protocol | quote }}
+            - name: MQTT_BROKER_USE_TLS
+              value: {{ .Values.mqttBroker.cloud.useTls | quote }}
+            - name: MQTT_USERNAME
+              value: {{ .Values.mqttBroker.cloud.username | quote }}
+            - name: MQTT_PASSWORD
+              value: {{ .Values.mqttBroker.cloud.password | quote }}
+            {{- if .Values.mqttBroker.cloud.caCert }}
+            - name: MQTT_BROKER_CA_CERT
+              value: {{ .Values.mqttBroker.cloud.caCert | quote }}
+            {{- end }}
+            - name: MQTT_BROKER_VERIFY_CERT
+              value: {{ .Values.mqttBroker.cloud.verifyCertificate | quote }}
+            - name: MQTT_KEEP_ALIVE
+              value: {{ .Values.mqttBroker.cloud.keepAlive | quote }}
+            - name: MQTT_CLEAN_SESSION
+              value: {{ .Values.mqttBroker.cloud.cleanSession | quote }}
+            - name: MQTT_RECONNECT_PERIOD
+              value: {{ .Values.mqttBroker.cloud.reconnectPeriod | quote }}
+            - name: MQTT_CONNECT_TIMEOUT
+              value: {{ .Values.mqttBroker.cloud.connectTimeout | quote }}
+            {{- else }}
+            # Local Mosquitto broker configuration
+            - name: MQTT_BROKER_TYPE
+              value: "local"
             - name: MQTT_BROKER_URL
               value: {{ include "iotistic.mosquitto.url" . }}
             - name: MQTT_BROKER_HOST
@@ -78,6 +119,7 @@ spec:
               value: "false"
             - name: MQTT_BROKER_PROTOCOL
               value: "mqtt"
+            {{- end }}
             {{- if .Values.api.mqtt.existingSecret }}
             # Read MQTT credentials from existing Kubernetes Secret
             - name: MQTT_USERNAME

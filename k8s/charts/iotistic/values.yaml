@@ -89,6 +89,48 @@ mosquitto:
   persistence:
     enabled: true
 
+# MQTT Broker Configuration
+# Choose between local (self-hosted Mosquitto) or cloud (HiveMQ, AWS IoT Core)
+mqttBroker:
+  # Broker type: 'local' or 'cloud'
+  # - local: Uses Mosquitto deployment (above)
+  # - cloud: Uses external managed MQTT service (HiveMQ Cloud, AWS IoT Core, etc.)
+  type: local
+  
+  # Local broker configuration (uses Mosquitto deployment)
+  local:
+    # Credentials for API and services to connect to local broker
+    username: admin
+    password: iotistic42!  # Change in production
+    # Internal service connection
+    host: "{{ include \"iotistic.fullname\" . }}-mosquitto"
+    port: 1883
+    protocol: mqtt
+    useTls: false
+    
+  # Cloud broker configuration (HiveMQ Cloud, AWS IoT Core, etc.)
+  cloud:
+    # Enable cloud broker (requires configuration)
+    enabled: false
+    # Provider: 'hivemq', 'aws-iot', 'azure-iot', 'custom'
+    provider: hivemq
+    # Connection details (must be configured if enabled)
+    host: ""  # e.g., abc123.s1.eu.hivemq.cloud
+    port: 8883
+    protocol: mqtts
+    username: ""
+    password: ""
+    # Cloud brokers always use TLS
+    useTls: true
+    verifyCertificate: true
+    # CA certificate (optional - most cloud providers use public CAs)
+    caCert: ""
+    # Connection options
+    keepAlive: 60
+    cleanSession: true
+    reconnectPeriod: 5000
+    connectTimeout: 30000
+
 # API service
 api:
   enabled: true
