@@ -207,6 +207,44 @@ mqttMonitor:
     # Reference existing Kubernetes secret (recommended for production)
     existingSecret: "iotistic-mqtt-credentials"
 
+# Housekeeper service - Database maintenance and cleanup
+housekeeper:
+  enabled: true
+  image:
+    repository: iotistic/housekeeper
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 3400
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  env:
+    NODE_ENV: development
+    LOG_LEVEL: info
+    DB_POOL_MAX: "10"
+    DB_IDLE_TIMEOUT: "30000"
+    DB_CONNECT_TIMEOUT: "10000"
+  # Scheduled task configuration
+  tasks:
+    # Database VACUUM - reclaim storage and update statistics
+    vacuum:
+      enabled: true
+      schedule: "0 2 * * *"  # Daily at 2 AM
+    # Partition maintenance - create/drop partitions for time-series data
+    partitionMaintenance:
+      enabled: true
+      schedule: "0 3 * * *"  # Daily at 3 AM
+    # Log cleanup - delete old logs based on retention policy
+    logCleanup:
+      enabled: true
+      schedule: "0 4 * * *"  # Daily at 4 AM
+      retentionDays: 30
+
 # Ingress configuration (optional for local dev)
 ingress:
   enabled: false

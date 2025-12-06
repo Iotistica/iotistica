@@ -55,6 +55,7 @@ jobs:
       api_version_final: ${{ steps.verify.outputs.api_version_final }}
       dashboard_version_final: ${{ steps.verify.outputs.dashboard_version_final }}
       mqtt_monitor_version_final: ${{ steps.verify.outputs.mqtt_monitor_version_final }}
+      housekeeper_version_final: ${{ steps.verify.outputs.housekeeper_version_final }}
     
     steps:
       - name: Checkout repository
@@ -142,15 +143,18 @@ jobs:
           API_VERSION=$(jq -r '.version' api/package.json)
           DASHBOARD_VERSION=$(jq -r '.version' dashboard/package.json)
           MQTT_MONITOR_VERSION=$(jq -r '.version' mqtt-monitor/package.json)
+          HOUSEKEEPER_VERSION=$(jq -r '.version' housekeeper/package.json)
           
           echo "api_version=$API_VERSION" >> $GITHUB_OUTPUT
           echo "dashboard_version=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
           echo "mqtt_monitor_version=$MQTT_MONITOR_VERSION" >> $GITHUB_OUTPUT
+          echo "housekeeper_version=$HOUSEKEEPER_VERSION" >> $GITHUB_OUTPUT
           
           echo "Service versions from package.json:"
           echo "  - API: $API_VERSION"
           echo "  - Dashboard: $DASHBOARD_VERSION"
           echo "  - MQTT Monitor: $MQTT_MONITOR_VERSION"
+          echo "  - Housekeeper: $HOUSEKEEPER_VERSION"
 
       - name: Verify Docker images exist
         id: verify
@@ -185,6 +189,7 @@ jobs:
           check_and_update_version "api" "${{ steps.versions.outputs.api_version }}" "api_version_final" || true
           check_and_update_version "dashboard" "${{ steps.versions.outputs.dashboard_version }}" "dashboard_version_final" || true
           check_and_update_version "mqtt-monitor" "${{ steps.versions.outputs.mqtt_monitor_version }}" "mqtt_monitor_version_final" || true
+          check_and_update_version "housekeeper" "${{ steps.versions.outputs.housekeeper_version }}" "housekeeper_version_final" || true
           
           echo ""
           echo "✅ Docker image verification complete"
@@ -202,6 +207,7 @@ jobs:
           echo "| API | \`${{ steps.versions.outputs.api_version }}\` | \`${{ steps.verify.outputs.api_version_final }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
           echo "| Dashboard | \`${{ steps.versions.outputs.dashboard_version }}\` | \`${{ steps.verify.outputs.dashboard_version_final }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
           echo "| MQTT Monitor | \`${{ steps.versions.outputs.mqtt_monitor_version }}\` | \`${{ steps.verify.outputs.mqtt_monitor_version_final }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
+          echo "| Housekeeper | \`${{ steps.versions.outputs.housekeeper_version }}\` | \`${{ steps.verify.outputs.housekeeper_version_final }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Strategy:** Retag existing CI-built images with release version" >> $GITHUB_STEP_SUMMARY
 
@@ -298,9 +304,40 @@ jobs:
           
           echo "✅ MQTT Monitor released as $RELEASE_TAG"
 
+  release-housekeeper:
+    name: Release Housekeeper
+    needs: validate-release
+    runs-on: [iotistic-lab-sc]
+    if: needs.validate-release.outputs.housekeeper_version_final != 'skip' && needs.validate-release.outputs.housekeeper_version_final != ''
+    
+    steps:
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Retag Housekeeper image with release version
+        run: |
+          RELEASE_TAG="${{ needs.validate-release.outputs.version }}"
+          SOURCE_TAG="${{ needs.validate-release.outputs.housekeeper_version_final }}"
+          
+          echo "Retagging iotistic/housekeeper:$SOURCE_TAG → iotistic/housekeeper:$RELEASE_TAG"
+          
+          # Pull the CI-built image
+          docker pull iotistic/housekeeper:$SOURCE_TAG
+          
+          # Tag with release version
+          docker tag iotistic/housekeeper:$SOURCE_TAG iotistic/housekeeper:$RELEASE_TAG
+          
+          # Push release tag
+          docker push iotistic/housekeeper:$RELEASE_TAG
+          
+          echo "✅ Housekeeper released as $RELEASE_TAG"
+
   create-release:
     name: Create GitHub Release
-    needs: [validate-release, release-api, release-dashboard, release-mqtt-monitor]
+    needs: [validate-release, release-api, release-dashboard, release-mqtt-monitor, release-housekeeper]
     runs-on: [iotistic-lab-sc]
     if: always()
     
@@ -381,7 +418,7 @@ jobs:
   check-deployment-needed:
     name: Check if Deployment Needed
     runs-on: ubuntu-latest
-    needs: [validate-release, release-api, release-dashboard, release-mqtt-monitor]
+    needs: [validate-release, release-api, release-dashboard, release-mqtt-monitor, release-housekeeper]
     outputs:
       should_deploy: ${{ steps.compare.outputs.should_deploy }}
       changes_summary: ${{ steps.compare.outputs.changes_summary }}
@@ -443,20 +480,24 @@ jobs:
           API_IMAGE=$(kubectl get deployment iotistic-api -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
           DASHBOARD_IMAGE=$(kubectl get deployment iotistic-dashboard -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
           MQTT_MONITOR_IMAGE=$(kubectl get deployment iotistic-mqtt-monitor -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
+          HOUSEKEEPER_IMAGE=$(kubectl get deployment iotistic-housekeeper -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
           
           # Extract version tags (e.g., iotistic/api:v1.0.12 -> v1.0.12)
           API_VERSION=$(echo "$API_IMAGE" | grep -oP '(?<=:)v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
           DASHBOARD_VERSION=$(echo "$DASHBOARD_IMAGE" | grep -oP '(?<=:)v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
           MQTT_MONITOR_VERSION=$(echo "$MQTT_MONITOR_IMAGE" | grep -oP '(?<=:)v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
+          HOUSEKEEPER_VERSION=$(echo "$HOUSEKEEPER_IMAGE" | grep -oP '(?<=:)v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
           
           echo "api_version=$API_VERSION" >> $GITHUB_OUTPUT
           echo "dashboard_version=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
           echo "mqtt_monitor_version=$MQTT_MONITOR_VERSION" >> $GITHUB_OUTPUT
+          echo "housekeeper_version=$HOUSEKEEPER_VERSION" >> $GITHUB_OUTPUT
           
           echo "Currently deployed versions:"
           echo "  API: $API_VERSION"
           echo "  Dashboard: $DASHBOARD_VERSION"
           echo "  MQTT Monitor: $MQTT_MONITOR_VERSION"
+          echo "  Housekeeper: $HOUSEKEEPER_VERSION"
       
       - name: Compare versions and determine deployment need
         id: compare
@@ -464,6 +505,7 @@ jobs:
           CURRENT_API="${{ steps.current.outputs.api_version }}"
           CURRENT_DASHBOARD="${{ steps.current.outputs.dashboard_version }}"
           CURRENT_MQTT_MONITOR="${{ steps.current.outputs.mqtt_monitor_version }}"
+          CURRENT_HOUSEKEEPER="${{ steps.current.outputs.housekeeper_version }}"
           
           NEW_VERSION="${{ needs.validate-release.outputs.version }}"
           
@@ -483,6 +525,11 @@ jobs:
           
           if [ "$CURRENT_MQTT_MONITOR" != "none" ] && [ "$CURRENT_MQTT_MONITOR" != "$NEW_VERSION" ]; then
             CHANGES="${CHANGES}MQTT Monitor: $CURRENT_MQTT_MONITOR → $NEW_VERSION\n"
+            CHANGED=true
+          fi
+          
+          if [ "$CURRENT_HOUSEKEEPER" != "none" ] && [ "$CURRENT_HOUSEKEEPER" != "$NEW_VERSION" ]; then
+            CHANGES="${CHANGES}Housekeeper: $CURRENT_HOUSEKEEPER → $NEW_VERSION\n"
             CHANGED=true
           fi
           
@@ -531,7 +578,7 @@ jobs:
 
   deploy-k8s:
     name: Deploy to Kubernetes
-    needs: [validate-release, release-api, release-dashboard, release-mqtt-monitor, create-release, check-deployment-needed]
+    needs: [validate-release, release-api, release-dashboard, release-mqtt-monitor, release-housekeeper, create-release, check-deployment-needed]
     runs-on: [iotistic-lab-sc]
     if: needs.check-deployment-needed.outputs.should_deploy == 'true'
     
@@ -582,7 +629,7 @@ jobs:
           
           echo "Preserving Mosquitto image tag: $MOSQUITTO_TAG"
           
-          # Update core services (API, Dashboard, MQTT Monitor)
+          # Update core services (API, Dashboard, MQTT Monitor, Housekeeper)
           # Preserve Mosquitto, PostgreSQL, Redis tags
           helm upgrade --install iotistic "${CHART_PATH}" \
             --namespace "${NAMESPACE}" \
@@ -591,6 +638,7 @@ jobs:
             --set api.image.tag="${RELEASE_TAG}" \
             --set dashboard.image.tag="${RELEASE_TAG}" \
             --set mqttMonitor.image.tag="${RELEASE_TAG}" \
+            --set housekeeper.image.tag="${RELEASE_TAG}" \
             --set mosquitto.image.pullPolicy="IfNotPresent" \
             --set mosquitto.image.tag="${MOSQUITTO_TAG}" \
             --timeout 5m
@@ -599,6 +647,7 @@ jobs:
           kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-api --timeout=180s || echo "⚠️ API deployment check failed"
           kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-dashboard --timeout=180s || echo "⚠️ Dashboard deployment check failed"
           kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-mqtt-monitor --timeout=180s || echo "⚠️ MQTT Monitor deployment check failed"
+          kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-housekeeper --timeout=180s || echo "⚠️ Housekeeper deployment check failed"
           
           echo "Deployment successful!"
           kubectl -n "${NAMESPACE}" get pods -o wide
