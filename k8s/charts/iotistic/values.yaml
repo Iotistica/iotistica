@@ -71,7 +71,7 @@ mosquitto:
   # - If serviceType is LoadBalancer: leave empty, will use LoadBalancer external IP
   # - If serviceType is NodePort: set to your K8s node IP (e.g., "10.27.27.160")
   # - If empty with NodePort: falls back to internal service name (devices won't connect)
-  externalHost: "23.233.80.108"  # Set to your K8s node IP
+  externalHost: "23.233.80.107"  # Set to your K8s node IP
   resources:
     requests:
       cpu: 100m
