@@ -1,0 +1,37 @@
+{{- if and (eq .Values.mosquitto.serviceType "NodePort") (not .Values.mosquitto.externalHost) }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "iotistic.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "iotistic.fullname" . }}-node-reader
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "iotistic.fullname" . }}-api-node-reader
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "iotistic.fullname" . }}-node-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "iotistic.fullname" . }}-api
+    namespace: {{ .Release.Namespace }}
+{{- end }}

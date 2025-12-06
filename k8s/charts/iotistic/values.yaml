@@ -60,14 +60,18 @@ mosquitto:
   ports:
     mqtt: 1883
     websocket: 9001
-  # Expose ports for local development (NodePort)
+  # Service type: LoadBalancer (cloud) or NodePort (local dev)
+  # LoadBalancer will automatically get external IP from cloud provider
+  # NodePort requires manual externalHost configuration
   serviceType: NodePort
   nodePorts:
     mqtt: 30883
     websocket: 30901
-  # External host for device connections (set to your K8s node IP or LoadBalancer)
-  # This is what devices will use to connect to MQTT broker
-  externalHost: ""  # Empty = use MQTT_BROKER_EXTERNAL_HOST env var
+  # External host for device connections
+  # - If serviceType is LoadBalancer: leave empty, will use LoadBalancer external IP
+  # - If serviceType is NodePort: set to your K8s node IP (e.g., "10.27.27.160")
+  # - If empty with NodePort: falls back to internal service name (devices won't connect)
+  externalHost: ""  # Auto-detect or set manually
   resources:
     requests:
       cpu: 100m

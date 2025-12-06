@@ -39,6 +39,30 @@ spec:
         {{- include "iotistic.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
     spec:
+      serviceAccountName: {{ include "iotistic.fullname" . }}-api
+      {{- if and (eq .Values.mosquitto.serviceType "NodePort") (not .Values.mosquitto.externalHost) }}
+      initContainers:
+        - name: detect-external-host
+          image: bitnami/kubectl:latest
+          command:
+            - sh
+            - -c
+            - |
+              # Detect node IP
+              NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+              echo "Detected node IP: $NODE_IP"
+              echo "MQTT_BROKER_EXTERNAL_HOST=$NODE_IP" > /shared/external-host.env
+          volumeMounts:
+            - name: external-host-config
+              mountPath: /shared
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+      {{- end }}
       containers:
         - name: api
           image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
@@ -71,7 +95,7 @@ spec:
             - name: MQTT_BROKER_EXTERNAL_HOST
               value: {{ .Values.mosquitto.externalHost | default (printf "%s-mosquitto" (include "iotistic.fullname" .)) }}
             - name: MQTT_BROKER_EXTERNAL_PORT
-              value: {{ .Values.mosquitto.nodePorts.mqtt | default .Values.mosquitto.ports.mqtt | quote }}
+              value: {{ ternary (.Values.mosquitto.ports.mqtt | toString) (.Values.mosquitto.nodePorts.mqtt | default .Values.mosquitto.ports.mqtt | toString) (eq .Values.mosquitto.serviceType "LoadBalancer") | quote }}
             - name: MQTT_BROKER_PORT
               value: {{ .Values.mosquitto.ports.mqtt | quote }}
             - name: MQTT_BROKER_USE_TLS
@@ -130,4 +154,9 @@ spec:
             failureThreshold: 5
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
+      {{- if and (eq .Values.mosquitto.serviceType "NodePort") (not .Values.mosquitto.externalHost) }}
+      volumes:
+        - name: external-host-config
+          emptyDir: {}
+      {{- end }}
 {{- end }}
