@@ -1,6 +1,6 @@
 {
   "name": "iotistic-housekeeper",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Standalone housekeeper service for database maintenance and cleanup tasks",
   "main": "dist/index.js",
   "scripts": {
