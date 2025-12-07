@@ -477,10 +477,17 @@ jobs:
           # Note: Deployment names match Helm release name 'iotistic' + service suffix
           # (e.g., iotistic-api, iotistic-dashboard, iotistic-mqtt-monitor)
           # These must match the Helm chart's {{ include "iotistic.fullname" . }}-<service> pattern
-          API_IMAGE=$(kubectl get deployment iotistic-api -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
-          DASHBOARD_IMAGE=$(kubectl get deployment iotistic-dashboard -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
-          MQTT_MONITOR_IMAGE=$(kubectl get deployment iotistic-mqtt-monitor -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
-          HOUSEKEEPER_IMAGE=$(kubectl get deployment iotistic-housekeeper -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
+          
+          echo "Testing kubectl access..."
+          kubectl get namespaces || echo "kubectl command failed!"
+          
+          echo "Checking deployments in namespace..."
+          kubectl get deployments -n iotistic-nodeport || echo "Failed to get deployments!"
+          
+          API_IMAGE=$(kubectl get deployment iotistic-api -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>&1 || echo "")
+          DASHBOARD_IMAGE=$(kubectl get deployment iotistic-dashboard -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>&1 || echo "")
+          MQTT_MONITOR_IMAGE=$(kubectl get deployment iotistic-mqtt-monitor -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>&1 || echo "")
+          HOUSEKEEPER_IMAGE=$(kubectl get deployment iotistic-housekeeper -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>&1 || echo "")
           
           echo "Current images:"
           echo "  API: $API_IMAGE"
