@@ -172,13 +172,14 @@ jobs:
               echo "${output_var}=$version" >> $GITHUB_OUTPUT
               return 0
             else
-              echo "⚠️  Image iotistic/$service:$version not found, falling back to :latest"
+              echo "⚠️  Image iotistic/$service:$version not found, trying :latest"
               if docker manifest inspect iotistic/$service:latest >/dev/null 2>&1; then
-                echo "✅ Found iotistic/$service:latest"
+                echo "✅ Found iotistic/$service:latest (will use for retagging)"
                 echo "${output_var}=latest" >> $GITHUB_OUTPUT
                 return 0
               else
-                echo "❌ Image iotistic/$service:latest also not found!"
+                echo "⚠️  Image iotistic/$service:latest not found either"
+                echo "⚠️  Skipping $service - no suitable image found"
                 echo "${output_var}=skip" >> $GITHUB_OUTPUT
                 return 1
               fi
@@ -193,6 +194,11 @@ jobs:
           
           echo ""
           echo "✅ Docker image verification complete"
+          echo "Final versions to release:"
+          echo "  API: ${api_version_final:-skip}"
+          echo "  Dashboard: ${dashboard_version_final:-skip}"
+          echo "  MQTT Monitor: ${mqtt_monitor_version_final:-skip}"
+          echo "  Housekeeper: ${housekeeper_version_final:-skip}"
 
       - name: Display release summary
         run: |
@@ -583,16 +589,8 @@ jobs:
           # Determine if deployment needed
           SHOULD_DEPLOY="false"
           
-          # Force deploy if triggered by tag push (production release)
-          if [ "${{ github.event_name }}" == "push" ]; then
-            SHOULD_DEPLOY="true"
-            echo "Deployment triggered by tag push (production release)"
-          # Force deploy if manually enabled
-          elif [ "${{ github.event.inputs.deploy_to_k8s }}" == "true" ]; then
-            SHOULD_DEPLOY="true"
-            echo "Deployment manually enabled via workflow_dispatch"
           # Deploy if any version changed (excludes "none" -> version transitions)
-          elif [ "$CHANGED" == "true" ]; then
+          if [ "$CHANGED" == "true" ]; then
             SHOULD_DEPLOY="true"
             if [ "$CHART_CHANGED" == "true" ]; then
               echo "Deployment needed - Helm chart or version changes detected"
