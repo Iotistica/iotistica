@@ -80,7 +80,7 @@ COMMENT ON TABLE sensor_data IS 'Time-series sensor data (TimescaleDB hypertable
 -- SELECT add_retention_policy('sensor_data', INTERVAL '365 days', if_not_exists => TRUE);
 
 -- ============================================================================
--- 6. CREATE CONTINUOUS AGGREGATES (OPTIONAL - FOR DASHBOARDS)
+-- 6. CREATE CONTINUOUS AGGREGATES (OPTIONAL - FOR DASHBOARDS)sdfsd
 -- ============================================================================
 
 -- Create materialized view for hourly sensor aggregates (faster dashboard queries)
