@@ -35,6 +35,21 @@ BEGIN
         ) THEN
             RAISE NOTICE 'Converting sensor_data to TimescaleDB hypertable...';
             
+            -- ================================================================
+            -- Fix primary key to include timestamp (required by TimescaleDB)
+            -- ================================================================
+            -- TimescaleDB requires all unique indexes and primary keys to
+            -- include the partitioning column (timestamp in our case)
+            
+            -- Drop the old primary key (id only)
+            ALTER TABLE sensor_data DROP CONSTRAINT IF EXISTS sensor_data_pkey CASCADE;
+            
+            -- Create new composite primary key including timestamp
+            ALTER TABLE sensor_data ADD CONSTRAINT sensor_data_pkey 
+                PRIMARY KEY (device_uuid, sensor_name, timestamp);
+            
+            RAISE NOTICE 'Updated primary key to include timestamp';
+            
             -- Convert sensor_data table to TimescaleDB hypertable
             PERFORM create_hypertable(
                 'sensor_data',                    -- Table name
@@ -55,14 +70,14 @@ BEGIN
         -- 3. OPTIMIZE INDEXES FOR HYPERTABLE
         -- ============================================================================
         
-        -- Drop the old unique constraint that conflicts with hypertable requirements
-        -- TimescaleDB requires time column to be part of unique constraints
+        -- The unique constraint idx_sensor_data_unique is now redundant (covered by primary key)
         DROP INDEX IF EXISTS idx_sensor_data_unique;
         
-        -- Recreate unique constraint including the time dimension (required for hypertables)
-        -- This prevents duplicate sensor readings at the same timestamp
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_sensor_data_unique_hyper 
-        ON sensor_data(device_uuid, sensor_name, timestamp DESC);
+        -- Keep other indexes for query optimization
+        -- idx_sensor_data_device_sensor (device_uuid, sensor_name, timestamp DESC)
+        -- idx_sensor_data_device_uuid (device_uuid)
+        -- idx_sensor_data_sensor_name (sensor_name)
+        -- idx_sensor_data_timestamp (timestamp DESC)
         
         RAISE NOTICE 'TimescaleDB hypertable setup complete';
     ELSE
@@ -113,62 +128,64 @@ END $$;
 -- ============================================================================
 -- 6. CREATE CONTINUOUS AGGREGATES (OPTIONAL - TIMESCALEDB ONLY)
 -- ============================================================================
+-- TEMPORARILY DISABLED - This can cause connection timeouts during migration
+-- Uncomment and run manually after migration completes if desired
 
-DO $$
-BEGIN
-    -- Only create continuous aggregates if TimescaleDB is enabled
-    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
-        RAISE NOTICE 'Creating continuous aggregate for hourly sensor data...';
-        
-        -- Check if continuous aggregate already exists
-        IF NOT EXISTS (
-            SELECT 1 FROM timescaledb_information.continuous_aggregates 
-            WHERE view_name = 'sensor_data_hourly'
-        ) THEN
-            -- Create materialized view for hourly sensor aggregates
-            CREATE MATERIALIZED VIEW sensor_data_hourly
-            WITH (timescaledb.continuous) AS
-            SELECT 
-                device_uuid,
-                sensor_name,
-                time_bucket('1 hour', timestamp) AS hour,
-                AVG((data->>'value')::numeric) AS avg_value,
-                MIN((data->>'value')::numeric) AS min_value,
-                MAX((data->>'value')::numeric) AS max_value,
-                COUNT(*) AS sample_count,
-                FIRST(data, timestamp) AS first_reading,
-                LAST(data, timestamp) AS last_reading
-            FROM sensor_data
-            WHERE data->>'value' IS NOT NULL
-            GROUP BY device_uuid, sensor_name, hour;
-            
-            RAISE NOTICE 'Continuous aggregate view created';
-            
-            -- Create index on continuous aggregate
-            CREATE INDEX IF NOT EXISTS idx_sensor_hourly_device_sensor_time 
-            ON sensor_data_hourly(device_uuid, sensor_name, hour DESC);
-            
-            RAISE NOTICE 'Index created on continuous aggregate';
-            
-            -- Add refresh policy
-            PERFORM add_continuous_aggregate_policy('sensor_data_hourly',
-                start_offset => INTERVAL '3 hours',
-                end_offset => INTERVAL '1 hour',
-                schedule_interval => INTERVAL '1 hour',
-                if_not_exists => TRUE
-            );
-            
-            COMMENT ON MATERIALIZED VIEW sensor_data_hourly IS 'Hourly sensor data aggregates (auto-refreshed every hour)';
-            RAISE NOTICE 'Continuous aggregate created successfully';
-        ELSE
-            RAISE NOTICE 'Continuous aggregate sensor_data_hourly already exists, skipping';
-        END IF;
-    END IF;
-EXCEPTION
-    WHEN OTHERS THEN
-        RAISE NOTICE 'Failed to create continuous aggregate: %', SQLERRM;
-        RAISE NOTICE 'This is optional - continuing anyway';
-END $$;
+-- DO $$
+-- BEGIN
+--     -- Only create continuous aggregates if TimescaleDB is enabled
+--     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+--         RAISE NOTICE 'Creating continuous aggregate for hourly sensor data...';
+--         
+--         -- Check if continuous aggregate already exists
+--         IF NOT EXISTS (
+--             SELECT 1 FROM timescaledb_information.continuous_aggregates 
+--             WHERE view_name = 'sensor_data_hourly'
+--         ) THEN
+--             -- Create materialized view for hourly sensor aggregates
+--             CREATE MATERIALIZED VIEW sensor_data_hourly
+--             WITH (timescaledb.continuous) AS
+--             SELECT 
+--                 device_uuid,
+--                 sensor_name,
+--                 time_bucket('1 hour', timestamp) AS hour,
+--                 AVG((data->>'value')::numeric) AS avg_value,
+--                 MIN((data->>'value')::numeric) AS min_value,
+--                 MAX((data->>'value')::numeric) AS max_value,
+--                 COUNT(*) AS sample_count,
+--                 FIRST(data, timestamp) AS first_reading,
+--                 LAST(data, timestamp) AS last_reading
+--             FROM sensor_data
+--             WHERE data->>'value' IS NOT NULL
+--             GROUP BY device_uuid, sensor_name, hour;
+--             
+--             RAISE NOTICE 'Continuous aggregate view created';
+--             
+--             -- Create index on continuous aggregate
+--             CREATE INDEX IF NOT EXISTS idx_sensor_hourly_device_sensor_time 
+--             ON sensor_data_hourly(device_uuid, sensor_name, hour DESC);
+--             
+--             RAISE NOTICE 'Index created on continuous aggregate';
+--             
+--             -- Add refresh policy
+--             PERFORM add_continuous_aggregate_policy('sensor_data_hourly',
+--                 start_offset => INTERVAL '3 hours',
+--                 end_offset => INTERVAL '1 hour',
+--                 schedule_interval => INTERVAL '1 hour',
+--                 if_not_exists => TRUE
+--             );
+--             
+--             COMMENT ON MATERIALIZED VIEW sensor_data_hourly IS 'Hourly sensor data aggregates (auto-refreshed every hour)';
+--             RAISE NOTICE 'Continuous aggregate created successfully';
+--         ELSE
+--             RAISE NOTICE 'Continuous aggregate sensor_data_hourly already exists, skipping';
+--         END IF;
+--     END IF;
+-- EXCEPTION
+--     WHEN OTHERS THEN
+--         RAISE NOTICE 'Failed to create continuous aggregate: %', SQLERRM;
+--         RAISE NOTICE 'This is optional - continuing anyway';
+-- END $$;
 
 -- ============================================================================
 -- 7. VERIFY HYPERTABLE CONFIGURATION

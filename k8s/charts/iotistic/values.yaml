@@ -10,7 +10,7 @@ postgres:
   enabled: true
   image:
     repository: timescale/timescaledb
-    tag: "latest-pg16"
+    tag: "latest-pg16"  # TimescaleDB with PostgreSQL 16
   database: iotistic
   username: postgres
   password: postgres
