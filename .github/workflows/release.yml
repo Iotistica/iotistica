@@ -6,10 +6,14 @@ on:
       - 'v*.*.*'
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Release version (e.g., v1.0.63)'
+      release_type:
+        description: 'Choose release type'
         required: true
-        type: string
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
       deploy:
         description: 'Deploy to Kubernetes after release'
         required: false
@@ -43,123 +47,169 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Set release version
+      - name: Set release version (auto bump)
         id: set_version
         run: |
-          # If triggered by a tag push, use that tag. If workflow_dispatch, use provided input.
           if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            # Tag push — use the pushed tag
             RELEASE="${GITHUB_REF#refs/tags/}"
             echo "Triggered by tag push. Release: $RELEASE"
-          else
-            # workflow_dispatch path - use provided input (must include leading 'v')
-            RELEASE="${{ github.event.inputs.version }}"
-            if [ -z "$RELEASE" ]; then
-              echo "No version provided via workflow_dispatch" >&2
-              exit 1
-            fi
-            # ensure release starts with 'v'
-            case "$RELEASE" in
-              v*) ;;
-              *) RELEASE="v${RELEASE#v}" ;;
-            esac
-            echo "Triggered manually. Release: $RELEASE"
+            echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
+            exit 0
           fi
 
-          # Validate semantic version format vMAJOR.MINOR.PATCH
-          if ! echo "$RELEASE" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' >/dev/null; then
-            echo "Invalid semantic version: $RELEASE" >&2
-            exit 1
+          # Manual dispatch → auto bump
+          TYPE="${{ github.event.inputs.release_type }}"
+
+          # Get latest semver tag
+          LAST=$(git tag -l 'v*.*.*' --sort=-version:refname | head -n1)
+
+          if [ -z "$LAST" ]; then
+            echo "No previous tags found, starting at v1.0.0"
+            LAST="v1.0.0"
           fi
 
-          echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
+          echo "Latest tag: $LAST"
 
-      - name: Read service versions from package.json at this commit
-        id: pkg_versions
-        run: |
-          # Read versions from package.json in the repo at this commit
-          API_VERSION=$(jq -r '.version' api/package.json)
-          DASHBOARD_VERSION=$(jq -r '.version' dashboard/package.json)
-          MQTT_MONITOR_VERSION=$(jq -r '.version' mqtt-monitor/package.json)
-          HOUSEKEEPER_VERSION=$(jq -r '.version' housekeeper/package.json)
+          # strip v prefix
+          BASE=${LAST#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
 
-          echo "api_pkg=$API_VERSION" >> $GITHUB_OUTPUT
-          echo "dashboard_pkg=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
-          echo "mqtt_pkg=$MQTT_MONITOR_VERSION" >> $GITHUB_OUTPUT
-          echo "housekeeper_pkg=$HOUSEKEEPER_VERSION" >> $GITHUB_OUTPUT
+          case "$TYPE" in
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+          esac
 
-          echo "Package.json versions:"
-          echo "  API: $API_VERSION"
-          echo "  Dashboard: $DASHBOARD_VERSION"
-          echo "  MQTT Monitor: $MQTT_MONITOR_VERSION"
-          echo "  Housekeeper: $HOUSEKEEPER_VERSION"
+          NEW="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "Auto-generated version: $NEW"
+          echo "release_version=$NEW" >> $GITHUB_OUTPUT
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+              id: set_version
+              run: |
+                # If triggered by a tag push, use that tag. If workflow_dispatch, use provided input.
+                if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+                  RELEASE="${GITHUB_REF#refs/tags/}"
+                  echo "Triggered by tag push. Release: $RELEASE"
+                else
+                  # workflow_dispatch path - use provided input (must include leading 'v')
+                  RELEASE="${{ github.event.inputs.version }}"
+                  if [ -z "$RELEASE" ]; then
+                    echo "No version provided via workflow_dispatch" >&2
+                    exit 1
+                  fi
+                  # ensure release starts with 'v'
+                  case "$RELEASE" in
+                    v*) ;;
+                    *) RELEASE="v${RELEASE#v}" ;;
+                  esac
+                  echo "Triggered manually. Release: $RELEASE"
+                fi
 
-      - name: Verify CI-built images exist (and determine source tags)
-        id: verify
-        shell: bash
-        run: |
-          set -euo pipefail
+                # Validate semantic version format vMAJOR.MINOR.PATCH
+                if ! echo "$RELEASE" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' >/dev/null; then
+                  echo "Invalid semantic version: $RELEASE" >&2
+                  exit 1
+                fi
 
-          # Helper: check image existence (returns tag to use or "skip")
-          check_image() {
-            local svc="$1"
-            local prefer_tag="$2"
-            # First try the package.json tag (no leading v -> try both)
-            candidates=()
-            if [ -n "$prefer_tag" ]; then
-              candidates+=("$prefer_tag")
-              # if prefer_tag doesn't start with v, also try with v prefix
-              if [[ "$prefer_tag" != v* ]]; then
-                candidates+=("v${prefer_tag}")
-              fi
-            fi
-            candidates+=("latest")
+                echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
 
-            for t in "${candidates[@]}"; do
-              if docker manifest inspect "${DOCKER_ORG}/${svc}:$t" >/dev/null 2>&1; then
-                echo "$t"
-                return 0
-              fi
-            done
+            - name: Read service versions from package.json at this commit
+              id: pkg_versions
+              run: |
+                # Read versions from package.json in the repo at this commit
+                API_VERSION=$(jq -r '.version' api/package.json)
+                DASHBOARD_VERSION=$(jq -r '.version' dashboard/package.json)
+                MQTT_MONITOR_VERSION=$(jq -r '.version' mqtt-monitor/package.json)
+                HOUSEKEEPER_VERSION=$(jq -r '.version' housekeeper/package.json)
 
-            echo "skip"
-            return 1
-          }
+                echo "api_pkg=$API_VERSION" >> $GITHUB_OUTPUT
+                echo "dashboard_pkg=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
+                echo "mqtt_pkg=$MQTT_MONITOR_VERSION" >> $GITHUB_OUTPUT
+                echo "housekeeper_pkg=$HOUSEKEEPER_VERSION" >> $GITHUB_OUTPUT
 
-          API_SRC=$(check_image "api" "${{ steps.pkg_versions.outputs.api_pkg }}" || true)
-          DASHBOARD_SRC=$(check_image "dashboard" "${{ steps.pkg_versions.outputs.dashboard_pkg }}" || true)
-          MQTT_SRC=$(check_image "mqtt-monitor" "${{ steps.pkg_versions.outputs.mqtt_pkg }}" || true)
-          HOUSEKEEPER_SRC=$(check_image "housekeeper" "${{ steps.pkg_versions.outputs.housekeeper_pkg }}" || true)
+                echo "Package.json versions:"
+                echo "  API: $API_VERSION"
+                echo "  Dashboard: $DASHBOARD_VERSION"
+                echo "  MQTT Monitor: $MQTT_MONITOR_VERSION"
+                echo "  Housekeeper: $HOUSEKEEPER_VERSION"
 
-          echo "api_src_tag=$API_SRC" >> $GITHUB_OUTPUT
-          echo "dashboard_src_tag=$DASHBOARD_SRC" >> $GITHUB_OUTPUT
-          echo "mqtt_src_tag=$MQTT_SRC" >> $GITHUB_OUTPUT
-          echo "housekeeper_src_tag=$HOUSEKEEPER_SRC" >> $GITHUB_OUTPUT
+            - name: Login to Docker Hub
+              uses: docker/login-action@v3
+              with:
+                username: ${{ secrets.DOCKERHUB_USERNAME }}
+                password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-          echo ""
-          echo "Image verification complete:"
-          echo "  API  -> $API_SRC"
-          echo "  Dashboard -> $DASHBOARD_SRC"
-          echo "  MQTT Monitor -> $MQTT_SRC"
-          echo "  Housekeeper -> $HOUSEKEEPER_SRC"
+            - name: Verify CI-built images exist (and determine source tags)
+              id: verify
+              shell: bash
+              run: |
+                set -euo pipefail
 
-      - name: Summary for step output
-        run: |
-          echo "## Release validation" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Release:** \`${{ steps.set_version.outputs.release_version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Service | package.json | selected image tag |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---:|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| API | \`${{ steps.pkg_versions.outputs.api_pkg }}\` | \`${{ steps.verify.outputs.api_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Dashboard | \`${{ steps.pkg_versions.outputs.dashboard_pkg }}\` | \`${{ steps.verify.outputs.dashboard_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| MQTT Monitor | \`${{ steps.pkg_versions.outputs.mqtt_pkg }}\` | \`${{ steps.verify.outputs.mqtt_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Housekeeper | \`${{ steps.pkg_versions.outputs.housekeeper_pkg }}\` | \`${{ steps.verify.outputs.housekeeper_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+                # Helper: check image existence (returns tag to use or "skip")
+                check_image() {
+                  local svc="$1"
+                  local prefer_tag="$2"
+                  # First try the package.json tag (no leading v -> try both)
+                  candidates=()
+                  if [ -n "$prefer_tag" ]; then
+                    candidates+=("$prefer_tag")
+                    # if prefer_tag doesn't start with v, also try with v prefix
+                    if [[ "$prefer_tag" != v* ]]; then
+                      candidates+=("v${prefer_tag}")
+                    fi
+                  fi
+                  candidates+=("latest")
+
+                  for t in "${candidates[@]}"; do
+                    if docker manifest inspect "${DOCKER_ORG}/${svc}:$t" >/dev/null 2>&1; then
+                      echo "$t"
+                      return 0
+                    fi
+                  done
+
+                  echo "skip"
+                  return 1
+                }
+
+                API_SRC=$(check_image "api" "${{ steps.pkg_versions.outputs.api_pkg }}" || true)
+                DASHBOARD_SRC=$(check_image "dashboard" "${{ steps.pkg_versions.outputs.dashboard_pkg }}" || true)
+                MQTT_SRC=$(check_image "mqtt-monitor" "${{ steps.pkg_versions.outputs.mqtt_pkg }}" || true)
+                HOUSEKEEPER_SRC=$(check_image "housekeeper" "${{ steps.pkg_versions.outputs.housekeeper_pkg }}" || true)
+
+                echo "api_src_tag=$API_SRC" >> $GITHUB_OUTPUT
+                echo "dashboard_src_tag=$DASHBOARD_SRC" >> $GITHUB_OUTPUT
+                echo "mqtt_src_tag=$MQTT_SRC" >> $GITHUB_OUTPUT
+                echo "housekeeper_src_tag=$HOUSEKEEPER_SRC" >> $GITHUB_OUTPUT
+
+                echo ""
+                echo "Image verification complete:"
+                echo "  API  -> $API_SRC"
+                echo "  Dashboard -> $DASHBOARD_SRC"
+                echo "  MQTT Monitor -> $MQTT_SRC"
+                echo "  Housekeeper -> $HOUSEKEEPER_SRC"
+
+            - name: Summary for step output
+              run: |
+                echo "## Release validation" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "**Release:** \`${{ steps.set_version.outputs.release_version }}\`" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "| Service | package.json | selected image tag |" >> $GITHUB_STEP_SUMMARY
+                echo "|---|---:|---|" >> $GITHUB_STEP_SUMMARY
+                echo "| API | \`${{ steps.pkg_versions.outputs.api_pkg }}\` | \`${{ steps.verify.outputs.api_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+                echo "| Dashboard | \`${{ steps.pkg_versions.outputs.dashboard_pkg }}\` | \`${{ steps.verify.outputs.dashboard_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+                echo "| MQTT Monitor | \`${{ steps.pkg_versions.outputs.mqtt_pkg }}\` | \`${{ steps.verify.outputs.mqtt_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+                echo "| Housekeeper | \`${{ steps.pkg_versions.outputs.housekeeper_pkg }}\` | \`${{ steps.verify.outputs.housekeeper_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
 
   retag-and-push:
     name: Retag & push release images
