@@ -194,6 +194,10 @@ export default class DeviceAgent {
 
       this.featureInitializer = new FeatureInitializer(featureContext);
 
+      // Initialize Discovery Service FIRST (so it can discover endpoints before SensorPublish loads)
+      await this.initDiscoveryService();
+
+      // Now initialize optional features (SensorPublish will load discovered endpoints from database)
       await this.featureInitializer.initOptionalFeatures();
 
       // Store references to features for backward compatibility
@@ -207,9 +211,6 @@ export default class DeviceAgent {
 
       // 10.5. Initialize Simulation Orchestrator (AFTER Anomaly Detection, used for testing)
       await this.initializeSimulationMode();
-
-      // 10.7. Initialize Discovery Service (protocol auto-discovery)
-      await this.initDiscoveryService ();
 
       // 11. Initialize API Binder (AFTER features are initialized so it can access sensor health)
       await this.initDeviceSync(config.settings);
@@ -646,20 +647,18 @@ export default class DeviceAgent {
       const enableFirstBootDiscovery = process.env.ENABLE_FIRST_BOOT_DISCOVERY === 'true';
       
       if (enableFirstBootDiscovery) {
-        this.agentLogger?.infoSync("Running first boot discovery", {
+        this.agentLogger?.infoSync("Running first boot discovery (will block until complete)", {
           component: LogComponents.agent,
         });
         
-        // Run discovery in background (don't block startup)
-        this.discoveryService.runDiscovery({ 
+        // Run discovery and WAIT for completion (so SensorPublish can load discovered endpoints)
+        await this.discoveryService.runDiscovery({ 
           trigger: 'first_boot', 
           validate: true 
-        }).catch(error => {
-          this.agentLogger?.errorSync(
-            "First boot discovery failed",
-            error as Error,
-            { component: LogComponents.agent }
-          );
+        });
+
+        this.agentLogger?.infoSync("First boot discovery completed", {
+          component: LogComponents.agent,
         });
       }
 
