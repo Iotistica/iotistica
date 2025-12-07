@@ -167,44 +167,55 @@ jobs:
         run: |
           echo "Verifying CI-built images exist on Docker Hub..."
           
-          # Function to check image and update version if needed
-          check_and_update_version() {
+          # Initialize variables
+          api_version_final=""
+          dashboard_version_final=""
+          mqtt_monitor_version_final=""
+          housekeeper_version_final=""
+          
+          # Function to check image and return version to use
+          check_image() {
             local service=$1
             local version=$2
-            local output_var=$3
             
             if docker manifest inspect iotistic/$service:$version >/dev/null 2>&1; then
               echo "✅ Found iotistic/$service:$version"
-              echo "${output_var}=$version" >> $GITHUB_OUTPUT
+              echo "$version"
               return 0
             else
               echo "⚠️  Image iotistic/$service:$version not found, trying :latest"
               if docker manifest inspect iotistic/$service:latest >/dev/null 2>&1; then
                 echo "✅ Found iotistic/$service:latest (will use for retagging)"
-                echo "${output_var}=latest" >> $GITHUB_OUTPUT
+                echo "latest"
                 return 0
               else
-                echo "⚠️  Image iotistic/$service:latest not found either"
+                echo "❌ Image iotistic/$service:latest not found either"
                 echo "⚠️  Skipping $service - no suitable image found"
-                echo "${output_var}=skip" >> $GITHUB_OUTPUT
+                echo "skip"
                 return 1
               fi
             fi
           }
           
-          # Check each service (continue even if some fail)
-          check_and_update_version "api" "${{ steps.versions.outputs.api_version }}" "api_version_final" || true
-          check_and_update_version "dashboard" "${{ steps.versions.outputs.dashboard_version }}" "dashboard_version_final" || true
-          check_and_update_version "mqtt-monitor" "${{ steps.versions.outputs.mqtt_monitor_version }}" "mqtt_monitor_version_final" || true
-          check_and_update_version "housekeeper" "${{ steps.versions.outputs.housekeeper_version }}" "housekeeper_version_final" || true
+          # Check each service
+          api_version_final=$(check_image "api" "${{ steps.versions.outputs.api_version }}")
+          dashboard_version_final=$(check_image "dashboard" "${{ steps.versions.outputs.dashboard_version }}")
+          mqtt_monitor_version_final=$(check_image "mqtt-monitor" "${{ steps.versions.outputs.mqtt_monitor_version }}")
+          housekeeper_version_final=$(check_image "housekeeper" "${{ steps.versions.outputs.housekeeper_version }}")
+          
+          # Set outputs
+          echo "api_version_final=$api_version_final" >> $GITHUB_OUTPUT
+          echo "dashboard_version_final=$dashboard_version_final" >> $GITHUB_OUTPUT
+          echo "mqtt_monitor_version_final=$mqtt_monitor_version_final" >> $GITHUB_OUTPUT
+          echo "housekeeper_version_final=$housekeeper_version_final" >> $GITHUB_OUTPUT
           
           echo ""
           echo "✅ Docker image verification complete"
           echo "Final versions to release:"
-          echo "  API: ${api_version_final:-skip}"
-          echo "  Dashboard: ${dashboard_version_final:-skip}"
-          echo "  MQTT Monitor: ${mqtt_monitor_version_final:-skip}"
-          echo "  Housekeeper: ${housekeeper_version_final:-skip}"
+          echo "  API: $api_version_final"
+          echo "  Dashboard: $dashboard_version_final"
+          echo "  MQTT Monitor: $mqtt_monitor_version_final"
+          echo "  Housekeeper: $housekeeper_version_final"
 
       - name: Display release summary
         run: |
