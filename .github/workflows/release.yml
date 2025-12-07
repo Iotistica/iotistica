@@ -156,6 +156,12 @@ jobs:
           echo "  - MQTT Monitor: $MQTT_MONITOR_VERSION"
           echo "  - Housekeeper: $HOUSEKEEPER_VERSION"
 
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
       - name: Verify Docker images exist
         id: verify
         run: |
@@ -658,8 +664,44 @@ jobs:
           VALUES_FILE=./k8s/charts/iotistic/values.yaml
           NAMESPACE=iotistic-nodeport
           RELEASE_TAG="${{ needs.validate-release.outputs.version }}"
+          
+          # Use verified versions from validate-release job (fallback to latest if needed)
+          API_TAG="${{ needs.validate-release.outputs.api_version_final }}"
+          DASHBOARD_TAG="${{ needs.validate-release.outputs.dashboard_version_final }}"
+          MQTT_MONITOR_TAG="${{ needs.validate-release.outputs.mqtt_monitor_version_final }}"
+          HOUSEKEEPER_TAG="${{ needs.validate-release.outputs.housekeeper_version_final }}"
+          
+          # Use release tag if retagging succeeded, otherwise use existing versions
+          if [ "$API_TAG" != "skip" ] && [ -n "$API_TAG" ]; then
+            API_DEPLOY_TAG="$RELEASE_TAG"
+          else
+            API_DEPLOY_TAG="latest"
+          fi
+          
+          if [ "$DASHBOARD_TAG" != "skip" ] && [ -n "$DASHBOARD_TAG" ]; then
+            DASHBOARD_DEPLOY_TAG="$RELEASE_TAG"
+          else
+            DASHBOARD_DEPLOY_TAG="latest"
+          fi
+          
+          if [ "$MQTT_MONITOR_TAG" != "skip" ] && [ -n "$MQTT_MONITOR_TAG" ]; then
+            MQTT_MONITOR_DEPLOY_TAG="$RELEASE_TAG"
+          else
+            MQTT_MONITOR_DEPLOY_TAG="latest"
+          fi
+          
+          if [ "$HOUSEKEEPER_TAG" != "skip" ] && [ -n "$HOUSEKEEPER_TAG" ]; then
+            HOUSEKEEPER_DEPLOY_TAG="$RELEASE_TAG"
+          else
+            HOUSEKEEPER_DEPLOY_TAG="latest"
+          fi
 
           echo "Deploying release $RELEASE_TAG to Kubernetes..."
+          echo "Image tags to deploy:"
+          echo "  API: $API_DEPLOY_TAG"
+          echo "  Dashboard: $DASHBOARD_DEPLOY_TAG"
+          echo "  MQTT Monitor: $MQTT_MONITOR_DEPLOY_TAG"
+          echo "  Housekeeper: $HOUSEKEEPER_DEPLOY_TAG"
           
           # Get current Mosquitto image tag to preserve it
           MOSQUITTO_TAG=$(kubectl get deployment iotistic-mosquitto -n "${NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | cut -d':' -f2 || echo "latest")
@@ -672,10 +714,10 @@ jobs:
             --namespace "${NAMESPACE}" \
             --create-namespace \
             -f "${VALUES_FILE}" \
-            --set api.image.tag="${RELEASE_TAG}" \
-            --set dashboard.image.tag="${RELEASE_TAG}" \
-            --set mqttMonitor.image.tag="${RELEASE_TAG}" \
-            --set housekeeper.image.tag="${RELEASE_TAG}" \
+            --set api.image.tag="${API_DEPLOY_TAG}" \
+            --set dashboard.image.tag="${DASHBOARD_DEPLOY_TAG}" \
+            --set mqttMonitor.image.tag="${MQTT_MONITOR_DEPLOY_TAG}" \
+            --set housekeeper.image.tag="${HOUSEKEEPER_DEPLOY_TAG}" \
             --set mosquitto.image.pullPolicy="IfNotPresent" \
             --set mosquitto.image.tag="${MOSQUITTO_TAG}" \
             --timeout 5m
