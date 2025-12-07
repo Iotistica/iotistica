@@ -61,6 +61,51 @@ spec:
             END \$\$;
           "
           
+          echo "Checking if sensor_data is already a hypertable and marking migration 103 as applied..."
+          psql -h {{ include "iotistic.fullname" . }}-postgres -U {{ .Values.postgres.username }} -d {{ .Values.postgres.database }} -c "
+            DO \$\$
+            DECLARE
+              is_hypertable BOOLEAN;
+              migration_exists BOOLEAN;
+            BEGIN
+              -- Check if TimescaleDB extension exists
+              IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+                -- Check if sensor_data is already a hypertable
+                SELECT EXISTS (
+                  SELECT 1 FROM timescaledb_information.hypertables 
+                  WHERE hypertable_name = 'sensor_data'
+                ) INTO is_hypertable;
+                
+                -- Check if migrations table exists
+                SELECT EXISTS (
+                  SELECT 1 FROM information_schema.tables 
+                  WHERE table_name = 'migrations'
+                ) INTO migration_exists;
+                
+                -- If table is already a hypertable and migrations table exists
+                IF is_hypertable AND migration_exists THEN
+                  -- Check if migration 103 is already recorded
+                  IF NOT EXISTS (SELECT 1 FROM migrations WHERE version = 103) THEN
+                    RAISE NOTICE 'sensor_data is already a hypertable, marking migration 103 as applied';
+                    INSERT INTO migrations (version, name, applied_at)
+                    VALUES (103, 'enable timescaledb hypertable', NOW())
+                    ON CONFLICT (version) DO NOTHING;
+                    RAISE NOTICE 'Migration 103 marked as applied';
+                  ELSE
+                    RAISE NOTICE 'Migration 103 already recorded';
+                  END IF;
+                ELSE
+                  IF NOT is_hypertable THEN
+                    RAISE NOTICE 'sensor_data is not yet a hypertable, migration 103 will run normally';
+                  END IF;
+                  IF NOT migration_exists THEN
+                    RAISE NOTICE 'migrations table does not exist yet, skipping';
+                  END IF;
+                END IF;
+              END IF;
+            END \$\$;
+          "
+          
           echo "TimescaleDB initialization complete!"
         env:
         - name: PGPASSWORD
