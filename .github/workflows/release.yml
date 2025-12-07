@@ -430,7 +430,7 @@ jobs:
 
   deploy-k8s:
     name: Deploy to Kubernetes (Helm)
-    needs: check-deployment-needed
+    needs: [validate-release, check-deployment-needed]
     runs-on: [iotistic-lab-sc]
     if: needs.check-deployment-needed.outputs.should_deploy == 'true' && github.event_name != 'pull_request'
     steps:
