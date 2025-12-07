@@ -482,11 +482,18 @@ jobs:
           MQTT_MONITOR_IMAGE=$(kubectl get deployment iotistic-mqtt-monitor -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
           HOUSEKEEPER_IMAGE=$(kubectl get deployment iotistic-housekeeper -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
           
-          # Extract version tags (e.g., iotistic/api:v1.0.12 -> v1.0.12)
-          API_VERSION=$(echo "$API_IMAGE" | grep -oP '(?<=:)v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
-          DASHBOARD_VERSION=$(echo "$DASHBOARD_IMAGE" | grep -oP '(?<=:)v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
-          MQTT_MONITOR_VERSION=$(echo "$MQTT_MONITOR_IMAGE" | grep -oP '(?<=:)v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
-          HOUSEKEEPER_VERSION=$(echo "$HOUSEKEEPER_IMAGE" | grep -oP '(?<=:)v[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
+          echo "Current images:"
+          echo "  API: $API_IMAGE"
+          echo "  Dashboard: $DASHBOARD_IMAGE"
+          echo "  MQTT Monitor: $MQTT_MONITOR_IMAGE"
+          echo "  Housekeeper: $HOUSEKEEPER_IMAGE"
+          
+          # Extract version tags (supports both v1.0.12 and 1.0.12 formats)
+          # Try with 'v' prefix first, then without
+          API_VERSION=$(echo "$API_IMAGE" | grep -oP '(?<=:)v?[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
+          DASHBOARD_VERSION=$(echo "$DASHBOARD_IMAGE" | grep -oP '(?<=:)v?[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
+          MQTT_MONITOR_VERSION=$(echo "$MQTT_MONITOR_IMAGE" | grep -oP '(?<=:)v?[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
+          HOUSEKEEPER_VERSION=$(echo "$HOUSEKEEPER_IMAGE" | grep -oP '(?<=:)v?[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
           
           echo "api_version=$API_VERSION" >> $GITHUB_OUTPUT
           echo "dashboard_version=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
