@@ -167,37 +167,32 @@ jobs:
         run: |
           echo "Verifying CI-built images exist on Docker Hub..."
           
-          # Initialize variables
-          api_version_final=""
-          dashboard_version_final=""
-          mqtt_monitor_version_final=""
-          housekeeper_version_final=""
-          
           # Function to check image and return version to use
+          # Logs go to stderr (&2), only version goes to stdout
           check_image() {
             local service=$1
             local version=$2
             
             if docker manifest inspect iotistic/$service:$version >/dev/null 2>&1; then
-              echo "✅ Found iotistic/$service:$version"
+              echo "✅ Found iotistic/$service:$version" >&2
               echo "$version"
               return 0
             else
-              echo "⚠️  Image iotistic/$service:$version not found, trying :latest"
+              echo "⚠️  Image iotistic/$service:$version not found, trying :latest" >&2
               if docker manifest inspect iotistic/$service:latest >/dev/null 2>&1; then
-                echo "✅ Found iotistic/$service:latest (will use for retagging)"
+                echo "✅ Found iotistic/$service:latest (will use for retagging)" >&2
                 echo "latest"
                 return 0
               else
-                echo "❌ Image iotistic/$service:latest not found either"
-                echo "⚠️  Skipping $service - no suitable image found"
+                echo "❌ Image iotistic/$service:latest not found either" >&2
+                echo "⚠️  Skipping $service - no suitable image found" >&2
                 echo "skip"
                 return 1
               fi
             fi
           }
           
-          # Check each service
+          # Check each service and capture ONLY the version string
           api_version_final=$(check_image "api" "${{ steps.versions.outputs.api_version }}")
           dashboard_version_final=$(check_image "dashboard" "${{ steps.versions.outputs.dashboard_version }}")
           mqtt_monitor_version_final=$(check_image "mqtt-monitor" "${{ steps.versions.outputs.mqtt_monitor_version }}")
