@@ -2,7 +2,7 @@
  * Trivy Security Scanner Service
  * 
  * Integrates Aqua Security's Trivy for vulnerability scanning of Docker images.
- * Scans images for CVEs and security issues before approval.fff
+ * Scans images for CVEs and security issues before approval.fffdfgdf
  */
 
 import { exec } from 'child_process';
