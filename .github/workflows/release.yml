@@ -442,8 +442,10 @@ jobs:
           use_tag() {
             local src="$1"
             if [ -z "$src" ] || [ "$src" = "skip" ]; then
-              echo "latest"
+              # No retagging occurred - keep current deployment tag (don't change)
+              echo "skip"
             else
+              # Retagging occurred - use the release version
               echo "${{ needs.validate-release.outputs.release_version }}"
             fi
           }
@@ -459,22 +461,20 @@ jobs:
           echo "  MQTT Monitor: $MQTT_DEPLOY_TAG"
           echo "  Housekeeper: $HOUSE_DEPLOY_TAG"
 
-          # Preserve mosquitto tag if present
-          MOSQUITTO_TAG=$(kubectl -n "$NAMESPACE" get deployment iotistic-mosquitto -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
-          MOSQUITTO_TAG=${MOSQUITTO_TAG##*:}
-          if [ -z "$MOSQUITTO_TAG" ] || [ "$MOSQUITTO_TAG" = "$MOSQUITTO_TAG" ]; then
-            MOSQUITTO_TAG="latest"
-          fi
+          # Build Helm command with only the tags that need updating
+          HELM_SETS=""
+          [ "$API_DEPLOY_TAG" != "skip" ] && HELM_SETS="$HELM_SETS --set api.image.tag=$API_DEPLOY_TAG"
+          [ "$DASH_DEPLOY_TAG" != "skip" ] && HELM_SETS="$HELM_SETS --set dashboard.image.tag=$DASH_DEPLOY_TAG"
+          [ "$MQTT_DEPLOY_TAG" != "skip" ] && HELM_SETS="$HELM_SETS --set mqttMonitor.image.tag=$MQTT_DEPLOY_TAG"
+          [ "$HOUSE_DEPLOY_TAG" != "skip" ] && HELM_SETS="$HELM_SETS --set housekeeper.image.tag=$HOUSE_DEPLOY_TAG"
+
+          echo "Helm sets: $HELM_SETS"
 
           helm upgrade --install iotistic "${{ env.CHART_PATH }}" \
             --namespace "$NAMESPACE" \
             --create-namespace \
             -f "${{ env.VALUES_FILE }}" \
-            --set api.image.tag="$API_DEPLOY_TAG" \
-            --set dashboard.image.tag="$DASH_DEPLOY_TAG" \
-            --set mqttMonitor.image.tag="$MQTT_DEPLOY_TAG" \
-            --set housekeeper.image.tag="$HOUSE_DEPLOY_TAG" \
-            --set mosquitto.image.tag="$MOSQUITTO_TAG" \
+            $HELM_SETS \
             --timeout 5m
 
           echo "Waiting for rollout status..."
