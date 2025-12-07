@@ -106,31 +106,51 @@ function calculateChecksum(sql: string): string {
 }
 
 /**
- * Apply a single migration
+ * Apply a single migration with retry logic
  */
 async function applyMigration(migration: Migration): Promise<void> {
   const startTime = Date.now();
   
   logger.info(` Applying migration ${migration.id}: ${migration.name}`);
   
-  await transaction(async (client) => {
-    // Execute migration SQL
-    await client.query(migration.sql);
-    
-    // Record migration as applied
-    const executionTime = Date.now() - startTime;
-    const checksum = calculateChecksum(migration.sql);
-    
-    await client.query(
-      `INSERT INTO schema_migrations 
-       (migration_number, name, filename, checksum, execution_time_ms) 
-       VALUES ($1, $2, $3, $4, $5)`,
-      [migration.id, migration.name, migration.filename, checksum, executionTime]
-    );
-  });
+  let retries = 3;
+  let lastError: Error | undefined;
   
-  const executionTime = Date.now() - startTime;
-  logger.info(`    Applied in ${executionTime}ms`);
+  while (retries > 0) {
+    try {
+      await transaction(async (client) => {
+        // Execute migration SQL
+        await client.query(migration.sql);
+        
+        // Record migration as applied
+        const executionTime = Date.now() - startTime;
+        const checksum = calculateChecksum(migration.sql);
+        
+        await client.query(
+          `INSERT INTO schema_migrations 
+           (migration_number, name, filename, checksum, execution_time_ms) 
+           VALUES ($1, $2, $3, $4, $5)`,
+          [migration.id, migration.name, migration.filename, checksum, executionTime]
+        );
+      });
+      
+      const executionTime = Date.now() - startTime;
+      logger.info(`    Applied in ${executionTime}ms`);
+      return; // Success
+      
+    } catch (error) {
+      lastError = error as Error;
+      retries--;
+      
+      if (retries > 0) {
+        logger.warn(`    Migration failed, retrying... (${retries} attempts left)`);
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s before retry
+      }
+    }
+  }
+  
+  // All retries exhausted
+  throw lastError;
 }
 
 /**
