@@ -120,38 +120,54 @@ BEGIN
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
         RAISE NOTICE 'Creating continuous aggregate for hourly sensor data...';
         
-        -- Create materialized view for hourly sensor aggregates
-        CREATE MATERIALIZED VIEW IF NOT EXISTS sensor_data_hourly
-        WITH (timescaledb.continuous) AS
-        SELECT 
-            device_uuid,
-            sensor_name,
-            time_bucket('1 hour', timestamp) AS hour,
-            AVG((data->>'value')::numeric) AS avg_value,
-            MIN((data->>'value')::numeric) AS min_value,
-            MAX((data->>'value')::numeric) AS max_value,
-            COUNT(*) AS sample_count,
-            FIRST(data, timestamp) AS first_reading,
-            LAST(data, timestamp) AS last_reading
-        FROM sensor_data
-        WHERE data->>'value' IS NOT NULL
-        GROUP BY device_uuid, sensor_name, hour;
-        
-        -- Create index on continuous aggregate
-        CREATE INDEX IF NOT EXISTS idx_sensor_hourly_device_sensor_time 
-        ON sensor_data_hourly(device_uuid, sensor_name, hour DESC);
-        
-        -- Add refresh policy
-        PERFORM add_continuous_aggregate_policy('sensor_data_hourly',
-            start_offset => INTERVAL '3 hours',
-            end_offset => INTERVAL '1 hour',
-            schedule_interval => INTERVAL '1 hour',
-            if_not_exists => TRUE
-        );
-        
-        COMMENT ON MATERIALIZED VIEW sensor_data_hourly IS 'Hourly sensor data aggregates (auto-refreshed every hour)';
-        RAISE NOTICE 'Continuous aggregate created successfully';
+        -- Check if continuous aggregate already exists
+        IF NOT EXISTS (
+            SELECT 1 FROM timescaledb_information.continuous_aggregates 
+            WHERE view_name = 'sensor_data_hourly'
+        ) THEN
+            -- Create materialized view for hourly sensor aggregates
+            CREATE MATERIALIZED VIEW sensor_data_hourly
+            WITH (timescaledb.continuous) AS
+            SELECT 
+                device_uuid,
+                sensor_name,
+                time_bucket('1 hour', timestamp) AS hour,
+                AVG((data->>'value')::numeric) AS avg_value,
+                MIN((data->>'value')::numeric) AS min_value,
+                MAX((data->>'value')::numeric) AS max_value,
+                COUNT(*) AS sample_count,
+                FIRST(data, timestamp) AS first_reading,
+                LAST(data, timestamp) AS last_reading
+            FROM sensor_data
+            WHERE data->>'value' IS NOT NULL
+            GROUP BY device_uuid, sensor_name, hour;
+            
+            RAISE NOTICE 'Continuous aggregate view created';
+            
+            -- Create index on continuous aggregate
+            CREATE INDEX IF NOT EXISTS idx_sensor_hourly_device_sensor_time 
+            ON sensor_data_hourly(device_uuid, sensor_name, hour DESC);
+            
+            RAISE NOTICE 'Index created on continuous aggregate';
+            
+            -- Add refresh policy
+            PERFORM add_continuous_aggregate_policy('sensor_data_hourly',
+                start_offset => INTERVAL '3 hours',
+                end_offset => INTERVAL '1 hour',
+                schedule_interval => INTERVAL '1 hour',
+                if_not_exists => TRUE
+            );
+            
+            COMMENT ON MATERIALIZED VIEW sensor_data_hourly IS 'Hourly sensor data aggregates (auto-refreshed every hour)';
+            RAISE NOTICE 'Continuous aggregate created successfully';
+        ELSE
+            RAISE NOTICE 'Continuous aggregate sensor_data_hourly already exists, skipping';
+        END IF;
     END IF;
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'Failed to create continuous aggregate: %', SQLERRM;
+        RAISE NOTICE 'This is optional - continuing anyway';
 END $$;
 
 -- ============================================================================
