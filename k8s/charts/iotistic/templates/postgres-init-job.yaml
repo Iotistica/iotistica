@@ -1,0 +1,68 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "iotistic.fullname" . }}-postgres-init
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres-init
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: postgres-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: postgres-init
+        image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Waiting for PostgreSQL to be ready..."
+          until pg_isready -h {{ include "iotistic.fullname" . }}-postgres -U {{ .Values.postgres.username }} -d {{ .Values.postgres.database }}; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          
+          echo "PostgreSQL is ready, creating TimescaleDB extension..."
+          psql -X -h {{ include "iotistic.fullname" . }}-postgres -U {{ .Values.postgres.username }} -d {{ .Values.postgres.database }} -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+          
+          echo "Verifying TimescaleDB extension..."
+          psql -h {{ include "iotistic.fullname" . }}-postgres -U {{ .Values.postgres.username }} -d {{ .Values.postgres.database }} -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'timescaledb';"
+          
+          echo "Fixing primary key to include timestamp for hypertable compatibility..."
+          psql -h {{ include "iotistic.fullname" . }}-postgres -U {{ .Values.postgres.username }} -d {{ .Values.postgres.database }} -c "
+            DO \$\$
+            BEGIN
+              -- Check if sensor_data table exists and primary key needs fixing
+              IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'sensor_data') THEN
+                -- Check if current primary key includes timestamp
+                IF NOT EXISTS (
+                  SELECT 1 FROM pg_constraint c
+                  JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+                  WHERE c.conname = 'sensor_data_pkey' AND a.attname = 'timestamp'
+                ) THEN
+                  RAISE NOTICE 'Fixing primary key to include timestamp...';
+                  ALTER TABLE sensor_data DROP CONSTRAINT IF EXISTS sensor_data_pkey CASCADE;
+                  ALTER TABLE sensor_data ADD CONSTRAINT sensor_data_pkey PRIMARY KEY (device_uuid, sensor_name, timestamp);
+                  RAISE NOTICE 'Primary key fixed successfully';
+                ELSE
+                  RAISE NOTICE 'Primary key already includes timestamp, skipping';
+                END IF;
+              ELSE
+                RAISE NOTICE 'sensor_data table does not exist yet, skipping primary key fix';
+              END IF;
+            END \$\$;
+          "
+          
+          echo "TimescaleDB initialization complete!"
+        env:
+        - name: PGPASSWORD
+          value: {{ .Values.postgres.password | quote }}
+{{- end }}
