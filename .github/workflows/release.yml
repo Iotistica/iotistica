@@ -417,7 +417,7 @@ jobs:
 
   check-deployment-needed:
     name: Check if Deployment Needed
-    runs-on: ubuntu-latest
+    runs-on: [iotistic-lab-sc]
     needs: [validate-release, release-api, release-dashboard, release-mqtt-monitor, release-housekeeper]
     outputs:
       should_deploy: ${{ steps.compare.outputs.should_deploy }}
