@@ -356,20 +356,26 @@ jobs:
           MQTT_CUR="${{ steps.current.outputs.mqtt_current }}"
           HOUSE_CUR="${{ steps.current.outputs.housekeeper_current }}"
 
-          # If deployment doesn't exist (none) we will create it -> deploy
-          if [ "$API_CUR" = "none" ] || [ "$API_CUR" != "$RELEASE" ]; then
+          # Check if images were actually retagged (not "skip")
+          API_SRC="${{ needs.validate-release.outputs.api_src_tag }}"
+          DASH_SRC="${{ needs.validate-release.outputs.dashboard_src_tag }}"
+          MQTT_SRC="${{ needs.validate-release.outputs.mqtt_src_tag }}"
+          HOUSE_SRC="${{ needs.validate-release.outputs.housekeeper_src_tag }}"
+
+          # Only deploy if image was retagged AND current deployment is different
+          if [ "$API_SRC" != "skip" ] && [ "$API_CUR" != "$RELEASE" ]; then
             CHANGES="${CHANGES}API: ${API_CUR} -> ${RELEASE}\n"
             DEPLOY=true
           fi
-          if [ "$DASH_CUR" = "none" ] || [ "$DASH_CUR" != "$RELEASE" ]; then
+          if [ "$DASH_SRC" != "skip" ] && [ "$DASH_CUR" != "$RELEASE" ]; then
             CHANGES="${CHANGES}Dashboard: ${DASH_CUR} -> ${RELEASE}\n"
             DEPLOY=true
           fi
-          if [ "$MQTT_CUR" = "none" ] || [ "$MQTT_CUR" != "$RELEASE" ]; then
+          if [ "$MQTT_SRC" != "skip" ] && [ "$MQTT_CUR" != "$RELEASE" ]; then
             CHANGES="${CHANGES}MQTT Monitor: ${MQTT_CUR} -> ${RELEASE}\n"
             DEPLOY=true
           fi
-          if [ "$HOUSE_CUR" = "none" ] || [ "$HOUSE_CUR" != "$RELEASE" ]; then
+          if [ "$HOUSE_SRC" != "skip" ] && [ "$HOUSE_CUR" != "$RELEASE" ]; then
             CHANGES="${CHANGES}Housekeeper: ${HOUSE_CUR} -> ${RELEASE}\n"
             DEPLOY=true
           fi
