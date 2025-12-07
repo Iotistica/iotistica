@@ -617,9 +617,9 @@ jobs:
 
   deploy-k8s:
     name: Deploy to Kubernetes
-    needs: [validate-release, release-api, release-dashboard, release-mqtt-monitor, release-housekeeper, create-release, check-deployment-needed]
+    needs: [validate-release, check-deployment-needed]
     runs-on: [iotistic-lab-sc]
-    if: needs.check-deployment-needed.outputs.should_deploy == 'true'
+    if: always() && needs.validate-release.result == 'success' && needs.check-deployment-needed.outputs.should_deploy == 'true'
     
     steps:
       - name: Checkout repository
