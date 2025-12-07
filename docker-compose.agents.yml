@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2025-12-06 21:19:16
+# Generated: 2025-12-07 10:47:51
 # Agents: 25 to 25
 # Ports: 48505 to 48505
 
@@ -22,7 +22,7 @@ services:
       - METRICS_INTERVAL_MS=30000
       - LOG_COMPRESSION=true
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=55c13ad8e71574fac086b58f4c554a433febd3c0c85cc12ac60cb2b27efb84ab
+      - PROVISIONING_KEY=9d3a402e7d4412d16af4da5a254d7888bcc4cc1bc7bf5edffa89b8fe6d8dfa2e
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - MEMORY_CHECK_INTERVAL_MS=30000
       - MEMORY_THRESHOLD_MB=30

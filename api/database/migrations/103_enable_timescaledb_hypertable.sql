@@ -1,120 +1,158 @@
--- Migration: Enable TimescaleDB and convert sensor_data to hypertable
+-- Migration: Enable TimescaleDB and convert sensor_data to hypertable (OPTIONAL)
 -- Created: 2025-12-06
 -- Purpose: Install TimescaleDB extension and convert sensor_data table to hypertable for better time-series performance
 -- Dependencies: Requires TimescaleDB extension to be available in PostgreSQL
+-- Note: This migration will skip gracefully if TimescaleDB is not installed
 
 -- ============================================================================
--- 1. ENABLE TIMESCALEDB EXTENSION
+-- 1. CHECK TIMESCALEDB AVAILABILITY AND ENABLE IF PRESENT
 -- ============================================================================
 
--- Install TimescaleDB extension if available
--- Note: This requires TimescaleDB to be installed on the PostgreSQL server
--- For installation instructions: https://docs.timescale.com/install/latest/
-CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
-
-COMMENT ON EXTENSION timescaledb IS 'Enables high-performance time-series data handling with automatic partitioning';
+DO $$
+DECLARE
+    timescaledb_available BOOLEAN;
+BEGIN
+    -- Check if TimescaleDB is available in the system
+    SELECT EXISTS (
+        SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb'
+    ) INTO timescaledb_available;
+    
+    IF timescaledb_available THEN
+        -- Install TimescaleDB extension if available
+        RAISE NOTICE 'TimescaleDB extension found, enabling...';
+        CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+        
+        COMMENT ON EXTENSION timescaledb IS 'Enables high-performance time-series data handling with automatic partitioning';
+        
+        -- ============================================================================
+        -- 2. CONVERT SENSOR_DATA TO HYPERTABLE
+        -- ============================================================================
+        
+        -- Check if sensor_data is already a hypertable
+        IF NOT EXISTS (
+            SELECT 1 FROM timescaledb_information.hypertables 
+            WHERE hypertable_name = 'sensor_data'
+        ) THEN
+            RAISE NOTICE 'Converting sensor_data to TimescaleDB hypertable...';
+            
+            -- Convert sensor_data table to TimescaleDB hypertable
+            PERFORM create_hypertable(
+                'sensor_data',                    -- Table name
+                'timestamp',                      -- Time column to partition by
+                chunk_time_interval => INTERVAL '7 days',  -- Create new chunk every 7 days
+                if_not_exists => TRUE,            -- Don't fail if already a hypertable
+                migrate_data => TRUE              -- Migrate existing data into chunks
+            );
+            
+            RAISE NOTICE 'Successfully converted sensor_data to hypertable';
+        ELSE
+            RAISE NOTICE 'sensor_data is already a TimescaleDB hypertable, skipping conversion';
+        END IF;
+        
+        COMMENT ON TABLE sensor_data IS 'Time-series sensor data from devices (TimescaleDB hypertable with 7-day chunks)';
+        
+        -- ============================================================================
+        -- 3. OPTIMIZE INDEXES FOR HYPERTABLE
+        -- ============================================================================
+        
+        -- Drop the old unique constraint that conflicts with hypertable requirements
+        -- TimescaleDB requires time column to be part of unique constraints
+        DROP INDEX IF EXISTS idx_sensor_data_unique;
+        
+        -- Recreate unique constraint including the time dimension (required for hypertables)
+        -- This prevents duplicate sensor readings at the same timestamp
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_sensor_data_unique_hyper 
+        ON sensor_data(device_uuid, sensor_name, timestamp DESC);
+        
+        RAISE NOTICE 'TimescaleDB hypertable setup complete';
+    ELSE
+        RAISE NOTICE 'TimescaleDB extension not available in this PostgreSQL installation';
+        RAISE NOTICE 'Skipping hypertable conversion - sensor_data will remain as regular table';
+        RAISE NOTICE 'To use TimescaleDB features, install it following: https://docs.timescale.com/install/latest/';
+    END IF;
+END $$;
 
 -- ============================================================================
--- 2. CONVERT SENSOR_DATA TO HYPERTABLE
+-- 4. CONFIGURE COMPRESSION (OPTIONAL - TIMESCALEDB ONLY)
 -- ============================================================================
 
--- Convert sensor_data table to TimescaleDB hypertable
--- This enables automatic time-based partitioning (chunks) for efficient time-series queries
--- Chunk interval: 7 days (optimized for IoT sensor data retention/query patterns)
-SELECT create_hypertable(
-    'sensor_data',                    -- Table name
-    'timestamp',                      -- Time column to partition by
-    chunk_time_interval => INTERVAL '7 days',  -- Create new chunk every 7 days
-    if_not_exists => TRUE,            -- Don't fail if already a hypertable
-    migrate_data => TRUE              -- Migrate existing data into chunks
-);
-
-COMMENT ON TABLE sensor_data IS 'Time-series sensor data from devices (TimescaleDB hypertable with 7-day chunks)';
-
--- ============================================================================
--- 3. OPTIMIZE INDEXES FOR HYPERTABLE
--- ============================================================================
-
--- Drop the old unique constraint that conflicts with hypertable requirements
--- TimescaleDB requires time column to be part of unique constraints
-DROP INDEX IF EXISTS idx_sensor_data_unique;
-
--- Recreate unique constraint including the time dimension (required for hypertables)
--- This prevents duplicate sensor readings at the same timestamp
-CREATE UNIQUE INDEX IF NOT EXISTS idx_sensor_data_unique_hyper 
-ON sensor_data(device_uuid, sensor_name, timestamp DESC);
-
--- Optimize existing indexes for TimescaleDB
--- TimescaleDB automatically creates time-based indexes per chunk
--- We keep device/sensor indexes for non-time filtered queries
--- Note: Indexes on hypertables are automatically created on each chunk
+DO $$
+BEGIN
+    -- Only configure compression if TimescaleDB is enabled
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        RAISE NOTICE 'Configuring TimescaleDB compression...';
+        
+        -- Enable compression for older chunks to save storage space
+        ALTER TABLE sensor_data SET (
+            timescaledb.compress,
+            timescaledb.compress_segmentby = 'device_uuid, sensor_name',
+            timescaledb.compress_orderby = 'timestamp DESC'
+        );
+        
+        -- Add compression policy to automatically compress chunks older than 30 days
+        PERFORM add_compression_policy('sensor_data', INTERVAL '30 days', if_not_exists => TRUE);
+        
+        COMMENT ON TABLE sensor_data IS 'Time-series sensor data (TimescaleDB hypertable: 7-day chunks, compress after 30 days)';
+        RAISE NOTICE 'Compression configured successfully';
+    END IF;
+END $$;
 
 -- ============================================================================
--- 4. CONFIGURE COMPRESSION (OPTIONAL - RECOMMENDED FOR PRODUCTION)
--- ============================================================================
-
--- Enable compression for older chunks to save storage space
--- Compression reduces storage by 90%+ for time-series data
--- Compress chunks older than 30 days
-ALTER TABLE sensor_data SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'device_uuid, sensor_name',  -- Group by device/sensor for better compression
-    timescaledb.compress_orderby = 'timestamp DESC'               -- Order by time within compressed chunks
-);
-
--- Add compression policy to automatically compress chunks older than 30 days
-SELECT add_compression_policy('sensor_data', INTERVAL '30 days', if_not_exists => TRUE);
-
-COMMENT ON TABLE sensor_data IS 'Time-series sensor data (TimescaleDB hypertable: 7-day chunks, compress after 30 days)';
-
--- ============================================================================
--- 5. CONFIGURE RETENTION POLICY (OPTIONAL - RECOMMENDED FOR PRODUCTION)
+-- 5. CONFIGURE RETENTION POLICY (OPTIONAL - TIMESCALEDB ONLY)
 -- ============================================================================
 
 -- Automatically drop chunks older than 365 days to prevent unbounded growth
--- Adjust retention period based on your requirements
--- Uncomment the following line to enable automatic data retention:
--- SELECT add_retention_policy('sensor_data', INTERVAL '365 days', if_not_exists => TRUE);
-
--- To enable retention policy, run:
--- SELECT add_retention_policy('sensor_data', INTERVAL '365 days', if_not_exists => TRUE);
+-- Uncomment to enable:
+-- DO $$
+-- BEGIN
+--     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+--         PERFORM add_retention_policy('sensor_data', INTERVAL '365 days', if_not_exists => TRUE);
+--     END IF;
+-- END $$;
 
 -- ============================================================================
--- 6. CREATE CONTINUOUS AGGREGATES (OPTIONAL - FOR DASHBOARDS)sdfsd
+-- 6. CREATE CONTINUOUS AGGREGATES (OPTIONAL - TIMESCALEDB ONLY)
 -- ============================================================================
 
--- Create materialized view for hourly sensor aggregates (faster dashboard queries)
--- This pre-computes hourly averages and is automatically maintained by TimescaleDB
-CREATE MATERIALIZED VIEW IF NOT EXISTS sensor_data_hourly
-WITH (timescaledb.continuous) AS
-SELECT 
-    device_uuid,
-    sensor_name,
-    time_bucket('1 hour', timestamp) AS hour,
-    AVG((data->>'value')::numeric) AS avg_value,
-    MIN((data->>'value')::numeric) AS min_value,
-    MAX((data->>'value')::numeric) AS max_value,
-    COUNT(*) AS sample_count,
-    FIRST(data, timestamp) AS first_reading,
-    LAST(data, timestamp) AS last_reading
-FROM sensor_data
-WHERE data->>'value' IS NOT NULL  -- Only aggregate numeric values
-GROUP BY device_uuid, sensor_name, hour;
-
--- Create index on continuous aggregate for fast queries
-CREATE INDEX IF NOT EXISTS idx_sensor_hourly_device_sensor_time 
-ON sensor_data_hourly(device_uuid, sensor_name, hour DESC);
-
--- Add refresh policy to keep continuous aggregate up-to-date
--- Refresh hourly aggregates within 1 hour of real-time
-SELECT add_continuous_aggregate_policy('sensor_data_hourly',
-    start_offset => INTERVAL '3 hours',   -- Start refreshing data 3 hours old
-    end_offset => INTERVAL '1 hour',      -- Finish refreshing data 1 hour old
-    schedule_interval => INTERVAL '1 hour', -- Run refresh every hour
-    if_not_exists => TRUE
-);
-
-COMMENT ON MATERIALIZED VIEW sensor_data_hourly IS 'Hourly sensor data aggregates (auto-refreshed every hour)';
+DO $$
+BEGIN
+    -- Only create continuous aggregates if TimescaleDB is enabled
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        RAISE NOTICE 'Creating continuous aggregate for hourly sensor data...';
+        
+        -- Create materialized view for hourly sensor aggregates
+        CREATE MATERIALIZED VIEW IF NOT EXISTS sensor_data_hourly
+        WITH (timescaledb.continuous) AS
+        SELECT 
+            device_uuid,
+            sensor_name,
+            time_bucket('1 hour', timestamp) AS hour,
+            AVG((data->>'value')::numeric) AS avg_value,
+            MIN((data->>'value')::numeric) AS min_value,
+            MAX((data->>'value')::numeric) AS max_value,
+            COUNT(*) AS sample_count,
+            FIRST(data, timestamp) AS first_reading,
+            LAST(data, timestamp) AS last_reading
+        FROM sensor_data
+        WHERE data->>'value' IS NOT NULL
+        GROUP BY device_uuid, sensor_name, hour;
+        
+        -- Create index on continuous aggregate
+        CREATE INDEX IF NOT EXISTS idx_sensor_hourly_device_sensor_time 
+        ON sensor_data_hourly(device_uuid, sensor_name, hour DESC);
+        
+        -- Add refresh policy
+        PERFORM add_continuous_aggregate_policy('sensor_data_hourly',
+            start_offset => INTERVAL '3 hours',
+            end_offset => INTERVAL '1 hour',
+            schedule_interval => INTERVAL '1 hour',
+            if_not_exists => TRUE
+        );
+        
+        COMMENT ON MATERIALIZED VIEW sensor_data_hourly IS 'Hourly sensor data aggregates (auto-refreshed every hour)';
+        RAISE NOTICE 'Continuous aggregate created successfully';
+    END IF;
+END $$;
 
 -- ============================================================================
 -- 7. VERIFY HYPERTABLE CONFIGURATION
