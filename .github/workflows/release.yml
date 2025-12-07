@@ -99,8 +99,6 @@ jobs:
           echo "Auto-generated version: $NEW"
           echo "release_version=$NEW" >> $GITHUB_OUTPUT
 
-    
-
       - name: Read service versions from package.json at this commit
         id: pkg_versions
         run: |
@@ -154,24 +152,28 @@ jobs:
           check_image() {
             local svc="$1"
             local prefer_tag="$2"
-            # First try the package.json tag (no leading v -> try both)
-            candidates=()
-            if [ -n "$prefer_tag" ]; then
-              candidates+=("$prefer_tag")
-              # if prefer_tag doesn't start with v, also try with v prefix
-              if [[ "$prefer_tag" != v* ]]; then
-                candidates+=("v${prefer_tag}")
-              fi
+            
+            # If no preferred tag provided, return skip
+            if [ -z "$prefer_tag" ]; then
+              echo "skip"
+              return 1
             fi
-            candidates+=("latest")
-
-            for t in "${candidates[@]}"; do
-              if docker manifest inspect "${DOCKER_ORG}/${svc}:$t" >/dev/null 2>&1; then
-                echo "$t"
+            
+            # Try the package.json tag first (exact match)
+            if docker manifest inspect "${DOCKER_ORG}/${svc}:${prefer_tag}" >/dev/null 2>&1; then
+              echo "$prefer_tag"
+              return 0
+            fi
+            
+            # If prefer_tag doesn't start with v, also try with v prefix
+            if [[ "$prefer_tag" != v* ]]; then
+              if docker manifest inspect "${DOCKER_ORG}/${svc}:v${prefer_tag}" >/dev/null 2>&1; then
+                echo "v${prefer_tag}"
                 return 0
               fi
-            done
-
+            fi
+            
+            # No versioned image found
             echo "skip"
             return 1
           }
