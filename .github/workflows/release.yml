@@ -419,6 +419,7 @@ jobs:
     name: Check if Deployment Needed
     runs-on: [iotistic-lab-sc]
     needs: [validate-release, release-api, release-dashboard, release-mqtt-monitor, release-housekeeper]
+    if: always() && needs.validate-release.result == 'success'
     outputs:
       should_deploy: ${{ steps.compare.outputs.should_deploy }}
       changes_summary: ${{ steps.compare.outputs.changes_summary }}
@@ -467,49 +468,29 @@ jobs:
       
       - name: Configure kubectl
         run: |
-          # Check if kubectl is already configured (self-hosted runner)
-          # Try a simple kubectl command that should work if configured
+          # Self-hosted runner should have kubectl pre-configured
+          echo "Verifying kubectl access..."
+          
           if kubectl get namespaces >/dev/null 2>&1; then
-            echo "✅ kubectl already configured on self-hosted runner"
-            kubectl version --client
-            echo "Connected to cluster:"
-            kubectl cluster-info | head -n 1
+            echo "✅ kubectl is working"
+            kubectl version --client --short 2>/dev/null || kubectl version --client
           else
-            echo "kubectl not configured, checking for KUBECONFIG secret..."
+            echo "⚠️  kubectl not accessible, attempting to load from KUBECONFIG secret..."
             
-            # Check if KUBECONFIG secret exists and is not empty
-            if [ -z "${{ secrets.KUBECONFIG }}" ]; then
-              echo "❌ KUBECONFIG secret is not set!"
-              echo ""
-              echo "This self-hosted runner needs kubectl configured. Two options:"
-              echo "  1. Configure kubectl on the runner: ~/.kube/config"
-              echo "  2. Set KUBECONFIG secret in GitHub repo settings"
-              echo ""
-              echo "To set secret: cat ~/.kube/config | base64 -w 0"
-              exit 1
-            fi
-            
-            echo "Configuring kubectl from KUBECONFIG secret..."
-            mkdir -p $HOME/.kube
-            echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
-            chmod 600 $HOME/.kube/config
-            
-            # Verify kubeconfig was decoded
-            if [ ! -s $HOME/.kube/config ]; then
-              echo "❌ Kubeconfig file is empty after decoding!"
-              echo "Secret may be incorrectly formatted or empty"
-              exit 1
-            fi
-            
-            echo "✅ Kubeconfig loaded ($(wc -l < $HOME/.kube/config) lines)"
-            
-            # Test connection
-            if kubectl get namespaces >/dev/null 2>&1; then
-              echo "✅ Successfully connected to cluster"
-              kubectl cluster-info | head -n 1
+            if [ -n "${{ secrets.KUBECONFIG }}" ]; then
+              mkdir -p $HOME/.kube
+              echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config 2>/dev/null || true
+              chmod 600 $HOME/.kube/config 2>/dev/null || true
+              
+              if kubectl get namespaces >/dev/null 2>&1; then
+                echo "✅ kubectl configured from secret"
+              else
+                echo "❌ kubectl still not working - check runner configuration"
+                exit 1
+              fi
             else
-              echo "❌ Failed to connect to cluster"
-              echo "Kubeconfig loaded but connection failed"
+              echo "❌ kubectl not configured and no KUBECONFIG secret found"
+              echo "Configure kubectl on runner at: ~/.kube/config"
               exit 1
             fi
           fi
