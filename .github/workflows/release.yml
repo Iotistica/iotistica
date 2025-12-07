@@ -468,35 +468,48 @@ jobs:
       - name: Configure kubectl
         run: |
           # Check if kubectl is already configured (self-hosted runner)
-          if kubectl cluster-info &>/dev/null; then
+          # Try a simple kubectl command that should work if configured
+          if kubectl get namespaces >/dev/null 2>&1; then
             echo "✅ kubectl already configured on self-hosted runner"
-            kubectl cluster-info
+            kubectl version --client
+            echo "Connected to cluster:"
+            kubectl cluster-info | head -n 1
           else
+            echo "kubectl not configured, checking for KUBECONFIG secret..."
+            
+            # Check if KUBECONFIG secret exists and is not empty
+            if [ -z "${{ secrets.KUBECONFIG }}" ]; then
+              echo "❌ KUBECONFIG secret is not set!"
+              echo ""
+              echo "This self-hosted runner needs kubectl configured. Two options:"
+              echo "  1. Configure kubectl on the runner: ~/.kube/config"
+              echo "  2. Set KUBECONFIG secret in GitHub repo settings"
+              echo ""
+              echo "To set secret: cat ~/.kube/config | base64 -w 0"
+              exit 1
+            fi
+            
             echo "Configuring kubectl from KUBECONFIG secret..."
             mkdir -p $HOME/.kube
             echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
             chmod 600 $HOME/.kube/config
             
-            # Verify kubeconfig is valid
-            echo "Verifying kubeconfig..."
+            # Verify kubeconfig was decoded
             if [ ! -s $HOME/.kube/config ]; then
-              echo "❌ Kubeconfig file is empty or missing!"
-              echo "Make sure KUBECONFIG secret is set correctly (base64 encoded)"
+              echo "❌ Kubeconfig file is empty after decoding!"
+              echo "Secret may be incorrectly formatted or empty"
               exit 1
             fi
             
             echo "✅ Kubeconfig loaded ($(wc -l < $HOME/.kube/config) lines)"
             
             # Test connection
-            if kubectl cluster-info &>/dev/null; then
+            if kubectl get namespaces >/dev/null 2>&1; then
               echo "✅ Successfully connected to cluster"
-              kubectl cluster-info
+              kubectl cluster-info | head -n 1
             else
               echo "❌ Failed to connect to cluster"
-              echo "Check if:"
-              echo "  1. KUBECONFIG secret contains valid config"
-              echo "  2. Runner has network access to cluster"
-              echo "  3. Cluster API endpoint is reachable"
+              echo "Kubeconfig loaded but connection failed"
               exit 1
             fi
           fi
