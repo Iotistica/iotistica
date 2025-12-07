@@ -1,21 +1,16 @@
 name: Release API, Dashboard and MQTT Monitor
 
-# This workflow creates official releases by retagging the latest CI-built images
-# with semantic version tags. CI builds continuously push images with SHA and 
-# version tags, and this workflow makes them "official" releases.
-#
-# Tagging Strategy:
-# - CI builds push: <service>:latest, <service>:<sha>, <service>:<version>
-# - Release workflow reuses existing images and adds: <service>:v1.2.3
-# - No rebuilding - images already tested via CI
-#
-# Services included: API, Dashboard, MQTT Monitor (core user-facing services)
-# Excluded: Agent, simulators, internal tools (have their own CI workflows)
+# Simplified release workflow:
+# 1. Push a tag (v1.2.3) to trigger OR use workflow_dispatch with version
+# 2. Find existing Docker images by package.json versions
+# 3. Retag them with the release version
+# 4. Create GitHub release
+# 5. Deploy to K8s if versions changed
 
 on:
   push:
     tags:
-      - 'v*.*.*'  # e.g., v1.2.3, v2.0.0 (semantic versioning)
+      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       bump_type:
@@ -31,45 +26,42 @@ on:
         description: 'Or enter custom version (e.g., 1.2.3, overrides bump_type)'
         required: false
         type: string
+      deploy:
+        description: 'Deploy to Kubernetes after release'
+        required: false
+        default: true
+        type: boolean
       destroy:
-        description: 'If true will destroy the deployed Iotistic app'
+        description: 'Destroy the Kubernetes deployment'
         required: false
         default: false
         type: boolean
       clean_before_deploy:
-        description: 'If true, delete Helm release + namespace before deploying'
+        description: 'Delete Helm release + namespace before deploying'
         required: false
         default: false
         type: boolean
 
 permissions:
-  contents: write  # Required for creating releases
-  packages: write  # Required for Docker operations
+  contents: write
+  packages: write
 
 jobs:
-  validate-release:
-    name: Validate Release Tag
+  release:
+    name: Create Release
     runs-on: [iotistic-lab-sc]
     outputs:
       version: ${{ steps.version.outputs.version }}
-      api_version_final: ${{ steps.verify.outputs.api_version_final }}
-      dashboard_version_final: ${{ steps.verify.outputs.dashboard_version_final }}
-      mqtt_monitor_version_final: ${{ steps.verify.outputs.mqtt_monitor_version_final }}
-      housekeeper_version_final: ${{ steps.verify.outputs.housekeeper_version_final }}
-    
+      
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          fetch-tags: true
 
-      - name: Determine release version
+      - name: Determine version
         id: version
         run: |
-          # Ensure we have all tags
-          git fetch --tags --force
-          
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # Manual trigger - calculate version
             if [ -n "${{ inputs.custom_version }}" ]; then
@@ -77,11 +69,14 @@ jobs:
               VERSION="v${{ inputs.custom_version }}"
               echo "Using custom version: $VERSION"
             else
-              # Auto-bump based on latest tag (use git tag with sort, not describe)
+              # Auto-bump based on latest tag
+              git fetch --tags --force
               LATEST_TAG=$(git tag -l "v*.*.*" --sort=-version:refname | head -n1)
+              
               if [ -z "$LATEST_TAG" ]; then
                 LATEST_TAG="v0.0.0"
               fi
+              
               echo "Latest tag: $LATEST_TAG"
               
               # Extract version numbers
@@ -107,54 +102,28 @@ jobs:
               VERSION="v${MAJOR}.${MINOR}.${PATCH}"
               echo "Auto-bumped version (${{ inputs.bump_type }}): $VERSION"
             fi
-            
-            # Check if tag already exists
-            if git rev-parse "$VERSION" >/dev/null 2>&1; then
-              echo "⚠️  Tag $VERSION already exists, using existing tag"
-            else
-              # Create and push the tag
-              echo "Creating new tag: $VERSION"
-              git config user.name "github-actions[bot]"
-              git config user.email "github-actions[bot]@users.noreply.github.com"
-              git tag "$VERSION"
-              git push origin "$VERSION"
-            fi
           else
             # Tag trigger - extract version from tag
-            VERSION=${GITHUB_REF#refs/tags/}
+            VERSION="${GITHUB_REF#refs/tags/}"
             echo "Release version: $VERSION"
           fi
           
-          # Validate semantic versioning format
+          # Validate format
           if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "❌ Invalid version format: $VERSION"
-            echo "Expected format: v1.2.3 (semantic versioning)"
+            echo "❌ Invalid version: $VERSION (expected: v1.2.3)"
             exit 1
           fi
           
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "✅ Valid semantic version: $VERSION"
+          echo "✅ Release version: $VERSION"
 
-      - name: Get service versions from package.json
-        id: versions
+      - name: Get package versions
+        id: packages
         run: |
-          # Get current versions from package.json files at the tagged commit
-          # (Do NOT pull master - we need versions from the specific tag/commit)
-          API_VERSION=$(jq -r '.version' api/package.json)
-          DASHBOARD_VERSION=$(jq -r '.version' dashboard/package.json)
-          MQTT_MONITOR_VERSION=$(jq -r '.version' mqtt-monitor/package.json)
-          HOUSEKEEPER_VERSION=$(jq -r '.version' housekeeper/package.json)
-          
-          echo "api_version=$API_VERSION" >> $GITHUB_OUTPUT
-          echo "dashboard_version=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
-          echo "mqtt_monitor_version=$MQTT_MONITOR_VERSION" >> $GITHUB_OUTPUT
-          echo "housekeeper_version=$HOUSEKEEPER_VERSION" >> $GITHUB_OUTPUT
-          
-          echo "Service versions from package.json:"
-          echo "  - API: $API_VERSION"
-          echo "  - Dashboard: $DASHBOARD_VERSION"
-          echo "  - MQTT Monitor: $MQTT_MONITOR_VERSION"
-          echo "  - Housekeeper: $HOUSEKEEPER_VERSION"
+          echo "api=$(jq -r .version api/package.json)" >> $GITHUB_OUTPUT
+          echo "dashboard=$(jq -r .version dashboard/package.json)" >> $GITHUB_OUTPUT
+          echo "mqtt_monitor=$(jq -r .version mqtt-monitor/package.json)" >> $GITHUB_OUTPUT
+          echo "housekeeper=$(jq -r .version housekeeper/package.json)" >> $GITHUB_OUTPUT
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -162,622 +131,176 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Verify Docker images exist
-        id: verify
+      - name: Retag and push images
         run: |
-          echo "Verifying CI-built images exist on Docker Hub..."
+          VERSION="${{ steps.version.outputs.version }}"
           
-          # Function to check image and return version to use
-          # Logs go to stderr (&2), only version goes to stdout
-          check_image() {
+          # Function to retag image (logs to stderr, returns success/fail)
+          retag_image() {
             local service=$1
-            local version=$2
+            local source_tag=$2
             
-            if docker manifest inspect iotistic/$service:$version >/dev/null 2>&1; then
-              echo "✅ Found iotistic/$service:$version" >&2
-              echo "$version"
-              return 0
-            else
-              echo "⚠️  Image iotistic/$service:$version not found, trying :latest" >&2
-              if docker manifest inspect iotistic/$service:latest >/dev/null 2>&1; then
-                echo "✅ Found iotistic/$service:latest (will use for retagging)" >&2
-                echo "latest"
+            # Try source tag first, fallback to latest
+            for tag in "$source_tag" "latest"; do
+              if docker pull iotistic/$service:$tag 2>/dev/null; then
+                echo "✅ Pulled iotistic/$service:$tag" >&2
+                docker tag iotistic/$service:$tag iotistic/$service:$VERSION
+                docker push iotistic/$service:$VERSION
+                echo "✅ Released iotistic/$service:$VERSION" >&2
                 return 0
-              else
-                echo "❌ Image iotistic/$service:latest not found either" >&2
-                echo "⚠️  Skipping $service - no suitable image found" >&2
-                echo "skip"
-                return 1
               fi
-            fi
+            done
+            
+            echo "⚠️  Skipped $service (no image found)" >&2
+            return 1
           }
           
-          # Check each service and capture ONLY the version string
-          api_version_final=$(check_image "api" "${{ steps.versions.outputs.api_version }}")
-          dashboard_version_final=$(check_image "dashboard" "${{ steps.versions.outputs.dashboard_version }}")
-          mqtt_monitor_version_final=$(check_image "mqtt-monitor" "${{ steps.versions.outputs.mqtt_monitor_version }}")
-          housekeeper_version_final=$(check_image "housekeeper" "${{ steps.versions.outputs.housekeeper_version }}")
-          
-          # Set outputs
-          echo "api_version_final=$api_version_final" >> $GITHUB_OUTPUT
-          echo "dashboard_version_final=$dashboard_version_final" >> $GITHUB_OUTPUT
-          echo "mqtt_monitor_version_final=$mqtt_monitor_version_final" >> $GITHUB_OUTPUT
-          echo "housekeeper_version_final=$housekeeper_version_final" >> $GITHUB_OUTPUT
-          
-          echo ""
-          echo "✅ Docker image verification complete"
-          echo "Final versions to release:"
-          echo "  API: $api_version_final"
-          echo "  Dashboard: $dashboard_version_final"
-          echo "  MQTT Monitor: $mqtt_monitor_version_final"
-          echo "  Housekeeper: $housekeeper_version_final"
-
-      - name: Display release summary
-        run: |
-          echo "## Release Validation" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Release Tag:** \`${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Services to Release" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Service | Package.json | Docker Image | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|--------------|--------------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| API | \`${{ steps.versions.outputs.api_version }}\` | \`${{ steps.verify.outputs.api_version_final }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
-          echo "| Dashboard | \`${{ steps.versions.outputs.dashboard_version }}\` | \`${{ steps.verify.outputs.dashboard_version_final }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
-          echo "| MQTT Monitor | \`${{ steps.versions.outputs.mqtt_monitor_version }}\` | \`${{ steps.verify.outputs.mqtt_monitor_version_final }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
-          echo "| Housekeeper | \`${{ steps.versions.outputs.housekeeper_version }}\` | \`${{ steps.verify.outputs.housekeeper_version_final }}\` | ✅ Found |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Strategy:** Retag existing CI-built images with release version" >> $GITHUB_STEP_SUMMARY
-
-  release-api:
-    name: Release API
-    needs: validate-release
-    runs-on: [iotistic-lab-sc]
-    if: needs.validate-release.outputs.api_version_final != 'skip' && needs.validate-release.outputs.api_version_final != ''
-    
-    steps:
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
-
-      - name: Retag API image with release version
-        run: |
-          RELEASE_TAG="${{ needs.validate-release.outputs.version }}"
-          SOURCE_TAG="${{ needs.validate-release.outputs.api_version_final }}"
-          
-          echo "Retagging iotistic/api:$SOURCE_TAG → iotistic/api:$RELEASE_TAG"
-          
-          # Pull the CI-built image
-          docker pull iotistic/api:$SOURCE_TAG
-          
-          # Tag with release version
-          docker tag iotistic/api:$SOURCE_TAG iotistic/api:$RELEASE_TAG
-          
-          # Push release tag
-          docker push iotistic/api:$RELEASE_TAG
-          
-          echo "✅ API released as $RELEASE_TAG"
-
-  release-dashboard:
-    name: Release Dashboard
-    needs: validate-release
-    runs-on: [iotistic-lab-sc]
-    if: needs.validate-release.outputs.dashboard_version_final != 'skip' && needs.validate-release.outputs.dashboard_version_final != ''
-    
-    steps:
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
-
-      - name: Retag Dashboard image with release version
-        run: |
-          RELEASE_TAG="${{ needs.validate-release.outputs.version }}"
-          SOURCE_TAG="${{ needs.validate-release.outputs.dashboard_version_final }}"
-          
-          echo "Retagging iotistic/dashboard:$SOURCE_TAG → iotistic/dashboard:$RELEASE_TAG"
-          
-          # Pull the CI-built image
-          docker pull iotistic/dashboard:$SOURCE_TAG
-          
-          # Tag with release version
-          docker tag iotistic/dashboard:$SOURCE_TAG iotistic/dashboard:$RELEASE_TAG
-          
-          # Push release tag
-          docker push iotistic/dashboard:$RELEASE_TAG
-          
-          echo "✅ Dashboard released as $RELEASE_TAG"
-
-  release-mqtt-monitor:
-    name: Release MQTT Monitor
-    needs: validate-release
-    runs-on: [iotistic-lab-sc]
-    if: needs.validate-release.outputs.mqtt_monitor_version_final != 'skip' && needs.validate-release.outputs.mqtt_monitor_version_final != ''
-    
-    steps:
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
-
-      - name: Retag MQTT Monitor image with release version
-        run: |
-          RELEASE_TAG="${{ needs.validate-release.outputs.version }}"
-          SOURCE_TAG="${{ needs.validate-release.outputs.mqtt_monitor_version_final }}"
-          
-          echo "Retagging iotistic/mqtt-monitor:$SOURCE_TAG → iotistic/mqtt-monitor:$RELEASE_TAG"
-          
-          # Pull the CI-built image
-          docker pull iotistic/mqtt-monitor:$SOURCE_TAG
-          
-          # Tag with release version
-          docker tag iotistic/mqtt-monitor:$SOURCE_TAG iotistic/mqtt-monitor:$RELEASE_TAG
-          
-          # Push release tag
-          docker push iotistic/mqtt-monitor:$RELEASE_TAG
-          
-          echo "✅ MQTT Monitor released as $RELEASE_TAG"
-
-  release-housekeeper:
-    name: Release Housekeeper
-    needs: validate-release
-    runs-on: [iotistic-lab-sc]
-    if: needs.validate-release.outputs.housekeeper_version_final != 'skip' && needs.validate-release.outputs.housekeeper_version_final != ''
-    
-    steps:
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
-
-      - name: Retag Housekeeper image with release version
-        run: |
-          RELEASE_TAG="${{ needs.validate-release.outputs.version }}"
-          SOURCE_TAG="${{ needs.validate-release.outputs.housekeeper_version_final }}"
-          
-          echo "Retagging iotistic/housekeeper:$SOURCE_TAG → iotistic/housekeeper:$RELEASE_TAG"
-          
-          # Pull the CI-built image
-          docker pull iotistic/housekeeper:$SOURCE_TAG
-          
-          # Tag with release version
-          docker tag iotistic/housekeeper:$SOURCE_TAG iotistic/housekeeper:$RELEASE_TAG
-          
-          # Push release tag
-          docker push iotistic/housekeeper:$RELEASE_TAG
-          
-          echo "✅ Housekeeper released as $RELEASE_TAG"
-
-  create-release:
-    name: Create GitHub Release
-    needs: [validate-release, release-api, release-dashboard, release-mqtt-monitor, release-housekeeper]
-    runs-on: [iotistic-lab-sc]
-    if: always()
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+          # Retag all services
+          retag_image "api" "${{ steps.packages.outputs.api }}" || true
+          retag_image "dashboard" "${{ steps.packages.outputs.dashboard }}" || true
+          retag_image "mqtt-monitor" "${{ steps.packages.outputs.mqtt_monitor }}" || true
+          retag_image "housekeeper" "${{ steps.packages.outputs.housekeeper }}" || true
 
       - name: Generate changelog
-        id: changelog
         run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          PREV_TAG=$(git tag -l "v*.*.*" --sort=-version:refname | grep -v "^${{ steps.version.outputs.version }}$" | head -n1)
           
           if [ -z "$PREV_TAG" ]; then
-            echo "First release - including all commits"
-            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges | head -50)
+            git log --pretty=format:"- %s (%h)" --no-merges | head -50 > changelog.txt
           else
-            echo "Generating changelog from $PREV_TAG to ${GITHUB_REF#refs/tags/}"
-            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges > changelog.txt
           fi
-          
-          echo "$COMMITS" > changelog.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ needs.validate-release.outputs.version }}
-          name: Release ${{ needs.validate-release.outputs.version }}
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Release ${{ steps.version.outputs.version }}
           body_path: changelog.txt
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate Release Summary
+      - name: Summary
         run: |
-          echo "# Release ${{ needs.validate-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "# Release ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "## Docker Images Released" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "All core services tagged with \`${{ needs.validate-release.outputs.version }}\`:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Service | Source Version | Release Tag |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|----------------|-------------|" >> $GITHUB_STEP_SUMMARY
-          echo "| API | \`${{ needs.validate-release.outputs.api_version_final }}\` | \`${{ needs.validate-release.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Dashboard | \`${{ needs.validate-release.outputs.dashboard_version_final }}\` | \`${{ needs.validate-release.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| MQTT Monitor | \`${{ needs.validate-release.outputs.mqtt_monitor_version_final }}\` | \`${{ needs.validate-release.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "## Changelog" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          cat changelog.txt | head -20 >> $GITHUB_STEP_SUMMARY
-          
-          TOTAL=$(wc -l < changelog.txt)
-          if [ $TOTAL -gt 20 ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "_...and $((TOTAL - 20)) more commits (see GitHub Release for full changelog)_" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "## Deployment Commands" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Kubernetes" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "kubectl set image deployment/api api=iotistic/api:${{ needs.validate-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "kubectl set image deployment/dashboard dashboard=iotistic/dashboard:${{ needs.validate-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "kubectl set image deployment/mqtt-monitor mqtt-monitor=iotistic/mqtt-monitor:${{ needs.validate-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Docker Compose" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "# Update image tags in docker-compose.yml to ${{ needs.validate-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "docker-compose pull && docker-compose up -d" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "## Docker Images" >> $GITHUB_STEP_SUMMARY
+          echo "- iotistic/api:${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- iotistic/dashboard:${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- iotistic/mqtt-monitor:${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- iotistic/housekeeper:${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
 
-  check-deployment-needed:
-    name: Check if Deployment Needed
+  deploy:
+    name: Deploy to Kubernetes
+    needs: release
     runs-on: [iotistic-lab-sc]
-    needs: [validate-release, release-api, release-dashboard, release-mqtt-monitor, release-housekeeper]
-    if: always() && needs.validate-release.result == 'success'
-    outputs:
-      should_deploy: ${{ steps.compare.outputs.should_deploy }}
-      changes_summary: ${{ steps.compare.outputs.changes_summary }}
+    if: |
+      always() && 
+      needs.release.result == 'success' &&
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy == true))
     
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
-      - name: Check for Helm chart changes
-        id: chart_changes
-        run: |
-          # Get the previous release tag to compare against
-          CURRENT_TAG="${{ needs.validate-release.outputs.version }}"
-          PREV_TAG=$(git tag -l "v*.*.*" --sort=-version:refname | grep -v "^${CURRENT_TAG}$" | head -n1)
-          
-          if [ -z "$PREV_TAG" ]; then
-            echo "No previous tag found - treating as chart changed"
-            echo "chart_changed=true" >> $GITHUB_OUTPUT
-            echo "chart_files=First release" >> $GITHUB_OUTPUT
-          else
-            echo "Comparing chart changes between $PREV_TAG and $CURRENT_TAG"
-            
-            # Check if any files in k8s/charts/iotistic/ changed
-            CHANGED_FILES=$(git diff --name-only $PREV_TAG..$CURRENT_TAG -- k8s/charts/iotistic/ || echo "")
-            
-            if [ -n "$CHANGED_FILES" ]; then
-              echo "Helm chart files changed:"
-              echo "$CHANGED_FILES"
-              echo "chart_changed=true" >> $GITHUB_OUTPUT
-              # Format for summary (escape newlines)
-              CHANGED_FILES_SUMMARY=$(echo "$CHANGED_FILES" | sed 's/^/  - /' | tr '\n' '|')
-              echo "chart_files=$CHANGED_FILES_SUMMARY" >> $GITHUB_OUTPUT
-            else
-              echo "No Helm chart changes detected"
-              echo "chart_changed=false" >> $GITHUB_OUTPUT
-              echo "chart_files=" >> $GITHUB_OUTPUT
-            fi
-          fi
-      
-      - name: Set up kubectl
+
+      - name: Setup kubectl
         uses: azure/setup-kubectl@v3
         with:
           version: 'v1.28.0'
-      
+
       - name: Configure kubectl
         run: |
-          # Self-hosted runner should have kubectl pre-configured
-          echo "Verifying kubectl access..."
-          
-          if kubectl get namespaces >/dev/null 2>&1; then
-            echo "✅ kubectl is working"
-            kubectl version --client --short 2>/dev/null || kubectl version --client
+          if kubectl cluster-info >/dev/null 2>&1; then
+            echo "✅ kubectl already configured"
+          elif [ -n "${{ secrets.KUBECONFIG }}" ]; then
+            mkdir -p $HOME/.kube
+            echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+            chmod 600 $HOME/.kube/config
+            echo "✅ kubectl configured from secret"
           else
-            echo "⚠️  kubectl not accessible, attempting to load from KUBECONFIG secret..."
-            
-            if [ -n "${{ secrets.KUBECONFIG }}" ]; then
-              mkdir -p $HOME/.kube
-              echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config 2>/dev/null || true
-              chmod 600 $HOME/.kube/config 2>/dev/null || true
-              
-              if kubectl get namespaces >/dev/null 2>&1; then
-                echo "✅ kubectl configured from secret"
-              else
-                echo "❌ kubectl still not working - check runner configuration"
-                exit 1
-              fi
-            else
-              echo "❌ kubectl not configured and no KUBECONFIG secret found"
-              echo "Configure kubectl on runner at: ~/.kube/config"
-              exit 1
-            fi
+            echo "❌ kubectl not configured"
+            exit 1
           fi
-      
-      - name: Get current deployed versions
-        id: current
+
+      - name: Check if deployment needed
+        id: check
         run: |
-          # Get current image tags from K8s deployment
-          # Note: Deployment names match Helm release name 'iotistic' + service suffix
-          # (e.g., iotistic-api, iotistic-dashboard, iotistic-mqtt-monitor)
-          # These must match the Helm chart's {{ include "iotistic.fullname" . }}-<service> pattern
+          VERSION="${{ needs.release.outputs.version }}"
+          NAMESPACE="iotistic-nodeport"
           
-          echo "Testing kubectl access..."
-          kubectl get namespaces || echo "kubectl command failed!"
+          # Get current deployed versions
+          API_IMG=$(kubectl get deploy iotistic-api -n $NAMESPACE -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
+          CURRENT=$(echo "$API_IMG" | grep -oP '(?<=:)v?[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
           
-          echo "Checking deployments in namespace..."
-          kubectl get deployments -n iotistic-nodeport || echo "Failed to get deployments!"
-          
-          API_IMAGE=$(kubectl get deployment iotistic-api -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>&1 || echo "")
-          DASHBOARD_IMAGE=$(kubectl get deployment iotistic-dashboard -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>&1 || echo "")
-          MQTT_MONITOR_IMAGE=$(kubectl get deployment iotistic-mqtt-monitor -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>&1 || echo "")
-          HOUSEKEEPER_IMAGE=$(kubectl get deployment iotistic-housekeeper -n iotistic-nodeport -o jsonpath='{.spec.template.spec.containers[0].image}' 2>&1 || echo "")
-          
-          echo "Current images:"
-          echo "  API: $API_IMAGE"
-          echo "  Dashboard: $DASHBOARD_IMAGE"
-          echo "  MQTT Monitor: $MQTT_MONITOR_IMAGE"
-          echo "  Housekeeper: $HOUSEKEEPER_IMAGE"
-          
-          # Extract version tags (supports both v1.0.12 and 1.0.12 formats)
-          # Try with 'v' prefix first, then without
-          API_VERSION=$(echo "$API_IMAGE" | grep -oP '(?<=:)v?[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
-          DASHBOARD_VERSION=$(echo "$DASHBOARD_IMAGE" | grep -oP '(?<=:)v?[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
-          MQTT_MONITOR_VERSION=$(echo "$MQTT_MONITOR_IMAGE" | grep -oP '(?<=:)v?[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
-          HOUSEKEEPER_VERSION=$(echo "$HOUSEKEEPER_IMAGE" | grep -oP '(?<=:)v?[0-9]+\.[0-9]+\.[0-9]+' || echo "none")
-          
-          echo "api_version=$API_VERSION" >> $GITHUB_OUTPUT
-          echo "dashboard_version=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
-          echo "mqtt_monitor_version=$MQTT_MONITOR_VERSION" >> $GITHUB_OUTPUT
-          echo "housekeeper_version=$HOUSEKEEPER_VERSION" >> $GITHUB_OUTPUT
-          
-          echo "Currently deployed versions:"
-          echo "  API: $API_VERSION"
-          echo "  Dashboard: $DASHBOARD_VERSION"
-          echo "  MQTT Monitor: $MQTT_MONITOR_VERSION"
-          echo "  Housekeeper: $HOUSEKEEPER_VERSION"
-      
-      - name: Compare versions and determine deployment need
-        id: compare
-        run: |
-          CURRENT_API="${{ steps.current.outputs.api_version }}"
-          CURRENT_DASHBOARD="${{ steps.current.outputs.dashboard_version }}"
-          CURRENT_MQTT_MONITOR="${{ steps.current.outputs.mqtt_monitor_version }}"
-          CURRENT_HOUSEKEEPER="${{ steps.current.outputs.housekeeper_version }}"
-          
-          NEW_VERSION="${{ needs.validate-release.outputs.version }}"
-          
-          CHANGES=""
-          CHANGED=false
-          
-          # Check each service (skip if current version is "none" - deployment doesn't exist)
-          if [ "$CURRENT_API" != "none" ] && [ "$CURRENT_API" != "$NEW_VERSION" ]; then
-            CHANGES="${CHANGES}API: $CURRENT_API → $NEW_VERSION\n"
-            CHANGED=true
-          fi
-          
-          if [ "$CURRENT_DASHBOARD" != "none" ] && [ "$CURRENT_DASHBOARD" != "$NEW_VERSION" ]; then
-            CHANGES="${CHANGES}Dashboard: $CURRENT_DASHBOARD → $NEW_VERSION\n"
-            CHANGED=true
-          fi
-          
-          if [ "$CURRENT_MQTT_MONITOR" != "none" ] && [ "$CURRENT_MQTT_MONITOR" != "$NEW_VERSION" ]; then
-            CHANGES="${CHANGES}MQTT Monitor: $CURRENT_MQTT_MONITOR → $NEW_VERSION\n"
-            CHANGED=true
-          fi
-          
-          if [ "$CURRENT_HOUSEKEEPER" != "none" ] && [ "$CURRENT_HOUSEKEEPER" != "$NEW_VERSION" ]; then
-            CHANGES="${CHANGES}Housekeeper: $CURRENT_HOUSEKEEPER → $NEW_VERSION\n"
-            CHANGED=true
-          fi
-          
-          # Check if Helm chart changed
-          CHART_CHANGED="${{ steps.chart_changes.outputs.chart_changed }}"
-          if [ "$CHART_CHANGED" == "true" ]; then
-            CHART_FILES="${{ steps.chart_changes.outputs.chart_files }}"
-            CHANGES="${CHANGES}Helm Chart: Configuration updated\n"
-            CHANGED=true
-          fi
-          
-          # Determine if deployment needed
-          SHOULD_DEPLOY="false"
-          
-          # Deploy if any version changed (excludes "none" -> version transitions)
-          if [ "$CHANGED" == "true" ]; then
-            SHOULD_DEPLOY="true"
-            if [ "$CHART_CHANGED" == "true" ]; then
-              echo "Deployment needed - Helm chart or version changes detected"
-            else
-              echo "Deployment needed - version changes detected"
-            fi
+          if [ "$CURRENT" = "$VERSION" ] || [ "$CURRENT" = "${VERSION#v}" ]; then
+            echo "should_deploy=false" >> $GITHUB_OUTPUT
+            echo "⏭️  Already deployed: $VERSION"
           else
-            echo "No deployment needed - all services already at $NEW_VERSION"
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+            echo "🚀 Deploy needed: $CURRENT → $VERSION"
           fi
-          
-          if [ -z "$CHANGES" ]; then
-            CHANGES="No version changes detected"
-          fi
-          
-          echo "should_deploy=$SHOULD_DEPLOY" >> $GITHUB_OUTPUT
-          echo "changes_summary<<EOF" >> $GITHUB_OUTPUT
-          echo -e "$CHANGES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-          
-          echo "Should deploy: $SHOULD_DEPLOY"
-          echo -e "Changes:\n$CHANGES"
 
-  deploy-k8s:
-    name: Deploy to Kubernetes
-    needs: [validate-release, check-deployment-needed]
-    runs-on: [iotistic-lab-sc]
-    if: always() && needs.validate-release.result == 'success' && needs.check-deployment-needed.outputs.should_deploy == 'true'
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # NOTE: We do NOT modify values.yaml in-place (dangerous and causes dirty repo state)
-      # Instead, we override image tags via --set flags in helm upgrade command below
-
-      # ------------------------------------
-      # OPTIONAL CLEAN BEFORE DEPLOY
-      # ------------------------------------
-      - name: Cleanup previous Helm release (before deploy)
-        if: ${{ inputs.destroy == false && inputs.clean_before_deploy == true }}
+      - name: Clean before deploy
+        if: ${{ inputs.clean_before_deploy == true && steps.check.outputs.should_deploy == 'true' }}
         run: |
-          set -e
-          NAMESPACE=iotistic-nodeport
-
-          echo "Deleting previous Helm release (if exists)..."
-          helm uninstall iotistic -n "${NAMESPACE}" || true
-
-          echo "Deleting namespace (if exists)..."
-          kubectl delete namespace "${NAMESPACE}" --ignore-not-found --wait
-
-          echo "Waiting for namespace finalizers to clear..."
+          NAMESPACE="iotistic-nodeport"
+          
+          echo "🧹 Cleaning previous deployment..."
+          helm uninstall iotistic -n $NAMESPACE || true
+          kubectl delete namespace $NAMESPACE --ignore-not-found --wait
+          
+          echo "⏳ Waiting for namespace cleanup..."
           for i in {1..10}; do
-            if ! kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1; then
-              echo "Namespace removed."; break
+            if ! kubectl get namespace $NAMESPACE >/dev/null 2>&1; then
+              echo "✅ Namespace cleaned"
+              break
             fi
-            echo "Namespace still terminating... waiting"
             sleep 3
           done
 
-      - name: Deploy to Kubernetes with Helm
-        if: ${{ inputs.destroy == false }}
+      - name: Deploy with Helm
+        if: ${{ inputs.destroy != true && steps.check.outputs.should_deploy == 'true' }}
         run: |
-          set -e
-          CHART_PATH=./k8s/charts/iotistic
-          VALUES_FILE=./k8s/charts/iotistic/values.yaml
-          NAMESPACE=iotistic-nodeport
-          RELEASE_TAG="${{ needs.validate-release.outputs.version }}"
+          VERSION="${{ needs.release.outputs.version }}"
+          NAMESPACE="iotistic-nodeport"
           
-          # Use verified versions from validate-release job (fallback to latest if needed)
-          API_TAG="${{ needs.validate-release.outputs.api_version_final }}"
-          DASHBOARD_TAG="${{ needs.validate-release.outputs.dashboard_version_final }}"
-          MQTT_MONITOR_TAG="${{ needs.validate-release.outputs.mqtt_monitor_version_final }}"
-          HOUSEKEEPER_TAG="${{ needs.validate-release.outputs.housekeeper_version_final }}"
+          # Get current Mosquitto tag (preserve it)
+          MOSQUITTO_TAG=$(kubectl get deploy iotistic-mosquitto -n $NAMESPACE -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | cut -d':' -f2 || echo "latest")
           
-          # Use release tag if retagging succeeded, otherwise use existing versions
-          if [ "$API_TAG" != "skip" ] && [ -n "$API_TAG" ]; then
-            API_DEPLOY_TAG="$RELEASE_TAG"
-          else
-            API_DEPLOY_TAG="latest"
-          fi
-          
-          if [ "$DASHBOARD_TAG" != "skip" ] && [ -n "$DASHBOARD_TAG" ]; then
-            DASHBOARD_DEPLOY_TAG="$RELEASE_TAG"
-          else
-            DASHBOARD_DEPLOY_TAG="latest"
-          fi
-          
-          if [ "$MQTT_MONITOR_TAG" != "skip" ] && [ -n "$MQTT_MONITOR_TAG" ]; then
-            MQTT_MONITOR_DEPLOY_TAG="$RELEASE_TAG"
-          else
-            MQTT_MONITOR_DEPLOY_TAG="latest"
-          fi
-          
-          if [ "$HOUSEKEEPER_TAG" != "skip" ] && [ -n "$HOUSEKEEPER_TAG" ]; then
-            HOUSEKEEPER_DEPLOY_TAG="$RELEASE_TAG"
-          else
-            HOUSEKEEPER_DEPLOY_TAG="latest"
-          fi
-
-          echo "Deploying release $RELEASE_TAG to Kubernetes..."
-          echo "Image tags to deploy:"
-          echo "  API: $API_DEPLOY_TAG"
-          echo "  Dashboard: $DASHBOARD_DEPLOY_TAG"
-          echo "  MQTT Monitor: $MQTT_MONITOR_DEPLOY_TAG"
-          echo "  Housekeeper: $HOUSEKEEPER_DEPLOY_TAG"
-          
-          # Get current Mosquitto image tag to preserve it
-          MOSQUITTO_TAG=$(kubectl get deployment iotistic-mosquitto -n "${NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | cut -d':' -f2 || echo "latest")
-          
-          echo "Preserving Mosquitto image tag: $MOSQUITTO_TAG"
-          
-          # Update core services (API, Dashboard, MQTT Monitor, Housekeeper)
-          # Preserve Mosquitto, PostgreSQL, Redis tags
-          helm upgrade --install iotistic "${CHART_PATH}" \
-            --namespace "${NAMESPACE}" \
+          helm upgrade --install iotistic ./k8s/charts/iotistic \
+            --namespace $NAMESPACE \
             --create-namespace \
-            -f "${VALUES_FILE}" \
-            --set api.image.tag="${API_DEPLOY_TAG}" \
-            --set dashboard.image.tag="${DASHBOARD_DEPLOY_TAG}" \
-            --set mqttMonitor.image.tag="${MQTT_MONITOR_DEPLOY_TAG}" \
-            --set housekeeper.image.tag="${HOUSEKEEPER_DEPLOY_TAG}" \
-            --set mosquitto.image.pullPolicy="IfNotPresent" \
-            --set mosquitto.image.tag="${MOSQUITTO_TAG}" \
-            --timeout 5m
-
-          echo "Checking deployment status for core services..."
-          kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-api --timeout=180s || echo "⚠️ API deployment check failed"
-          kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-dashboard --timeout=180s || echo "⚠️ Dashboard deployment check failed"
-          kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-mqtt-monitor --timeout=180s || echo "⚠️ MQTT Monitor deployment check failed"
-          kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-housekeeper --timeout=180s || echo "⚠️ Housekeeper deployment check failed"
+            -f ./k8s/charts/iotistic/values.yaml \
+            --set api.image.tag="$VERSION" \
+            --set dashboard.image.tag="$VERSION" \
+            --set mqttMonitor.image.tag="$VERSION" \
+            --set housekeeper.image.tag="$VERSION" \
+            --set mosquitto.image.tag="$MOSQUITTO_TAG" \
+            --timeout 5m \
+            --wait
           
-          echo "Deployment successful!"
-          kubectl -n "${NAMESPACE}" get pods -o wide
-          kubectl -n "${NAMESPACE}" get svc -o wide
+          echo "✅ Deployed $VERSION to Kubernetes"
 
-      - name: Generate Deployment Summary
-        if: ${{ inputs.destroy == false }}
+      - name: Destroy deployment
+        if: ${{ inputs.destroy == true }}
         run: |
-          RELEASE_TAG="${{ needs.validate-release.outputs.version }}"
+          NAMESPACE="iotistic-nodeport"
           
-          echo "## Kubernetes Deployment" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Release:** \`$RELEASE_TAG\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Namespace:** \`iotistic-nodeport\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🗑️  Destroying deployment..."
+          helm uninstall iotistic -n $NAMESPACE || true
+          kubectl delete namespace $NAMESPACE --wait --ignore-not-found
           
-          echo "### Version Changes" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "${{ needs.check-deployment-needed.outputs.changes_summary }}" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Deployment destroyed"
+
+      - name: Verify deployment
+        if: ${{ inputs.destroy != true && steps.check.outputs.should_deploy == 'true' }}
+        run: |
+          kubectl -n iotistic-nodeport get pods
+          kubectl -n iotistic-nodeport get svc
           
-          echo "### Deployed Services" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          kubectl -n iotistic-nodeport get svc -o wide >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "### Pod Status" >> $GITHUB_STEP_SUMMARY
+          echo "## Deployment Status" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           kubectl -n iotistic-nodeport get pods -o wide >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "### Access URLs" >> $GITHUB_STEP_SUMMARY
-          echo "- **Dashboard:** http://localhost:30000" >> $GITHUB_STEP_SUMMARY
-          echo "- **API:** http://localhost:30002" >> $GITHUB_STEP_SUMMARY
-
-      # ------------------------------------
-      # DESTROY
-      # ------------------------------------
-      - name: Destroy deployed Iotistic NodePort (helm)
-        if: ${{ inputs.destroy == true }}
-        run: |
-          set -e
-          NAMESPACE=iotistic-nodeport
-          helm uninstall iotistic -n "${NAMESPACE}" || true
-          kubectl delete namespace "${NAMESPACE}" --wait --ignore-not-found
