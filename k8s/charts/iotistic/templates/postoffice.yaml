@@ -80,16 +80,25 @@ spec:
               value: {{ .Values.postoffice.email.smtp.port | quote }}
             - name: SMTP_SECURE
               value: {{ .Values.postoffice.email.smtp.secure | quote }}
+            {{- if .Values.postoffice.email.smtp.existingSecret }}
+            # Read SMTP credentials from existing Kubernetes Secret
             - name: SMTP_USER
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.postoffice.email.smtp.existingSecret | default (printf "%s-postoffice-smtp" (include "iotistic.fullname" .)) }}
+                  name: {{ .Values.postoffice.email.smtp.existingSecret }}
                   key: username
             - name: SMTP_PASS
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.postoffice.email.smtp.existingSecret | default (printf "%s-postoffice-smtp" (include "iotistic.fullname" .)) }}
+                  name: {{ .Values.postoffice.email.smtp.existingSecret }}
                   key: password
+            {{- else }}
+            # Use credentials from values.yaml (not recommended for production)
+            - name: SMTP_USER
+              value: {{ .Values.postoffice.email.smtp.username | quote }}
+            - name: SMTP_PASS
+              value: {{ .Values.postoffice.email.smtp.password | quote }}
+            {{- end }}
             {{- else if eq .Values.postoffice.email.transport "ses" }}
             # AWS SES configuration
             - name: AWS_REGION
