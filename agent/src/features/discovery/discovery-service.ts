@@ -35,6 +35,7 @@ import { OPCUADiscoveryPlugin } from './opcua.discovery';
 import { CANDiscoveryPlugin } from './can.discovery';
 import { SNMPDiscoveryPlugin } from './snmp.discovery';
 import { autoDetectLocalSubnets } from '../../utils/network';
+import type { AgentConfig } from '../../config/agent-config.js';
 
 export type DiscoveryTrigger = 'first_boot' | 'manual' | 'scheduled';
 export type DiscoveryProtocol = 'modbus' | 'opcua' | 'can' | 'snmp';
@@ -102,6 +103,7 @@ export interface SNMPDiscoveryOptions {
 
 export class DiscoveryService {
   private logger?: AgentLogger;
+  private agentConfig?: AgentConfig;
   private metadata: DiscoveryMetadata;
   private readonly MIN_DISCOVERY_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
   private readonly VALIDATION_CONCURRENCY = 3; // Concurrent validations (avoid overwhelming network/CPU)
@@ -111,11 +113,12 @@ export class DiscoveryService {
    * Create discovery service
    * 
    * IMPORTANT: Call init() after construction to load persisted metadata:
-   *   const discovery = new DiscoveryService(logger);
+   *   const discovery = new DiscoveryService(logger, agentConfig);
    *   await discovery.init();
    */
-  constructor(logger?: AgentLogger) {
+  constructor(logger?: AgentLogger, agentConfig?: AgentConfig) {
     this.logger = logger;
+    this.agentConfig = agentConfig;
     this.metadata = this.loadMetadata();
     this.plugins = this.initializePlugins();
   }
@@ -302,9 +305,47 @@ export class DiscoveryService {
   }
 
   /**
-   * Get Modbus discovery options from environment
+   * Get Modbus discovery options from configuration
+   * Uses AgentConfig if available, otherwise falls back to direct env reads
    */
   private getModbusOptions(): ModbusDiscoveryOptions | undefined {
+    // Use config accessor if available (cloud → env fallback)
+    if (this.agentConfig) {
+      const config = this.agentConfig.getModbusConfig();
+      
+      // No connection configured
+      if (!config.tcpHost && !config.rtuPort) {
+        return undefined;
+      }
+
+      const options: ModbusDiscoveryOptions = {};
+
+      // TCP configuration
+      if (config.tcpHost) {
+        options.tcpHost = config.tcpHost;
+        options.tcpPort = config.tcpPort ?? 502;
+      }
+
+      // Serial/RTU configuration
+      if (config.rtuPort) {
+        options.serialPort = config.rtuPort;
+        options.baudRate = config.rtuBaudRate ?? 9600;
+      }
+
+      // Slave ID range
+      if (config.slaveRangeStart !== undefined && config.slaveRangeEnd !== undefined) {
+        options.slaveIdRange = [config.slaveRangeStart, config.slaveRangeEnd];
+      }
+
+      // Timeout
+      if (config.timeout !== undefined) {
+        options.timeout = config.timeout;
+      }
+
+      return options;
+    }
+
+    // Legacy: Direct env var reads (backward compatibility)
     const tcpHost = process.env.MODBUS_TCP_HOST;
     const serialPort = process.env.MODBUS_SERIAL_PORT;
 
@@ -349,9 +390,24 @@ export class DiscoveryService {
   }
 
   /**
-   * Get OPC-UA discovery options from environment
+   * Get OPC-UA discovery options from configuration
+   * Uses AgentConfig if available, otherwise falls back to direct env reads
    */
   private getOPCUAOptions(): OPCUADiscoveryOptions | undefined {
+    // Use config accessor if available (cloud → env fallback)
+    if (this.agentConfig) {
+      const config = this.agentConfig.getOPCUAConfig();
+      
+      if (!config.discoveryUrls || config.discoveryUrls.length === 0) {
+        return undefined; // Use plugin defaults
+      }
+
+      return {
+        discoveryUrls: config.discoveryUrls
+      };
+    }
+
+    // Legacy: Direct env var reads (backward compatibility)
     const urls = process.env.OPCUA_DISCOVERY_URLS;
     
     if (!urls) {
@@ -382,9 +438,66 @@ export class DiscoveryService {
   }
 
   /**
-   * Get SNMP discovery options from environment
+   * Get SNMP discovery options from configuration
+   * Uses AgentConfig if available, otherwise falls back to direct env reads
    */
   private getSNMPOptions(): SNMPDiscoveryOptions | undefined {
+    // Use config accessor if available (cloud → env fallback)
+    if (this.agentConfig) {
+      const config = this.agentConfig.getSNMPConfig();
+      
+      // CRITICAL: Only run SNMP discovery if explicitly configured
+      // Don't auto-detect subnets (causes massive IP scans)
+      if (!config.ipRanges || config.ipRanges.length === 0) {
+        this.logger?.debugSync('SNMP IP ranges not configured, skipping SNMP discovery', {
+          component: LogComponents.discovery,
+          note: 'Configure via dashboard or set SNMP_IP_RANGES env var'
+        });
+        return undefined;
+      }
+
+      const options: SNMPDiscoveryOptions = { ipRanges: config.ipRanges };
+
+      // Optional: Port
+      if (config.port !== undefined) {
+        options.port = config.port;
+      }
+      
+      // Note: SNMPv3 auth not yet in cloud config schema (future enhancement)
+      // For now, v3 auth still comes from env vars
+      if (process.env.SNMP_COMMUNITY) {
+        options.community = process.env.SNMP_COMMUNITY;
+      }
+      
+      if (process.env.SNMP_VERSION) {
+        options.version = process.env.SNMP_VERSION as 'v1' | 'v2c' | 'v3';
+      }
+      
+      if (process.env.SNMP_TIMEOUT) {
+        options.timeout = parseInt(process.env.SNMP_TIMEOUT, 10);
+      }
+      
+      if (process.env.SNMP_RETRIES) {
+        options.retries = parseInt(process.env.SNMP_RETRIES, 10);
+      }
+      
+      if (process.env.SNMP_CONCURRENCY) {
+        options.concurrency = parseInt(process.env.SNMP_CONCURRENCY, 10);
+      }
+
+      // SNMPv3 authentication (env vars only for now)
+      if (options.version === 'v3') {
+        options.v3Username = process.env.SNMP_V3_USERNAME;
+        options.v3AuthProtocol = process.env.SNMP_V3_AUTH_PROTOCOL as 'MD5' | 'SHA';
+        options.v3AuthKey = process.env.SNMP_V3_AUTH_KEY;
+        options.v3PrivProtocol = process.env.SNMP_V3_PRIV_PROTOCOL as 'DES' | 'AES';
+        options.v3PrivKey = process.env.SNMP_V3_PRIV_KEY;
+      }
+
+      return options;
+    }
+
+    // Legacy: Direct env var reads (backward compatibility)
     const ipRanges = process.env.SNMP_IP_RANGES;
     
     // CRITICAL: Only run SNMP discovery if explicitly configured

@@ -100,6 +100,14 @@ interface TargetStateConfig {
         reason: string
       }
   };
+  intervals?: {
+    discoveryFullIntervalMs?: number;
+    discoveryLightIntervalMs?: number;
+    targetStatePollIntervalMs?: number;
+    deviceReportIntervalMs?: number;
+    metricsIntervalMs?: number;
+    reconciliationIntervalMs?: number;
+  };
   protocolAdapters?: {
     modbus?: {
       enabled: boolean;
@@ -185,6 +193,14 @@ export function generateDefaultTargetStateConfig(
         port: 161,
       },
     },
+    intervals: {
+      discoveryFullIntervalMs: 86400000, // 24 hours
+      discoveryLightIntervalMs: 14400000, // 4 hours
+      targetStatePollIntervalMs: 60000, // 60 seconds
+      deviceReportIntervalMs: 60000, // 60 seconds (matches settings.deviceReportIntervalMs)
+      metricsIntervalMs: 60000, // 60 seconds (matches settings.metricsIntervalMs)
+      reconciliationIntervalMs: 30000, // 30 seconds
+    },
   };
 
   // If no license data, return default
@@ -205,12 +221,16 @@ export function generateDefaultTargetStateConfig(
     case 'professional':
       defaultConfig.settings.metricsIntervalMs = 30000; // 30 seconds
       defaultConfig.settings.deviceReportIntervalMs = 20000; // 20 seconds
+      defaultConfig.intervals!.metricsIntervalMs = 30000; // Match settings
+      defaultConfig.intervals!.deviceReportIntervalMs = 20000; // Match settings
       defaultConfig.logging.level = 'info';
       break;
 
     case 'enterprise':
       defaultConfig.settings.metricsIntervalMs = 10000; // 10 seconds (fastest)
       defaultConfig.settings.deviceReportIntervalMs = 10000; // 10 seconds
+      defaultConfig.intervals!.metricsIntervalMs = 10000; // Match settings
+      defaultConfig.intervals!.deviceReportIntervalMs = 10000; // Match settings
       defaultConfig.logging.level = 'debug'; // Enhanced logging
       break;
 
@@ -230,6 +250,7 @@ export function generateDefaultTargetStateConfig(
   if (!subscriptionActive && licenseData.trial?.isTrialMode !== true) {
     logger.warn('Subscription not active - disabling premium features');
     defaultConfig.settings.metricsIntervalMs = 300000; // 5 minutes (minimal)
+    defaultConfig.intervals!.metricsIntervalMs = 300000; // Match settings
   }
 
   return defaultConfig;

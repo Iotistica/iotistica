@@ -52,6 +52,7 @@ import { loadConfigFromEnv } from "./ai/anomaly/utils.js";
 import { SimulationOrchestrator, loadSimulationConfig } from "./simulation/index.js";
 import { DiscoveryService } from "./features/discovery/discovery-service.js";
 import { FeatureInitializer, type FeatureContext } from "./bootstrap/init.js";
+import { AgentConfig } from "./config/agent-config.js";
 
 /**
  * Load boot configuration from file
@@ -90,17 +91,13 @@ export default class DeviceAgent {
   private anomalyService?: AnomalyDetectionService; // Edge-based AI anomaly detection for metrics and sensors
   private simulationOrchestrator?: SimulationOrchestrator; // Simulation framework for testing
   private discoveryService?: DiscoveryService; // Protocol discovery (Modbus, OPC-UA, CAN, etc.)
+  private agentConfig!: AgentConfig; // Configuration accessor (cloud → env fallback)
 
   // Cached target state (updated when target state changes)
   private cachedTargetState: any = null;
 
   // System settings (config-driven with env var defaults)
-  private reconciliationIntervalMs: number;
-  private discoveryFullIntervalMs: number;    
-  private discoveryLightIntervalMs: number; 
-  private targetStatePollIntervalMs: number; 
-  private deviceReportIntervalMs: number; 
-  private metricsIntervalMs: number; 
+  // Note: Intervals now accessed via agentConfig.getIntervalConfig() 
   // Scheduled restart timer (controlled from cloud config)
   private scheduledRestartTimer?: NodeJS.Timeout;
 
@@ -125,15 +122,14 @@ export default class DeviceAgent {
   };
 
   constructor() {
-    this.reconciliationIntervalMs = parseInt(process.env.RECONCILIATION_INTERVAL_MS || "30000",10);
     this.apiUrl = process.env.CLOUD_API_ENDPOINT || "http://localhost:3002";
     this.deviceApiPort = parseInt(process.env.DEVICE_API_PORT || "48484",10);
-    this.discoveryFullIntervalMs = parseInt(process.env.DISCOVERY_FULL_INTERVAL_MS || "86400000", 10 ); // 24 hours default
-    this.discoveryLightIntervalMs = parseInt(process.env.DISCOVERY_LIGHT_INTERVAL_MS || "14400000", 10 ); // 4 hours default
-    this.targetStatePollIntervalMs = parseInt(process.env.POLL_INTERVAL_MS || "60000", 10);
-    this.deviceReportIntervalMs = parseInt(process.env.REPORT_INTERVAL_MS || "60000", 10);
-    this.metricsIntervalMs = parseInt(process.env.METRICS_INTERVAL_MS || "300000", 10);
-  
+    
+    // Initialize StateReconciler first (manages target state)
+    this.stateReconciler = new StateReconciler();
+    
+    // Create config accessor (uses stateReconciler for cloud config)
+    this.agentConfig = new AgentConfig(this.stateReconciler);
   }
 
   public async init(): Promise<void> {
@@ -236,11 +232,13 @@ export default class DeviceAgent {
         ? "Cloud-connected"
         : "Standalone (not provisioned)";
 
+      const intervals = this.agentConfig.getIntervalConfig();
+      
       this.agentLogger.infoSync("Device Agent initialized successfully", {
         component: LogComponents.agent,
         mode,
         deviceApiPort: this.deviceApiPort,
-        reconciliationInterval: config.settings.reconciliationIntervalMs || this.reconciliationIntervalMs,
+        reconciliationInterval: intervals.reconciliationIntervalMs,
         cloudApiEndpoint: this.apiUrl,
         cloudFeaturesEnabled: this.deviceInfo.provisioned && !!this.cloudSync,
       });
@@ -639,12 +637,13 @@ export default class DeviceAgent {
     });
 
     try {
-      // Create discovery service
-      this.discoveryService = new DiscoveryService(this.agentLogger);
+      // Create discovery service with config accessor
+      this.discoveryService = new DiscoveryService(this.agentLogger, this.agentConfig);
       await this.discoveryService.init();
 
-      // Check if first boot discovery should run
-      const enableFirstBootDiscovery = process.env.ENABLE_FIRST_BOOT_DISCOVERY === 'true';
+      // Check if first boot discovery should run (uses cloud config → env fallback)
+      const features = this.agentConfig.getFeatures();
+      const enableFirstBootDiscovery = features.enableFirstBootDiscovery ?? false;
       
       if (enableFirstBootDiscovery) {
         this.agentLogger?.infoSync("Running first boot discovery (will block until complete)", {
@@ -699,10 +698,12 @@ export default class DeviceAgent {
       return;
     }
     
+    const intervals = this.agentConfig.getIntervalConfig();
+    
     this.agentLogger?.infoSync('Starting periodic discovery timers', {
       component: LogComponents.agent,
-      lightIntervalHours: this.discoveryLightIntervalMs / (60 * 60 * 1000),
-      fullIntervalHours: this.discoveryFullIntervalMs / (60 * 60 * 1000),
+      lightIntervalHours: intervals.discoveryLightIntervalMs! / (60 * 60 * 1000),
+      fullIntervalHours: intervals.discoveryFullIntervalMs! / (60 * 60 * 1000),
     });
     
     // Light discovery: Fast scan (ping only)
@@ -721,7 +722,7 @@ export default class DeviceAgent {
           { component: LogComponents.agent }
         );
       });
-    }, this.discoveryLightIntervalMs);
+    }, intervals.discoveryLightIntervalMs!);
     
     // Full discovery: Deep validation with device info reads
     this.discoveryFullTimer = setInterval(() => {
@@ -739,7 +740,7 @@ export default class DeviceAgent {
           { component: LogComponents.agent }
         );
       });
-    }, this.discoveryFullIntervalMs);
+    }, intervals.discoveryFullIntervalMs!);
   }
 
   private async initializeSimulationMode(): Promise<void> {
@@ -820,11 +821,8 @@ export default class DeviceAgent {
       return;
     }
 
-    // Get intervals from config (passed as parameter during init)
-    this.targetStatePollIntervalMs = configSettings.targetStatePollIntervalMs;
-    this.deviceReportIntervalMs = configSettings.deviceReportIntervalMs;
-    this.metricsIntervalMs = configSettings.metricsIntervalMs;
- 
+    // Get intervals from agentConfig (cloud → env fallback)
+    const intervals = this.agentConfig.getIntervalConfig();
 
     // Configure edge AI anomaly detection for system metrics and sensors
     if (this.anomalyService) {
@@ -850,9 +848,9 @@ export default class DeviceAgent {
       this.deviceManager,
       {
         cloudApiEndpoint: this.apiUrl,
-        pollInterval: this.targetStatePollIntervalMs, // Use config value or default 60s
-        reportInterval: this.deviceReportIntervalMs, // Use config value or default 60s
-        metricsInterval: this.metricsIntervalMs, // Use config value or default 5min
+        pollInterval: intervals.targetStatePollIntervalMs!,
+        reportInterval: intervals.deviceReportIntervalMs!,
+        metricsInterval: intervals.metricsIntervalMs!,
       },
       this.agentLogger, // Pass the agent logger
       this.sensorPublish, // Pass sensor-publish for health reporting
@@ -878,12 +876,13 @@ export default class DeviceAgent {
 
 
   private startAutoReconciliation(): void {
+    const intervals = this.agentConfig.getIntervalConfig();
     this.containerManager.startAutoReconciliation(
-      this.reconciliationIntervalMs
+      intervals.reconciliationIntervalMs!
     );
     this.agentLogger?.infoSync("Auto-reconciliation started", {
       component: LogComponents.agent,
-      intervalMs: this.reconciliationIntervalMs,
+      intervalMs: intervals.reconciliationIntervalMs,
     });
   }
 
