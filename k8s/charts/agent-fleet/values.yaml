@@ -33,9 +33,10 @@ agent:
   
   # Agent environment variables
   env:
-    # CloudSync intervals
-    REPORT_INTERVAL_MS: "60000"      # 1 minute
-    METRICS_INTERVAL_MS: "300000"    # 5 minutes
+    # CloudSync intervals (increased to reduce API load with large fleets)
+    POLL_INTERVAL_MS: "300000"       # 5 minutes (check for target state changes)
+    REPORT_INTERVAL_MS: "300000"     # 5 minutes (report current state)
+    METRICS_INTERVAL_MS: "600000"    # 10 minutes (send metrics)
     
     # Discovery intervals
     DISCOVERY_LIGHT_INTERVAL_MS: "14400000"  # 4 hours
@@ -43,7 +44,7 @@ agent:
     
     # Protocol adapters
     ENABLE_PROTOCOL_ADAPTERS: "true"
-    ENABLE_SENSOR_PUBLISH: "true"
+    ENABLE_SENSOR_PUBLISH: "false"  # Disabled - no OPC-UA server in K8s fleet
     ENABLE_FIRST_BOOT_DISCOVERY: "true"
     
     # Modbus configuration (sidecar)
@@ -66,7 +67,7 @@ agent:
     
     # Security
     REQUIRE_PROVISIONING: "false"    # Pre-provisioned keys
-    API_SECURITY_MODE: "LOCALHOST_ONLY"
+    API_SECURITY_MODE: "OPEN"  # Allow K8s probes in cluster
     FIREWALL_ENABLED: "false"
     
     # Disable anomaly detection for testing (resource-intensive)
@@ -145,9 +146,9 @@ service:
 monitoring:
   enabled: true
   
-  # Prometheus ServiceMonitor
+  # Prometheus ServiceMonitor (requires Prometheus Operator CRD)
   serviceMonitor:
-    enabled: true
+    enabled: false  # Set to true if Prometheus Operator is installed
     interval: 30s
     scrapeTimeout: 10s
   

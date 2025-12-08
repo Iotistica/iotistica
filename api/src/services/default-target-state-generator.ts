@@ -153,11 +153,11 @@ export function generateDefaultTargetStateConfig(
     },
     features: {
       enableDeviceJobs: true, // Always enabled (API access required for system to work)
-      enableDeviceSensorPublish: true,
+      enableDeviceSensorPublish: false, // Disabled by default (no OPC-UA server assumed)
       enableDeviceRemoteAccess: true,
       enableProtocolAdapters: true,
       enableFirstBootDiscovery: true,
-      enableAnomalyDetection: true,
+      enableAnomalyDetection: false, // Disabled by default (resource-intensive)
     },
     settings: {
       metricsIntervalMs: 60000, // 1 minute (starter plan)
