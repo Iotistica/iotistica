@@ -1,57 +1,36 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2025-12-05 21:03:10
-# Agents: 25 to 25
-# Ports: 48505 to 48505
+# Generated: 2025-12-07 22:29:26
+# Agents: 27 to 27
+# Ports: 48507 to 48507
 
 services:
-  agent-25:
-    container_name: agent-25
-    image: zemfyre-sensor-agent:latest
+  agent-27:
+    container_name: agent-27
+    image: iotistic/agent:latest
     restart: always
     mem_limit: 512m
     mem_reservation: 256m
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - agent-25-data:/app/data
+      - agent-27-data:/app/data
       - ./certs/ca.crt:/app/certs/ca.crt:ro
     environment:
-      - DEVICE_API_PORT=48505
+      - DEVICE_API_PORT=48507
       - CLOUD_API_ENDPOINT=http://23.233.80.107:30002
       - NODE_ENV=development
-      - REPORT_INTERVAL_MS=20000
-      - METRICS_INTERVAL_MS=30000
-      - LOG_COMPRESSION=true
+      # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=07b253d8b18b30a0be37ffbc40d8e7868bf28fb4ab5b3741caa6e8e6d750b5ec
+      - PROVISIONING_KEY=4bc0951f84c2ef44bbb439b3a8f73bd901b9af92253e9ff5d3f834ab2a3e5260
       - API_SECURITY_MODE=LOCALHOST_ONLY
-      - MEMORY_CHECK_INTERVAL_MS=30000
-      - MEMORY_THRESHOLD_MB=30
-      - LOG_FILE_PERSISTANCE=true
-      - LOG_MAX_AGE=86400000
-      - MAX_LOG_FILE_SIZE=52428800
-      - MAX_LOGS=10000
-      - ANOMALY_DETECTION_ENABLED=true
+      - FIREWALL_ENABLED=false
+      # Testing & Development (not dashboard-controlled)
       - SIMULATION_MODE=false
       - SIMULATION_CONFIG={}
       - SIMULATE_MEMORY_LEAK=false
-      - FIREWALL_ENABLED=false
-      - ENABLE_PROTOCOL_ADAPTERS=true
-      - ENABLE_SENSOR_PUBLISH=true
-      - ENABLE_FIRST_BOOT_DISCOVERY=true
-      - MODBUS_VENDOR_FILE=/app/dist/config/vendors/dataPoints.json
-      - MODBUS_VENDOR=COMAP
-      - MODBUS_TCP_HOST=iotistic-modbus-sim
-      - MODBUS_TCP_PORT=502
-      - MODBUS_SLAVE_RANGE_START=1
-      - MODBUS_SLAVE_RANGE_END=10
-      - MODBUS_TIMEOUT=2000
-      - OPCUA_DISCOVERY_URLS=
-      - SNMP_IP_RANGES=iotistic-snmp-sim
-      - SNMP_PORT=161
     networks:
       - iotistic-net
 volumes:
-  agent-25-data:
+  agent-27-data:
     driver: local
 networks:
   iotistic-net:

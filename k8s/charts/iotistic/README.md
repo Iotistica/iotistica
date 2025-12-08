@@ -11,6 +11,8 @@ This chart deploys a complete Iotistic stack including:
 - **API** - Backend API service (handles MQTT auth, device management)
 - **Dashboard** - Frontend web UI
 - **MQTT Monitor** - Real-time MQTT topic monitoring with schema generation
+- **Postoffice** - Email delivery service with queue management
+- **Housekeeper** - Database maintenance and cleanup service
 
 ### Key Architecture Patterns
 
@@ -110,6 +112,11 @@ helm uninstall iotistic --namespace iotistic
 | `dashboard.nodePort` | NodePort for Dashboard | `30000` |
 | `mqttMonitor.enabled` | Enable MQTT Monitor | `true` |
 | `mqttMonitor.port` | Internal service port | `3500` |
+| `postoffice.enabled` | Enable Postoffice email service | `true` |
+| `postoffice.port` | Internal service port | `3600` |
+| `postoffice.email.transport` | Email transport (smtp/ses) | `smtp` |
+| `housekeeper.enabled` | Enable Housekeeper service | `true` |
+| `housekeeper.port` | Internal service port | `3400` |
 | `ingress.enabled` | Enable Ingress | `false` |
 
 ### Example: Custom Values

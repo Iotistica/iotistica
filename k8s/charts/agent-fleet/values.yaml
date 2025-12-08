@@ -1,0 +1,190 @@
+# Default values for agent-fleet
+# Deploy multiple agent pods with Modbus simulator sidecars for load testing
+
+# Fleet configuration
+fleet:
+  # Name of the agent fleet (for labels and identification)
+  name: "test-fleet-1"
+  
+  # Number of agent pods to deploy
+  replicaCount: 10
+  
+  # Cloud API endpoint
+  cloudApiEndpoint: "http://api.iotistic.svc.cluster.local:3002"
+  
+  # Fleet ID for provisioning
+  fleetId: "default-fleet"
+
+# Agent container configuration
+agent:
+  image:
+    repository: iotistic/agent
+    tag: latest
+    pullPolicy: IfNotPresent
+  
+  # Resource limits per agent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  
+  # Agent environment variables
+  env:
+    # CloudSync intervals
+    REPORT_INTERVAL_MS: "60000"      # 1 minute
+    METRICS_INTERVAL_MS: "300000"    # 5 minutes
+    
+    # Discovery intervals
+    DISCOVERY_LIGHT_INTERVAL_MS: "14400000"  # 4 hours
+    DISCOVERY_FULL_INTERVAL_MS: "86400000"   # 24 hours
+    
+    # Protocol adapters
+    ENABLE_PROTOCOL_ADAPTERS: "true"
+    ENABLE_SENSOR_PUBLISH: "true"
+    ENABLE_FIRST_BOOT_DISCOVERY: "true"
+    
+    # Modbus configuration (sidecar)
+    MODBUS_ENABLED: "true"
+    MODBUS_TCP_HOST: "localhost"     # Sidecar on same pod
+    MODBUS_TCP_PORT: "502"
+    MODBUS_SLAVE_RANGE_START: "1"
+    MODBUS_SLAVE_RANGE_END: "5"
+    MODBUS_TIMEOUT: "2000"
+    MODBUS_VENDOR: "Generic"
+    
+    # Logging
+    LOG_LEVEL: "info"
+    LOG_COMPRESSION: "true"
+    LOG_FILE_PERSISTENCE: "false"    # Disable file logging in K8s
+    
+    # Performance
+    MEMORY_CHECK_INTERVAL_MS: "30000"
+    MEMORY_THRESHOLD_MB: "30"
+    
+    # Security
+    REQUIRE_PROVISIONING: "false"    # Pre-provisioned keys
+    API_SECURITY_MODE: "LOCALHOST_ONLY"
+    FIREWALL_ENABLED: "false"
+    
+    # Disable anomaly detection for testing (resource-intensive)
+    ANOMALY_DETECTION_ENABLED: "false"
+
+# Modbus simulator sidecar configuration
+simulator:
+  image:
+    repository: iotistic/modbus-simulator
+    tag: latest
+    pullPolicy: IfNotPresent
+  
+  # Resource limits per simulator
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  
+  # Simulator environment variables
+  env:
+    MODBUS_PORT: "502"
+    MODBUS_SLAVES: "5"               # Number of slave IDs to simulate
+    MODBUS_VENDOR: "Generic"         # Vendor to simulate
+    MODBUS_VENDOR_JSON: "/app/vendors/dataPoints.json"
+
+# Provisioning configuration
+provisioning:
+  # API endpoint for provisioning key generation
+  apiUrl: "https://api.iotistic.com"
+  
+  # Fleet ID for all agents in this deployment
+  fleetId: "k8s-fleet-default"
+  
+  # Existing secret containing pre-generated provisioning keys
+  # Keys should be named: PROVISIONING_KEY_0, PROVISIONING_KEY_1, etc.
+  # Generate with: ./scripts/generate-provisioning-keys.sh or .ps1
+  existingSecret: ""
+  
+  # Secret name to create (if existingSecret not provided)
+  secretName: "agent-fleet-provisioning-keys"
+  
+  # Require provisioning (agents won't start without valid key)
+  required: true
+  
+  # Key file name in secret
+  keyFileName: "keys.txt"
+
+# Persistent storage configuration
+persistence:
+  enabled: true
+  
+  # Storage class (leave empty for default)
+  storageClass: ""
+  
+  # Storage size per agent (SQLite database + logs)
+  size: 100Mi
+  
+  # Access mode
+  accessMode: ReadWriteOnce
+
+# Service configuration (for agent API exposure)
+service:
+  # ClusterIP service for each agent
+  type: ClusterIP
+  
+  # Agent API port
+  port: 48484
+  
+  # Create headless service for StatefulSet
+  headless: true
+
+# Monitoring configuration
+monitoring:
+  enabled: true
+  
+  # Prometheus ServiceMonitor
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+  
+  # Metrics port
+  metricsPort: 48484
+
+# Node selection
+nodeSelector: {}
+  # Example: workload: agent-fleet
+
+# Tolerations for dedicated node pools
+tolerations: []
+  # Example:
+  # - key: "workload"
+  #   operator: "Equal"
+  #   value: "agent-fleet"
+  #   effect: "NoSchedule"
+
+# Affinity rules
+affinity: {}
+  # Example: Spread agents across nodes
+  # podAntiAffinity:
+  #   preferredDuringSchedulingIgnoredDuringExecution:
+  #     - weight: 100
+  #       podAffinityTerm:
+  #         labelSelector:
+  #           matchLabels:
+  #             app: agent-fleet
+  #         topologyKey: kubernetes.io/hostname
+
+# Security context
+securityContext:
+  runAsNonRoot: false  # Agent may need root for certain operations
+  runAsUser: 0
+  fsGroup: 0
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 80%  # Keep 80% of agents running during disruptions

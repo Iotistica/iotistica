@@ -80,7 +80,7 @@ jobs:
         id: bump
         run: |
           cd postoffice
-          # Get current version
+          # Get current versiond
           CURRENT_VERSION=$(jq -r '.version' package.json)
           echo "Current version: $CURRENT_VERSION"
           

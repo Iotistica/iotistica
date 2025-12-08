@@ -33,9 +33,10 @@
 
 param(
     [int]$Count = 1,
-    [int]$StartIndex = 25,
+    [int]$StartIndex = 27,
     [string]$OutputFile = "docker-compose.agents.yml",
     [string]$ApiUrl = "http://23.233.80.107:30002",
+    #[string]$ApiUrl = "http://localhost:4002",
     [string]$FleetId = "default-fleet",
     
     # Cleanup Mode
@@ -47,6 +48,7 @@ param(
     # Agent Configuration
     [string]$NodeEnv = "development",
     [string]$CLOUD_API_ENDPOINT = "http://23.233.80.107:30002",
+    #[string]$CLOUD_API_ENDPOINT = "http://api:3002",
     [int]$ReportInterval = 20000,
     [int]$MetricsInterval = 30000,
     [string]$LogCompression = "true",
@@ -292,7 +294,7 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
     $service = @"
   $agentName`:
     container_name: $agentName
-    image: zemfyre-sensor-agent:latest
+    image: iotistic/agent:latest
     restart: always
     mem_limit: $MemLimit
     mem_reservation: $MemReservation
@@ -304,36 +306,15 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
       - DEVICE_API_PORT=$port
       - CLOUD_API_ENDPOINT=$CLOUD_API_ENDPOINT
       - NODE_ENV=$NodeEnv
-      - REPORT_INTERVAL_MS=$ReportInterval
-      - METRICS_INTERVAL_MS=$MetricsInterval
-      - LOG_COMPRESSION=$LogCompression
+      # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=$RequireProvisioning
       - PROVISIONING_KEY=$apiKey
       - API_SECURITY_MODE=$ApiSecurityMode
-      - MEMORY_CHECK_INTERVAL_MS=$MemoryCheckInterval
-      - MEMORY_THRESHOLD_MB=$MemoryThreshold
-      - LOG_FILE_PERSISTANCE=$LogFilePersistance
-      - LOG_MAX_AGE=$LogMaxAge
-      - MAX_LOG_FILE_SIZE=$MaxLogFileSize
-      - MAX_LOGS=$MaxLogs
-      - ANOMALY_DETECTION_ENABLED=$AnomalyDetectionEnabled
+      - FIREWALL_ENABLED=$FirewallEnabled
+      # Testing & Development (not dashboard-controlled)
       - SIMULATION_MODE=$($simConfig.enabled)
       - SIMULATION_CONFIG=$($simConfig.config)
       - SIMULATE_MEMORY_LEAK=$SimulateMemoryLeak
-      - FIREWALL_ENABLED=$FirewallEnabled
-      - ENABLE_PROTOCOL_ADAPTERS=$EnableProtocolAdapters
-      - ENABLE_SENSOR_PUBLISH=$EnableSensorPublish
-      - ENABLE_FIRST_BOOT_DISCOVERY=$EnableFirstBootDiscovery
-      - MODBUS_VENDOR_FILE=/app/dist/config/vendors/dataPoints.json
-      - MODBUS_VENDOR=COMAP
-      - MODBUS_TCP_HOST=$ModbusTcpHost
-      - MODBUS_TCP_PORT=$ModbusTcpPort
-      - MODBUS_SLAVE_RANGE_START=$ModbusSlaveRangeStart
-      - MODBUS_SLAVE_RANGE_END=$ModbusSlaveRangeEnd
-      - MODBUS_TIMEOUT=$ModbusTimeout
-      - OPCUA_DISCOVERY_URLS=$OpcuaDiscoveryUrls
-      - SNMP_IP_RANGES=$SnmpIpRanges
-      - SNMP_PORT=$SnmpPort
     networks:
       - iotistic-net
 "@
@@ -435,7 +416,7 @@ Write-Host "  docker-compose -f $OutputFile down" -ForegroundColor Yellow
 if ($Run) {
     Write-Host "`n🚀 Starting agents..." -ForegroundColor Cyan
     $composeFile = Join-Path $PSScriptRoot ".." $OutputFile
-    docker compose -f $composeFile up -d
+    docker compose -f $composeFile up -d --build
     
     if ($LASTEXITCODE -eq 0) {
         Write-Host "✅ Agents started successfully!" -ForegroundColor Green

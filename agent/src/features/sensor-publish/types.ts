@@ -35,7 +35,7 @@ export type SensorConfig = z.infer<typeof SensorConfigSchema>;
  */
 export const SensorPublishConfigSchema = z.object({
   enabled: z.boolean().default(true),
-  sensors: z.array(SensorConfigSchema).max(10)
+  endpoints: z.array(SensorConfigSchema).max(10)
 });
 
 export type SensorPublishConfig = z.infer<typeof SensorPublishConfigSchema> & {

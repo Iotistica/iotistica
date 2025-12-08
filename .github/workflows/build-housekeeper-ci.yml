@@ -11,7 +11,7 @@ on:
 jobs:
   test:
     name: Run Unit Tests
-    runs-on: ubuntu-24.04
+    runs-on: [iotistic-lab-sc]
     
     steps:
       - name: Checkout repository
@@ -38,7 +38,7 @@ jobs:
   version:
     name: Bump Version
     needs: test
-    runs-on: ubuntu-24.04
+    runs-on: [iotistic-lab-sc]
     permissions:
       contents: write
     outputs:
@@ -80,7 +80,7 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add package.json
+          git add housekeeper/package.json
           git commit -m "chore: bump housekeeper version to ${{ steps.bump.outputs.package_version }} [skip ci]"
           git push origin HEAD
 
@@ -94,7 +94,7 @@ jobs:
   buildx:
     name: Build & Push to Docker
     needs: version
-    runs-on: ubuntu-24.04
+    runs-on: [iotistic-lab-sc]
     permissions:
       contents: write
 
@@ -102,7 +102,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: master
 
       - name: Display Version Update
         run: |
@@ -145,8 +145,8 @@ jobs:
         if: success()
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: ./Dockerfile
+          context: ./housekeeper
+          file: ./housekeeper/Dockerfile
           push: true
           platforms: linux/amd64
           cache-from: type=local,src=/tmp/.buildx-cache
@@ -159,7 +159,7 @@ jobs:
   report:
     name: Generate Reports
     needs: [version, buildx]
-    runs-on: ubuntu-24.04
+    runs-on: [iotistic-lab-sc]
     if: always()
     
     steps:

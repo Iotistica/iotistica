@@ -15,9 +15,9 @@
 
 services:
     postgres:
-        image: postgres:16-alpine
+        image: timescale/timescaledb:latest-pg16
         container_name: iotistic-postgres
-        restart: unless-stopped
+        # restart: unless-stopped
         environment:
             - POSTGRES_DB=${POSTGRES_DB:-iotistic}
             - POSTGRES_USER=${POSTGRES_USER:-postgres}
@@ -30,6 +30,7 @@ services:
             - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
         command: >
             postgres
+            -c shared_preload_libraries=timescaledb
             -c config_file=/etc/postgresql/postgresql.conf
             -c hba_file=/etc/postgresql/pg_hba.conf
         healthcheck:
@@ -61,41 +62,7 @@ services:
             retries: 5
         networks:
            - iotistic-net
-    agent-20:
-        container_name: agent-20
-        image: zemfyre-sensor-agent:latest
-        restart: always
-        mem_limit: 512m
-        mem_reservation: 256m
-        volumes:
-        - /var/run/docker.sock:/var/run/docker.sock
-        - agent-20-data:/app/data
-        - ./certs/ca.crt:/app/certs/ca.crt:ro
-        environment:
-        - DEVICE_API_PORT=48500
-        - CLOUD_API_ENDPOINT=http://api:3002
-        - NODE_ENV=development
-        - REPORT_INTERVAL_MS=20000
-        - METRICS_INTERVAL_MS=30000
-        - LOG_COMPRESSION=true
-        - REQUIRE_PROVISIONING=true
-        - PROVISIONING_KEY=1ee72ac184889b87e62e86eea290101c92c2747701a55f58759478faf836f365
-        - API_SECURITY_MODE=LOCALHOST_ONLY
-        - MEMORY_CHECK_INTERVAL_MS=30000
-        - MEMORY_THRESHOLD_MB=15
-        - LOG_FILE_PERSISTANCE=true
-        - LOG_MAX_AGE=86400000
-        - MAX_LOG_FILE_SIZE=52428800
-        - MAX_LOGS=10000
-        - SIMULATE_MEMORY_LEAK=false
-        - ANOMALY_DETECTION_ENABLED=true
-        - SIMULATION_MODE=false
-        - SIMULATION_CONFIG={}
-        depends_on:
-            api:
-                condition: service_healthy
-        networks:
-        - iotistic-net
+   
     api:
         build:
             context: ./api

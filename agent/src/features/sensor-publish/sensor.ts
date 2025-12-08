@@ -377,20 +377,18 @@ export class Sensor extends EventEmitter {
    */
   private onData(data: Buffer): void {
     this.stats.bytesReceived += data.length;
-    this.logger?.info(`Received ${data.length} bytes from endpoint '${this.getSensorName()}'`);
-    
     // Append to buffer
     this.buffer = Buffer.concat([this.buffer, data]);
     
-    // Check if buffer capacity exceeded
+    // Parse messages from buffer first (this adds them to messageBatch)
+    this.parseMessages();
+    
+    // Check if buffer capacity exceeded after parsing
     if (this.buffer.length > this.config.bufferCapacity) {
       this.logger?.warn(`Buffer capacity exceeded for endpoint '${this.getSensorName()}', publishing batch`);
       this.publishBatch();
       return;
     }
-    
-    // Parse messages from buffer
-    this.parseMessages();
   }
 
   /**
@@ -452,7 +450,10 @@ export class Sensor extends EventEmitter {
       return;
     }
     
-    if (!this.mqttConnection.isConnected()) {
+    const isConnected = this.mqttConnection.isConnected();
+    this.logger?.debug(`MQTT connection status: ${isConnected}`);
+    
+    if (!isConnected) {
       this.logger?.warn(`MQTT not connected, cannot publish batch from endpoint '${this.getSensorName()}'`);
       return;
     }
@@ -468,6 +469,7 @@ export class Sensor extends EventEmitter {
         messages: this.messageBatch.messages
       });
       
+    
       await this.mqttConnection.publish(topic, payload, { qos: 1 });
       
       // Feed to edge AI anomaly detection if configured
@@ -480,7 +482,7 @@ export class Sensor extends EventEmitter {
       this.stats.bytesPublished += this.messageBatch.totalBytes;
       this.stats.lastPublishTime = new Date();
       
-      this.logger?.debug(
+      this.logger?.info(
         `Published ${this.messageBatch.messages.length} messages (${this.messageBatch.totalBytes} bytes) from sensor '${this.getSensorName()}'`
       );
       

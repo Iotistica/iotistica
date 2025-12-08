@@ -170,7 +170,7 @@ export class FeatureInitializer {
         return;
       }
 
-      // Build endpoint configs only for enabled protocols
+      // Build sensor configs only for enabled protocols
       const endpoints = endpointOutputs
         .filter(output => enabledEndpoints.has(output.protocol))
         .map((output) => ({
@@ -192,13 +192,13 @@ export class FeatureInitializer {
         return;
       }
 
-      const endpointConfig = {
+      const sensorConfig = {
         enabled: true,
         endpoints,
       };
 
       this.features.sensorPublish = new SensorPublishFeature(
-        endpointConfig as any,
+        sensorConfig as any,
         logger,
         deviceInfo.uuid
       );
@@ -395,19 +395,20 @@ export class FeatureInitializer {
   private async initFirewall(): Promise<void> {
     const { logger, configSettings, deviceApiPort } = this.context;
 
+    // Check if firewall is disabled via environment variable
+    // Firewall is infrastructure security, controlled at deployment time only
+    if (process.env.FIREWALL_ENABLED === 'false') {
+      logger.infoSync('Firewall disabled by environment variable', {
+        component: LogComponents.agent,
+      });
+      return;
+    }
+
     // Get firewall configuration from config or environment
     const firewallMode = 
       configSettings.firewallMode || 
       process.env.FIREWALL_MODE || 
       'auto';
-    
-    // Check if firewall is enabled
-    if (firewallMode === 'disabled' || process.env.FIREWALL_ENABLED === 'false') {
-      logger.infoSync('Firewall disabled by configuration', {
-        component: LogComponents.agent,
-      });
-      return;
-    }
     
     // Check if running as root (required for iptables)
     const hasGetuid = typeof process.getuid === 'function';
@@ -415,7 +416,7 @@ export class FeatureInitializer {
     if (!hasGetuid) {
       logger.warnSync('Firewall disabled - cannot detect root privileges', {
         component: LogComponents.agent,
-        note: 'Set FIREWALL_ENABLED=false to suppress this warning',
+        note: 'Firewall requires root privileges to manage iptables',
       });
       return;
     }

@@ -1,0 +1,21 @@
+apiVersion: v2
+name: agent-fleet
+description: Deploy N agent pods with Modbus simulator sidecars for load testing
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+maintainers:
+  - name: Iotistic Team
+    email: dev@iotistic.com
+
+keywords:
+  - iot
+  - agent
+  - modbus
+  - testing
+  - simulation
+
+home: https://github.com/Iotistica/iotistic
+sources:
+  - https://github.com/Iotistica/iotistic

@@ -81,3 +81,7 @@ agent/src/features/protocol-adapters/
 
 /.github/workflows/azure_creds.json
 /postoffice/dist
+# Kubernetes secrets (NEVER commit sensitive values)
+values-secret.yaml
+**/values-secret.yaml
+k8s/**/values-secret.yaml

@@ -1,0 +1,334 @@
+name: Release Agent Fleet Chart
+
+on:
+  push:
+    paths:
+      - 'k8s/charts/agent-fleet/**'
+      - '.github/workflows/release-agent-fleet.yml'
+  workflow_dispatch:
+    inputs:
+      chart_version:
+        description: 'Chart version to release (e.g., 1.0.0)'
+        required: true
+        type: string
+      deploy_test:
+        description: 'Deploy test fleet after release'
+        required: false
+        default: false
+        type: boolean
+      test_fleet_size:
+        description: 'Number of agents for test deployment'
+        required: false
+        default: '5'
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CHART_PATH: ./k8s/charts/agent-fleet
+  CHART_NAME: agent-fleet
+
+jobs:
+  validate-chart:
+    name: Validate Helm chart
+    runs-on: ubuntu-latest
+    outputs:
+      chart_version: ${{ steps.chart_info.outputs.version }}
+      app_version: ${{ steps.chart_info.outputs.app_version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.13.0'
+
+      - name: Get chart information
+        id: chart_info
+        run: |
+          VERSION=$(yq eval '.version' ${{ env.CHART_PATH }}/Chart.yaml)
+          APP_VERSION=$(yq eval '.appVersion' ${{ env.CHART_PATH }}/Chart.yaml)
+          
+          # Override with manual input if provided
+          if [ -n "${{ github.event.inputs.chart_version }}" ]; then
+            VERSION="${{ github.event.inputs.chart_version }}"
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "app_version=$APP_VERSION" >> $GITHUB_OUTPUT
+          
+          echo "Chart version: $VERSION"
+          echo "App version: $APP_VERSION"
+
+      - name: Lint Helm chart
+        run: |
+          helm lint ${{ env.CHART_PATH }}
+
+      - name: Validate chart templates
+        run: |
+          helm template test ${{ env.CHART_PATH }} \
+            --set fleet.replicaCount=5 \
+            --set fleet.cloudApiEndpoint=https://api.iotistic.com \
+            --set fleet.fleetId=test-fleet \
+            --set provisioning.existingSecret=test-keys > /tmp/rendered.yaml
+          
+          echo "Chart templates rendered successfully"
+          cat /tmp/rendered.yaml
+
+      - name: Check for required files
+        run: |
+          required_files=(
+            "Chart.yaml"
+            "values.yaml"
+            "README.md"
+            "PROVISIONING.md"
+            "templates/statefulset.yaml"
+            "templates/service.yaml"
+            "templates/secret.yaml"
+            "templates/_helpers.tpl"
+            "scripts/generate-provisioning-keys.sh"
+            "scripts/generate-provisioning-keys.ps1"
+          )
+          
+          for file in "${required_files[@]}"; do
+            if [ ! -f "${{ env.CHART_PATH }}/$file" ]; then
+              echo "❌ Missing required file: $file"
+              exit 1
+            fi
+            echo "✅ Found: $file"
+          done
+
+  package-chart:
+    name: Package and publish chart
+    runs-on: ubuntu-latest
+    needs: validate-chart
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.13.0'
+
+      - name: Update chart version if manual
+        if: github.event.inputs.chart_version != ''
+        run: |
+          VERSION="${{ github.event.inputs.chart_version }}"
+          yq eval ".version = \"$VERSION\"" -i ${{ env.CHART_PATH }}/Chart.yaml
+          echo "Updated Chart.yaml to version $VERSION"
+
+      - name: Package Helm chart
+        run: |
+          mkdir -p .helm-packages
+          helm package ${{ env.CHART_PATH }} -d .helm-packages
+          
+          echo "Packaged chart:"
+          ls -lh .helm-packages/
+
+      - name: Generate chart index
+        run: |
+          helm repo index .helm-packages --url https://github.com/${{ github.repository }}/releases/download/agent-fleet-v${{ needs.validate-chart.outputs.chart_version }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: agent-fleet-v${{ needs.validate-chart.outputs.chart_version }}
+          name: Agent Fleet Chart v${{ needs.validate-chart.outputs.chart_version }}
+          body: |
+            # Agent Fleet Helm Chart v${{ needs.validate-chart.outputs.chart_version }}
+            
+            ## Installation
+            
+            ```bash
+            # Download chart
+            helm pull https://github.com/${{ github.repository }}/releases/download/agent-fleet-v${{ needs.validate-chart.outputs.chart_version }}/agent-fleet-${{ needs.validate-chart.outputs.chart_version }}.tgz
+            
+            # Or install directly
+            helm install agent-fleet https://github.com/${{ github.repository }}/releases/download/agent-fleet-v${{ needs.validate-chart.outputs.chart_version }}/agent-fleet-${{ needs.validate-chart.outputs.chart_version }}.tgz
+            ```
+            
+            ## Provisioning
+            
+            Generate provisioning keys before deployment:
+            
+            ```bash
+            # Generate 10 keys
+            ./k8s/charts/agent-fleet/scripts/generate-provisioning-keys.sh \
+              10 \
+              https://api.iotistic.com \
+              k8s-fleet-production \
+              $AUTH_TOKEN > keys.env
+            
+            # Create secret
+            kubectl create secret generic agent-provisioning-keys \
+              --from-env-file=keys.env \
+              -n agent-fleet
+            
+            # Deploy fleet
+            helm install agent-fleet ./agent-fleet-${{ needs.validate-chart.outputs.chart_version }}.tgz \
+              --set fleet.replicaCount=10 \
+              --set fleet.cloudApiEndpoint=https://api.iotistic.com \
+              --set fleet.fleetId=k8s-fleet-production \
+              --set provisioning.existingSecret=agent-provisioning-keys \
+              -n agent-fleet --create-namespace
+            ```
+            
+            ## Changes
+            
+            See [README.md](https://github.com/${{ github.repository }}/blob/agent-fleet-v${{ needs.validate-chart.outputs.chart_version }}/k8s/charts/agent-fleet/README.md) for full documentation.
+          files: |
+            .helm-packages/*.tgz
+            .helm-packages/index.yaml
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-test-fleet:
+    name: Deploy test fleet
+    runs-on: ubuntu-latest
+    needs: [validate-chart, package-chart]
+    if: github.event.inputs.deploy_test == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure kubectl
+        run: |
+          if [ -n "${{ secrets.KUBECONFIG }}" ]; then
+            mkdir -p "$HOME/.kube"
+            echo "${{ secrets.KUBECONFIG }}" | base64 -d > "$HOME/.kube/config" || echo "${{ secrets.KUBECONFIG }}" > "$HOME/.kube/config"
+            chmod 600 "$HOME/.kube/config"
+          else
+            echo "KUBECONFIG not configured - skipping deployment"
+            exit 1
+          fi
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.13.0'
+
+      - name: Generate test provisioning keys
+        env:
+          API_URL: ${{ secrets.TEST_API_URL || 'https://api.iotistic.com' }}
+          FLEET_ID: agent-fleet-test-${{ github.run_number }}
+          AUTH_TOKEN: ${{ secrets.API_AUTH_TOKEN }}
+        run: |
+          FLEET_SIZE="${{ github.event.inputs.test_fleet_size }}"
+          
+          echo "Generating $FLEET_SIZE provisioning keys for test fleet..."
+          
+          # Use the provisioning script
+          chmod +x ${{ env.CHART_PATH }}/scripts/generate-provisioning-keys.sh
+          ${{ env.CHART_PATH }}/scripts/generate-provisioning-keys.sh \
+            "$FLEET_SIZE" \
+            "$API_URL" \
+            "$FLEET_ID" \
+            "$AUTH_TOKEN" > keys-test.env
+          
+          echo "Generated $(wc -l < keys-test.env) provisioning keys"
+
+      - name: Create test namespace and secret
+        run: |
+          NAMESPACE="agent-fleet-test"
+          
+          # Create namespace
+          kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Create provisioning keys secret
+          kubectl create secret generic agent-provisioning-keys-test \
+            --from-env-file=keys-test.env \
+            -n "$NAMESPACE" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          echo "Created secret with $(kubectl get secret agent-provisioning-keys-test -n $NAMESPACE -o jsonpath='{.data}' | jq 'keys | length') keys"
+
+      - name: Deploy test fleet
+        env:
+          FLEET_SIZE: ${{ github.event.inputs.test_fleet_size }}
+          API_URL: ${{ secrets.TEST_API_URL || 'https://api.iotistic.com' }}
+          FLEET_ID: agent-fleet-test-${{ github.run_number }}
+        run: |
+          NAMESPACE="agent-fleet-test"
+          RELEASE_NAME="agent-fleet-test-${{ github.run_number }}"
+          
+          helm upgrade --install "$RELEASE_NAME" ${{ env.CHART_PATH }} \
+            --namespace "$NAMESPACE" \
+            --set fleet.replicaCount="$FLEET_SIZE" \
+            --set fleet.cloudApiEndpoint="$API_URL" \
+            --set fleet.fleetId="$FLEET_ID" \
+            --set provisioning.existingSecret=agent-provisioning-keys-test \
+            --set provisioning.required=true \
+            --set agent.resources.requests.memory=128Mi \
+            --set agent.resources.limits.memory=256Mi \
+            --set simulator.resources.requests.memory=32Mi \
+            --set simulator.resources.limits.memory=64Mi \
+            --timeout 10m \
+            --wait
+          
+          echo "✅ Test fleet deployed successfully"
+
+      - name: Verify test fleet
+        run: |
+          NAMESPACE="agent-fleet-test"
+          RELEASE_NAME="agent-fleet-test-${{ github.run_number }}"
+          
+          echo "Waiting for pods to be ready..."
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/instance="$RELEASE_NAME" \
+            -n "$NAMESPACE" \
+            --timeout=600s || true
+          
+          echo ""
+          echo "Pod status:"
+          kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/instance="$RELEASE_NAME"
+          
+          echo ""
+          echo "Checking first agent provisioning status..."
+          FIRST_POD=$(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/instance="$RELEASE_NAME" -o jsonpath='{.items[0].metadata.name}')
+          
+          if [ -n "$FIRST_POD" ]; then
+            kubectl exec "$FIRST_POD" -c agent -n "$NAMESPACE" -- \
+              curl -s localhost:48484/v2/device | jq '{uuid, status, provisioned}' || echo "Could not check device status"
+          fi
+
+      - name: Deployment summary
+        run: |
+          NAMESPACE="agent-fleet-test"
+          RELEASE_NAME="agent-fleet-test-${{ github.run_number }}"
+          
+          echo "## Test Fleet Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Chart Version:** \`${{ needs.validate-chart.outputs.chart_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Fleet Size:** \`${{ github.event.inputs.test_fleet_size }}\` agents" >> $GITHUB_STEP_SUMMARY
+          echo "**Fleet ID:** \`agent-fleet-test-${{ github.run_number }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Pod Status" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/instance="$RELEASE_NAME" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Cleanup Command" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "helm uninstall $RELEASE_NAME -n $NAMESPACE" >> $GITHUB_STEP_SUMMARY
+          echo "kubectl delete namespace $NAMESPACE" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Cleanup on failure
+        if: failure()
+        run: |
+          NAMESPACE="agent-fleet-test"
+          RELEASE_NAME="agent-fleet-test-${{ github.run_number }}"
+          
+          echo "Cleaning up failed deployment..."
+          helm uninstall "$RELEASE_NAME" -n "$NAMESPACE" || true
+          kubectl delete namespace "$NAMESPACE" || true

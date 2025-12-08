@@ -9,8 +9,8 @@ global:
 postgres:
   enabled: true
   image:
-    repository: postgres
-    tag: "16-alpine"
+    repository: timescale/timescaledb
+    tag: "latest-pg16"  # TimescaleDB with PostgreSQL 16
   database: iotistic
   username: postgres
   password: postgres
@@ -89,6 +89,48 @@ mosquitto:
   persistence:
     enabled: true
 
+# MQTT Broker Configuration
+# Choose between local (self-hosted Mosquitto) or cloud (HiveMQ, AWS IoT Core)
+mqttBroker:
+  # Broker type: 'local' or 'cloud'
+  # - local: Uses Mosquitto deployment (above)
+  # - cloud: Uses external managed MQTT service (HiveMQ Cloud, AWS IoT Core, etc.)
+  type: local
+  
+  # Local broker configuration (uses Mosquitto deployment)
+  local:
+    # Credentials for API and services to connect to local broker
+    username: admin
+    password: iotistic42!  # Change in production
+    # Internal service connection
+    host: "{{ include \"iotistic.fullname\" . }}-mosquitto"
+    port: 1883
+    protocol: mqtt
+    useTls: false
+    
+  # Cloud broker configuration (HiveMQ Cloud, AWS IoT Core, etc.)
+  cloud:
+    # Enable cloud broker (requires configuration)
+    enabled: false
+    # Provider: 'hivemq', 'aws-iot', 'azure-iot', 'custom'
+    provider: hivemq
+    # Connection details (must be configured if enabled)
+    host: ""  # e.g., abc123.s1.eu.hivemq.cloud
+    port: 8883
+    protocol: mqtts
+    username: ""
+    password: ""
+    # Cloud brokers always use TLS
+    useTls: true
+    verifyCertificate: true
+    # CA certificate (optional - most cloud providers use public CAs)
+    caCert: ""
+    # Connection options
+    keepAlive: 60
+    cleanSession: true
+    reconnectPeriod: 5000
+    connectTimeout: 30000
+
 # API service
 api:
   enabled: true
@@ -121,9 +163,22 @@ api:
     VPN_ENABLED: "false"
     FORCE_COLOR: "1"
   # MQTT credentials
+  # SECURITY: For production, use Kubernetes Secrets instead of hardcoding here
+  # Option 1 (Recommended): Create secret manually:
+  #   kubectl create secret generic iotistic-mqtt-credentials \
+  #     --from-literal=username=admin \
+  #     --from-literal=password='your-secure-password' \
+  #     -n iotistic-nodeport
+  #   Then set mqtt.existingSecret=iotistic-mqtt-credentials
+  #
+  # Option 2: Use separate values-secret.yaml (add to .gitignore):
+  #   helm install -f values.yaml -f values-secret.yaml
+  #
+  # Option 3: Pass via --set flag:
+  #   helm install --set mqtt.username=admin --set mqtt.password=secret
   mqtt:
-    username: admin
-    password: iotistic42!
+    # Reference existing Kubernetes secret (recommended for production)
+    existingSecret: "iotistic-mqtt-credentials"
   # License configuration (optional)
   license:
     publicKey: ""
@@ -188,9 +243,99 @@ mqttMonitor:
     MQTT_METRICS_UPDATE_INTERVAL: "5000"
     MQTT_TOPIC_TREE_UPDATE_INTERVAL: "5000"
   # MQTT credentials (should match mosquitto credentials)
+  # SECURITY: For production, reference the same secret as API service
+  # See api.mqtt configuration above for security options
   mqtt:
-    username: admin
-    password: iotistic42!
+    # Reference existing Kubernetes secret (recommended for production)
+    existingSecret: "iotistic-mqtt-credentials"
+
+# Housekeeper service - Database maintenance and cleanup
+housekeeper:
+  enabled: true
+  image:
+    repository: iotistic/housekeeper
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 3400
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  env:
+    NODE_ENV: development
+    LOG_LEVEL: info
+    DB_POOL_MAX: "10"
+    DB_IDLE_TIMEOUT: "30000"
+    DB_CONNECT_TIMEOUT: "10000"
+  # Scheduled task configuration
+  tasks:
+    # Database VACUUM - reclaim storage and update statistics
+    vacuum:
+      enabled: true
+      schedule: "0 2 * * *"  # Daily at 2 AM
+    # Partition maintenance - create/drop partitions for time-series data
+    partitionMaintenance:
+      enabled: true
+      schedule: "0 3 * * *"  # Daily at 3 AM
+    # Log cleanup - delete old logs based on retention policy
+    logCleanup:
+      enabled: true
+      schedule: "0 4 * * *"  # Daily at 4 AM
+      retentionDays: 30
+
+# Postoffice service - Email delivery service
+postoffice:
+  enabled: true
+  image:
+    repository: iotistic/postoffice
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 3600
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  env:
+    NODE_ENV: development
+    REDIS_DB: "2"  # Use separate Redis DB for email queue
+  # Email configuration
+  email:
+    transport: smtp  # Options: smtp, ses
+    from: "noreply@iotistic.com"
+    fromName: "Iotistic Platform"
+    # SMTP configuration (if transport=smtp)
+    smtp:
+      host: "smtp.gmail.com"
+      port: "587"
+      secure: "false"  # Use TLS
+      # Credentials should be stored in Kubernetes Secret
+      existingSecret: ""  # Leave empty to use values below (not recommended for production)
+      username: ""
+      password: ""
+    # AWS SES configuration (if transport=ses)
+    ses:
+      region: "us-east-1"
+      # Credentials should be stored in Kubernetes Secret
+      existingSecret: ""  # Leave empty to use values below (not recommended for production)
+      accessKeyId: ""
+      secretAccessKey: ""
+  # Queue configuration
+  queue:
+    concurrency: "5"  # Number of concurrent email processing jobs
+    maxRetry: "3"     # Maximum retry attempts for failed emails
+    retryDelay: "60000"  # Delay between retries (ms)
+  # Bull Board UI (queue monitoring)
+  bullBoard:
+    enabled: true
+    path: "/admin/queues"
 
 # Ingress configuration (optional for local dev)
 ingress:

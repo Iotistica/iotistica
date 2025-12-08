@@ -15,7 +15,8 @@ const dbConfig = {
   password: process.env.DB_PASSWORD || 'postgres',
   max: parseInt(process.env.DB_POOL_SIZE || '20'),
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 10000, // 10 seconds for migrations and slow queries
+  statementTimeout: 60000, // 60 seconds max query execution time
 };
 
 // Create connection pool
@@ -66,10 +67,20 @@ export async function transaction<T>(
     await client.query('COMMIT');
     return result;
   } catch (error) {
-    await client.query('ROLLBACK');
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      // Connection might be closed, log but don't throw
+      logger.warn('Failed to rollback transaction (connection may be closed)', rollbackError);
+    }
     throw error;
   } finally {
-    client.release();
+    try {
+      client.release();
+    } catch (releaseError) {
+      // Client might already be released or connection closed
+      logger.warn('Failed to release client', releaseError);
+    }
   }
 }
 
