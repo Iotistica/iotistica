@@ -208,8 +208,8 @@ jobs:
   deploy-test-fleet:
     name: Deploy test fleet
     runs-on: [iotistic-lab-sc]
-    needs: [validate-chart, package-chart]
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_test == 'true'
+    needs: [validate-chart]
+    if: github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
