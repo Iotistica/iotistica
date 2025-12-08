@@ -30,29 +30,94 @@ spec:
       {{- end }}
       securityContext:
         {{- toYaml .Values.securityContext | nindent 8 }}
+      hostNetwork: true  # Allow access to external API via public IP
+      # Init container to generate fresh provisioning key on demand
+      initContainers:
+        - name: generate-provisioning-key
+          image: curlimages/curl:8.5.0
+          command:
+            - sh
+            - -c
+            - |
+              # Extract index from pod name (agent-fleet-test-0 -> 0)
+              INDEX=$(echo $POD_NAME | grep -o '[0-9]*$')
+              echo "Pod index: $INDEX"
+              echo "Generating fresh provisioning key from API..."
+              
+              # Generate new key via API
+              RESPONSE=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "$CLOUD_API_ENDPOINT/api/v1/provisioning-keys/generate" \
+                -H "Content-Type: application/json" \
+                -d "{\"fleetId\":\"$FLEET_ID\",\"newKey\":false,\"metadata\":{\"index\":$INDEX,\"podName\":\"$POD_NAME\"}}")
+              
+              HTTP_CODE=$(echo "$RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2)
+              BODY=$(echo "$RESPONSE" | sed '/HTTP_CODE:/d')
+              
+              echo "HTTP Status: $HTTP_CODE"
+              echo "Response body: $BODY"
+              
+              # Extract key from response (supports both .key and .provisioningKey)
+              KEY=$(echo "$BODY" | grep -o '"key":"[^"]*' | cut -d'"' -f4)
+              if [ -z "$KEY" ]; then
+                KEY=$(echo "$BODY" | grep -o '"provisioningKey":"[^"]*' | cut -d'"' -f4)
+              fi
+              
+              if [ -z "$KEY" ]; then
+                echo "ERROR: Failed to extract key from API response"
+                echo "Response: $RESPONSE"
+                exit 1
+              fi
+              
+              # Write provisioning key to shared volume
+              echo "$KEY" > /provisioning/PROVISIONING_KEY
+              echo "Provisioning key generated successfully (${#KEY} chars)"
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CLOUD_API_ENDPOINT
+              value: {{ .Values.fleet.cloudApiEndpoint | quote }}
+            - name: FLEET_ID
+              value: {{ .Values.fleet.fleetId | quote }}
+          volumeMounts:
+            - name: provisioning
+              mountPath: /provisioning
       containers:
         # Main agent container
         - name: agent
           image: "{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag }}"
           imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              # Extract pod index from pod name (agent-fleet-test-N)
+              POD_INDEX=$(echo $POD_NAME | grep -o '[0-9]*$')
+              # Calculate unique API port: 48484 + pod_index
+              API_PORT=$((48484 + POD_INDEX))
+              echo "Pod index: $POD_INDEX, API port: $API_PORT"
+              
+              # Load provisioning key from file and pass to node
+              if [ -f /provisioning/PROVISIONING_KEY ]; then
+                PROVISIONING_KEY=$(cat /provisioning/PROVISIONING_KEY)
+                echo "Loaded provisioning key from file"
+                exec env PROVISIONING_KEY="$PROVISIONING_KEY" DEVICE_API_PORT="$API_PORT" node dist/app.js
+              else
+                echo "WARNING: No provisioning key file found"
+                exec env DEVICE_API_PORT="$API_PORT" node dist/app.js
+              fi
           ports:
             - name: api
               containerPort: 48484
               protocol: TCP
-            - name: metrics
-              containerPort: 48484
-              protocol: TCP
           env:
-            - name: DEVICE_API_PORT
-              value: "48484"
+            # API_PORT set dynamically in command based on pod index
             - name: CLOUD_API_ENDPOINT
               value: {{ .Values.fleet.cloudApiEndpoint | quote }}
             - name: FLEET_ID
               value: {{ .Values.fleet.fleetId | quote }}
             - name: NODE_ENV
               value: "production"
-            - name: REQUIRE_PROVISIONING
-              value: {{ .Values.provisioning.required | quote }}
             # Get pod name from Downward API
             - name: POD_NAME
               valueFrom:
@@ -67,18 +132,19 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
-          # Use envFrom to load all keys from secret, agent will select based on POD_INDEX
-          envFrom:
-            - secretRef:
-                name: {{ .Values.provisioning.existingSecret | default (printf "%s-provisioning-keys" (include "agent-fleet.fullname" .)) }}
+            - name: REQUIRE_PROVISIONING
+              value: {{ .Values.provisioning.required | quote }}
           volumeMounts:
             - name: agent-data
               mountPath: /app/data
+            - name: provisioning
+              mountPath: /provisioning
+              readOnly: true
           resources:
             {{- toYaml .Values.agent.resources | nindent 12 }}
           livenessProbe:
             httpGet:
-              path: /v2/ping
+              path: /ping
               port: api
             initialDelaySeconds: 30
             periodSeconds: 30
@@ -86,7 +152,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /v2/ping
+              path: /ping
               port: api
             initialDelaySeconds: 10
             periodSeconds: 10
@@ -115,13 +181,20 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
-          readinessProbe:
-            tcpSocket:
-              port: modbus
-            initialDelaySeconds: 2
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 3
+          # Readiness probe disabled - simulator may generate errors
+          # when agent queries addresses not defined in vendor config
+          # readinessProbe:
+          #   tcpSocket:
+          #     port: modbus
+          #   initialDelaySeconds: 2
+          #   periodSeconds: 5
+          #   timeoutSeconds: 3
+          #   failureThreshold: 3
+      
+      # Provisioning volume (emptyDir shared between init container and agent)
+      volumes:
+        - name: provisioning
+          emptyDir: {}
   
   {{- if .Values.persistence.enabled }}
   volumeClaimTemplates:
