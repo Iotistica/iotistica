@@ -514,6 +514,8 @@ jobs:
           set -e
           NAMESPACE=iotistic-nodeport
 
+          kubectx nodeport
+
           echo "Deleting previous Helm release (if exists)..."
           helm uninstall iotistic -n "${NAMESPACE}" || true
 
@@ -544,7 +546,9 @@ jobs:
           MOSQUITTO_TAG=$(kubectl get deployment iotistic-mosquitto -n "${NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | cut -d':' -f2 || echo "latest")
           
           echo "Preserving Mosquitto image tag: $MOSQUITTO_TAG"
-          
+
+          kubectx nodeport
+
           # Update core services (API, Dashboard, MQTT Monitor)
           # Preserve Mosquitto, PostgreSQL, Redis tags
           helm upgrade --install iotistic "${CHART_PATH}" \
@@ -608,5 +612,6 @@ jobs:
         run: |
           set -e
           NAMESPACE=iotistic-nodeport
+          kubectx nodeport
           helm uninstall iotistic -n "${NAMESPACE}" || true
           kubectl delete namespace "${NAMESPACE}" --wait --ignore-not-found
