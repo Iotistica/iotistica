@@ -1,0 +1,18 @@
+{{- if .Values.service.headless }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agent-fleet.fullname" . }}-headless
+  labels:
+    {{- include "agent-fleet.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: api
+      protocol: TCP
+      name: api
+  selector:
+    {{- include "agent-fleet.selectorLabels" . | nindent 4 }}
+{{- end }}

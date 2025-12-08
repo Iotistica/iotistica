@@ -1,0 +1,87 @@
+# Example: Load Testing (500 agents)
+fleet:
+  name: agent-fleet-loadtest
+  replicaCount: 500
+  cloudApiEndpoint: https://loadtest-api.iotistic.com
+  fleetId: loadtest-fleet-001
+
+agent:
+  image:
+    repository: iotistica/agent
+    tag: "latest"
+  resources:
+    requests:
+      memory: "128Mi"  # Minimal for load testing
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+  env:
+    # Aggressive intervals for load testing
+    - name: DISCOVERY_INTERVAL_LIGHT_MS
+      value: "60000"   # 1 minute
+    - name: POLL_INTERVAL_MS
+      value: "5000"    # 5 seconds
+    - name: REPORT_INTERVAL_MS
+      value: "30000"   # 30 seconds
+    - name: LOG_LEVEL
+      value: "warn"    # Reduce log verbosity
+
+simulator:
+  resources:
+    requests:
+      memory: "32Mi"   # Minimal for simulator
+      cpu: "50m"
+    limits:
+      memory: "64Mi"
+      cpu: "100m"
+  slaves: 10           # More devices per simulator
+
+provisioning:
+  existingSecret: "agent-provisioning-keys-loadtest"
+
+persistence:
+  enabled: true
+  storageClass: "standard"  # Use cheaper storage
+  size: "500Mi"             # Minimal for load testing
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+    interval: "60s"   # Less frequent scraping
+    additionalLabels:
+      release: prometheus
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: "50%"  # More flexible for load testing
+
+# Spread across zones for resilience
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-fleet
+          topologyKey: topology.kubernetes.io/zone
+
+# Use spot instances (if supported)
+nodeSelector:
+  node.kubernetes.io/instance-type: spot
+
+tolerations:
+  - key: "spot"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+
+# Deploy with:
+# helm install agent-fleet-loadtest ./k8s/charts/agent-fleet -f examples/loadtest-values.yaml -n agent-fleet-loadtest
+#
+# Note: 500 agents requires:
+# - CPU: ~50 cores
+# - Memory: ~64 GB
+# - Storage: ~250 GB
+# Recommended: 7-8 nodes × 8 vCPU / 16 GB RAM
