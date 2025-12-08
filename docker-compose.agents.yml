@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2025-12-07 21:25:07
+# Generated: 2025-12-07 22:07:06
 # Agents: 27 to 27
 # Ports: 48507 to 48507
 
@@ -18,36 +18,14 @@ services:
       - DEVICE_API_PORT=48507
       - CLOUD_API_ENDPOINT=http://23.233.80.107:30002
       - NODE_ENV=development
-      - REPORT_INTERVAL_MS=20000
-      - METRICS_INTERVAL_MS=30000
-      - LOG_COMPRESSION=true
+      # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=7f2c1d02eebf2cd62e9bbbc8291a379d54697e1efc5474f0dca7ee69954f3def
+      - PROVISIONING_KEY=1b9570c6832ce12b5d57950cdf351a2899806e3f393c34c28a24c78949f772db
       - API_SECURITY_MODE=LOCALHOST_ONLY
-      - MEMORY_CHECK_INTERVAL_MS=30000
-      - MEMORY_THRESHOLD_MB=30
-      - LOG_FILE_PERSISTANCE=true
-      - LOG_MAX_AGE=86400000
-      - MAX_LOG_FILE_SIZE=52428800
-      - MAX_LOGS=10000
-      - ANOMALY_DETECTION_ENABLED=true
+      # Testing & Development (not dashboard-controlled)
       - SIMULATION_MODE=false
       - SIMULATION_CONFIG={}
       - SIMULATE_MEMORY_LEAK=false
-      - FIREWALL_ENABLED=false
-      - ENABLE_PROTOCOL_ADAPTERS=true
-      - ENABLE_SENSOR_PUBLISH=true
-      - ENABLE_FIRST_BOOT_DISCOVERY=true
-      - MODBUS_VENDOR_FILE=/app/dist/config/vendors/dataPoints.json
-      - MODBUS_VENDOR=COMAP
-      - MODBUS_TCP_HOST=iotistic-modbus-sim
-      - MODBUS_TCP_PORT=502
-      - MODBUS_SLAVE_RANGE_START=1
-      - MODBUS_SLAVE_RANGE_END=10
-      - MODBUS_TIMEOUT=2000
-      - OPCUA_DISCOVERY_URLS=
-      - SNMP_IP_RANGES=iotistic-snmp-sim
-      - SNMP_PORT=161
     networks:
       - iotistic-net
 volumes:

@@ -604,6 +604,16 @@ export default class DeviceAgent {
   }
 
   private initializeAnomalyDetection(): void {
+    // Check if anomaly detection is enabled (cloud config → env fallback)
+    const features = this.agentConfig.getFeatures();
+    
+    if (!features.enableAnomalyDetection) {
+      this.agentLogger?.infoSync("Anomaly Detection disabled by configuration", {
+        component: LogComponents.agent,
+      });
+      return;
+    }
+    
     this.agentLogger?.infoSync("Initializing Anomaly Detection Service", {
       component: LogComponents.agent,
     });

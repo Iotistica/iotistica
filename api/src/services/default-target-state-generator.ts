@@ -84,6 +84,8 @@ interface TargetStateConfig {
     enableDeviceRemoteAccess: boolean;
     enableProtocolAdapters?: boolean;
     enableFirstBootDiscovery?: boolean;
+    enableAnomalyDetection?: boolean;
+    enableFirewall?: boolean;
   };
   settings: {
     metricsIntervalMs: number;
@@ -156,6 +158,8 @@ export function generateDefaultTargetStateConfig(
       enableDeviceRemoteAccess: true,
       enableProtocolAdapters: true,
       enableFirstBootDiscovery: true,
+      enableAnomalyDetection: true,
+      enableFirewall: false, // Disabled by default (security consideration)
     },
     settings: {
       metricsIntervalMs: 60000, // 1 minute (starter plan)
@@ -216,41 +220,26 @@ export function generateDefaultTargetStateConfig(
 
   logger.info(`Generating target state for plan: ${plan}, active: ${subscriptionActive}`);
 
-  // Apply plan-based settings
+  // Note: Intervals are now dashboard-controlled only (not plan-based)
+  // Plan-based adjustments only affect logging level
   switch (plan) {
     case 'professional':
-      defaultConfig.settings.metricsIntervalMs = 30000; // 30 seconds
-      defaultConfig.settings.deviceReportIntervalMs = 20000; // 20 seconds
-      defaultConfig.intervals!.metricsIntervalMs = 30000; // Match settings
-      defaultConfig.intervals!.deviceReportIntervalMs = 20000; // Match settings
       defaultConfig.logging.level = 'info';
       break;
 
     case 'enterprise':
-      defaultConfig.settings.metricsIntervalMs = 10000; // 10 seconds (fastest)
-      defaultConfig.settings.deviceReportIntervalMs = 10000; // 10 seconds
-      defaultConfig.intervals!.metricsIntervalMs = 10000; // Match settings
-      defaultConfig.intervals!.deviceReportIntervalMs = 10000; // Match settings
       defaultConfig.logging.level = 'debug'; // Enhanced logging
       break;
 
     case 'starter':
     default:
-      // Use default values (1 minute metrics)
+      // Use default values
       break;
   }
-
 
   if (features.hasAdvancedAlerts || features.hasCustomDashboards) {
     defaultConfig.logging.level = 'debug';
     logger.info('Enhanced logging (hasAdvancedAlerts/hasCustomDashboards)');
-  }
-
-  // If subscription not active (and not trialing), disable premium features
-  if (!subscriptionActive && licenseData.trial?.isTrialMode !== true) {
-    logger.warn('Subscription not active - disabling premium features');
-    defaultConfig.settings.metricsIntervalMs = 300000; // 5 minutes (minimal)
-    defaultConfig.intervals!.metricsIntervalMs = 300000; // Match settings
   }
 
   return defaultConfig;

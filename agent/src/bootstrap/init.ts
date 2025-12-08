@@ -393,7 +393,20 @@ export class FeatureInitializer {
   }
 
   private async initFirewall(): Promise<void> {
-    const { logger, configSettings, deviceApiPort } = this.context;
+    const { logger, configSettings, deviceApiPort, stateReconciler } = this.context;
+
+    // Check if firewall is enabled (cloud config → env fallback)
+    // Import AgentConfig to access features
+    const { AgentConfig } = await import('../config/agent-config.js');
+    const agentConfig = new AgentConfig(stateReconciler);
+    const features = agentConfig.getFeatures();
+    
+    if (!features.enableFirewall) {
+      logger.infoSync('Firewall disabled by configuration', {
+        component: LogComponents.agent,
+      });
+      return;
+    }
 
     // Get firewall configuration from config or environment
     const firewallMode = 
@@ -401,21 +414,13 @@ export class FeatureInitializer {
       process.env.FIREWALL_MODE || 
       'auto';
     
-    // Check if firewall is enabled
-    if (firewallMode === 'disabled' || process.env.FIREWALL_ENABLED === 'false') {
-      logger.infoSync('Firewall disabled by configuration', {
-        component: LogComponents.agent,
-      });
-      return;
-    }
-    
     // Check if running as root (required for iptables)
     const hasGetuid = typeof process.getuid === 'function';
     
     if (!hasGetuid) {
       logger.warnSync('Firewall disabled - cannot detect root privileges', {
         component: LogComponents.agent,
-        note: 'Set FIREWALL_ENABLED=false to suppress this warning',
+        note: 'Firewall requires root privileges to manage iptables',
       });
       return;
     }
@@ -424,7 +429,7 @@ export class FeatureInitializer {
     if (uid !== 0) {
       logger.warnSync('Firewall disabled - requires root privileges', {
         component: LogComponents.agent,
-        note: 'Run container with --privileged or set FIREWALL_ENABLED=false',
+        note: 'Run container with --privileged or disable firewall in dashboard',
         uid,
       });
       return;
