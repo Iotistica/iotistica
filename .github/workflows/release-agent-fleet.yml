@@ -1,4 +1,4 @@
-name: Release Agent Fleet Chart
+name: Release Agent Fleet 
 
 on:
   push:
