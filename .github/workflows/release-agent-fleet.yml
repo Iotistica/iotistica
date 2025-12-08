@@ -126,6 +126,12 @@ jobs:
         with:
           version: 'v3.13.0'
 
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
       - name: Update chart version if manual
         if: github.event.inputs.chart_version != ''
         run: |
@@ -163,24 +169,12 @@ jobs:
             helm install agent-fleet https://github.com/${{ github.repository }}/releases/download/agent-fleet-v${{ needs.validate-chart.outputs.chart_version }}/agent-fleet-${{ needs.validate-chart.outputs.chart_version }}.tgz
             ```
             
-            ## Provisioning
+            ## Deployment
             
-            Generate provisioning keys before deployment:
+            Agents automatically provision themselves on startup via init containers:
             
             ```bash
-            # Generate 10 keys
-            ./k8s/charts/agent-fleet/scripts/generate-provisioning-keys.sh \
-              10 \
-              http://10.27.27.160:30002 \
-              k8s-fleet-production \
-              $AUTH_TOKEN > keys.env
-            
-            # Create secret
-            kubectl create secret generic agent-provisioning-keys \
-              --from-env-file=keys.env \
-              -n agent-fleet
-            
-            # Deploy fleet
+            # Deploy fleet (agents will auto-provision)
             helm install agent-fleet ./agent-fleet-${{ needs.validate-chart.outputs.chart_version }}.tgz \
               --set fleet.replicaCount=10 \
               --set fleet.cloudApiEndpoint=http://10.27.27.160:30002 \
@@ -235,40 +229,14 @@ jobs:
         with:
           version: 'v3.13.0'
 
-      - name: Generate test provisioning keys
-        env:
-          API_URL: ${{ secrets.TEST_API_URL || 'http://10.27.27.160:30002' }}
-          FLEET_ID: agent-fleet-test-${{ github.run_number }}
-          AUTH_TOKEN: ${{ secrets.API_AUTH_TOKEN }}
-        run: |
-          FLEET_SIZE="${{ github.event.inputs.test_fleet_size }}"
-          
-          echo "Generating $FLEET_SIZE provisioning keys for test fleet..."
-          
-          # Use the provisioning script
-          chmod +x ${{ env.CHART_PATH }}/scripts/generate-provisioning-keys.sh
-          ${{ env.CHART_PATH }}/scripts/generate-provisioning-keys.sh \
-            "$FLEET_SIZE" \
-            "$API_URL" \
-            "$FLEET_ID" \
-            "$AUTH_TOKEN" > keys-test.env
-          
-          echo "Generated $(wc -l < keys-test.env) provisioning keys"
-
-      - name: Create test namespace and secret
+      - name: Create test namespace
         run: |
           NAMESPACE="agent-fleet-test"
           
-          # Create namespace
+          # Create namespace if it doesn't exist
           kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
           
-          # Create provisioning keys secret
-          kubectl create secret generic agent-provisioning-keys-test \
-            --from-env-file=keys-test.env \
-            -n "$NAMESPACE" \
-            --dry-run=client -o yaml | kubectl apply -f -
-          
-          echo "Created secret with $(kubectl get secret agent-provisioning-keys-test -n $NAMESPACE -o jsonpath='{.data}' | jq 'keys | length') keys"
+          echo "Namespace $NAMESPACE ready"
 
       - name: Deploy test fleet
         env:
