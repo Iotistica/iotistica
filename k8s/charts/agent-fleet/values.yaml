@@ -7,7 +7,7 @@ fleet:
   name: "test-fleet-1"
   
   # Number of agent pods to deploy
-  replicaCount: 10
+  replicaCount: 5
   
   # Cloud API endpoint
   cloudApiEndpoint: "http://api.iotistic.svc.cluster.local:3002"
@@ -55,6 +55,13 @@ agent:
     MODBUS_SLAVE_RANGE_END: "5"
     MODBUS_TIMEOUT: "2000"
     MODBUS_VENDOR: "Generic"
+    
+    # MQTT configuration (cloud broker)
+    MQTT_BROKER_URL: "mqtt://23.233.80.107:30883"
+    MQTT_CLIENT_ID_PREFIX: "agent-fleet"
+    MQTT_RECONNECT_PERIOD: "5000"
+    MQTT_CONNECT_TIMEOUT: "30000"
+    MQTT_KEEPALIVE: "60"
     
     # Logging
     LOG_LEVEL: "info"

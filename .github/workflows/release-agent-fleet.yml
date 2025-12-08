@@ -33,7 +33,7 @@ env:
 jobs:
   validate-chart:
     name: Validate Helm chart
-    runs-on: ubuntu-latest
+    runs-on: [iotistic-lab-sc]
     outputs:
       chart_version: ${{ steps.chart_info.outputs.version }}
       app_version: ${{ steps.chart_info.outputs.app_version }}
@@ -73,9 +73,11 @@ jobs:
         run: |
           helm template test ${{ env.CHART_PATH }} \
             --set fleet.replicaCount=5 \
-            --set fleet.cloudApiEndpoint=https://api.iotistic.com \
+            --set fleet.cloudApiEndpoint=http://23.233.80.107:30002 \
             --set fleet.fleetId=test-fleet \
-            --set provisioning.existingSecret=test-keys > /tmp/rendered.yaml
+            --set agent.env.MQTT_BROKER_URL=mqtt://23.233.80.107:30883 \
+            --set agent.env.ENABLE_SENSOR_PUBLISH=false \
+            --set agent.env.ANOMALY_DETECTION_ENABLED=false > /tmp/rendered.yaml
           
           echo "Chart templates rendered successfully"
           cat /tmp/rendered.yaml
@@ -105,7 +107,7 @@ jobs:
 
   package-chart:
     name: Package and publish chart
-    runs-on: ubuntu-latest
+    runs-on: [iotistic-lab-sc]
     needs: validate-chart
     steps:
       - name: Checkout repository
@@ -163,7 +165,7 @@ jobs:
             # Generate 10 keys
             ./k8s/charts/agent-fleet/scripts/generate-provisioning-keys.sh \
               10 \
-              https://api.iotistic.com \
+              http://23.233.80.107:30002 \
               k8s-fleet-production \
               $AUTH_TOKEN > keys.env
             
@@ -175,9 +177,14 @@ jobs:
             # Deploy fleet
             helm install agent-fleet ./agent-fleet-${{ needs.validate-chart.outputs.chart_version }}.tgz \
               --set fleet.replicaCount=10 \
-              --set fleet.cloudApiEndpoint=https://api.iotistic.com \
+              --set fleet.cloudApiEndpoint=http://23.233.80.107:30002 \
               --set fleet.fleetId=k8s-fleet-production \
-              --set provisioning.existingSecret=agent-provisioning-keys \
+              --set agent.env.MQTT_BROKER_URL=mqtt://23.233.80.107:30883 \
+              --set agent.env.POLL_INTERVAL_MS=300000 \
+              --set agent.env.REPORT_INTERVAL_MS=300000 \
+              --set agent.env.METRICS_INTERVAL_MS=600000 \
+              --set agent.env.ENABLE_SENSOR_PUBLISH=false \
+              --set agent.env.ANOMALY_DETECTION_ENABLED=false \
               -n agent-fleet --create-namespace
             ```
             
@@ -194,7 +201,7 @@ jobs:
 
   deploy-test-fleet:
     name: Deploy test fleet
-    runs-on: ubuntu-latest
+    runs-on: [iotistic-lab-sc]
     needs: [validate-chart, package-chart]
     if: github.event.inputs.deploy_test == 'true'
     steps:
@@ -219,7 +226,7 @@ jobs:
 
       - name: Generate test provisioning keys
         env:
-          API_URL: ${{ secrets.TEST_API_URL || 'https://api.iotistic.com' }}
+          API_URL: ${{ secrets.TEST_API_URL || 'http://23.233.80.107:30002' }}
           FLEET_ID: agent-fleet-test-${{ github.run_number }}
           AUTH_TOKEN: ${{ secrets.API_AUTH_TOKEN }}
         run: |
@@ -255,7 +262,7 @@ jobs:
       - name: Deploy test fleet
         env:
           FLEET_SIZE: ${{ github.event.inputs.test_fleet_size }}
-          API_URL: ${{ secrets.TEST_API_URL || 'https://api.iotistic.com' }}
+          API_URL: ${{ secrets.TEST_API_URL || 'http://23.233.80.107:30002' }}
           FLEET_ID: agent-fleet-test-${{ github.run_number }}
         run: |
           NAMESPACE="agent-fleet-test"
@@ -266,12 +273,17 @@ jobs:
             --set fleet.replicaCount="$FLEET_SIZE" \
             --set fleet.cloudApiEndpoint="$API_URL" \
             --set fleet.fleetId="$FLEET_ID" \
-            --set provisioning.existingSecret=agent-provisioning-keys-test \
-            --set provisioning.required=true \
+            --set agent.env.MQTT_BROKER_URL=mqtt://23.233.80.107:30883 \
+            --set agent.env.POLL_INTERVAL_MS=300000 \
+            --set agent.env.REPORT_INTERVAL_MS=300000 \
+            --set agent.env.METRICS_INTERVAL_MS=600000 \
+            --set agent.env.ENABLE_SENSOR_PUBLISH=false \
+            --set agent.env.ANOMALY_DETECTION_ENABLED=false \
             --set agent.resources.requests.memory=128Mi \
             --set agent.resources.limits.memory=256Mi \
             --set simulator.resources.requests.memory=32Mi \
             --set simulator.resources.limits.memory=64Mi \
+            --set persistence.size=100Mi \
             --timeout 10m \
             --wait
           

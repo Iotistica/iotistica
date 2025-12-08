@@ -106,10 +106,9 @@ spec:
                 echo "WARNING: No provisioning key file found"
                 exec env DEVICE_API_PORT="$API_PORT" node dist/app.js
               fi
-          ports:
-            - name: api
-              containerPort: 48484
-              protocol: TCP
+          # Port definition removed to prevent hostPort conflicts on single-node clusters
+          # Agent API accessed via localhost:$DEVICE_API_PORT inside pod only
+          # For external access, use kubectl port-forward
           env:
             # API_PORT set dynamically in command based on pod index
             - name: CLOUD_API_ENDPOINT
@@ -145,7 +144,7 @@ spec:
           livenessProbe:
             httpGet:
               path: /ping
-              port: api
+              port: 48484  # Use fixed port number since containerPort is removed
             initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 5
@@ -153,7 +152,7 @@ spec:
           readinessProbe:
             httpGet:
               path: /ping
-              port: api
+              port: 48484  # Use fixed port number since containerPort is removed
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
@@ -163,10 +162,8 @@ spec:
         - name: modbus-simulator
           image: "{{ .Values.simulator.image.repository }}:{{ .Values.simulator.image.tag }}"
           imagePullPolicy: {{ .Values.simulator.image.pullPolicy }}
-          ports:
-            - name: modbus
-              containerPort: 502
-              protocol: TCP
+          # Port definition removed to prevent hostPort conflicts on single-node clusters
+          # Modbus simulator accessed via localhost:502 by agent only
           env:
             {{- range $key, $value := .Values.simulator.env }}
             - name: {{ $key }}
@@ -176,7 +173,7 @@ spec:
             {{- toYaml .Values.simulator.resources | nindent 12 }}
           livenessProbe:
             tcpSocket:
-              port: modbus
+              port: 502  # Use fixed port number since containerPort is removed
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 3
@@ -185,7 +182,7 @@ spec:
           # when agent queries addresses not defined in vendor config
           # readinessProbe:
           #   tcpSocket:
-          #     port: modbus
+          #     port: 502  # Use fixed port number since containerPort is removed
           #   initialDelaySeconds: 2
           #   periodSeconds: 5
           #   timeoutSeconds: 3
