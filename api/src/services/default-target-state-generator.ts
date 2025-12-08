@@ -87,8 +87,6 @@ interface TargetStateConfig {
     enableAnomalyDetection?: boolean;
   };
   settings: {
-    metricsIntervalMs: number;
-    deviceReportIntervalMs: number;
     stateReportIntervalMs: number;
     memoryCheckIntervalMs?: number;
     memoryThresholdMb?: number;
@@ -160,8 +158,6 @@ export function generateDefaultTargetStateConfig(
       enableAnomalyDetection: false, // Disabled by default (resource-intensive)
     },
     settings: {
-      metricsIntervalMs: 60000, // 1 minute (starter plan)
-      deviceReportIntervalMs: 30000, // 30 seconds
       stateReportIntervalMs: 10000, // 10 seconds
       memoryCheckIntervalMs: 30000, // 30 seconds
       memoryThresholdMb: 30,

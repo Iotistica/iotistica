@@ -306,6 +306,7 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
       - DEVICE_API_PORT=$port
       - CLOUD_API_ENDPOINT=$CLOUD_API_ENDPOINT
       - NODE_ENV=$NodeEnv
+      - ENABLE_SENSOR_PUBLISH=true
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=$RequireProvisioning
       - PROVISIONING_KEY=$apiKey
