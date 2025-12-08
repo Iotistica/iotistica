@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2025-12-08 12:42:07
+# Generated: 2025-12-08 16:57:46
 # Agents: 27 to 27
 # Ports: 48507 to 48507
 
@@ -18,9 +18,10 @@ services:
       - DEVICE_API_PORT=48507
       - CLOUD_API_ENDPOINT=http://23.233.80.107:30002
       - NODE_ENV=development
+      - ENABLE_SENSOR_PUBLISH=true
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=1c305b4ecd7c5478e159823098b8925720de6637898634497a5ae1eeafc94037
+      - PROVISIONING_KEY=28aff541572a1ba2324d4610143ced9dcbec0a4e8885a81fa7d9623d21035d44
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)

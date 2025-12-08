@@ -190,17 +190,21 @@ export interface TargetState {
 				inCluster?: boolean;
 			};
 			
-			// Interval configurations
+			// Legacy interval fields (DEPRECATED - use config.intervals instead)
 			reconciliationIntervalMs?: number;
 			targetStatePollIntervalMs?: number;
-			deviceReportIntervalMs?: number;
-			metricsIntervalMs?: number;
-			cloudJobsPollingIntervalMs?: number;
-			shadowPublishIntervalMs?: number;
+			stateReportIntervalMs?: number; // Renamed to match actual field
 			
 			// Performance and resource settings
 			memoryCheckIntervalMs?: number;
 			memoryThresholdMb?: number;
+			
+			// Scheduled restart configuration
+			scheduledRestart?: {
+				enabled?: boolean;
+				intervalDays?: number;
+				reason?: string;
+			};
 			
 			// Logging settings
 			logMaxAge?: number;
