@@ -95,7 +95,8 @@ def setup_server(slaves=3):
 def main():
     slaves_to_simulate = int(os.environ.get("MODBUS_SLAVES", 3))
     tcp_port = int(os.environ.get("MODBUS_PORT", 502))
-    logger.info(f"Starting Modbus TCP Simulator for vendor '{VENDOR}' with {slaves_to_simulate} slaves on port {tcp_port}")
+    tcp_host = os.environ.get("MODBUS_HOST", "0.0.0.0")
+    logger.info(f"Starting Modbus TCP Simulator for vendor '{VENDOR}' with {slaves_to_simulate} slaves on {tcp_host}:{tcp_port}")
 
     context, identities = setup_server(slaves=slaves_to_simulate)
 
@@ -103,7 +104,7 @@ def main():
         StartTcpServer(
             context=context,
             identity=identities[1],  # use first slave's identity
-            address=("0.0.0.0", tcp_port)
+            address=(tcp_host, tcp_port)
         )
     except KeyboardInterrupt:
         logger.info(f"Shutting down Modbus TCP Simulator for vendor '{VENDOR}'")

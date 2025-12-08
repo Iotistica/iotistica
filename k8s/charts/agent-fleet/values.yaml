@@ -98,6 +98,7 @@ simulator:
   
   # Simulator environment variables
   env:
+    MODBUS_HOST: "127.0.0.1"         # Bind to localhost only (prevents conflicts on single-node)
     MODBUS_PORT: "502"
     MODBUS_SLAVES: "5"               # Number of slave IDs to simulate
     MODBUS_VENDOR: "Generic"         # Vendor to simulate
