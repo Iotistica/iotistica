@@ -211,7 +211,14 @@ jobs:
         run: |
           if [ -n "${{ secrets.KUBECONFIG }}" ]; then
             mkdir -p "$HOME/.kube"
-            echo "${{ secrets.KUBECONFIG }}" | base64 -d > "$HOME/.kube/config" || echo "${{ secrets.KUBECONFIG }}" > "$HOME/.kube/config"
+            
+            # Backup existing config if present
+            if [ -f "$HOME/.kube/config" ]; then
+              cp "$HOME/.kube/config" "$HOME/.kube/config.backup"
+            fi
+            
+            # Try base64 decode first, fall back to plain text
+            echo "${{ secrets.KUBECONFIG }}" | base64 -d > "$HOME/.kube/config" 2>/dev/null || echo "${{ secrets.KUBECONFIG }}" > "$HOME/.kube/config"
             chmod 600 "$HOME/.kube/config"
           else
             echo "KUBECONFIG not configured - skipping deployment"
