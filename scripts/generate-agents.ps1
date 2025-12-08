@@ -310,6 +310,7 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
       - REQUIRE_PROVISIONING=$RequireProvisioning
       - PROVISIONING_KEY=$apiKey
       - API_SECURITY_MODE=$ApiSecurityMode
+      - FIREWALL_ENABLED=$FirewallEnabled
       # Testing & Development (not dashboard-controlled)
       - SIMULATION_MODE=$($simConfig.enabled)
       - SIMULATION_CONFIG=$($simConfig.config)

@@ -14,6 +14,58 @@ interface DeviceFeatures {
   enableSensorPublish?: boolean;
   enableProtocolAdapters?: boolean;
   enableShadow?: boolean;
+  enableFirstBootDiscovery?: boolean;
+  enableAnomalyDetection?: boolean;
+}
+
+interface DeviceIntervals {
+  discoveryFullIntervalMs?: number;
+  discoveryLightIntervalMs?: number;
+  targetStatePollIntervalMs?: number;
+  deviceReportIntervalMs?: number;
+  metricsIntervalMs?: number;
+  reconciliationIntervalMs?: number;
+}
+
+interface ModbusConfig {
+  enabled?: boolean;
+  tcpHost?: string;
+  tcpPort?: number;
+  slaveRangeStart?: number;
+  slaveRangeEnd?: number;
+  timeout?: number;
+  vendor?: string;
+}
+
+interface OPCUAConfig {
+  enabled?: boolean;
+  discoveryUrls?: string[];
+}
+
+interface SNMPConfig {
+  enabled?: boolean;
+  ipRanges?: string[];
+  port?: number;
+}
+
+interface ProtocolAdapters {
+  modbus?: ModbusConfig;
+  opcua?: OPCUAConfig;
+  snmp?: SNMPConfig;
+}
+
+interface PerformanceConfig {
+  memoryCheckIntervalMs?: number;
+  memoryThresholdMb?: number;
+}
+
+interface LoggingConfig {
+  level?: string;
+  enableFilePersistence?: boolean;
+  enableCompression?: boolean;
+  logMaxAge?: number;
+  maxLogFileSize?: number;
+  maxLogs?: number;
 }
 
 interface DeviceSettings {
@@ -22,16 +74,17 @@ interface DeviceSettings {
   deviceReportIntervalMs?: number;
 }
 
-interface DeviceLogging {
-  level?: string;
-  enableFilePersistence?: boolean;
-  enableCloudLogging?: boolean;
-}
-
 interface DeviceConfig {
   features?: DeviceFeatures;
+  intervals?: DeviceIntervals;
+  protocolAdapters?: ProtocolAdapters;
   settings?: DeviceSettings;
-  logging?: DeviceLogging;
+  logging?: LoggingConfig;
+  memoryCheckIntervalMs?: number;
+  memoryThresholdMb?: number;
+  logMaxAge?: number;
+  maxLogFileSize?: number;
+  maxLogs?: number;
 }
 
 interface Props {
@@ -82,6 +135,31 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
       features: {
         ...prev.features,
         [feature]: !prev.features?.[feature]
+      }
+    }));
+    setHasChanges(true);
+  };
+
+  const handleIntervalChange = (key: keyof DeviceIntervals, value: number) => {
+    setPendingConfig(prev => ({
+      ...prev,
+      intervals: {
+        ...prev.intervals,
+        [key]: value
+      }
+    }));
+    setHasChanges(true);
+  };
+
+  const handleModbusChange = (field: keyof ModbusConfig, value: any) => {
+    setPendingConfig(prev => ({
+      ...prev,
+      protocolAdapters: {
+        ...prev.protocolAdapters,
+        modbus: {
+          ...prev.protocolAdapters?.modbus,
+          [field]: value
+        }
       }
     }));
     setHasChanges(true);
@@ -178,7 +256,7 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
           <div>
             <h1 className="text-3xl font-bold text-foreground">Device Settings</h1>
             <p className="text-muted-foreground mt-1">
-              Configure device features and behavior
+              Configure device features, timing intervals, and protocol adapters
             </p>
           </div>
           <div className="flex gap-2">
@@ -224,6 +302,85 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
           </Alert>
         )}
 
+        {/* Timing & Intervals */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Timing & Intervals</CardTitle>
+            <CardDescription>
+              Control agent communication frequency and discovery schedules
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* CloudSync Intervals */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold text-foreground">CloudSync (Agent ↔ Cloud Communication)</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <IntervalInput
+                  label="Target State Poll"
+                  description="How often agent checks for config changes"
+                  value={pendingConfig.intervals?.targetStatePollIntervalMs ?? 60000}
+                  onChange={(val) => handleIntervalChange('targetStatePollIntervalMs', val)}
+                  defaultValue={60000}
+                  min={10000}
+                  max={300000}
+                />
+                <IntervalInput
+                  label="Device Report"
+                  description="How often agent reports current state"
+                  value={pendingConfig.intervals?.deviceReportIntervalMs ?? 60000}
+                  onChange={(val) => handleIntervalChange('deviceReportIntervalMs', val)}
+                  defaultValue={60000}
+                  min={10000}
+                  max={300000}
+                />
+                <IntervalInput
+                  label="Metrics"
+                  description="How often agent sends system metrics"
+                  value={pendingConfig.intervals?.metricsIntervalMs ?? 300000}
+                  onChange={(val) => handleIntervalChange('metricsIntervalMs', val)}
+                  defaultValue={300000}
+                  min={30000}
+                  max={600000}
+                />
+                <IntervalInput
+                  label="Reconciliation"
+                  description="Container state reconciliation interval"
+                  value={pendingConfig.intervals?.reconciliationIntervalMs ?? 30000}
+                  onChange={(val) => handleIntervalChange('reconciliationIntervalMs', val)}
+                  defaultValue={30000}
+                  min={10000}
+                  max={120000}
+                />
+              </div>
+            </div>
+
+            {/* Discovery Intervals */}
+            <div className="space-y-4 pt-4 border-t border-border">
+              <h3 className="text-sm font-semibold text-foreground">Discovery (Device Scanning)</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <IntervalInput
+                  label="Light Scan"
+                  description="Fast ping-only scan interval"
+                  value={pendingConfig.intervals?.discoveryLightIntervalMs ?? 14400000}
+                  onChange={(val) => handleIntervalChange('discoveryLightIntervalMs', val)}
+                  defaultValue={14400000}
+                  min={3600000}
+                  max={86400000}
+                />
+                <IntervalInput
+                  label="Full Scan"
+                  description="Deep validation with device info reads"
+                  value={pendingConfig.intervals?.discoveryFullIntervalMs ?? 86400000}
+                  onChange={(val) => handleIntervalChange('discoveryFullIntervalMs', val)}
+                  defaultValue={86400000}
+                  min={3600000}
+                  max={604800000}
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Device Features */}
         <Card>
           <CardHeader>
@@ -237,24 +394,10 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
           </CardHeader>
           <CardContent className="space-y-4">
             <FeatureToggle
-              label="Remote Access"
-              description="Allow remote SSH/terminal access to this device"
-              enabled={pendingConfig.features?.enableRemoteAccess ?? false}
-              onToggle={() => handleFeatureToggle('enableRemoteAccess')}
-            />
-            
-            <FeatureToggle
-              label="Job Engine"
-              description="Enable local job scheduling and execution on the device"
-              enabled={pendingConfig.features?.enableJobEngine ?? false}
-              onToggle={() => handleFeatureToggle('enableJobEngine')}
-            />
-            
-            <FeatureToggle
-              label="Cloud Jobs"
-              description="Allow device to receive and execute jobs from cloud"
-              enabled={pendingConfig.features?.enableCloudJobs ?? false}
-              onToggle={() => handleFeatureToggle('enableCloudJobs')}
+              label="Protocol Adapters"
+              description="Enable Modbus, OPC-UA, SNMP for industrial device communication"
+              enabled={pendingConfig.features?.enableProtocolAdapters ?? false}
+              onToggle={() => handleFeatureToggle('enableProtocolAdapters')}
             />
             
             <FeatureToggle
@@ -265,72 +408,187 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
             />
             
             <FeatureToggle
-              label="Protocol Adapters"
-              description="Enable protocol adapters for Modbus, BACnet, and other industrial protocols"
-              enabled={pendingConfig.features?.enableProtocolAdapters ?? false}
-              onToggle={() => handleFeatureToggle('enableProtocolAdapters')}
+              label="First Boot Discovery"
+              description="Run protocol discovery on first startup"
+              enabled={pendingConfig.features?.enableFirstBootDiscovery ?? false}
+              onToggle={() => handleFeatureToggle('enableFirstBootDiscovery')}
             />
             
             <FeatureToggle
-              label="Device Shadow"
-              description="Maintain device shadow state for offline resilience"
-              enabled={pendingConfig.features?.enableShadow ?? false}
-              onToggle={() => handleFeatureToggle('enableShadow')}
+              label="Anomaly Detection"
+              description="Enable edge AI anomaly detection for metrics and sensors"
+              enabled={pendingConfig.features?.enableAnomalyDetection ?? false}
+              onToggle={() => handleFeatureToggle('enableAnomalyDetection')}
             />
           </CardContent>
         </Card>
 
-        {/* Feature Descriptions */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Feature Descriptions</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div>
-              <strong className="text-foreground">Remote Access:</strong>
-              <p className="text-muted-foreground">
-                Enables SSH tunneling and remote terminal access through the cloud platform. 
-                Requires valid credentials and proper network configuration.
-              </p>
-            </div>
-            <div>
-              <strong className="text-foreground">Job Engine:</strong>
-              <p className="text-muted-foreground">
-                Allows the device to schedule and execute jobs locally (scripts, maintenance tasks, etc.). 
-                Jobs can be triggered on a schedule or by events.
-              </p>
-            </div>
-            <div>
-              <strong className="text-foreground">Cloud Jobs:</strong>
-              <p className="text-muted-foreground">
-                Enables the device to receive job commands from the cloud platform via MQTT. 
-                Jobs are executed locally and status is reported back to the cloud.
-              </p>
-            </div>
-            <div>
-              <strong className="text-foreground">Sensor Publishing:</strong>
-              <p className="text-muted-foreground">
-                Automatically publishes sensor readings to configured MQTT topics. 
-                Sensor data becomes available for dashboards, alerts, and integrations.
-              </p>
-            </div>
-            <div>
-              <strong className="text-foreground">Protocol Adapters:</strong>
-              <p className="text-muted-foreground">
-                Enables communication with industrial devices using protocols like Modbus RTU/TCP, 
-                BACnet, OPC UA, and others. Auto-enables when sensors are configured.
-              </p>
-            </div>
-            <div>
-              <strong className="text-foreground">Device Shadow:</strong>
-              <p className="text-muted-foreground">
-                Maintains a synchronized shadow state in the cloud that persists even when the device 
-                goes offline. Useful for querying last-known state and queuing commands.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Protocol Adapters Configuration */}
+        {pendingConfig.features?.enableProtocolAdapters && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Protocol Adapters</CardTitle>
+              <CardDescription>
+                Configure industrial protocol settings for device discovery
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Modbus */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-foreground">Modbus TCP</h3>
+                  <Switch
+                    checked={pendingConfig.protocolAdapters?.modbus?.enabled ?? false}
+                    onCheckedChange={(checked) => handleModbusChange('enabled', checked)}
+                  />
+                </div>
+                {pendingConfig.protocolAdapters?.modbus?.enabled && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-4 border-l-2 border-border">
+                    <div>
+                      <label className="text-sm font-medium text-foreground">TCP Host</label>
+                      <input
+                        type="text"
+                        value={pendingConfig.protocolAdapters?.modbus?.tcpHost ?? ''}
+                        onChange={(e) => handleModbusChange('tcpHost', e.target.value)}
+                        className="mt-1 w-full px-3 py-2 text-sm rounded-md border border-input bg-input-background dark:bg-input/30 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        placeholder="localhost or IP address"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-foreground">TCP Port</label>
+                      <input
+                        type="number"
+                        value={pendingConfig.protocolAdapters?.modbus?.tcpPort ?? 502}
+                        onChange={(e) => handleModbusChange('tcpPort', parseInt(e.target.value))}
+                        className="mt-1 w-full px-3 py-2 text-sm rounded-md border border-input bg-input-background dark:bg-input/30 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        min={1}
+                        max={65535}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-foreground">Slave Range Start</label>
+                      <input
+                        type="number"
+                        value={pendingConfig.protocolAdapters?.modbus?.slaveRangeStart ?? 1}
+                        onChange={(e) => handleModbusChange('slaveRangeStart', parseInt(e.target.value))}
+                        className="mt-1 w-full px-3 py-2 text-sm rounded-md border border-input bg-input-background dark:bg-input/30 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        min={1}
+                        max={247}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-foreground">Slave Range End</label>
+                      <input
+                        type="number"
+                        value={pendingConfig.protocolAdapters?.modbus?.slaveRangeEnd ?? 10}
+                        onChange={(e) => handleModbusChange('slaveRangeEnd', parseInt(e.target.value))}
+                        className="mt-1 w-full px-3 py-2 text-sm rounded-md border border-input bg-input-background dark:bg-input/30 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        min={1}
+                        max={247}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
+    </div>
+  );
+}
+
+interface IntervalInputProps {
+  label: string;
+  description: string;
+  value: number;
+  onChange: (value: number) => void;
+  defaultValue: number;
+  min: number;
+  max: number;
+}
+
+function IntervalInput({ label, description, value, onChange, defaultValue, min, max }: IntervalInputProps) {
+  const [unit, setUnit] = useState<'ms' | 's' | 'm' | 'h'>('s');
+  const [displayValue, setDisplayValue] = useState<number>(value / 1000);
+
+  // Convert ms to display unit
+  const msToUnit = (ms: number, targetUnit: typeof unit) => {
+    switch (targetUnit) {
+      case 'ms': return ms;
+      case 's': return ms / 1000;
+      case 'm': return ms / 60000;
+      case 'h': return ms / 3600000;
+    }
+  };
+
+  // Convert display unit to ms
+  const unitToMs = (val: number, sourceUnit: typeof unit) => {
+    switch (sourceUnit) {
+      case 'ms': return val;
+      case 's': return val * 1000;
+      case 'm': return val * 60000;
+      case 'h': return val * 3600000;
+    }
+  };
+
+  // Update display value when value or unit changes
+  useEffect(() => {
+    setDisplayValue(msToUnit(value, unit));
+  }, [value, unit]);
+
+  const handleValueChange = (newValue: number) => {
+    setDisplayValue(newValue);
+    const ms = unitToMs(newValue, unit);
+    if (ms >= min && ms <= max) {
+      onChange(ms);
+    }
+  };
+
+  const handleUnitChange = (newUnit: 'ms' | 's' | 'm' | 'h') => {
+    const newDisplayValue = msToUnit(value, newUnit);
+    setUnit(newUnit);
+    setDisplayValue(newDisplayValue);
+  };
+
+  const isDefault = value === defaultValue;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <label className="text-sm font-medium text-foreground">{label}</label>
+        {!isDefault && (
+          <button
+            onClick={() => onChange(defaultValue)}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Reset to default
+          </button>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">{description}</p>
+      <div className="flex gap-2">
+        <input
+          type="number"
+          value={displayValue}
+          onChange={(e) => handleValueChange(parseFloat(e.target.value))}
+          className="flex-1 px-3 py-2 text-sm rounded-md border border-input bg-input-background dark:bg-input/30 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          step={unit === 'ms' ? 1000 : unit === 's' ? 1 : unit === 'm' ? 1 : 0.1}
+        />
+        <select
+          value={unit}
+          onChange={(e) => handleUnitChange(e.target.value as typeof unit)}
+          className="px-3 py-2 text-sm rounded-md border border-input bg-input-background dark:bg-input/30 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <option value="ms">ms</option>
+          <option value="s">seconds</option>
+          <option value="m">minutes</option>
+          <option value="h">hours</option>
+        </select>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {value}ms = {Math.round(value / 1000)}s = {(value / 60000).toFixed(2)}m = {(value / 3600000).toFixed(2)}h
+      </p>
     </div>
   );
 }

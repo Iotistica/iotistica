@@ -393,16 +393,12 @@ export class FeatureInitializer {
   }
 
   private async initFirewall(): Promise<void> {
-    const { logger, configSettings, deviceApiPort, stateReconciler } = this.context;
+    const { logger, configSettings, deviceApiPort } = this.context;
 
-    // Check if firewall is enabled (cloud config → env fallback)
-    // Import AgentConfig to access features
-    const { AgentConfig } = await import('../config/agent-config.js');
-    const agentConfig = new AgentConfig(stateReconciler);
-    const features = agentConfig.getFeatures();
-    
-    if (!features.enableFirewall) {
-      logger.infoSync('Firewall disabled by configuration', {
+    // Check if firewall is disabled via environment variable
+    // Firewall is infrastructure security, controlled at deployment time only
+    if (process.env.FIREWALL_ENABLED === 'false') {
+      logger.infoSync('Firewall disabled by environment variable', {
         component: LogComponents.agent,
       });
       return;
@@ -429,7 +425,7 @@ export class FeatureInitializer {
     if (uid !== 0) {
       logger.warnSync('Firewall disabled - requires root privileges', {
         component: LogComponents.agent,
-        note: 'Run container with --privileged or disable firewall in dashboard',
+        note: 'Run container with --privileged or set FIREWALL_ENABLED=false',
         uid,
       });
       return;

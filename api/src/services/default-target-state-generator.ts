@@ -85,7 +85,6 @@ interface TargetStateConfig {
     enableProtocolAdapters?: boolean;
     enableFirstBootDiscovery?: boolean;
     enableAnomalyDetection?: boolean;
-    enableFirewall?: boolean;
   };
   settings: {
     metricsIntervalMs: number;
@@ -159,7 +158,6 @@ export function generateDefaultTargetStateConfig(
       enableProtocolAdapters: true,
       enableFirstBootDiscovery: true,
       enableAnomalyDetection: true,
-      enableFirewall: false, // Disabled by default (security consideration)
     },
     settings: {
       metricsIntervalMs: 60000, // 1 minute (starter plan)

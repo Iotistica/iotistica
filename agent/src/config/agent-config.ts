@@ -56,11 +56,10 @@ export interface LoggingConfig {
 }
 
 export interface FeatureToggles {
-  enableProtocolAdapters?: boolean;
-  enableSensorPublish?: boolean;
-  enableFirstBootDiscovery?: boolean;
-  enableAnomalyDetection?: boolean;
-  enableFirewall?: boolean;
+  enableProtocolAdapters: boolean;
+  enableSensorPublish: boolean;
+  enableFirstBootDiscovery: boolean;
+  enableAnomalyDetection: boolean;
 }
 
 export interface IntervalConfig {
@@ -209,7 +208,6 @@ export class AgentConfig {
       enableSensorPublish: cloud?.enableSensorPublish ?? (env.ENABLE_SENSOR_PUBLISH === 'true'),
       enableFirstBootDiscovery: cloud?.enableFirstBootDiscovery ?? (env.ENABLE_FIRST_BOOT_DISCOVERY === 'true'),
       enableAnomalyDetection: cloud?.enableAnomalyDetection ?? (env.ANOMALY_DETECTION_ENABLED === 'true'),
-      enableFirewall: cloud?.enableFirewall ?? (env.FIREWALL_ENABLED === 'true'),
     };
   }
 
