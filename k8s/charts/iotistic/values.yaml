@@ -287,6 +287,56 @@ housekeeper:
       schedule: "0 4 * * *"  # Daily at 4 AM
       retentionDays: 30
 
+# Postoffice service - Email delivery service
+postoffice:
+  enabled: true
+  image:
+    repository: iotistic/postoffice
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 3600
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  env:
+    NODE_ENV: development
+    REDIS_DB: "2"  # Use separate Redis DB for email queue
+  # Email configuration
+  email:
+    transport: smtp  # Options: smtp, ses
+    from: "noreply@iotistic.com"
+    fromName: "Iotistic Platform"
+    # SMTP configuration (if transport=smtp)
+    smtp:
+      host: "smtp.gmail.com"
+      port: "587"
+      secure: "false"  # Use TLS
+      # Credentials should be stored in Kubernetes Secret
+      existingSecret: ""  # Leave empty to use values below (not recommended for production)
+      username: ""
+      password: ""
+    # AWS SES configuration (if transport=ses)
+    ses:
+      region: "us-east-1"
+      # Credentials should be stored in Kubernetes Secret
+      existingSecret: ""  # Leave empty to use values below (not recommended for production)
+      accessKeyId: ""
+      secretAccessKey: ""
+  # Queue configuration
+  queue:
+    concurrency: "5"  # Number of concurrent email processing jobs
+    maxRetry: "3"     # Maximum retry attempts for failed emails
+    retryDelay: "60000"  # Delay between retries (ms)
+  # Bull Board UI (queue monitoring)
+  bullBoard:
+    enabled: true
+    path: "/admin/queues"
+
 # Ingress configuration (optional for local dev)
 ingress:
   enabled: false
