@@ -378,6 +378,21 @@ export class DeviceManager {
 
 			return this.getDeviceInfo();
 		} catch (error: any) {
+			// Handle already registered case - mark as provisioned
+			if (error.message === 'DEVICE_ALREADY_REGISTERED') {
+				this.logger?.infoSync('Device already registered - marking as provisioned', {
+					component: LogComponents.deviceManager,
+					operation: 'provision',
+					uuid: this.deviceInfo!.uuid,
+				});
+				
+				// Mark as provisioned and save to avoid re-provisioning
+				this.deviceInfo!.provisioned = true;
+				await this.saveDeviceInfo();
+				
+				return this.getDeviceInfo();
+			}
+
 			this.logger?.errorSync(
 				'Provisioning failed',
 				error instanceof Error ? error : new Error(String(error)),
@@ -420,6 +435,18 @@ export class DeviceManager {
 			});
 
 			if (!response.ok) {
+				// Handle 409 Conflict - device already registered
+				if (response.status === 409) {
+					this.logger?.warnSync('Device already registered with API', {
+						component: LogComponents.deviceManager,
+						operation: 'registerWithAPI',
+						uuid: provisionRequest.uuid,
+						note: 'Device has existing registration. Provisioning will be skipped.'
+					});
+					// Throw a specific error that can be caught by provision() to handle gracefully
+					throw new Error('DEVICE_ALREADY_REGISTERED');
+				}
+
 				const errorText = await response.json().catch(() => ({ message: response.statusText }));
 				throw new Error(`API returned ${response.status}: ${JSON.stringify(errorText)}`);
 			}
@@ -428,6 +455,11 @@ export class DeviceManager {
 
 			return result;
 		} catch (error: any) {
+			// Re-throw already registered error without logging as error
+			if (error.message === 'DEVICE_ALREADY_REGISTERED') {
+				throw error;
+			}
+
 			this.logger?.errorSync(
 				'Registration failed',
 				error instanceof Error ? error : new Error(String(error)),
