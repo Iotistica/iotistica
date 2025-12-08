@@ -28,6 +28,7 @@ import {
   DeviceMetricsModel,
   DeviceLogsModel,
 } from '../db/models';
+import { validateTargetStateConfigMiddleware } from '../validators/target-state-config.validator';
 import { EventPublisher, objectsAreEqual } from '../services/event-sourcing';
 import EventSourcingConfig from '../events/event-sourcing';
 import deviceAuth, { deviceAuthFromBody } from '../middleware/device-auth';
@@ -328,7 +329,7 @@ router.get('/devices/:uuid/target-state', deviceAuth, async (req, res) => {
  * - Array: [{ appId: 1, appName: "app1", ... }, ...]
  * - Object: { 1: { appId: 1, appName: "app1", ... }, ... }
  */
-router.post('/devices/:uuid/target-state', deviceAuth, async (req, res) => {
+router.post('/devices/:uuid/target-state', deviceAuth, validateTargetStateConfigMiddleware, async (req, res) => {
   try {
     const { uuid } = req.params;
     let { apps, config } = req.body;
@@ -439,7 +440,7 @@ function normalizeAppsFormat(apps: any): Record<number, any> {
  * - Array: [{ appId: 1, appName: "app1", ... }, ...]
  * - Object: { 1: { appId: 1, appName: "app1", ... }, ... }
  */
-router.put('/devices/:uuid/target-state', async (req, res) => {
+router.put('/devices/:uuid/target-state', validateTargetStateConfigMiddleware, async (req, res) => {
   try {
     const { uuid } = req.params;
     let { apps, config } = req.body;
