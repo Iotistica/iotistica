@@ -1,4 +1,4 @@
-name: Release API, Dashboard and MQTT Monitor
+name: Release API, Dashboard, MQTT Monitor, Housekeeper, and Postoffice
 
 on:
   push:
@@ -45,6 +45,7 @@ jobs:
       dashboard_src_tag: ${{ steps.verify.outputs.dashboard_src_tag }}
       mqtt_src_tag: ${{ steps.verify.outputs.mqtt_src_tag }}
       housekeeper_src_tag: ${{ steps.verify.outputs.housekeeper_src_tag }}
+      postoffice_src_tag: ${{ steps.verify.outputs.postoffice_src_tag }}
     steps:
       - name: Checkout repository (full)
         uses: actions/checkout@v4
@@ -107,17 +108,20 @@ jobs:
           DASHBOARD_VERSION=$(jq -r '.version' dashboard/package.json)
           MQTT_MONITOR_VERSION=$(jq -r '.version' mqtt-monitor/package.json)
           HOUSEKEEPER_VERSION=$(jq -r '.version' housekeeper/package.json)
+          POSTOFFICE_VERSION=$(jq -r '.version' postoffice/package.json)
 
           echo "api_pkg=$API_VERSION" >> $GITHUB_OUTPUT
           echo "dashboard_pkg=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
           echo "mqtt_pkg=$MQTT_MONITOR_VERSION" >> $GITHUB_OUTPUT
           echo "housekeeper_pkg=$HOUSEKEEPER_VERSION" >> $GITHUB_OUTPUT
+          echo "postoffice_pkg=$POSTOFFICE_VERSION" >> $GITHUB_OUTPUT
 
           echo "Package.json versions:"
           echo "  API: $API_VERSION"
           echo "  Dashboard: $DASHBOARD_VERSION"
           echo "  MQTT Monitor: $MQTT_MONITOR_VERSION"
           echo "  Housekeeper: $HOUSEKEEPER_VERSION"
+          echo "  Postoffice: $POSTOFFICE_VERSION"
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -138,6 +142,7 @@ jobs:
             echo "dashboard_src_tag=latest" >> $GITHUB_OUTPUT
             echo "mqtt_src_tag=latest" >> $GITHUB_OUTPUT
             echo "housekeeper_src_tag=latest" >> $GITHUB_OUTPUT
+            echo "postoffice_src_tag=latest" >> $GITHUB_OUTPUT
             
             echo ""
             echo "Image verification complete (forced latest):"
@@ -145,6 +150,7 @@ jobs:
             echo "  Dashboard -> latest"
             echo "  MQTT Monitor -> latest"
             echo "  Housekeeper -> latest"
+            echo "  Postoffice -> latest"
             exit 0
           fi
 
@@ -182,11 +188,13 @@ jobs:
           DASHBOARD_SRC=$(check_image "dashboard" "${{ steps.pkg_versions.outputs.dashboard_pkg }}" || true)
           MQTT_SRC=$(check_image "mqtt-monitor" "${{ steps.pkg_versions.outputs.mqtt_pkg }}" || true)
           HOUSEKEEPER_SRC=$(check_image "housekeeper" "${{ steps.pkg_versions.outputs.housekeeper_pkg }}" || true)
+          POSTOFFICE_SRC=$(check_image "postoffice" "${{ steps.pkg_versions.outputs.postoffice_pkg }}" || true)
 
           echo "api_src_tag=$API_SRC" >> $GITHUB_OUTPUT
           echo "dashboard_src_tag=$DASHBOARD_SRC" >> $GITHUB_OUTPUT
           echo "mqtt_src_tag=$MQTT_SRC" >> $GITHUB_OUTPUT
           echo "housekeeper_src_tag=$HOUSEKEEPER_SRC" >> $GITHUB_OUTPUT
+          echo "postoffice_src_tag=$POSTOFFICE_SRC" >> $GITHUB_OUTPUT
 
           echo ""
           echo "Image verification complete:"
@@ -194,6 +202,7 @@ jobs:
           echo "  Dashboard -> $DASHBOARD_SRC"
           echo "  MQTT Monitor -> $MQTT_SRC"
           echo "  Housekeeper -> $HOUSEKEEPER_SRC"
+          echo "  Postoffice -> $POSTOFFICE_SRC"
 
       - name: Summary for step output
         run: |
@@ -207,12 +216,13 @@ jobs:
           echo "| Dashboard | \`${{ steps.pkg_versions.outputs.dashboard_pkg }}\` | \`${{ steps.verify.outputs.dashboard_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| MQTT Monitor | \`${{ steps.pkg_versions.outputs.mqtt_pkg }}\` | \`${{ steps.verify.outputs.mqtt_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Housekeeper | \`${{ steps.pkg_versions.outputs.housekeeper_pkg }}\` | \`${{ steps.verify.outputs.housekeeper_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Postoffice | \`${{ steps.pkg_versions.outputs.postoffice_pkg }}\` | \`${{ steps.verify.outputs.postoffice_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
 
   retag-and-push:
     name: Retag & push release images
     runs-on: [iotistic-lab-sc]
     needs: validate-release
-    if: always() && (needs.validate-release.outputs.api_src_tag != 'skip' || needs.validate-release.outputs.dashboard_src_tag != 'skip' || needs.validate-release.outputs.mqtt_src_tag != 'skip' || needs.validate-release.outputs.housekeeper_src_tag != 'skip')
+    if: always() && (needs.validate-release.outputs.api_src_tag != 'skip' || needs.validate-release.outputs.dashboard_src_tag != 'skip' || needs.validate-release.outputs.mqtt_src_tag != 'skip' || needs.validate-release.outputs.housekeeper_src_tag != 'skip' || needs.validate-release.outputs.postoffice_src_tag != 'skip')
     steps:
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -245,6 +255,7 @@ jobs:
           retag_and_push "dashboard" "${{ needs.validate-release.outputs.dashboard_src_tag }}"
           retag_and_push "mqtt-monitor" "${{ needs.validate-release.outputs.mqtt_src_tag }}"
           retag_and_push "housekeeper" "${{ needs.validate-release.outputs.housekeeper_src_tag }}"
+          retag_and_push "postoffice" "${{ needs.validate-release.outputs.postoffice_src_tag }}"
 
   create-release:
     name: Create GitHub Release (changelog)
@@ -334,17 +345,20 @@ jobs:
           DASH_CUR=$(get_tag "iotistic-dashboard" || echo "none")
           MQTT_CUR=$(get_tag "iotistic-mqtt-monitor" || echo "none")
           HOUSE_CUR=$(get_tag "iotistic-housekeeper" || echo "none")
+          POST_CUR=$(get_tag "iotistic-postoffice" || echo "none")
 
           echo "api_current=$API_CUR" >> $GITHUB_OUTPUT
           echo "dashboard_current=$DASH_CUR" >> $GITHUB_OUTPUT
           echo "mqtt_current=$MQTT_CUR" >> $GITHUB_OUTPUT
           echo "housekeeper_current=$HOUSE_CUR" >> $GITHUB_OUTPUT
+          echo "postoffice_current=$POST_CUR" >> $GITHUB_OUTPUT
 
           echo "Current deployed tags:"
           echo "  API: $API_CUR"
           echo "  Dashboard: $DASH_CUR"
           echo "  MQTT Monitor: $MQTT_CUR"
           echo "  Housekeeper: $HOUSE_CUR"
+          echo "  Postoffice: $POST_CUR"
 
       - name: Check for Helm chart changes
         id: chart_check
@@ -379,12 +393,14 @@ jobs:
           DASH_CUR="${{ steps.current.outputs.dashboard_current }}"
           MQTT_CUR="${{ steps.current.outputs.mqtt_current }}"
           HOUSE_CUR="${{ steps.current.outputs.housekeeper_current }}"
+          POST_CUR="${{ steps.current.outputs.postoffice_current }}"
 
           # Check if images were actually retagged (not "skip")
           API_SRC="${{ needs.validate-release.outputs.api_src_tag }}"
           DASH_SRC="${{ needs.validate-release.outputs.dashboard_src_tag }}"
           MQTT_SRC="${{ needs.validate-release.outputs.mqtt_src_tag }}"
           HOUSE_SRC="${{ needs.validate-release.outputs.housekeeper_src_tag }}"
+          POST_SRC="${{ needs.validate-release.outputs.postoffice_src_tag }}"
 
           # Only deploy if image was retagged AND current deployment is different
           if [ "$API_SRC" != "skip" ] && [ "$API_CUR" != "$RELEASE" ]; then
@@ -401,6 +417,10 @@ jobs:
           fi
           if [ "$HOUSE_SRC" != "skip" ] && [ "$HOUSE_CUR" != "$RELEASE" ]; then
             CHANGES="${CHANGES}Housekeeper: ${HOUSE_CUR} -> ${RELEASE}\n"
+            DEPLOY=true
+          fi
+          if [ "$POST_SRC" != "skip" ] && [ "$POST_CUR" != "$RELEASE" ]; then
+            CHANGES="${CHANGES}Postoffice: ${POST_CUR} -> ${RELEASE}\n"
             DEPLOY=true
           fi
 
@@ -467,6 +487,7 @@ jobs:
           DASH_TAG="${{ needs.validate-release.outputs.dashboard_src_tag }}"
           MQTT_TAG="${{ needs.validate-release.outputs.mqtt_src_tag }}"
           HOUSE_TAG="${{ needs.validate-release.outputs.housekeeper_src_tag }}"
+          POST_TAG="${{ needs.validate-release.outputs.postoffice_src_tag }}"
 
           # Use release tag where retagging occurred, otherwise fall back to existing tag value
           use_tag() {
@@ -484,12 +505,14 @@ jobs:
           DASH_DEPLOY_TAG=$(use_tag "$DASH_TAG")
           MQTT_DEPLOY_TAG=$(use_tag "$MQTT_TAG")
           HOUSE_DEPLOY_TAG=$(use_tag "$HOUSE_TAG")
+          POST_DEPLOY_TAG=$(use_tag "$POST_TAG")
 
           echo "Deploying images (tags):"
           echo "  API: $API_DEPLOY_TAG"
           echo "  Dashboard: $DASH_DEPLOY_TAG"
           echo "  MQTT Monitor: $MQTT_DEPLOY_TAG"
           echo "  Housekeeper: $HOUSE_DEPLOY_TAG"
+          echo "  Postoffice: $POST_DEPLOY_TAG"
 
           # Build Helm command with only the tags that need updating
           HELM_SETS=""
@@ -497,6 +520,7 @@ jobs:
           [ "$DASH_DEPLOY_TAG" != "skip" ] && HELM_SETS="$HELM_SETS --set dashboard.image.tag=$DASH_DEPLOY_TAG"
           [ "$MQTT_DEPLOY_TAG" != "skip" ] && HELM_SETS="$HELM_SETS --set mqttMonitor.image.tag=$MQTT_DEPLOY_TAG"
           [ "$HOUSE_DEPLOY_TAG" != "skip" ] && HELM_SETS="$HELM_SETS --set housekeeper.image.tag=$HOUSE_DEPLOY_TAG"
+          [ "$POST_DEPLOY_TAG" != "skip" ] && HELM_SETS="$HELM_SETS --set postoffice.image.tag=$POST_DEPLOY_TAG"
 
           echo "Helm sets: $HELM_SETS"
 
@@ -512,6 +536,7 @@ jobs:
           kubectl -n "$NAMESPACE" rollout status deploy/iotistic-dashboard --timeout=180s || true
           kubectl -n "$NAMESPACE" rollout status deploy/iotistic-mqtt-monitor --timeout=180s || true
           kubectl -n "$NAMESPACE" rollout status deploy/iotistic-housekeeper --timeout=180s || true
+          kubectl -n "$NAMESPACE" rollout status deploy/iotistic-postoffice --timeout=180s || true
 
       - name: Deployment summary
         run: |
