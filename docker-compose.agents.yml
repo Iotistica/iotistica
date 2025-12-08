@@ -1,28 +1,28 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2025-12-07 14:11:09
-# Agents: 25 to 25
-# Ports: 48505 to 48505
+# Generated: 2025-12-07 19:21:57
+# Agents: 27 to 27
+# Ports: 48507 to 48507
 
 services:
-  agent-25:
-    container_name: agent-25
+  agent-27:
+    container_name: agent-27
     image: iotistic/agent:latest
     restart: always
     mem_limit: 512m
     mem_reservation: 256m
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - agent-25-data:/app/data
+      - agent-27-data:/app/data
       - ./certs/ca.crt:/app/certs/ca.crt:ro
     environment:
-      - DEVICE_API_PORT=48505
+      - DEVICE_API_PORT=48507
       - CLOUD_API_ENDPOINT=http://23.233.80.107:30002
       - NODE_ENV=development
       - REPORT_INTERVAL_MS=20000
       - METRICS_INTERVAL_MS=30000
       - LOG_COMPRESSION=true
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=fcfd465922dd14d475f6a0dbfb1cea778f021d296100e3a96abaff71d82715f1
+      - PROVISIONING_KEY=ddf89f7956281916327ab67d4305f3dd55c08492016d9d58481061602041a5f6
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - MEMORY_CHECK_INTERVAL_MS=30000
       - MEMORY_THRESHOLD_MB=30
@@ -51,7 +51,7 @@ services:
     networks:
       - iotistic-net
 volumes:
-  agent-25-data:
+  agent-27-data:
     driver: local
 networks:
   iotistic-net:

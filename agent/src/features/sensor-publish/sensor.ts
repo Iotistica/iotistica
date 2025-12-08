@@ -377,8 +377,6 @@ export class Sensor extends EventEmitter {
    */
   private onData(data: Buffer): void {
     this.stats.bytesReceived += data.length;
-    this.logger?.info(`Received ${data.length} bytes from endpoint '${this.getSensorName()}'`);
-    
     // Append to buffer
     this.buffer = Buffer.concat([this.buffer, data]);
     
@@ -471,8 +469,7 @@ export class Sensor extends EventEmitter {
         messages: this.messageBatch.messages
       });
       
-      this.logger?.info(`Publishing to topic: ${topic}, payload size: ${payload.length} bytes`);
-      
+    
       await this.mqttConnection.publish(topic, payload, { qos: 1 });
       
       // Feed to edge AI anomaly detection if configured

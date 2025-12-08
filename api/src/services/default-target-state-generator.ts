@@ -76,21 +76,52 @@ interface TargetStateConfig {
     level: string;
     enableRemoteLogging: boolean;
     enableFilePersistence: boolean;
+    enableCompression?: boolean;
   };
   features: {
     enableDeviceJobs: boolean;
     enableDeviceSensorPublish?: boolean;
     enableDeviceRemoteAccess: boolean;
+    enableProtocolAdapters?: boolean;
+    enableFirstBootDiscovery?: boolean;
   };
   settings: {
     metricsIntervalMs: number;
     deviceReportIntervalMs: number;
     stateReportIntervalMs: number;
+    memoryCheckIntervalMs?: number;
+    memoryThresholdMb?: number;
+    logMaxAge?: number;
+    maxLogFileSize?: number;
+    maxLogs?: number;
     scheduledRestart: {
         enabled: boolean,
         intervalDays: number,
         reason: string
       }
+  };
+  protocolAdapters?: {
+    modbus?: {
+      enabled: boolean;
+      tcpHost?: string;
+      tcpPort?: number;
+      serialPort?: string;
+      baudRate?: number;
+      slaveRangeStart?: number;
+      slaveRangeEnd?: number;
+      timeout?: number;
+      vendor?: string;
+      vendorFile?: string;
+    };
+    opcua?: {
+      enabled: boolean;
+      discoveryUrls?: string[];
+    };
+    snmp?: {
+      enabled: boolean;
+      ipRanges?: string[];
+      port?: number;
+    };
   };
 }
 
@@ -109,21 +140,50 @@ export function generateDefaultTargetStateConfig(
       level: 'info',
       enableRemoteLogging: true,
       enableFilePersistence: false,
+      enableCompression: true,
     },
     features: {
       enableDeviceJobs: true, // Always enabled (API access required for system to work)
-      enableDeviceSensorPublish:true,
+      enableDeviceSensorPublish: true,
       enableDeviceRemoteAccess: true,
+      enableProtocolAdapters: true,
+      enableFirstBootDiscovery: true,
     },
     settings: {
       metricsIntervalMs: 60000, // 1 minute (starter plan)
       deviceReportIntervalMs: 30000, // 30 seconds
       stateReportIntervalMs: 10000, // 10 seconds
-       scheduledRestart: {
+      memoryCheckIntervalMs: 30000, // 30 seconds
+      memoryThresholdMb: 30,
+      logMaxAge: 86400000, // 24 hours in ms
+      maxLogFileSize: 52428800, // 50 MB
+      maxLogs: 10000,
+      scheduledRestart: {
         enabled: true,
         intervalDays: 7,
         reason: "heap_fragmentation_cleanup"
       }
+    },
+    protocolAdapters: {
+      modbus: {
+        enabled: false, // Disabled by default (no hardware assumed)
+        tcpHost: '',
+        tcpPort: 502,
+        slaveRangeStart: 1,
+        slaveRangeEnd: 10,
+        timeout: 2000,
+        vendor: 'Generic',
+        vendorFile: '/app/dist/config/vendors/dataPoints.json',
+      },
+      opcua: {
+        enabled: false,
+        discoveryUrls: [],
+      },
+      snmp: {
+        enabled: false,
+        ipRanges: [],
+        port: 161,
+      },
     },
   };
 

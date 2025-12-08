@@ -197,6 +197,15 @@ export interface TargetState {
 			metricsIntervalMs?: number;
 			cloudJobsPollingIntervalMs?: number;
 			shadowPublishIntervalMs?: number;
+			
+			// Performance and resource settings
+			memoryCheckIntervalMs?: number;
+			memoryThresholdMb?: number;
+			
+			// Logging settings
+			logMaxAge?: number;
+			maxLogFileSize?: number;
+			maxLogs?: number;
 		};
 		features?: {
 			enableCloudJobs?: boolean;
@@ -204,9 +213,41 @@ export interface TargetState {
 			enableDeviceJobs?: boolean;
 			enableShadow?: boolean;
 			enableLogs?: boolean;
+			
+			// Protocol adapter features
+			enableProtocolAdapters?: boolean;
+			enableSensorPublish?: boolean;
+			enableFirstBootDiscovery?: boolean;
 		};
 		logging?: {
 			level?: string;
+			enableFilePersistence?: boolean;
+			enableCompression?: boolean;
+		};
+		
+		// Protocol adapter configurations
+		protocolAdapters?: {
+			modbus?: {
+				enabled?: boolean;
+				tcpHost?: string;
+				tcpPort?: number;
+				serialPort?: string;
+				baudRate?: number;
+				slaveRangeStart?: number;
+				slaveRangeEnd?: number;
+				timeout?: number;
+				vendor?: string;
+				vendorFile?: string;
+			};
+			opcua?: {
+				enabled?: boolean;
+				discoveryUrls?: string[];
+			};
+			snmp?: {
+				enabled?: boolean;
+				ipRanges?: string[];
+				port?: number;
+			};
 		};
 	};
 }

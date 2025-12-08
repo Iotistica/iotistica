@@ -33,7 +33,7 @@
 
 param(
     [int]$Count = 1,
-    [int]$StartIndex = 25,
+    [int]$StartIndex = 27,
     [string]$OutputFile = "docker-compose.agents.yml",
     [string]$ApiUrl = "http://23.233.80.107:30002",
     #[string]$ApiUrl = "http://localhost:4002",
