@@ -301,6 +301,7 @@ jobs:
     steps:
       - name: Configure kubectl (ensure KUBECONFIG)
         run: |
+          kubectx nodeport
           if kubectl get namespaces >/dev/null 2>&1; then
             echo "kubectl already working"
             exit 0
@@ -310,6 +311,7 @@ jobs:
             mkdir -p "$HOME/.kube"
             echo "${{ secrets.KUBECONFIG }}" | base64 -d > "$HOME/.kube/config" || echo "${{ secrets.KUBECONFIG }}" > "$HOME/.kube/config"
             chmod 600 "$HOME/.kube/config"
+            kubectx nodeport || true
             kubectl get namespaces || true
           else
             echo "KUBECONFIG not configured and kubectl not accessible" >&2
@@ -482,19 +484,12 @@ jobs:
         run: |
           set -euo pipefail
 
-<<<<<<< HEAD
-          kubectx nodeport
-
-          echo "Deleting previous Helm release (if exists)..."
-          helm uninstall iotistic -n "${NAMESPACE}" || true
-=======
           # Determine tags to deploy - if retagging happened we used the release tag
           API_TAG="${{ needs.validate-release.outputs.api_src_tag }}"
           DASH_TAG="${{ needs.validate-release.outputs.dashboard_src_tag }}"
           MQTT_TAG="${{ needs.validate-release.outputs.mqtt_src_tag }}"
           HOUSE_TAG="${{ needs.validate-release.outputs.housekeeper_src_tag }}"
           POST_TAG="${{ needs.validate-release.outputs.postoffice_src_tag }}"
->>>>>>> e167e879313614fa54eb57b3e61467698255737f
 
           # Use release tag where retagging occurred, otherwise fall back to existing tag value
           use_tag() {
@@ -514,21 +509,6 @@ jobs:
           HOUSE_DEPLOY_TAG=$(use_tag "$HOUSE_TAG")
           POST_DEPLOY_TAG=$(use_tag "$POST_TAG")
 
-<<<<<<< HEAD
-          echo "Deploying release $RELEASE_TAG to Kubernetes..."
-          
-          # Get current Mosquitto image tag to preserve it
-          MOSQUITTO_TAG=$(kubectl get deployment iotistic-mosquitto -n "${NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | cut -d':' -f2 || echo "latest")
-          
-          echo "Preserving Mosquitto image tag: $MOSQUITTO_TAG"
-
-          kubectx nodeport
-
-          # Update core services (API, Dashboard, MQTT Monitor)
-          # Preserve Mosquitto, PostgreSQL, Redis tags
-          helm upgrade --install iotistic "${CHART_PATH}" \
-            --namespace "${NAMESPACE}" \
-=======
           echo "Deploying images (tags):"
           echo "  API: $API_DEPLOY_TAG"
           echo "  Dashboard: $DASH_DEPLOY_TAG"
@@ -546,9 +526,10 @@ jobs:
 
           echo "Helm sets: $HELM_SETS"
 
+          kubectx nodeport
+
           helm upgrade --install iotistic "${{ env.CHART_PATH }}" \
             --namespace "$NAMESPACE" \
->>>>>>> e167e879313614fa54eb57b3e61467698255737f
             --create-namespace \
             -f "${{ env.VALUES_FILE }}" \
             $HELM_SETS \
@@ -577,29 +558,3 @@ jobs:
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           kubectl -n ${{ env.K8S_NAMESPACE }} get pods -o wide >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-<<<<<<< HEAD
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "### Pod Status" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          kubectl -n iotistic-nodeport get pods -o wide >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "### Access URLs" >> $GITHUB_STEP_SUMMARY
-          echo "- **Dashboard:** http://localhost:30000" >> $GITHUB_STEP_SUMMARY
-          echo "- **API:** http://localhost:30002" >> $GITHUB_STEP_SUMMARY
-
-      # ------------------------------------
-      # DESTROY
-      # ------------------------------------
-      - name: Destroy deployed Iotistic NodePort (helm)
-        if: ${{ inputs.destroy == true }}
-        run: |
-          set -e
-          NAMESPACE=iotistic-nodeport
-          kubectx nodeport
-          helm uninstall iotistic -n "${NAMESPACE}" || true
-          kubectl delete namespace "${NAMESPACE}" --wait --ignore-not-found
-=======
->>>>>>> e167e879313614fa54eb57b3e61467698255737f
