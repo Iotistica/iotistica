@@ -48,6 +48,12 @@ jobs:
         with:
           version: 'v3.13.0'
 
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
       - name: Get chart information
         id: chart_info
         run: |
