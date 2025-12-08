@@ -73,9 +73,9 @@ jobs:
         run: |
           helm template test ${{ env.CHART_PATH }} \
             --set fleet.replicaCount=5 \
-            --set fleet.cloudApiEndpoint=http://23.233.80.107:30002 \
+            --set fleet.cloudApiEndpoint=http://10.27.27.160:30002 \
             --set fleet.fleetId=test-fleet \
-            --set agent.env.MQTT_BROKER_URL=mqtt://23.233.80.107:30883 \
+            --set agent.env.MQTT_BROKER_URL=mqtt://10.27.27.160:30883 \
             --set agent.env.ENABLE_SENSOR_PUBLISH=false \
             --set agent.env.ANOMALY_DETECTION_ENABLED=false > /tmp/rendered.yaml
           
@@ -165,7 +165,7 @@ jobs:
             # Generate 10 keys
             ./k8s/charts/agent-fleet/scripts/generate-provisioning-keys.sh \
               10 \
-              http://23.233.80.107:30002 \
+              http://10.27.27.160:30002 \
               k8s-fleet-production \
               $AUTH_TOKEN > keys.env
             
@@ -177,9 +177,9 @@ jobs:
             # Deploy fleet
             helm install agent-fleet ./agent-fleet-${{ needs.validate-chart.outputs.chart_version }}.tgz \
               --set fleet.replicaCount=10 \
-              --set fleet.cloudApiEndpoint=http://23.233.80.107:30002 \
+              --set fleet.cloudApiEndpoint=http://10.27.27.160:30002 \
               --set fleet.fleetId=k8s-fleet-production \
-              --set agent.env.MQTT_BROKER_URL=mqtt://23.233.80.107:30883 \
+              --set agent.env.MQTT_BROKER_URL=mqtt://10.27.27.160:30883 \
               --set agent.env.POLL_INTERVAL_MS=300000 \
               --set agent.env.REPORT_INTERVAL_MS=300000 \
               --set agent.env.METRICS_INTERVAL_MS=600000 \
@@ -218,6 +218,11 @@ jobs:
             echo "KUBECONFIG not configured - skipping deployment"
             exit 1
           fi
+          
+          # Switch to k3scl02 cluster context
+          kubectl config use-context k3scl02
+          echo "Current context: $(kubectl config current-context)"
+          kubectl cluster-info
 
       - name: Install Helm
         uses: azure/setup-helm@v3
@@ -226,7 +231,7 @@ jobs:
 
       - name: Generate test provisioning keys
         env:
-          API_URL: ${{ secrets.TEST_API_URL || 'http://23.233.80.107:30002' }}
+          API_URL: ${{ secrets.TEST_API_URL || 'http://10.27.27.160:30002' }}
           FLEET_ID: agent-fleet-test-${{ github.run_number }}
           AUTH_TOKEN: ${{ secrets.API_AUTH_TOKEN }}
         run: |
@@ -262,7 +267,7 @@ jobs:
       - name: Deploy test fleet
         env:
           FLEET_SIZE: ${{ github.event.inputs.test_fleet_size }}
-          API_URL: ${{ secrets.TEST_API_URL || 'http://23.233.80.107:30002' }}
+          API_URL: ${{ secrets.TEST_API_URL || 'http://10.27.27.160:30002' }}
           FLEET_ID: agent-fleet-test-${{ github.run_number }}
         run: |
           NAMESPACE="agent-fleet-test"
@@ -273,7 +278,7 @@ jobs:
             --set fleet.replicaCount="$FLEET_SIZE" \
             --set fleet.cloudApiEndpoint="$API_URL" \
             --set fleet.fleetId="$FLEET_ID" \
-            --set agent.env.MQTT_BROKER_URL=mqtt://23.233.80.107:30883 \
+            --set agent.env.MQTT_BROKER_URL=mqtt://10.27.27.160:30883 \
             --set agent.env.POLL_INTERVAL_MS=300000 \
             --set agent.env.REPORT_INTERVAL_MS=300000 \
             --set agent.env.METRICS_INTERVAL_MS=600000 \
