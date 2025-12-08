@@ -209,26 +209,28 @@ jobs:
 
       - name: Configure kubectl
         run: |
-          if [ -n "${{ secrets.KUBECONFIG }}" ]; then
+          if [ -f "$HOME/.kube/config" ]; then
+            echo "Kubeconfig already exists at $HOME/.kube/config — skipping configuration."
+          elif [ -n "${{ secrets.KUBECONFIG }}" ]; then
             mkdir -p "$HOME/.kube"
-            
-            # Backup existing config if present
-            if [ -f "$HOME/.kube/config" ]; then
-              cp "$HOME/.kube/config" "$HOME/.kube/config.backup"
-            fi
-            
+
             # Try base64 decode first, fall back to plain text
-            echo "${{ secrets.KUBECONFIG }}" | base64 -d > "$HOME/.kube/config" 2>/dev/null || echo "${{ secrets.KUBECONFIG }}" > "$HOME/.kube/config"
+            echo "${{ secrets.KUBECONFIG }}" | base64 -d > "$HOME/.kube/config" 2>/dev/null || \
+            echo "${{ secrets.KUBECONFIG }}" > "$HOME/.kube/config"
             chmod 600 "$HOME/.kube/config"
+
+            echo "Kubeconfig configured successfully."
           else
-            echo "KUBECONFIG not configured - skipping deployment"
+            echo "KUBECONFIG secret not set — skipping deployment."
             exit 1
           fi
-          
-          # Switch to k3scl02 cluster context
-          kubectl config use-context k3scl02
-          echo "Current context: $(kubectl config current-context)"
-          kubectl cluster-info
+
+          # Only switch context if config exists
+          if [ -f "$HOME/.kube/config" ]; then
+            kubectl config use-context k3scl02
+            echo "Current context: $(kubectl config current-context)"
+            kubectl cluster-info
+          fi
 
       - name: Install Helm
         uses: azure/setup-helm@v3
