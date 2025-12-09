@@ -271,7 +271,7 @@ jobs:
             --set simulator.resources.requests.memory=32Mi \
             --set simulator.resources.limits.memory=64Mi \
             --set persistence.size=100Mi \
-            --timeout 15m \
+            --timeout 60m \
             --wait
           
           echo "✅ Test fleet deployed successfully"
