@@ -527,4 +527,93 @@ describe('Target State Config Validator', () => {
       expect(result.valid).toBe(true);
     });
   });
+
+  describe('Logging Batch Configuration', () => {
+    it('should accept valid logBatchSize', () => {
+      const config = {
+        logging: {
+          logBatchSize: 100
+        }
+      };
+      const result = validateTargetStateConfig(config);
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it('should reject logBatchSize < 1', () => {
+      const config = {
+        logging: {
+          logBatchSize: 0
+        }
+      };
+      const result = validateTargetStateConfig(config);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContainEqual(
+        expect.objectContaining({ field: 'logging.logBatchSize' })
+      );
+    });
+
+    it('should reject logBatchSize > 1000', () => {
+      const config = {
+        logging: {
+          logBatchSize: 1500
+        }
+      };
+      const result = validateTargetStateConfig(config);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContainEqual(
+        expect.objectContaining({ field: 'logging.logBatchSize' })
+      );
+    });
+
+    it('should accept valid logFlushIntervalMs (30 seconds)', () => {
+      const config = {
+        logging: {
+          logFlushIntervalMs: 30000
+        }
+      };
+      const result = validateTargetStateConfig(config);
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it('should reject logFlushIntervalMs < 1000 (1 second)', () => {
+      const config = {
+        logging: {
+          logFlushIntervalMs: 500
+        }
+      };
+      const result = validateTargetStateConfig(config);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContainEqual(
+        expect.objectContaining({ field: 'logging.logFlushIntervalMs' })
+      );
+    });
+
+    it('should reject logFlushIntervalMs > 300000 (5 minutes)', () => {
+      const config = {
+        logging: {
+          logFlushIntervalMs: 600000
+        }
+      };
+      const result = validateTargetStateConfig(config);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContainEqual(
+        expect.objectContaining({ field: 'logging.logFlushIntervalMs' })
+      );
+    });
+
+    it('should accept both batch settings together', () => {
+      const config = {
+        logging: {
+          logBatchSize: 500,
+          logFlushIntervalMs: 60000,
+          enableCompression: true
+        }
+      };
+      const result = validateTargetStateConfig(config);
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+  });
 });

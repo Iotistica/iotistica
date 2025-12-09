@@ -270,12 +270,16 @@ export default class DeviceAgent {
     }
 
     try {
+      const loggingConfig = this.agentConfig.getLoggingConfig();
+      
       const cloudLogBackend = new CloudLogBackend(
         {
           cloudEndpoint: this.apiUrl,
           deviceUuid: this.deviceInfo.uuid,
           deviceApiKey: this.deviceInfo.apiKey,
-          compression: process.env.LOG_COMPRESSION !== "false",
+          compression: loggingConfig.enableCompression,
+          batchSize: loggingConfig.logBatchSize,
+          flushInterval: loggingConfig.logFlushIntervalMs,
         },
         this.agentLogger
       );

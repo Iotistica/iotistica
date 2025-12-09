@@ -200,6 +200,26 @@ export function validateTargetStateConfig(config: any): ValidationResult {
     });
   }
 
+  if (logging.logBatchSize !== undefined) {
+    if (!Number.isInteger(logging.logBatchSize) || logging.logBatchSize < 1 || logging.logBatchSize > 1000) {
+      errors.push({
+        field: 'logging.logBatchSize',
+        message: 'Must be an integer between 1 and 1000',
+        value: logging.logBatchSize
+      });
+    }
+  }
+
+  if (logging.logFlushIntervalMs !== undefined) {
+    if (!Number.isInteger(logging.logFlushIntervalMs) || logging.logFlushIntervalMs < 1000 || logging.logFlushIntervalMs > 300000) {
+      errors.push({
+        field: 'logging.logFlushIntervalMs',
+        message: 'Must be an integer between 1000 (1 second) and 300000 (5 minutes)',
+        value: logging.logFlushIntervalMs
+      });
+    }
+  }
+
   // ==================== Protocol Adapters ====================
   const protocolAdapters = config.protocolAdapters || {};
   const adaptersEnabled = features.enableProtocolAdapters === true;

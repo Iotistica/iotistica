@@ -53,6 +53,8 @@ export interface LoggingConfig {
   maxLogs?: number;
   enableFilePersistence?: boolean;
   enableCompression?: boolean;
+  logBatchSize?: number;          // Number of logs per batch upload (default: 100)
+  logFlushIntervalMs?: number;    // Milliseconds between log flushes (default: 30000)
 }
 
 export interface FeatureToggles {
@@ -191,6 +193,12 @@ export class AgentConfig {
         : undefined),
       enableFilePersistence: cloud.logging?.enableFilePersistence ?? (env.LOG_FILE_PERSISTANCE === 'true'),
       enableCompression: cloud.logging?.enableCompression ?? (env.LOG_COMPRESSION === 'true'),
+      logBatchSize: cloud.logging?.logBatchSize ?? (env.LOG_BATCH_SIZE 
+        ? parseInt(env.LOG_BATCH_SIZE, 10) 
+        : 100), // Default: 100 logs per batch
+      logFlushIntervalMs: cloud.logging?.logFlushIntervalMs ?? (env.LOG_FLUSH_INTERVAL_MS 
+        ? parseInt(env.LOG_FLUSH_INTERVAL_MS, 10) 
+        : 30000), // Default: 30 seconds
     };
   }
 
