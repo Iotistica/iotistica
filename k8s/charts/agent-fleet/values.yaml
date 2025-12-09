@@ -166,6 +166,7 @@ monitoring:
 # Node selection
 nodeSelector: {}
   # Example: workload: agent-fleet
+  role: workers
 
 # Tolerations for dedicated node pools
 tolerations: []
