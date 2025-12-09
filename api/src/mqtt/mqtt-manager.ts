@@ -439,12 +439,12 @@ export class MqttManager extends EventEmitter {
       }
       
       // START operation
-      logOperation.start('mqtt-message', `Received ${messageType}`, {
-        topic,
-        deviceUuid: deviceUuid?.substring(0, 8) + '...',
-        messageType,
-        payloadSize: payload.length
-      });
+      // logOperation.start('mqtt-message', `Received ${messageType}`, {
+      //   topic,
+      //   deviceUuid: deviceUuid?.substring(0, 8) + '...',
+      //   messageType,
+      //   payloadSize: payload.length
+      // });
 
       // Parse JSON payload
       let data: any;
@@ -453,10 +453,10 @@ export class MqttManager extends EventEmitter {
       } catch {
         // Non-JSON payload (e.g., raw log messages)
         data = message;
-        logOperation.step('mqtt-message', 'Non-JSON payload detected', { 
-          messageType,
-          preview: message.substring(0, 100)
-        });
+        // logOperation.step('mqtt-message', 'Non-JSON payload detected', { 
+        //   messageType,
+        //   preview: message.substring(0, 100)
+        // });
       }
 
       // Route message based on type
@@ -464,28 +464,28 @@ export class MqttManager extends EventEmitter {
         case 'endpoints':
           // Topic: iot/device/{uuid}/endpoints/{endpointTopic}
           const endpointTopic = rest[0] || 'unknown';
-          logOperation.step('mqtt-message', 'Routing to endpoint handler', { 
-            deviceUuid: deviceUuid?.substring(0, 8) + '...',
-            endpointTopic
-          });
+          // logOperation.step('mqtt-message', 'Routing to endpoint handler', { 
+          //   deviceUuid: deviceUuid?.substring(0, 8) + '...',
+          //   endpointTopic
+          // });
           this.handleSensorData(deviceUuid, endpointTopic, data);
           break;
           
         case 'sensor':
           // Topic: iot/device/{uuid}/sensor/{sensorTopic} (legacy, deprecated)
           const sensorTopic = rest[0] || 'unknown';
-          logOperation.step('mqtt-message', 'Routing to sensor handler (legacy)', { 
-            deviceUuid: deviceUuid?.substring(0, 8) + '...',
-            sensorTopic
-          });
+          // logOperation.step('mqtt-message', 'Routing to sensor handler (legacy)', { 
+          //   deviceUuid: deviceUuid?.substring(0, 8) + '...',
+          //   sensorTopic
+          // });
           this.handleSensorData(deviceUuid, sensorTopic, data);
           break;
           
         case 'state':
-          logOperation.step('mqtt-message', 'Processing state update', { 
-            deviceUuid: deviceUuid.substring(0, 8) + '...',
-            hasVersion: data && data[deviceUuid] && 'version' in data[deviceUuid]
-          });
+          // logOperation.step('mqtt-message', 'Processing state update', { 
+          //   deviceUuid: deviceUuid.substring(0, 8) + '...',
+          //   hasVersion: data && data[deviceUuid] && 'version' in data[deviceUuid]
+          // });
           // Agent already sends full report: { [uuid]: state }
           // Don't double-wrap - emit the parsed data directly
           this.emit('state', data);
@@ -494,36 +494,36 @@ export class MqttManager extends EventEmitter {
         case 'agent':
           // Topic: iot/device/{uuid}/agent/{subTopic}
           const subTopic = rest[0] || 'unknown';
-          logOperation.step('mqtt-message', 'Routing to agent handler', { 
-            deviceUuid: deviceUuid?.substring(0, 8) + '...',
-            subTopic
-          });
+          // logOperation.step('mqtt-message', 'Routing to agent handler', { 
+          //   deviceUuid: deviceUuid?.substring(0, 8) + '...',
+          //   subTopic
+          // });
           this.emit('agent', { deviceUuid, subTopic, message: data });
           break;
           
         case 'logs':
           // Topic: iot/device/{uuid}/logs/{containerId}
           const containerId = rest[0] || 'unknown';
-          logOperation.step('mqtt-message', 'Routing to log handler', { 
-            deviceUuid: deviceUuid?.substring(0, 8) + '...',
-            containerId
-          });
+          // logOperation.step('mqtt-message', 'Routing to log handler', { 
+          //   deviceUuid: deviceUuid?.substring(0, 8) + '...',
+          //   containerId
+          // });
           this.handleLogMessage(deviceUuid, containerId, data);
           break;
           
         case 'metrics':
           // Topic: iot/device/{uuid}/metrics
-          logOperation.step('mqtt-message', 'Routing to metrics handler', { 
-            deviceUuid: deviceUuid?.substring(0, 8) + '...'
-          });
+          // logOperation.step('mqtt-message', 'Routing to metrics handler', { 
+          //   deviceUuid: deviceUuid?.substring(0, 8) + '...'
+          // });
           this.handleMetrics(deviceUuid, data);
           break;
           
         case 'status':
           // Topic: iot/device/{uuid}/status
-          logOperation.step('mqtt-message', 'Routing to status handler', { 
-            deviceUuid: deviceUuid?.substring(0, 8) + '...'
-          });
+          // logOperation.step('mqtt-message', 'Routing to status handler', { 
+          //   deviceUuid: deviceUuid?.substring(0, 8) + '...'
+          // });
           this.handleStatus(deviceUuid, data);
           break;
           
@@ -537,7 +537,7 @@ export class MqttManager extends EventEmitter {
       }
       
       // DONE operation
-      logOperation.complete('mqtt-message', `Message handled`, { messageType });
+      //logOperation.complete('mqtt-message', `Message handled`, { messageType });
 
     } catch (error) {
       logOperation.error('mqtt-message', 'Failed to handle message', error as Error, { topic });
