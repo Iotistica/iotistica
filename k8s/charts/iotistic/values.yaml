@@ -138,7 +138,7 @@ api:
     repository: iotistic/api
     tag: latest
     pullPolicy: IfNotPresent  # Use local images only (prevents pulling from registry)
-  replicas: 3  # Start with 3 replicas for large fleet deployments (100+ agents)
+  replicas: 1  # Single replica for now
   port: 3002
   serviceType: NodePort
   nodePort: 30002
@@ -154,7 +154,7 @@ api:
       memory: 1Gi      # Increased for connection pool (200 connections)
   # Horizontal Pod Autoscaling for dynamic fleet scaling
   autoscaling:
-    enabled: true
+    enabled: false     # Disabled for now
     minReplicas: 3     # Minimum pods for large fleet (100+ agents)
     maxReplicas: 10    # Scale up to 10 pods under heavy load
     targetCPUUtilizationPercentage: 70

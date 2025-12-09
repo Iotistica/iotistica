@@ -150,7 +150,7 @@ api:
   image:
     repository: iotistic/api
     tag: latest
-  replicas: 2  # Start with 2 replicas for load distribution
+  replicas: 1  # Single replica for now
   port: 3002
   resources:
     requests:
