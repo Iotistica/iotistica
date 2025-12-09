@@ -182,7 +182,8 @@ spec:
             {{- toYaml .Values.simulator.resources | nindent 12 }}
           livenessProbe:
             tcpSocket:
-              port: 502  # Use fixed port number since containerPort is removed
+              host: 127.0.0.1
+              port: 502
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 3
