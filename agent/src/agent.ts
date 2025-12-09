@@ -212,6 +212,9 @@ export default class DeviceAgent {
       // 11. Initialize API Binder (AFTER features are initialized so it can access sensor health)
       await this.initDeviceSync(config.settings);
 
+      // 11.5. Run first boot discovery NOW (after CloudSync has fetched target state from cloud)
+      await this.runFirstBootDiscoveryIfEnabled();
+
       // 11-13. Initialize supporting features (updater, firewall, sensor config handler)
       await this.featureInitializer.initSupportingFeatures();
 
@@ -656,33 +659,13 @@ export default class DeviceAgent {
       this.discoveryService = new DiscoveryService(this.agentLogger, this.agentConfig);
       await this.discoveryService.init();
 
-      // Check if first boot discovery should run (uses cloud config → env fallback)
-      const features = this.agentConfig.getFeatures();
-      const enableFirstBootDiscovery = features.enableFirstBootDiscovery ?? false;
-      
-      if (enableFirstBootDiscovery) {
-        this.agentLogger?.infoSync("Running first boot discovery (will block until complete)", {
-          component: LogComponents.agent,
-        });
-        
-        // Run discovery and WAIT for completion (so SensorPublish can load discovered endpoints)
-        await this.discoveryService.runDiscovery({ 
-          trigger: 'first_boot', 
-          validate: true 
-        });
+      // NOTE: First boot discovery is DEFERRED until after CloudSync fetches target state
+      // This ensures we respect cloud-configured feature flags (not just env variables)
+      // See runFirstBootDiscoveryIfEnabled() called after CloudSync initialization
 
-        this.agentLogger?.infoSync("First boot discovery completed", {
-          component: LogComponents.agent,
-        });
-      }
-
-      this.agentLogger?.infoSync("Discovery Service initialized", {
+      this.agentLogger?.infoSync("Discovery Service initialized (first boot discovery deferred until cloud config loaded)", {
         component: LogComponents.agent,
-        firstBootDiscovery: enableFirstBootDiscovery,
       });
-      
-      // Start periodic discovery if enabled
-      this.startPeriodicDiscovery();
     } catch (error) {
       this.agentLogger?.errorSync(
         "Failed to initialize Discovery Service",
@@ -756,6 +739,58 @@ export default class DeviceAgent {
         );
       });
     }, intervals.discoveryFullIntervalMs!);
+  }
+
+  /**
+   * Run first boot discovery if enabled (called AFTER CloudSync fetches target state)
+   * This ensures we respect cloud-configured feature flags
+   */
+  private async runFirstBootDiscoveryIfEnabled(): Promise<void> {
+    if (!this.discoveryService) {
+      return;
+    }
+
+    // Check feature flags (now cloud config is available)
+    const features = this.agentConfig.getFeatures();
+    const enableFirstBootDiscovery = features.enableFirstBootDiscovery ?? false;
+
+    if (!enableFirstBootDiscovery) {
+      this.agentLogger?.infoSync('First boot discovery disabled by configuration', {
+        component: LogComponents.agent,
+        configSource: this.stateReconciler.getTargetState()?.config ? 'cloud' : 'environment'
+      });
+      
+      // Start periodic discovery even if first boot is disabled
+      this.startPeriodicDiscovery();
+      return;
+    }
+
+    this.agentLogger?.infoSync('Running first boot discovery (will block until complete)', {
+      component: LogComponents.agent,
+      configSource: this.stateReconciler.getTargetState()?.config ? 'cloud' : 'environment'
+    });
+
+    try {
+      // Run discovery and WAIT for completion (so SensorPublish can load discovered endpoints)
+      await this.discoveryService.runDiscovery({
+        trigger: 'first_boot',
+        validate: true
+      });
+
+      this.agentLogger?.infoSync('First boot discovery completed', {
+        component: LogComponents.agent,
+      });
+    } catch (error) {
+      this.agentLogger?.errorSync(
+        'First boot discovery failed',
+        error as Error,
+        { component: LogComponents.agent }
+      );
+      // Don't fail startup - discovery is optional
+    }
+
+    // Start periodic discovery after first boot completes
+    this.startPeriodicDiscovery();
   }
 
   private async initializeSimulationMode(): Promise<void> {
