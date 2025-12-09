@@ -30,7 +30,6 @@ spec:
       {{- end }}
       securityContext:
         {{- toYaml .Values.securityContext | nindent 8 }}
-      hostNetwork: true  # Allow access to external API via public IP
       # Init container to generate fresh provisioning key on demand
       initContainers:
         - name: generate-provisioning-key
