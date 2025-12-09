@@ -142,17 +142,27 @@ spec:
           resources:
             {{- toYaml .Values.agent.resources | nindent 12 }}
           livenessProbe:
-            httpGet:
-              path: /ping
-              port: 48484  # Use fixed port number since containerPort is removed
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  POD_INDEX=$(echo $POD_NAME | grep -o '[0-9]*$')
+                  API_PORT=$((48484 + POD_INDEX))
+                  wget -q -O- http://127.0.0.1:$API_PORT/ping || exit 1
             initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
           readinessProbe:
-            httpGet:
-              path: /ping
-              port: 48484  # Use fixed port number since containerPort is removed
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  POD_INDEX=$(echo $POD_NAME | grep -o '[0-9]*$')
+                  API_PORT=$((48484 + POD_INDEX))
+                  wget -q -O- http://127.0.0.1:$API_PORT/ping || exit 1
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
