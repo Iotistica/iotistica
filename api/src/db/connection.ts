@@ -13,10 +13,12 @@ const dbConfig = {
   database: process.env.DB_NAME || 'iotistic',
   user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || 'postgres',
-  max: parseInt(process.env.DB_POOL_SIZE || '20'),
+  max: parseInt(process.env.DB_POOL_SIZE || '200'), // High for large fleet deployments (100+ agents)
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000, // 10 seconds for migrations and slow queries
+  connectionTimeoutMillis: 30000, // 30 seconds to handle load spikes from multiple agents
   statementTimeout: 60000, // 60 seconds max query execution time
+  // Queue incoming requests when all connections busy
+  allowExitOnIdle: false,
 };
 
 // Create connection pool

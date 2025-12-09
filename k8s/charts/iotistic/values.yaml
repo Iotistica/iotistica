@@ -138,7 +138,7 @@ api:
     repository: iotistic/api
     tag: latest
     pullPolicy: IfNotPresent  # Use local images only (prevents pulling from registry)
-  replicas: 1
+  replicas: 3  # Start with 3 replicas for large fleet deployments (100+ agents)
   port: 3002
   serviceType: NodePort
   nodePort: 30002
@@ -147,15 +147,22 @@ api:
   corsOrigins: "http://localhost:5173,http://localhost:3001,http://localhost:3000,http://*:30000"
   resources:
     requests:
-      cpu: 250m
-      memory: 256Mi
+      cpu: 500m        # Increased for fleet load
+      memory: 512Mi    # Increased for connection pool
     limits:
-      cpu: 500m
-      memory: 512Mi
+      cpu: 1000m       # Increased for fleet load
+      memory: 1Gi      # Increased for connection pool (200 connections)
+  # Horizontal Pod Autoscaling for dynamic fleet scaling
+  autoscaling:
+    enabled: true
+    minReplicas: 3     # Minimum pods for large fleet (100+ agents)
+    maxReplicas: 10    # Scale up to 10 pods under heavy load
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
   env:
     NODE_ENV: development
     LOG_LEVEL: info
-    DB_POOL_SIZE: "20"
+    DB_POOL_SIZE: "200"  # Increased for large fleet deployments (100+ agents)
     MQTT_PERSIST_TO_DB: "true"
     MQTT_DB_SYNC_INTERVAL: "10000"
     MQTT_MONITOR_ENABLED: "true"

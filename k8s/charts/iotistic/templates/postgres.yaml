@@ -21,7 +21,7 @@ data:
     
     # Connection settings
     listen_addresses = '*'
-    max_connections = 100
+    max_connections = 300  # Increased for large fleet deployments (100+ agents)
     
     # Memory settings
     shared_buffers = 128MB

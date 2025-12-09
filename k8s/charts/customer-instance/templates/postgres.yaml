@@ -42,6 +42,8 @@ spec:
             secretKeyRef:
               name: {{ include "customer-instance.fullname" . }}-secrets
               key: POSTGRES_DB
+        - name: POSTGRES_MAX_CONNECTIONS
+          value: "300"  # Increased for large fleet deployments (100+ agents)
         - name: PGDATA
           value: /var/lib/postgresql/data/pgdata
         volumeMounts:

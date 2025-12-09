@@ -129,10 +129,15 @@ export async function deviceAuth(
 
   } catch (error: any) {
     console.error('Device authentication error:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Authentication failed'
-    });
+    // Only send error response if headers haven't been sent yet
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: 'Internal Server Error',
+        message: 'Authentication failed'
+      });
+    }
+    // Re-throw to let calling code know auth failed
+    throw error;
   }
 }
 

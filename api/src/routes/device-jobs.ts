@@ -645,7 +645,11 @@ async function jobsAuth(req: Request, res: Response, next: any) {
       return next(); // Device auth successful
     }
   } catch (err) {
-    // Device auth failed, try provisioning key
+    // Device auth failed, check if response already sent before continuing
+    if (res.headersSent) {
+      return; // Error response already sent by deviceAuth, abort
+    }
+    // Try provisioning key as fallback
   }
 
   // Try provisioning key (fallback for development)
@@ -667,11 +671,13 @@ async function jobsAuth(req: Request, res: Response, next: any) {
     // Provisioning key also failed
   }
 
-  // Both failed
-  return res.status(401).json({
-    error: 'Unauthorized',
-    message: 'Invalid device API key or provisioning key'
-  });
+  // Both failed - only send response if headers not already sent
+  if (!res.headersSent) {
+    return res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Invalid device API key or provisioning key'
+    });
+  }
 }
 
 /**

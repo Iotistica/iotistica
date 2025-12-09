@@ -150,18 +150,19 @@ api:
   image:
     repository: iotistic/api
     tag: latest
-  replicas: 1
+  replicas: 2  # Start with 2 replicas for load distribution
   port: 3002
   resources:
     requests:
-      cpu: 250m
-      memory: 256Mi
+      cpu: 500m        # Increased for fleet load
+      memory: 512Mi    # Increased for connection pool
     limits:
-      cpu: 500m
-      memory: 512Mi
+      cpu: 1000m       # Increased for fleet load
+      memory: 1Gi      # Increased for connection pool
   env:
     NODE_ENV: production
     LOG_LEVEL: info
+    DB_POOL_SIZE: "100"  # Per-pod connection pool for customer instances
 
 # Dashboard (admin panel)
 dashboard:
