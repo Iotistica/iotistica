@@ -180,13 +180,13 @@ spec:
             {{- end }}
           resources:
             {{- toYaml .Values.simulator.resources | nindent 12 }}
-          livenessProbe:
-            tcpSocket:
-              port: 502
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 3
-            failureThreshold: 3
+#          livenessProbe:
+#            tcpSocket:
+#              port: 502
+#            initialDelaySeconds: 5
+#            periodSeconds: 10
+#            timeoutSeconds: 3
+#            failureThreshold: 3
           # Readiness probe disabled - simulator may generate errors
           # when agent queries addresses not defined in vendor config
           # readinessProbe:
