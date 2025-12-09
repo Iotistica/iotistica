@@ -131,7 +131,7 @@ persistence:
   enabled: true
   
   # Storage class (leave empty for default)
-  storageClass: ""
+  storageClass: "longhorn"
   
   # Storage size per agent (SQLite database + logs)
   size: 100Mi
