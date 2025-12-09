@@ -182,7 +182,6 @@ spec:
             {{- toYaml .Values.simulator.resources | nindent 12 }}
           livenessProbe:
             tcpSocket:
-              host: 127.0.0.1
               port: 502
             initialDelaySeconds: 5
             periodSeconds: 10
