@@ -1,78 +1,70 @@
 /**
  * Database connection and query interface
- * PostgreSQL connection pool management (K8s-safe)
+ * PostgreSQL connection pool management
  */
 
 import { Pool, PoolClient, QueryResult } from 'pg';
 import logger from '../utils/logger';
 
-// Database configuration
+// Database configuration from environment variables
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '5432'),
   database: process.env.DB_NAME || 'iotistic',
   user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || 'postgres',
-  max: parseInt(process.env.DB_POOL_SIZE || '50'), // conservative pool size
+  max: parseInt(process.env.DB_POOL_SIZE || '50'), // High for large fleet deployments (100+ agents)
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000, // fail fast if pool exhausted
-  statementTimeout: 60000, // max 60s per query
+  connectionTimeoutMillis: 30000, // 30 seconds to handle load spikes from multiple agents
+  statementTimeout: 60000, // 60 seconds max query execution time
+  // Queue incoming requests when all connections busy
   allowExitOnIdle: false,
 };
 
-// Create the pool
+// Create connection pool
 export const pool = new Pool(dbConfig);
 
-// Handle pool errors without crashing
-pool.on('error', (err, client) => {
+// Handle pool errors
+pool.on('error', (err) => {
   logger.error('Unexpected error on idle database client', err);
-  // Do NOT exit process; log only
+  // process.exit(-1);
 });
 
 /**
- * Execute a query with retries (safe under high load)
+ * Execute a query with parameterized values
  */
 export async function query<T = any>(
   text: string,
-  params?: any[],
-  retries = 3
+  params?: any[]
 ): Promise<QueryResult<T>> {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      const start = Date.now();
-      const result = await pool.query<T>(text, params);
-      const duration = Date.now() - start;
-      if (duration > 500) {
-        logger.warn(`Slow query detected (${duration}ms): ${text}`);
-      }
-      return result;
-    } catch (err: any) {
-      logger.warn(`Query attempt ${attempt} failed: ${err.message}`);
-      if (attempt === retries) {
-        logger.error('Query failed after retries', { text, err });
-        throw err;
-      }
-      // Backoff before retry
-      await new Promise((res) => setTimeout(res, 50 * attempt));
-    }
+  const start = Date.now();
+  try {
+    const result = await pool.query<T>(text, params);
+    const duration = Date.now() - start;
+    return result;
+  } catch (error) {
+    logger.error('Query error', { text, error });
+    throw error;
   }
-  throw new Error('Query failed after retries');
 }
 
 /**
- * Get a client safely for transactions
+ * Get a client from the pool for transactions
  */
 export async function getClient(): Promise<PoolClient> {
   try {
-    return await pool.connect();
-  } catch (err: any) {
-    logger.warn('Failed to acquire DB client from pool', err.message);
+    const client = await pool.connect();
+    return client;
+  } catch (err) {
+    logger.warn('Failed to acquire database client from pool', err);
+    // Optionally: throw a custom error to handle backpressure gracefully
     throw new Error('DB connection temporarily unavailable');
   }
 }
 
+
 /**
- * Execute a callback inside a transaction
+ * Execute a function within a transaction
  */
 export async function transaction<T>(
   callback: (client: PoolClient) => Promise<T>
@@ -83,46 +75,71 @@ export async function transaction<T>(
     const result = await callback(client);
     await client.query('COMMIT');
     return result;
-  } catch (err) {
+  } catch (error) {
     try {
       await client.query('ROLLBACK');
-    } catch (rollbackErr) {
-      logger.warn('Failed to rollback transaction', rollbackErr);
+    } catch (rollbackError) {
+      // Connection might be closed, log but don't throw
+      logger.warn('Failed to rollback transaction (connection may be closed)', rollbackError);
     }
-    throw err;
+    throw error;
   } finally {
     try {
       client.release();
-    } catch (releaseErr) {
-      logger.warn('Failed to release DB client', releaseErr);
+    } catch (releaseError) {
+      // Client might already be released or connection closed
+      logger.warn('Failed to release client', releaseError);
     }
   }
 }
 
 /**
- * Test DB connection
+ * Test database connection
  */
 export async function testConnection(): Promise<boolean> {
   try {
+    logger.info('Testing database connection with config:', {
+      host: dbConfig.host,
+      port: dbConfig.port,
+      database: dbConfig.database,
+      user: dbConfig.user,
+    });
+    
     const result = await query('SELECT NOW() as now');
-    logger.info('Database connected successfully at', result.rows[0].now);
+    logger.log(' Database connected successfully at', result.rows[0].now);
     return true;
-  } catch (err) {
-    logger.error('Database connection failed', err);
+  } catch (error) {
+    logger.error(' Database connection failed:', error);
+    if (error instanceof Error) {
+      logger.error('Connection error details:', {
+        message: error.message,
+        code: (error as any).code,
+        host: dbConfig.host,
+        port: dbConfig.port,
+      });
+    }
     return false;
   }
 }
 
 /**
- * Close all connections
+ * Initialize database schema
+ * @deprecated Use runMigrations() from migrations.ts instead
+ */
+export async function initializeSchema(): Promise<void> {
+  logger.warn('  initializeSchema() is deprecated, using migration system instead');
+  
+  // Import and run migrations
+  const { runMigrations } = await import('./migrations');
+  await runMigrations();
+}
+
+/**
+ * Close all database connections
  */
 export async function close(): Promise<void> {
-  try {
-    await pool.end();
-    logger.info('Database connections closed');
-  } catch (err) {
-    logger.warn('Error closing DB pool', err);
-  }
+  await pool.end();
+  logger.info('Database connections closed');
 }
 
 export default {
@@ -130,6 +147,7 @@ export default {
   getClient,
   transaction,
   testConnection,
+  initializeSchema,
   close,
   pool,
 };
