@@ -125,11 +125,20 @@ export async function validateProvisioningKey(
 
     return { valid: true, keyRecord: record };
   } catch (error: any) {
+    // Distinguish between database errors and validation errors
+    const isDatabaseError = error.message?.includes('Connection terminated') || 
+                           error.message?.includes('timeout') ||
+                           error.message?.includes('ECONNREFUSED');
+    
     await logAuditEvent({
-      eventType: AuditEventType.PROVISIONING_FAILED,
+      eventType: isDatabaseError ? AuditEventType.PROVISIONING_FAILED : AuditEventType.PROVISIONING_KEY_INVALID,
       ipAddress,
-      severity: AuditSeverity.ERROR,
-      details: { error: error.message }
+      severity: isDatabaseError ? AuditSeverity.ERROR : AuditSeverity.WARNING,
+      details: { 
+        error: error.message,
+        isDatabaseError,
+        reason: isDatabaseError ? 'Database connection error' : 'Validation error'
+      }
     });
     throw error;
   }
