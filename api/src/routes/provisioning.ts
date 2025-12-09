@@ -73,7 +73,7 @@ const eventPublisher = new EventPublisher();
  */
 const provisioningLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'development' ? 100 : 5, // Relaxed for dev
+  max: process.env.NODE_ENV === 'development' ? 1000 : 100, // Higher for fleet deployments
   message: 'Too many provisioning attempts from this IP, please try again later',
   standardHeaders: true,
   legacyHeaders: false,
@@ -92,10 +92,10 @@ const provisioningLimiter = rateLimit({
   }
 });
 
-// Rate limit for key exchange - 10 attempts per hour
+// Rate limit for key exchange - environment-aware for fleet deployments
 const keyExchangeLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 10,
+  max: process.env.NODE_ENV === 'development' ? 1000 : 50, // Higher limit for fleet provisioning
   message: 'Too many key exchange attempts, please try again later'
 });
 
