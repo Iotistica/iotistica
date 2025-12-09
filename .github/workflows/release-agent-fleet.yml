@@ -271,10 +271,19 @@ jobs:
             --set simulator.resources.requests.memory=32Mi \
             --set simulator.resources.limits.memory=64Mi \
             --set persistence.size=100Mi \
-            --timeout 10m \
+            --timeout 15m \
             --wait
           
           echo "✅ Test fleet deployed successfully"
+          
+          # Debug: Check pod status immediately
+          kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/instance="$RELEASE_NAME"
+          
+          # Debug: Check if init containers are stuck
+          for pod in $(kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/instance="$RELEASE_NAME" -o name); do
+            echo "=== $pod init container logs ==="
+            kubectl logs "$pod" -c init-provisioning -n "$NAMESPACE" --tail=20 || echo "Init container not found or not running"
+          done
 
       - name: Verify test fleet
         run: |

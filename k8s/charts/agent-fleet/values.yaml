@@ -57,7 +57,7 @@ agent:
     MODBUS_VENDOR: "Generic"
     
     # MQTT configuration (cloud broker)
-    MQTT_BROKER_URL: "mqtt://23.233.80.107:30883"
+    MQTT_BROKER_URL: "mqtt://10.27.27.160:30883"
     MQTT_CLIENT_ID_PREFIX: "agent-fleet"
     MQTT_RECONNECT_PERIOD: "5000"
     MQTT_CONNECT_TIMEOUT: "30000"
