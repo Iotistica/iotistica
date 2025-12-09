@@ -24,7 +24,7 @@ export async function handleSensorData(data: SensorData): Promise<void> {
       const batch = data.data as any;
       const messages = batch.messages as string[];
       
-      logger.info(`Processing sensor data batch: ${messages.length} messages from ${data.deviceUuid}/${data.sensorName}`);
+      logger.debug(`Processing sensor data batch: ${messages.length} messages from ${data.deviceUuid}/${data.sensorName}`);
       
       // Parse and insert all messages in batch
       for (const messageStr of messages) {
@@ -48,7 +48,7 @@ export async function handleSensorData(data: SensorData): Promise<void> {
         }
       }
       
-      logger.info(`Stored ${messages.length} sensor readings: ${data.deviceUuid}/${data.sensorName}`);
+      logger.debug(`Stored ${messages.length} sensor readings: ${data.deviceUuid}/${data.sensorName}`);
     } else {
       // Single message (legacy format)
       await query(
@@ -64,7 +64,7 @@ export async function handleSensorData(data: SensorData): Promise<void> {
         ]
       );
 
-      logger.info(` Stored sensor data: ${data.deviceUuid}/${data.sensorName}`);
+      logger.debug(` Stored sensor data: ${data.deviceUuid}/${data.sensorName}`);
     }
 
   } catch (error) {
