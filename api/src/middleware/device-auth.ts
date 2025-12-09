@@ -26,7 +26,7 @@ interface CachedDeviceAuth {
   cached_at: number;
 }
 
-// Cache TTL in seconds (default: 5 minutes)
+// Cache TTL in seconds (default: 5 minutes = 300 seconds)
 const CACHE_TTL = parseInt(process.env.DEVICE_AUTH_CACHE_TTL || '300', 10);
 
 // Lazy-load Redis client
@@ -101,7 +101,7 @@ async function storeInCache(device: any): Promise<void> {
     };
 
     await redis.getClient().setex(cacheKey, CACHE_TTL, JSON.stringify(cacheData));
-    logger.debug('Device auth cached', { deviceUuid: device.uuid, ttl: CACHE_TTL });
+    logger.info('Device auth cached', { deviceUuid: device.uuid, ttl: CACHE_TTL });
   } catch (error: any) {
     logger.debug('Auth cache write failed', { deviceUuid: device.uuid, error: error.message });
   }
@@ -257,11 +257,15 @@ export async function deviceAuth(
     next();
 
   } catch (error: any) {
+    const duration = Date.now() - startTime;
+    
     logger.error('Device authentication error', { 
       deviceUuid: req.params.uuid,
+      duration: duration + 'ms',
       error: error.message, 
       stack: error.stack 
     });
+    
     // Only send error response if headers haven't been sent yet
     if (!res.headersSent) {
       res.status(500).json({
@@ -269,8 +273,7 @@ export async function deviceAuth(
         message: 'Authentication failed'
       });
     }
-    // Re-throw to let calling code know auth failed
-    throw error;
+    // Don't re-throw - let the request fail gracefully without crashing
   }
 }
 
