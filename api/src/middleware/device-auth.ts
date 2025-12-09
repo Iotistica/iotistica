@@ -15,6 +15,114 @@ import { query } from '../db/connection';
 import bcrypt from 'bcrypt';
 import logger from '../utils/logger';
 
+interface CachedDeviceAuth {
+  id: number;
+  uuid: string;
+  device_name: string;
+  device_type: string;
+  is_active: boolean;
+  device_api_key_hash: string;
+  fleet_id?: string;
+  cached_at: number;
+}
+
+// Cache TTL in seconds (default: 5 minutes)
+const CACHE_TTL = parseInt(process.env.DEVICE_AUTH_CACHE_TTL || '300', 10);
+
+// Lazy-load Redis client
+let redisClient: any = null;
+async function getRedisClient() {
+  if (!redisClient) {
+    try {
+      const module = await import('../redis/client');
+      redisClient = module.redisClient;
+    } catch (error) {
+      logger.warn('Redis client not available for auth caching');
+      return null;
+    }
+  }
+  return redisClient;
+}
+
+/**
+ * Get device auth from Redis cache
+ */
+async function getFromCache(deviceUuid: string): Promise<any | null> {
+  try {
+    const redis = await getRedisClient();
+    if (!redis || !redis.isReady()) {
+      return null;
+    }
+
+    const cacheKey = `auth:device:${deviceUuid}`;
+    const cached = await redis.getClient().get(cacheKey);
+
+    if (!cached) {
+      return null;
+    }
+
+    const data: CachedDeviceAuth = JSON.parse(cached);
+    
+    // Validate cache age
+    const age = Date.now() / 1000 - data.cached_at;
+    if (age > CACHE_TTL) {
+      await redis.getClient().del(cacheKey);
+      return null;
+    }
+
+    logger.debug('Device auth cache hit', { deviceUuid, age: age.toFixed(2) + 's' });
+    return data;
+  } catch (error: any) {
+    logger.debug('Auth cache read failed', { deviceUuid, error: error.message });
+    return null;
+  }
+}
+
+/**
+ * Store device auth in Redis cache
+ */
+async function storeInCache(device: any): Promise<void> {
+  try {
+    const redis = await getRedisClient();
+    if (!redis || !redis.isReady()) {
+      return;
+    }
+
+    const cacheKey = `auth:device:${device.uuid}`;
+    const cacheData: CachedDeviceAuth = {
+      id: device.id,
+      uuid: device.uuid,
+      device_name: device.device_name,
+      device_type: device.device_type,
+      is_active: device.is_active,
+      device_api_key_hash: device.device_api_key_hash,
+      fleet_id: device.fleet_id,
+      cached_at: Date.now() / 1000,
+    };
+
+    await redis.getClient().setex(cacheKey, CACHE_TTL, JSON.stringify(cacheData));
+    logger.debug('Device auth cached', { deviceUuid: device.uuid, ttl: CACHE_TTL });
+  } catch (error: any) {
+    logger.debug('Auth cache write failed', { deviceUuid: device.uuid, error: error.message });
+  }
+}
+
+/**
+ * Invalidate device auth cache (call when credentials change)
+ */
+export async function invalidateDeviceAuthCache(deviceUuid: string): Promise<void> {
+  try {
+    const redis = await getRedisClient();
+    if (!redis || !redis.isReady()) {
+      return;
+    }
+    await redis.getClient().del(`auth:device:${deviceUuid}`);
+    logger.info('Device auth cache invalidated', { deviceUuid });
+  } catch (error: any) {
+    logger.debug('Auth cache invalidation failed', { deviceUuid, error: error.message });
+  }
+}
+
 // Extend Express Request to include device info
 declare global {
   namespace Express {
@@ -42,6 +150,9 @@ export async function deviceAuth(
   res: Response,
   next: NextFunction
 ): Promise<void> {
+  const startTime = Date.now();
+  let cacheHit = false;
+  
   try {
     // Extract API key from header (support both formats)
     const apiKey = 
@@ -67,23 +178,32 @@ export async function deviceAuth(
       return;
     }
 
-    // Fetch device from database
-    const result = await query(
-      `SELECT id, uuid, device_name, device_type, is_active, device_api_key_hash, fleet_id
-       FROM devices
-       WHERE uuid = $1`,
-      [deviceUuid]
-    );
+    // Try cache first
+    let device = await getFromCache(deviceUuid);
+    let cacheHit = !!device;
 
-    if (result.rows.length === 0) {
-      res.status(404).json({
-        error: 'Not Found',
-        message: 'Device not found'
-      });
-      return;
+    // Cache miss - fetch from database
+    if (!device) {
+      const result = await query(
+        `SELECT id, uuid, device_name, device_type, is_active, device_api_key_hash, fleet_id
+         FROM devices
+         WHERE uuid = $1`,
+        [deviceUuid]
+      );
+
+      if (result.rows.length === 0) {
+        res.status(404).json({
+          error: 'Not Found',
+          message: 'Device not found'
+        });
+        return;
+      }
+
+      device = result.rows[0];
+      
+      // Store in cache for future requests
+      await storeInCache(device);
     }
-
-    const device = result.rows[0];
 
     // Check if device is active
     if (!device.is_active) {
@@ -122,13 +242,26 @@ export async function deviceAuth(
       fleetId: device.fleet_id
     };
 
+    const duration = Date.now() - startTime;
     
+    // Log slow auth (cache should be <5ms, DB fallback ~50-200ms)
+    if (duration > 100 || !cacheHit) {
+      logger.debug('Device authenticated', {
+        deviceUuid,
+        duration: duration + 'ms',
+        cacheHit,
+      });
+    }
 
     // Proceed to route handler
     next();
 
   } catch (error: any) {
-    console.error('Device authentication error:', error);
+    logger.error('Device authentication error', { 
+      deviceUuid: req.params.uuid,
+      error: error.message, 
+      stack: error.stack 
+    });
     // Only send error response if headers haven't been sent yet
     if (!res.headersSent) {
       res.status(500).json({

@@ -7,6 +7,7 @@ import { query, transaction } from './connection';
 import { PoolClient } from 'pg';
 import crypto from 'crypto';
 import { DeviceSensorSyncService } from '../services/device-endpoints';
+import logger from '../utils/logger';
 
 // Types
 export interface Device {
@@ -157,7 +158,13 @@ export class DeviceModel {
         }
       });
       
-      console.log(`✅ Device ${existingDevice.device_name || uuid.substring(0, 8)} came back online after ${offlineDurationMin} minutes`);
+      logger.info('Device came back online', {
+        deviceName: existingDevice.device_name || uuid.substring(0, 8),
+        deviceUuid: uuid,
+        offlineDurationMinutes: offlineDurationMin,
+        wasOfflineAt: existingDevice.modified_at,
+        cameOnlineAt: new Date().toISOString()
+      });
     }
     
     return result.rows[0];
