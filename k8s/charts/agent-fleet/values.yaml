@@ -164,7 +164,7 @@ monitoring:
   metricsPort: 48484
 
 # Node selection
-nodeSelector: {}
+nodeSelector:
   # Example: workload: agent-fleet
   role: workers
 
