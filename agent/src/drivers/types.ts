@@ -229,10 +229,31 @@ export interface TargetState {
 			enableCompression?: boolean;
 		};
 		
-		// Protocol adapter configurations
+		// Protocol selection (high-level enablement)
+		// Controls which protocols are active on the device
+		protocols?: {
+			modbus?: {
+				enabled: boolean; // Enable/disable Modbus protocol
+			};
+			opcua?: {
+				enabled: boolean; // Enable/disable OPC-UA protocol
+			};
+			snmp?: {
+				enabled: boolean; // Enable/disable SNMP protocol
+			};
+			can?: {
+				enabled: boolean; // Enable/disable CAN protocol
+			};
+			comap?: {
+				enabled: boolean; // Enable/disable CoMAP protocol
+			};
+		};
+		
+		// Protocol adapter configurations (detailed settings)
+		// Note: Protocol must be enabled in 'protocols' section above
 		protocolAdapters?: {
 			modbus?: {
-				enabled?: boolean;
+				enabled?: boolean; // DEPRECATED: Use config.protocols.modbus.enabled instead
 				tcpHost?: string;
 				tcpPort?: number;
 				serialPort?: string;
@@ -244,11 +265,11 @@ export interface TargetState {
 				vendorFile?: string;
 			};
 			opcua?: {
-				enabled?: boolean;
+				enabled?: boolean; // DEPRECATED: Use config.protocols.opcua.enabled instead
 				discoveryUrls?: string[];
 			};
 			snmp?: {
-				enabled?: boolean;
+				enabled?: boolean; // DEPRECATED: Use config.protocols.snmp.enabled instead
 				ipRanges?: string[];
 				port?: number;
 			};

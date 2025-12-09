@@ -27,6 +27,7 @@ export interface FeatureContext {
   stateReconciler: StateReconciler;
   configSettings: Record<string, any>;
   configFeatures: Record<string, any>;
+  configProtocols?: Record<string, any>; // New: protocols section from target state
   cloudApiEndpoint: string;
   deviceApiPort: number;
   anomalyService?: any;
@@ -233,34 +234,51 @@ export class FeatureInitializer {
   }
 
   private async initProtocolAdapters(): Promise<void> {
-    const { logger, deviceInfo, configFeatures } = this.context;
+    const { logger, deviceInfo, configFeatures, configProtocols } = this.context;
 
     try {
+      // Get protocol enablement from new protocols section (preferred) or legacy protocolAdapters section
+      const protocols = configProtocols || {};
+      const protocolAdapters = configFeatures.protocolAdapters || {};
+      
+      // Build sensor config with backward compatibility
+      // Priority: config.protocols.*.enabled (new way) → config.protocolAdapters.*.enabled (legacy)
       const sensorsConfig: SensorConfig = {
         enabled: true,
-        ...configFeatures.protocolAdapters,
+        modbus: {
+          enabled: protocols.modbus?.enabled ?? protocolAdapters.modbus?.enabled ?? false,
+          ...(protocolAdapters.modbus || {})
+        },
+        opcua: {
+          enabled: protocols.opcua?.enabled ?? protocolAdapters.opcua?.enabled ?? false,
+          ...(protocolAdapters.opcua || {})
+        },
+        snmp: {
+          enabled: protocols.snmp?.enabled ?? protocolAdapters.snmp?.enabled ?? false,
+          ...(protocolAdapters.snmp || {})
+        },
+        can: {
+          enabled: protocols.can?.enabled ?? protocolAdapters.can?.enabled ?? false
+        },
+        comap: {
+          enabled: protocols.comap?.enabled ?? protocolAdapters.comap?.enabled ?? false
+        }
       };
 
-      // Enable Modbus by default if ENABLE_PROTOCOL_ADAPTERS is set
+      // Legacy: Enable all protocols if ENABLE_PROTOCOL_ADAPTERS env var is set
       if (process.env.ENABLE_PROTOCOL_ADAPTERS === 'true') {
-        sensorsConfig.modbus = {
-          enabled: true,
-          ...(sensorsConfig.modbus || {})
-        };
-        logger.debugSync('Enabled Modbus protocol adapter from ENABLE_PROTOCOL_ADAPTERS', {
-          component: LogComponents.agent
-        });
-      }
-
-      // Enable SNMP by default if ENABLE_PROTOCOL_ADAPTERS is set
-      if (process.env.ENABLE_PROTOCOL_ADAPTERS === 'true') {
-        sensorsConfig.snmp = {
-          enabled: true,
-          ...(sensorsConfig.snmp || {})
-        };
-        logger.debugSync('Enabled SNMP protocol adapter from ENABLE_PROTOCOL_ADAPTERS', {
-          component: LogComponents.agent
-        });
+        if (!protocols.modbus && !protocolAdapters.modbus) {
+          sensorsConfig.modbus!.enabled = true;
+          logger.debugSync('Enabled Modbus from ENABLE_PROTOCOL_ADAPTERS (legacy)', {
+            component: LogComponents.agent
+          });
+        }
+        if (!protocols.snmp && !protocolAdapters.snmp) {
+          sensorsConfig.snmp!.enabled = true;
+          logger.debugSync('Enabled SNMP from ENABLE_PROTOCOL_ADAPTERS (legacy)', {
+            component: LogComponents.agent
+          });
+        }
       }
 
       // Check environment variable for config override
@@ -279,6 +297,23 @@ export class FeatureInitializer {
         }
       }
 
+      // Log enabled protocols
+      const enabledProtocols = Object.entries(sensorsConfig)
+        .filter(([key, value]) => key !== 'enabled' && typeof value === 'object' && value?.enabled)
+        .map(([key]) => key);
+      
+      if (enabledProtocols.length === 0) {
+        logger.infoSync('No protocols enabled, skipping Protocol Adapters initialization', {
+          component: LogComponents.agent
+        });
+        return;
+      }
+
+      logger.infoSync('Initializing Protocol Adapters', {
+        component: LogComponents.agent,
+        enabledProtocols
+      });
+
       this.features.sensors = new SensorsFeature(
         sensorsConfig,
         logger,
@@ -288,7 +323,8 @@ export class FeatureInitializer {
       await this.features.sensors.start();
 
       logger.infoSync('Protocol Adapters initialized', {
-        component: LogComponents.agent
+        component: LogComponents.agent,
+        enabledProtocols
       });
     } catch (error) {
       logger.errorSync('Failed to initialize Protocol Adapters', error as Error, {

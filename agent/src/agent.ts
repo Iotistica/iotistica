@@ -183,6 +183,7 @@ export default class DeviceAgent {
         containerManager: this.containerManager,
         configSettings: config.settings,
         configFeatures: config.features,
+        configProtocols: config.protocols,
         cloudApiEndpoint: this.apiUrl,
         deviceApiPort: this.deviceApiPort,
         anomalyService: this.anomalyService
@@ -1216,7 +1217,8 @@ export default class DeviceAgent {
     return {
       features: this.cachedTargetState?.config?.features || {},
       settings: this.cachedTargetState?.config?.settings || {},
-      logging: this.cachedTargetState?.config?.logging || {}
+      logging: this.cachedTargetState?.config?.logging || {},
+      protocols: this.cachedTargetState?.config?.protocols || {}
     };
   }
 

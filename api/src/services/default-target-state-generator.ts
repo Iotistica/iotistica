@@ -107,9 +107,26 @@ interface TargetStateConfig {
     metricsIntervalMs?: number;
     reconciliationIntervalMs?: number;
   };
-  protocolAdapters?: {
+  protocols?: {
     modbus?: {
       enabled: boolean;
+    };
+    opcua?: {
+      enabled: boolean;
+    };
+    snmp?: {
+      enabled: boolean;
+    };
+    can?: {
+      enabled: boolean;
+    };
+    comap?: {
+      enabled: boolean;
+    };
+  };
+  protocolAdapters?: {
+    modbus?: {
+      enabled: boolean; // DEPRECATED: Use config.protocols.modbus.enabled instead
       tcpHost?: string;
       tcpPort?: number;
       serialPort?: string;
@@ -121,11 +138,11 @@ interface TargetStateConfig {
       vendorFile?: string;
     };
     opcua?: {
-      enabled: boolean;
+      enabled: boolean; // DEPRECATED: Use config.protocols.opcua.enabled instead
       discoveryUrls?: string[];
     };
     snmp?: {
-      enabled: boolean;
+      enabled: boolean; // DEPRECATED: Use config.protocols.snmp.enabled instead
       ipRanges?: string[];
       port?: number;
     };
@@ -170,9 +187,26 @@ export function generateDefaultTargetStateConfig(
         reason: "heap_fragmentation_cleanup"
       }
     },
-    protocolAdapters: {
+    protocols: {
       modbus: {
         enabled: false, // Disabled by default (no hardware assumed)
+      },
+      opcua: {
+        enabled: false,
+      },
+      snmp: {
+        enabled: false,
+      },
+      can: {
+        enabled: false,
+      },
+      comap: {
+        enabled: false,
+      },
+    },
+    protocolAdapters: {
+      modbus: {
+        enabled: false, // DEPRECATED: kept for backward compatibility
         tcpHost: '',
         tcpPort: 502,
         slaveRangeStart: 1,
@@ -182,11 +216,11 @@ export function generateDefaultTargetStateConfig(
         vendorFile: '/app/dist/config/vendors/dataPoints.json',
       },
       opcua: {
-        enabled: false,
+        enabled: false, // DEPRECATED: kept for backward compatibility
         discoveryUrls: [],
       },
       snmp: {
-        enabled: false,
+        enabled: false, // DEPRECATED: kept for backward compatibility
         ipRanges: [],
         port: 161,
       },
