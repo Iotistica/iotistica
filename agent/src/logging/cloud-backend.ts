@@ -616,8 +616,23 @@ export class CloudLogBackend implements LogBackend {
 	/**
 	 * Send dropped log summaries to cloud when connection recovers
 	 * This allows analysis of what was lost during outages
+	 * 
+	 * NOTE: Endpoint not implemented in API yet - commenting out to avoid 404 spam
 	 */
 	private async sendDroppedLogSummaries(): Promise<void> {
+		// TODO: Implement /device/{uuid}/logs/dropped-summaries endpoint in API
+		// For now, just clear summaries to avoid memory buildup
+		if (this.droppedLogSummaries.length > 0) {
+			this.logger?.debugSync('Dropped log summaries tracked (endpoint not implemented)', {
+				component: LogComponents.logs,
+				summaryCount: this.droppedLogSummaries.length,
+				totalDroppedLogs: this.droppedLogSummaries.reduce((sum, s) => sum + s.totalCount, 0)
+			});
+			this.droppedLogSummaries = [];
+		}
+		return;
+		
+		/* COMMENTED OUT - Endpoint not implemented
 		if (this.droppedLogSummaries.length === 0) {
 			return;
 		}
@@ -651,5 +666,6 @@ export class CloudLogBackend implements LogBackend {
 				error: error instanceof Error ? error.message : String(error)
 			});
 		}
+		*/
 	}
 }

@@ -153,8 +153,12 @@ export async function logAuditEvent(entry: AuditLogEntry): Promise<void> {
       ]
     );
   } catch (error) {
-    // Don't fail the request if audit logging fails, but log to console
-    console.error('Failed to write audit log to database:', error);
+    // Don't fail the request if audit logging fails, but log the error
+    auditLogger.error('Failed to write audit log to database', {
+      error: error instanceof Error ? error.message : String(error),
+      eventType,
+      deviceUuid: deviceUuid ? `${deviceUuid.substring(0, 8)}...` : undefined
+    });
   }
 }
 
@@ -176,7 +180,12 @@ export async function logProvisioningAttempt(
       [ipAddress, deviceUuid, provisioningKeyId, success, errorMessage || null, userAgent || null]
     );
   } catch (error) {
-    console.error('Failed to log provisioning attempt:', error);
+    auditLogger.error('Failed to log provisioning attempt', {
+      error: error instanceof Error ? error.message : String(error),
+      ipAddress,
+      deviceUuid,
+      success
+    });
   }
 }
 

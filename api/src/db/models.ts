@@ -116,55 +116,59 @@ export class DeviceModel {
       [uuid]
     );
     
-    // Log when device comes back online
+    // Log when device comes back online (only if offline > 5 minutes to avoid noise from connection issues)
     if (wasOffline && existingDevice) {
       const offlineDurationMs = Date.now() - new Date(existingDevice.modified_at).getTime();
       const offlineDurationMin = Math.floor(offlineDurationMs / 1000 / 60);
       
-      // Import at top of file needed
-      const { logAuditEvent, AuditEventType, AuditSeverity } = require('../utils/audit-logger');
-      const { EventPublisher } = require('../services/event-sourcing');
-      
-      // 🎉 EVENT SOURCING: Publish device online event
-      const eventPublisher = new EventPublisher('device_connectivity');
-      await eventPublisher.publish(
-        'device.online',
-        'device',
-        uuid,
-        {
-          device_name: existingDevice.device_name || 'Unknown',
-          was_offline_at: existingDevice.modified_at,
-          offline_duration_minutes: offlineDurationMin,
-          came_online_at: new Date().toISOString(),
-          reason: 'Device resumed communication'
-        },
-        {
-          metadata: {
-            detection_method: 'heartbeat_received',
-            last_seen: existingDevice.last_connectivity_event
+      // Only log if device was offline for more than 5 minutes
+      // This avoids false positives from temporary connection pool exhaustion
+      if (offlineDurationMin >= 5) {
+        // Import at top of file needed
+        const { logAuditEvent, AuditEventType, AuditSeverity } = require('../utils/audit-logger');
+        const { EventPublisher } = require('../services/event-sourcing');
+        
+        // 🎉 EVENT SOURCING: Publish device online event
+        const eventPublisher = new EventPublisher('device_connectivity');
+        await eventPublisher.publish(
+          'device.online',
+          'device',
+          uuid,
+          {
+            device_name: existingDevice.device_name || 'Unknown',
+            was_offline_at: existingDevice.modified_at,
+            offline_duration_minutes: offlineDurationMin,
+            came_online_at: new Date().toISOString(),
+            reason: 'Device resumed communication'
+          },
+          {
+            metadata: {
+              detection_method: 'heartbeat_received',
+              last_seen: existingDevice.last_connectivity_event
+            }
           }
-        }
-      );
-      
-      await logAuditEvent({
-        eventType: AuditEventType.DEVICE_ONLINE,
-        deviceUuid: uuid,
-        severity: AuditSeverity.INFO,
-        details: {
-          deviceName: existingDevice.device_name || 'Unknown',
-          wasOfflineAt: existingDevice.modified_at,
+        );
+        
+        await logAuditEvent({
+          eventType: AuditEventType.DEVICE_ONLINE,
+          deviceUuid: uuid,
+          severity: AuditSeverity.INFO,
+          details: {
+            deviceName: existingDevice.device_name || 'Unknown',
+            wasOfflineAt: existingDevice.modified_at,
+            offlineDurationMinutes: offlineDurationMin,
+            cameOnlineAt: new Date().toISOString()
+          }
+        });
+        
+        logger.info('Device came back online', {
+          deviceName: existingDevice.device_name || uuid.substring(0, 8),
+          deviceUuid: uuid,
           offlineDurationMinutes: offlineDurationMin,
+          wasOfflineAt: existingDevice.modified_at,
           cameOnlineAt: new Date().toISOString()
-        }
-      });
-      
-      logger.info('Device came back online', {
-        deviceName: existingDevice.device_name || uuid.substring(0, 8),
-        deviceUuid: uuid,
-        offlineDurationMinutes: offlineDurationMin,
-        wasOfflineAt: existingDevice.modified_at,
-        cameOnlineAt: new Date().toISOString()
-      });
+        });
+      }
     }
     
     return result.rows[0];
