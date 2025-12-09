@@ -122,18 +122,14 @@ export class CloudLogBackend implements LogBackend {
 			cloudEndpoint: config.cloudEndpoint,
 			deviceUuid: config.deviceUuid,
 			deviceApiKey: config.deviceApiKey ?? '',
-			compression: config.compression ?? true,
-			batchSize: config.batchSize ?? 100,
-			maxRetries: config.maxRetries ?? 3,
-			
-			bufferSize: config.bufferSize ?? 256 * 1024, // 256KB
-			flushInterval: config.flushInterval ?? 100, // 100ms
-			reconnectInterval: config.reconnectInterval ?? 5000, // 5s
-			maxReconnectInterval: config.maxReconnectInterval ?? 300000, // 5min
-			samplingRates: config.samplingRates ?? { debug: 1, info: 1, warn: 1, error: 1 },
-		};
-		
-		// Initialize HTTP client with default headers
+		compression: config.compression ?? true,
+		batchSize: config.batchSize ?? 500, // 500 logs per batch (changed from 100)
+		maxRetries: config.maxRetries ?? 3,		bufferSize: config.bufferSize ?? 256 * 1024, // 256KB
+		flushInterval: config.flushInterval ?? 30000, // 30 seconds (changed from 100ms)
+		reconnectInterval: config.reconnectInterval ?? 5000, // 5s
+		maxReconnectInterval: config.maxReconnectInterval ?? 300000, // 5min
+		samplingRates: config.samplingRates ?? { debug: 0.01, info: 0.1, warn: 1, error: 1 }, // Selective sampling (changed from all 1)
+	};		// Initialize HTTP client with default headers
 		this.httpClient = new FetchHttpClient({
 			defaultHeaders: {
 				'X-Device-API-Key': this.config.deviceApiKey

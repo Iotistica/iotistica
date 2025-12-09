@@ -195,7 +195,7 @@ export class AgentConfig {
       enableCompression: cloud.logging?.enableCompression ?? (env.LOG_COMPRESSION === 'true'),
       logBatchSize: cloud.logging?.logBatchSize ?? (env.LOG_BATCH_SIZE 
         ? parseInt(env.LOG_BATCH_SIZE, 10) 
-        : 100), // Default: 100 logs per batch
+        : 500), // Default: 500 logs per batch (increased from 100)
       logFlushIntervalMs: cloud.logging?.logFlushIntervalMs ?? (env.LOG_FLUSH_INTERVAL_MS 
         ? parseInt(env.LOG_FLUSH_INTERVAL_MS, 10) 
         : 30000), // Default: 30 seconds
