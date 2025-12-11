@@ -1,21 +1,24 @@
 /**
  * MQTT Message Handlers
  * 
- * Processes incoming MQTT messages and stores them in the database
+ * Processes incoming MQTT messages and queues them to Redis Streams
  */
 
 import { query } from '../db/connection';
 import type { SensorData, MetricsData } from './mqtt-manager';
 import { processDeviceStateReport } from '../services/device-state';
+import { redisSensorQueue } from '../services/redis-sensor-queue';
 import logger from '../utils/logger';
 
 /**
  * Handle incoming sensor data
- * Store in sensor_data table or time-series database
+ * Queue to Redis Stream for batch processing
  * Supports both single messages and batches
  */
 export async function handleSensorData(data: SensorData): Promise<void> {
   try {
+    const startTime = Date.now();
+    
     // Check if this is a batch (from Sensor Publish feature)
     const isBatch = data.data && Array.isArray((data.data as any).messages);
     
@@ -26,49 +29,57 @@ export async function handleSensorData(data: SensorData): Promise<void> {
       
       logger.debug(`Processing sensor data batch: ${messages.length} messages from ${data.deviceUuid}/${data.sensorName}`);
       
-      // Parse and insert all messages in batch
-      for (const messageStr of messages) {
-        try {
-          const message = JSON.parse(messageStr);
-          
-          await query(
-            `INSERT INTO sensor_data (device_uuid, sensor_name, data, timestamp, metadata)
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT DO NOTHING`,
-            [
-              data.deviceUuid,
-              data.sensorName,
-              JSON.stringify(message),
-              message.timestamp || batch.timestamp || new Date().toISOString(),
-              JSON.stringify(data.metadata || {})
-            ]
-          );
-        } catch (parseError) {
-          logger.error(`Failed to parse message in batch: ${messageStr}`, parseError);
-        }
-      }
+      // Transform all messages to queue format
+      const queueEntries = messages
+        .map((messageStr: string) => {
+          try {
+            const message = JSON.parse(messageStr);
+            return {
+              deviceUuid: data.deviceUuid,
+              sensorName: data.sensorName,
+              data: message,
+              timestamp: message.timestamp || batch.timestamp || new Date().toISOString(),
+              metadata: data.metadata || {}
+            };
+          } catch (parseError) {
+            logger.error(`Failed to parse message in batch: ${messageStr}`, parseError);
+            return null;
+          }
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
       
-      logger.debug(`Stored ${messages.length} sensor readings: ${data.deviceUuid}/${data.sensorName}`);
+      // Add to Redis Stream
+      await redisSensorQueue.add(queueEntries);
+      
+      const duration = Date.now() - startTime;
+      logger.info('Queued sensor data batch to Redis Stream', {
+        deviceUuid: data.deviceUuid.substring(0, 8),
+        sensorName: data.sensorName,
+        received: messages.length,
+        queued: queueEntries.length,
+        dropped: messages.length - queueEntries.length,
+        durationMs: duration
+      });
     } else {
       // Single message (legacy format)
-      await query(
-        `INSERT INTO sensor_data (device_uuid, sensor_name, data, timestamp, metadata)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT DO NOTHING`,
-        [
-          data.deviceUuid,
-          data.sensorName,
-          JSON.stringify(data.data),
-          data.timestamp,
-          JSON.stringify(data.metadata || {})
-        ]
-      );
-
-      logger.debug(` Stored sensor data: ${data.deviceUuid}/${data.sensorName}`);
+      await redisSensorQueue.add([{
+        deviceUuid: data.deviceUuid,
+        sensorName: data.sensorName,
+        data: data.data,
+        timestamp: data.timestamp,
+        metadata: data.metadata || {}
+      }]);
+      
+      const duration = Date.now() - startTime;
+      logger.debug('Queued sensor data to Redis Stream', {
+        deviceUuid: data.deviceUuid.substring(0, 8),
+        sensorName: data.sensorName,
+        durationMs: duration
+      });
     }
 
   } catch (error) {
-    logger.error(' Failed to store sensor data:', error);
+    logger.error('Failed to queue sensor data:', error);
     throw error;
   }
 }

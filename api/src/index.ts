@@ -399,6 +399,17 @@ async function startServer() {
     process.exit(1);
   }
 
+  // Start Redis sensor queue worker for batch processing
+  try {
+    const { redisSensorQueue } = await import('./services/redis-sensor-queue');
+    await redisSensorQueue.startWorker();
+    logger.info('Redis sensor queue worker started');
+  } catch (error) {
+    logger.error('Failed to start Redis sensor queue worker', { error });
+    // This is critical - sensor data won't be persisted without it
+    process.exit(1);
+  }
+
   // Initialize MQTT manager for device messages
   (async () => {
     try {

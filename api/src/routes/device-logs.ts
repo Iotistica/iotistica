@@ -28,6 +28,7 @@ import {
 import { logger } from '../utils/logger';
 import deviceAuth, { deviceAuthFromBody } from '../middleware/device-auth';
 import { redisLogQueue } from '../services/redis-log-queue';
+import { redisSensorQueue } from '../services/redis-sensor-queue';
 
 
 export const router = express.Router();
@@ -261,6 +262,23 @@ router.get('/admin/log-queue/stats', async (req, res) => {
     logger.error('Error getting log queue stats', { error: error.message });
     res.status(500).json({
       error: 'Failed to get log queue stats',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * Get Redis Stream sensor queue statistics
+ * GET /api/v1/admin/sensor-queue/stats
+ */
+router.get('/admin/sensor-queue/stats', async (req, res) => {
+  try {
+    const stats = await redisSensorQueue.getStats();
+    res.json(stats);
+  } catch (error: any) {
+    logger.error('Error getting sensor queue stats', { error: error.message });
+    res.status(500).json({
+      error: 'Failed to get sensor queue stats',
       message: error.message
     });
   }
