@@ -53,7 +53,7 @@ redis:
   persistence:
     enabled: false  # Disabled for dev (less disk I/O, faster restarts)
   storage:
-    size: 2Gi  # Minimal for dev environment
+    size: 5Gi  # Keep existing size (StatefulSet storage is immutable)
     storageClass: ""
   # MINIMAL tier resources for dev server
   resources:
