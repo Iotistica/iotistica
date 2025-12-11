@@ -5,7 +5,7 @@
  */
 
 import { query } from '../db/connection';
-import type { SensorData, MetricsData } from './mqtt-manager';
+import type { SensorData, MetricsData, StateMessage } from './mqtt-manager';
 import { processDeviceStateReport } from '../services/device-state';
 import { redisSensorQueue } from '../services/redis-sensor-queue';
 import logger from '../utils/logger';
@@ -90,10 +90,21 @@ export async function handleEndpointsData(data: SensorData): Promise<void> {
  * Processes full device state reports including config, apps, and metrics
  * Dual-write: PostgreSQL (durable) + Redis pub/sub (real-time)
  */
-export async function handleDeviceState(payload: any): Promise<void> {
+export async function handleDeviceState(payload: StateMessage): Promise<void> {
   try {
+    // Destructure new payload format
+    const { deviceUuid, data: state } = payload;
+    
+    if (!deviceUuid || !state) {
+      logger.error('Invalid state payload format', { hasUuid: !!deviceUuid, hasData: !!state });
+      return;
+    }
+    
+    // Reconstruct old format for processDeviceStateReport
+    const stateReport = { [deviceUuid]: state };
+    
     // Use shared service for consistent state processing
-    await processDeviceStateReport(payload, {
+    await processDeviceStateReport(stateReport, {
       source: 'mqtt',
       topic: 'iot/device/+/state'
     });
@@ -101,8 +112,6 @@ export async function handleDeviceState(payload: any): Promise<void> {
     // Publish to Redis for real-time distribution (MQTT-specific, non-blocking)
     try {
       const { redisClient } = await import('../redis/client');
-      const deviceUuid = Object.keys(payload)[0];
-      const state = payload[deviceUuid];
       
       if (deviceUuid && state) {
         // Publish full state to device:{uuid}:state channel
