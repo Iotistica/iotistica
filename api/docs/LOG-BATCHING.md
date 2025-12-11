@@ -1,33 +1,34 @@
-# Log Batching System
+# Log Batching System (Redis Streams)
 
 ## Overview
 
-The log batching system collects device logs in memory and writes them to the database in batches, significantly reducing database connection pressure and improving write performance.
+The log batching system uses Redis Streams to decouple log acceptance from database writes. Logs are instantly appended to a Redis Stream, then a background worker processes them in batches, significantly reducing database connection pressure and improving write performance.
 
 ## Architecture
 
 ### Flow Diagram
 
 ```
-Agent → API Endpoint → Sampling Filter → Batch Queue → Database
-         (NDJSON)        (level-based)     (per-device)   (batch INSERT)
+Agent → API Endpoint → Sampling Filter → Redis Stream (XADD) → Background Worker → Database
+         (NDJSON)        (level-based)     (instant, 1-2ms)    (batch XREAD)      (batch INSERT)
 ```
 
 ### Components
 
-1. **LogBatchQueue** (`api/src/services/log-batch-queue.ts`)
-   - Singleton service managing in-memory log queues
-   - Per-device queuing for isolation
-   - Automatic flush on batch size or timeout
-   - Graceful shutdown handling
+1. **RedisLogQueue** (`api/src/services/redis-log-queue.ts`)
+   - Singleton service managing Redis Stream for logs
+   - Instant XADD for log acceptance (non-blocking)
+   - Background worker with XREAD for batch consumption
+   - Consumer groups for distributed processing
+   - ACK system for reliability
 
 2. **Device Logs Route** (`api/src/routes/device-logs.ts`)
    - Receives logs from agents (NDJSON or JSON)
    - Applies sampling filter (level-based)
-   - Adds logs to batch queue (non-blocking)
+   - Adds logs to Redis Stream (instant response)
 
 3. **DeviceLogsModel** (`api/src/db/models.ts`)
-   - Database write operations
+   - Database write operations (called by background worker)
    - Batch INSERT with 500 logs per statement
    - Parallel execution for large batches
 
@@ -37,8 +38,10 @@ Agent → API Endpoint → Sampling Filter → Batch Queue → Database
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LOG_BATCH_SIZE` | `20` | Number of logs to collect before flushing |
-| `LOG_FLUSH_INTERVAL_MS` | `5000` | Max time (ms) to hold logs before flushing |
+| `REDIS_LOG_STREAM_KEY` | `device:logs` | Redis Stream key for logs |
+| `REDIS_LOG_CONSUMER_GROUP` | `log-writers` | Consumer group name |
+| `REDIS_LOG_BATCH_SIZE` | `50` | Logs to read per batch |
+| `REDIS_LOG_BLOCK_MS` | `5000` | Max wait time for new logs (ms) |
 | `LOG_SAMPLING_RATE` | `1.0` | Sampling rate for info/debug logs (0.0-1.0) |
 | `LOG_INSERT_BATCH_SIZE` | `500` | SQL batch size (logs per INSERT) |
 
@@ -46,22 +49,22 @@ Agent → API Endpoint → Sampling Filter → Batch Queue → Database
 
 **Development:**
 ```bash
-LOG_BATCH_SIZE=10              # Smaller batches for faster feedback
-LOG_FLUSH_INTERVAL_MS=2000     # 2 seconds
+REDIS_LOG_BATCH_SIZE=20        # Smaller batches for faster feedback
+REDIS_LOG_BLOCK_MS=2000        # 2 seconds
 LOG_SAMPLING_RATE=1.0          # Store all logs
 ```
 
 **Production:**
 ```bash
-LOG_BATCH_SIZE=50              # Larger batches for efficiency
-LOG_FLUSH_INTERVAL_MS=5000     # 5 seconds
+REDIS_LOG_BATCH_SIZE=50        # Balanced batch size
+REDIS_LOG_BLOCK_MS=5000        # 5 seconds
 LOG_SAMPLING_RATE=0.1          # 10% of info/debug logs
 ```
 
 **High Volume:**
 ```bash
-LOG_BATCH_SIZE=100             # Even larger batches
-LOG_FLUSH_INTERVAL_MS=10000    # 10 seconds
+REDIS_LOG_BATCH_SIZE=100       # Larger batches
+REDIS_LOG_BLOCK_MS=10000       # 10 seconds
 LOG_SAMPLING_RATE=0.05         # 5% of info/debug logs
 ```
 
@@ -88,21 +91,35 @@ Example with `LOG_SAMPLING_RATE=0.1`:
 - 100 info logs received → ~10 stored
 - 10 error logs received → 10 stored (100%)
 
-### 3. Batch Queue
+### 3. Redis Stream (XADD)
 
-Logs added to per-device queue:
+Logs instantly appended to Redis Stream:
 ```typescript
-await logBatchQueue.add(deviceUuid, sampledLogs);
+await redisLogQueue.add(logsWithDeviceUuid);
 ```
 
-Queue behavior:
-- **Flush trigger 1**: Batch size reached (e.g., 20 logs)
-- **Flush trigger 2**: Timeout reached (e.g., 5 seconds)
-- **Flush trigger 3**: Graceful shutdown (SIGTERM/SIGINT)
+Stream behavior:
+- **Instant append**: XADD completes in 1-2ms
+- **Persistent**: Survives API restarts
+- **Ordered**: Guaranteed message ordering
 
-### 4. Database Write
+### 4. Background Worker (XREAD)
 
-Queue flushes to database:
+Worker continuously reads batches:
+```typescript
+// Every 5 seconds, read up to 50 logs
+XREAD COUNT 50 BLOCK 5000 STREAMS device:logs >
+```
+
+Worker behavior:
+- **Batch consumption**: Reads up to 50 logs atomically
+- **Groups by device**: Organizes logs by deviceUuid
+- **Batch INSERT**: Writes all logs for each device in one statement
+- **ACK**: Acknowledges processed messages
+
+### 5. Database Write
+
+Worker writes batched logs:
 ```sql
 INSERT INTO device_logs (device_uuid, service_name, timestamp, message, level, is_system, is_stderr)
 VALUES
@@ -122,20 +139,21 @@ Large batches split into 500-log chunks and executed in parallel.
 - **Connection pressure**: High (16 writes/second)
 - **Overhead**: Network latency × 1000
 
-### After (Batched Writes)
+### After (Redis Streams + Batched Writes)
 
-- **Pattern**: 20 logs = 1 INSERT = 1 DB round-trip (with batch size=20)
-- **Example**: 1000 logs/minute = 50 DB writes/minute
-- **Connection pressure**: Low (0.83 writes/second)
-- **Overhead**: Network latency × 50
+- **Pattern**: 50 logs = 1 XREAD = 1 INSERT per device = 1 DB round-trip
+- **Example**: 1000 logs/minute = ~20 DB writes/minute (assuming ~50 logs per batch)
+- **Connection pressure**: Very low (0.33 writes/second)
+- **Overhead**: Network latency × 20
+- **Decoupled**: Log acceptance (Redis) doesn't block on DB writes
 
-**Result**: 20× reduction in database writes, 95% less connection pressure
+**Result**: 50× reduction in database writes, 98% less connection pressure, no DB connection used for log acceptance
 
 ## Monitoring
 
 ### Queue Statistics
 
-Check queue status:
+Check Redis Stream status:
 ```bash
 curl http://localhost:3002/api/v1/admin/log-queue/stats
 ```

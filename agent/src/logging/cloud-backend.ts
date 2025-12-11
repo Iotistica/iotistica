@@ -421,10 +421,8 @@ export class CloudLogBackend implements LogBackend {
 			
 			// Schedule reconnect with exponential backoff
 			this.scheduleReconnect();
-		} else {
-			// Connection recovered - send dropped log summaries if any
-			await this.sendDroppedLogSummaries();
 		}
+		// Note: Connection recovery tracking removed - sendDroppedLogSummaries endpoint not yet implemented
 	}
 	
 	private async sendLogs(logs: LogMessage[]): Promise<void> {

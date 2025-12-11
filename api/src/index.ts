@@ -388,6 +388,17 @@ async function startServer() {
     // Don't exit - will fall back to direct writes
   }
 
+  // Start Redis log queue worker for batch processing
+  try {
+    const { redisLogQueue } = await import('./services/redis-log-queue');
+    await redisLogQueue.startWorker();
+    logger.info('Redis log queue worker started');
+  } catch (error) {
+    logger.error('Failed to start Redis log queue worker', { error });
+    // This is critical - logs won't be persisted without it
+    process.exit(1);
+  }
+
   // Initialize MQTT manager for device messages
   (async () => {
     try {
@@ -526,13 +537,13 @@ async function startServer() {
       // Ignore errors during shutdown
     }
     
-    // Flush log batch queue before closing database
+    // Stop Redis log queue worker (graceful shutdown with final batch processing)
     try {
-      const { logBatchQueue } = await import('./services/log-batch-queue');
-      await logBatchQueue.flushAll();
-      logger.info('Log batch queue flushed');
+      const { redisLogQueue } = await import('./services/redis-log-queue');
+      await redisLogQueue.stopWorker();
+      logger.info('Redis log queue worker stopped');
     } catch (error) {
-      logger.error('Error flushing log batch queue', { error });
+      logger.error('Error stopping Redis log queue worker', { error });
     }
     
     // Close database pool
@@ -634,13 +645,13 @@ async function startServer() {
       // Ignore errors during shutdown
     }
     
-    // Flush log batch queue before closing database
+    // Stop Redis log queue worker (graceful shutdown with final batch processing)
     try {
-      const { logBatchQueue } = await import('./services/log-batch-queue');
-      await logBatchQueue.flushAll();
-      logger.info('Log batch queue flushed');
+      const { redisLogQueue } = await import('./services/redis-log-queue');
+      await redisLogQueue.stopWorker();
+      logger.info('Redis log queue worker stopped');
     } catch (error) {
-      logger.error('Error flushing log batch queue', { error });
+      logger.error('Error stopping Redis log queue worker', { error });
     }
     
     // Close database connections

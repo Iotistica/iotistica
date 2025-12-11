@@ -27,7 +27,7 @@ import {
 } from '../db/models';
 import { logger } from '../utils/logger';
 import deviceAuth, { deviceAuthFromBody } from '../middleware/device-auth';
-import { logBatchQueue } from '../services/log-batch-queue';
+import { redisLogQueue } from '../services/redis-log-queue';
 
 
 export const router = express.Router();
@@ -126,12 +126,18 @@ router.post('/device/:uuid/logs', deviceAuth, express.text({ type: 'application/
         });
       }
       
-      // Add logs to batch queue instead of writing immediately
+      // Add logs to Redis Stream instead of writing immediately
       if (sampledLogs.length > 0) {
-        await logBatchQueue.add(uuid, sampledLogs);
+        // Add deviceUuid to each log entry
+        const logsWithDevice = sampledLogs.map(log => ({
+          ...log,
+          deviceUuid: uuid
+        }));
+        
+        await redisLogQueue.add(logsWithDevice);
         
         const duration = Date.now() - startTime;
-        logger.info('Queued logs for batched write', { 
+        logger.info('Queued logs to Redis Stream', { 
           received: logs.length,
           queued: sampledLogs.length,
           dropped: droppedCount,
@@ -243,12 +249,12 @@ router.get('/devices/:uuid/logs/services', async (req, res) => {
 });
 
 /**
- * Get log batch queue statistics
+ * Get Redis Stream queue statistics
  * GET /api/v1/admin/log-queue/stats
  */
 router.get('/admin/log-queue/stats', async (req, res) => {
   try {
-    const stats = logBatchQueue.getStats();
+    const stats = await redisLogQueue.getStats();
     res.json(stats);
   } catch (error: any) {
     logger.error('Error getting log queue stats', { error: error.message });
