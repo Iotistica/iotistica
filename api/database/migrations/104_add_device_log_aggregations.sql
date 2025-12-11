@@ -115,12 +115,34 @@ BEGIN
         
         -- Step 5: Copy data back from temporary table
         RAISE NOTICE 'Step 5/6: Restoring data (this may take a while for large tables)...';
-        INSERT INTO device_logs (id, device_uuid, service_name, message, level, is_system, is_stderr, timestamp, created_at)
-        SELECT id, device_uuid, service_name, message, 
-               COALESCE(level, 'info') as level,  -- Use existing level or default to 'info'
-               is_system, is_stderr, timestamp, created_at
-        FROM device_logs_temp
-        ORDER BY timestamp;
+        
+        -- Check if level column exists in temp table
+        IF EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'device_logs_temp' AND column_name = 'level'
+        ) THEN
+            -- Temp table has level column, copy it
+            INSERT INTO device_logs (id, device_uuid, service_name, message, level, is_system, is_stderr, timestamp, created_at)
+            SELECT id, device_uuid, service_name, message, 
+                   COALESCE(level, 'info') as level,
+                   is_system, is_stderr, timestamp, created_at
+            FROM device_logs_temp
+            ORDER BY timestamp;
+        ELSE
+            -- Temp table doesn't have level column, detect from message
+            INSERT INTO device_logs (id, device_uuid, service_name, message, level, is_system, is_stderr, timestamp, created_at)
+            SELECT id, device_uuid, service_name, message,
+                   CASE
+                       WHEN is_stderr = true THEN 'error'
+                       WHEN message ~* 'error|fatal|critical|\[error\]|\[crit\]|\[alert\]|\[emerg\]' THEN 'error'
+                       WHEN message ~* 'warn|warning|\[warn\]' THEN 'warn'
+                       WHEN message ~* 'debug|trace|\[debug\]' THEN 'debug'
+                       ELSE 'info'
+                   END as level,
+                   is_system, is_stderr, timestamp, created_at
+            FROM device_logs_temp
+            ORDER BY timestamp;
+        END IF;
         
         -- Update sequence to max id
         PERFORM setval('device_logs_id_seq', (SELECT MAX(id) FROM device_logs));
