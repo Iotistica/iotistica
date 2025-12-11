@@ -38,7 +38,7 @@ import alertsRoutes from './routes/alerts';
 // Import jobs
 
 import { jobScheduler } from './services/job-scheduler';
-import poolWrapper from './db/connection';
+import poolWrapper, { close } from './db/connection';
 import { initializeMqtt, shutdownMqtt } from './mqtt';
 import { LicenseValidator } from './services/license-validator';
 import licenseRoutes from './routes/license';
@@ -615,6 +615,14 @@ async function startServer() {
       logger.info('Traffic flush service stopped');
     } catch (error) {
       // Ignore errors during shutdown
+    }
+    
+    // Close database connections
+    try {
+      await close();
+      logger.info('Database connections closed');
+    } catch (error) {
+      logger.error('Error closing database connections', { error });
     }
     
     server.close(() => {
