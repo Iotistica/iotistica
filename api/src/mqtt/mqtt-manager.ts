@@ -55,6 +55,45 @@ export interface MetricsData {
   network?: any;
 }
 
+export interface ParsedTopic {
+  deviceUuid: string;
+  messageType: string;
+  subTopic?: string;
+  rest: string[];
+}
+
+export interface StateMessage {
+  deviceUuid: string;
+  data: any; // Full device state payload
+}
+
+export interface AgentMessage {
+  deviceUuid: string;
+  subTopic: string;
+  message: any;
+}
+
+export interface UnknownMessage {
+  topic: string;
+  deviceUuid: string;
+  messageType: string;
+  data: any;
+}
+
+/**
+ * Map of message types to their payload structures
+ * Provides type safety for MQTT message handling
+ */
+export interface TopicMessageMap {
+  endpoints: SensorData;
+  state: StateMessage;
+  agent: AgentMessage;
+  logs: LogMessage;
+  metrics: MetricsData;
+  status: { deviceUuid: string; status: any };
+  unknown: UnknownMessage;
+}
+
 /**
  * MQTT Topic Structure (Convention)
  * 
@@ -81,12 +120,29 @@ export class MqttManager extends EventEmitter {
   private errorLogThrottle: number = 30000; // Log errors max once per 30 seconds
   private readonly BASE_RECONNECT_DELAY_MS = 1000; // 1 second
   private readonly MAX_RECONNECT_DELAY_MS = 8000; // 8 seconds max
+  
+  // Health monitoring
+  private lastMessageTimestamp: number = 0;
+  private lastConnectionTimestamp: number = 0;
+  
   private pendingPublishes: Array<{
     topic: string;
     payload: string | Buffer;
     qos?: 0 | 1 | 2;
+    retryCount?: number;
   }> = [];
   private readonly MAX_PENDING_PUBLISHES = 1000;
+  private readonly MAX_PUBLISH_RETRIES = 3;
+
+  // Message type handlers dispatch map
+  private readonly messageHandlers: Record<string, (deviceUuid: string, subTopic: string | undefined, data: any) => void>;
+
+  /**
+   * Type-safe event emitter
+   */
+  private emitTyped<K extends keyof TopicMessageMap>(event: K, data: TopicMessageMap[K]): void {
+    this.emit(event, data);
+  }
 
   constructor(config: MqttConfig) {
     super();
@@ -101,6 +157,16 @@ export class MqttManager extends EventEmitter {
       clean: config.clean !== false,
       qos: config.qos || 1
     };
+
+    // Initialize message handlers dispatch map
+    this.messageHandlers = {
+      endpoints: this.handleEndpointsData.bind(this),
+      state: this.handleStateMessage.bind(this),
+      agent: this.handleAgentMessage.bind(this),
+      logs: this.handleLogMessage.bind(this),
+      metrics: this.handleMetricsMessage.bind(this),
+      status: this.handleStatusMessage.bind(this)
+    };
   }
 
   /**
@@ -108,6 +174,9 @@ export class MqttManager extends EventEmitter {
    */
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
+      let initialConnectionSucceeded = false;
+      let connectionTimeout: NodeJS.Timeout | null = null;
+
       logger.info('Connecting to MQTT broker', { brokerUrl: this.config.brokerUrl });
 
       const options: mqtt.IClientOptions = {
@@ -121,7 +190,23 @@ export class MqttManager extends EventEmitter {
 
       this.client = mqtt.connect(this.config.brokerUrl, options);
 
+      // Timeout for initial connection (30 seconds)
+      connectionTimeout = setTimeout(() => {
+        if (!initialConnectionSucceeded) {
+          logger.error('MQTT initial connection timeout after 30s');
+          this.client?.end(true); // Force close to prevent further events
+          reject(new Error('MQTT connection timeout after 30s'));
+        }
+      }, 30000);
+
       this.client.on('connect', () => {
+        initialConnectionSucceeded = true;
+        if (connectionTimeout) {
+          clearTimeout(connectionTimeout);
+          connectionTimeout = null;
+        }
+
+        this.lastConnectionTimestamp = Date.now();
         logger.info('Connected to MQTT broker', { 
           clientId: this.config.clientId, 
           qos: this.config.qos 
@@ -139,31 +224,41 @@ export class MqttManager extends EventEmitter {
       });
 
       this.client.on('error', (error) => {
+        // Clear timeout on error
+        if (connectionTimeout) {
+          clearTimeout(connectionTimeout);
+          connectionTimeout = null;
+        }
+
         // Throttle error logging to reduce spam
         const now = Date.now();
         if (now - this.lastErrorLog > this.errorLogThrottle) {
           logger.error('MQTT connection error (throttled - shown once per 30s)', { 
             error: error.message || (error as any).code,
-            reconnectAttempts: this.reconnectAttempts
+            reconnectAttempts: this.reconnectAttempts,
+            initialConnection: !initialConnectionSucceeded
           });
           this.lastErrorLog = now;
         }
         
-        if (!this.reconnecting) {
+        // Only reject and cleanup if initial connection failed
+        if (!initialConnectionSucceeded && !this.reconnecting) {
+          this.client?.end(true); // Force close to prevent further events
           reject(error);
         }
       });
 
       this.client.on('offline', () => {
-        // Only log if not already reconnecting to avoid duplicate logs
-        if (!this.reconnecting) {
+        // Only schedule reconnect if initial connection succeeded
+        if (initialConnectionSucceeded && !this.reconnecting) {
           logger.warn('MQTT client offline, scheduling reconnect');
           this.scheduleReconnect();
         }
       });
 
       this.client.on('close', () => {
-        if (!this.reconnecting && this.client) {
+        // Only schedule reconnect if initial connection succeeded
+        if (initialConnectionSucceeded && !this.reconnecting && this.client) {
           logger.warn('MQTT connection closed, scheduling reconnect');
           this.scheduleReconnect();
         }
@@ -222,7 +317,11 @@ export class MqttManager extends EventEmitter {
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.client) {
-        logger.debug('Attempting MQTT reconnect');
+        // Ensure clean session flag is preserved across reconnects
+        if (this.client.options) {
+          this.client.options.clean = this.config.clean;
+        }
+        logger.debug('Attempting MQTT reconnect', { clean: this.config.clean });
         this.client.reconnect();
       }
     }, delay);
@@ -366,6 +465,7 @@ export class MqttManager extends EventEmitter {
 
   /**
    * Drain pending publishes after reconnection
+   * Retries failed publishes up to MAX_PUBLISH_RETRIES times
    */
   private drainPendingPublishes(): void {
     if (this.pendingPublishes.length === 0) {
@@ -378,29 +478,72 @@ export class MqttManager extends EventEmitter {
 
     const messages = [...this.pendingPublishes];
     this.pendingPublishes = [];
+    const failedMessages: typeof messages = [];
 
-    messages.forEach(({ topic, payload, qos }) => {
+    messages.forEach(({ topic, payload, qos, retryCount = 0 }) => {
       if (this.client && this.isConnected()) {
         this.client.publish(topic, payload, { qos: qos ?? this.config.qos }, (err) => {
           if (err) {
-            logger.error('Failed to publish queued message', { topic, error: err });
+            const currentRetryCount = retryCount + 1;
+            
+            if (currentRetryCount < this.MAX_PUBLISH_RETRIES) {
+              // Re-queue for retry
+              logger.warn('Failed to publish queued message, will retry', { 
+                topic, 
+                error: err.message,
+                retryCount: currentRetryCount,
+                maxRetries: this.MAX_PUBLISH_RETRIES
+              });
+              failedMessages.push({ topic, payload, qos, retryCount: currentRetryCount });
+            } else {
+              // Max retries exceeded, discard
+              logger.error('Failed to publish queued message after max retries, discarding', { 
+                topic, 
+                error: err.message,
+                retryCount: currentRetryCount
+              });
+            }
           }
         });
+      } else {
+        // Client disconnected during drain, re-queue
+        failedMessages.push({ topic, payload, qos, retryCount });
       }
     });
 
+    // Re-add failed messages to front of queue for next drain attempt
+    if (failedMessages.length > 0) {
+      logger.info('Re-queuing failed publishes', {
+        failed: failedMessages.length,
+        total: this.pendingPublishes.length + failedMessages.length
+      });
+      this.pendingPublishes = [...failedMessages, ...this.pendingPublishes];
+    }
+
     logger.info('Completed draining offline publish queue', {
-      sent: messages.length
+      sent: messages.length - failedMessages.length,
+      failed: failedMessages.length
     });
   }
 
   /**
    * Re-subscribe to all topics after reconnection
+   * Only re-subscribes if clean=true, since clean=false maintains subscriptions in broker
    */
   private resubscribe(): void {
     if (!this.client || this.subscriptions.size === 0) {
       return;
     }
+
+    // With clean=false, broker maintains subscriptions across reconnects
+    // Re-subscribing would create duplicates
+    if (!this.config.clean) {
+      logger.debug('Skipping re-subscribe (clean=false, broker maintains subscriptions)', {
+        count: this.subscriptions.size
+      });
+      return;
+    }
+
     const topics = Array.from(this.subscriptions);
 
     this.client.subscribe(topics, { qos: this.config.qos }, (err) => {
@@ -413,33 +556,72 @@ export class MqttManager extends EventEmitter {
   }
 
   /**
+   * Parse MQTT topic into structured components
+   * Expected format: iot/device/{uuid}/{type}/[subTopic]
+   * 
+   * @returns Parsed topic structure or null if invalid
+   */
+  private parseTopic(topic: string): ParsedTopic | null {
+    const parts = topic.split('/');
+    
+    // Validate minimum topic length: iot/device/{uuid}/{type}
+    if (parts.length < 4) {
+      logger.warn('Topic too short - expected at least iot/device/{uuid}/{type}', { 
+        topic, 
+        partCount: parts.length 
+      });
+      return null;
+    }
+    
+    // Validate topic starts with iot/device
+    if (parts[0] !== 'iot' || parts[1] !== 'device') {
+      logger.warn('Invalid topic format - must start with iot/device', { topic });
+      return null;
+    }
+    
+    const deviceUuid = parts[2];
+    const messageType = parts[3];
+    const rest = parts.slice(4);
+    const subTopic = rest.length > 0 ? rest[0] : undefined;
+    
+    // Validate required fields are non-empty
+    if (!deviceUuid || deviceUuid.trim() === '' || !messageType || messageType.trim() === '') {
+      logger.warn('Invalid topic structure - missing deviceUuid or messageType', { 
+        topic, 
+        deviceUuid: deviceUuid || '(empty)', 
+        messageType: messageType || '(empty)' 
+      });
+      return null;
+    }
+
+    return {
+      deviceUuid,
+      messageType,
+      subTopic,
+      rest
+    };
+  }
+
+  /**
    * Handle incoming MQTT messages
    */
   private handleMessage(topic: string, payload: Buffer): void {
     const message = payload.toString();
     
+    // Update last message timestamp for health monitoring
+    this.lastMessageTimestamp = Date.now();
+    
     // DEBUG: Log all incoming messages
     logger.info('MQTT message received', { topic, payloadLength: payload.length });
     
     try {
-      // Only accept iot/device/{uuid}/{type}/... format
-      const parts = topic.split('/');
-      
-      // Validate topic starts with iot/device
-      if (parts[0] !== 'iot' || parts[1] !== 'device') {
-        logger.warn('Invalid topic format - must start with iot/device', { topic });
-        return;
+      // Parse topic
+      const parsed = this.parseTopic(topic);
+      if (!parsed) {
+        return; // Invalid topic, already logged
       }
-      
-      const deviceUuid = parts[2];
-      const messageType = parts[3];
-      const rest = parts.slice(4);
-      
-      // Validate required fields
-      if (!deviceUuid || !messageType) {
-        logger.warn('Invalid topic structure', { topic });
-        return;
-      }
+
+      const { deviceUuid, messageType, subTopic, rest } = parsed;
       
 
       // Parse JSON payload
@@ -449,96 +631,90 @@ export class MqttManager extends EventEmitter {
       } catch {
         // Non-JSON payload (e.g., raw log messages)
         data = message;
-        // logOperation.step('mqtt-message', 'Non-JSON payload detected', { 
-        //   messageType,
-        //   preview: message.substring(0, 100)
-        // });
       }
 
-      // Route message based on type
-      switch (messageType) {
-        case 'endpoints':
-          // Topic: iot/device/{uuid}/endpoints/{endpointTopic}
-          const endpointTopic = rest[0] || 'unknown';
-          this.handleEndpointsData(deviceUuid, endpointTopic, data);
-          break;
-          
-        case 'state':
-
-          this.emit('state', data);
-          break;
-          
-        case 'agent':
-          // Topic: iot/device/{uuid}/agent/{subTopic}
-          const subTopic = rest[0] || 'unknown';
-          this.emit('agent', { deviceUuid, subTopic, message: data });
-          break;
-          
-        case 'logs':
-          // Topic: iot/device/{uuid}/logs/{containerId}
-          const containerId = rest[0] || 'unknown';
-          this.handleLogMessage(deviceUuid, containerId, data);
-          break;
-          
-        case 'metrics':
-          this.handleMetrics(deviceUuid, data);
-          break;
-          
-        case 'status':
-          this.handleStatus(deviceUuid, data);
-          break;
-          
-        default:
-          logger.warn(`Unknown message type`, {
-            operation: 'mqtt-message',
-            messageType,
-            topic
-          });
-          this.emit('unknown', { topic, deviceUuid, data });
+      // Dispatch to appropriate handler
+      const handler = this.messageHandlers[messageType];
+      if (handler) {
+        handler(deviceUuid, subTopic, data);
+      } else {
+        logger.warn('Unknown message type', {
+          operation: 'mqtt-message',
+          messageType,
+          topic
+        });
+        this.emitTyped('unknown', { topic, deviceUuid, messageType, data });
       }
-      
 
     } catch (error) {
       logOperation.error('mqtt-message', 'Failed to handle message', error as Error, { topic });
     }
   }
 
+  /**
+   * Handle state message
+   */
+  private handleStateMessage(deviceUuid: string, subTopic: string | undefined, data: any): void {
+    this.emitTyped('state', { deviceUuid, data });
+  }
 
   /**
-   * Handle sensor data message
+   * Handle agent message
    */
-  private handleEndpointsData(deviceUuid: string, sensorName: string, data: any): void {
-    const sensorData: SensorData = {
+  private handleAgentMessage(deviceUuid: string, subTopic: string | undefined, data: any): void {
+    this.emitTyped('agent', { deviceUuid, subTopic: subTopic || 'unknown', message: data });
+  }
+
+  /**
+   * Handle metrics message wrapper
+   */
+  private handleMetricsMessage(deviceUuid: string, subTopic: string | undefined, data: any): void {
+    this.handleMetrics(deviceUuid, data);
+  }
+
+  /**
+   * Handle status message wrapper
+   */
+  private handleStatusMessage(deviceUuid: string, subTopic: string | undefined, data: any): void {
+    this.handleStatus(deviceUuid, data);
+  }
+
+
+  /**
+   * Handle endpoint data message
+   */
+  private handleEndpointsData(deviceUuid: string, sensorName: string | undefined, data: any): void {
+    const endpointData: SensorData = {
       deviceUuid,
-      sensorName,
+      sensorName: sensorName || 'unknown',
       timestamp: data.timestamp || new Date().toISOString(),
       data: data.data || data,
       metadata: data.metadata
     };
 
-    logger.info('Sensor data received - emitting event', { 
+    logger.info('Endpoint data received - emitting event', { 
       deviceUuid: deviceUuid.substring(0, 8) + '...', 
-      sensorName,
+      sensorName: sensorName || 'unknown',
       hasData: !!data
     });
-    this.emit('endpoints', sensorData);
+    this.emitTyped('endpoints', endpointData);
   }
 
   /**
    * Handle log message
    */
-  private handleLogMessage(deviceUuid: string, containerId: string, data: any): void {
+  private handleLogMessage(deviceUuid: string, containerId: string | undefined, data: any): void {
     const logMessage: LogMessage = {
       deviceUuid,
-      containerId,
-      containerName: data.containerName || containerId,
+      containerId: containerId || 'unknown',
+      containerName: data.containerName || containerId || 'unknown',
       message: data.message || data,
       timestamp: data.timestamp || new Date().toISOString(),
       level: data.level,
       stream: data.stream
     };
 
-    this.emit('log', logMessage);
+    this.emitTyped('logs', logMessage);
   }
 
   /**
@@ -558,7 +734,7 @@ export class MqttManager extends EventEmitter {
     };
 
   
-    this.emit('metrics', metrics);
+    this.emitTyped('metrics', metrics);
   }
 
   /**
@@ -569,7 +745,7 @@ export class MqttManager extends EventEmitter {
       deviceUuid: deviceUuid.substring(0, 8) + '...', 
       status: data.status || data 
     });
-    this.emit('status', { deviceUuid, status: data });
+    this.emitTyped('status', { deviceUuid, status: data });
   }
 
   /**
@@ -577,6 +753,87 @@ export class MqttManager extends EventEmitter {
    */
   isConnected(): boolean {
     return this.client?.connected || false;
+  }
+
+  /**
+   * Get reconnecting status
+   */
+  isReconnecting(): boolean {
+    return this.reconnecting;
+  }
+
+  /**
+   * Get timestamp of last received message (milliseconds since epoch)
+   * Returns 0 if no messages received yet
+   */
+  getLastMessageTimestamp(): number {
+    return this.lastMessageTimestamp;
+  }
+
+  /**
+   * Get timestamp of last successful connection (milliseconds since epoch)
+   * Returns 0 if never connected
+   */
+  getLastConnectionTimestamp(): number {
+    return this.lastConnectionTimestamp;
+  }
+
+  /**
+   * Get broker health metrics
+   */
+  getHealthMetrics(): {
+    connected: boolean;
+    reconnecting: boolean;
+    lastMessageTimestamp: number;
+    lastConnectionTimestamp: number;
+    timeSinceLastMessage: number;
+    timeSinceLastConnection: number;
+    pendingPublishes: number;
+    activeSubscriptions: number;
+  } {
+    const now = Date.now();
+    return {
+      connected: this.isConnected(),
+      reconnecting: this.reconnecting,
+      lastMessageTimestamp: this.lastMessageTimestamp,
+      lastConnectionTimestamp: this.lastConnectionTimestamp,
+      timeSinceLastMessage: this.lastMessageTimestamp > 0 ? now - this.lastMessageTimestamp : -1,
+      timeSinceLastConnection: this.lastConnectionTimestamp > 0 ? now - this.lastConnectionTimestamp : -1,
+      pendingPublishes: this.pendingPublishes.length,
+      activeSubscriptions: this.subscriptions.size
+    };
+  }
+
+  /**
+   * Wait for MQTT connection to be established
+   * @param timeoutMs - Maximum time to wait in milliseconds (default: 5000)
+   * @returns Promise that resolves when connected or rejects on timeout
+   */
+  async awaitConnected(timeoutMs: number = 5000): Promise<void> {
+    if (this.isConnected()) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.client?.off('connect', onConnect);
+        reject(new Error(`MQTT connection timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      const onConnect = () => {
+        clearTimeout(timeout);
+        resolve();
+      };
+
+      // Wait for next connect event
+      this.client?.once('connect', onConnect);
+
+      // If client doesn't exist, reject immediately
+      if (!this.client) {
+        clearTimeout(timeout);
+        reject(new Error('MQTT client not initialized'));
+      }
+    });
   }
 
   /**

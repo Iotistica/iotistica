@@ -103,10 +103,22 @@ export function getMqttManager(): MqttManager | null {
 export async function shutdownMqtt(): Promise<void> {
   if (mqttManager) {
     logger.info('Shutting down MQTT service...');
-    await mqttManager.disconnect();
+    await mqttManager.destroy();
     mqttManager = null;
     logger.info('MQTT service shut down');
   }
 }
+
+// Graceful shutdown on SIGTERM (Kubernetes, PM2, Docker)
+process.on('SIGTERM', async () => {
+  logger.info('SIGTERM received, shutting down MQTT gracefully...');
+  await shutdownMqtt();
+});
+
+// Graceful shutdown on SIGINT (Ctrl+C)
+process.on('SIGINT', async () => {
+  logger.info('SIGINT received, shutting down MQTT gracefully...');
+  await shutdownMqtt();
+});
 
 export default { initializeMqtt, getMqttManager, shutdownMqtt };
