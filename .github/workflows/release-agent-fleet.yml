@@ -353,13 +353,3 @@ jobs:
           echo "helm uninstall $RELEASE_NAME -n $NAMESPACE" >> $GITHUB_STEP_SUMMARY
           echo "kubectl delete namespace $NAMESPACE" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-
-      - name: Cleanup on failure
-        if: failure()
-        run: |
-          NAMESPACE="agent-fleet-test"
-          RELEASE_NAME="agent-fleet-test-${{ github.run_number }}"
-          
-          echo "Cleaning up failed deployment..."
-          helm uninstall "$RELEASE_NAME" -n "$NAMESPACE" || true
-          kubectl delete namespace "$NAMESPACE" || true
