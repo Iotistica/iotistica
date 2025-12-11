@@ -147,7 +147,7 @@ api:
   corsOrigins: "http://localhost:5173,http://localhost:3001,http://localhost:3000,http://*:30000"
   resources:
     requests:
-      cpu: 500m        # Increased for fleet load
+      cpu: 250m        # Reduced for single-node clusters
       memory: 512Mi    # Increased for connection pool
     limits:
       cpu: 1000m       # Increased for fleet load
