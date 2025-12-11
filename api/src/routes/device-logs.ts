@@ -73,7 +73,8 @@ router.post('/device/:uuid/logs', deviceAuth, express.text({ type: 'application/
       // Standard JSON array format
       logs = req.body;
       logger.info('Received logs from device (JSON array format)', { 
-        uuid: uuid.substring(0, 8) 
+        uuid: uuid.substring(0, 8),
+        count: Array.isArray(logs) ? logs.length : 0
       });
     }
 
