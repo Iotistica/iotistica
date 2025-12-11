@@ -82,7 +82,7 @@ export interface UnknownMessage {
 
 /**
  * Map of message types to their payload structures
- * Provides type safety for MQTT message handling
+ * Provides type safety for MQTT message handlingddd
  */
 export interface TopicMessageMap {
   endpoints: SensorData;
