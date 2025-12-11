@@ -6,12 +6,8 @@ on:
       - 'k8s/charts/agent-fleet/**'
   workflow_dispatch:
     inputs:
-      chart_version:
-        description: 'Chart version to release (e.g., 1.0.0)'
-        required: true
-        type: string
       deploy_test:
-        description: 'Deploy test fleet after release'
+        description: 'Deploy test fleet'
         required: false
         default: false
         type: boolean
@@ -38,9 +34,6 @@ jobs:
   validate-chart:
     name: Validate Helm chart
     runs-on: [iotistic-lab-sc]
-    outputs:
-      chart_version: ${{ steps.chart_info.outputs.version }}
-      app_version: ${{ steps.chart_info.outputs.app_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -57,23 +50,6 @@ jobs:
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
           yq --version
-
-      - name: Get chart information
-        id: chart_info
-        run: |
-          VERSION=$(yq eval '.version' ${{ env.CHART_PATH }}/Chart.yaml)
-          APP_VERSION=$(yq eval '.appVersion' ${{ env.CHART_PATH }}/Chart.yaml)
-          
-          # Override with manual input if provided
-          if [ -n "${{ github.event.inputs.chart_version }}" ]; then
-            VERSION="${{ github.event.inputs.chart_version }}"
-          fi
-          
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "app_version=$APP_VERSION" >> $GITHUB_OUTPUT
-          
-          echo "Chart version: $VERSION"
-          echo "App version: $APP_VERSION"
 
       - name: Lint Helm chart
         run: |
@@ -114,94 +90,6 @@ jobs:
             fi
             echo "✅ Found: $file"
           done
-
-  package-chart:
-    name: Package and publish chart
-    runs-on: [iotistic-lab-sc]
-    needs: validate-chart
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install Helm
-        uses: azure/setup-helm@v3
-        with:
-          version: 'v3.13.0'
-
-      - name: Install yq
-        run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
-          yq --version
-
-      - name: Update chart version if manual
-        if: github.event.inputs.chart_version != ''
-        run: |
-          VERSION="${{ github.event.inputs.chart_version }}"
-          yq eval ".version = \"$VERSION\"" -i ${{ env.CHART_PATH }}/Chart.yaml
-          echo "Updated Chart.yaml to version $VERSION"
-
-      - name: Package Helm chart
-        run: |
-          mkdir -p .helm-packages
-          helm package ${{ env.CHART_PATH }} -d .helm-packages
-          
-          echo "Packaged chart:"
-          ls -lh .helm-packages/
-
-      - name: Generate chart index
-        run: |
-          helm repo index .helm-packages --url https://github.com/${{ github.repository }}/releases/download/agent-fleet-v${{ needs.validate-chart.outputs.chart_version }}
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: agent-fleet-v${{ needs.validate-chart.outputs.chart_version }}
-          name: Agent Fleet Chart v${{ needs.validate-chart.outputs.chart_version }}
-          body: |
-            # Agent Fleet Helm Chart v${{ needs.validate-chart.outputs.chart_version }}
-            
-            ## Installation
-            
-            ```bash
-            # Download chart
-            helm pull https://github.com/${{ github.repository }}/releases/download/agent-fleet-v${{ needs.validate-chart.outputs.chart_version }}/agent-fleet-${{ needs.validate-chart.outputs.chart_version }}.tgz
-            
-            # Or install directly
-            helm install agent-fleet https://github.com/${{ github.repository }}/releases/download/agent-fleet-v${{ needs.validate-chart.outputs.chart_version }}/agent-fleet-${{ needs.validate-chart.outputs.chart_version }}.tgz
-            ```
-            
-            ## Deployment
-            
-            Agents automatically provision themselves on startup via init containers:
-            
-            ```bash
-            # Deploy fleet (agents will auto-provision)
-            helm install agent-fleet ./agent-fleet-${{ needs.validate-chart.outputs.chart_version }}.tgz \
-              --set fleet.replicaCount=10 \
-              --set fleet.cloudApiEndpoint=http://10.27.27.160:30002 \
-              --set fleet.fleetId=k8s-fleet-production \
-              --set agent.env.MQTT_BROKER_URL=mqtt://10.27.27.160:30883 \
-              --set agent.env.POLL_INTERVAL_MS=300000 \
-              --set agent.env.REPORT_INTERVAL_MS=300000 \
-              --set agent.env.METRICS_INTERVAL_MS=600000 \
-              --set agent.env.ENABLE_SENSOR_PUBLISH=false \
-              --set agent.env.ANOMALY_DETECTION_ENABLED=false \
-              -n agent-fleet --create-namespace
-            ```
-            
-            ## Changes
-            
-            See [README.md](https://github.com/${{ github.repository }}/blob/agent-fleet-v${{ needs.validate-chart.outputs.chart_version }}/k8s/charts/agent-fleet/README.md) for full documentation.
-          files: |
-            .helm-packages/*.tgz
-            .helm-packages/index.yaml
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   deploy-test-fleet:
     name: Deploy test fleet
@@ -339,7 +227,6 @@ jobs:
           
           echo "## Test Fleet Deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Chart Version:** \`${{ needs.validate-chart.outputs.chart_version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Fleet Size:** \`${{ github.event.inputs.test_fleet_size }}\` agents" >> $GITHUB_STEP_SUMMARY
           echo "**Fleet ID:** \`agent-fleet-test-${{ github.run_number }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
