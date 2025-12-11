@@ -526,6 +526,23 @@ async function startServer() {
       // Ignore errors during shutdown
     }
     
+    // Flush log batch queue before closing database
+    try {
+      const { logBatchQueue } = await import('./services/log-batch-queue');
+      await logBatchQueue.flushAll();
+      logger.info('Log batch queue flushed');
+    } catch (error) {
+      logger.error('Error flushing log batch queue', { error });
+    }
+    
+    // Close database pool
+    try {
+      await close();
+      logger.info('Database connection closed');
+    } catch (error) {
+      logger.error('Error closing database connection', { error });
+    }
+    
     server.close(() => {
       logger.info('Server closed');
       clearTimeout(forceCloseTimeout);
@@ -615,6 +632,15 @@ async function startServer() {
       logger.info('Traffic flush service stopped');
     } catch (error) {
       // Ignore errors during shutdown
+    }
+    
+    // Flush log batch queue before closing database
+    try {
+      const { logBatchQueue } = await import('./services/log-batch-queue');
+      await logBatchQueue.flushAll();
+      logger.info('Log batch queue flushed');
+    } catch (error) {
+      logger.error('Error flushing log batch queue', { error });
     }
     
     // Close database connections

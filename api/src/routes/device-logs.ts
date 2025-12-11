@@ -27,6 +27,7 @@ import {
 } from '../db/models';
 import { logger } from '../utils/logger';
 import deviceAuth, { deviceAuthFromBody } from '../middleware/device-auth';
+import { logBatchQueue } from '../services/log-batch-queue';
 
 
 export const router = express.Router();
@@ -125,21 +126,17 @@ router.post('/device/:uuid/logs', deviceAuth, express.text({ type: 'application/
         });
       }
       
-      // Get batch size from environment (default: 500)
-      const batchSize = parseInt(process.env.LOG_INSERT_BATCH_SIZE || '500', 10);
-      
+      // Add logs to batch queue instead of writing immediately
       if (sampledLogs.length > 0) {
-        await DeviceLogsModel.store(uuid, sampledLogs, batchSize);
+        await logBatchQueue.add(uuid, sampledLogs);
         
         const duration = Date.now() - startTime;
-        logger.info('Stored log entries', { 
+        logger.info('Queued logs for batched write', { 
           received: logs.length,
-          stored: sampledLogs.length,
+          queued: sampledLogs.length,
           dropped: droppedCount,
           uuid: uuid.substring(0, 8),
-          batchSize,
-          durationMs: duration,
-          logsPerSecond: Math.round((sampledLogs.length / duration) * 1000)
+          durationMs: duration
         });
       }
       
@@ -245,6 +242,22 @@ router.get('/devices/:uuid/logs/services', async (req, res) => {
   }
 });
 
+/**
+ * Get log batch queue statistics
+ * GET /api/v1/admin/log-queue/stats
+ */
+router.get('/admin/log-queue/stats', async (req, res) => {
+  try {
+    const stats = logBatchQueue.getStats();
+    res.json(stats);
+  } catch (error: any) {
+    logger.error('Error getting log queue stats', { error: error.message });
+    res.status(500).json({
+      error: 'Failed to get log queue stats',
+      message: error.message
+    });
+  }
+});
 
 
 export default router;
