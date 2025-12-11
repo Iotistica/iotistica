@@ -68,5 +68,9 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 # Use tini as init process for proper signal handling
 ENTRYPOINT ["/sbin/tini", "--"]
 
+# Increase Node.js heap size for high load (100+ agents)
+# Default 512MB is insufficient - increase to 2GB
+ENV NODE_OPTIONS="--max-old-space-size=2048"
+
 # Start the application
 CMD ["node", "dist/index.js"]
