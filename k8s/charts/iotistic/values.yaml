@@ -29,26 +29,46 @@ postgres:
     enabled: true
 
 # Redis cache
+# RESOURCE TIERS - Choose based on your server capacity:
+# 
+# MINIMAL (Dev server, 25-50 agents) - CURRENT:
+#   requests: cpu 200m, memory 512Mi
+#   limits: cpu 500m, memory 768Mi
+#   maxMemory: 512mb
+#
+# BALANCED (Production, 4-8GB RAM, 50-100 agents):
+#   requests: cpu 300m, memory 768Mi
+#   limits: cpu 1000m, memory 1Gi
+#   maxMemory: 768mb
+
 redis:
   enabled: true
   image:
     repository: redis
     tag: "7-alpine"
   port: 6379
-  maxMemory: 256mb
-  maxMemoryPolicy: volatile-lru
+  # MINIMAL tier: Dev server with limited resources
+  maxMemory: 512mb
+  maxMemoryPolicy: allkeys-lru  # Evict any key when memory full
   persistence:
-    enabled: true
+    enabled: false  # Disabled for dev (less disk I/O, faster restarts)
   storage:
-    size: 5Gi
+    size: 2Gi  # Minimal for dev environment
     storageClass: ""
+  # MINIMAL tier resources for dev server
   resources:
     requests:
-      cpu: 100m
-      memory: 128Mi
+      cpu: 200m       # Light baseline
+      memory: 512Mi
     limits:
-      cpu: 200m
-      memory: 256Mi
+      cpu: 500m       # Modest burst allowance
+      memory: 768Mi
+  # Simplified config for dev environment
+  config:
+    maxclients: "5000"            # Sufficient for dev testing
+    timeout: "300"                # Close idle connections after 5min
+    save: ""                      # No RDB snapshots (dev only)
+    appendonly: "no"              # No AOF for dev (faster)
 
 # Mosquitto MQTT broker
 mosquitto:

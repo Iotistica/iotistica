@@ -53,11 +53,16 @@ class RedisClient {
          logger.info(`⏳ Redis reconnecting in ${delay}ms (attempt ${times}/${this.maxReconnectAttempts})`);
         return delay;
       },
-      maxRetriesPerRequest: 3,
+      maxRetriesPerRequest: 20, // Increased for high load scenarios
+      enableOfflineQueue: true, // Queue commands during reconnection
       enableReadyCheck: true,
       lazyConnect: false,
       connectTimeout: 10000, // 10 second timeout
       keepAlive: 30000, // Keep connection alive
+      reconnectOnError: (err) => {
+        const targetErrors = ['READONLY', 'ECONNREFUSED', 'ETIMEDOUT'];
+        return targetErrors.some(e => err.message.includes(e));
+      },
     });
 
     // Event handlers

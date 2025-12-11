@@ -46,8 +46,16 @@ class RedisLogQueue {
       host: process.env.REDIS_HOST || 'localhost',
       port: parseInt(process.env.REDIS_PORT || '6379', 10),
       password: process.env.REDIS_PASSWORD,
-      maxRetriesPerRequest: 3,
-      retryStrategy: (times) => Math.min(times * 50, 2000),
+      maxRetriesPerRequest: 20, // Increased for high load scenarios
+      enableOfflineQueue: true, // Queue commands during reconnection
+      retryStrategy: (times) => {
+        if (times > 50) return null; // Stop after 50 attempts
+        return Math.min(times * 100, 5000); // Exponential backoff, max 5s
+      },
+      reconnectOnError: (err) => {
+        const targetErrors = ['READONLY', 'ECONNREFUSED', 'ETIMEDOUT'];
+        return targetErrors.some(e => err.message.includes(e));
+      },
     });
 
     this.consumerName = `worker-${process.pid}-${Date.now()}`;
@@ -85,12 +93,22 @@ class RedisLogQueue {
 
   /**
    * Add logs to Redis Stream (fast, non-blocking)
+   * Gracefully degrades by dropping logs if Redis is unavailable
    */
   async add(logs: LogEntry[]): Promise<void> {
     if (logs.length === 0) return;
 
     try {
       const startTime = Date.now();
+
+      // Check Redis connection before attempting write
+      if (this.redis.status !== 'ready' && this.redis.status !== 'connect') {
+        logger.warn('Redis not ready, dropping logs', {
+          status: this.redis.status,
+          count: logs.length
+        });
+        return; // Graceful degradation: drop logs instead of crashing
+      }
 
       // Use pipeline for bulk insert (atomic)
       const pipeline = this.redis.pipeline();
@@ -105,17 +123,27 @@ class RedisLogQueue {
       await pipeline.exec();
 
       const duration = Date.now() - startTime;
-      logger.debug('Added logs to Redis stream', {
-        count: logs.length,
-        durationMs: duration,
-        logsPerSecond: Math.round((logs.length / duration) * 1000)
-      });
+      
+      // Only log slow operations to reduce log spam under load
+      if (duration > 1000) {
+        logger.warn('Slow Redis write operation', {
+          count: logs.length,
+          durationMs: duration
+        });
+      } else {
+        logger.debug('Added logs to Redis stream', {
+          count: logs.length,
+          durationMs: duration,
+          logsPerSecond: Math.round((logs.length / duration) * 1000)
+        });
+      }
     } catch (err: any) {
       logger.error('Failed to add logs to Redis stream', {
         count: logs.length,
-        error: err.message
+        error: err.message,
+        redisStatus: this.redis.status
       });
-      throw err;
+      // Don't throw - graceful degradation: drop logs instead of crashing API
     }
   }
 

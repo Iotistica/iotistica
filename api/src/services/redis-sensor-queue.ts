@@ -43,8 +43,16 @@ class RedisSensorQueue {
       host: process.env.REDIS_HOST || 'localhost',
       port: parseInt(process.env.REDIS_PORT || '6379', 10),
       password: process.env.REDIS_PASSWORD,
-      maxRetriesPerRequest: 3,
-      retryStrategy: (times) => Math.min(times * 50, 2000),
+      maxRetriesPerRequest: 20, // Increased for high load scenarios
+      enableOfflineQueue: true, // Queue commands during reconnection
+      retryStrategy: (times) => {
+        if (times > 50) return null; // Stop after 50 attempts
+        return Math.min(times * 100, 5000); // Exponential backoff, max 5s
+      },
+      reconnectOnError: (err) => {
+        const targetErrors = ['READONLY', 'ECONNREFUSED', 'ETIMEDOUT'];
+        return targetErrors.some(e => err.message.includes(e));
+      },
     });
 
     this.consumerName = `worker-${process.pid}-${Date.now()}`;
@@ -82,12 +90,22 @@ class RedisSensorQueue {
 
   /**
    * Add sensor data to Redis Stream (fast, non-blocking)
+   * Gracefully degrades by dropping data if Redis is unavailable
    */
   async add(sensorData: SensorDataEntry[]): Promise<void> {
     if (sensorData.length === 0) return;
 
     try {
       const startTime = Date.now();
+
+      // Check Redis connection before attempting write
+      if (this.redis.status !== 'ready' && this.redis.status !== 'connect') {
+        logger.warn('Redis not ready, dropping sensor data', {
+          status: this.redis.status,
+          count: sensorData.length
+        });
+        return; // Graceful degradation: drop data instead of crashing
+      }
 
       // Use pipeline for bulk insert (atomic)
       const pipeline = this.redis.pipeline();
@@ -102,17 +120,27 @@ class RedisSensorQueue {
       await pipeline.exec();
 
       const duration = Date.now() - startTime;
-      logger.debug('Added sensor data to Redis stream', {
-        count: sensorData.length,
-        durationMs: duration,
-        dataPerSecond: Math.round((sensorData.length / duration) * 1000)
-      });
+      
+      // Only log slow operations to reduce log spam under load
+      if (duration > 1000) {
+        logger.warn('Slow Redis write operation', {
+          count: sensorData.length,
+          durationMs: duration
+        });
+      } else {
+        logger.debug('Added sensor data to Redis stream', {
+          count: sensorData.length,
+          durationMs: duration,
+          dataPerSecond: Math.round((sensorData.length / duration) * 1000)
+        });
+      }
     } catch (err: any) {
       logger.error('Failed to add sensor data to Redis stream', {
         count: sensorData.length,
-        error: err.message
+        error: err.message,
+        redisStatus: this.redis.status
       });
-      throw err;
+      // Don't throw - graceful degradation: drop data instead of crashing API
     }
   }
 
