@@ -636,6 +636,12 @@ export class MqttManager extends EventEmitter {
       // Dispatch to appropriate handler
       const handler = this.messageHandlers[messageType];
       if (handler) {
+        logger.info('Dispatching to handler', {
+          messageType,
+          deviceUuid: deviceUuid.substring(0, 8) + '...',
+          subTopic,
+          hasData: !!data
+        });
         handler(deviceUuid, subTopic, data);
       } else {
         logger.warn('Unknown message type', {
@@ -684,6 +690,13 @@ export class MqttManager extends EventEmitter {
    * Handle endpoint data message
    */
   private handleEndpointsData(deviceUuid: string, sensorName: string | undefined, data: any): void {
+    logger.info('handleEndpointsData called', {
+      deviceUuid: deviceUuid.substring(0, 8) + '...',
+      sensorName: sensorName || 'unknown',
+      hasData: !!data,
+      dataKeys: data ? Object.keys(data).join(',') : 'none'
+    });
+
     const endpointData: SensorData = {
       deviceUuid,
       sensorName: sensorName || 'unknown',
@@ -692,12 +705,14 @@ export class MqttManager extends EventEmitter {
       metadata: data.metadata
     };
 
-    logger.info('Endpoint data received - emitting event', { 
+    logger.info('Emitting endpoints event', { 
       deviceUuid: deviceUuid.substring(0, 8) + '...', 
-      sensorName: sensorName || 'unknown',
-      hasData: !!data
+      sensorName: endpointData.sensorName,
+      timestamp: endpointData.timestamp,
+      hasMetadata: !!endpointData.metadata
     });
     this.emitTyped('endpoints', endpointData);
+    logger.info('Endpoints event emitted successfully');
   }
 
   /**
