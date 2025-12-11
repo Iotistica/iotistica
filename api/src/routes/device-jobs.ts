@@ -652,9 +652,10 @@ async function jobsAuth(req: Request, res: Response, next: any) {
     // Try provisioning key as fallback
   }
 
-  // Try provisioning key (fallback for development)
+  // Try provisioning key (fallback for development/initial setup only)
   try {
-    const provisioningResult = await validateProvisioningKey(apiKey, req.ip || 'unknown');
+    // Suppress audit logging since this is a fallback, not actual provisioning
+    const provisioningResult = await validateProvisioningKey(apiKey, req.ip || 'unknown', true);
     if (provisioningResult.valid) {
       logger.info(`Using provisioning key for device ${req.params.uuid}`);
       // Set req.device for compatibility
@@ -668,7 +669,12 @@ async function jobsAuth(req: Request, res: Response, next: any) {
       return next();
     }
   } catch (err) {
-    // Provisioning key also failed
+    // Provisioning key also failed - suppress logging here since it's just a fallback
+    // The real error was already logged by deviceAuth middleware
+    logger.debug('Provisioning key fallback failed (expected for provisioned devices)', {
+      uuid: req.params.uuid,
+      error: err instanceof Error ? err.message : String(err)
+    });
   }
 
   // Both failed - only send response if headers not already sent

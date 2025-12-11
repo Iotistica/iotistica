@@ -33,10 +33,15 @@ export interface ProvisioningKeyValidationResult {
 /**
  * Validate a provisioning key against the database
  * Optimized with SHA-256 fast hash for O(1) lookup (300ms) vs O(N) bcrypt (N*300ms)
+ * 
+ * @param key - The provisioning key to validate
+ * @param ipAddress - IP address for audit logging
+ * @param suppressAuditLog - Skip audit logging (used when this is a fallback check, not actual provisioning)
  */
 export async function validateProvisioningKey(
   key: string,
-  ipAddress?: string
+  ipAddress?: string,
+  suppressAuditLog: boolean = false
 ): Promise<ProvisioningKeyValidationResult> {
   try {
     // Fast lookup using SHA-256 hash (O(1) instead of O(N) bcrypt comparisons)
@@ -52,12 +57,14 @@ export async function validateProvisioningKey(
     );
 
     if (result.rows.length === 0) {
-      await logAuditEvent({
-        eventType: AuditEventType.PROVISIONING_KEY_INVALID,
-        ipAddress,
-        severity: AuditSeverity.WARNING,
-        details: { reason: 'Invalid provisioning key' }
-      });
+      if (!suppressAuditLog) {
+        await logAuditEvent({
+          eventType: AuditEventType.PROVISIONING_KEY_INVALID,
+          ipAddress,
+          severity: AuditSeverity.WARNING,
+          details: { reason: 'Invalid provisioning key' }
+        });
+      }
       return { valid: false, error: 'Invalid provisioning key' };
     }
 

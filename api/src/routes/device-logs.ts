@@ -173,6 +173,43 @@ router.post('/device/:uuid/logs', deviceAuth, express.text({ type: 'application/
 
 
 /**
+ * Device reports dropped log summaries (connection loss tracking)
+ * POST /api/v1/device/:uuid/logs/dropped-summaries
+ * 
+ * Allows agents to report which logs were dropped during connection outages
+ * This helps with troubleshooting and understanding data loss
+ */
+router.post('/device/:uuid/logs/dropped-summaries', deviceAuth, express.json(), async (req, res) => {
+  try {
+    const { uuid } = req.params;
+    const { summaries, reportedAt } = req.body;
+
+    logger.info('Received dropped log summaries', {
+      uuid: uuid.substring(0, 8),
+      summaryCount: summaries?.length || 0,
+      totalDropped: summaries?.reduce((sum: number, s: any) => sum + (s.totalCount || 0), 0) || 0
+    });
+
+    // TODO: Store summaries in database for analysis
+    // For now, just log them and acknowledge receipt
+    // Could be stored in a separate dropped_logs_summary table
+
+    res.json({ 
+      status: 'ok', 
+      received: summaries?.length || 0,
+      message: 'Summaries received and logged'
+    });
+  } catch (error: any) {
+    logger.error('Error processing dropped log summaries', { error: error.message });
+    res.status(500).json({
+      error: 'Failed to process dropped log summaries',
+      message: error.message
+    });
+  }
+});
+
+
+/**
  * Get device logs
  * GET /api/v1/devices/:uuid/logs
  */
