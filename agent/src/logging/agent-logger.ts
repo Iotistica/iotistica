@@ -90,7 +90,6 @@ export class AgentLogger {
 		// Log the change at info level (always show this)
 		const originalMinLevel = this.minLogLevel;
 		this.minLogLevel = 'info'; // Temporarily set to info to ensure this message is logged
-		this.consoleLog('info', `Log level changed: ${oldLevel} → ${level}`, { component: 'AgentLogger' });
 		this.minLogLevel = originalMinLevel;
 	}
 

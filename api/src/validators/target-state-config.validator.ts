@@ -156,14 +156,6 @@ export function validateTargetStateConfig(config: any): ValidationResult {
 
   // ==================== Feature Toggles ====================
   const features = config.features || {};
-  
-  if (features.enableProtocolAdapters !== undefined && typeof features.enableProtocolAdapters !== 'boolean') {
-    errors.push({
-      field: 'features.enableProtocolAdapters',
-      message: 'Must be a boolean',
-      value: features.enableProtocolAdapters
-    });
-  }
 
   if (features.enableSensorPublish !== undefined && typeof features.enableSensorPublish !== 'boolean') {
     errors.push({
@@ -173,13 +165,6 @@ export function validateTargetStateConfig(config: any): ValidationResult {
     });
   }
 
-  if (features.enableFirstBootDiscovery !== undefined && typeof features.enableFirstBootDiscovery !== 'boolean') {
-    errors.push({
-      field: 'features.enableFirstBootDiscovery',
-      message: 'Must be a boolean',
-      value: features.enableFirstBootDiscovery
-    });
-  }
 
   // ==================== Logging Features ====================
   const logging = config.logging || {};
@@ -220,27 +205,29 @@ export function validateTargetStateConfig(config: any): ValidationResult {
     }
   }
 
-  // ==================== Protocol Adapters ====================
+  // ==================== Protocol Configuration ====================
+  // Check protocols section (primary) and protocolAdapters (legacy fallback)
+  const protocols = config.protocols || {};
   const protocolAdapters = config.protocolAdapters || {};
-  const adaptersEnabled = features.enableProtocolAdapters === true;
 
-  // --- Modbus TCP Configuration ---
-  const modbus = protocolAdapters.modbus || {};
+  // --- Modbus Configuration ---
+  // Priority: protocols.modbus (primary) → protocolAdapters.modbus (legacy)
+  const modbus = { ...(protocolAdapters.modbus || {}), ...(protocols.modbus || {}) };
   
   if (modbus.enabled !== undefined && typeof modbus.enabled !== 'boolean') {
     errors.push({
-      field: 'protocolAdapters.modbus.enabled',
+      field: 'protocols.modbus.enabled',
       message: 'Must be a boolean',
       value: modbus.enabled
     });
   }
 
-  if (modbus.enabled === true && adaptersEnabled) {
+  if (modbus.enabled === true) {
     // Required fields when Modbus is enabled
-    if (!modbus.tcpHost || typeof modbus.tcpHost !== 'string') {
+    if (modbus.tcpHost !== undefined && (!modbus.tcpHost || typeof modbus.tcpHost !== 'string')) {
       errors.push({
-        field: 'protocolAdapters.modbus.tcpHost',
-        message: 'Required when Modbus is enabled (IP address or hostname)',
+        field: 'protocols.modbus.tcpHost',
+        message: 'Must be a non-empty string (IP address or hostname)',
         value: modbus.tcpHost
       });
     }
@@ -248,7 +235,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
     if (modbus.tcpPort !== undefined) {
       if (!isValidPort(modbus.tcpPort)) {
         errors.push({
-          field: 'protocolAdapters.modbus.tcpPort',
+          field: 'protocols.modbus.tcpPort',
           message: 'Must be a valid port number (1-65535)',
           value: modbus.tcpPort
         });
@@ -258,7 +245,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
     if (modbus.slaveRangeStart !== undefined) {
       if (!isValidModbusSlave(modbus.slaveRangeStart)) {
         errors.push({
-          field: 'protocolAdapters.modbus.slaveRangeStart',
+          field: 'protocols.modbus.slaveRangeStart',
           message: 'Must be a valid Modbus slave ID (1-247)',
           value: modbus.slaveRangeStart
         });
@@ -268,7 +255,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
     if (modbus.slaveRangeEnd !== undefined) {
       if (!isValidModbusSlave(modbus.slaveRangeEnd)) {
         errors.push({
-          field: 'protocolAdapters.modbus.slaveRangeEnd',
+          field: 'protocols.modbus.slaveRangeEnd',
           message: 'Must be a valid Modbus slave ID (1-247)',
           value: modbus.slaveRangeEnd
         });
@@ -279,7 +266,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
     if (modbus.slaveRangeStart !== undefined && modbus.slaveRangeEnd !== undefined) {
       if (modbus.slaveRangeStart > modbus.slaveRangeEnd) {
         errors.push({
-          field: 'protocolAdapters.modbus.slaveRange',
+          field: 'protocols.modbus.slaveRange',
           message: 'slaveRangeStart must be <= slaveRangeEnd',
           value: { start: modbus.slaveRangeStart, end: modbus.slaveRangeEnd }
         });
@@ -289,7 +276,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
     if (modbus.timeout !== undefined) {
       if (!isValidTimeout(modbus.timeout)) {
         errors.push({
-          field: 'protocolAdapters.modbus.timeout',
+          field: 'protocols.modbus.timeout',
           message: 'Must be a positive integer <= 300000ms (5 minutes)',
           value: modbus.timeout
         });
@@ -298,7 +285,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
 
     if (modbus.vendor !== undefined && typeof modbus.vendor !== 'string') {
       errors.push({
-        field: 'protocolAdapters.modbus.vendor',
+        field: 'protocols.modbus.vendor',
         message: 'Must be a string',
         value: modbus.vendor
       });
@@ -307,7 +294,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
     // RTU Configuration (optional)
     if (modbus.rtuPort !== undefined && typeof modbus.rtuPort !== 'string') {
       errors.push({
-        field: 'protocolAdapters.modbus.rtuPort',
+        field: 'protocols.modbus.serialPort',
         message: 'Must be a string (serial port path)',
         value: modbus.rtuPort
       });
@@ -317,7 +304,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
       const validBaudRates = [9600, 19200, 38400, 57600, 115200];
       if (!validBaudRates.includes(modbus.rtuBaudRate)) {
         errors.push({
-          field: 'protocolAdapters.modbus.rtuBaudRate',
+          field: 'protocols.modbus.baudRate',
           message: `Must be one of: ${validBaudRates.join(', ')}`,
           value: modbus.rtuBaudRate
         });
@@ -328,7 +315,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
       const validParity = ['none', 'even', 'odd'];
       if (!validParity.includes(modbus.rtuParity)) {
         errors.push({
-          field: 'protocolAdapters.modbus.rtuParity',
+          field: 'protocols.modbus.parity',
           message: `Must be one of: ${validParity.join(', ')}`,
           value: modbus.rtuParity
         });
@@ -339,7 +326,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
       const validDataBits = [7, 8];
       if (!validDataBits.includes(modbus.rtuDataBits)) {
         errors.push({
-          field: 'protocolAdapters.modbus.rtuDataBits',
+          field: 'protocols.modbus.dataBits',
           message: `Must be one of: ${validDataBits.join(', ')}`,
           value: modbus.rtuDataBits
         });
@@ -350,7 +337,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
       const validStopBits = [1, 2];
       if (!validStopBits.includes(modbus.rtuStopBits)) {
         errors.push({
-          field: 'protocolAdapters.modbus.rtuStopBits',
+          field: 'protocols.modbus.stopBits',
           message: `Must be one of: ${validStopBits.join(', ')}`,
           value: modbus.rtuStopBits
         });
@@ -359,21 +346,21 @@ export function validateTargetStateConfig(config: any): ValidationResult {
   }
 
   // --- OPC-UA Configuration ---
-  const opcua = protocolAdapters.opcua || {};
+  const opcua = { ...(protocolAdapters.opcua || {}), ...(protocols.opcua || {}) };
 
   if (opcua.enabled !== undefined && typeof opcua.enabled !== 'boolean') {
     errors.push({
-      field: 'protocolAdapters.opcua.enabled',
+      field: 'protocols.opcua.enabled',
       message: 'Must be a boolean',
       value: opcua.enabled
     });
   }
 
-  if (opcua.enabled === true && adaptersEnabled) {
+  if (opcua.enabled === true) {
     if (opcua.discoveryUrls !== undefined) {
       if (!Array.isArray(opcua.discoveryUrls)) {
         errors.push({
-          field: 'protocolAdapters.opcua.discoveryUrls',
+          field: 'protocols.opcua.discoveryUrls',
           message: 'Must be an array of URLs',
           value: opcua.discoveryUrls
         });
@@ -381,7 +368,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
         opcua.discoveryUrls.forEach((url: any, index: number) => {
           if (!isValidUrl(url)) {
             errors.push({
-              field: `protocolAdapters.opcua.discoveryUrls[${index}]`,
+              field: `protocols.opcua.discoveryUrls[${index}]`,
               message: 'Must be a valid URL (opc.tcp://, http://, or https://)',
               value: url
             });
@@ -390,7 +377,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
 
         if (opcua.discoveryUrls.length === 0) {
           errors.push({
-            field: 'protocolAdapters.opcua.discoveryUrls',
+            field: 'protocols.opcua.discoveryUrls',
             message: 'Required when OPC-UA is enabled (at least one URL)',
             value: opcua.discoveryUrls
           });
@@ -398,7 +385,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
       }
     } else {
       errors.push({
-        field: 'protocolAdapters.opcua.discoveryUrls',
+        field: 'protocols.opcua.discoveryUrls',
         message: 'Required when OPC-UA is enabled',
         value: undefined
       });
@@ -406,21 +393,21 @@ export function validateTargetStateConfig(config: any): ValidationResult {
   }
 
   // --- SNMP Configuration ---
-  const snmp = protocolAdapters.snmp || {};
+  const snmp = { ...(protocolAdapters.snmp || {}), ...(protocols.snmp || {}) };
 
   if (snmp.enabled !== undefined && typeof snmp.enabled !== 'boolean') {
     errors.push({
-      field: 'protocolAdapters.snmp.enabled',
+      field: 'protocols.snmp.enabled',
       message: 'Must be a boolean',
       value: snmp.enabled
     });
   }
 
-  if (snmp.enabled === true && adaptersEnabled) {
+  if (snmp.enabled === true) {
     if (snmp.ipRanges !== undefined) {
       if (!Array.isArray(snmp.ipRanges)) {
         errors.push({
-          field: 'protocolAdapters.snmp.ipRanges',
+          field: 'protocols.snmp.ipRanges',
           message: 'Must be an array of IP ranges (CIDR or range notation)',
           value: snmp.ipRanges
         });
@@ -428,7 +415,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
         snmp.ipRanges.forEach((range: any, index: number) => {
           if (typeof range !== 'string' || !isValidIpRange(range)) {
             errors.push({
-              field: `protocolAdapters.snmp.ipRanges[${index}]`,
+              field: `protocols.snmp.ipRanges[${index}]`,
               message: 'Must be a valid IP range (e.g., "192.168.1.0/24" or "10.0.0.1-10.0.0.254")',
               value: range
             });
@@ -437,7 +424,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
 
         if (snmp.ipRanges.length === 0) {
           errors.push({
-            field: 'protocolAdapters.snmp.ipRanges',
+            field: 'protocols.snmp.ipRanges',
             message: 'Required when SNMP is enabled (at least one IP range)',
             value: snmp.ipRanges
           });
@@ -445,7 +432,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
       }
     } else {
       errors.push({
-        field: 'protocolAdapters.snmp.ipRanges',
+        field: 'protocols.snmp.ipRanges',
         message: 'Required when SNMP is enabled',
         value: undefined
       });
@@ -454,7 +441,7 @@ export function validateTargetStateConfig(config: any): ValidationResult {
     if (snmp.port !== undefined) {
       if (!isValidPort(snmp.port)) {
         errors.push({
-          field: 'protocolAdapters.snmp.port',
+          field: 'protocols.snmp.port',
           message: 'Must be a valid port number (1-65535)',
           value: snmp.port
         });

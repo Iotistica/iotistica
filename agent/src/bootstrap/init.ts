@@ -54,6 +54,7 @@ export interface InitializedFeatures {
 export class FeatureInitializer {
   private context: FeatureContext;
   private features: InitializedFeatures = {};
+  private currentProtocols: Record<string, any> | null = null;
 
   constructor(context: FeatureContext) {
     this.context = context;
@@ -61,14 +62,18 @@ export class FeatureInitializer {
 
   /**
    * Initialize optional features (can run in parallel)
-   * Jobs, SensorPublish, and Protocol Adapters are independent
+   * Jobs and SensorPublish are initialized immediately.
+   * Protocol Adapters are initialized via event listener (react to target state changes).
    */
   async initOptionalFeatures(): Promise<void> {
     await Promise.all([
       this.initJobs(),
-      this.initSensorPublish(),
-      this.initProtocolAdapters()
+      this.initSensorPublish()
+      // Protocol adapters initialized via event-driven pattern (see setupProtocolAdapterListener)
     ]);
+    
+    // Set up event-driven protocol adapter initialization
+    this.setupProtocolAdapterListener();
   }
 
   /**
@@ -237,49 +242,39 @@ export class FeatureInitializer {
     const { logger, deviceInfo, configFeatures, configProtocols } = this.context;
 
     try {
-      // Get protocol enablement from new protocols section (preferred) or legacy protocolAdapters section
+      // Protocols is now the single source of truth (includes both enabled flag and config)
       const protocols = configProtocols || {};
-      const protocolAdapters = configFeatures.protocolAdapters || {};
+      const legacyAdapters = configFeatures.protocolAdapters || {}; // Backward compatibility
       
       // Build sensor config with backward compatibility
-      // Priority: config.protocols.*.enabled (new way) → config.protocolAdapters.*.enabled (legacy)
+      // Priority: config.protocols.* (all fields) → config.protocolAdapters.* (legacy fallback)
       const sensorsConfig: SensorConfig = {
         enabled: true,
         modbus: {
-          enabled: protocols.modbus?.enabled ?? protocolAdapters.modbus?.enabled ?? false,
-          ...(protocolAdapters.modbus || {})
+          enabled: protocols.modbus?.enabled ?? legacyAdapters.modbus?.enabled ?? false,
+          // Merge config: protocols takes priority, then legacy protocolAdapters
+          ...(legacyAdapters.modbus || {}),
+          ...(protocols.modbus || {})
         },
         opcua: {
-          enabled: protocols.opcua?.enabled ?? protocolAdapters.opcua?.enabled ?? false,
-          ...(protocolAdapters.opcua || {})
+          enabled: protocols.opcua?.enabled ?? legacyAdapters.opcua?.enabled ?? false,
+          ...(legacyAdapters.opcua || {}),
+          ...(protocols.opcua || {})
         },
         snmp: {
-          enabled: protocols.snmp?.enabled ?? protocolAdapters.snmp?.enabled ?? false,
-          ...(protocolAdapters.snmp || {})
+          enabled: protocols.snmp?.enabled ?? legacyAdapters.snmp?.enabled ?? false,
+          ...(legacyAdapters.snmp || {}),
+          ...(protocols.snmp || {})
         },
         can: {
-          enabled: protocols.can?.enabled ?? protocolAdapters.can?.enabled ?? false
+          enabled: protocols.can?.enabled ?? legacyAdapters.can?.enabled ?? false,
+          ...(protocols.can || {})
         },
         comap: {
-          enabled: protocols.comap?.enabled ?? protocolAdapters.comap?.enabled ?? false
+          enabled: protocols.comap?.enabled ?? legacyAdapters.comap?.enabled ?? false,
+          ...(protocols.comap || {})
         }
       };
-
-      // Legacy: Enable all protocols if ENABLE_PROTOCOL_ADAPTERS env var is set
-      if (process.env.ENABLE_PROTOCOL_ADAPTERS === 'true') {
-        if (!protocols.modbus && !protocolAdapters.modbus) {
-          sensorsConfig.modbus!.enabled = true;
-          logger.debugSync('Enabled Modbus from ENABLE_PROTOCOL_ADAPTERS (legacy)', {
-            component: LogComponents.agent
-          });
-        }
-        if (!protocols.snmp && !protocolAdapters.snmp) {
-          sensorsConfig.snmp!.enabled = true;
-          logger.debugSync('Enabled SNMP from ENABLE_PROTOCOL_ADAPTERS (legacy)', {
-            component: LogComponents.agent
-          });
-        }
-      }
 
       // Check environment variable for config override
       const envConfigStr = process.env.PROTOCOL_ADAPTERS_CONFIG;
@@ -333,6 +328,138 @@ export class FeatureInitializer {
       });
       this.features.sensors = undefined;
     }
+  }
+
+  /**
+   * Set up event-driven protocol adapter initialization
+   * Listens for target-state-changed events and reinitializes protocol adapters when config changes
+   */
+  private setupProtocolAdapterListener(): void {
+    const { logger, stateReconciler } = this.context;
+
+    logger.infoSync('Setting up protocol adapter event listener', {
+      component: LogComponents.agent
+    });
+
+    stateReconciler.on('target-state-changed', async (state: any) => {
+      try {
+        const protocols = state.config?.protocols || {};
+        await this.handleProtocolConfigChange(protocols);
+      } catch (error) {
+        logger.errorSync('Failed to handle protocol config change', error as Error, {
+          component: LogComponents.agent
+        });
+      }
+    });
+  }
+
+  /**
+   * Handle protocol configuration changes
+   * Compares new config with current, stops existing adapters if needed, reinitializes with new config
+   */
+  private async handleProtocolConfigChange(protocols: Record<string, any>): Promise<void> {
+    const { logger } = this.context;
+
+    // Check if protocols actually changed
+    const changed = this.hasProtocolConfigChanges(protocols);
+
+    if (!changed) {
+      return; // No changes, skip reinitialization
+    }
+
+    logger.infoSync('Protocol configuration changed, reinitializing', {
+      component: LogComponents.agent,
+      protocols
+    });
+
+    // Stop existing protocol adapters if running
+    if (this.features.sensors) {
+      try {
+        await this.features.sensors.stop();
+        logger.infoSync('Stopped existing protocol adapters', {
+          component: LogComponents.agent
+        });
+      } catch (error) {
+        logger.warnSync('Error stopping protocol adapters', {
+          component: LogComponents.agent,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+
+    // Update context with new protocols config
+    this.context.configProtocols = protocols;
+
+    // Reinitialize with new config
+    await this.initProtocolAdapters();
+
+    // Store for next comparison
+    this.currentProtocols = this.deepClone(protocols);
+
+  }
+
+  /**
+   * Check if protocol configuration has changed
+   */
+  private hasProtocolConfigChanges(newProtocols: Record<string, any>): boolean {
+    // First time, always initialize
+    if (!this.currentProtocols) {
+      // But only if there are protocols to enable
+      const hasEnabledProtocols = Object.values(newProtocols).some(
+        (proto: any) => proto?.enabled === true
+      );
+      return hasEnabledProtocols;
+    }
+
+    // Check for enabled status changes
+    const protocolKeys = ['modbus', 'opcua', 'snmp', 'can', 'comap'];
+    for (const key of protocolKeys) {
+      const oldEnabled = this.currentProtocols[key]?.enabled ?? false;
+      const newEnabled = newProtocols[key]?.enabled ?? false;
+      if (oldEnabled !== newEnabled) {
+        return true;
+      }
+    }
+
+    // Check for config value changes (deep comparison)
+    return !this.deepEqual(newProtocols, this.currentProtocols);
+  }
+
+  /**
+   * Deep equality check for objects
+   */
+  private deepEqual(obj1: any, obj2: any): boolean {
+    if (obj1 === obj2) return true;
+    if (obj1 == null || obj2 == null) return false;
+    if (typeof obj1 !== 'object' || typeof obj2 !== 'object') return obj1 === obj2;
+
+    const keys1 = Object.keys(obj1);
+    const keys2 = Object.keys(obj2);
+
+    if (keys1.length !== keys2.length) return false;
+
+    for (const key of keys1) {
+      if (!keys2.includes(key)) return false;
+      if (!this.deepEqual(obj1[key], obj2[key])) return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Deep clone an object
+   */
+  private deepClone(obj: any): any {
+    if (obj === null || typeof obj !== 'object') return obj;
+    if (Array.isArray(obj)) return obj.map(item => this.deepClone(item));
+    
+    const cloned: any = {};
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key)) {
+        cloned[key] = this.deepClone(obj[key]);
+      }
+    }
+    return cloned;
   }
 
   private async initSensorConfigHandler(): Promise<void> {

@@ -83,7 +83,6 @@ interface TargetStateConfig {
     enableDeviceSensorPublish?: boolean;
     enableDeviceRemoteAccess: boolean;
     enableProtocolAdapters?: boolean;
-    enableFirstBootDiscovery?: boolean;
     enableAnomalyDetection?: boolean;
   };
   settings: {
@@ -110,23 +109,7 @@ interface TargetStateConfig {
   protocols?: {
     modbus?: {
       enabled: boolean;
-    };
-    opcua?: {
-      enabled: boolean;
-    };
-    snmp?: {
-      enabled: boolean;
-    };
-    can?: {
-      enabled: boolean;
-    };
-    comap?: {
-      enabled: boolean;
-    };
-  };
-  protocolAdapters?: {
-    modbus?: {
-      enabled: boolean; // DEPRECATED: Use config.protocols.modbus.enabled instead
+      // Modbus-specific configuration
       tcpHost?: string;
       tcpPort?: number;
       serialPort?: string;
@@ -138,11 +121,43 @@ interface TargetStateConfig {
       vendorFile?: string;
     };
     opcua?: {
-      enabled: boolean; // DEPRECATED: Use config.protocols.opcua.enabled instead
+      enabled: boolean;
+      // OPC-UA specific configuration
       discoveryUrls?: string[];
     };
     snmp?: {
-      enabled: boolean; // DEPRECATED: Use config.protocols.snmp.enabled instead
+      enabled: boolean;
+      // SNMP specific configuration
+      ipRanges?: string[];
+      port?: number;
+    };
+    can?: {
+      enabled: boolean;
+    };
+    comap?: {
+      enabled: boolean;
+    };
+  };
+  // DEPRECATED: Legacy protocolAdapters for backward compatibility only
+  protocolAdapters?: {
+    modbus?: {
+      enabled?: boolean; // DEPRECATED: Use protocols.modbus.enabled
+      tcpHost?: string;
+      tcpPort?: number;
+      serialPort?: string;
+      baudRate?: number;
+      slaveRangeStart?: number;
+      slaveRangeEnd?: number;
+      timeout?: number;
+      vendor?: string;
+      vendorFile?: string;
+    };
+    opcua?: {
+      enabled?: boolean; // DEPRECATED: Use protocols.opcua.enabled
+      discoveryUrls?: string[];
+    };
+    snmp?: {
+      enabled?: boolean; // DEPRECATED: Use protocols.snmp.enabled
       ipRanges?: string[];
       port?: number;
     };
@@ -168,10 +183,8 @@ export function generateDefaultTargetStateConfig(
     },
     features: {
       enableDeviceJobs: true, // Always enabled (API access required for system to work)
-      enableDeviceSensorPublish: false, // Disabled by default (no OPC-UA server assumed)
+      enableDeviceSensorPublish: true, // Enabled by default (protocols enabled)
       enableDeviceRemoteAccess: true,
-      enableProtocolAdapters: true,
-      enableFirstBootDiscovery: true,
       enableAnomalyDetection: false, // Disabled by default (resource-intensive)
     },
     settings: {
@@ -189,25 +202,8 @@ export function generateDefaultTargetStateConfig(
     },
     protocols: {
       modbus: {
-        enabled: false, // Disabled by default (no hardware assumed)
-      },
-      opcua: {
-        enabled: false,
-      },
-      snmp: {
-        enabled: false,
-      },
-      can: {
-        enabled: false,
-      },
-      comap: {
-        enabled: false,
-      },
-    },
-    protocolAdapters: {
-      modbus: {
-        enabled: false, // DEPRECATED: kept for backward compatibility
-        tcpHost: '',
+        enabled: true, // Enabled by default with simulator
+        tcpHost: 'iotistic-modbus-sim', // Default Modbus simulator hostname
         tcpPort: 502,
         slaveRangeStart: 1,
         slaveRangeEnd: 10,
@@ -216,18 +212,24 @@ export function generateDefaultTargetStateConfig(
         vendorFile: '/app/dist/config/vendors/dataPoints.json',
       },
       opcua: {
-        enabled: false, // DEPRECATED: kept for backward compatibility
+        enabled: false,
         discoveryUrls: [],
       },
       snmp: {
-        enabled: false, // DEPRECATED: kept for backward compatibility
+        enabled: false,
         ipRanges: [],
         port: 161,
+      },
+      can: {
+        enabled: false,
+      },
+      comap: {
+        enabled: false,
       },
     },
     intervals: {
       discoveryFullIntervalMs: 86400000, // 24 hours
-      discoveryLightIntervalMs: 14400000, // 4 hours
+      discoveryLightIntervalMs: 60000, // 1 minute (for testing - change to 14400000 for production)
       targetStatePollIntervalMs: 60000, // 60 seconds
       deviceReportIntervalMs: 60000, // 60 seconds (matches settings.deviceReportIntervalMs)
       metricsIntervalMs: 60000, // 60 seconds (matches settings.metricsIntervalMs)

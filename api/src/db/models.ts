@@ -539,7 +539,11 @@ export class DeviceMetricsModel {
  */
 export class DeviceLogsModel {
   /**
-   * Store device logs
+   * Store device logs in batches to reduce database connection pool pressure
+   * 
+   * @param deviceUuid - Device UUID
+   * @param logs - Array of log entries
+   * @param batchSize - Number of logs to insert per query (default: 500)
    */
   static async store(
     deviceUuid: string,
@@ -547,34 +551,52 @@ export class DeviceLogsModel {
       serviceName?: string;
       timestamp?: Date;
       message: string;
+      level?: string;
       isSystem?: boolean;
       isStderr?: boolean;
-    }>
+    }>,
+    batchSize: number = 500
   ): Promise<void> {
     if (logs.length === 0) return;
 
-    const values: any[] = [];
-    const placeholders: string[] = [];
+    // Split logs into batches to avoid exceeding PostgreSQL parameter limits
+    // PostgreSQL has a limit of 65535 parameters per query
+    // With 7 parameters per log, max safe batch size is ~9,000
+    // We use 500 as default for better performance and connection pool management
+    const batches: typeof logs[] = [];
+    for (let i = 0; i < logs.length; i += batchSize) {
+      batches.push(logs.slice(i, i + batchSize));
+    }
 
-    logs.forEach((log, index) => {
-      const offset = index * 6;
-      placeholders.push(
-        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6})`
-      );
-      values.push(
-        deviceUuid,
-        log.serviceName || null,
-        log.timestamp || new Date(),
-        log.message,
-        log.isSystem || false,
-        log.isStderr || false
-      );
-    });
+    // Insert batches in parallel (but limit concurrency to avoid overwhelming the pool)
+    // Use Promise.all for parallel execution - connection pool will handle concurrency
+    await Promise.all(
+      batches.map(async (batch) => {
+        const values: any[] = [];
+        const placeholders: string[] = [];
 
-    await query(
-      `INSERT INTO device_logs (device_uuid, service_name, timestamp, message, is_system, is_stderr)
-       VALUES ${placeholders.join(', ')}`,
-      values
+        batch.forEach((log, index) => {
+          const offset = index * 7;
+          placeholders.push(
+            `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7})`
+          );
+          values.push(
+            deviceUuid,
+            log.serviceName || null,
+            log.timestamp || new Date(),
+            log.message,
+            log.level || 'info',
+            log.isSystem || false,
+            log.isStderr || false
+          );
+        });
+
+        await query(
+          `INSERT INTO device_logs (device_uuid, service_name, timestamp, message, level, is_system, is_stderr)
+           VALUES ${placeholders.join(', ')}`,
+          values
+        );
+      })
     );
   }
 

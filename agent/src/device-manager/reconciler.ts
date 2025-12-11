@@ -35,10 +35,16 @@ interface StateReconcilerEvents {
 	'target-state-changed': (state: DeviceState) => void;
 	'state-applied': () => void;
 	'reconciliation-complete': () => void;
+	'logging-config-changed': (change: { old: any; new: any }) => void;
+	'protocol-config-changed': (change: { old: any; new: any }) => void;
+	'intervals-changed': (change: { old: any; new: any }) => void;
+	'memory-config-changed': (change: { old: any; new: any }) => void;
+	'scheduled-restart-changed': (change: { old: any; new: any }) => void;
 }
 
 export class StateReconciler extends EventEmitter {
 	private targetState: DeviceState = { apps: {}, config: {} };
+	private previousState: DeviceState = { apps: {}, config: {} };
 	private containerManager: ContainerManager;
 	private configManager: ConfigManager;
 	private lastSavedStateHash: string = '';
@@ -102,6 +108,8 @@ export class StateReconciler extends EventEmitter {
 			endpointCount: state.config?.endpoints?.length || 0,
 		});
 
+		// Store previous state before updating
+		this.previousState = _.cloneDeep(this.targetState);
 		this.targetState = _.cloneDeep(state);
 		
 		// Ensure config field exists
@@ -112,7 +120,10 @@ export class StateReconciler extends EventEmitter {
 		// Persist complete target state to database
 		await this.saveTargetStateToDB();
 
-		// Emit event for listeners (like agent.ts)
+		// Detect and emit granular change events
+		this.emitConfigChangeEvents(this.previousState, this.targetState);
+
+		// Emit generic event for backward compatibility
 		this.emit('target-state-changed', this.targetState);
 
 		// Trigger reconciliation
@@ -219,25 +230,28 @@ export class StateReconciler extends EventEmitter {
 				.orderBy('createdAt', 'desc')
 				.limit(1);
 
-			if (snapshots.length > 0) {
-				this.targetState = JSON.parse(snapshots[0].state);
+		if (snapshots.length > 0) {
+			this.targetState = JSON.parse(snapshots[0].state);
 
-				// Ensure config field exists (backward compatibility)
-				if (!this.targetState.config) {
-					this.targetState.config = {};
-				}
+			// Ensure config field exists (backward compatibility)
+			if (!this.targetState.config) {
+				this.targetState.config = {};
+			}
 
-				// Load the hash for future comparisons
-				if (snapshots[0].stateHash) {
-					this.lastSavedStateHash = snapshots[0].stateHash;
-				}
+			// Load the hash for future comparisons
+			if (snapshots[0].stateHash) {
+				this.lastSavedStateHash = snapshots[0].stateHash;
+			}
 
-			this.logger?.infoSync('Loaded target state from database', {
-				component: LogComponents.stateReconciler,
-				operation: 'loadTargetState',
-				appsCount: Object.keys(this.targetState.apps).length,
-				devicesCount: this.targetState.config?.endpoints?.length || 0,
-			});
+		this.logger?.infoSync('Loaded target state from database', {
+			component: LogComponents.stateReconciler,
+			operation: 'loadTargetState',
+			appsCount: Object.keys(this.targetState.apps).length,
+			devicesCount: this.targetState.config?.endpoints?.length || 0,
+			configKeys: Object.keys(this.targetState.config || {}),
+			hasIntervals: !!this.targetState.config?.intervals,
+			hasProtocols: !!this.targetState.config?.protocols,
+		});
 			}
 		} catch (error) {
 			this.logger?.errorSync(
@@ -299,6 +313,82 @@ export class StateReconciler extends EventEmitter {
 	private getStateHash(state: DeviceState): string {
 		const stateJson = JSON.stringify(state);
 		return crypto.createHash('sha256').update(stateJson).digest('hex');
+	}
+
+	/**
+	 * Detect configuration changes and emit granular events
+	 */
+	private emitConfigChangeEvents(oldState: DeviceState, newState: DeviceState): void {
+		const oldConfig = oldState.config || {};
+		const newConfig = newState.config || {};
+
+		// Check logging config changes
+		if (!_.isEqual(oldConfig.logging, newConfig.logging)) {
+			this.logger?.debugSync('Logging configuration changed', {
+				component: LogComponents.stateReconciler,
+				operation: 'emitConfigChangeEvents',
+			});
+			this.emit('logging-config-changed', {
+				old: oldConfig.logging,
+				new: newConfig.logging,
+			});
+		}
+
+		// Check protocol config changes
+		if (!_.isEqual(oldConfig.protocols, newConfig.protocols)) {
+			this.logger?.debugSync('Protocol configuration changed', {
+				component: LogComponents.stateReconciler,
+				operation: 'emitConfigChangeEvents',
+			});
+			this.emit('protocol-config-changed', {
+				old: oldConfig.protocols,
+				new: newConfig.protocols,
+			});
+		}
+
+		// Check intervals changes
+		if (!_.isEqual(oldConfig.intervals, newConfig.intervals)) {
+			this.logger?.debugSync('Intervals configuration changed', {
+				component: LogComponents.stateReconciler,
+				operation: 'emitConfigChangeEvents',
+			});
+			this.emit('intervals-changed', {
+				old: oldConfig.intervals,
+				new: newConfig.intervals,
+			});
+		}
+
+		// Check memory/performance config changes
+		const oldMemoryConfig = {
+			memoryThresholdMb: oldConfig.settings?.memoryThresholdMb,
+			memoryCheckIntervalMs: oldConfig.settings?.memoryCheckIntervalMs,
+		};
+		const newMemoryConfig = {
+			memoryThresholdMb: newConfig.settings?.memoryThresholdMb,
+			memoryCheckIntervalMs: newConfig.settings?.memoryCheckIntervalMs,
+		};
+		if (!_.isEqual(oldMemoryConfig, newMemoryConfig)) {
+			this.logger?.debugSync('Memory configuration changed', {
+				component: LogComponents.stateReconciler,
+				operation: 'emitConfigChangeEvents',
+			});
+			this.emit('memory-config-changed', {
+				old: oldMemoryConfig,
+				new: newMemoryConfig,
+			});
+		}
+
+		// Check scheduled restart changes
+		if (!_.isEqual(oldConfig.settings?.scheduledRestart, newConfig.settings?.scheduledRestart)) {
+			this.logger?.debugSync('Scheduled restart configuration changed', {
+				component: LogComponents.stateReconciler,
+				operation: 'emitConfigChangeEvents',
+			});
+			this.emit('scheduled-restart-changed', {
+				old: oldConfig.settings?.scheduledRestart,
+				new: newConfig.settings?.scheduledRestart,
+			});
+		}
 	}
 
 	/**

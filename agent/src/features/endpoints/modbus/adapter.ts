@@ -49,8 +49,6 @@ export class ModbusAdapter extends EventEmitter {
     }
 
     try {
-      this.logger.info('Starting Modbus Adapter...');
-
       // Initialize and connect all enabled devices
       for (const deviceConfig of this.config.devices) {
         if (deviceConfig.enabled) {
@@ -59,7 +57,6 @@ export class ModbusAdapter extends EventEmitter {
       }
 
       this.running = true;
-      this.logger.info('Modbus Adapter started successfully');
       this.emit('started');
 
     } catch (error) {

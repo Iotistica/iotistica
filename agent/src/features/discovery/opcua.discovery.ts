@@ -52,7 +52,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
         const { OPCUAClient } = await import('node-opcua-client');
 
         const client = OPCUAClient.create({
-          endpoint_must_exist: false,
+          endpointMustExist : false,
           connectionStrategy: {
             maxRetry: 1,
             initialDelay: 100,

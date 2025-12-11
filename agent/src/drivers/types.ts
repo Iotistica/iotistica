@@ -219,9 +219,7 @@ export interface TargetState {
 			enableLogs?: boolean;
 			
 			// Protocol adapter features
-			enableProtocolAdapters?: boolean;
 			enableSensorPublish?: boolean;
-			enableFirstBootDiscovery?: boolean;
 		};
 		logging?: {
 			level?: string;
@@ -229,31 +227,12 @@ export interface TargetState {
 			enableCompression?: boolean;
 		};
 		
-		// Protocol selection (high-level enablement)
-		// Controls which protocols are active on the device
+		// Protocol configurations (unified enablement + settings)
+		// Each protocol contains both the enabled flag and its specific configuration
 		protocols?: {
 			modbus?: {
-				enabled: boolean; // Enable/disable Modbus protocol
-			};
-			opcua?: {
-				enabled: boolean; // Enable/disable OPC-UA protocol
-			};
-			snmp?: {
-				enabled: boolean; // Enable/disable SNMP protocol
-			};
-			can?: {
-				enabled: boolean; // Enable/disable CAN protocol
-			};
-			comap?: {
-				enabled: boolean; // Enable/disable CoMAP protocol
-			};
-		};
-		
-		// Protocol adapter configurations (detailed settings)
-		// Note: Protocol must be enabled in 'protocols' section above
-		protocolAdapters?: {
-			modbus?: {
-				enabled?: boolean; // DEPRECATED: Use config.protocols.modbus.enabled instead
+				enabled: boolean;
+				// Modbus-specific configuration
 				tcpHost?: string;
 				tcpPort?: number;
 				serialPort?: string;
@@ -265,11 +244,47 @@ export interface TargetState {
 				vendorFile?: string;
 			};
 			opcua?: {
-				enabled?: boolean; // DEPRECATED: Use config.protocols.opcua.enabled instead
+				enabled: boolean;
+				// OPC-UA specific configuration
 				discoveryUrls?: string[];
 			};
 			snmp?: {
-				enabled?: boolean; // DEPRECATED: Use config.protocols.snmp.enabled instead
+				enabled: boolean;
+				// SNMP specific configuration
+				ipRanges?: string[];
+				port?: number;
+			};
+			can?: {
+				enabled: boolean;
+				// CAN bus specific configuration (future)
+			};
+			comap?: {
+				enabled: boolean;
+				// CoMAP specific configuration (future)
+			};
+		};
+		
+		// DEPRECATED: Legacy protocolAdapters section for backward compatibility only
+		// Will be removed in future version. Use 'protocols' section above instead.
+		protocolAdapters?: {
+			modbus?: {
+				enabled?: boolean;
+				tcpHost?: string;
+				tcpPort?: number;
+				serialPort?: string;
+				baudRate?: number;
+				slaveRangeStart?: number;
+				slaveRangeEnd?: number;
+				timeout?: number;
+				vendor?: string;
+				vendorFile?: string;
+			};
+			opcua?: {
+				enabled?: boolean;
+				discoveryUrls?: string[];
+			};
+			snmp?: {
+				enabled?: boolean;
 				ipRanges?: string[];
 				port?: number;
 			};

@@ -134,9 +134,7 @@ export class JobsFeature extends BaseFeature {
   protected async onInitialize(): Promise<void> {
     const config = this.config as JobsConfig;
     
-    this.logger.info(`Initializing Jobs Feature`);
-    this.logger.info(`Polling interval: ${config.pollingIntervalMs || 30000}ms`);
-    this.logger.info(`Handler directory: ${config.handlerDirectory || '/app/data/job-handlers'}`);
+    this.logger.info(`Initializing Jobs Feature - pollingIntervalMs: ${config.pollingIntervalMs || 30000}, handlerDirectory: ${config.handlerDirectory || '/app/data/job-handlers'}`);
   }
 
   /**

@@ -106,5 +106,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 # Use tini as init process for proper signal handling
 ENTRYPOINT ["/sbin/tini", "--", "/app/docker-entrypoint.sh"]
 
-# Start the agent
-CMD ["node", "dist/app.js"]
+# Start the agent with security revert flag for node-opcua compatibility
+CMD ["node", "--security-revert=CVE-2023-46809", "dist/app.js"]

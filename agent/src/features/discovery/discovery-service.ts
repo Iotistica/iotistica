@@ -144,17 +144,17 @@ export class DiscoveryService {
     const { trigger, validate = false, forceRun = false, protocols } = options;
     const traceId = crypto.randomUUID();
 
-    // Check rate limiting
-    if (!forceRun && !this.shouldRunDiscovery(trigger)) {
-      this.logger?.infoSync('Discovery skipped due to rate limiting', {
-        component: LogComponents.discovery,
-        traceId,
-        trigger,
-        lastDiscoveryAt: this.metadata.lastDiscoveryAt,
-        minIntervalMs: this.MIN_DISCOVERY_INTERVAL_MS
-      });
-      return [];
-    }
+    // // Check rate limiting
+    // if (!forceRun && !this.shouldRunDiscovery(trigger)) {
+    //   this.logger?.infoSync('Discovery skipped due to rate limiting', {
+    //     component: LogComponents.discovery,
+    //     traceId,
+    //     trigger,
+    //     lastDiscoveryAt: this.metadata.lastDiscoveryAt,
+    //     minIntervalMs: this.MIN_DISCOVERY_INTERVAL_MS
+    //   });
+    //   return [];
+    // }
 
     this.logger?.infoSync('Starting discovery', {
       component: LogComponents.discovery,
@@ -284,6 +284,70 @@ export class DiscoveryService {
     }
 
     return false;
+  }
+
+  /**
+   * Get list of enabled protocols from agent configuration
+   * If no config available, returns all available protocols
+   */
+  private getEnabledProtocols(): DiscoveryProtocol[] {
+    if (!this.agentConfig) {
+      // No config available, return all protocols
+      return Array.from(this.plugins.keys()) as DiscoveryProtocol[];
+    }
+
+    const enabledProtocols: DiscoveryProtocol[] = [];
+
+    // Check Modbus
+    const modbusConfig = this.agentConfig.getModbusConfig();
+    if (modbusConfig.enabled) {
+      enabledProtocols.push('modbus');
+    }
+
+    // Check OPC-UA
+    const opcuaConfig = this.agentConfig.getOPCUAConfig();
+    if (opcuaConfig.enabled) {
+      enabledProtocols.push('opcua');
+    }
+
+    // Check SNMP
+    const snmpConfig = this.agentConfig.getSNMPConfig();
+    if (snmpConfig.enabled) {
+      enabledProtocols.push('snmp');
+    }
+
+    // TODO: Add CAN and COMAP when config methods are available
+    // For now, check environment variables directly for these protocols
+    if (process.env.CAN_INTERFACE) {
+      enabledProtocols.push('can');
+    }
+
+    return enabledProtocols;
+  }
+
+  /**
+   * Check if a specific protocol is enabled in agent configuration
+   * Used to set the 'enabled' flag when saving discovered devices
+   */
+  private isProtocolEnabled(protocol: string): boolean {
+    if (!this.agentConfig) {
+      // No config available, default to enabled
+      return true;
+    }
+
+    switch (protocol) {
+      case 'modbus':
+        return this.agentConfig.getModbusConfig().enabled ?? false;
+      case 'opcua':
+        return this.agentConfig.getOPCUAConfig().enabled ?? false;
+      case 'snmp':
+        return this.agentConfig.getSNMPConfig().enabled ?? false;
+      case 'can':
+        // TODO: Add getCANConfig() when available
+        return !!process.env.CAN_INTERFACE;
+      default:
+        return false;
+    }
   }
 
   /**
@@ -649,11 +713,6 @@ export class DiscoveryService {
       return { saved: 0, skipped: 0 };
     }
 
-    this.logger?.infoSync(`Saving ${discovered.length} discovered endpoints to database`, {
-      component: LogComponents.discovery,
-      traceId,
-      operation: 'saveToDatabase'
-    });
 
     // Fetch existing sensors ONCE before loop (avoid O(N²) performance)
     const existingSensors = await DeviceEndpointModel.getAll();
@@ -712,7 +771,7 @@ export class DiscoveryService {
         const deviceSensor: DeviceEndpoint = {
           name: sensor.name,
           protocol: sensor.protocol as 'modbus' | 'can' | 'opcua',
-          enabled: true, // DEVELOPMENT: Auto-enable discovered devices (set to false for production)
+          enabled: this.isProtocolEnabled(sensor.protocol), // Check if protocol is enabled in config
           poll_interval: 5000, // Default 5 seconds
           connection: sensor.connection,
           data_points: sensor.dataPoints || [],

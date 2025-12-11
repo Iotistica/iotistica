@@ -193,7 +193,6 @@ export class CloudLogBackend implements LogBackend {
 	}
 	
 	async initialize(): Promise<void> {
-		this.logger?.infoSync('Initializing Cloud Log Backend...', { component: LogComponents.logs });
 		this.logger?.infoSync('Configuration loaded', { 
 			component: LogComponents.logs,
 			endpoint: this.config.cloudEndpoint,
@@ -344,17 +343,12 @@ export class CloudLogBackend implements LogBackend {
 		// Split buffer into smaller batches if too large
 		const batchSize = this.config.batchSize;
 		const batches: LogMessage[][] = [];
+		const totalLogsToFlush = this.buffer.length; // Store before clearing
 		
 		for (let i = 0; i < this.buffer.length; i += batchSize) {
 			batches.push(this.buffer.slice(i, i + batchSize));
 		}
 		
-		this.logger?.debugSync('Attempting to flush logs to cloud', { 
-			component: LogComponents.logs,
-			totalLogs: this.buffer.length,
-			batches: batches.length,
-			batchSize
-		});
 		
 		// Clear buffer immediately to prevent duplicate sends
 		this.buffer = [];
@@ -363,7 +357,7 @@ export class CloudLogBackend implements LogBackend {
 		const failedLogs: LogMessage[] = [];
 		
 		for (const batch of batches) {
-			try {
+				try {
 				// Use retry policy for network resilience
 				await this.retryPolicy.execute(() => this.sendLogs(batch));
 				
@@ -374,10 +368,17 @@ export class CloudLogBackend implements LogBackend {
 				this.circuitBreakerOpen = false;
 				this.retryPolicy.reset();
 				
-				// Only log recovery if circuit breaker was open (avoid spam)
+				// Log successful upload
 				if (wasCircuitOpen) {
 					this.logger?.infoSync(`Circuit breaker CLOSED - connection restored (sent ${batch.length} logs)`, {
 						component: LogComponents.cloudSync
+					});
+				} else {
+					this.logger?.infoSync(`Uploaded ${batch.length} logs to cloud`, {
+						component: LogComponents.cloudSync,
+						totalLogsInFlush: totalLogsToFlush,
+						batchCount: batches.length,
+						batchSize
 					});
 				}
 			} catch (error) {

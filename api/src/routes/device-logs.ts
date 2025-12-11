@@ -88,6 +88,7 @@ router.post('/device/:uuid/logs', deviceAuth, express.text({ type: 'application/
 
     // Store logs
     if (Array.isArray(logs) && logs.length > 0) {
+      const startTime = Date.now();
       logger.debug('Storing logs', { count: logs.length });
       
       // Transform agent log format to API format
@@ -96,11 +97,51 @@ router.post('/device/:uuid/logs', deviceAuth, express.text({ type: 'application/
         timestamp: log.timestamp ? new Date(log.timestamp) : new Date(),
         message: log.message,
         isSystem: log.isSystem || false,
-        isStderr: log.isStderr || log.isStdErr || false // Handle both field names
+        isStderr: log.isStderr || log.isStdErr || false, // Handle both field names
+        level: log.level || 'info' // Agent sends this field
       }));
       
-      await DeviceLogsModel.store(uuid, transformedLogs);
-      logger.info('Stored log entries', { count: logs.length, uuid: uuid.substring(0, 8) });
+      // Apply sampling to reduce database writes
+      // LOG_SAMPLING_RATE: 0.0-1.0 (default: 1.0 = store all logs)
+      // Always store ERROR and WARN logs, sample INFO/DEBUG
+      const samplingRate = parseFloat(process.env.LOG_SAMPLING_RATE || '1.0');
+      const sampledLogs = transformedLogs.filter(log => {
+        // Always store errors and warnings (use level field from agent)
+        if (log.level === 'error' || log.level === 'warn' || log.isStderr) {
+          return true;
+        }
+        
+        // Sample info/debug logs based on rate
+        return Math.random() < samplingRate;
+      });
+      
+      const droppedCount = transformedLogs.length - sampledLogs.length;
+      if (droppedCount > 0) {
+        logger.debug('Sampled logs', { 
+          received: transformedLogs.length, 
+          stored: sampledLogs.length, 
+          dropped: droppedCount,
+          samplingRate 
+        });
+      }
+      
+      // Get batch size from environment (default: 500)
+      const batchSize = parseInt(process.env.LOG_INSERT_BATCH_SIZE || '500', 10);
+      
+      if (sampledLogs.length > 0) {
+        await DeviceLogsModel.store(uuid, sampledLogs, batchSize);
+        
+        const duration = Date.now() - startTime;
+        logger.info('Stored log entries', { 
+          received: logs.length,
+          stored: sampledLogs.length,
+          dropped: droppedCount,
+          uuid: uuid.substring(0, 8),
+          batchSize,
+          durationMs: duration,
+          logsPerSecond: Math.round((sampledLogs.length / duration) * 1000)
+        });
+      }
       
       // Publish logs to Redis pub/sub for real-time WebSocket streaming
       try {

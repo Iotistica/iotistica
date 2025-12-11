@@ -35,8 +35,8 @@ param(
     [int]$Count = 1,
     [int]$StartIndex = 27,
     [string]$OutputFile = "docker-compose.agents.yml",
-    [string]$ApiUrl = "http://23.233.80.107:30002",
-    #[string]$ApiUrl = "http://localhost:4002",
+    #[string]$ApiUrl = "http://23.233.80.107:30002",
+    [string]$ApiUrl = "http://localhost:4002",
     [string]$FleetId = "default-fleet",
     
     # Cleanup Mode
@@ -45,10 +45,13 @@ param(
     # Run Mode
     [switch]$Run,
     
+    # Build Mode - build from source instead of using pre-built image
+    [switch]$BuildFromSource,
+    
     # Agent Configuration
     [string]$NodeEnv = "development",
-    [string]$CLOUD_API_ENDPOINT = "http://23.233.80.107:30002",
-    #[string]$CLOUD_API_ENDPOINT = "http://api:3002",
+    #[string]$CLOUD_API_ENDPOINT = "http://23.233.80.107:30002",
+    [string]$CLOUD_API_ENDPOINT = "http://api:3002",
     [int]$ReportInterval = 20000,
     [int]$MetricsInterval = 30000,
     [string]$LogCompression = "true",
@@ -290,11 +293,22 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
     $volumeName = "$agentName-data"
     $simConfig = Get-SimulationConfig -Index $i -SimulationEnabled $EnableSimulation.IsPresent
     
+    # Build configuration: use build context if -BuildFromSource, otherwise use image
+    $buildOrImage = if ($BuildFromSource) {
+        @"
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+"@
+    } else {
+        "    image: iotistic/agent:latest"
+    }
+    
     # Service definition
     $service = @"
   $agentName`:
     container_name: $agentName
-    image: iotistic/agent:latest
+$buildOrImage
     restart: always
     mem_limit: $MemLimit
     mem_reservation: $MemReservation
@@ -306,7 +320,6 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
       - DEVICE_API_PORT=$port
       - CLOUD_API_ENDPOINT=$CLOUD_API_ENDPOINT
       - NODE_ENV=$NodeEnv
-      - ENABLE_SENSOR_PUBLISH=true
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=$RequireProvisioning
       - PROVISIONING_KEY=$apiKey

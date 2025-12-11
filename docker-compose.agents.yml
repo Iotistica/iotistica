@@ -1,12 +1,14 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2025-12-08 20:51:09
+# Generated: 2025-12-10 21:04:34
 # Agents: 27 to 27
 # Ports: 48507 to 48507
 
 services:
   agent-27:
     container_name: agent-27
-    image: iotistic/agent:latest
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
     restart: always
     mem_limit: 512m
     mem_reservation: 256m
@@ -16,12 +18,11 @@ services:
       - ./certs/ca.crt:/app/certs/ca.crt:ro
     environment:
       - DEVICE_API_PORT=48507
-      - CLOUD_API_ENDPOINT=http://23.233.80.107:30002
+      - CLOUD_API_ENDPOINT=http://api:3002
       - NODE_ENV=development
-      - ENABLE_SENSOR_PUBLISH=true
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=33d15afb69cfd452c851f4a6fd17eada04cd1e80f57e655953f16f24b6524eb9
+      - PROVISIONING_KEY=3cc2beb6e8eca10088fa9efd8136fdca76e43eadd74dc515947b03e73bfc7df8
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)

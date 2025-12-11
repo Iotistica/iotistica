@@ -20,25 +20,7 @@
       ],
       "env": {
 			"CLOUD_API_ENDPOINT":"http://localhost:4002",
-			"MQTT_DB_SYNC_INTERVAL": "70000",
-			"REPORT_INTERVAL_MS":"5000",
-			"METRICS_INTERVAL_MS":"5000",
-			"LOG_COMPRESSION":"true",
-			"REQUIRE_PROVISIONING" : "true",
-      "ENABLE_PROTOCOL_ADAPTERS" : "true",
-      "ENABLE_SENSOR_PUBLISH" : "true",
-      "ENABLE_FIRST_BOOT_DISCOVERY": "true",
-      "MODBUS_TCP_HOST":"localhost",
-      "MODBUS_TCP_PORT":"502",
-      "MODBUS_VENDOR":"COMAP",
-      "MODBUS_SLAVE_RANGE_START":"1",
-      "MODBUS_SLAVE_RANGE_END":"10",
-      "MODBUS_TIMEOUT":"2000",
-      "OPCUA_DISCOVERY_URLS":"",
-      "SNMP_IP_RANGES":"iotistic-snmp-sim",
-      "SNMP_PORT":"161",
-      "MEMORY_THRESHOLD_MB":"50",
-			"PROVISIONING_API_KEY": "c6918ba3f115dcc39c0eb352f4170eab439ef44b6f014c8913926725e09001cd"
+			"PROVISIONING_KEY": "dfb4742a2e616c7ca0f7f4dcd355964116640f8cfa37aeba4f4f3938a949a5a4"
       }
     },
     {

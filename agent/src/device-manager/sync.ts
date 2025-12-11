@@ -683,8 +683,8 @@ export class CloudSync extends EventEmitter {
 			// Apply target state to state reconciler (handles both containers and config)
 			await this.stateReconciler.setTarget(this.targetState);
 			
-			// Trigger reconciliation
-			this.emit('target-state-changed', this.targetState);
+			// // Trigger reconciliation
+			// this.emit('target-state-changed', this.targetState);
 			
 			this.logger?.infoSync('Target state applied', {
 				component: LogComponents.cloudSync,
@@ -1035,7 +1035,7 @@ export class CloudSync extends EventEmitter {
 				const sensorStats = this.sensorPublish.getStats();
 				(stateReport[deviceInfo.uuid] as any).sensor_health = sensorStats;
 			} catch (error) {
-				this.logger?.warnSync('Failed to collect sensor stats', {
+				this.logger?.warnSync('Failed to collect endpoints stats', {
 					component: LogComponents.cloudSync,
 					operation: 'collect-sensor-stats',
 					error: error instanceof Error ? error.message : String(error)
