@@ -418,6 +418,9 @@ export class MqttManager extends EventEmitter {
   private handleMessage(topic: string, payload: Buffer): void {
     const message = payload.toString();
     
+    // DEBUG: Log all incoming messages
+    logger.info('MQTT message received', { topic, payloadLength: payload.length });
+    
     try {
       // Only accept iot/device/{uuid}/{type}/... format
       const parts = topic.split('/');
@@ -464,10 +467,10 @@ export class MqttManager extends EventEmitter {
         case 'endpoints':
           // Topic: iot/device/{uuid}/endpoints/{endpointTopic}
           const endpointTopic = rest[0] || 'unknown';
-          // logOperation.step('mqtt-message', 'Routing to endpoint handler', { 
-          //   deviceUuid: deviceUuid?.substring(0, 8) + '...',
-          //   endpointTopic
-          // });
+          logOperation.step('mqtt-message', 'Routing to endpoint handler', { 
+            deviceUuid: deviceUuid?.substring(0, 8) + '...',
+            endpointTopic
+          });
           this.handleSensorData(deviceUuid, endpointTopic, data);
           break;
           
@@ -592,9 +595,10 @@ export class MqttManager extends EventEmitter {
       metadata: data.metadata
     };
 
-    logger.debug('Sensor data received', { 
+    logger.info('Sensor data received - emitting event', { 
       deviceUuid: deviceUuid.substring(0, 8) + '...', 
-      sensorName 
+      sensorName,
+      hasData: !!data
     });
     this.emit('sensor', sensorData);
   }

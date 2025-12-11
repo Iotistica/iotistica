@@ -19,6 +19,13 @@ export async function handleSensorData(data: SensorData): Promise<void> {
   try {
     const startTime = Date.now();
     
+    // DEBUG: Log when handler is called
+    logger.info('handleSensorData called', {
+      deviceUuid: data.deviceUuid?.substring(0, 8),
+      sensorName: data.sensorName,
+      hasData: !!data.data
+    });
+    
     // Check if this is a batch (from Sensor Publish feature)
     const isBatch = data.data && Array.isArray((data.data as any).messages);
     
