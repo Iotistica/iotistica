@@ -51,7 +51,7 @@ redis:
   maxMemory: 512mb
   maxMemoryPolicy: allkeys-lru  # Evict any key when memory full
   persistence:
-    enabled: false  # Disabled for dev (less disk I/O, faster restarts)
+    enabled: true  # Keep enabled (StatefulSet volumeClaimTemplates are immutable)
   storage:
     size: 5Gi  # Keep existing size (StatefulSet storage is immutable)
     storageClass: ""
@@ -67,8 +67,9 @@ redis:
   config:
     maxclients: "5000"            # Sufficient for dev testing
     timeout: "300"                # Close idle connections after 5min
-    save: ""                      # No RDB snapshots (dev only)
-    appendonly: "no"              # No AOF for dev (faster)
+    save: ""                      # No RDB snapshots
+    appendonly: "yes"             # Keep AOF enabled (persistence is on)
+    appendfsync: "everysec"       # Balanced durability
 
 # Mosquitto MQTT broker
 mosquitto:
