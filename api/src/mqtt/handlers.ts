@@ -11,20 +11,14 @@ import { redisSensorQueue } from '../services/redis-sensor-queue';
 import logger from '../utils/logger';
 
 /**
- * Handle incoming sensor data
+ * Handle incoming endpoint data
  * Queue to Redis Stream for batch processing
  * Supports both single messages and batches
  */
-export async function handleSensorData(data: SensorData): Promise<void> {
+export async function handleEndpointsData(data: SensorData): Promise<void> {
   try {
     const startTime = Date.now();
     
-    // DEBUG: Log when handler is called
-    logger.info('handleSensorData called', {
-      deviceUuid: data.deviceUuid?.substring(0, 8),
-      sensorName: data.sensorName,
-      hasData: !!data.data
-    });
     
     // Check if this is a batch (from Sensor Publish feature)
     const isBatch = data.data && Array.isArray((data.data as any).messages);
@@ -34,7 +28,7 @@ export async function handleSensorData(data: SensorData): Promise<void> {
       const batch = data.data as any;
       const messages = batch.messages as string[];
       
-      logger.debug(`Processing sensor data batch: ${messages.length} messages from ${data.deviceUuid}/${data.sensorName}`);
+      logger.debug(`Processing endpoints data batch: ${messages.length} messages from ${data.deviceUuid}/${data.sensorName}`);
       
       // Transform all messages to queue format
       const queueEntries = messages
@@ -59,7 +53,7 @@ export async function handleSensorData(data: SensorData): Promise<void> {
       await redisSensorQueue.add(queueEntries);
       
       const duration = Date.now() - startTime;
-      logger.info('Queued sensor data batch to Redis Stream', {
+      logger.info('Queued endpoints data batch to Redis Stream', {
         deviceUuid: data.deviceUuid.substring(0, 8),
         sensorName: data.sensorName,
         received: messages.length,
@@ -78,7 +72,7 @@ export async function handleSensorData(data: SensorData): Promise<void> {
       }]);
       
       const duration = Date.now() - startTime;
-      logger.debug('Queued sensor data to Redis Stream', {
+      logger.debug('Queued endpoints data to Redis Stream', {
         deviceUuid: data.deviceUuid.substring(0, 8),
         sensorName: data.sensorName,
         durationMs: duration
@@ -86,7 +80,7 @@ export async function handleSensorData(data: SensorData): Promise<void> {
     }
 
   } catch (error) {
-    logger.error('Failed to queue sensor data:', error);
+    logger.error('Failed to queue endpoints data:', error);
     throw error;
   }
 }

@@ -7,7 +7,7 @@
 import MqttManager from './mqtt-manager';
 import logger from '../utils/logger';
 import {
-  handleSensorData,
+  handleEndpointsData,
   handleDeviceState,
   handleAgentStatus
 } from './handlers';
@@ -42,11 +42,11 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
     await mqttManager.connect();
 
     // Register event handlers
-    mqttManager.on('sensor', async (data) => {
+    mqttManager.on('endpoints', async (data) => {
       try {
-        await handleSensorData(data);
+        await handleEndpointsData(data);
       } catch (error) {
-        logger.error('Error handling sensor data:', error);
+        logger.error('Error handling endpoint data:', error);
       }
     });
 
@@ -73,7 +73,7 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
     if (subscribeToAll) {
       logger.info('Subscribing to all device topics...');
       mqttManager.subscribeToAll([
-        'sensor',
+        'endpoints',
         'state',
         'agent',
       ]);
