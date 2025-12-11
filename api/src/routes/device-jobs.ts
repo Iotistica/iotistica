@@ -9,7 +9,6 @@ import express, { Request, Response } from 'express';
 import { randomUUID } from 'crypto';
 import poolWrapper from '../db/connection';
 import deviceAuth, { deviceAuthFromBody } from '../middleware/device-auth';
-import { validateProvisioningKey } from '../utils/provisioning-keys';
 import { getMqttJobsNotifier } from '../services/mqtt-jobs-notifier';
 import { hasPermission, hasAnyPermission } from '../middleware/permissions';
 import { PERMISSIONS } from '../types/permissions';
@@ -623,74 +622,11 @@ router.get('/devices/:uuid/jobs', async (req: Request, res: Response) => {
 });
 
 /**
- * Flexible authentication for jobs/next endpoint
- * Accepts both device API key and provisioning key (for development)
- */
-async function jobsAuth(req: Request, res: Response, next: any) {
-  const apiKey = 
-    req.headers['x-device-api-key'] as string ||
-    req.headers.authorization?.replace('Bearer ', '');
-
-  if (!apiKey) {
-    return res.status(401).json({
-      error: 'Unauthorized',
-      message: 'API key required (X-Device-API-Key or Authorization: Bearer)'
-    });
-  }
-
-  // Try device auth first
-  try {
-    await deviceAuth(req, res, () => {});
-    if (req.device) {
-      return next(); // Device auth successful
-    }
-  } catch (err) {
-    // Device auth failed, check if response already sent before continuing
-    if (res.headersSent) {
-      return; // Error response already sent by deviceAuth, abort
-    }
-    // Try provisioning key as fallback
-  }
-
-  // Try provisioning key (fallback for development/initial setup only)
-  try {
-    // Suppress audit logging since this is a fallback, not actual provisioning
-    const provisioningResult = await validateProvisioningKey(apiKey, req.ip || 'unknown', true);
-    if (provisioningResult.valid) {
-      logger.info(`Using provisioning key for device ${req.params.uuid}`);
-      // Set req.device for compatibility
-      req.device = {
-        id: 0, // Placeholder
-        uuid: req.params.uuid!,
-        deviceName: 'dev-device',
-        deviceType: 'unknown',
-        isActive: true
-      };
-      return next();
-    }
-  } catch (err) {
-    // Provisioning key also failed - suppress logging here since it's just a fallback
-    // The real error was already logged by deviceAuth middleware
-    logger.debug('Provisioning key fallback failed (expected for provisioned devices)', {
-      uuid: req.params.uuid,
-      error: err instanceof Error ? err.message : String(err)
-    });
-  }
-
-  // Both failed - only send response if headers not already sent
-  if (!res.headersSent) {
-    return res.status(401).json({
-      error: 'Unauthorized',
-      message: 'Invalid device API key or provisioning key'
-    });
-  }
-}
-
-/**
  * GET /api/v1/devices/:uuid/jobs/next
  * Get next pending job for device (MQTT endpoint equivalent)
+ * Requires device authentication
  */
-router.get('/devices/:uuid/jobs/next', jobsAuth, async (req: Request, res: Response) => {
+router.get('/devices/:uuid/jobs/next', deviceAuth, async (req: Request, res: Response) => {
   try {
     const { uuid } = req.params;
 
