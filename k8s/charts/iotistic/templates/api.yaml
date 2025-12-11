@@ -39,6 +39,7 @@ spec:
         {{- include "iotistic.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
     spec:
+      terminationGracePeriodSeconds: 60  # Allow 60s for graceful shutdown
       containers:
         - name: api
           image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
@@ -47,6 +48,10 @@ spec:
             - name: api
               containerPort: {{ .Values.api.port }}
               protocol: TCP
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 15"]  # Wait 15s for connections to drain
           env:
             - name: PORT
               value: {{ .Values.api.port | quote }}
