@@ -169,10 +169,10 @@ api:
   resources:
     requests:
       cpu: 250m        # Reduced for single-node clusters
-      memory: 512Mi    # Increased for connection pool
+      memory: 1Gi      # Increased for 100 agent load
     limits:
       cpu: 1000m       # Increased for fleet load
-      memory: 1Gi      # Increased for connection pool (200 connections)
+      memory: 2Gi      # Increased for 100 agents (batching, caching, buffers)
   # Horizontal Pod Autoscaling for dynamic fleet scaling
   autoscaling:
     enabled: false     # Disabled for now
