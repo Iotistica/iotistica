@@ -54,7 +54,7 @@
     "modbus": {
       "vendor": "Generic",
       "enabled": true,
-      "tcpHost": "iotistic-modbus-sim",
+      "tcpHost": "localhost",
       "tcpPort": 502,
       "timeout": 2000,
       "vendorFile": "/app/dist/config/vendors/dataPoints.json",

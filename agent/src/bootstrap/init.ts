@@ -61,19 +61,30 @@ export class FeatureInitializer {
   }
 
   /**
-   * Initialize optional features (can run in parallel)
-   * Jobs and SensorPublish are initialized immediately.
-   * Protocol Adapters are initialized via event listener (react to target state changes).
+   * Initialize sensor features (can run in parallel)
+   * - Protocol Adapters: Create Unix sockets for data output (Modbus, OPC-UA, etc.)
+   * - SensorPublish: Connect to Unix sockets and publish to MQTT
    */
-  async initOptionalFeatures(): Promise<void> {
-    await Promise.all([
-      this.initJobs(),
-      this.initSensorPublish()
-      // Protocol adapters initialized via event-driven pattern (see setupProtocolAdapterListener)
-    ]);
+  async initSensorFeatures(): Promise<void> {
+    // Initialize protocol adapters FIRST (they create the Unix sockets)
+    await this.initProtocolAdapters();
     
-    // Set up event-driven protocol adapter initialization
+    // Initialize sensor publish (connects to sockets created by protocol adapters)
+    await this.initSensorPublish();
+    
+    // Store current protocols BEFORE setting up listener to prevent duplicate initialization
+    const protocols = this.context.stateReconciler.getTargetState()?.config?.protocols || {};
+    this.currentProtocols = this.deepClone(protocols);
+    
+    // Set up event-driven protocol adapter initialization for future changes
     this.setupProtocolAdapterListener();
+  }
+
+  /**
+   * Initialize jobs feature (cloud job polling and execution)
+   */
+  async initJobsFeature(): Promise<void> {
+    await this.initJobs();
   }
 
   /**
@@ -191,7 +202,7 @@ export class FeatureInitializer {
         }));
 
       if (endpoints.length === 0) {
-        logger.warnSync('No pipes to read from (no enabled protocols)', {
+        logger.warnSync('No pipes to read from', {
           component: LogComponents.agent,
           enabledProtocols: Array.from(enabledEndpoints)
         });
@@ -392,6 +403,30 @@ export class FeatureInitializer {
 
     // Reinitialize with new config
     await this.initProtocolAdapters();
+
+    // Reinitialize sensor_publish since protocol adapters changed
+    // Sensor outputs (Unix sockets) are now available
+    if (this.features.sensors) {
+      logger.infoSync('Reinitializing Sensor Publish after protocol adapter changes', {
+        component: LogComponents.agent
+      });
+
+      // Stop existing sensor publish if running
+      if (this.features.sensorPublish) {
+        try {
+          await this.features.sensorPublish.stop();
+        } catch (error) {
+          logger.warnSync('Error stopping sensor publish', {
+            component: LogComponents.agent,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+        this.features.sensorPublish = undefined;
+      }
+
+      // Restart sensor publish with new endpoints
+      await this.initSensorPublish();
+    }
 
     // Store for next comparison
     this.currentProtocols = this.deepClone(protocols);

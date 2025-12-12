@@ -25,9 +25,6 @@ export interface DeviceInfo {
 	macAddress?: string;
 	osVersion?: string;
 	agentVersion?: string;
-	mqttUsername?: string;
-	mqttPassword?: string;
-	mqttBrokerUrl?: string;
 	mqttBrokerConfig?: MqttBrokerConfig; // TLS configuration from provisioning
 	apiTlsConfig?: ApiTlsConfig;         // API HTTPS TLS configuration
 }
@@ -36,6 +33,8 @@ export interface MqttBrokerConfig {
 	protocol: string;           // 'mqtt' or 'mqtts'
 	host: string;
 	port: number;
+	username?: string;          // MQTT username
+	password?: string;          // MQTT password
 	useTls: boolean;
 	caCert?: string;            // CA certificate (PEM format)
 	clientCert?: string;        // Client certificate (optional)

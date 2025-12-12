@@ -12,8 +12,8 @@
  */
 
 import Redis from 'ioredis';
-import { query } from '../db/connection';
 import { logger } from '../utils/logger';
+import { ReadingsService, ReadingInsert } from './readings.service';
 
 interface SensorDataEntry {
   deviceUuid: string;
@@ -36,6 +36,7 @@ class RedisSensorQueue {
   private isRunning = false;
   private batchSize: number;
   private blockTimeMs: number;
+  private readingsService: ReadingsService;
 
   constructor() {
     // Separate Redis connection for sensor queue
@@ -58,6 +59,7 @@ class RedisSensorQueue {
     this.consumerName = `worker-${process.pid}-${Date.now()}`;
     this.batchSize = parseInt(process.env.SENSOR_BATCH_SIZE || '100', 10);
     this.blockTimeMs = parseInt(process.env.SENSOR_FLUSH_INTERVAL_MS || '2000', 10);
+    this.readingsService = new ReadingsService();
 
     this.redis.on('error', (err) => {
       logger.error('Redis sensor queue connection error', { error: err.message });
@@ -226,7 +228,7 @@ class RedisSensorQueue {
       if (allData.length === 0) return;
 
       // Insert all sensor data in one batch operation
-      await this.insertSensorDataBatch(allData);
+      await this.insertReadingsBatch(allData);
 
       // Acknowledge messages (atomic)
       const messageIds = entries.map(e => e.id);
@@ -256,40 +258,115 @@ class RedisSensorQueue {
   }
 
   /**
-   * Insert all sensor data in a single batch INSERT
+   * Transform sensor data entries to readings format and insert in batches
    * Chunks data into groups of 500 to avoid PostgreSQL parameter limits
    */
-  private async insertSensorDataBatch(data: SensorDataEntry[]): Promise<void> {
+  private async insertReadingsBatch(data: SensorDataEntry[]): Promise<void> {
     const chunkSize = 500;
     
     for (let i = 0; i < data.length; i += chunkSize) {
       const chunk = data.slice(i, i + chunkSize);
       
-      // Build bulk INSERT query
-      const values: any[] = [];
-      const placeholders: string[] = [];
+      // Transform sensor data to readings format (with batch expansion)
+      const readings: ReadingInsert[] = [];
       
-      chunk.forEach((entry, idx) => {
-        const offset = idx * 5;
-        placeholders.push(`($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5})`);
-        values.push(
-          entry.deviceUuid,
-          entry.sensorName,
-          JSON.stringify(entry.data),
-          entry.timestamp,
-          JSON.stringify(entry.metadata || {})
-        );
+      chunk.forEach(entry => {
+        // Detect protocol from metadata or sensor name
+        let protocol = 'mqtt'; // Default to MQTT
+        
+        // Check metadata first (most reliable)
+        if (entry.metadata?.protocol) {
+          protocol = entry.metadata.protocol;
+        }
+        // Check for exact match or prefix pattern
+        else if (entry.sensorName === 'modbus' || entry.sensorName.startsWith('modbus_')) {
+          protocol = 'modbus';
+        }
+        else if (entry.sensorName === 'opcua' || entry.sensorName.startsWith('opcua_')) {
+          protocol = 'opcua';
+        }
+        else if (entry.sensorName === 'snmp' || entry.sensorName.startsWith('snmp_')) {
+          protocol = 'snmp';
+        }
+        else if (entry.sensorName === 'can' || entry.sensorName.startsWith('can_')) {
+          protocol = 'can';
+        }
+
+        // Check if this is a batch message (Modbus/OPC UA can send multiple readings)
+        if (entry.data && Array.isArray(entry.data.readings)) {
+          // Expand batch into individual readings
+          entry.data.readings.forEach((reading: any) => {
+            const extra: Record<string, any> = {
+              sensor_name: entry.sensorName,
+            };
+            
+            // Add device name if present
+            if (reading.deviceName) {
+              extra.deviceName = reading.deviceName;
+            }
+            
+            // Add any additional fields
+            Object.entries(reading).forEach(([key, val]) => {
+              if (!['value', 'quality', 'unit', 'timestamp', 'registerName', 'deviceName'].includes(key)) {
+                extra[key] = val;
+              }
+            });
+            
+            readings.push({
+              device_uuid: entry.deviceUuid,
+              metric_name: reading.registerName || reading.nodeName || entry.sensorName,
+              value: typeof reading.value === 'number' ? reading.value : null,
+              quality: reading.quality?.toLowerCase() || 'good',
+              unit: reading.unit || null,
+              protocol,
+              extra,
+              time: new Date(reading.timestamp || entry.timestamp)
+            });
+          });
+        } else {
+          // Single reading (legacy format)
+          const value = typeof entry.data === 'object' 
+            ? (entry.data.value ?? entry.data.rawValue ?? null)
+            : entry.data;
+
+          const quality = entry.data?.quality?.toLowerCase() || 'good';
+          const unit = entry.data?.unit || null;
+
+          // Store protocol-specific metadata in extra
+          const extra: Record<string, any> = {};
+          if (entry.data && typeof entry.data === 'object') {
+            // Copy all fields except value, quality, unit (already in dedicated columns)
+            Object.entries(entry.data).forEach(([key, val]) => {
+              if (!['value', 'rawValue', 'quality', 'unit', 'timestamp', 'readings'].includes(key)) {
+                extra[key] = val;
+              }
+            });
+          }
+          // Add original sensor name for backward compatibility
+          extra.sensor_name = entry.sensorName;
+          
+          // Add metadata if present
+          if (entry.metadata && Object.keys(entry.metadata).length > 0) {
+            extra.metadata = entry.metadata;
+          }
+
+          readings.push({
+            device_uuid: entry.deviceUuid,
+            metric_name: entry.sensorName,
+            value: typeof value === 'number' ? value : null,
+            quality,
+            unit,
+            protocol,
+            extra,
+            time: new Date(entry.timestamp)
+          });
+        }
       });
+
+      // Use ReadingsService for optimized bulk insert
+      const insertedCount = await this.readingsService.bulkInsert(readings);
       
-      const sql = `
-        INSERT INTO sensor_data (device_uuid, sensor_name, data, timestamp, metadata)
-        VALUES ${placeholders.join(', ')}
-        ON CONFLICT DO NOTHING
-      `;
-      
-      await query(sql, values);
-      
-      logger.debug(`Inserted ${chunk.length} sensor readings to database`);
+      logger.debug(`Inserted ${insertedCount} readings to database (chunk ${Math.floor(i / chunkSize) + 1})`);
     }
   }
 

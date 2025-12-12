@@ -203,7 +203,7 @@ export function generateDefaultTargetStateConfig(
     protocols: {
       modbus: {
         enabled: true, // Enabled by default with simulator
-        tcpHost: 'iotistic-modbus-sim', // Default Modbus simulator hostname
+        tcpHost: process.env.MODBUS_TCP_HOST || 'iotistic-modbus-sim', // Docker: container name, Local: override with 'localhost'
         tcpPort: 502,
         slaveRangeStart: 1,
         slaveRangeEnd: 10,

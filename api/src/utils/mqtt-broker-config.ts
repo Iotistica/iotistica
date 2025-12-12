@@ -291,12 +291,13 @@ export function buildBrokerUrl(config: MqttBrokerConfig): string {
 
 /**
  * Format broker configuration for API response
- * Removes sensitive information and formats for client consumption
+ * Formats for client consumption with optional credentials
  * 
  * @param config - Broker configuration from database (snake_case)
- * @returns Sanitized broker configuration object (camelCase)
+ * @param credentials - Optional MQTT credentials { username, password }
+ * @returns Complete broker configuration object (camelCase)
  */
-export function formatBrokerConfigForClient(config: any) {
+export function formatBrokerConfigForClient(config: any, credentials?: { username: string; password: string }) {
   // Support both snake_case (from database) and camelCase (from env)
   const useTls = config.use_tls ?? config.useTls ?? false;
   const caCert = config.ca_cert ?? config.caCert ?? null;
@@ -312,6 +313,10 @@ export function formatBrokerConfigForClient(config: any) {
     protocol: config.protocol,
     host: config.host,
     port: config.port,
+    ...(credentials && {
+      username: credentials.username,
+      password: credentials.password
+    }),
     useTls,
     clientIdPrefix,
     keepAlive,

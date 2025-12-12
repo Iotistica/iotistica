@@ -469,6 +469,33 @@ export class CloudSync extends EventEmitter {
 		return this.connectionMonitor.isOnline();
 	}
 	
+	/**
+	 * Update polling, reporting, and metrics intervals dynamically
+	 * Changes take effect on the next scheduled iteration
+	 */
+	public updateIntervals(intervals: {
+		pollInterval: number;
+		reportInterval: number;
+		metricsInterval: number;
+	}): void {
+		this.config.pollInterval = intervals.pollInterval;
+		this.config.reportInterval = intervals.reportInterval;
+		this.config.metricsInterval = intervals.metricsInterval;
+		
+		this.logger?.infoSync('CloudSync intervals updated', {
+			component: LogComponents.cloudSync,
+			pollIntervalMs: intervals.pollInterval,
+			reportIntervalMs: intervals.reportInterval,
+			metricsIntervalMs: intervals.metricsInterval,
+			pollIntervalSec: intervals.pollInterval / 1000,
+			reportIntervalSec: intervals.reportInterval / 1000,
+			metricsIntervalMin: intervals.metricsInterval / 60000,
+		});
+		
+		// Note: Current timers will complete with old intervals
+		// New intervals take effect on next scheduled iteration
+	}
+	
 	// ============================================================================
 	// POLLING LOGIC
 	// ============================================================================

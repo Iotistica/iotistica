@@ -19,8 +19,7 @@
         "!**/node_modules/**"
       ],
       "env": {
-			"CLOUD_API_ENDPOINT":"http://localhost:4002",
-			"PROVISIONING_KEY": "dfb4742a2e616c7ca0f7f4dcd355964116640f8cfa37aeba4f4f3938a949a5a4"
+			"PROVISIONING_KEY": "7ace06e952368d28a3bd43b0f51d87af28cb0a7e603553cb89584c9715aced7d"
       }
     },
     {

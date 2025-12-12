@@ -874,6 +874,109 @@ await lock.tryExecute(async () => { /* protected operation */ });
 if (isAuthError(error)) { /* refresh credentials */ }
 ```
 
+### Dynamic Configuration Updates
+
+The agent supports **hot-reloading** of configuration from cloud target state without requiring a restart. Configuration changes are detected during the poll cycle and applied immediately via event-driven handlers.
+
+#### Supported Dynamic Updates
+
+| Configuration Type | Update Method | Restart Required? |
+|-------------------|---------------|-------------------|
+| **Log Level** | `setLogLevel()` | ❌ No - Immediate |
+| **Protocol Enabled/Disabled** | Database update | ❌ No - Next discovery cycle |
+| **Container Reconciliation Interval** | Timer restart | ❌ No - Next iteration |
+| **Memory Monitoring** | Service restart | ❌ No - Immediate |
+| **Poll Interval** | `updateIntervals()` | ❌ No - Next poll |
+| **Report Interval** | `updateIntervals()` | ❌ No - Next report |
+| **Metrics Interval** | `updateIntervals()` | ❌ No - Next metrics |
+| **Discovery Intervals** | Event emission | ❌ No - Timer restart |
+
+#### How It Works
+
+**1. Cloud API updates target state:**
+```json
+{
+  "config": {
+    "intervals": {
+      "targetStatePollIntervalMs": 30000,
+      "deviceReportIntervalMs": 60000,
+      "metricsIntervalMs": 300000
+    },
+    "logging": {
+      "logLevel": "debug"
+    }
+  }
+}
+```
+
+**2. Agent polls and detects changes:**
+```typescript
+// CloudSync polls target state every 60s (default)
+const newTargetState = await pollTargetState();
+await stateReconciler.setTarget(newTargetState); // Triggers reconciliation
+```
+
+**3. StateReconciler emits granular events:**
+```typescript
+// Events emitted when config fields change
+stateReconciler.emit('intervals-changed', { old, new });
+stateReconciler.emit('logging-config-changed', { old, new });
+stateReconciler.emit('protocol-config-changed', { old, new });
+stateReconciler.emit('memory-config-changed', { old, new });
+```
+
+**4. AgentConfig handlers apply changes:**
+```typescript
+// Logging updates
+handleLoggingConfigChanges() {
+  this.logger.setLogLevel(newLevel); // ✅ Immediate effect
+}
+
+// Interval updates
+handleIntervalsChanges() {
+  this.cloudSync.updateIntervals({
+    pollInterval: newPollInterval,
+    reportInterval: newReportInterval,
+    metricsInterval: newMetricsInterval
+  }); // ✅ Next iteration uses new intervals
+}
+```
+
+**Example: Changing Log Level**
+```bash
+# Cloud API updates device config
+PATCH /api/devices/{uuid}/config
+{
+  "logging": { "logLevel": "debug" }
+}
+
+# Agent polls within 60s (default poll interval)
+# StateReconciler detects change
+# AgentConfig applies immediately
+# ✅ Debug logs start appearing without restart!
+```
+
+**Example: Changing Poll Interval**
+```bash
+# Cloud API updates intervals
+PATCH /api/devices/{uuid}/config
+{
+  "intervals": { "targetStatePollIntervalMs": 15000 }
+}
+
+# Agent polls within current interval (e.g., 60s)
+# StateReconciler detects change
+# CloudSync.updateIntervals() called
+# ✅ Next poll happens in 15s instead of 60s!
+```
+
+**Benefits:**
+- Zero-downtime configuration changes
+- Immediate effect for critical settings (log level, monitoring)
+- Gradual rollout (changes apply on next iteration, not mid-operation)
+- No manual SSH/container access required
+- Centralized configuration management from cloud dashboard
+
 ---
 
 ## 🐳 Docker Integration

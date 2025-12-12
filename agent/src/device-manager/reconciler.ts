@@ -77,7 +77,8 @@ export class StateReconciler extends EventEmitter {
 	 * Initialize state reconciler
 	 */
 	public async init(): Promise<void> {
-		this.logger?.infoSync('Initializing StateReconciler', {
+		this.
+		logger?.infoSync('Initializing StateReconciler', {
 			component: LogComponents.stateReconciler,
 			operation: 'init',
 		});

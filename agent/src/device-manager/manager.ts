@@ -130,9 +130,7 @@ export class DeviceManager {
 				macAddress: record.macAddress || undefined,
 				osVersion: record.osVersion || undefined,
 			agentVersion: record.agentVersion || undefined,
-			mqttUsername: record.mqttUsername || undefined,
-			mqttPassword: record.mqttPassword || undefined,
-			mqttBrokerUrl: record.mqttBrokerUrl || undefined,
+
 			mqttBrokerConfig: record.mqttBrokerConfig ? JSON.parse(record.mqttBrokerConfig) : undefined,
 			apiTlsConfig: record.apiTlsConfig ? JSON.parse(record.apiTlsConfig) : undefined,
 		};
@@ -174,9 +172,6 @@ export class DeviceManager {
 			macAddress: this.deviceInfo.macAddress || null,
 			osVersion: this.deviceInfo.osVersion || null,
 			agentVersion: this.deviceInfo.agentVersion || null,
-		mqttUsername: this.deviceInfo.mqttUsername || null,
-		mqttPassword: this.deviceInfo.mqttPassword || null,
-		mqttBrokerUrl: this.deviceInfo.mqttBrokerUrl || null,
 		mqttBrokerConfig: this.deviceInfo.mqttBrokerConfig ? JSON.stringify(this.deviceInfo.mqttBrokerConfig) : null,
 		apiTlsConfig: this.deviceInfo.apiTlsConfig ? JSON.stringify(this.deviceInfo.apiTlsConfig) : null,
 			updatedAt: new Date().toISOString(),

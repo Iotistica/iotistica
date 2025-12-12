@@ -132,9 +132,6 @@ export class AgentConfig extends EventEmitter {
     this.stateReconciler.on('memory-config-changed', this.handleMemoryConfigChanges.bind(this));
     this.stateReconciler.on('scheduled-restart-changed', this.handleScheduledRestartConfig.bind(this));
 
-    this.logger?.infoSync('AgentConfig reactive layer initialized', {
-      component: LogComponents.agent,
-    });
   }
 
   /**
@@ -154,13 +151,23 @@ export class AgentConfig extends EventEmitter {
       if (fs.existsSync(configPath)) {
         const content = fs.readFileSync(configPath, 'utf-8');
         const parsed = JSON.parse(content);
-        console.log(`[AgentConfig] Loaded device.json from ${configPath}`);
+        this.logger?.debugSync(`Loaded device.json from ${configPath}`, {
+          component: LogComponents.agentConfig,
+          configPath
+        });
         return parsed;
       } else {
-        console.warn(`[AgentConfig] device.json not found at ${configPath}, using hardcoded defaults`);
+        this.logger?.warnSync(`device.json not found at ${configPath}, using hardcoded defaults`, {
+          component: LogComponents.agentConfig,
+          configPath
+        });
       }
     } catch (error) {
-      console.warn(`[AgentConfig] Failed to load device.json from ${configPath}:`, error);
+      this.logger?.errorSync(
+        `Failed to load device.json from ${configPath}`,
+        error as Error,
+        { component: LogComponents.agentConfig, configPath }
+      );
     }
     
     return {}; // Empty object if file not found or parse error
@@ -450,8 +457,8 @@ export class AgentConfig extends EventEmitter {
     }
 
     // Update CloudSync intervals
-    if (this.cloudSync && 'updateIntervals' in this.cloudSync) {
-      (this.cloudSync as any).updateIntervals({
+    if (this.cloudSync) {
+      this.cloudSync.updateIntervals({
         pollInterval: intervals.targetStatePollIntervalMs!,
         reportInterval: intervals.deviceReportIntervalMs!,
         metricsInterval: intervals.metricsIntervalMs!,

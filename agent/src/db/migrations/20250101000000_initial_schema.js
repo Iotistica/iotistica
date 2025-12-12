@@ -30,11 +30,8 @@ export async function up(knex) {
     table.string('deviceApiKey', 255).nullable(); // Permanent device-specific key
     table.string('provisioningApiKey', 255).nullable(); // Temporary provisioning key
     
-    // MQTT credentials (provided by cloud during provisioning)
-    table.string('mqttUsername', 255).nullable();
-    table.string('mqttPassword', 255).nullable();
-    table.string('mqttBrokerUrl', 255).nullable();
-    table.text('mqttBrokerConfig').nullable(); // JSON: MQTT TLS configuration
+    // MQTT configuration (all settings including credentials in JSON)
+    table.text('mqttBrokerConfig').nullable(); // JSON: Complete MQTT config (broker, credentials, TLS)
     
     // API TLS configuration
     table.text('apiTlsConfig').nullable(); // JSON: API HTTPS TLS config

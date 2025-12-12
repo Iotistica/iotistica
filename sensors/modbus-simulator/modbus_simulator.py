@@ -72,10 +72,10 @@ def setup_server(slaves=3):
     identities = {}
 
     for unit_id in range(1, slaves + 1):
-        hr = VendorDataBlock(0, [0]*200)
-        ir = VendorDataBlock(0, [0]*100)
-        co = VendorDataBlock(0, [False]*20, is_coil=True)
-        di = VendorDataBlock(0, [False]*20, is_coil=True)
+        hr = VendorDataBlock(1, [0]*200)
+        ir = VendorDataBlock(1, [0]*100)
+        co = VendorDataBlock(1, [False]*20, is_coil=True)
+        di = VendorDataBlock(1, [False]*20, is_coil=True)
 
         store = ModbusSlaveContext(hr=hr, ir=ir, co=co, di=di)
         slave_contexts[unit_id] = store

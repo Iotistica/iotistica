@@ -127,9 +127,7 @@ export class DeviceManager {
 				macAddress: record.macAddress || undefined,
 				osVersion: record.osVersion || undefined,
 			agentVersion: record.agentVersion || undefined,
-			mqttUsername: record.mqttUsername || undefined,
-			mqttPassword: record.mqttPassword || undefined,
-			mqttBrokerUrl: record.mqttBrokerUrl || undefined,
+
 			mqttBrokerConfig: record.mqttBrokerConfig ? JSON.parse(record.mqttBrokerConfig) : undefined,
 			apiTlsConfig: record.apiTlsConfig ? JSON.parse(record.apiTlsConfig) : undefined,
 		};
@@ -171,9 +169,6 @@ export class DeviceManager {
 			macAddress: this.deviceInfo.macAddress || null,
 			osVersion: this.deviceInfo.osVersion || null,
 			agentVersion: this.deviceInfo.agentVersion || null,
-		mqttUsername: this.deviceInfo.mqttUsername || null,
-		mqttPassword: this.deviceInfo.mqttPassword || null,
-		mqttBrokerUrl: this.deviceInfo.mqttBrokerUrl || null,
 		mqttBrokerConfig: this.deviceInfo.mqttBrokerConfig ? JSON.stringify(this.deviceInfo.mqttBrokerConfig) : null,
 		apiTlsConfig: this.deviceInfo.apiTlsConfig ? JSON.stringify(this.deviceInfo.apiTlsConfig) : null,
 			updatedAt: new Date().toISOString(),
@@ -294,10 +289,8 @@ export class DeviceManager {
 
 		// Save server-assigned device ID
 		this.deviceInfo.deviceId = response.id.toString();
-		this.deviceInfo.mqttUsername = response.mqtt.username;
-		this.deviceInfo.mqttPassword = response.mqtt.password;
-		this.deviceInfo.mqttBrokerUrl = response.mqtt.broker;
-		this.deviceInfo.mqttBrokerConfig = response.mqtt.brokerConfig; // Save TLS config if provided
+		// Save consolidated MQTT broker config (includes credentials)
+		this.deviceInfo.mqttBrokerConfig = response.mqtt.brokerConfig;
 		this.deviceInfo.apiTlsConfig = response.api?.tlsConfig; // Save API HTTPS TLS config if provided
 
 		// Phase 2: Exchange keys - verify device can authenticate with deviceApiKey
@@ -332,9 +325,7 @@ export class DeviceManager {
 				deviceId: this.deviceInfo.deviceId,
 				deviceName: this.deviceInfo.deviceName,
 				applicationId: this.deviceInfo.applicationId,
-				mqttUsername: this.deviceInfo.mqttUsername,
-				mqttBrokerUrl: this.deviceInfo.mqttBrokerUrl,
-				mqttBrokerConfig: this.deviceInfo.mqttBrokerConfig,
+				mqttBrokerHost: this.deviceInfo.mqttBrokerConfig?.host,
 			});
 
 			// Phase 4: Setup VPN if provided in response
@@ -570,9 +561,7 @@ export class DeviceManager {
 		this.deviceInfo.applicationId = undefined;
 		
 		// Clear MQTT credentials (these are cloud-assigned)
-		this.deviceInfo.mqttUsername = undefined;
-		this.deviceInfo.mqttPassword = undefined;
-		this.deviceInfo.mqttBrokerUrl = undefined;
+		this.deviceInfo.mqttBrokerConfig = undefined;
 
 		await this.saveDeviceInfo();
 
@@ -681,9 +670,7 @@ export class DeviceManager {
 		this.deviceInfo.macAddress = undefined;
 		this.deviceInfo.osVersion = undefined;
 		this.deviceInfo.agentVersion = undefined;
-		this.deviceInfo.mqttUsername = undefined;
-		this.deviceInfo.mqttPassword = undefined;
-		this.deviceInfo.mqttBrokerUrl = undefined;
+		this.deviceInfo.mqttBrokerConfig = undefined;
 		this.deviceInfo.uuid = preservedUuid; // Restore UUID
 
 		await this.saveDeviceInfo();

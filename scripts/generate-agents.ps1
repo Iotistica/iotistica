@@ -408,9 +408,29 @@ $totalVolumeStorage = $volumeSize * $Count
 $totalMemory = $memLimit * $Count
 $totalStorage = $totalImageStorage + $totalVolumeStorage
 
+# For single agent, output only the key
+if ($Count -eq 1) {
+    $keyValue = ($provisioningKeys[0] -split ': ')[1]
+    Write-Host $keyValue -ForegroundColor Yellow
+    
+    # Auto-run if -Run flag is set
+    if ($Run) {
+        $composeFile = Join-Path $PSScriptRoot ".." $OutputFile
+        docker compose -f $composeFile up -d --build
+    }
+    exit 0
+}
+
+# For multiple agents, show full details
 Write-Host "`n✅ Generated $Count agents in $OutputFile" -ForegroundColor Green
 Write-Host "  Agents: $StartIndex to $($StartIndex + $Count - 1)" -ForegroundColor Gray
 Write-Host "  Ports: $(Get-UniquePort $StartIndex) to $(Get-UniquePort ($StartIndex + $Count - 1))" -ForegroundColor Gray
+
+Write-Host "`n🔑 Provisioning Keys:" -ForegroundColor Magenta
+foreach ($keyEntry in $provisioningKeys) {
+    Write-Host "  $keyEntry" -ForegroundColor Yellow
+}
+
 Write-Host "`n💾 Storage Requirements:" -ForegroundColor Cyan
 Write-Host "  Docker Image: $totalImageStorage MB (shared by all agents)" -ForegroundColor Gray
 Write-Host "  Volumes: $totalVolumeStorage MB ($volumeSize MB × $Count agents)" -ForegroundColor Gray

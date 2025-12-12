@@ -16,6 +16,7 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export const LogComponents = {
   // Core Agent
   agent: 'Agent',
+  agentConfig: 'AgentConfig',
   agentUpdater: 'AgentUpdater',
   
   // API Integration

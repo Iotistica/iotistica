@@ -22,30 +22,23 @@ import { LocalLogBackend } from "./logging/local-backend.js";
 import { CloudLogBackend } from "./logging/cloud-backend.js";
 import { ContainerLogMonitor } from "./logging/docker-monitor.js";
 import { AgentLogger } from "./logging/agent-logger.js";
-import type { LogBackend, LogLevel } from "./logging/types.js";
+import type { LogLevel } from "./logging/types.js";
 import { LogComponents } from "./logging/types.js";
-import { JobsFeature } from "./features/jobs/src/monitor.js";
-import { SensorPublishFeature } from "./features/sensor-publish/index.js";
-import { SensorConfigHandler } from "./features/sensor-publish/config-handler.js";
+
 import { MqttManager } from "./mqtt/manager.js";
 import { getPackageVersion } from "./utils/api-utils";
-import {
-  SensorsFeature as SensorsFeature,
-  SensorConfig,
-} from "./features/endpoints/index.js";
+
 import { AgentFirewall } from "./network/firewall.js";
 import { AgentUpdater } from "./updater.js";
 import { getMacAddress, getOsVersion } from "./system/metrics.js";
 import * as fs from 'fs';
-import * as path from 'path';
 import { 
   healthcheck as memoryHealthcheck, 
   setMemoryLogger,
   startMemoryMonitoring,
   stopMemoryMonitoring,
   startMemoryLeakSimulation,
-  stopMemoryLeakSimulation,
-  getSimulationStatus
+  stopMemoryLeakSimulation
 } from "./system/memory.js";
 import { AnomalyDetectionService } from "./ai/anomaly/index.js";
 import { loadConfigFromEnv } from "./ai/anomaly/utils.js";
@@ -85,9 +78,6 @@ export default class DeviceAgent {
   private firewall?: AgentFirewall; // Network firewall protection
   private updater?: AgentUpdater; // Agent self-update handler
   private featureInitializer?: FeatureInitializer;
-  private jobs?: JobsFeature;
-  private sensorPublish?: SensorPublishFeature;
-  private sensors?: SensorsFeature;
   private anomalyService?: AnomalyDetectionService; // Edge-based AI anomaly detection for metrics and sensors
   private simulationOrchestrator?: SimulationOrchestrator; // Simulation framework for testing
   private discoveryService?: DiscoveryService; // Protocol discovery (Modbus, OPC-UA, CAN, etc.)
@@ -97,10 +87,6 @@ export default class DeviceAgent {
   // Note: All settings now accessed via agentConfig getters (intervals, endpoints, ports, etc.)
   // Scheduled restart timer (controlled from cloud config)
   private scheduledRestartTimer?: NodeJS.Timeout;
-  
-  // Periodic discovery timers
-  private discoveryLightTimer?: NodeJS.Timeout;
-  private discoveryFullTimer?: NodeJS.Timeout;
 
   // Note: Configuration change handling moved to AgentConfig reactive layer
   // AgentConfig listens to StateReconciler events and applies changes automatically
@@ -113,7 +99,7 @@ export default class DeviceAgent {
   public async init(): Promise<void> {
 
       // Initialize database FIRST (needed by StateReconciler)
-      await this.initializeDatabase();
+      await this.initDatabase();
 
       // Initialize StateReconciler and AgentConfig EARLY (before logging setup)
       // This ensures AgentConfig can read target state from SQLite database
@@ -144,12 +130,12 @@ export default class DeviceAgent {
       // StateReconciler already initialized, so just get ContainerManager reference
       await Promise.all([
         this.initializeMqttManager(),      // ~300-500ms
-        this.setupContainerManager()       // ~200-300ms (just setup, no init)
+        this.initContainerManager()       // ~200-300ms (just setup, no init)
       ]);
       // Saves ~300-500ms compared to sequential execution
 
       // Initialize device API
-      await this.initializeDeviceAPI();
+      await this.initDeviceAPI();
 
      
       // Initialize optional features using FeatureInitializer
@@ -170,20 +156,17 @@ export default class DeviceAgent {
 
       this.featureInitializer = new FeatureInitializer(featureContext);
 
-      // Initialize Discovery Service FIRST (so it can discover endpoints before SensorPublish loads)
+      // Initialize Discovery Service
       await this.initDiscoveryService();
 
-      // Now initialize optional features (SensorPublish will load discovered endpoints from database)
-      await this.featureInitializer.initOptionalFeatures();
+      // Initialize sensor features (sensor publish + protocol adapters)
+      await this.featureInitializer.initSensorFeatures();
 
-      // Store references to features for backward compatibility
-      const features = this.featureInitializer.getFeatures();
-      this.jobs = features.jobs;
-      this.sensorPublish = features.sensorPublish;
-      this.sensors = features.sensors;
+      // Initialize jobs feature (cloud job polling/execution)
+      await this.featureInitializer.initJobsFeature();
 
-      // 10. Initialize Anomaly Detection Service (BEFORE API Binder so it can be passed to CloudSync)
-      this.initializeAnomalyDetection();
+      // Initialize Anomaly Detection Service (BEFORE CloudSync)
+      this.initAnomalyDetection();
 
       // 10.5. Initialize Simulation Orchestrator (AFTER Anomaly Detection, used for testing)
       await this.initializeSimulationMode();
@@ -192,14 +175,13 @@ export default class DeviceAgent {
       await this.initDeviceSync();
 
       // 11.5. Start periodic discovery timers
-      if (this.discoveryService) {
-        this.startPeriodicDiscovery();
-      }
+      this.discoveryService?.startPeriodicDiscovery();
 
       // 11-13. Initialize supporting features (updater, firewall, sensor config handler)
       await this.featureInitializer.initSupportingFeatures();
 
       // Store references for backward compatibility
+      const features = this.featureInitializer.getFeatures();
       this.updater = features.updater;
       this.firewall = features.firewall;
 
@@ -215,23 +197,12 @@ export default class DeviceAgent {
         containerManager: this.containerManager,
         cloudSync: this.cloudSync,
         discoveryService: this.discoveryService,
-        discoveryLightTimer: this.discoveryLightTimer,
-        discoveryFullTimer: this.discoveryFullTimer,
       });
 
       // Setup AgentConfig event listeners for actions requiring Agent context
       this.agentConfig.on('restart-discovery-timers', (intervals: any) => {
-        // Clear existing timers
-        if (this.discoveryLightTimer) {
-          clearInterval(this.discoveryLightTimer);
-          this.discoveryLightTimer = undefined;
-        }
-        if (this.discoveryFullTimer) {
-          clearInterval(this.discoveryFullTimer);
-          this.discoveryFullTimer = undefined;
-        }
-        // Restart with new intervals
-        this.startPeriodicDiscovery();
+        // Restart discovery timers with new intervals
+        this.discoveryService?.startPeriodicDiscovery();
       });
 
       this.agentConfig.on('schedule-restart', ({ restartTimeMs, restartConfig }: any) => {
@@ -340,7 +311,7 @@ export default class DeviceAgent {
     }
   }
 
-  private async initializeDatabase(): Promise<void> {
+  private async initDatabase(): Promise<void> {
     await db.initialized(this.agentLogger);
   }
 
@@ -477,59 +448,58 @@ export default class DeviceAgent {
   }
 
   private async initializeMqttManager(): Promise<void> {
-    this.agentLogger.infoSync("Initializing MQTT Manager", {
-      component: LogComponents.agent,
-    });
 
     try {
-      // Use MQTT credentials from provisioning if available, otherwise fall back to env vars
-      const mqttBrokerUrl =
-        this.deviceInfo.mqttBrokerUrl || process.env.MQTT_BROKER;
-      const mqttUsername =
-        this.deviceInfo.mqttUsername || process.env.MQTT_USERNAME;
-      const mqttPassword =
-        this.deviceInfo.mqttPassword || process.env.MQTT_PASSWORD;
-
-      // Debug: Log broker URL being used
-      this.agentLogger.debugSync(`MQTT Broker URL: ${mqttBrokerUrl}`, {
-        component: LogComponents.agent,
-        source: this.deviceInfo.mqttBrokerUrl ? "provisioning" : "environment",
-        hasUsername: !!mqttUsername,
-      });
-
-      if (!mqttBrokerUrl) {
-        this.agentLogger.debugSync("MQTT disabled - no broker URL provided", {
+      // Only use MQTT if device is provisioned with mqttBrokerConfig
+      if (!this.deviceInfo.mqttBrokerConfig) {
+        this.agentLogger.debugSync("MQTT disabled - device not provisioned with broker config", {
           component: LogComponents.agent,
-          note: "Provision device or set MQTT_BROKER env var to enable",
+          note: "Provision device to enable MQTT",
         });
         return;
       }
-
+      
+      // Build MQTT broker URL from mqttBrokerConfig JSON
+      const config = this.deviceInfo.mqttBrokerConfig;
+      const mqttBrokerUrl = `${config.protocol || 'mqtt'}://${config.host}:${config.port}`;
+      
+      this.agentLogger.debugSync(`Built MQTT Broker URL from config`, {
+        component: LogComponents.agent,
+        source: "mqttBrokerConfig",
+        url: mqttBrokerUrl,
+        protocol: config.protocol,
+        host: config.host,
+        port: config.port,
+        hasUsername: !!config.username,
+      });
+      
       const mqttManager = MqttManager.getInstance();
 
-      // Build MQTT connection options
+      // Build MQTT connection options from mqttBrokerConfig
       const mqttOptions: any = {
-        clientId: `device_${this.deviceInfo.uuid}`,
-        clean: true,
-        reconnectPeriod: 5000,
-        username: mqttUsername,
-        password: mqttPassword,
+        clientId: config.clientIdPrefix ? `${config.clientIdPrefix}_${this.deviceInfo.uuid}` : `device_${this.deviceInfo.uuid}`,
+        clean: config.cleanSession ?? true,
+        reconnectPeriod: config.reconnectPeriod ?? 5000,
+        keepalive: config.keepAlive ?? 60,
+        connectTimeout: config.connectTimeout ?? 30000,
+        username: config.username,
+        password: config.password,
       };
 
       // Add TLS options if broker config specifies TLS
-      if (this.deviceInfo.mqttBrokerConfig?.useTls && this.deviceInfo.mqttBrokerConfig.caCert) {
+      if (config.useTls && config.caCert) {
         // Fix double-escaped newlines in certificate (handles both \\n and \n)
-        const caCert = this.deviceInfo.mqttBrokerConfig.caCert.replace(/\\n/g, '\n');
+        const caCert = config.caCert.replace(/\\n/g, '\n');
         
         // MQTT library expects CA cert as string (not Buffer)
         mqttOptions.ca = caCert;
-        mqttOptions.rejectUnauthorized = this.deviceInfo.mqttBrokerConfig.verifyCertificate;
+        mqttOptions.rejectUnauthorized = config.verifyCertificate ?? true;
         
         this.agentLogger.infoSync("MQTT TLS enabled", {
           component: LogComponents.agent,
-          protocol: this.deviceInfo.mqttBrokerConfig.protocol,
-          verifyCertificate: this.deviceInfo.mqttBrokerConfig.verifyCertificate,
-          hasCaCert: !!this.deviceInfo.mqttBrokerConfig.caCert,
+          protocol: config.protocol,
+          verifyCertificate: config.verifyCertificate,
+          hasCaCert: !!config.caCert,
         });
       }
 
@@ -545,10 +515,7 @@ export default class DeviceAgent {
         component: LogComponents.agent,
         brokerUrl: mqttBrokerUrl,
         clientId: `device_${this.deviceInfo.uuid}`,
-        username: mqttUsername || "(none)",
-        credentialsSource: this.deviceInfo.mqttUsername
-          ? "provisioning"
-          : "environment",
+        username: config.username || "(none)",
         debugMode: process.env.MQTT_DEBUG === "true",
         totalLogBackends: this.agentLogger.getBackends().length,
       });
@@ -577,7 +544,7 @@ export default class DeviceAgent {
     // after all dependencies (logger, containerManager, etc.) are available
   }
 
-  private async setupContainerManager(): Promise<void> {
+  private async initContainerManager(): Promise<void> {
     // StateReconciler already initialized, just setup logging and event handlers
     // For backward compatibility, keep ContainerManager reference for DeviceAPI
     this.containerManager = this.stateReconciler.getContainerManager();
@@ -603,14 +570,8 @@ export default class DeviceAgent {
     });
   }
 
-  private async initializeContainerManager(): Promise<void> {
-    // Legacy method - now split into initializeStateReconciler() and setupContainerManager()
-    // Kept for backward compatibility if called elsewhere
-    await this.initializeStateReconciler();
-    await this.setupContainerManager();
-  }
 
-  private async initializeDeviceAPI(): Promise<void> {
+  private async initDeviceAPI(): Promise<void> {
     this.agentLogger?.infoSync("Initializing device API", {
       component: LogComponents.agent,
     });
@@ -651,7 +612,7 @@ export default class DeviceAgent {
     });
   }
 
-  private initializeAnomalyDetection(): void {
+  private initAnomalyDetection(): void {
     // Check if anomaly detection is enabled (cloud config → env fallback)
     const features = this.agentConfig.getFeatures();
     
@@ -717,69 +678,7 @@ export default class DeviceAgent {
     }
   }
   
-  /**
-   * Start periodic discovery timers
-   * - Light discovery: Fast scan (ping only) every 4 hours (default)
-   * - Full discovery: Deep validation every 24 hours (default)
-   */
-  private startPeriodicDiscovery(): void {
-    if (!this.discoveryService) {
-      return;
-    }
-    
-    const enablePeriodicDiscovery = process.env.ENABLE_PERIODIC_DISCOVERY !== 'false'; // Default: enabled
-    
-    if (!enablePeriodicDiscovery) {
-      this.agentLogger?.infoSync('Periodic discovery disabled', {
-        component: LogComponents.agent,
-      });
-      return;
-    }
-    
-    const intervals = this.agentConfig.getIntervalConfig();
-    
-    this.agentLogger?.infoSync('Starting periodic discovery timers', {
-      component: LogComponents.agent,
-      lightIntervalHours: intervals.discoveryLightIntervalMs! / (60 * 60 * 1000),
-      fullIntervalHours: intervals.discoveryFullIntervalMs! / (60 * 60 * 1000),
-    });
-    
-    // Light discovery: Fast scan (ping only)
-    this.discoveryLightTimer = setInterval(() => {
-      this.agentLogger?.infoSync('Running scheduled light discovery', {
-        component: LogComponents.agent,
-      });
-      
-      this.discoveryService?.runDiscovery({
-        trigger: 'scheduled',
-        validate: false, // Ping only, no deep validation
-      }).catch(error => {
-        this.agentLogger?.errorSync(
-          'Scheduled light discovery failed',
-          error as Error,
-          { component: LogComponents.agent }
-        );
-      });
-    }, intervals.discoveryLightIntervalMs!);
-    
-    // Full discovery: Deep validation with device info reads
-    this.discoveryFullTimer = setInterval(() => {
-      this.agentLogger?.infoSync('Running scheduled full discovery', {
-        component: LogComponents.agent,
-      });
-      
-      this.discoveryService?.runDiscovery({
-        trigger: 'scheduled',
-        validate: true, // Full validation with device info
-      }).catch(error => {
-        this.agentLogger?.errorSync(
-          'Scheduled full discovery failed',
-          error as Error,
-          { component: LogComponents.agent }
-        );
-      });
-    }, intervals.discoveryFullIntervalMs!);
-  }
+
 
   private async initializeSimulationMode(): Promise<void> {
     try {
@@ -792,7 +691,7 @@ export default class DeviceAgent {
       
       // Only run simulation if provisioned OR in standalone dev mode
       // This prevents MQTT errors when device is not provisioned
-      const isProvisioned = this.deviceInfo.provisioned && this.deviceInfo.mqttBrokerUrl;
+      const isProvisioned = this.deviceInfo.provisioned && this.deviceInfo.mqttBrokerConfig;
       const isDevMode = process.env.NODE_ENV === 'development' || process.env.FORCE_SIMULATION === 'true';
       
       if (!isProvisioned && !isDevMode) {
@@ -891,8 +790,8 @@ export default class DeviceAgent {
         metricsInterval: intervals.metricsIntervalMs!,
       },
       this.agentLogger, // Pass the agent logger
-      this.sensorPublish, // Pass sensor-publish for health reporting
-      this.sensors, // Pass protocol-adapters for health reporting
+      undefined, // sensorPublish (unused)
+      undefined, // sensors (unused)
       MqttManager.getInstance() // Pass MQTT manager singleton for state reporting (optional)
     );
 
@@ -1095,20 +994,8 @@ export default class DeviceAgent {
         });
       }
       
-      // Clear discovery timers
-      if (this.discoveryLightTimer) {
-        clearInterval(this.discoveryLightTimer);
-        this.discoveryLightTimer = undefined;
-      }
-      if (this.discoveryFullTimer) {
-        clearInterval(this.discoveryFullTimer);
-        this.discoveryFullTimer = undefined;
-      }
-      if (this.discoveryLightTimer || this.discoveryFullTimer) {
-        this.agentLogger?.infoSync("Discovery timers cleared", {
-          component: LogComponents.agent,
-        });
-      }
+      // Stop discovery timers
+      this.discoveryService?.stopPeriodicDiscovery();
 
       // AgentConfig handles its own cleanup (event listeners)
       // No manual removal needed since AgentConfig is garbage collected
@@ -1139,9 +1026,5 @@ export default class DeviceAgent {
 
   public getDeviceAPI(): DeviceAPI {
     return this.deviceAPI;
-  }
-
-  public getJobEngine() {
-    return this.jobs?.getJobEngine();
   }
 }

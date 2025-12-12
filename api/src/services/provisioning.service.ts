@@ -318,9 +318,34 @@ export class ProvisioningService {
       logger.info('No broker config in database, using environment fallback');
     }
 
-    const brokerUrl = brokerConfig 
-      ? buildBrokerUrl(brokerConfig)
-      : (process.env.MQTT_BROKER_URL || 'mqtt://mosquitto:1883');
+    // Build broker URL and config (with credentials)
+    let finalBrokerConfig;
+    let brokerUrl;
+    
+    if (brokerConfig) {
+      // Use database broker config
+      finalBrokerConfig = formatBrokerConfigForClient(brokerConfig, mqttCredentials);
+      brokerUrl = buildBrokerUrl(brokerConfig);
+    } else {
+      // Fallback to environment variables
+      const envBrokerUrl = process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883';
+      const parsedUrl = new URL(envBrokerUrl);
+      
+      finalBrokerConfig = {
+        protocol: parsedUrl.protocol.replace(':', ''),
+        host: parsedUrl.hostname,
+        port: parseInt(parsedUrl.port || '1883', 10),
+        username: mqttCredentials.username,
+        password: mqttCredentials.password,
+        useTls: parsedUrl.protocol === 'mqtts:',
+        clientIdPrefix: 'Iotistic',
+        keepAlive: 60,
+        cleanSession: true,
+        reconnectPeriod: 1000,
+        connectTimeout: 30000
+      };
+      brokerUrl = envBrokerUrl;
+    }
 
     // Fetch API TLS configuration
     const apiTlsConfig = await configService.get('api.tls');
@@ -334,12 +359,12 @@ export class ProvisioningService {
       fleetId: provisioningKeyRecord.fleet_id,
       createdAt: device.created_at.toISOString(),
       mqtt: {
+        // Legacy fields for backward compatibility (deprecated)
         username: mqttCredentials.username,
         password: mqttCredentials.password,
         broker: brokerUrl,
-        ...(brokerConfig && {
-          brokerConfig: formatBrokerConfigForClient(brokerConfig)
-        }),
+        // New consolidated config (includes credentials)
+        brokerConfig: finalBrokerConfig,
         topics: {
           publish: [`iot/device/${device.uuid}/#`],
           subscribe: [`iot/device/${device.uuid}/#`]

@@ -108,6 +108,8 @@ export class DiscoveryService {
   private readonly MIN_DISCOVERY_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
   private readonly VALIDATION_CONCURRENCY = 3; // Concurrent validations (avoid overwhelming network/CPU)
   private plugins: Map<string, BaseDiscoveryPlugin>;
+  private lightTimer?: NodeJS.Timeout;
+  private fullTimer?: NodeJS.Timeout;
 
   /**
    * Create discovery service
@@ -135,6 +137,89 @@ export class DiscoveryService {
     plugins.set('snmp', new SNMPDiscoveryPlugin(this.logger));
     
     return plugins;
+  }
+
+  /**
+   * Start periodic discovery timers
+   * - Light discovery: Fast scan (ping only) every 4 hours (default)
+   * - Full discovery: Deep validation every 24 hours (default)
+   */
+  public startPeriodicDiscovery(): void {
+    const enablePeriodicDiscovery = process.env.ENABLE_PERIODIC_DISCOVERY !== 'false'; // Default: enabled
+    
+    if (!enablePeriodicDiscovery) {
+      this.logger?.infoSync('Periodic discovery disabled', {
+        component: LogComponents.discovery,
+      });
+      return;
+    }
+    
+    // Stop any existing timers first
+    this.stopPeriodicDiscovery();
+    
+    const intervals = this.agentConfig?.getIntervalConfig();
+    if (!intervals) {
+      this.logger?.warnSync('Cannot start periodic discovery - agentConfig not available', {
+        component: LogComponents.discovery,
+      });
+      return;
+    }
+    
+    this.logger?.infoSync('Starting periodic discovery timers', {
+      component: LogComponents.discovery,
+      lightIntervalHours: intervals.discoveryLightIntervalMs! / (60 * 60 * 1000),
+      fullIntervalHours: intervals.discoveryFullIntervalMs! / (60 * 60 * 1000),
+    });
+    
+    // Light discovery: Fast scan (ping only)
+    this.lightTimer = setInterval(() => {
+      this.logger?.infoSync('Running scheduled light discovery', {
+        component: LogComponents.discovery,
+      });
+      
+      this.runDiscovery({
+        trigger: 'scheduled',
+        validate: false, // Ping only, no deep validation
+      }).catch(error => {
+        this.logger?.errorSync(
+          'Scheduled light discovery failed',
+          error as Error,
+          { component: LogComponents.discovery }
+        );
+      });
+    }, intervals.discoveryLightIntervalMs!);
+    
+    // Full discovery: Deep validation with device info reads
+    this.fullTimer = setInterval(() => {
+      this.logger?.infoSync('Running scheduled full discovery', {
+        component: LogComponents.discovery,
+      });
+      
+      this.runDiscovery({
+        trigger: 'scheduled',
+        validate: true, // Full validation with device info
+      }).catch(error => {
+        this.logger?.errorSync(
+          'Scheduled full discovery failed',
+          error as Error,
+          { component: LogComponents.discovery }
+        );
+      });
+    }, intervals.discoveryFullIntervalMs!);
+  }
+
+  /**
+   * Stop periodic discovery timers
+   */
+  public stopPeriodicDiscovery(): void {
+    if (this.lightTimer) {
+      clearInterval(this.lightTimer);
+      this.lightTimer = undefined;
+    }
+    if (this.fullTimer) {
+      clearInterval(this.fullTimer);
+      this.fullTimer = undefined;
+    }
   }
 
   /**
