@@ -836,16 +836,18 @@ export class DiscoveryService {
             });
             // Could update connection here if desired
           } else if (fingerprintChanged) {
-            this.logger?.debugSync(`Device "${sensor.name}" fingerprint changed (dynamic data)`, {
+            this.logger?.infoSync(`Device "${sensor.name}" fingerprint changed (dynamic data)`, {
               component: LogComponents.discovery,
               traceId,
               oldFingerprint: existing.metadata?.fingerprint,
               newFingerprint: sensor.fingerprint
             });
           } else {
-            this.logger?.debugSync(`Device "${sensor.name}" already known`, {
+            this.logger?.infoSync(`Device "${sensor.name}" already known - skipping`, {
               component: LogComponents.discovery,
-              traceId
+              traceId,
+              protocol: sensor.protocol,
+              lastSeen: existing.lastSeenAt
             });
           }
           skipped++;
@@ -895,10 +897,28 @@ export class DiscoveryService {
       }
     }
 
-    this.logger?.infoSync(`Discovery save complete: ${saved} saved, ${skipped} skipped`, {
-      component: LogComponents.discovery,
-      traceId
-    });
+    // Log detailed skip reasons if devices were skipped
+    if (skipped > 0) {
+      const skipReasons = discovered
+        .filter(d => {
+          const existing = existingSensors.find(s => 
+            s.metadata?.fingerprint === d.fingerprint || s.name === d.name
+          );
+          return existing !== undefined;
+        })
+        .map(d => `${d.name} (${d.protocol})`);
+      
+      this.logger?.infoSync(`Discovery save complete: ${saved} saved, ${skipped} skipped (already exist)`, {
+        component: LogComponents.discovery,
+        traceId,
+        skippedDevices: skipReasons
+      });
+    } else {
+      this.logger?.infoSync(`Discovery save complete: ${saved} saved, ${skipped} skipped`, {
+        component: LogComponents.discovery,
+        traceId
+      });
+    }
 
     // Check for stale devices (not seen in 7+ days)
     await this.checkStaleDevices(traceId);
