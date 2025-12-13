@@ -239,17 +239,17 @@ export class DiscoveryService extends EventEmitter {
     const { trigger, validate = false, forceRun = false, protocols } = options;
     const traceId = crypto.randomUUID();
 
-    // // Check rate limiting
-    // if (!forceRun && !this.shouldRunDiscovery(trigger)) {
-    //   this.logger?.infoSync('Discovery skipped due to rate limiting', {
-    //     component: LogComponents.discovery,
-    //     traceId,
-    //     trigger,
-    //     lastDiscoveryAt: this.metadata.lastDiscoveryAt,
-    //     minIntervalMs: this.MIN_DISCOVERY_INTERVAL_MS
-    //   });
-    //   return [];
-    // }
+    // Check rate limiting
+    if (!forceRun && !this.shouldRunDiscovery(trigger)) {
+      this.logger?.infoSync('Discovery skipped due to rate limiting', {
+        component: LogComponents.discovery,
+        traceId,
+        trigger,
+        lastDiscoveryAt: this.metadata.lastDiscoveryAt,
+        minIntervalMs: this.MIN_DISCOVERY_INTERVAL_MS
+      });
+      return [];
+    }
 
     // Log special message for first boot discovery
     if (trigger === 'first_boot') {
