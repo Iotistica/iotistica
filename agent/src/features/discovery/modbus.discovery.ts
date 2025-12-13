@@ -341,9 +341,11 @@ private async testSlaveId(
     const reg = await client.readHoldingRegisters(0, 1);
 
     if (reg?.data?.length) {
+      // Don't include register value in deviceId - it changes dynamically!
+      // Only use slave ID for fingerprint stability
       return {
-        method: "register_read",
-        deviceId: reg.data[0].toString()
+        method: "register_read"
+        // deviceId intentionally omitted - fingerprint uses only slaveId
       };
     }
 
