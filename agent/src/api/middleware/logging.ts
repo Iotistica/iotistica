@@ -26,17 +26,20 @@ export default function logging(req: Request, res: Response, next: NextFunction)
 			path: req.path
 		};
 		
-		if (logger) {
+		// Skip logging for health check endpoints
+		const isHealthCheck = req.path === '/ping' || req.path === '/health' || req.path === '/healthz';
+		
+		if (logger && !isHealthCheck) {
 			if (res.statusCode >= 500) {
 				logger.errorSync(logMessage, undefined, context);
 			} else if (res.statusCode >= 400) {
 				logger.warnSync(logMessage, context);
 			} else {
-				// Changed to infoSync so all successful requests are visible
-				logger.infoSync(logMessage, context);
+				// Use debug for routine successful requests to reduce cloud log volume
+				logger.debugSync(logMessage, context);
 			}
-		} else {
-			// Fallback to console if logger not available
+		} else if (!logger && !isHealthCheck) {
+			// Fallback to console if logger not available (skip health checks)
 			console.log(`${logMessage} - ${res.statusCode} (${duration}ms)`);
 		}
 	});
