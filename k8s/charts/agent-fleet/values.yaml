@@ -20,7 +20,7 @@ agent:
   image:
     repository: iotistic/agent
     tag: latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   
   # Resource limits per agent
   resources:
@@ -85,7 +85,7 @@ simulator:
   image:
     repository: iotistic/modbus-simulator
     tag: latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   
   # Resource limits per simulator
   resources:
