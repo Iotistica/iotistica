@@ -153,7 +153,7 @@ jobs:
           # Pull the image
           docker pull iotistic/nodered:${{ needs.version.outputs.version }}
           
-          # Get image size
+          # Get image size1
           SIZE_BYTES=$(docker image inspect iotistic/nodered:${{ needs.version.outputs.version }} --format='{{.Size}}')
           SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
           
