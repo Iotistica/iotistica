@@ -87,3 +87,31 @@ Generate MQTT password
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{/*
+Generate Node-RED MQTT password
+*/}}
+{{- define "customer-instance.noderedMqttPassword" -}}
+{{- if .Values.nodered.mqtt.password }}
+{{- .Values.nodered.mqtt.password }}
+{{- else }}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace (printf "%s-secrets" (include "customer-instance.fullname" .)) }}
+{{- if $secret }}
+{{- index $secret.data "NODERED_MQTT_PASSWORD" | b64dec }}
+{{- else }}
+{{- randAlphaNum 32 }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+Generate Node-RED storage token (service API key)
+*/}}
+{{- define "customer-instance.noderedStorageToken" -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace (printf "%s-secrets" (include "customer-instance.fullname" .)) }}
+{{- if $secret }}
+{{- index $secret.data "NODERED_STORAGE_TOKEN" | b64dec }}
+{{- else }}
+{{- randAlphaNum 64 }}
+{{- end }}
+{{- end }}

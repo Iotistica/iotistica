@@ -184,6 +184,34 @@ dashboard:
   # Set explicitly for custom deployments
   apiUrl: ""  # e.g., "https://api.example.com" or "" for automatic detection
 
+# Node-RED (flow-based programming)
+nodered:
+  enabled: false  # Disabled by default, enable per customer
+  image:
+    repository: iotistic/nodered
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 1880
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  storage:
+    size: 5Gi
+    storageClass: ""
+  # MQTT credentials (separate from API credentials)
+  mqtt:
+    username: "nodered"
+    password: ""  # Auto-generated if empty
+  # Logging level
+  logLevel: "info"
+  # Timezone
+  timezone: "UTC"
+
 # Prometheus exporter (metrics)
 exporter:
   enabled: false  # Disabled - image not built yet

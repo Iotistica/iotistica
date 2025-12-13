@@ -35,6 +35,16 @@ spec:
             name: {{ include "customer-instance.fullname" . }}-api
             port:
               number: {{ .Values.api.port }}
+      {{- if .Values.nodered.enabled }}
+      # Node-RED
+      - path: /nodered
+        pathType: Prefix
+        backend:
+          service:
+            name: {{ include "customer-instance.fullname" . }}-nodered
+            port:
+              number: {{ .Values.nodered.port }}
+      {{- end }}
       # Metrics
       - path: /metrics
         pathType: Prefix
