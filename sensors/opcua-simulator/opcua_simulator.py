@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class OPCUASimulator:
-    """Simulates OPC UA server with industrial sensor nodes"""
+    """Simulates OPC UA server with industrial sensor nodes!"""
     
     def __init__(self, endpoint='opc.tcp://0.0.0.0:4840/iotistic/simulator'):
         self.endpoint = endpoint
