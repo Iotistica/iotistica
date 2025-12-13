@@ -15,7 +15,6 @@ COPY data/@iotistic/nr-storage/*.js /data/@iotistic/nr-storage/
 # Copy Node-RED config files
 COPY data/package.json /data/
 COPY data/settings.js /data/settings.js
-COPY data/flows.json /data/flows.json
 
 # Ensure all /data files belong to node-red
 RUN chown -R node-red:node-red /data
