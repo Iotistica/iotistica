@@ -70,7 +70,7 @@ export class AgentUpdater {
         await this.handleUpdateCommand(message);
       });
       
-      this.logger.infoSync("MQTT update listener initialized", {
+      this.logger.debugSync("MQTT update listener initialized", {
         component: LogComponents.agentUpdater,
         updateTopic: this.updateTopic,
         statusTopic: this.statusTopic
@@ -104,7 +104,7 @@ export class AgentUpdater {
 
       const { version, scheduled_time, force } = command;
       
-      this.logger.infoSync("Agent update command received", {
+      this.logger.debugSync("Agent update command received", {
         component: LogComponents.agentUpdater,
         version,
         scheduled_time,
@@ -124,7 +124,7 @@ export class AgentUpdater {
         const delay = scheduledDate.getTime() - Date.now();
         
         if (delay > 0) {
-          this.logger.infoSync("Update scheduled for later", {
+          this.logger.debugSync("Update scheduled for later", {
             component: LogComponents.agentUpdater,
             scheduled_time,
             delay_ms: delay,

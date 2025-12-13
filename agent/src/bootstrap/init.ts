@@ -658,7 +658,7 @@ export class FeatureInitializer {
 
       await this.features.updater.initialize();
 
-      logger.infoSync('Agent Updater initialized', {
+      logger.debugSync('Agent Updater initialized', {
         component: LogComponents.agent
       });
     } catch (error) {
@@ -741,7 +741,7 @@ export class FeatureInitializer {
     // Stop Sensor Publish
     if (this.features.sensorPublish) {
       await this.features.sensorPublish.stop();
-      logger.infoSync('Sensor Publish stopped', {
+      logger.debugSync('Sensor Publish stopped', {
         component: LogComponents.agent,
       });
     }
@@ -749,7 +749,7 @@ export class FeatureInitializer {
     // Stop Protocol Adapters
     if (this.features.sensors) {
       await this.features.sensors.stop();
-      logger.infoSync('Protocol Adapters stopped', {
+      logger.debugSync('Protocol Adapters stopped', {
         component: LogComponents.agent,
       });
     }
@@ -757,7 +757,7 @@ export class FeatureInitializer {
     // Stop Sensor Config Handler
     if (this.features.sensorConfigHandler) {
       // No explicit stop method, just clear reference
-      logger.infoSync('Sensor Config Handler cleanup', {
+      logger.debugSync('Sensor Config Handler cleanup', {
         component: LogComponents.agent,
       });
     }
@@ -765,7 +765,7 @@ export class FeatureInitializer {
     // Stop Jobs Feature
     if (this.features.jobs) {
       await this.features.jobs.stop();
-      logger.infoSync('Jobs Feature stopped', {
+      logger.debugSync('Jobs Feature stopped', {
         component: LogComponents.agent,
       });
     }
@@ -773,7 +773,7 @@ export class FeatureInitializer {
     // Stop Agent Updater
     if (this.features.updater) {
       // No explicit stop method
-      logger.infoSync('Agent Updater cleanup', {
+      logger.debugSync('Agent Updater cleanup', {
         component: LogComponents.agent,
       });
     }
@@ -781,7 +781,7 @@ export class FeatureInitializer {
     // Stop Firewall
     if (this.features.firewall) {
       // Firewall has no explicit cleanup method
-      logger.infoSync('Firewall cleanup', {
+      logger.debugSync('Firewall cleanup', {
         component: LogComponents.agent,
       });
     }

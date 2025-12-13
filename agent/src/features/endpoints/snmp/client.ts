@@ -44,7 +44,7 @@ export class SNMPClient {
     }
 
     this.connected = true;
-    this.logger.info(`SNMP session created for ${this.config.name}`);
+    this.logger.debug(`SNMP session created for ${this.config.name}`);
   }
 
   async disconnect(): Promise<void> {

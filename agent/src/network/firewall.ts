@@ -60,7 +60,7 @@ export class AgentFirewall {
    */
   async initialize(): Promise<void> {
     if (!this.config.enabled) {
-      this.logger.infoSync('Firewall disabled by configuration', {
+      this.logger.debugSync('Firewall disabled by configuration', {
         component: LogComponents.firewall,
       });
       return;
@@ -71,7 +71,7 @@ export class AgentFirewall {
       await this.applyFirewallRules();
       this.initialized = true;
       
-      this.logger.infoSync('Firewall initialized successfully', {
+      this.logger.debugSync('Firewall initialized successfully', {
         component: LogComponents.firewall,
         mode: this.config.mode,
       });
@@ -312,7 +312,7 @@ export class AgentFirewall {
    * Update firewall mode dynamically
    */
   async updateMode(mode: 'on' | 'off' | 'auto'): Promise<void> {
-    this.logger.infoSync('Updating firewall mode', {
+    this.logger.debugSync('Updating firewall mode', {
       component: LogComponents.firewall,
       from: this.config.mode,
       to: mode,
@@ -326,7 +326,7 @@ export class AgentFirewall {
    * Update firewall configuration dynamically
    */
   async updateConfig(config: Partial<FirewallConfig>): Promise<void> {
-    this.logger.infoSync('Updating firewall configuration', {
+    this.logger.debugSync('Updating firewall configuration', {
       component: LogComponents.firewall,
       changes: Object.keys(config),
     });
@@ -349,7 +349,7 @@ export class AgentFirewall {
       return;
     }
 
-    this.logger.infoSync('Stopping firewall', {
+    this.logger.debugSync('Stopping firewall', {
       component: LogComponents.firewall,
     });
 
@@ -389,7 +389,7 @@ export class AgentFirewall {
         .apply(adaptor);
 
       this.initialized = false;
-      this.logger.infoSync('Firewall stopped', {
+      this.logger.debugSync('Firewall stopped', {
         component: LogComponents.firewall,
       });
     } catch (error) {

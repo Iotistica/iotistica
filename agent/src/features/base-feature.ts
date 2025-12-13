@@ -176,12 +176,12 @@ export abstract class BaseFeature extends EventEmitter {
     }
 
     try {
-      this.logger.info('Starting feature...');
+      this.logger.debug('Starting feature...');
       this.validateConfig();
       await this.onInitialize();
       await this.onStart();
       this.isRunning = true;
-      this.logger.info('Feature started successfully');
+      this.logger.debug('Feature started successfully');
     } catch (error) {
       this.logger.error('Failed to start feature', error);
       throw error;
@@ -197,10 +197,10 @@ export abstract class BaseFeature extends EventEmitter {
     }
 
     try {
-      this.logger.info('Stopping feature...');
+      this.logger.debug('Stopping feature...');
       await this.onStop();
       this.isRunning = false;
-      this.logger.info('Feature stopped successfully');
+      this.logger.debug('Feature stopped successfully');
     } catch (error) {
       this.logger.error('Failed to stop feature', error);
       throw error;
