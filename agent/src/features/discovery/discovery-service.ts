@@ -251,14 +251,24 @@ export class DiscoveryService extends EventEmitter {
     //   return [];
     // }
 
-    this.logger?.infoSync('Starting discovery', {
-      component: LogComponents.discovery,
-      traceId,
-      trigger,
-      validate,
-      forceRun,
-      protocols: protocols || 'all'
-    });
+    // Log special message for first boot discovery
+    if (trigger === 'first_boot') {
+      this.logger?.infoSync('FIRST BOOT DISCOVERY: Running comprehensive device discovery scan with full validation', {
+        component: LogComponents.discovery,
+        traceId,
+        validate,
+        protocols: protocols || 'all'
+      });
+    } else {
+      this.logger?.infoSync('Starting discovery', {
+        component: LogComponents.discovery,
+        traceId,
+        trigger,
+        validate,
+        forceRun,
+        protocols: protocols || 'all'
+      });
+    }
 
     const startTime = Date.now();
 
