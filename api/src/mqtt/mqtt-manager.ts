@@ -207,9 +207,12 @@ export class MqttManager extends EventEmitter {
         }
 
         this.lastConnectionTimestamp = Date.now();
-        logger.info('Connected to MQTT broker', { 
+        logger.info('✅ MQTT CLIENT CONNECTED TO BROKER', { 
+          brokerUrl: this.config.brokerUrl,
           clientId: this.config.clientId, 
-          qos: this.config.qos 
+          username: this.config.username,
+          qos: this.config.qos,
+          keepalive: this.config.keepalive
         });
         this.reconnecting = false;
         this.reconnectCount = 0; // Reset counter on successful connection
@@ -265,6 +268,11 @@ export class MqttManager extends EventEmitter {
       });
 
       this.client.on('message', (topic, payload) => {
+        logger.debug('📨 MQTT MESSAGE RECEIVED', { 
+          topic, 
+          payloadSize: payload.length,
+          payloadPreview: payload.toString().substring(0, 100)
+        });
         this.handleMessage(topic, payload);
       });
     });
@@ -382,7 +390,12 @@ export class MqttManager extends EventEmitter {
 
     // Wait for all subscriptions and log summary
     await Promise.all(subscriptionPromises);
-    logger.info('Successfully subscribed to all MQTT topics', { count: topicPatterns.length });
+    logger.info('✅ SUCCESSFULLY SUBSCRIBED TO ALL MQTT TOPICS', { 
+      count: topicPatterns.length,
+      topics: topicPatterns,
+      clientId: this.config.clientId,
+      isConnected: this.isConnected()
+    });
   }
 
   /**
@@ -767,7 +780,15 @@ export class MqttManager extends EventEmitter {
    * Get connection status
    */
   isConnected(): boolean {
-    return this.client?.connected || false;
+    const connected = this.client?.connected || false;
+    if (!connected) {
+      logger.debug('MQTT connection status check', {
+        connected: false,
+        clientExists: !!this.client,
+        clientId: this.config.clientId
+      });
+    }
+    return connected;
   }
 
   /**

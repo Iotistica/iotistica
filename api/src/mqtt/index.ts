@@ -35,6 +35,7 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
       password: process.env.MQTT_PASSWORD,
       reconnectPeriod: parseInt(process.env.MQTT_RECONNECT_PERIOD || '5000'),
       keepalive: parseInt(process.env.MQTT_KEEPALIVE || '60'),
+      clean: true, // Use clean session to avoid stale session state causing ECONNRESET
       qos: (parseInt(process.env.MQTT_QOS || '1') as 0 | 1 | 2)
     });
 
