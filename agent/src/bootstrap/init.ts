@@ -303,10 +303,31 @@ export class FeatureInitializer {
         }
       }
 
-      // Log enabled protocols
-      const enabledProtocols = Object.entries(sensorsConfig)
+      // Log enabled protocols from config
+      const configEnabledProtocols = Object.entries(sensorsConfig)
         .filter(([key, value]) => key !== 'enabled' && typeof value === 'object' && value?.enabled)
         .map(([key]) => key);
+
+      // Check database for enabled devices (even if config doesn't enable the protocol)
+      const { DeviceEndpointModel } = await import('../db/models/endpoint.model');
+      const dbProtocolsWithDevices: string[] = [];
+      
+      for (const protocol of ['modbus', 'opcua', 'snmp', 'can']) {
+        const devices = await DeviceEndpointModel.getEnabled(protocol);
+        if (devices.length > 0) {
+          dbProtocolsWithDevices.push(protocol);
+          // Enable the protocol in config if it has database devices
+          if (!sensorsConfig[protocol]?.enabled) {
+            if (!sensorsConfig[protocol]) {
+              sensorsConfig[protocol] = { enabled: true };
+            } else {
+              sensorsConfig[protocol].enabled = true;
+            }
+          }
+        }
+      }
+
+      const enabledProtocols = [...new Set([...configEnabledProtocols, ...dbProtocolsWithDevices])];
       
       if (enabledProtocols.length === 0) {
         logger.infoSync('No protocols enabled, skipping Protocol Adapters initialization', {
@@ -401,7 +422,7 @@ export class FeatureInitializer {
     // Update context with new protocols config
     this.context.configProtocols = protocols;
 
-    // Reinitialize with new config
+    // Always reinitialize protocol adapters (will check database even if config is empty)
     await this.initProtocolAdapters();
 
     // Reinitialize sensor_publish since protocol adapters changed
@@ -439,11 +460,8 @@ export class FeatureInitializer {
   private hasProtocolConfigChanges(newProtocols: Record<string, any>): boolean {
     // First time, always initialize
     if (!this.currentProtocols) {
-      // But only if there are protocols to enable
-      const hasEnabledProtocols = Object.values(newProtocols).some(
-        (proto: any) => proto?.enabled === true
-      );
-      return hasEnabledProtocols;
+      // Always return true on first call - let initProtocolAdapters check database
+      return true;
     }
 
     // Check for enabled status changes

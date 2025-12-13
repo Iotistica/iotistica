@@ -39,6 +39,12 @@ class OPCUASimulator:
         # Create main folder
         factory = await objects.add_folder(2, "Factory")
         
+        # Add simple example variable with explicit string NodeID (for easy testing)
+        my_variable_nodeid = ua.NodeId("MyVariable", 2)  # ns=2;s=MyVariable
+        my_variable = await objects.add_variable(my_variable_nodeid, "MyVariable", 42.0)
+        await my_variable.set_writable()
+        self.nodes['example'] = my_variable
+        
         # Create sensor groups
         temperature_folder = await factory.add_folder(2, "Temperature")
         pressure_folder = await factory.add_folder(2, "Pressure")
@@ -139,6 +145,14 @@ class OPCUASimulator:
         while True:
             try:
                 for key, node in self.nodes.items():
+                    # Handle example variable separately
+                    if key == 'example':
+                        # Oscillating value between 30 and 50
+                        elapsed = time.time() - self.start_time
+                        value = 40.0 + 10.0 * math.sin(elapsed / 5.0)
+                        await node.write_value(round(value, 2))
+                        continue
+                    
                     # Parse sensor type and index from key
                     parts = key.rsplit('_', 1)
                     sensor_type = parts[0]
@@ -161,6 +175,7 @@ class OPCUASimulator:
         async with self.server:
             logger.info(f"OPC UA Server started at {self.endpoint}")
             logger.info("Available node structure:")
+            logger.info("  - MyVariable (test variable, oscillates 30-50)")
             logger.info("  - Factory/Temperature/Sensor_1-5 (°C)")
             logger.info("  - Factory/Pressure/Sensor_1-5 (mbar)")
             logger.info("  - Factory/Flow/Sensor_1-5 (L/min)")

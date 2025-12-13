@@ -709,8 +709,10 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
     );
 
     // Step 2: Create OPC-UA client with endpoint requirements
+    const hostname = require('os').hostname();
     const client = OPCUAClient.create({
       applicationName: 'Iotistic Sensor Agent',
+      applicationUri: `urn:${hostname}:Iotistic Sensor Agent`,
       connectionStrategy: {
         initialDelay: 1000,
         maxRetry: 3,
@@ -726,10 +728,16 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
     try {
       // Step 3: Connect to server (use discovered endpoint if available)
       const connectUrl = discoveredEndpoint?.endpointUrl || connection.endpointUrl;
+      this.logger.info(`Attempting connection to ${connectUrl}`, {
+        securityMode: MessageSecurityMode[this.convertSecurityMode(connection.securityMode)],
+        securityPolicy: connection.securityPolicy
+      });
+      
       await client.connect(connectUrl);
       this.logger.info(`Connected to ${connectUrl}`);
 
       // Step 4: Create session with optional authentication
+      this.logger.debug('Creating session...');
       let session: ClientSession;
       if (connection.username && connection.password) {
         session = await client.createSession({
