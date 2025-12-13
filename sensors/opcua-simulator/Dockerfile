@@ -6,7 +6,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir asyncua==1.0.6
 
 # Copy simulator script
-COPY opcua_simulator.py .
+COPY sensors/opcua-simulator/opcua_simulator.py .
 
 # Expose OPC UA port
 EXPOSE 4840
