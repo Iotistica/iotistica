@@ -147,7 +147,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
     const valid: OPCUADataPoint[] = [];
     const invalid: string[] = [];
 
-    this.logger.info(`Validating ${dataPoints.length} NodeIDs for ${deviceName}...`);
+    this.logger.debug(`Validating ${dataPoints.length} NodeIDs for ${deviceName}...`);
 
     for (const dp of dataPoints) {
       try {
@@ -187,7 +187,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
         invalidNodes: invalid
       });
     } else {
-      this.logger.info(`✓ All ${valid.length} NodeIDs validated successfully for ${deviceName}`);
+      this.logger.debug(`✓ All ${valid.length} NodeIDs validated successfully for ${deviceName}`);
     }
 
     return { valid, invalid };
@@ -234,7 +234,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 
     sessionWrapper.subscription = subscription;
 
-    this.logger.info(`Created subscription for ${deviceName}`, {
+    this.logger.debug(`Created subscription for ${deviceName}`, {
       publishingInterval: connection.publishingInterval || 1000,
       samplingInterval: connection.samplingInterval || 500,
       dataPointCount: validDataPoints.length,
@@ -647,7 +647,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       // Select best endpoint (prefer exact match, then first available)
       const bestEndpoint = matchingEndpoints[0];
       
-      this.logger.info('Selected endpoint', {
+      this.logger.debug('Selected endpoint', {
         url: bestEndpoint.endpointUrl,
         securityMode: MessageSecurityMode[bestEndpoint.securityMode],
         securityPolicy: bestEndpoint.securityPolicyUri,
@@ -695,7 +695,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
   protected async connectDevice(device: OPCUADeviceConfig): Promise<OPCUASession> {
     const { connection } = device;
 
-    this.logger.info(`Connecting to OPC-UA device: ${device.name}`);
+    this.logger.debug(`Connecting to OPC-UA device: ${device.name}`);
     this.logger.debug(`Endpoint: ${connection.endpointUrl}`);
 
     // Step 1: Discover and select best matching endpoint
@@ -728,13 +728,13 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
     try {
       // Step 3: Connect to server (use discovered endpoint if available)
       const connectUrl = discoveredEndpoint?.endpointUrl || connection.endpointUrl;
-      this.logger.info(`Attempting connection to ${connectUrl}`, {
+      this.logger.debug(`Attempting connection to ${connectUrl}`, {
         securityMode: MessageSecurityMode[this.convertSecurityMode(connection.securityMode)],
         securityPolicy: connection.securityPolicy
       });
       
       await client.connect(connectUrl);
-      this.logger.info(`Connected to ${connectUrl}`);
+      this.logger.debug(`Connected to ${connectUrl}`);
 
       // Step 4: Create session with optional authentication
       this.logger.debug('Creating session...');
@@ -751,7 +751,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
         this.logger.debug(`Session created with anonymous authentication`);
       }
 
-      this.logger.info(`Session established for device: ${device.name}`);
+      this.logger.debug(`Session established for device: ${device.name}`);
 
       const sessionWrapper: OPCUASession = {
         client,
@@ -802,7 +802,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       if (device.connection.useSubscription && validDataPoints.length > 0) {
         try {
           await this.createSubscription(device.name, device, sessionWrapper);
-          this.logger.info(`Subscription mode enabled for ${device.name} - using real-time streaming`);
+          this.logger.debug(`Subscription mode enabled for ${device.name} - using real-time streaming`);
         } catch (error) {
           this.logger.error(`Failed to create subscription for ${device.name}: ${error}`);
           this.logger.warn(`Falling back to polling mode for ${device.name}`);
@@ -922,7 +922,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       this.MAX_RETRY_DELAY
     );
     
-    this.logger.info(`Scheduling reconnect for ${device.name}`, {
+    this.logger.debug(`Scheduling reconnect for ${device.name}`, {
       reason,
       delayMs: delay,
       consecutiveFailures: sessionWrapper.consecutiveFailures,
@@ -950,7 +950,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
    * Attempt to reconnect to OPC-UA device
    */
   private async attemptReconnect(device: OPCUADeviceConfig, sessionWrapper: OPCUASession): Promise<void> {
-    this.logger.info(`Attempting reconnect to OPC-UA device: ${device.name}`, {
+    this.logger.debug(`Attempting reconnect to OPC-UA device: ${device.name}`, {
       attempt: sessionWrapper.consecutiveFailures,
       maxAttempts: this.MAX_RETRY_ATTEMPTS
     });
@@ -972,7 +972,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       sessionWrapper.currentRetryDelay = this.MIN_RETRY_DELAY;
       sessionWrapper.consecutiveFailures = 0;
       
-      this.logger.info(`Reconnected successfully to ${device.name}`);
+      this.logger.debug(`Reconnected successfully to ${device.name}`);
       this.emit('device-connected', device.name);
       
     } catch (error) {
@@ -1045,14 +1045,14 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       return;
     }
 
-    this.logger.info(`Disconnecting OPC-UA device: ${deviceName}`);
+    this.logger.debug(`Disconnecting OPC-UA device: ${deviceName}`);
     
     // Stop reconnection attempts
     sessionWrapper.reconnecting = false;
     
     try {
       await this.cleanupSession(sessionWrapper, true);
-      this.logger.info(`Disconnected from device: ${deviceName}`);
+      this.logger.debug(`Disconnected from device: ${deviceName}`);
     } catch (error) {
       this.logger.error(`Error disconnecting device ${deviceName}: ${error}`);
     } finally {

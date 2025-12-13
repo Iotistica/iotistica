@@ -76,7 +76,7 @@ export class ModbusAdapter extends EventEmitter {
     }
 
     try {
-      this.logger.info('Stopping Modbus Adapter...');
+      this.logger.debug('Stopping Modbus Adapter...');
 
       // Stop all polling timers
       for (const [deviceName, timer] of this.pollTimers) {
@@ -94,7 +94,7 @@ export class ModbusAdapter extends EventEmitter {
       this.clients.clear();
 
       this.running = false;
-      this.logger.info('Modbus Adapter stopped successfully');
+      this.logger.debug('Modbus Adapter stopped successfully');
       this.emit('stopped');
 
     } catch (error) {
@@ -137,7 +137,7 @@ export class ModbusAdapter extends EventEmitter {
       await this.initializeDevice(deviceConfig);
     }
 
-    this.logger.info(`Device ${deviceName} enabled`);
+    this.logger.debug(`Device ${deviceName} enabled`);
     this.emit('device-enabled', deviceName);
   }
 
@@ -160,7 +160,7 @@ export class ModbusAdapter extends EventEmitter {
       await this.cleanupDevice(deviceName);
     }
 
-    this.logger.info(`Device ${deviceName} disabled`);
+    this.logger.debug(`Device ${deviceName} disabled`);
     this.emit('device-disabled', deviceName);
   }
 
@@ -200,7 +200,7 @@ export class ModbusAdapter extends EventEmitter {
    */
   private async initializeDevice(deviceConfig: ModbusDevice): Promise<void> {
     try {
-      this.logger.info(`Initializing device: ${deviceConfig.name}`);
+      this.logger.debug(`Initializing device: ${deviceConfig.name}`);
 
       // Create Modbus client
       const client = new ModbusClient(deviceConfig, this.logger);
@@ -217,7 +217,7 @@ export class ModbusAdapter extends EventEmitter {
       // Start polling
       this.startPolling(deviceConfig);
 
-      this.logger.info(`Device ${deviceConfig.name} initialized successfully`);
+      this.logger.debug(`Device ${deviceConfig.name} initialized successfully`);
       this.emit('device-connected', deviceConfig.name);
 
     } catch (error) {
@@ -478,7 +478,7 @@ export class ModbusAdapter extends EventEmitter {
     
     setTimeout(async () => {
       if (this.running && deviceConfig.enabled) {
-        this.logger.info(`Retrying connection to device: ${deviceConfig.name}`);
+        this.logger.debug(`Retrying connection to device: ${deviceConfig.name}`);
         await this.cleanupDevice(deviceConfig.name);
         await this.initializeDevice(deviceConfig);
       }

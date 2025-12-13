@@ -154,7 +154,6 @@ export class SocketServer {
    * Handle new client connection
    */
   private handleClientConnection(socket: net.Socket): void {
-    this.logger.info(`New client connected to socket server`);
     this.clients.push(socket);
 
     socket.on('error', (error) => {
@@ -163,12 +162,10 @@ export class SocketServer {
     });
 
     socket.on('close', () => {
-      this.logger.info('Client disconnected from socket server');
       this.removeClient(socket);
     });
 
     socket.on('end', () => {
-      this.logger.info('Client ended connection to socket server');
       this.removeClient(socket);
     });
   }

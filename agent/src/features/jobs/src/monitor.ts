@@ -134,7 +134,7 @@ export class JobsFeature extends BaseFeature {
   protected async onInitialize(): Promise<void> {
     const config = this.config as JobsConfig;
     
-    this.logger.info(`Initializing Jobs Feature - pollingIntervalMs: ${config.pollingIntervalMs || 30000}, handlerDirectory: ${config.handlerDirectory || '/app/data/job-handlers'}`);
+    this.logger.debug(`Initializing Jobs Feature - pollingIntervalMs: ${config.pollingIntervalMs || 30000}, handlerDirectory: ${config.handlerDirectory || '/app/data/job-handlers'}`);
   }
 
   /**
@@ -152,14 +152,14 @@ export class JobsFeature extends BaseFeature {
     // 3. Start connection monitor for automatic fallback
     this.startConnectionMonitor();
 
-    this.logger.info(`Jobs Feature started - Mode: ${this.mqttSubscribed ? 'MQTT-primary with HTTP fallback' : 'HTTP-only'}`);
+    this.logger.debug(`Jobs Feature started - Mode: ${this.mqttSubscribed ? 'MQTT-primary with HTTP fallback' : 'HTTP-only'}`);
   }
 
   /**
    * Stop the jobs feature
    */
   protected async onStop(): Promise<void> {
-    this.logger.info(`Stopping Jobs Feature`);
+    this.logger.debug(`Stopping Jobs Feature`);
     this.needStop = true;
 
     // Stop connection monitor
@@ -172,7 +172,7 @@ export class JobsFeature extends BaseFeature {
     if (this.httpPollingInterval) {
       clearInterval(this.httpPollingInterval);
       this.httpPollingInterval = undefined;
-      this.logger.info(`HTTP polling stopped`);
+      this.logger.debug(`HTTP polling stopped`);
     }
 
     // Unsubscribe from MQTT topics
@@ -185,7 +185,7 @@ export class JobsFeature extends BaseFeature {
       await this.sleep(100);
     }
 
-    this.logger.info(`Jobs Feature stopped`);
+    this.logger.debug(`Jobs Feature stopped`);
   }
 
   /**
@@ -194,7 +194,7 @@ export class JobsFeature extends BaseFeature {
   private async startHttpPolling(config: JobsConfig): Promise<void> {
     const pollingIntervalMs = config.pollingIntervalMs || 30000;
     
-    this.logger.info(`Starting HTTP polling (interval: ${pollingIntervalMs}ms)`);
+    this.logger.debug(`Starting HTTP polling (interval: ${pollingIntervalMs}ms)`);
 
     // Initial poll
     await this.pollForJobs();
@@ -206,7 +206,7 @@ export class JobsFeature extends BaseFeature {
       }
     }, pollingIntervalMs);
 
-    this.logger.info(`HTTP polling started`);
+    this.logger.debug(`HTTP polling started`);
   }
 
   /**
@@ -298,7 +298,7 @@ export class JobsFeature extends BaseFeature {
         return;
       }
 
-      this.logger.info(`Initializing MQTT job notifications (primary)`);
+      this.logger.debug(`Initializing MQTT job notifications (primary)`);
 
       // Subscribe to job notification topic
       const notifyTopic = `iot/device/${this.deviceUuid}/jobs/notify-next`;
@@ -313,7 +313,7 @@ export class JobsFeature extends BaseFeature {
       });
 
       this.mqttSubscribed = true;
-      this.logger.info(`MQTT job notifications initialized`);
+      this.logger.debug(`MQTT job notifications initialized`);
 
     } catch (error) {
       this.logger.warn(`Failed to initialize MQTT subscriptions (will use HTTP fallback): ${error}`);
@@ -328,7 +328,7 @@ export class JobsFeature extends BaseFeature {
     this.logger.debug(`Received MQTT job notification`);
     
     if (!message.execution) {
-      this.logger.info(`No pending jobs available`);
+      this.logger.debug(`No pending jobs available`);
       return;
     }
 
@@ -586,7 +586,7 @@ export class JobsFeature extends BaseFeature {
         if (currentMqttState && this.mqttSubscribed) {
           // MQTT reconnected - pause HTTP polling
           this.httpPaused = true;
-          this.logger.info(`MQTT reconnected - switching to MQTT-primary mode`);
+          this.logger.debug(`MQTT reconnected - switching to MQTT-primary mode`);
         } else {
           // MQTT disconnected - resume HTTP polling
           this.httpPaused = false;
@@ -597,7 +597,7 @@ export class JobsFeature extends BaseFeature {
       }
     }, 5000); // Check every 5 seconds
 
-    this.logger.info(`Connection monitor started - Initial mode: ${this.lastMqttState && this.mqttSubscribed ? 'MQTT-primary' : 'HTTP-fallback'}`);
+    this.logger.debug(`Connection monitor started - Initial mode: ${this.lastMqttState && this.mqttSubscribed ? 'MQTT-primary' : 'HTTP-fallback'}`);
   }
 
   /**

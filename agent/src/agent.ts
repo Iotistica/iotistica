@@ -247,7 +247,7 @@ export default class DeviceAgent {
 
       const intervals = this.agentConfig.getIntervalConfig();
       
-      this.agentLogger.infoSync("Device Agent initialized successfully", {
+      this.agentLogger.debugSync("Device Agent initialized successfully", {
         component: LogComponents.agent,
         mode,
         deviceApiPort: this.agentConfig.getDeviceApiPort(),
@@ -299,7 +299,7 @@ export default class DeviceAgent {
       // Add cloud backend to AgentLogger
       this.agentLogger.addBackend(cloudLogBackend);
 
-      this.agentLogger.infoSync("Cloud log backend initialized", {
+      this.agentLogger.debugSync("Cloud log backend initialized", {
         component: LogComponents.agent,
         cloudEndpoint: cloudApiEndpoint,
       });
@@ -352,7 +352,7 @@ export default class DeviceAgent {
       provisioningApiKey &&
       cloudEndpoint
     ) {
-      this.agentLogger.infoSync(
+      this.agentLogger.debugSync(
         "Auto-provisioning device with two-phase authentication",
         {
           component: LogComponents.agent,
@@ -364,7 +364,7 @@ export default class DeviceAgent {
         const macAddress = process.env.MAC_ADDRESS || (await getMacAddress());
         const osVersion = process.env.OS_VERSION || (await getOsVersion());
 
-        this.agentLogger.infoSync("System information detected", {
+        this.agentLogger.debugSync("System information detected", {
           component: LogComponents.agent,
           macAddress: macAddress
             ? `${macAddress.substring(0, 8)}...`
@@ -427,7 +427,7 @@ export default class DeviceAgent {
     // Always update agent version on startup (in case of upgrades)
     const currentVersion = process.env.AGENT_VERSION || getPackageVersion();
     if (this.deviceInfo.agentVersion !== currentVersion) {
-      this.agentLogger.infoSync("Updating agent version", {
+      this.agentLogger.debugSync("Updating agent version", {
         component: LogComponents.agent,
         oldVersion: this.deviceInfo.agentVersion || "unknown",
         newVersion: currentVersion,
@@ -439,7 +439,7 @@ export default class DeviceAgent {
     // Now set the device ID on the logger
     this.agentLogger.setDeviceId(this.deviceInfo.uuid);
 
-    this.agentLogger.infoSync("Device manager initialized", {
+    this.agentLogger.debugSync("Device manager initialized", {
       component: LogComponents.agent,
       uuid: this.deviceInfo.uuid,
       name: this.deviceInfo.deviceName || "Not set",
@@ -498,7 +498,7 @@ export default class DeviceAgent {
         mqttOptions.ca = caCert;
         mqttOptions.rejectUnauthorized = config.verifyCertificate ?? true;
         
-        this.agentLogger.infoSync("MQTT TLS enabled", {
+        this.agentLogger.debugSync("MQTT TLS enabled", {
           component: LogComponents.agent,
           protocol: config.protocol,
           verifyCertificate: config.verifyCertificate,
@@ -559,7 +559,7 @@ export default class DeviceAgent {
       this.logMonitor = new ContainerLogMonitor(docker, this.agentLogger);
       this.containerManager.setLogMonitor(this.logMonitor);
       await this.containerManager.attachLogsToAllContainers();
-      this.agentLogger.infoSync("Log monitor attached to container manager", {
+      this.agentLogger.debugSync("Log monitor attached to container manager", {
         component: LogComponents.agent,
         backendCount: this.agentLogger.getBackends().length,
       });

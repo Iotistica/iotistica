@@ -146,7 +146,7 @@ export class FeatureInitializer {
 
       await this.features.jobs.start();
 
-      logger.infoSync('Jobs Feature initialized', {
+      logger.debugSync('Jobs Feature initialized', {
         component: LogComponents.agent,
         mode: this.features.jobs.getCurrentMode(),
         mqttActive: this.features.jobs.isMqttActive(),
@@ -235,7 +235,7 @@ export class FeatureInitializer {
         const { configureAnomalyFeed } = await import('../features/sensor-publish/sensor.js');
         configureAnomalyFeed(anomalyService);
 
-        logger.infoSync('Configured edge AI anomaly detection for sensor data', {
+        logger.debugSync('Configured edge AI anomaly detection for sensor data', {
           component: LogComponents.agent,
           sensorCount: endpoints.length
         });
@@ -243,7 +243,7 @@ export class FeatureInitializer {
 
       await this.features.sensorPublish.start();
 
-      logger.infoSync('Sensor Publish Feature initialized', {
+      logger.debugSync('Sensor Publish Feature initialized', {
         component: LogComponents.agent,
         pipeCount: endpoints.length,
         enabledProtocols: Array.from(enabledEndpoints),
@@ -340,13 +340,13 @@ export class FeatureInitializer {
       const enabledProtocols = [...new Set([...configEnabledProtocols, ...dbProtocolsWithDevices])];
       
       if (enabledProtocols.length === 0) {
-        logger.infoSync('No protocols enabled, skipping Protocol Adapters initialization', {
+        logger.debugSync('No protocols enabled, skipping Protocol Adapters initialization', {
           component: LogComponents.agent
         });
         return;
       }
 
-      logger.infoSync('Initializing Protocol Adapters', {
+      logger.debugSync('Initializing Protocol Adapters', {
         component: LogComponents.agent,
         enabledProtocols
       });
@@ -359,7 +359,7 @@ export class FeatureInitializer {
 
       await this.features.sensors.start();
 
-      logger.infoSync('Protocol Adapters initialized', {
+      logger.debugSync('Protocol Adapters initialized', {
         component: LogComponents.agent,
         enabledProtocols
       });
@@ -585,7 +585,7 @@ export class FeatureInitializer {
       return;
     }
 
-    logger.infoSync('Initializing Sensor Config Handler', {
+    logger.debugSync('Initializing Sensor Config Handler', {
       component: LogComponents.agent
     });
 
@@ -632,7 +632,7 @@ export class FeatureInitializer {
         });
       }
 
-      logger.infoSync('Sensor Config Handler initialized', {
+      logger.debugSync('Sensor Config Handler initialized', {
         component: LogComponents.agent
       });
     } catch (error) {
@@ -676,7 +676,7 @@ export class FeatureInitializer {
     // Check if firewall is disabled via environment variable
     // Firewall is infrastructure security, controlled at deployment time only
     if (process.env.FIREWALL_ENABLED === 'false') {
-      logger.infoSync('Firewall disabled by environment variable', {
+      logger.debugSync('Firewall disabled by environment variable', {
         component: LogComponents.agent,
       });
       return;
@@ -726,7 +726,7 @@ export class FeatureInitializer {
 
     await this.features.firewall.initialize();
 
-    logger.infoSync('Firewall initialized', {
+    logger.debugSync('Firewall initialized', {
       component: LogComponents.agent,
       mode: firewallMode
     });

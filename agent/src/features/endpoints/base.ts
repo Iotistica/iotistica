@@ -91,7 +91,7 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
     }
 
     try {
-      this.logger.info(`Starting ${this.getProtocolName()} adapter...`);
+      this.logger.debug(`Starting ${this.getProtocolName()} adapter...`);
 
       // Initialize all enabled devices
       for (const [name, device] of this.devices) {
@@ -101,7 +101,7 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
       }
 
       this.running = true;
-      this.logger.info(`${this.getProtocolName()} adapter started successfully`);
+      this.logger.debug(`${this.getProtocolName()} adapter started successfully`);
       this.emit('started');
 
     } catch (error) {
@@ -121,7 +121,7 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
     }
 
     try {
-      this.logger.info(`Stopping ${this.getProtocolName()} adapter...`);
+      this.logger.debug(`Stopping ${this.getProtocolName()} adapter...`);
 
       // Stop all polling timers
       for (const [deviceName, timer] of this.pollTimers) {
@@ -139,7 +139,7 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
 
       this.connections.clear();
       this.running = false;
-      this.logger.info(`${this.getProtocolName()} adapter stopped successfully`);
+      this.logger.debug(`${this.getProtocolName()} adapter stopped successfully`);
       this.emit('stopped');
 
     } catch (error) {
@@ -233,7 +233,7 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
       const status = this.deviceStatuses.get(device.name)!;
       status.connected = true;
 
-      this.logger.info(`Device initialized: ${device.name}`);
+      this.logger.debug(`Device initialized: ${device.name}`);
       this.emit('device-connected', device.name);
 
       // Start polling

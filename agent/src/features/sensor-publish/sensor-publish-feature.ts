@@ -72,7 +72,7 @@ export class SensorPublishFeature extends BaseFeature {
       return;
     }
 
-    this.logger.info(`Starting Sensor Publish feature with ${sensorConfig.endpoints.length} sensors`);
+    this.logger.debug(`Starting Sensor Publish feature with ${sensorConfig.endpoints.length} sensors`);
   }
 
   /**
@@ -108,12 +108,12 @@ export class SensorPublishFeature extends BaseFeature {
       
       // Set up event handlers
       sensor.on('connected', () => {
-        this.logger.info(`Sensor '${config.name}' connected`);
+        this.logger.debug(`Sensor '${config.name}' connected`);
         this.emit('sensor-connected', config.name);
       });
       
       sensor.on('disconnected', () => {
-        this.logger.info(`Sensor '${config.name}' disconnected`);
+        this.logger.debug(`Sensor '${config.name}' disconnected`);
         this.emit('sensor-disconnected', config.name);
       });
       
@@ -223,7 +223,7 @@ export class SensorPublishFeature extends BaseFeature {
         await sensor.start();
       }
       
-      this.logger.info(`Sensor '${sensorName}' enabled`);
+      this.logger.debug(`Sensor '${sensorName}' enabled`);
       this.emit('sensor-enabled', sensorName);
     }
   }
@@ -248,7 +248,7 @@ export class SensorPublishFeature extends BaseFeature {
         await sensor.stop();
       }
       
-      this.logger.info(`Sensor '${sensorName}' disabled`);
+      this.logger.debug(`Sensor '${sensorName}' disabled`);
       this.emit('sensor-disabled', sensorName);
     }
   }
@@ -277,7 +277,7 @@ export class SensorPublishFeature extends BaseFeature {
       sensor.updateInterval(intervalMs);
     }
     
-    this.logger.info(`Updated interval for '${sensorName}': ${intervalMs}ms`);
+    this.logger.debug(`Updated interval for '${sensorName}': ${intervalMs}ms`);
     this.emit('sensor-interval-updated', sensorName, intervalMs);
   }
 

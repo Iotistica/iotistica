@@ -203,7 +203,7 @@ export function generateDefaultTargetStateConfig(
     protocols: {
       modbus: {
         enabled: true, // Enabled by default with simulator
-        tcpHost: process.env.MODBUS_TCP_HOST || 'iotistic-modbus-sim', // Docker: container name, Local: override with 'localhost'
+        tcpHost: process.env.MODBUS_TCP_HOST || 'localhost', // Docker: container name, Local: override with 'localhost'
         tcpPort: 502,
         slaveRangeStart: 1,
         slaveRangeEnd: 10,
@@ -229,7 +229,7 @@ export function generateDefaultTargetStateConfig(
     },
     intervals: {
       discoveryFullIntervalMs: 86400000, // 24 hours
-      discoveryLightIntervalMs: 60000, // 1 minute (for testing - change to 14400000 for production)
+      discoveryLightIntervalMs: 300000, // 1 minute (for testing - change to 14400000 for production)
       targetStatePollIntervalMs: 60000, // 60 seconds
       deviceReportIntervalMs: 60000, // 60 seconds (matches settings.deviceReportIntervalMs)
       metricsIntervalMs: 60000, // 60 seconds (matches settings.metricsIntervalMs)

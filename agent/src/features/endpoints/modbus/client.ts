@@ -84,7 +84,7 @@ export class ModbusClient {
    */
   async connect(): Promise<void> {
     try {
-      this.logger.info(`Connecting to Modbus device: ${this.device.name}`);
+      this.logger.debug(`Connecting to Modbus device: ${this.device.name}`);
       
       const { connection } = this.device;
       
@@ -171,7 +171,7 @@ export class ModbusClient {
         // Properly await close callback (modbus-serial uses callbacks, not promises)
         await new Promise<void>((resolve) => {
           this.client.close(() => {
-            this.logger.info(`Disconnected from Modbus device: ${this.device.name}`);
+            this.logger.debug(`Disconnected from Modbus device: ${this.device.name}`);
             resolve();
           });
         });
