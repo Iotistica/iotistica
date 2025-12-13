@@ -17,8 +17,6 @@ export async function up(knex) {
     table.dropColumn('mqttBrokerUrl');
   });
 
-  console.log('✅ Removed mqttUsername, mqttPassword, mqttBrokerUrl columns');
-  console.log('ℹ️  All MQTT configuration now in mqttBrokerConfig JSON field');
 }
 
 export async function down(knex) {
