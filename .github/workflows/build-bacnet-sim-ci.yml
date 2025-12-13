@@ -1,0 +1,321 @@
+name: CI Build & Push BACnet Simulator
+
+on: 
+  push:
+    branches:
+      - master
+    paths:
+      - 'sensors/bacnet-simulator/**'
+      - '.github/workflows/build-bacnet-sim-ci.yml'
+
+jobs:
+  test:
+    name: Validate Python & Syntax
+    runs-on: [iotistic-lab-sc]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        working-directory: ./sensors/bacnet-simulator
+        run: |
+          pip install --no-cache-dir bacpypes3==0.0.91
+          pip install pylint
+
+      - name: Check Python syntax
+        working-directory: ./sensors/bacnet-simulator
+        run: python -m py_compile bacnet_simulator.py
+
+      - name: Run pylint
+        working-directory: ./sensors/bacnet-simulator
+        run: pylint --disable=all --enable=E,F bacnet_simulator.py || true
+
+      - name: Cleanup test artifacts
+        if: always()
+        run: |
+          pip cache purge || true
+          rm -rf ~/.cache/pip || true
+
+  version:
+    name: Bump Version
+    needs: test
+    runs-on: [iotistic-lab-sc]
+    permissions:
+      contents: write
+    outputs:
+      package_version: ${{ steps.bump.outputs.package_version }}
+      sha_short: ${{ steps.bump.outputs.sha_short }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: master
+
+      - name: Bump version in package.json
+        id: bump
+        run: |
+          cd sensors/bacnet-simulator
+          
+          # Check if package.json exists, if not create it
+          if [ ! -f package.json ]; then
+            echo '{"name":"bacnet-simulator","version":"1.0.0"}' > package.json
+            git add package.json
+          fi
+          
+          # Get current version
+          CURRENT_VERSION=$(jq -r '.version' package.json)
+          echo "Current version: $CURRENT_VERSION"
+          
+          # Bump patch version (e.g., 1.0.0 -> 1.0.1)
+          IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
+          MAJOR="${VERSION_PARTS[0]}"
+          MINOR="${VERSION_PARTS[1]}"
+          PATCH="${VERSION_PARTS[2]}"
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+          
+          echo "New version: $NEW_VERSION"
+          
+          # Update package.json
+          jq --arg v "$NEW_VERSION" '.version = $v' package.json > tmp.json && mv tmp.json package.json
+          
+          # Set outputs
+          echo "package_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Commit and push version bump
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          
+          # Add and commit the version bump
+          git add sensors/bacnet-simulator/package.json
+          git commit -m "chore: bump bacnet-simulator version to ${{ steps.bump.outputs.package_version }} [skip ci]"
+          
+          # Pull with rebase strategy, auto-stashing if needed
+          git pull --rebase --autostash origin master
+          
+          # Push to master
+          git push origin HEAD:master
+
+      - name: Display version info
+        run: |
+          echo "## Version Bumped" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**New Version:** \`${{ steps.bump.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ steps.bump.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+
+  buildx:
+    name: Build & Push to Docker
+    needs: version
+    runs-on: [iotistic-lab-sc]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Display Version Update
+        run: |
+          echo "## Building Version ${{ needs.version.outputs.package_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platforms:** \`linux/amd64,linux/arm64,linux/arm/v7\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker Tags:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/bacnet-simulator:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/bacnet-simulator:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/bacnet-simulator:${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: buildx-bacnet-sim-v2-${{ github.sha }}
+          restore-keys: |
+            buildx-bacnet-sim-v2-
+
+      # Login to Docker Hub (only if tests passed)
+      - name: Login to Docker Hub
+        if: success()
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      # Build and push to registry
+      - name: Build & Push final image
+        id: docker_build
+        if: success()
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./sensors/bacnet-simulator/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
+          tags: |
+            iotistic/bacnet-simulator:latest
+            iotistic/bacnet-simulator:${{ needs.version.outputs.sha_short }}
+            iotistic/bacnet-simulator:${{ needs.version.outputs.package_version }}
+
+      - name: Cleanup Docker build artifacts
+        if: always()
+        run: |
+          # Remove dangling images
+          docker image prune -f
+          # Remove build cache
+          rm -rf /tmp/.buildx-cache || true
+          # Clean up Docker builder cache
+          docker buildx prune -f --keep-storage 5GB || true
+
+  report:
+    name: Generate Reports
+    needs: [version, buildx]
+    runs-on: [iotistic-lab-sc]
+    if: always()
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag found, using all commits"
+            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges -- sensors/bacnet-simulator/)
+          else
+            echo "Generating changelog from $PREV_TAG to HEAD"
+            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges -- sensors/bacnet-simulator/)
+          fi
+          
+          # Save to file
+          echo "$COMMITS" > changelog.txt
+          
+          # Save first 20 lines for summary
+          echo "$COMMITS" | head -20 > changelog_summary.txt
+
+      - name: Get Docker image size
+        id: image_size
+        run: |
+          # Login to Docker Hub to pull the image
+          echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          
+          # Pull the image (amd64 only for size check)
+          docker pull --platform linux/amd64 iotistic/bacnet-simulator:${{ needs.version.outputs.package_version }}
+          
+          # Get image size
+          SIZE_BYTES=$(docker image inspect iotistic/bacnet-simulator:${{ needs.version.outputs.package_version }} --format='{{.Size}}')
+          SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
+          
+          echo "size_mb=$SIZE_MB" >> $GITHUB_OUTPUT
+          echo "size_bytes=$SIZE_BYTES" >> $GITHUB_OUTPUT
+          
+          # Get layer count
+          LAYERS=$(docker image inspect iotistic/bacnet-simulator:${{ needs.version.outputs.package_version }} --format='{{len .RootFS.Layers}}')
+          echo "layers=$LAYERS" >> $GITHUB_OUTPUT
+
+      - name: Generate Summary Report
+        run: |
+          echo "# Build & Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Version Information" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platforms:** \`linux/amd64, linux/arm64, linux/arm/v7\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Docker Image" >> $GITHUB_STEP_SUMMARY
+          echo "**Size (amd64):** ${{ steps.image_size.outputs.size_mb }} MB" >> $GITHUB_STEP_SUMMARY
+          echo "**Layers:** ${{ steps.image_size.outputs.layers }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/bacnet-simulator:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/bacnet-simulator:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/bacnet-simulator:${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Changelog (BACnet Simulator)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -s changelog_summary.txt ]; then
+            cat changelog_summary.txt >> $GITHUB_STEP_SUMMARY
+            
+            TOTAL_COMMITS=$(wc -l < changelog.txt)
+            SHOWN_COMMITS=$(wc -l < changelog_summary.txt)
+            if [ $TOTAL_COMMITS -gt $SHOWN_COMMITS ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "_...and $((TOTAL_COMMITS - SHOWN_COMMITS)) more commits_" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "No bacnet-simulator commits found" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Workflow Status" >> $GITHUB_STEP_SUMMARY
+          echo "All jobs completed successfully! 🎉" >> $GITHUB_STEP_SUMMARY
+
+      - name: Final cleanup
+        if: always()
+        run: |
+          # Remove the pulled image from report job
+          docker rmi iotistic/bacnet-simulator:${{ needs.version.outputs.package_version }} || true
+          # Clean up old Docker images (keep last 3 versions)
+          docker images 'iotistic/bacnet-simulator' --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" | \
+            sort -k2 -r | tail -n +4 | awk '{print $1}' | xargs -r docker rmi || true
+          # Remove dangling images
+          docker image prune -f
+          # Clean up workspace artifacts
+          rm -f changelog.txt changelog_summary.txt || true
+
+  trigger-integration-tests:
+    name: Trigger Integration Tests
+    needs: [version, buildx, report]
+    runs-on: [iotistic-lab-sc]
+    permissions:
+      actions: write
+      contents: read
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    
+    steps:
+      - name: Trigger integration tests
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'integration-tests.yml',
+              ref: 'master',
+              inputs: {
+                bacnet_simulator_version: '${{ needs.version.outputs.package_version }}'
+              }
+            });
+            
+            console.log('Integration tests triggered with bacnet-simulator version: ${{ needs.version.outputs.package_version }}');
