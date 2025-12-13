@@ -485,7 +485,7 @@ export class Sensor extends EventEmitter {
       // Only log when messages were actually published
       if (this.messageBatch.messages.length > 0) {
         this.logger?.info(
-          `Published ${this.messageBatch.messages.length} messages (${this.messageBatch.totalBytes} bytes) from endpoint '${this.getSensorName()}'`
+          `Published ${this.messageBatch.messages.length} messages (${this.messageBatch.totalBytes} bytes) from '${this.getSensorName()}'`
         );
       }
       
