@@ -281,6 +281,14 @@ export class DiscoveryService {
         // Build protocol-specific options from environment variables
         const pluginOptions = this.getPluginOptions(protocol);
         const discovered = await plugin.discover(pluginOptions);
+        
+        this.logger?.infoSync(`${protocol} plugin returned ${discovered.length} devices`, {
+          component: LogComponents.discovery,
+          traceId,
+          protocol,
+          deviceCount: discovered.length
+        });
+        
         allDiscovered.push(...discovered);
 
         // Phase 2: Validation (optional)
@@ -337,7 +345,8 @@ export class DiscoveryService {
       traceId,
       duration,
       validated: validate,
-      protocols: selectedProtocols
+      protocols: selectedProtocols,
+      deviceNames: allDiscovered.map(d => d.name)
     });
 
     // Save to database

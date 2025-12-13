@@ -169,6 +169,12 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
       await this.closeConnection();
     }
 
+    this.logger?.infoSync(`Modbus discovery complete: ${discovered.length} devices`, {
+      component: LogComponents.discovery,
+      phase: 'discovery',
+      deviceCount: discovered.length
+    });
+
     return discovered;
   }
 

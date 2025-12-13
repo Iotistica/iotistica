@@ -1,12 +1,14 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2025-12-12 14:06:20
+# Generated: 2025-12-13 08:31:21
 # Agents: 27 to 27
 # Ports: 48507 to 48507
 
 services:
   agent-27:
     container_name: agent-27
-    image: iotistic/agent:latest
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
     restart: always
     mem_limit: 512m
     mem_reservation: 256m
@@ -20,7 +22,7 @@ services:
       - NODE_ENV=development
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=7ace06e952368d28a3bd43b0f51d87af28cb0a7e603553cb89584c9715aced7d
+      - PROVISIONING_KEY=402cf5ea3cf6929a29c6c43ce4a569980b958d748fb904f9534817ad40cab736
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)
