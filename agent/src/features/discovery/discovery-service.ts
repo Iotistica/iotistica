@@ -107,6 +107,8 @@ export interface SNMPDiscoveryOptions {
  * Coordinates protocol-specific discovery plugins
  * 
  * Events:
+ * - 'discovery-complete': Emitted after discovery completes and saves to database
+ *   Payload: { trigger: DiscoveryTrigger, validate: boolean, deviceCount: number, traceId: string }
  * - 'endpoint-enabled': Emitted when a new enabled endpoint is saved to database
  *   Payload: { protocol: string, endpoint: DeviceEndpoint }
  */
@@ -374,6 +376,14 @@ export class DiscoveryService extends EventEmitter {
 
     // Update metadata
     this.updateMetadata(trigger, validate);
+
+    // Emit discovery-complete event (triggers sensor publish reload on first boot)
+    this.emit('discovery-complete', {
+      trigger,
+      validate,
+      deviceCount: allDiscovered.length,
+      traceId
+    });
 
     return allDiscovered;
   }
@@ -919,10 +929,12 @@ export class DiscoveryService extends EventEmitter {
         });
 
         // Emit event for enabled endpoints (triggers Sensor Publish reload)
+        // During batch discovery, skip individual reloads (discovery-complete will reload all)
         if (deviceSensor.enabled) {
           this.emit('endpoint-enabled', {
             protocol: sensor.protocol,
-            endpoint: deviceSensor
+            endpoint: deviceSensor,
+            isBatchDiscovery: !!traceId // If traceId exists, this is from batch discovery
           });
         }
       } catch (error) {

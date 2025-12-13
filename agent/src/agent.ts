@@ -812,6 +812,52 @@ export default class DeviceAgent {
     // Start polling for target state
     await this.cloudSync.startPoll();
 
+    // Trigger first boot discovery after cloud config is loaded
+    // This ensures we respect cloud-configured feature flags
+    await this.runFirstBootDiscoveryIfEnabled();
+
+  }
+
+  /**
+   * Run first boot discovery if enabled
+   * Called after CloudSync initializes and fetches target state
+   */
+  private async runFirstBootDiscoveryIfEnabled(): Promise<void> {
+    if (!this.discoveryService) {
+      this.agentLogger?.debugSync('Discovery service not available, skipping first boot discovery', {
+        component: LogComponents.agent
+      });
+      return;
+    }
+
+    // Check if first boot discovery is enabled (default: true)
+    const enableFirstBootDiscovery = process.env.ENABLE_FIRST_BOOT_DISCOVERY !== 'false';
+    
+    if (!enableFirstBootDiscovery) {
+      this.agentLogger?.infoSync('First boot discovery disabled by configuration', {
+        component: LogComponents.agent
+      });
+      return;
+    }
+
+
+    try {
+      await this.discoveryService.runDiscovery({
+        trigger: 'first_boot',
+        validate: true, // Always run full validation on first boot
+      });
+
+      this.agentLogger?.infoSync('First boot discovery completed', {
+        component: LogComponents.agent
+      });
+    } catch (error) {
+      this.agentLogger?.errorSync(
+        'First boot discovery failed',
+        error as Error,
+        { component: LogComponents.agent }
+      );
+      // Don't fail startup - discovery errors are non-fatal
+    }
   }
 
 

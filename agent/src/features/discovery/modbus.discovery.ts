@@ -255,11 +255,6 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
           isOpen: true
         };
 
-        this.logger?.infoSync('Opened Modbus TCP connection', {
-          component: LogComponents.agent,
-          host: options!.tcpHost,
-          port: options?.tcpPort || 502
-        });
       }
 
       // Set timeout

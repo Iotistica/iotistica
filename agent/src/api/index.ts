@@ -77,10 +77,6 @@ export class DeviceAPI {
 	public async listen(port: number, timeout: number = 300000): Promise<void> {
 		return new Promise((resolve) => {
 			this.server = this.api.listen(port, () => {
-				this.logger?.infoSync('Device API successfully started', {
-					component: LogComponents.agent,
-					port
-				});
 				if (this.server) {
 					this.server.timeout = timeout;
 				}

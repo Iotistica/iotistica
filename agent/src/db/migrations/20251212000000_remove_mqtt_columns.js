@@ -9,7 +9,6 @@
  */
 
 export async function up(knex) {
-  console.log('🔄 Removing deprecated MQTT credential columns...');
 
   await knex.schema.alterTable('device', (table) => {
     table.dropColumn('mqttUsername');
@@ -20,7 +19,6 @@ export async function up(knex) {
 }
 
 export async function down(knex) {
-  console.log('🔄 Restoring MQTT credential columns...');
 
   await knex.schema.alterTable('device', (table) => {
     table.string('mqttUsername', 255).nullable();
@@ -28,6 +26,4 @@ export async function down(knex) {
     table.string('mqttBrokerUrl', 255).nullable();
   });
 
-  console.log('✅ Restored mqttUsername, mqttPassword, mqttBrokerUrl columns');
-  console.log('⚠️  Note: Data will be empty - you will need to re-provision devices');
 }

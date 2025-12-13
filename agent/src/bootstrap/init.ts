@@ -409,7 +409,19 @@ export class FeatureInitializer {
       return;
     }
 
+    // Listen for individual endpoint-enabled events (real-time updates)
     this.features.discoveryService.on('endpoint-enabled', async (data: any) => {
+      // Skip individual reloads during batch discovery - discovery-complete handler will reload everything
+      if (data.isBatchDiscovery) {
+        logger.debugSync('Skipping individual reload during batch discovery', {
+          component: LogComponents.agent,
+          protocol: data.protocol,
+          endpoint: data.endpoint.name,
+          note: 'Will reload after discovery completes'
+        });
+        return;
+      }
+
       logger.infoSync('New enabled endpoint discovered, reloading Sensor Publish', {
         component: LogComponents.agent,
         protocol: data.protocol,
@@ -441,6 +453,54 @@ export class FeatureInitializer {
       }
     });
 
+    // Listen for discovery-complete events (batch reload after full discovery)
+    this.features.discoveryService.on('discovery-complete', async (data: any) => {
+      logger.infoSync('Discovery completed, checking for reload', {
+        component: LogComponents.agent,
+        trigger: data.trigger,
+        deviceCount: data.deviceCount
+      });
+
+      // Only reload if discovery found devices AND (first boot OR currently no sensor publish)
+      if (data.deviceCount > 0 && (data.trigger === 'first_boot' || !this.features.sensorPublish)) {
+        try {
+          // Reload protocol adapters first (so they pick up discovered devices from database)
+          logger.infoSync('Reloading protocol adapters after discovery', {
+            component: LogComponents.agent,
+            deviceCount: data.deviceCount
+          });
+
+          // Stop existing protocol adapters if running
+          if (this.features.sensors) {
+            await this.features.sensors.stop();
+            this.features.sensors = undefined;
+          }
+
+          // Reinitialize protocol adapters (will load devices from database)
+          await this.initProtocolAdapters();
+
+          // Then reload Sensor Publish to connect to the sockets
+          if (this.features.sensorPublish) {
+            await this.features.sensorPublish.stop();
+            this.features.sensorPublish = undefined;
+          }
+
+          // Reinitialize Sensor Publish with discovered endpoints
+          await this.initSensorPublish();
+
+          logger.infoSync('Protocol adapters and Sensor Publish reloaded after discovery', {
+            component: LogComponents.agent,
+            trigger: data.trigger,
+            deviceCount: data.deviceCount
+          });
+        } catch (error) {
+          logger.errorSync('Failed to reload after discovery', error as Error, {
+            component: LogComponents.agent
+          });
+        }
+      }
+    });
+
     logger.infoSync('Endpoint auto-reload watcher initialized', {
       component: LogComponents.agent,
       note: 'Sensor Publish will reload automatically when discovery finds new enabled endpoints'
@@ -466,6 +526,22 @@ export class FeatureInitializer {
       protocols
     });
 
+    // CRITICAL: Stop Sensor Publish FIRST to avoid reconnect errors when socket is deleted
+    if (this.features.sensorPublish) {
+      try {
+        await this.features.sensorPublish.stop();
+        logger.debugSync('Stopped Sensor Publish before protocol adapter restart', {
+          component: LogComponents.agent
+        });
+      } catch (error) {
+        logger.warnSync('Error stopping sensor publish', {
+          component: LogComponents.agent,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      this.features.sensorPublish = undefined;
+    }
+
     // Stop existing protocol adapters if running
     if (this.features.sensors) {
       try {
@@ -487,27 +563,12 @@ export class FeatureInitializer {
     // Always reinitialize protocol adapters (will check database even if config is empty)
     await this.initProtocolAdapters();
 
-    // Reinitialize sensor_publish since protocol adapters changed
-    // Sensor outputs (Unix sockets) are now available
+    // Reinitialize Sensor Publish now that protocol adapters are restarted
     if (this.features.sensors) {
       logger.infoSync('Reinitializing Sensor Publish after protocol adapter changes', {
         component: LogComponents.agent
       });
 
-      // Stop existing sensor publish if running
-      if (this.features.sensorPublish) {
-        try {
-          await this.features.sensorPublish.stop();
-        } catch (error) {
-          logger.warnSync('Error stopping sensor publish', {
-            component: LogComponents.agent,
-            error: error instanceof Error ? error.message : String(error)
-          });
-        }
-        this.features.sensorPublish = undefined;
-      }
-
-      // Restart sensor publish with new endpoints
       await this.initSensorPublish();
     }
 
