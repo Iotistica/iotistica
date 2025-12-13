@@ -270,7 +270,7 @@ export class AgentConfig extends EventEmitter {
       logBatchSize: cloudLogging?.logBatchSize ?? deviceLogging?.logBatchSize ?? 500,
       logFlushIntervalMs: cloudLogging?.logFlushIntervalMs ?? deviceLogging?.logFlushIntervalMs ?? 30000,
       logDir: process.env.LOG_DIR ?? deviceSettings?.logDir ?? "/app/data/logs",
-      logLevel: process.env.LOG_LEVEL ?? deviceLogging?.level ?? "info",
+      logLevel: process.env.LOG_LEVEL ?? cloudLogging?.level ?? deviceLogging?.level ?? "info",
     };
   }
 
