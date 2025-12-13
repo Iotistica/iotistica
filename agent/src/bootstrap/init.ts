@@ -309,7 +309,7 @@ export class FeatureInitializer {
         .map(([key]) => key);
 
       // Check database for enabled devices (even if config doesn't enable the protocol)
-      const { DeviceEndpointModel } = await import('../db/models/endpoint.model');
+      const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
       const dbProtocolsWithDevices: string[] = [];
       
       for (const protocol of ['modbus', 'opcua', 'snmp', 'can']) {
