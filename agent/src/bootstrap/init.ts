@@ -238,7 +238,7 @@ export class FeatureInitializer {
         pipeCount: endpoints.length,
         enabledProtocols: Array.from(enabledEndpoints),
         pipes: endpoints.map(s => s.addr),
-        mqttTopicPattern: 'iot/device/{deviceUuid}/sensor/{topic}'
+        mqttTopicPattern: 'iot/device/{deviceUuid}/endpoints/{topic}'
       });
     } catch (error) {
       logger.errorSync('Failed to initialize Sensor Publish Feature', error as Error, {

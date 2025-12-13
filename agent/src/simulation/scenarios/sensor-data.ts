@@ -20,7 +20,7 @@ import type {
  * Sensor data simulation scenario
  * 
  * Generates synthetic sensor data matching the format of real sensor-publish feature:
- * - MQTT Topic: iot/device/{deviceUuid}/sensor/{mqttTopic}
+ * - MQTT Topic: iot/device/{deviceUuid}/endpoints/{mqttTopic}
  * - Payload: { sensor: "name", timestamp: "ISO", messages: ["data"] }
  */
 export class SensorDataSimulation implements SimulationScenario {
@@ -145,7 +145,7 @@ export class SensorDataSimulation implements SimulationScenario {
 	 * Publish sensor data for all Configured Endpoints
 	 * 
 	 * Matches the real sensor-publish format:
-	 * - Topic: iot/device/{deviceUuid}/sensor/{mqttTopic}
+	 * - Topic: iot/device/{deviceUuid}/endpoints/{mqttTopic}
 	 * - Payload: { sensor: "name", timestamp: "ISO", messages: [data] }
 	 */
 	private async publishSensorData(): Promise<void> {
@@ -156,7 +156,7 @@ export class SensorDataSimulation implements SimulationScenario {
 			// Skip if MQTT not connected (e.g., device not provisioned)
 			if (this.mqttManager && this.deviceUuid && this.mqttManager.isConnected()) {
 				try {
-					const topic = `iot/device/${this.deviceUuid}/sensor/${sensor.metric}`;
+					const topic = `iot/device/${this.deviceUuid}/endpoints/${sensor.metric}`;
 					const payload = JSON.stringify({
 						sensor: sensor.metric,
 						timestamp: new Date().toISOString(),
