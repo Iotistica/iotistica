@@ -56,6 +56,18 @@ jobs:
         with:
           ref: master
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Build nr-devices-plugin
+        run: |
+          cd nodered/data/@iotistic/nr-devices-plugin
+          npm ci
+          npm run build
+          echo "✅ nr-devices-plugin built successfully"
+
       - name: Display Version Update
         run: |
           echo "## Building Version ${{ needs.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
