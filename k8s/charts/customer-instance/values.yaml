@@ -189,7 +189,7 @@ nodered:
   enabled: false  # Disabled by default, enable per customer
   image:
     repository: iotistic/nodered
-    tag: latest
+    tag: ""  # REQUIRED: Must specify version (e.g., 2025.12.13-2294) - do not use 'latest' in production
     pullPolicy: IfNotPresent
   replicas: 1
   port: 1880

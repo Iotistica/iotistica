@@ -87,13 +87,21 @@ jobs:
       - name: Verify nr-auth
         run: |
           cd nodered/data/@iotistic/nr-auth
-          npm ci --production
+          if [ -f package-lock.json ]; then
+            npm ci --production
+          else
+            npm install --production
+          fi
           echo "✅ nr-auth verified"
 
       - name: Verify nr-storage
         run: |
           cd nodered/data/@iotistic/nr-storage
-          npm ci --production
+          if [ -f package-lock.json ]; then
+            npm ci --production
+          else
+            npm install --production
+          fi
           echo "✅ nr-storage verified"
 
       - name: Upload plugin artifacts
