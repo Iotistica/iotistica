@@ -1,4 +1,4 @@
-name: Release API, Dashboard, Node-RED, MQTT Monitor, Housekeeper, and Postoffice
+name: Release All
 
 on:
   push:
