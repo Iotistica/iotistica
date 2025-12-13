@@ -25,6 +25,7 @@
  */
 
 import crypto from 'crypto';
+import { EventEmitter } from 'events';
 import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import { DeviceEndpointModel, DeviceEndpoint } from '../../db/models/endpoint.model';
@@ -101,7 +102,15 @@ export interface SNMPDiscoveryOptions {
   v3PrivKey?: string;
 }
 
-export class DiscoveryService {
+/**
+ * Discovery Service
+ * Coordinates protocol-specific discovery plugins
+ * 
+ * Events:
+ * - 'endpoint-enabled': Emitted when a new enabled endpoint is saved to database
+ *   Payload: { protocol: string, endpoint: DeviceEndpoint }
+ */
+export class DiscoveryService extends EventEmitter {
   private logger?: AgentLogger;
   private agentConfig?: AgentConfig;
   private metadata: DiscoveryMetadata;
@@ -119,6 +128,7 @@ export class DiscoveryService {
    *   await discovery.init();
    */
   constructor(logger?: AgentLogger, agentConfig?: AgentConfig) {
+    super();
     this.logger = logger;
     this.agentConfig = agentConfig;
     this.metadata = this.loadMetadata();
@@ -897,6 +907,14 @@ export class DiscoveryService {
           traceId,
           confidence: sensor.confidence
         });
+
+        // Emit event for enabled endpoints (triggers Sensor Publish reload)
+        if (deviceSensor.enabled) {
+          this.emit('endpoint-enabled', {
+            protocol: sensor.protocol,
+            endpoint: deviceSensor
+          });
+        }
       } catch (error) {
         this.logger?.errorSync(
           `Failed to save sensor "${sensor.name}"`,

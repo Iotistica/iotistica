@@ -91,6 +91,8 @@ services:
 
     
 volumes:
+  application-manager-data:
+    driver: local
   ml-models:
     driver: local
   neo4j-data:

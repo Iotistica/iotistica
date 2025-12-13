@@ -158,6 +158,9 @@ export default class DeviceAgent {
 
       // Initialize Discovery Service
       await this.initDiscoveryService();
+      
+      // Update feature context with discoveryService
+      featureContext.discoveryService = this.discoveryService;
 
       // Initialize sensor features (sensor publish + protocol adapters)
       await this.featureInitializer.initSensorFeatures();

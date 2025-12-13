@@ -31,6 +31,7 @@ export interface FeatureContext {
   cloudApiEndpoint: string;
   deviceApiPort: number;
   anomalyService?: any;
+  discoveryService?: any; // Discovery service for endpoint auto-reload
 }
 
 export interface InitializedFeatures {
@@ -40,6 +41,7 @@ export interface InitializedFeatures {
   sensorConfigHandler?: SensorConfigHandler;
   updater?: AgentUpdater;
   firewall?: AgentFirewall;
+  discoveryService?: any; // Discovery service (passed from Agent)
 }
 
 /**
@@ -72,12 +74,20 @@ export class FeatureInitializer {
     // Initialize sensor publish (connects to sockets created by protocol adapters)
     await this.initSensorPublish();
     
+    // Store discoveryService reference if available
+    if (this.context.discoveryService) {
+      this.features.discoveryService = this.context.discoveryService;
+    }
+    
     // Store current protocols BEFORE setting up listener to prevent duplicate initialization
     const protocols = this.context.stateReconciler.getTargetState()?.config?.protocols || {};
     this.currentProtocols = this.deepClone(protocols);
     
     // Set up event-driven protocol adapter initialization for future changes
     this.setupProtocolAdapterListener();
+    
+    // Watch for new enabled endpoints from discovery (auto-reload Sensor Publish)
+    this.setupEndpointAutoReloadListener();
   }
 
   /**
@@ -382,6 +392,58 @@ export class FeatureInitializer {
           component: LogComponents.agent
         });
       }
+    });
+  }
+
+  /**
+   * Setup listener for endpoint-enabled events from discovery
+   * Automatically reloads Sensor Publish when new enabled endpoints are discovered
+   */
+  private setupEndpointAutoReloadListener(): void {
+    const { logger } = this.context;
+    
+    if (!this.features.discoveryService) {
+      logger.debugSync('Discovery service not available, skipping endpoint auto-reload setup', {
+        component: LogComponents.agent
+      });
+      return;
+    }
+
+    this.features.discoveryService.on('endpoint-enabled', async (data: any) => {
+      logger.infoSync('New enabled endpoint discovered, reloading Sensor Publish', {
+        component: LogComponents.agent,
+        protocol: data.protocol,
+        endpoint: data.endpoint.name
+      });
+
+      try {
+        // Stop existing Sensor Publish
+        if (this.features.sensorPublish) {
+          await this.features.sensorPublish.stop();
+          logger.debugSync('Stopped Sensor Publish for reload', {
+            component: LogComponents.agent
+          });
+          this.features.sensorPublish = undefined;
+        }
+
+        // Reinitialize with new endpoints
+        await this.initSensorPublish();
+
+        logger.infoSync('Sensor Publish reloaded successfully', {
+          component: LogComponents.agent,
+          newEndpoint: data.endpoint.name
+        });
+      } catch (error) {
+        logger.errorSync('Failed to reload Sensor Publish', error as Error, {
+          component: LogComponents.agent,
+          endpoint: data.endpoint.name
+        });
+      }
+    });
+
+    logger.infoSync('Endpoint auto-reload watcher initialized', {
+      component: LogComponents.agent,
+      note: 'Sensor Publish will reload automatically when discovery finds new enabled endpoints'
     });
   }
 
