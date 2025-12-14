@@ -2,7 +2,6 @@
 set -e
 
 # Insert default sensor outputs if not exists (idempotent)
-echo "Ensuring default endpoints outputs exist..."
 node -e "
 const Database = require('better-sqlite3');
 const db = new Database('/app/data/device.sqlite');
@@ -23,22 +22,16 @@ if (tableExists) {
   protocols.forEach(protocol => {
     const exists = db.prepare('SELECT id FROM endpoint_outputs WHERE protocol = ?').get(protocol);
     if (!exists) {
-      console.log(\`Inserting default output for \${protocol}\`);
       db.prepare(\`
         INSERT INTO endpoint_outputs (protocol, socket_path, data_format, delimiter, include_timestamp, include_device_name, logging)
         VALUES (?, ?, 'json', '\\n', 1, 1, ?)
       \`).run(protocol, socketPaths[protocol], JSON.stringify({ level: 'info' }));
     }
   });
-  
-  console.log('✓ Default endpoint outputs configured');
 }
 
 db.close();
-" || {
-    echo "Warning: Failed to ensure default endpoint outputs, continuing anyway..."
-}
+" 2>/dev/null || true
 
 # Start the agent
-echo "Starting agent..."
 exec "$@"

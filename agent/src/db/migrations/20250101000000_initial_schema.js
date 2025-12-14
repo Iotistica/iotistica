@@ -51,8 +51,6 @@ export async function up(knex) {
     table.timestamp('lastSeenAt').nullable();
   });
 
-  console.log('✓ Created device table');
-
   // ===== State Snapshot Table =====
   // Tracks current and target container state
   await knex.schema.createTable('stateSnapshot', (table) => {
@@ -65,8 +63,6 @@ export async function up(knex) {
     table.index('type');
     table.index('stateHash');
   });
-
-  console.log('✓ Created stateSnapshot table');
 
   // ===== Endpoints Table =====
   // Protocol endpoint configurations (formerly sensors/protocol_adapter_devices)
@@ -89,8 +85,6 @@ export async function up(knex) {
     table.index('uuid');
   });
 
-  console.log('✓ Created endpoints table');
-
   // ===== Endpoint Outputs Table =====
   // Output configuration per protocol (where data goes after collection)
   await knex.schema.createTable('endpoint_outputs', (table) => {
@@ -105,8 +99,6 @@ export async function up(knex) {
     table.timestamp('created_at').notNullable().defaultTo(knex.fn.now());
     table.timestamp('updated_at').notNullable().defaultTo(knex.fn.now());
   });
-
-  console.log('✓ Created endpoint_outputs table');
 
   // Insert default output configurations
   await knex('endpoint_outputs').insert([
@@ -130,8 +122,6 @@ export async function up(knex) {
     }
   ]);
 
-  console.log('✓ Inserted default endpoint outputs');
-
   // ===== Agent Metadata Table =====
   // Discovery metadata and operational state
   await knex.schema.createTable('agent_metadata', (table) => {
@@ -140,9 +130,6 @@ export async function up(knex) {
     table.timestamp('createdAt').defaultTo(knex.fn.now());
     table.timestamp('updatedAt').defaultTo(knex.fn.now());
   });
-
-  console.log('✓ Created agent_metadata table');
-  console.log('✓ Database schema initialized');
 }
 
 export async function down(knex) {

@@ -22,10 +22,6 @@ export async function up(knex) {
       include_device_name: true,
       logging: JSON.stringify({ level: 'info' })
     });
-    
-    console.log('✓ Added OPC UA output configuration');
-  } else {
-    console.log('✓ OPC UA output configuration already exists');
   }
 }
 
@@ -33,6 +29,4 @@ export async function down(knex) {
   await knex('endpoint_outputs')
     .where('protocol', 'opcua')
     .delete();
-  
-  console.log('✓ Removed OPC UA output configuration');
 }
