@@ -43,7 +43,6 @@ jobs:
       release_version: ${{ steps.set_version.outputs.release_version }}
       api_src_tag: ${{ steps.verify.outputs.api_src_tag }}
       dashboard_src_tag: ${{ steps.verify.outputs.dashboard_src_tag }}
-      nodered_src_tag: ${{ steps.verify.outputs.nodered_src_tag }}
       mqtt_src_tag: ${{ steps.verify.outputs.mqtt_src_tag }}
       housekeeper_src_tag: ${{ steps.verify.outputs.housekeeper_src_tag }}
       postoffice_src_tag: ${{ steps.verify.outputs.postoffice_src_tag }}
@@ -107,14 +106,12 @@ jobs:
           # Read versions from package.json in the repo at this commit
           API_VERSION=$(jq -r '.version' api/package.json)
           DASHBOARD_VERSION=$(jq -r '.version' dashboard/package.json)
-          NODERED_VERSION=$(date +%Y.%m.%d)-$(git rev-list --count HEAD)
           MQTT_MONITOR_VERSION=$(jq -r '.version' mqtt-monitor/package.json)
           HOUSEKEEPER_VERSION=$(jq -r '.version' housekeeper/package.json)
           POSTOFFICE_VERSION=$(jq -r '.version' postoffice/package.json)
 
           echo "api_pkg=$API_VERSION" >> $GITHUB_OUTPUT
           echo "dashboard_pkg=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
-          echo "nodered_pkg=$NODERED_VERSION" >> $GITHUB_OUTPUT
           echo "mqtt_pkg=$MQTT_MONITOR_VERSION" >> $GITHUB_OUTPUT
           echo "housekeeper_pkg=$HOUSEKEEPER_VERSION" >> $GITHUB_OUTPUT
           echo "postoffice_pkg=$POSTOFFICE_VERSION" >> $GITHUB_OUTPUT
@@ -122,7 +119,6 @@ jobs:
           echo "Package.json versions:"
           echo "  API: $API_VERSION"
           echo "  Dashboard: $DASHBOARD_VERSION"
-          echo "  Node-RED: $NODERED_VERSION"
           echo "  MQTT Monitor: $MQTT_MONITOR_VERSION"
           echo "  Housekeeper: $HOUSEKEEPER_VERSION"
           echo "  Postoffice: $POSTOFFICE_VERSION"
@@ -143,7 +139,6 @@ jobs:
           if [ "${{ github.event.inputs.force_latest }}" = "true" ]; then
             echo "api_src_tag=latest" >> $GITHUB_OUTPUT
             echo "dashboard_src_tag=latest" >> $GITHUB_OUTPUT
-            echo "nodered_src_tag=latest" >> $GITHUB_OUTPUT
             echo "mqtt_src_tag=latest" >> $GITHUB_OUTPUT
             echo "housekeeper_src_tag=latest" >> $GITHUB_OUTPUT
             echo "postoffice_src_tag=latest" >> $GITHUB_OUTPUT
@@ -152,7 +147,6 @@ jobs:
             echo "Image verification complete (forced latest):"
             echo "  API  -> latest"
             echo "  Dashboard -> latest"
-            echo "  Node-RED -> latest"
             echo "  MQTT Monitor -> latest"
             echo "  Housekeeper -> latest"
             echo "  Postoffice -> latest"
@@ -191,14 +185,12 @@ jobs:
           # Check each service
           API_SRC=$(check_image "api" "${{ steps.pkg_versions.outputs.api_pkg }}" || true)
           DASHBOARD_SRC=$(check_image "dashboard" "${{ steps.pkg_versions.outputs.dashboard_pkg }}" || true)
-          NODERED_SRC=$(check_image "nodered" "${{ steps.pkg_versions.outputs.nodered_pkg }}" || true)
           MQTT_SRC=$(check_image "mqtt-monitor" "${{ steps.pkg_versions.outputs.mqtt_pkg }}" || true)
           HOUSEKEEPER_SRC=$(check_image "housekeeper" "${{ steps.pkg_versions.outputs.housekeeper_pkg }}" || true)
           POSTOFFICE_SRC=$(check_image "postoffice" "${{ steps.pkg_versions.outputs.postoffice_pkg }}" || true)
 
           echo "api_src_tag=$API_SRC" >> $GITHUB_OUTPUT
           echo "dashboard_src_tag=$DASHBOARD_SRC" >> $GITHUB_OUTPUT
-          echo "nodered_src_tag=$NODERED_SRC" >> $GITHUB_OUTPUT
           echo "mqtt_src_tag=$MQTT_SRC" >> $GITHUB_OUTPUT
           echo "housekeeper_src_tag=$HOUSEKEEPER_SRC" >> $GITHUB_OUTPUT
           echo "postoffice_src_tag=$POSTOFFICE_SRC" >> $GITHUB_OUTPUT
@@ -207,14 +199,12 @@ jobs:
           echo "Image verification complete:"
           echo "  API  -> $API_SRC"
           echo "  Dashboard -> $DASHBOARD_SRC"
-          echo "  Node-RED -> $NODERED_SRC"
           echo "  MQTT Monitor -> $MQTT_SRC"
           echo "  Housekeeper -> $HOUSEKEEPER_SRC"
           echo "  Postoffice -> $POSTOFFICE_SRC"
 
       - name: Summary for step output
         run: |
-          echo "##Node-RED | \`${{ steps.pkg_versions.outputs.nodered_pkg }}\` | \`${{ steps.verify.outputs.nodered_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "|  Release validation" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Release:** \`${{ steps.set_version.outputs.release_version }}\`" >> $GITHUB_STEP_SUMMARY
@@ -225,7 +215,7 @@ jobs:
           echo "| Dashboard | \`${{ steps.pkg_versions.outputs.dashboard_pkg }}\` | \`${{ steps.verify.outputs.dashboard_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| MQTT Monitor | \`${{ steps.pkg_versions.outputs.mqtt_pkg }}\` | \`${{ steps.verify.outputs.mqtt_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Housekeeper | \`${{ steps.pkg_versions.outputs.housekeeper_pkg }}\` | \`${{ steps.verify.outputs.housekeeper_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Postoffice | \`${{ steps.pkg_versions.outputs.postoffice_pkg }}\` | \`${{ steps.verify.outputs.postoffice_src_tag }}\` |" >> $GITHUB_STEP_SUMMARYnodered_src_tag != 'skip' || needs.validate-release.outputs.
+          echo "| Postoffice | \`${{ steps.pkg_versions.outputs.postoffice_pkg }}\` | \`${{ steps.verify.outputs.postoffice_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
 
   retag-and-push:
     name: Retag & push release images
@@ -256,8 +246,7 @@ jobs:
             echo "Processing $svc: ${DOCKER_ORG}/${svc}:${src_tag} -> ${DOCKER_ORG}/${svc}:${RELEASE}"
             docker pull "${DOCKER_ORG}/${svc}:${src_tag}"
             docker tag "${DOCKER_ORG}/${svc}:${src_tag}" "${DOCKER_ORG}/${svc}:${RELEASE}"
-            docker push "$nodered" "${{ needs.validate-release.outputs.nodered_src_tag }}"
-          retag_and_push "{DOCKER_ORG}/${svc}:${RELEASE}"
+            docker push "${DOCKER_ORG}/${svc}:${RELEASE}"
             echo "Retagged & pushed ${DOCKER_ORG}/${svc}:${RELEASE}"
           }
 
