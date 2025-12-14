@@ -141,6 +141,8 @@ jobs:
 
           # If force_latest is true, use "latest" for all services
           if [ "${{ github.event.inputs.force_latest }}" = "true" ]; then
+            echo "api_src_tag=latest" >> $GITHUB_OUTPUT
+            echo "dashboard_src_tag=latest" >> $GITHUB_OUTPUT
             echo "nodered_src_tag=latest" >> $GITHUB_OUTPUT
             echo "mqtt_src_tag=latest" >> $GITHUB_OUTPUT
             echo "housekeeper_src_tag=latest" >> $GITHUB_OUTPUT
@@ -150,10 +152,7 @@ jobs:
             echo "Image verification complete (forced latest):"
             echo "  API  -> latest"
             echo "  Dashboard -> latest"
-            echo "  Node-RED
-            echo "Image verification complete (forced latest):"
-            echo "  API  -> latest"
-            echo "  Dashboard -> latest"
+            echo "  Node-RED -> latest"
             echo "  MQTT Monitor -> latest"
             echo "  Housekeeper -> latest"
             echo "  Postoffice -> latest"
