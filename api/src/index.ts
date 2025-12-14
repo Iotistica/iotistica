@@ -90,11 +90,11 @@ app.options('*', cors());
 
 // Support compressed (gzip) request bodies
 app.use(express.json({ 
-  limit: '10mb',
+  limit: '50mb',  // Increased for high agent count (100+ agents sending logs)
   inflate: true  // Automatically decompress gzip/deflate
 }));
 app.use(express.urlencoded({ 
-  limit: '10mb', 
+  limit: '50mb',  // Increased for high agent count
   extended: true,
   inflate: true  // Automatically decompress gzip/deflate
 }));
