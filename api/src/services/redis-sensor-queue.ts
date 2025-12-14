@@ -72,22 +72,42 @@ class RedisSensorQueue {
 
   /**
    * Initialize consumer group (idempotent)
+   * Retries on failure to handle Redis not being ready
    */
   async initialize(): Promise<void> {
-    try {
-      // Create consumer group (fails if already exists, that's ok)
-      await this.redis.xgroup('CREATE', this.streamKey, this.consumerGroup, '0', 'MKSTREAM');
-      logger.info('Created Redis consumer group for sensors', {
-        stream: this.streamKey,
-        group: this.consumerGroup
-      });
-    } catch (err: any) {
-      if (err.message.includes('BUSYGROUP')) {
-        logger.info('Redis consumer group already exists', { group: this.consumerGroup });
-      } else {
-        throw err;
+    const maxRetries = 5;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // Create consumer group (fails if already exists, that's ok)
+        await this.redis.xgroup('CREATE', this.streamKey, this.consumerGroup, '0', 'MKSTREAM');
+        logger.info('Created Redis consumer group for sensors', {
+          stream: this.streamKey,
+          group: this.consumerGroup
+        });
+        return; // Success
+      } catch (err: any) {
+        if (err.message.includes('BUSYGROUP')) {
+          logger.info('Redis consumer group already exists', { group: this.consumerGroup });
+          return; // Already exists, success
+        }
+        
+        lastError = err;
+        logger.warn(`Failed to create consumer group (attempt ${attempt}/${maxRetries})`, {
+          error: err.message,
+          group: this.consumerGroup
+        });
+        
+        if (attempt < maxRetries) {
+          // Wait before retry (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, Math.min(1000 * attempt, 5000)));
+        }
       }
     }
+
+    // All retries failed
+    throw new Error(`Failed to initialize Redis consumer group after ${maxRetries} attempts: ${lastError?.message}`);
   }
 
   /**
@@ -209,9 +229,25 @@ class RedisSensorQueue {
         await this.processBatch(entries);
 
       } catch (err: any) {
-        logger.error('Error in sensor worker loop', { error: err.message });
-        // Don't crash, wait and retry
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Check if consumer group disappeared (Redis restart/flush)
+        if (err.message && err.message.includes('NOGROUP')) {
+          logger.warn('Consumer group missing, reinitializing...', {
+            group: this.consumerGroup,
+            stream: this.streamKey
+          });
+          try {
+            await this.initialize();
+            logger.info('Consumer group reinitialized successfully');
+            continue; // Retry immediately
+          } catch (initErr: any) {
+            logger.error('Failed to reinitialize consumer group', { error: initErr.message });
+            await new Promise(resolve => setTimeout(resolve, 5000));
+          }
+        } else {
+          logger.error('Error in sensor worker loop', { error: err.message });
+          // Don't crash, wait and retry
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
       }
     }
   }
