@@ -186,6 +186,11 @@ jobs:
             
             # No versioned image found
             echo "skip"
+          }
+          
+          # Check each service
+          API_SRC=$(check_image "api" "${{ steps.pkg_versions.outputs.api_pkg }}" || true)
+          DASHBOARD_SRC=$(check_image "dashboard" "${{ steps.pkg_versions.outputs.dashboard_pkg }}" || true)
           NODERED_SRC=$(check_image "nodered" "${{ steps.pkg_versions.outputs.nodered_pkg }}" || true)
           MQTT_SRC=$(check_image "mqtt-monitor" "${{ steps.pkg_versions.outputs.mqtt_pkg }}" || true)
           HOUSEKEEPER_SRC=$(check_image "housekeeper" "${{ steps.pkg_versions.outputs.housekeeper_pkg }}" || true)
@@ -202,12 +207,7 @@ jobs:
           echo "Image verification complete:"
           echo "  API  -> $API_SRC"
           echo "  Dashboard -> $DASHBOARD_SRC"
-          echo "  Node-RED -> $NODEREOFFICE_SRC" >> $GITHUB_OUTPUT
-
-          echo ""
-          echo "Image verification complete:"
-          echo "  API  -> $API_SRC"
-          echo "  Dashboard -> $DASHBOARD_SRC"
+          echo "  Node-RED -> $NODERED_SRC"
           echo "  MQTT Monitor -> $MQTT_SRC"
           echo "  Housekeeper -> $HOUSEKEEPER_SRC"
           echo "  Postoffice -> $POSTOFFICE_SRC"
