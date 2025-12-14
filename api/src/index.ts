@@ -34,6 +34,7 @@ import { router as noderedStorageRoutes } from './routes/nodered-storage';
 import { trafficLogger} from "./middleware/traffic-logger";
 import { startTrafficFlushService, stopTrafficFlushService } from './services/traffic-flush.service';
 import alertsRoutes from './routes/alerts';
+import prometheusRoutes from './routes/prometheus';
 
 // Import jobs
 
@@ -151,6 +152,9 @@ app.get('/health', (req, res) => {
 // Setup API documentation
 import { setupApiDocs } from './docs';
 setupApiDocs(app, API_BASE);
+
+// Prometheus metrics endpoint (no auth, no versioning - standard /metrics path)
+app.use(prometheusRoutes);
 
 // Mount route modules - All routes now use centralized versioning via API_BASE
 app.use(`${API_BASE}/auth`, authRoutes);
