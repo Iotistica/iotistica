@@ -2,14 +2,23 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install build dependencies for ARM platforms (gcc required for cffi compilation)
+# Install build dependencies for ARM platforms
+# gcc, g++, make: C/C++ compiler toolchain
+# libffi-dev: Foreign Function Interface library headers
+# python3-dev: Python development headers
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc libffi-dev && \
+    apt-get install -y --no-install-recommends \
+        gcc \
+        g++ \
+        make \
+        libffi-dev \
+        python3-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install dependencies
-RUN pip install --no-cache-dir asyncua==1.0.6
+# Upgrade pip and install dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir asyncua==1.0.6
 
 # Copy simulator script
 COPY sensors/opcua-simulator/opcua_simulator.py .
