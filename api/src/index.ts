@@ -35,6 +35,7 @@ import { trafficLogger} from "./middleware/traffic-logger";
 import { startTrafficFlushService, stopTrafficFlushService } from './services/traffic-flush.service';
 import alertsRoutes from './routes/alerts';
 import prometheusRoutes from './routes/prometheus';
+import endpointsDataRoutes from './routes/endpoints-data';
 
 // Import jobs
 
@@ -157,6 +158,7 @@ setupApiDocs(app, API_BASE);
 app.use(prometheusRoutes);
 
 // Mount route modules - All routes now use centralized versioning via API_BASE
+app.use(`${API_BASE}/endpoints`, endpointsDataRoutes);  // Generic endpoints data API
 app.use(`${API_BASE}/auth`, authRoutes);
 app.use(`${API_BASE}/users`, usersRoutes);
 app.use(API_BASE, licenseRoutes);

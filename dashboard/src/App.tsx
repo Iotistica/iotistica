@@ -19,6 +19,7 @@ import { Menu, Activity, BarChart3, Radio, CalendarClock, Clock, Package, Trendi
 import { buildApiUrl } from "./config/api";
 import { SensorHealthDashboard } from "./pages/SensorHealthDashboard";
 import { SensorsPage } from "./pages/SensorsPage";
+import { EndpointsVisualizationPage } from "./pages/EndpointsVisualizationPage";
 import HousekeeperPage from "./pages/HousekeeperPage";
 import DeviceSettingsPage from "./pages/DeviceSettingsPage";
 import AccountPage from "./pages/AccountPage";
@@ -62,7 +63,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [deviceDialogOpen, setDeviceDialogOpen] = useState(false);
   const [editingDevice, setEditingDevice] = useState<Device | null>(null);
-  const [currentView, setCurrentView] = useState<'metrics' | 'sensors' | 'mqtt' | 'jobs' | 'applications' | 'timeline' | 'usage' | 'analytics' | 'security' | 'maintenance' | 'logs' | 'settings' | 'tags' | 'tag-definitions' | 'account' | 'users' | 'profile' | 'dashboard' | 'digital-twin' | 'event-debugger'>('dashboard');
+  const [currentView, setCurrentView] = useState<'metrics' | 'sensors' | 'endpoints' | 'mqtt' | 'jobs' | 'applications' | 'timeline' | 'usage' | 'analytics' | 'security' | 'maintenance' | 'logs' | 'settings' | 'tags' | 'tag-definitions' | 'account' | 'users' | 'profile' | 'dashboard' | 'digital-twin' | 'event-debugger'>('dashboard');
   const [debugMode, setDebugMode] = useState(false);
   
   // Memoize selected device to prevent unnecessary re-renders
@@ -563,8 +564,14 @@ export default function App() {
               <Activity className="w-4 h-4 mr-2" />
               Endpoints
             </Button>
-            <Button
-              variant={currentView === 'mqtt' ? 'default' : 'outline'}
+            <Button              variant={currentView === 'endpoints' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setCurrentView('endpoints')}
+            >
+              <BarChart3 className="w-4 h-4 mr-2" />
+              Endpoints Viz
+            </Button>
+            <Button              variant={currentView === 'mqtt' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCurrentView('mqtt')}
             >
@@ -690,6 +697,9 @@ export default function App() {
                   debugMode={debugMode}
                   onDebugModeChange={setDebugMode}
                 />
+          )}
+          {currentView === 'endpoints' && (
+            <EndpointsVisualizationPage />
           )}
           {currentView === 'mqtt' && (
             <MqttPage device={selectedDevice} />

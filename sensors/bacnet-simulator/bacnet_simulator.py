@@ -50,12 +50,11 @@ class CondoBuildingSimulator:
         )
         
         # Create BACnet application
-        self.app = Application.from_object(device)
-        await self.app.startup()
+        self.app = Application()
+        self.app.add_object(device)
         
         print(f"BACnet Device Created: {BUILDING_NAME}")
         print(f"Device ID: {DEVICE_ID}")
-        print(f"IP Address: {self.app.localAddress}")
         
     def create_hvac_system(self):
         """Create HVAC system objects for the building"""
@@ -69,9 +68,8 @@ class CondoBuildingSimulator:
             obj = AnalogInputObject(
                 objectIdentifier=f"analog-input,{object_id}",
                 objectName=f"AHU-{ahu_num} Supply Air Temp",
-                description=f"Supply air temperature for floors {floors_served}",
+                description=f"Supply air temperature for floors {floors_served} (°C)",
                 presentValue=Real(18.0 + random.uniform(-1, 1)),
-                units="degreesCelsius",
             )
             self.objects[object_id] = {'obj': obj, 'type': 'ahu_supply_temp', 'ahu': ahu_num}
             object_id += 1
@@ -80,9 +78,8 @@ class CondoBuildingSimulator:
             obj = AnalogInputObject(
                 objectIdentifier=f"analog-input,{object_id}",
                 objectName=f"AHU-{ahu_num} Return Air Temp",
-                description=f"Return air temperature for floors {floors_served}",
+                description=f"Return air temperature for floors {floors_served} (°C)",
                 presentValue=Real(22.0 + random.uniform(-1, 1)),
-                units="degreesCelsius",
             )
             self.objects[object_id] = {'obj': obj, 'type': 'ahu_return_temp', 'ahu': ahu_num}
             object_id += 1
@@ -91,9 +88,8 @@ class CondoBuildingSimulator:
             obj = AnalogInputObject(
                 objectIdentifier=f"analog-input,{object_id}",
                 objectName=f"AHU-{ahu_num} Supply Air Flow",
-                description=f"Supply air flow rate for floors {floors_served}",
+                description=f"Supply air flow rate for floors {floors_served} (CFM)",
                 presentValue=Real(5000.0 + random.uniform(-200, 200)),
-                units="cubicFeetPerMinute",
             )
             self.objects[object_id] = {'obj': obj, 'type': 'ahu_airflow', 'ahu': ahu_num}
             object_id += 1
@@ -112,9 +108,8 @@ class CondoBuildingSimulator:
             obj = AnalogInputObject(
                 objectIdentifier=f"analog-input,{object_id}",
                 objectName=f"AHU-{ahu_num} Cooling Valve",
-                description=f"Cooling coil valve position for floors {floors_served}",
+                description=f"Cooling coil valve position for floors {floors_served} (%)",
                 presentValue=Real(45.0 + random.uniform(-10, 10)),
-                units="percent",
             )
             self.objects[object_id] = {'obj': obj, 'type': 'ahu_cooling_valve', 'ahu': ahu_num}
             object_id += 1
@@ -126,9 +121,8 @@ class CondoBuildingSimulator:
                 obj = AnalogInputObject(
                     objectIdentifier=f"analog-input,{object_id}",
                     objectName=f"Floor-{floor} Zone-{zone} Temp",
-                    description=f"Zone temperature for Floor {floor} Zone {zone}",
+                    description=f"Zone temperature for Floor {floor} Zone {zone} (°C)",
                     presentValue=Real(22.0 + random.uniform(-1.5, 1.5)),
-                    units="degreesCelsius",
                 )
                 self.objects[object_id] = {'obj': obj, 'type': 'vav_temp', 'floor': floor, 'zone': zone}
                 object_id += 1
@@ -137,9 +131,8 @@ class CondoBuildingSimulator:
                 obj = AnalogInputObject(
                     objectIdentifier=f"analog-input,{object_id}",
                     objectName=f"Floor-{floor} Zone-{zone} Damper",
-                    description=f"VAV damper position for Floor {floor} Zone {zone}",
+                    description=f"VAV damper position for Floor {floor} Zone {zone} (%)",
                     presentValue=Real(50.0 + random.uniform(-15, 15)),
-                    units="percent",
                 )
                 self.objects[object_id] = {'obj': obj, 'type': 'vav_damper', 'floor': floor, 'zone': zone}
                 object_id += 1
@@ -163,9 +156,8 @@ class CondoBuildingSimulator:
         obj = AnalogInputObject(
             objectIdentifier=f"analog-input,{object_id}",
             objectName="Chiller-1 Supply Temp",
-            description="Chilled water supply temperature",
+            description="Chilled water supply temperature (°C)",
             presentValue=Real(7.0 + random.uniform(-0.5, 0.5)),
-            units="degreesCelsius",
         )
         self.objects[object_id] = {'obj': obj, 'type': 'chiller_supply_temp'}
         object_id += 1
@@ -173,9 +165,8 @@ class CondoBuildingSimulator:
         obj = AnalogInputObject(
             objectIdentifier=f"analog-input,{object_id}",
             objectName="Chiller-1 Return Temp",
-            description="Chilled water return temperature",
+            description="Chilled water return temperature (°C)",
             presentValue=Real(12.0 + random.uniform(-0.5, 0.5)),
-            units="degreesCelsius",
         )
         self.objects[object_id] = {'obj': obj, 'type': 'chiller_return_temp'}
         object_id += 1
@@ -183,9 +174,8 @@ class CondoBuildingSimulator:
         obj = AnalogInputObject(
             objectIdentifier=f"analog-input,{object_id}",
             objectName="Chiller-1 Power",
-            description="Chiller electrical consumption",
+            description="Chiller electrical consumption (kW)",
             presentValue=Real(85.0 + random.uniform(-5, 5)),
-            units="kilowatts",
         )
         self.objects[object_id] = {'obj': obj, 'type': 'chiller_power'}
         object_id += 1
@@ -204,9 +194,8 @@ class CondoBuildingSimulator:
             obj = AnalogInputObject(
                 objectIdentifier=f"analog-input,{object_id}",
                 objectName=f"Boiler-{boiler_num} Supply Temp",
-                description=f"Hot water supply temperature from Boiler {boiler_num}",
+                description=f"Hot water supply temperature from Boiler {boiler_num} (°C)",
                 presentValue=Real(60.0 + random.uniform(-2, 2)),
-                units="degreesCelsius",
             )
             self.objects[object_id] = {'obj': obj, 'type': 'boiler_supply_temp', 'boiler': boiler_num}
             object_id += 1
@@ -214,9 +203,8 @@ class CondoBuildingSimulator:
             obj = AnalogInputObject(
                 objectIdentifier=f"analog-input,{object_id}",
                 objectName=f"Boiler-{boiler_num} Gas Flow",
-                description=f"Natural gas consumption for Boiler {boiler_num}",
+                description=f"Natural gas consumption for Boiler {boiler_num} (m³/h)",
                 presentValue=Real(0.0),  # Off
-                units="cubicMetersPerHour",
             )
             self.objects[object_id] = {'obj': obj, 'type': 'boiler_gas_flow', 'boiler': boiler_num}
             object_id += 1
@@ -231,9 +219,8 @@ class CondoBuildingSimulator:
         obj = AnalogInputObject(
             objectIdentifier=f"analog-input,{object_id}",
             objectName="Building Main Power",
-            description="Total building electrical demand",
+            description="Total building electrical demand (kW)",
             presentValue=Real(250.0 + random.uniform(-20, 20)),
-            units="kilowatts",
         )
         self.objects[object_id] = {'obj': obj, 'type': 'main_power'}
         object_id += 1
@@ -241,9 +228,8 @@ class CondoBuildingSimulator:
         obj = AnalogInputObject(
             objectIdentifier=f"analog-input,{object_id}",
             objectName="Building Total Energy",
-            description="Cumulative electrical energy consumption",
+            description="Cumulative electrical energy consumption (kWh)",
             presentValue=Real(1567890.0),
-            units="kilowattHours",
         )
         self.objects[object_id] = {'obj': obj, 'type': 'total_energy'}
         object_id += 1
@@ -253,9 +239,8 @@ class CondoBuildingSimulator:
             obj = AnalogInputObject(
                 objectIdentifier=f"analog-input,{object_id}",
                 objectName=f"Floor-{floor} Power",
-                description=f"Electrical demand for Floor {floor}",
+                description=f"Electrical demand for Floor {floor} (kW)",
                 presentValue=Real(18.0 + random.uniform(-3, 3)),
-                units="kilowatts",
             )
             self.objects[object_id] = {'obj': obj, 'type': 'floor_power', 'floor': floor}
             object_id += 1
@@ -264,9 +249,8 @@ class CondoBuildingSimulator:
         obj = AnalogInputObject(
             objectIdentifier=f"analog-input,{object_id}",
             objectName="Building Gas Flow",
-            description="Natural gas consumption (heating/hot water)",
+            description="Natural gas consumption (heating/hot water) (m³/h)",
             presentValue=Real(12.0 + random.uniform(-2, 2)),
-            units="cubicMetersPerHour",
         )
         self.objects[object_id] = {'obj': obj, 'type': 'gas_flow'}
         object_id += 1
@@ -368,7 +352,6 @@ class CondoBuildingSimulator:
                 objectName=f"Elevator-{elevator_num} Floor",
                 description=f"Current floor position of Elevator {elevator_num}",
                 presentValue=Real(1.0),
-                units="noUnits",
             )
             self.objects[object_id] = {'obj': obj, 'type': 'elevator_floor', 'elevator': elevator_num}
             object_id += 1
@@ -403,9 +386,8 @@ class CondoBuildingSimulator:
         obj = AnalogInputObject(
             objectIdentifier=f"analog-input,{object_id}",
             objectName="Domestic Water Pressure",
-            description="Main domestic water supply pressure",
+            description="Main domestic water supply pressure (kPa)",
             presentValue=Real(450.0 + random.uniform(-20, 20)),
-            units="kiloPascals",
         )
         self.objects[object_id] = {'obj': obj, 'type': 'water_pressure'}
         object_id += 1
@@ -413,9 +395,8 @@ class CondoBuildingSimulator:
         obj = AnalogInputObject(
             objectIdentifier=f"analog-input,{object_id}",
             objectName="Domestic Water Flow",
-            description="Main domestic water flow rate",
+            description="Main domestic water flow rate (L/min)",
             presentValue=Real(45.0 + random.uniform(-10, 10)),
-            units="litersPerMinute",
         )
         self.objects[object_id] = {'obj': obj, 'type': 'water_flow'}
         object_id += 1
@@ -424,9 +405,8 @@ class CondoBuildingSimulator:
         obj = AnalogInputObject(
             objectIdentifier=f"analog-input,{object_id}",
             objectName="Hot Water Tank Temp",
-            description="Domestic hot water storage tank temperature",
+            description="Domestic hot water storage tank temperature (°C)",
             presentValue=Real(55.0 + random.uniform(-2, 2)),
-            units="degreesCelsius",
         )
         self.objects[object_id] = {'obj': obj, 'type': 'hot_water_temp'}
         object_id += 1
@@ -671,7 +651,7 @@ class CondoBuildingSimulator:
         for obj_id, obj_info in self.objects.items():
             self.app.add_object(obj_info['obj'])
         
-        print(f"BACnet device running on {self.app.localAddress}")
+        print("BACnet device started successfully")
         print("Starting simulation updates...\n")
         
         # Start simulation update loop

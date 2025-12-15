@@ -196,6 +196,35 @@ spec:
           #   periodSeconds: 5
           #   timeoutSeconds: 3
           #   failureThreshold: 3
+        
+        {{- if .Values.opcuaSimulator.enabled }}
+        # OPC-UA simulator sidecar
+        - name: opcua-simulator
+          image: "{{ .Values.opcuaSimulator.image.repository }}:{{ .Values.opcuaSimulator.image.tag }}"
+          imagePullPolicy: {{ .Values.opcuaSimulator.image.pullPolicy }}
+          # OPC-UA port 4840 accessed via localhost by agent only
+          env:
+            {{- range $key, $value := .Values.opcuaSimulator.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.opcuaSimulator.resources | nindent 12 }}
+          livenessProbe:
+            tcpSocket:
+              port: 4840
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: 4840
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+        {{- end }}
       
       # Provisioning volume (emptyDir shared between init container and agent)
       volumes:

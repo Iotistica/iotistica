@@ -253,6 +253,21 @@ services:
             options:
                 max-size: "5m"
                 max-file: "2"
+    bacnet-simulator:
+        build:
+            context: ./sensors/bacnet-simulator
+            dockerfile: Dockerfile
+        container_name: iotistic-bacnet-sim
+        restart: unless-stopped
+        ports:
+            - "47808:47808/udp"
+        networks:
+            - iotistic-net
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "5m"
+                max-file: "2"
 
     neo4j:
         image: neo4j:5.15-community
