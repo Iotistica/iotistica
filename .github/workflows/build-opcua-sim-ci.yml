@@ -64,7 +64,7 @@ jobs:
         run: |
           cd sensors/opcua-simulator
           
-          # Check if package.json exists, if not create it
+          # Check if package.json exists, if not create it8
           if [ ! -f package.json ]; then
             echo '{"name":"opcua-simulator","version":"1.0.0"}' > package.json
             git add package.json
