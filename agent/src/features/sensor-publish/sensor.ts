@@ -597,34 +597,58 @@ export class Sensor extends EventEmitter {
     const isConnected = this.mqttConnection.isConnected();
     this.logger?.debug(`MQTT connection status: ${isConnected}`);
     
+    // Build topic with device UUID (no leading $ - reserved for broker system topics)
+    const topic = `iot/device/${this.deviceUuid}/endpoints/${this.config.mqttTopic}`;
+    
+    // Feed to edge AI anomaly detection FIRST (before publishing)
+    // This ensures scores are available for enrichment
+    if (anomalyService) {
+      this.feedMessagesToAnomaly(this.messageBatch.messages);
+    }
+    
+    // Enrich messages with anomaly scores from edge AI
+    const enrichedMessages = this.enrichMessagesWithAnomalyScores(this.messageBatch.messages);
+    
+    // Publish as JSON array with enriched data
+    // Messages are objects for MQTT Explorer pretty-printing
+    // API handler will accept both objects and JSON strings
+    const payload = JSON.stringify({
+      sensor: this.getSensorName(),
+      timestamp: new Date().toISOString(),
+      messages: enrichedMessages
+    });
+    
+    // If MQTT not connected, buffer to local database
     if (!isConnected) {
-      this.logger?.warn(`MQTT not connected, cannot publish batch from endpoint '${this.getSensorName()}'`);
+      this.logger?.warn(`MQTT not connected, buffering ${this.messageBatch.messages.length} messages from endpoint '${this.getSensorName()}'`);
+      
+      try {
+        const { MessageBufferModel } = await import('../../db/models/index.js');
+        
+        await MessageBufferModel.enqueue({
+          endpoint_name: this.getSensorName(),
+          topic,
+          qos: 1,
+          payload,
+          payload_bytes: Buffer.byteLength(payload, 'utf8')
+        });
+        
+        this.logger?.debug(`Buffered ${this.messageBatch.messages.length} messages to local database`);
+        
+        // Reset batch (data is safely buffered)
+        this.messageBatch = {
+          messages: [],
+          totalBytes: 0,
+          firstMessageTime: new Date()
+        };
+      } catch (error) {
+        this.logger?.error(`Failed to buffer messages from endpoint '${this.getSensorName()}'`, error);
+      }
+      
       return;
     }
     
     try {
-      // Build topic with device UUID (no leading $ - reserved for broker system topics)
-      const topic = `iot/device/${this.deviceUuid}/endpoints/${this.config.mqttTopic}`;
-      
-      // Feed to edge AI anomaly detection FIRST (before publishing)
-      // This ensures scores are available for enrichment
-      if (anomalyService) {
-        this.feedMessagesToAnomaly(this.messageBatch.messages);
-      }
-      
-      // Enrich messages with anomaly scores from edge AI
-      const enrichedMessages = this.enrichMessagesWithAnomalyScores(this.messageBatch.messages);
-      
-      // Publish as JSON array with enriched data
-      // Messages are objects for MQTT Explorer pretty-printing
-      // API handler will accept both objects and JSON strings
-      const payload = JSON.stringify({
-        sensor: this.getSensorName(),
-        timestamp: new Date().toISOString(),
-        messages: enrichedMessages
-      });
-      
-    
       await this.mqttConnection.publish(topic, payload, { qos: 1 });
       
       this.stats.messagesPublished += this.messageBatch.messages.length;

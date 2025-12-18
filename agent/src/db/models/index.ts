@@ -19,3 +19,7 @@ export type { DeviceEndpointOutput as DeviceSensorOutput } from './endpoint-outp
 
 // Agent metadata (discovery, etc.)
 export { MetadataModel } from './metadata.model';
+
+// Message buffer (offline queue for MQTT)
+export { MessageBufferModel } from './message-buffer.model';
+export type { MessageBufferRecord, BufferStats } from './message-buffer.model';

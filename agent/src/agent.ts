@@ -73,6 +73,7 @@ export default class DeviceAgent {
   private deviceInfo!: DeviceInfo; // Cache device info after initialization
   private deviceAPI!: DeviceAPI;
   private cloudSync?: CloudSync;
+  private bufferSync?: import('./sync/buffer-sync').MessageBufferSync; // Local message data queue for offline MQTT
   private logMonitor?: ContainerLogMonitor;
   private agentLogger!: AgentLogger; // Structured logging for agent-level events
   private firewall?: AgentFirewall; // Network firewall protection
@@ -133,6 +134,9 @@ export default class DeviceAgent {
         this.initContainerManager()       // ~200-300ms (just setup, no init)
       ]);
       // Saves ~300-500ms compared to sequential execution
+
+      // Initialize buffer sync AFTER MQTT manager
+      await this.initializeBufferSync();
 
       // Initialize device API
       await this.initDeviceAPI();
@@ -578,6 +582,50 @@ export default class DeviceAgent {
         }
       );
       // Don't throw - allow agent to continue without MQTT
+    }
+  }
+
+  private async initializeBufferSync(): Promise<void> {
+    // Only initialize buffer sync if MQTT is configured
+    if (!this.deviceInfo.mqttBrokerConfig) {
+      this.agentLogger?.debugSync("Message buffer sync disabled - MQTT not configured", {
+        component: LogComponents.agent
+      });
+      return;
+    }
+
+    try {
+      const { MessageBufferSync } = await import('./sync/buffer-sync.js');
+      const mqttManager = MqttManager.getInstance();
+      
+      this.bufferSync = new MessageBufferSync(
+        mqttManager,
+        this.agentLogger,
+        {
+          enabled: true,
+          flushBatchSize: 100,
+          flushIntervalMs: 30000, // 30 seconds
+          maxRetries: 3,
+          cleanupIntervalMs: 3600000 // 1 hour
+        }
+      );
+
+      await this.bufferSync.start();
+
+      this.agentLogger?.infoSync("Message buffer sync started", {
+        component: LogComponents.agent,
+        flushInterval: "30s",
+        batchSize: 100
+      });
+    } catch (error) {
+      this.agentLogger?.errorSync(
+        "Failed to initialize message buffer sync",
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          component: LogComponents.agent,
+          note: "Message data will not be buffered when MQTT is offline"
+        }
+      );
     }
   }
 
