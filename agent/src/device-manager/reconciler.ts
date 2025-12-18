@@ -40,6 +40,8 @@ interface StateReconcilerEvents {
 	'intervals-changed': (change: { old: any; new: any }) => void;
 	'memory-config-changed': (change: { old: any; new: any }) => void;
 	'scheduled-restart-changed': (change: { old: any; new: any }) => void;
+	'features-changed': (change: { old: any; new: any }) => void;
+	'anomaly-config-changed': (change: { old: any; new: any }) => void;
 }
 
 export class StateReconciler extends EventEmitter {
@@ -70,6 +72,16 @@ export class StateReconciler extends EventEmitter {
 			this.logger?.debugSync('Config reconciliation complete', {
 				component: LogComponents.stateReconciler,
 			});
+		});
+		
+		// Forward feature changes to agent
+		this.configManager.on('features-changed', (change: { old: any; new: any }) => {
+			this.emit('features-changed', change);
+		});
+		
+		// Forward anomaly config changes to agent
+		this.configManager.on('anomaly-config-changed', (change: { old: any; new: any }) => {
+			this.emit('anomaly-config-changed', change);
 		});
 	}
 

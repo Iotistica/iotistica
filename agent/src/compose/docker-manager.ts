@@ -248,7 +248,13 @@ export class DockerManager {
 			// 5. Create container
 			const container = await this.docker.createContainer(createOptions);
 			const containerId = container.id;
-
+			this.logger?.infoSync('Container created', {
+				component: LogComponents.dockerManager,
+				operation: 'startContainer',
+				serviceName: service.serviceName,
+				containerId: containerId.substring(0, 12),
+				imageName: service.imageName
+			});
 			// 6. Start container
 			await container.start();
 

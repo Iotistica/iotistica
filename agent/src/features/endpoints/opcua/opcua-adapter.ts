@@ -609,7 +609,9 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       // Discover all available endpoints
       // Discover endpoints using getEndpoints (OPC-UA standard method)
       const discoveryClient = OPCUAClient.create({
-        endpoint_must_exist: false
+        applicationName: 'Iotistic Sensor Agent',
+        applicationUri: 'urn:iotistic:sensor-agent',
+        endpointMustExist : false
       });
       await discoveryClient.connect(baseUrl);
       const allEndpoints = await discoveryClient.getEndpoints();
@@ -709,10 +711,10 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
     );
 
     // Step 2: Create OPC-UA client with endpoint requirements
-    const hostname = require('os').hostname();
+    // Use static applicationUri to avoid certificate regeneration when hostname changes
     const client = OPCUAClient.create({
       applicationName: 'Iotistic Sensor Agent',
-      applicationUri: `urn:${hostname}:Iotistic Sensor Agent`,
+      applicationUri: 'urn:iotistic:sensor-agent',
       connectionStrategy: {
         initialDelay: 1000,
         maxRetry: 3,

@@ -5,11 +5,8 @@ WORKDIR /app
 # Install dependencies
 RUN pip install --no-cache-dir pymodbus==3.5.4
 
-# Copy simulator script from sensors/modbus-simulator directory
-COPY sensors/modbus-simulator/modbus_simulator.py .
-
-# Copy vendor data points from shared config directory
-COPY config/vendors ./vendors
+# Copy simulator script (build context is sensors/modbus-simulator)
+COPY modbus_simulator.py .
 
 # Expose Modbus TCP port
 EXPOSE 502

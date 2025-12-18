@@ -6,6 +6,7 @@
  */
 
 import { randomUUID } from 'crypto';
+import type { Knex } from 'knex';
 import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import type {
@@ -22,6 +23,7 @@ import { getDetector } from './detectors';
 import { AlertManager } from './alert-manager';
 import { LinearPredictor } from './forecaster';
 import type { Prediction } from './forecaster';
+import { AnomalyStorageService } from './storage';
 
 export class AnomalyDetectionService {
 	private config: AnomalyConfig;
@@ -30,11 +32,14 @@ export class AnomalyDetectionService {
 	private logger?: AgentLogger;
 	private enabled: boolean = false;
 	private predictor: LinearPredictor;
+	private storage?: AnomalyStorageService;
+	private baselineSaveTimer?: NodeJS.Timeout;
+	private baselineSaveIntervalMs: number = 300000; // 5 minutes
 	
-	constructor(config: AnomalyConfig, logger?: AgentLogger) {
+	constructor(config: AnomalyConfig, db?: Knex, logger?: AgentLogger) {
 		this.config = config;
 		this.logger = logger;
-		this.enabled = config.enabled;
+		this.enabled = true; // Controlled by features.enableAnomalyDetection
 		
 		this.alertManager = new AlertManager(
 			config.alerts.maxQueueSize,
@@ -43,14 +48,35 @@ export class AnomalyDetectionService {
 		
 		this.predictor = new LinearPredictor();
 		
+		// Initialize storage if database provided (use default 30 days if not configured)
+		if (db) {
+			const retention = config.storage?.retention || 30;
+			this.storage = new AnomalyStorageService(
+				db,
+				retention,
+				logger
+			);
+			
+			// Initialize storage (verify tables exist, start cleanup)
+			this.storage.initialize().catch(error => {
+				this.logger?.errorSync('Failed to initialize anomaly storage', error as Error, {
+					component: LogComponents.metrics,
+				});
+				this.storage = undefined; // Disable storage on error
+			});
+			
+			// Start periodic baseline saving
+			this.startPeriodicBaselineSave();
+		}
+		
 		// Buffers are created lazily when data is first received (more efficient)
 		// This ensures metricsTracked reflects only actively monitored metrics
 		
 		this.logger?.infoSync('Anomaly detection service initialized', {
 			component: LogComponents.metrics,
-			enabled: this.enabled,
 			metricsConfigured: config.metrics.filter(m => m.enabled).length,
 			methods: this.getUniqueDetectionMethods(),
+			storageEnabled: !!this.storage,
 		});
 	}
 	
@@ -100,8 +126,16 @@ export class AnomalyDetectionService {
 	): void {
 		const results: AnomalyAlert[] = [];
 		
+		// Build list of methods to run
+		const methodsToRun = [...metricConfig.methods];
+		
+		// Auto-add expected_range if expectedRange is configured but not in methods
+		if (metricConfig.expectedRange && !methodsToRun.includes('expected_range')) {
+			methodsToRun.unshift('expected_range'); // Add first for priority
+		}
+		
 		// Run each configured detection method
-		for (const method of metricConfig.methods) {
+		for (const method of methodsToRun) {
 			const detector = getDetector(method);
 			if (!detector) {
 				this.logger?.warnSync(`Unknown detection method: ${method}`, {
@@ -123,6 +157,15 @@ export class AnomalyDetectionService {
 		// Add alerts to manager
 		for (const alert of results) {
 			this.alertManager.addAlert(alert);
+			
+			// Store alert to database
+			if (this.storage) {
+				this.storage.storeAlert(alert).catch(error => {
+					this.logger?.errorSync('Failed to store alert to database', error as Error, {
+						component: LogComponents.metrics,
+					});
+				});
+			}
 			
 			this.logger?.warnSync('Anomaly detected', {
 				component: LogComponents.metrics,
@@ -340,14 +383,136 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
+	 * Stop and cleanup anomaly detection service
+	 */
+	stop(): void {
+		this.enabled = false;
+		this.buffers.clear();
+		this.alertManager = new AlertManager(
+			this.config.alerts.maxQueueSize,
+			this.config.alerts.cooldownMs
+		);
+		
+		// Stop baseline save timer
+		if (this.baselineSaveTimer) {
+			clearInterval(this.baselineSaveTimer);
+			this.baselineSaveTimer = undefined;
+		}
+		
+		// Stop storage service
+		if (this.storage) {
+			this.storage.stop();
+			this.storage = undefined;
+		}
+		
+		this.logger?.infoSync('Anomaly detection service stopped and cleaned up', {
+			component: LogComponents.metrics,
+		});
+	}
+	
+	/**
 	 * Update configuration
 	 */
 	updateConfig(config: Partial<AnomalyConfig>): void {
 		this.config = { ...this.config, ...config };
-		this.enabled = this.config.enabled;
+		
+		// Update storage retention if changed (default to 30 if not specified)
+		if (this.storage && config.storage?.retention !== undefined) {
+			this.storage.updateRetention(config.storage.retention);
+		}
 		
 		this.logger?.infoSync('Anomaly detection configuration updated', {
 			component: LogComponents.metrics,
 		});
+	}
+	
+	/**
+	 * Start periodic baseline saving
+	 */
+	private startPeriodicBaselineSave(): void {
+		if (!this.storage) return;
+		
+		this.baselineSaveTimer = setInterval(() => {
+			this.saveBaselines();
+		}, this.baselineSaveIntervalMs);
+		
+		this.logger?.infoSync('Started periodic baseline saving', {
+			component: LogComponents.metrics,
+			interval_hours: this.baselineSaveIntervalMs / (60 * 60 * 1000),
+		});
+	}
+	
+	/**
+	 * Save current statistical baselines to database
+	 * Public for manual triggering and testing
+	 */
+	async saveBaselines(): Promise<void> {
+		if (!this.storage) {
+			this.logger?.warnSync('Cannot save baselines - storage not initialized', {
+				component: LogComponents.metrics,
+			});
+			return;
+		}
+		
+		const now = Date.now();
+		let savedCount = 0;
+		let skippedCount = 0;
+		
+		// Minimum samples required for statistical baseline (default: 5 samples = ~5 minutes at 60s interval)
+		const minSamples = this.config.storage?.minSamples ?? 5;
+		
+		// Debug: Log buffer sizes before saving
+		const bufferSizes: Record<string, number> = {};
+		for (const [metricName, buffer] of this.buffers.entries()) {
+			bufferSizes[metricName] = buffer.size;
+		}
+		
+		this.logger?.infoSync('Baseline save starting', {
+			component: LogComponents.metrics,
+			minSamples,
+			bufferSizes,
+		});
+		
+		// Save all baselines in parallel
+		const savePromises: Promise<void>[] = [];
+		
+		for (const [metricName, buffer] of this.buffers.entries()) {
+			if (buffer.size >= minSamples) {
+				savePromises.push(
+					this.storage.storeBaseline(metricName, buffer, now).catch(error => {
+						this.logger?.errorSync('Failed to save baseline', error as Error, {
+							component: LogComponents.metrics,
+							metric: metricName,
+						});
+					})
+				);
+				savedCount++;
+			} else {
+				this.logger?.infoSync('Skipping baseline save - insufficient samples', {
+					component: LogComponents.metrics,
+					metric: metricName,
+					bufferSize: buffer.size,
+					required: minSamples,
+				});
+				skippedCount++;
+			}
+		}
+		
+		// Wait for all saves to complete
+		await Promise.all(savePromises);
+		
+		this.logger?.infoSync('Baseline save completed', {
+			component: LogComponents.metrics,
+			saved: savedCount,
+			skipped: skippedCount,
+			totalBuffers: this.buffers.size,
+		});
+	}
+	
+	/**
+	 * Get storage service (for external queries)
+	 */
+	getStorage(): AnomalyStorageService | undefined {
+		return this.storage;
 	}
 }

@@ -221,6 +221,38 @@ export class Sensor extends EventEmitter {
         },
       });
     } else if (typeof data === 'object' && data !== null) {
+      // Handle special case: Modbus/OPC-UA "readings" array format
+      if (Array.isArray(data) && prefix === 'readings') {
+        // Process each reading in the array
+        for (const reading of data) {
+          if (typeof reading === 'object' && reading !== null) {
+            const deviceName = reading.deviceName || sensorName;
+            const registerName = reading.registerName;
+            const value = reading.value;
+            const quality = reading.quality || 'GOOD';
+            
+            // Feed if we have both registerName and numeric value
+            if (registerName && typeof value === 'number') {
+              anomalyService.processDataPoint({
+                source: 'endpoint',
+                metric: `${deviceName}_${registerName}`,
+                value: value,
+                unit: this.inferUnit(registerName),
+                timestamp: timestampMs,
+                quality: quality === 'GOOD' ? 'GOOD' : 'BAD',
+                deviceId: this.deviceUuid,
+                tags: {
+                  sensorName,
+                  deviceName,
+                  registerName,
+                },
+              });
+            }
+          }
+        }
+        return; // Don't recurse further into readings array
+      }
+      
       // Object or array - recurse into nested fields
       for (const [key, value] of Object.entries(data)) {
         if (typeof value === 'number') {
@@ -239,7 +271,10 @@ export class Sensor extends EventEmitter {
               field: metricName,
             },
           });
-        } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        } else if (Array.isArray(value)) {
+          // Handle arrays (e.g., "readings" array)
+          this.extractNumericFields(value, sensorName, timestamp, key);
+        } else if (typeof value === 'object' && value !== null) {
           // Recurse into nested object (max depth 2 to avoid deep nesting)
           if (!prefix) {
             this.extractNumericFields(value, sensorName, timestamp, key);

@@ -93,10 +93,23 @@ export async function handleEndpointsData(data: SensorData): Promise<void> {
 export async function handleDeviceState(payload: StateMessage): Promise<void> {
   try {
     // Destructure new payload format
-    const { deviceUuid, data: state } = payload;
+    const { deviceUuid, data: mqttPayload } = payload;
     
-    if (!deviceUuid || !state) {
-      logger.error('Invalid state payload format', { hasUuid: !!deviceUuid, hasData: !!state });
+    if (!deviceUuid || !mqttPayload) {
+      logger.error('Invalid state payload format', { hasUuid: !!deviceUuid, hasData: !!mqttPayload });
+      return;
+    }
+    
+    // Extract actual state from MQTT payload
+    // MQTT sends: { "full-uuid": { apps, config, version, ... }, "msgId": "..." }
+    // We need to extract just the state object under the UUID key
+    const state = mqttPayload[deviceUuid];
+    
+    if (!state) {
+      logger.error('State data not found under UUID key', {
+        deviceUuid: deviceUuid.substring(0, 8),
+        payloadKeys: Object.keys(mqttPayload)
+      });
       return;
     }
     

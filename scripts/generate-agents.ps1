@@ -48,10 +48,13 @@ param(
     # Build Mode - build from source instead of using pre-built image
     [switch]$BuildFromSource,
     
+    # Network Mode - use host network for discovery (default: true)
+    [bool]$UseHostNetwork = $true,
+    
     # Agent Configuration
     [string]$NodeEnv = "development",
     #[string]$CLOUD_API_ENDPOINT = "http://23.233.80.107:30002",
-    [string]$CLOUD_API_ENDPOINT = "http://api:3002",
+    [string]$CLOUD_API_ENDPOINT = "http://api:4002",
     [int]$ReportInterval = 20000,
     [int]$MetricsInterval = 30000,
     [string]$LogCompression = "true",
@@ -104,11 +107,30 @@ function Remove-AgentResources {
     $containerNames = @()
     $volumeNames = @()
     $imageNames = @()
+    $networkNames = @()
     
     for ($i = $StartIndex; $i -le $endIndex; $i++) {
+        # Agent container
         $containerNames += "agent-$i"
+        
+        # Core service containers (mosquitto, nodered)
+        $containerNames += "core-services_mosquitto_1"
+        $containerNames += "core-services_nodered_2"
+        
+        # Agent volumes
         $volumeNames += "zemfyre-sensor_agent-$i-data"
+        
+        # Core service volumes (app ID 1000)
+        $volumeNames += "1000_mosquitto-data"
+        $volumeNames += "1000_mosquitto-config"
+        $volumeNames += "1000_mosquitto-log"
+        $volumeNames += "1000_nodered-data"
+        
+        # Agent images
         $imageNames += "zemfyre-sensor-agent-$i:latest"
+        
+        # Core service networks (app ID 1000)
+        $networkNames += "1000_default"
     }
     
     # Stop and remove containers
@@ -151,7 +173,23 @@ function Remove-AgentResources {
             # Volume may not exist, continue
         }
     }
-    Write-Host "  ✅ Removed $removedCount volumes" -ForegroundColor Green
+    Write-Host "  ✅ Removed $removedCount volumes" -ForegroundColor Yellow
+    
+    # Remove networks
+    Write-Host "`n🌐 Removing networks..." -ForegroundColor Cyan
+    $removedNetworkCount = 0
+    foreach ($network in $networkNames) {
+        try {
+            $output = docker network rm $network 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                $removedNetworkCount++
+            }
+        }
+        catch {
+            # Network may not exist, continue
+        }
+    }
+    Write-Host "  ✅ Removed $removedNetworkCount networks" -ForegroundColor Yellow
     
     # Remove images
     Write-Host "`n🖼️  Removing images..." -ForegroundColor Cyan
@@ -174,6 +212,7 @@ function Remove-AgentResources {
     
     Write-Host "`n✅ Cleanup complete!" -ForegroundColor Green
     Write-Host "  Agents cleaned: $StartIndex to $endIndex" -ForegroundColor Gray
+    Write-Host "  Core services removed: mosquitto, nodered (per agent)" -ForegroundColor Gray
 }
 
 # Generate provisioning key via API
@@ -293,6 +332,15 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
     $volumeName = "$agentName-data"
     $simConfig = Get-SimulationConfig -Index $i -SimulationEnabled $EnableSimulation.IsPresent
     
+    # Adjust CLOUD_API_ENDPOINT based on network mode
+    # Host mode: use localhost (shares host network stack)
+    # Bridge mode: use service name (container networking)
+    $cloudApiEndpoint = if ($UseHostNetwork) {
+        $CLOUD_API_ENDPOINT -replace "api:", "localhost:"
+    } else {
+        $CLOUD_API_ENDPOINT
+    }
+    
     # Build configuration: use build context if -BuildFromSource, otherwise use image
     $buildOrImage = if ($BuildFromSource) {
         @"
@@ -304,6 +352,18 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
         "    image: iotistic/agent:latest"
     }
     
+    # Network configuration: host mode for discovery or bridge for isolation
+    $networkConfig = if ($UseHostNetwork) {
+        @"
+    network_mode: host
+"@
+    } else {
+        @"
+    networks:
+      - iotistic-net
+"@
+    }
+    
     # Service definition
     $service = @"
   $agentName`:
@@ -312,13 +372,14 @@ $buildOrImage
     restart: always
     mem_limit: $MemLimit
     mem_reservation: $MemReservation
+$networkConfig
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - $volumeName`:/app/data
       - ./certs/ca.crt:/app/certs/ca.crt:ro
     environment:
       - DEVICE_API_PORT=$port
-      - CLOUD_API_ENDPOINT=$CLOUD_API_ENDPOINT
+      - CLOUD_API_ENDPOINT=$cloudApiEndpoint
       - NODE_ENV=$NodeEnv
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=$RequireProvisioning
@@ -329,8 +390,6 @@ $buildOrImage
       - SIMULATION_MODE=$($simConfig.enabled)
       - SIMULATION_CONFIG=$($simConfig.config)
       - SIMULATE_MEMORY_LEAK=$SimulateMemoryLeak
-    networks:
-      - iotistic-net
 "@
     
     $services += $service

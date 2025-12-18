@@ -41,7 +41,7 @@ import {
   stopMemoryLeakSimulation
 } from "./system/memory.js";
 import { AnomalyDetectionService } from "./ai/anomaly/index.js";
-import { loadConfigFromEnv } from "./ai/anomaly/utils.js";
+import { loadConfigFromEnv, loadConfigFromTargetState } from "./ai/anomaly/utils.js";
 import { SimulationOrchestrator, loadSimulationConfig } from "./simulation/index.js";
 import { DiscoveryService } from "./features/discovery/discovery-service.js";
 import { FeatureInitializer, type FeatureContext } from "./bootstrap/init.js";
@@ -168,10 +168,11 @@ export default class DeviceAgent {
       // Initialize jobs feature (cloud job polling/execution)
       await this.featureInitializer.initJobsFeature();
 
-      // Initialize Anomaly Detection Service (BEFORE CloudSync)
-      this.initAnomalyDetection();
+      // NOTE: Anomaly Detection initialization is DEFERRED until after CloudSync fetches target state
+      // This ensures we respect cloud-configured feature flags (not just local/env variables)
+  
 
-      // 10.5. Initialize Simulation Orchestrator (AFTER Anomaly Detection, used for testing)
+      // 10.5. Initialize Simulation Orchestrator
       await this.initializeSimulationMode();
 
       // init sync
@@ -238,6 +239,48 @@ export default class DeviceAgent {
 
         // Don't prevent graceful shutdown
         this.scheduledRestartTimer.unref();
+      });
+
+      // Listen for feature changes from ConfigManager
+      this.stateReconciler.on('features-changed', async (change: { old: any; new: any }) => {
+        this.agentLogger?.infoSync('Features configuration changed', {
+          component: LogComponents.agent,
+          changes: Object.keys(change.new).filter(key => change.old[key] !== change.new[key])
+        });
+        
+        // Handle anomaly detection toggle
+        if (change.old.enableAnomalyDetection !== change.new.enableAnomalyDetection) {
+          if (change.new.enableAnomalyDetection && !this.anomalyService) {
+            // Start anomaly detection
+            this.agentLogger?.infoSync('Starting Anomaly Detection Service (dynamically enabled)', {
+              component: LogComponents.agent
+            });
+            await this.initAnomalyDetection();
+          } else if (!change.new.enableAnomalyDetection && this.anomalyService) {
+            // Stop anomaly detection
+            this.agentLogger?.infoSync('Stopping Anomaly Detection Service (dynamically disabled)', {
+              component: LogComponents.agent
+            });
+            this.anomalyService.stop();
+            this.anomalyService = undefined;
+          }
+        }
+      });
+      
+      // Listen for anomaly config changes from ConfigManager
+      this.stateReconciler.on('anomaly-config-changed', (change: { old: any; new: any }) => {
+        this.agentLogger?.infoSync('Anomaly configuration changed from cloud', {
+          component: LogComponents.agent
+        });
+        
+        // Reload anomaly config if service is running
+        if (this.anomalyService && change.new) {
+          this.agentLogger?.infoSync('Reloading anomaly detection configuration', {
+            component: LogComponents.agent,
+            metricsCount: change.new.metrics?.filter((m: any) => m.enabled).length
+          });
+          this.anomalyService.updateConfig(change.new);
+        }
       });
 
       //Final words
@@ -509,6 +552,9 @@ export default class DeviceAgent {
       // Connect to MQTT broker with provisioned credentials
       await mqttManager.connect(mqttBrokerUrl, mqttOptions);
 
+      // Initialize message ID generator for HA deduplication
+      mqttManager.initMessageIdGenerator(this.deviceInfo.uuid);
+
       // Enable debug mode if requested
       if (process.env.MQTT_DEBUG === "true") {
         mqttManager.setDebug(true);
@@ -615,7 +661,7 @@ export default class DeviceAgent {
     });
   }
 
-  private initAnomalyDetection(): void {
+  private async initAnomalyDetection(): Promise<void> {
     // Check if anomaly detection is enabled (cloud config → env fallback)
     const features = this.agentConfig.getFeatures();
     
@@ -631,17 +677,57 @@ export default class DeviceAgent {
     });
 
     try {
-      // Load configuration from environment variables
-      const config = loadConfigFromEnv();
+      // Load configuration from target state (preferred) or environment variables (fallback)
+      const targetStateConfig = this.stateReconciler.getTargetState()?.config;
+      const config = loadConfigFromTargetState(targetStateConfig);
       
-      // Create anomaly detection service
-      this.anomalyService = new AnomalyDetectionService(config, this.agentLogger);
+      // Get database connection for storage
+      const dbInstance = db.getKnex();
+      
+      // Auto-discover endpoint metrics and merge with cloud config
+      const { discoverEndpointMetrics, mergeMetricConfigs } = await import('./ai/anomaly/endpoint-sync.js');
+      const discoveredMetrics = await discoverEndpointMetrics(dbInstance, this.agentLogger);
+      const mergedMetrics = mergeMetricConfigs(config.metrics, discoveredMetrics);
+      
+      // Update config with merged metrics
+      config.metrics = mergedMetrics;
+      
+      this.agentLogger?.infoSync("Merged cloud and discovered endpoint metrics", {
+        component: LogComponents.agent,
+        cloudMetrics: config.metrics.length - discoveredMetrics.length,
+        discoveredMetrics: discoveredMetrics.length,
+        totalMetrics: mergedMetrics.length,
+      });
+      
+      // Save merged config back to target state (will be reported to cloud)
+      if (discoveredMetrics.length > 0 && targetStateConfig) {
+        const currentTargetState = this.stateReconciler.getTargetState();
+        if (currentTargetState?.config) {
+          // Update target state with merged anomaly config
+          currentTargetState.config.anomaly = config;
+          
+          // Save to database (this will trigger config change detection and cloud report)
+          await this.stateReconciler.setTarget(currentTargetState);
+          
+          this.agentLogger?.infoSync("Saved merged anomaly config to target state", {
+            component: LogComponents.agent,
+            totalMetrics: mergedMetrics.length,
+          });
+        }
+      }
+      
+      // Create anomaly detection service with database storage
+      this.anomalyService = new AnomalyDetectionService(config, dbInstance, this.agentLogger);
       
       this.agentLogger?.infoSync("Anomaly Detection Service initialized", {
         component: LogComponents.agent,
-        enabled: config.enabled,
         metricsCount: config.metrics.filter(m => m.enabled).length,
+        source: targetStateConfig?.anomaly ? 'cloud' : 'environment',
+        storageEnabled: !!config.storage,
       });
+      
+      // Wire anomaly service to system metrics and sensor-publish
+      this.configureAnomalyFeed();
     } catch (error) {
       this.agentLogger?.errorSync(
         "Failed to initialize Anomaly Detection Service",
@@ -651,6 +737,36 @@ export default class DeviceAgent {
       // Don't fail startup - anomaly detection is optional
       this.anomalyService = undefined;
     }
+  }
+  
+  /**
+   * Configure anomaly detection feed for system metrics and sensors
+   */
+  private async configureAnomalyFeed(): Promise<void> {
+    if (!this.anomalyService) return;
+    
+    this.agentLogger?.infoSync('Configuring edge AI anomaly detection', {
+      component: LogComponents.agent,
+    });
+    
+    // Wire edge AI anomaly service to system metrics
+    const { configureAnomalyFeed: configureSystemMetrics, getSystemMetrics } = await import('./system/metrics.js');
+    configureSystemMetrics(this.anomalyService);
+    
+    // Wire edge AI anomaly service to sensor-publish
+    const { configureAnomalyFeed: configureSensorAnomaly } = await import('./features/sensor-publish/sensor.js');
+    configureSensorAnomaly(this.anomalyService);
+    
+    this.agentLogger?.infoSync('Anomaly detection configured for system metrics and endpoints', {
+      component: LogComponents.agent,
+    });
+    
+    // Immediately collect initial metrics to populate buffers
+    // (Don't wait for first metricsInterval cycle)
+    this.agentLogger?.debugSync('Collecting initial metrics for anomaly detection', {
+      component: LogComponents.agent,
+    });
+    await getSystemMetrics();
   }
 
   private async initDiscoveryService (): Promise<void> {
@@ -764,25 +880,6 @@ export default class DeviceAgent {
     // Get intervals from agentConfig (cloud → env fallback)
     const intervals = this.agentConfig.getIntervalConfig();
 
-    // Configure edge AI anomaly detection for system metrics and sensors
-    if (this.anomalyService) {
-      this.agentLogger?.infoSync('Configuring edge AI anomaly detection', {
-        component: LogComponents.agent,
-      });
-      
-      // Wire edge AI anomaly service to system metrics
-      const { configureAnomalyFeed: configureSystemMetrics } = await import('./system/metrics.js');
-      configureSystemMetrics(this.anomalyService);
-      
-      // Wire edge AI anomaly service to sensor-publish
-      const { configureAnomalyFeed: configureSensorAnomaly } = await import('./features/sensor-publish/sensor.js');
-      configureSensorAnomaly(this.anomalyService);
-      
-      this.agentLogger?.infoSync('Anomaly detection configured for system metrics and endpoints', {
-        component: LogComponents.agent,
-      });
-    }
-
     this.cloudSync = new CloudSync(
       this.stateReconciler, // Use StateReconciler instead of ContainerManager
       this.deviceManager,
@@ -798,7 +895,14 @@ export default class DeviceAgent {
       MqttManager.getInstance() // Pass MQTT manager singleton for state reporting (optional)
     );
 
-    // Reinitialize device actions with cloudSync for connection health endpoint
+    // Reinitialize device actions with cloudSync, anomaly service, and simulation
+    this.agentLogger?.infoSync('Reinitializing device actions with all services', {
+      component: LogComponents.agent,
+      hasCloudSync: !!this.cloudSync,
+      hasAnomalyService: !!this.anomalyService,
+      hasSimulation: !!this.simulationOrchestrator,
+    });
+    
     deviceActions.initialize(
       this.containerManager,
       this.deviceManager,
@@ -811,6 +915,26 @@ export default class DeviceAgent {
 
     // Start polling for target state
     await this.cloudSync.startPoll();
+
+    // Initialize anomaly detection after cloud config is loaded
+    await this.initAnomalyDetection();
+    
+    // Reinitialize device actions WITH anomaly service now available
+    if (this.anomalyService) {
+      this.agentLogger?.infoSync('Reinitializing device actions with anomaly service', {
+        component: LogComponents.agent,
+        hasAnomalyService: true,
+      });
+      
+      deviceActions.initialize(
+        this.containerManager,
+        this.deviceManager,
+        this.cloudSync,
+        this.agentLogger,
+        this.anomalyService,
+        this.simulationOrchestrator
+      );
+    }
 
     // Trigger first boot discovery after cloud config is loaded
     // This ensures we respect cloud-configured feature flags
@@ -850,6 +974,15 @@ export default class DeviceAgent {
       this.agentLogger?.infoSync('First boot discovery completed', {
         component: LogComponents.agent
       });
+
+      // Re-initialize anomaly detection now that endpoints are discovered
+      // This allows auto-discovery of endpoint metrics
+      if (this.agentConfig.getFeatures().enableAnomalyDetection) {
+        this.agentLogger?.infoSync('Re-initializing anomaly detection after endpoint discovery', {
+          component: LogComponents.agent
+        });
+        await this.initAnomalyDetection();
+      }
     } catch (error) {
       this.agentLogger?.errorSync(
         'First boot discovery failed',

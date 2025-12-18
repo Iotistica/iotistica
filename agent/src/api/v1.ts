@@ -221,6 +221,31 @@ router.post('/v1/test/anomaly', async (req: Request, res: Response, next: NextFu
 });
 
 /**
+ * POST /v1/anomaly/save-baselines
+ * Manually trigger baseline save (for testing)
+ */
+router.post('/v1/anomaly/save-baselines', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const anomalyService = (actions as any).getAnomalyService?.();
+		if (!anomalyService) {
+			return res.status(503).json({ error: 'Anomaly detection service not available' });
+		}
+		
+		// Trigger baseline save
+		anomalyService.saveBaselines();
+		
+		const stats = anomalyService.getStats();
+		
+		return res.status(200).json({
+			message: 'Baseline save triggered',
+			stats
+		});
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
  * GET /v1/simulation/status
  * Get simulation orchestrator status
  */

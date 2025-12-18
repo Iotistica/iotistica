@@ -20,8 +20,8 @@ RUN apt-get update && \
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir asyncua==1.0.6
 
-# Copy simulator script
-COPY sensors/opcua-simulator/opcua_simulator.py .
+# Copy simulator script (build context is sensors/opcua-simulator)
+COPY opcua_simulator.py .
 
 # Expose OPC UA port
 EXPOSE 4840

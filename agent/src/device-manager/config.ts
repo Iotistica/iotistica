@@ -27,6 +27,8 @@ interface ConfigManagerEvents {
 	'device-registered': (device: ProtocolAdapterDevice) => void;
 	'device-updated': (device: ProtocolAdapterDevice) => void;
 	'device-unregistered': (deviceId: string) => void;
+	'features-changed': (change: { old: any; new: any }) => void;
+	'anomaly-config-changed': (change: { old: any; new: any }) => void;
 }
 
 export class ConfigManager extends EventEmitter {
@@ -130,13 +132,42 @@ export class ConfigManager extends EventEmitter {
 			const { endpoints: _targetEndpoints, ...otherTargetFields } = this.targetConfig;
 			const { endpoints: currentEndpoints, ...otherCurrentFields } = this.currentConfig;
 			
+			// Detect feature changes before merging
+			const oldFeatures = this.currentConfig.features;
+			const newFeatures = otherTargetFields.features;
+			
 			// Merge non-device fields into current config
 			Object.assign(this.currentConfig, otherTargetFields);
 			
 			// Restore endpoints array (will be reconciled separately)
 			if (currentEndpoints) {
 				this.currentConfig.endpoints = currentEndpoints;
-			}			// Calculate steps for sensor reconciliation
+			}
+			
+			// Emit feature change event if features changed
+			if (oldFeatures && newFeatures && !_.isEqual(oldFeatures, newFeatures)) {
+				this.emit('features-changed', { old: oldFeatures, new: newFeatures });
+				
+				this.logger?.infoSync('Feature configuration changed', {
+					component: LogComponents.configManager,
+					operation: 'reconcile',
+					changes: Object.keys(newFeatures).filter(key => oldFeatures[key] !== newFeatures[key])
+				});
+			}
+			
+			// Emit anomaly config change event if anomaly config changed
+			const oldAnomalyConfig = otherCurrentFields.anomaly;
+			const newAnomalyConfig = otherTargetFields.anomaly;
+			if (oldAnomalyConfig && newAnomalyConfig && !_.isEqual(oldAnomalyConfig, newAnomalyConfig)) {
+				this.emit('anomaly-config-changed', { old: oldAnomalyConfig, new: newAnomalyConfig });
+				
+				this.logger?.infoSync('Anomaly configuration changed', {
+					component: LogComponents.configManager,
+					operation: 'reconcile',
+				});
+			}
+			
+			// Calculate steps for sensor reconciliation
 			const steps = this.calculateSteps();
 
 			if (steps.length === 0) {
@@ -156,7 +187,6 @@ export class ConfigManager extends EventEmitter {
 				operation: 'reconcile',
 				stepsCount: steps.length,
 			});
-
 			// Execute steps
 			for (const step of steps) {
 				try {

@@ -97,8 +97,6 @@ export async function processDeviceStateReport(
     // Only reconcile if config is present in the report (agent only sends config when changed)
     if (deviceState.config) {
         await deviceSensorSync.syncCurrentStateToTable(uuid, deviceState);
-    } else {
-      logger.debug(`Skipping endpoints reconciliation for ${uuid.substring(0, 8)} (config not in report)`);
     }
 
     // EVENT SOURCING: Publish current state updated event

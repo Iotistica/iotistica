@@ -13,6 +13,7 @@
 import mqtt from 'mqtt';
 import { EventEmitter } from 'events';
 import logger, { logOperation } from '../utils/logger';
+import { isDuplicateMessage } from '../utils/mqtt-deduplication';
 
 export interface MqttConfig {
   brokerUrl: string;
@@ -273,7 +274,13 @@ export class MqttManager extends EventEmitter {
           payloadSize: payload.length,
           payloadPreview: payload.toString().substring(0, 100)
         });
-        this.handleMessage(topic, payload);
+        // Handle message asynchronously (deduplication is async)
+        this.handleMessage(topic, payload).catch(error => {
+          logger.error('Error in MQTT message handler', { 
+            topic, 
+            error: error instanceof Error ? error.message : String(error) 
+          });
+        });
       });
     });
   }
@@ -618,7 +625,7 @@ export class MqttManager extends EventEmitter {
   /**
    * Handle incoming MQTT messages
    */
-  private handleMessage(topic: string, payload: Buffer): void {
+  private async handleMessage(topic: string, payload: Buffer): Promise<void> {
     const message = payload.toString();
     
     // Update last message timestamp for health monitoring
@@ -644,6 +651,19 @@ export class MqttManager extends EventEmitter {
       } catch {
         // Non-JSON payload (e.g., raw log messages)
         data = message;
+      }
+
+      // HA Deduplication: Check if message has msgId and if we've seen it before
+      if (data && typeof data === 'object' && data.msgId) {
+        const isDupe = await isDuplicateMessage(data.msgId);
+        if (isDupe) {
+          logger.debug('Duplicate message detected, skipping processing', {
+            msgId: data.msgId,
+            topic,
+            deviceUuid: deviceUuid.substring(0, 8) + '...'
+          });
+          return; // Skip duplicate
+        }
       }
 
       // Dispatch to appropriate handler

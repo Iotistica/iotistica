@@ -308,9 +308,13 @@ export class DeviceSensorSyncService {
         ? JSON.parse(currentState.config) 
         : currentState.config;
       
-    
       const agentEndpoints = config?.endpoints;
       const currentVersion = currentState.version || 0;
+
+      if (!agentEndpoints || !Array.isArray(agentEndpoints)) {
+        logger.warn(`No endpoints array found in config for device ${deviceUuid.substring(0, 8)}`);
+        return;
+      }
 
       logger.info(`Agent reports ${agentEndpoints.length} running endpoints (version ${currentVersion})`);
 

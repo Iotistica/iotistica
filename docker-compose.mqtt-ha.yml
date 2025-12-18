@@ -1,0 +1,186 @@
+# Docker Compose configuration for Mosquitto HA (Bridge Mode)
+#
+# This setup provides high availability MQTT infrastructure with:
+#   - Two Mosquitto brokers (primary + secondary) in active-active mode
+#   - Bidirectional bridge for message synchronization
+#   - Redis-based message deduplication in API
+#
+# Architecture:
+#   Device → Primary Broker → Bridge → Secondary Broker → API (dedup check)
+#   Device → Secondary Broker → Bridge → Primary Broker → API (dedup check)
+#
+# Usage:
+#   docker-compose -f docker-compose.mqtt-ha.yml up -d
+#
+# Environment variables:
+#   - MQTT_BRIDGE_USERNAME=bridge        # Bridge authentication username
+#   - MQTT_BRIDGE_PASSWORD=bridge-secret # Bridge authentication password
+#   - MOSQUITTO_PRIMARY_PORT=1883        # Primary broker external port
+#   - MOSQUITTO_SECONDARY_PORT=1884      # Secondary broker external port
+
+version: '3.8'
+
+services:
+  # Primary Mosquitto Broker
+  mosquitto-primary:
+    image: iegomez/mosquitto-go-auth
+    container_name: iotistic-mosquitto-primary
+    restart: unless-stopped
+    ports:
+      - "${MOSQUITTO_PRIMARY_PORT:-1883}:1883"        # MQTT
+      - "${MOSQUITTO_PRIMARY_WS_PORT:-9001}:9001"     # WebSocket
+    volumes:
+      - ./mosquitto/mosquitto-bridge-primary.conf:/etc/mosquitto/mosquitto.conf
+      - mosquitto-primary-data:/mosquitto/data
+      - mosquitto-primary-log:/mosquitto/log
+    environment:
+      - MQTT_BRIDGE_USERNAME=${MQTT_BRIDGE_USERNAME:-bridge}
+      - MQTT_BRIDGE_PASSWORD=${MQTT_BRIDGE_PASSWORD:-bridge-secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 5 mosquitto_sub -h localhost -p 1883 -t '$$SYS/#' -C 1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - iotistic-net
+
+  # Secondary Mosquitto Broker
+  mosquitto-secondary:
+    image: iegomez/mosquitto-go-auth
+    container_name: iotistic-mosquitto-secondary
+    restart: unless-stopped
+    ports:
+      - "${MOSQUITTO_SECONDARY_PORT:-1884}:1883"      # MQTT (different external port)
+      - "${MOSQUITTO_SECONDARY_WS_PORT:-9002}:9001"   # WebSocket
+    volumes:
+      - ./mosquitto/mosquitto-bridge-secondary.conf:/etc/mosquitto/mosquitto.conf
+      - mosquitto-secondary-data:/mosquitto/data
+      - mosquitto-secondary-log:/mosquitto/log
+    environment:
+      - MQTT_BRIDGE_USERNAME=${MQTT_BRIDGE_USERNAME:-bridge}
+      - MQTT_BRIDGE_PASSWORD=${MQTT_BRIDGE_PASSWORD:-bridge-secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 5 mosquitto_sub -h localhost -p 1883 -t '$$SYS/#' -C 1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - iotistic-net
+
+  # PostgreSQL (shared by both brokers for auth/ACL)
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: iotistic-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-iotistic}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - iotistic-pg-data:/var/lib/postgresql/data
+      - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    command: >
+      postgres
+      -c shared_preload_libraries=timescaledb
+      -c config_file=/etc/postgresql/postgresql.conf
+      -c hba_file=/etc/postgresql/pg_hba.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - iotistic-net
+
+  # Redis (shared for auth cache + message deduplication)
+  redis:
+    image: redis:7-alpine
+    container_name: iotistic-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy volatile-lru
+      --save 60 1000
+      --appendonly yes
+    ports:
+      - "${REDIS_PORT_EXT:-6379}:6379"
+    volumes:
+      - iotistic-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - iotistic-net
+
+  # API (connects to both brokers for redundancy)
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: iotistic-api
+    restart: unless-stopped
+    environment:
+      - PORT=${PORT:-3002}
+      - NODE_ENV=${NODE_ENV:-development}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-iotistic}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      # Connect to primary broker by default (failover handled by clients)
+      - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtt://mosquitto-primary:1883}
+      # Alternative: round-robin between brokers
+      # - MQTT_BROKER_URL=mqtt://mosquitto-primary:1883,mqtt://mosquitto-secondary:1883
+      - MQTT_USERNAME=${MQTT_USERNAME:-nodered}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-secret}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "${API_PORT_EXT:-3002}:3002"
+    depends_on:
+      mosquitto-primary:
+        condition: service_healthy
+      mosquitto-secondary:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - iotistic-net
+
+volumes:
+  iotistic-pg-data:
+    driver: local
+  iotistic-redis-data:
+    driver: local
+  mosquitto-primary-data:
+    driver: local
+  mosquitto-primary-log:
+    driver: local
+  mosquitto-secondary-data:
+    driver: local
+  mosquitto-secondary-log:
+    driver: local
+
+networks:
+  iotistic-net:
+    driver: bridge

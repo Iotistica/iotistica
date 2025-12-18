@@ -128,7 +128,7 @@ export class CloudLogBackend implements LogBackend {
 		flushInterval: config.flushInterval ?? 30000, // 30 seconds (changed from 100ms)
 		reconnectInterval: config.reconnectInterval ?? 5000, // 5s
 		maxReconnectInterval: config.maxReconnectInterval ?? 300000, // 5min
-		samplingRates: config.samplingRates ?? { debug: 0.01, info: 0.1, warn: 1, error: 1 }, // Selective sampling (changed from all 1)
+		samplingRates: config.samplingRates ?? { debug: 0.05, info: 1, warn: 1, error: 1 }, // All info/warn/error, sample 5% debug
 	};		// Initialize HTTP client with default headers
 		this.httpClient = new FetchHttpClient({
 			defaultHeaders: {
@@ -141,8 +141,8 @@ export class CloudLogBackend implements LogBackend {
 		this.samplingRates = {
 			error: config.samplingRates?.error ?? 1.0,   // 100% - all errors
 			warn: config.samplingRates?.warn ?? 1.0,     // 100% - all warnings
-			info: config.samplingRates?.info ?? 0.1,     // 10% - sample info logs
-			debug: config.samplingRates?.debug ?? 0.01,  // 1% - sample debug logs
+			info: config.samplingRates?.info ?? 1.0,     // 100% - all info logs (critical for container lifecycle)
+			debug: config.samplingRates?.debug ?? 0.05,  // 5% - sample debug logs
 		};
 		
 		// Initialize retry policy

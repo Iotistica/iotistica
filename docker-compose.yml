@@ -430,37 +430,37 @@ services:
             options:
                 max-size: "10m"
                 max-file: "3"
-    wg-server:
-        build: ./wg-server
-        container_name: wg-server
-        restart: unless-stopped
-        privileged: true
-        # network_mode: host  # Commented out - doesn't work on Windows Docker Desktop
-        cap_add:
-        - NET_ADMIN
-        - SYS_MODULE
-        devices:
-        - /dev/net/tun:/dev/net/tun
-        ports:
-        - "8089:8089"           # API port
-        - "51820:51820/udp"     # WireGuard VPN port
-        volumes:
-        - ./wg-server/wg0.conf:/etc/wireguard/wg0.conf
-        - wg-data:/var/lib/wireguard
-        environment:
-        - PORT=8089
-        - WG_INTERFACE=wg0
-        - SERVER_ENDPOINT=${SERVER_ENDPOINT:-vpn.example.com}
-        - DB_HOST=postgres      # Changed back to postgres service name
-        - DB_PORT=5432
-        - DB_NAME=iotistic
-        - DB_USER=postgres
-        - DB_PASSWORD=postgres
-        - LOG_LEVEL=${LOG_LEVEL:-info}
-        networks:
-        - iotistic-net
-        depends_on:
-        - postgres
+    # wg-server:
+    #     build: ./wg-server
+    #     container_name: wg-server
+    #     restart: unless-stopped
+    #     privileged: true
+    #     # network_mode: host  # Commented out - doesn't work on Windows Docker Desktop
+    #     cap_add:
+    #     - NET_ADMIN
+    #     - SYS_MODULE
+    #     devices:
+    #     - /dev/net/tun:/dev/net/tun
+    #     ports:
+    #     - "8089:8089"           # API port
+    #     - "51820:51820/udp"     # WireGuard VPN port
+    #     volumes:
+    #     - ./wg-server/wg0.conf:/etc/wireguard/wg0.conf
+    #     - wg-data:/var/lib/wireguard
+    #     environment:
+    #     - PORT=8089
+    #     - WG_INTERFACE=wg0
+    #     - SERVER_ENDPOINT=${SERVER_ENDPOINT:-vpn.example.com}
+    #     - DB_HOST=postgres      # Changed back to postgres service name
+    #     - DB_PORT=5432
+    #     - DB_NAME=iotistic
+    #     - DB_USER=postgres
+    #     - DB_PASSWORD=postgres
+    #     - LOG_LEVEL=${LOG_LEVEL:-info}
+    #     networks:
+    #     - iotistic-net
+    #     depends_on:
+    #     - postgres
 
     cadvisor:
         image: gcr.io/cadvisor/cadvisor:latest

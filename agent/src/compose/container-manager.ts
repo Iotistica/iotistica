@@ -710,7 +710,7 @@ export class ContainerManager extends EventEmitter {
 			const steps = this.calculateSteps();
 
 			if (steps.length === 0) {
-				this.logger?.debugSync('No changes needed - system is in desired state', {
+				this.logger?.infoSync('No changes needed - system is in desired state', {
 					component: LogComponents.containerManager,
 					operation: 'applyTargetState'
 				});
@@ -725,12 +725,12 @@ export class ContainerManager extends EventEmitter {
 			
 			steps.forEach((step, i) => {
 				if (step.action === 'downloadImage') {
-					this.logger?.debugSync(`Step ${i + 1}: ${step.action}`, {
+					this.logger?.infoSync(`Step ${i + 1}: ${step.action}`, {
 						component: LogComponents.containerManager,
 						image: step.imageName
 					});
 				} else if (step.action === 'startContainer') {
-					this.logger?.debugSync(`Step ${i + 1}: ${step.action}`, {
+					this.logger?.infoSync(`Step ${i + 1}: ${step.action}`, {
 						component: LogComponents.containerManager,
 						serviceName: step.service.serviceName,
 						image: step.service.imageName
@@ -747,14 +747,14 @@ export class ContainerManager extends EventEmitter {
 
 			for (let i = 0; i < steps.length; i++) {
 				const step = steps[i];
-				this.logger?.debugSync(`Executing step ${i + 1}/${steps.length}: ${step.action}`, {
+				this.logger?.infoSync(`Executing step ${i + 1}/${steps.length}: ${step.action}`, {
 					component: LogComponents.containerManager,
 					operation: 'applyTargetState'
 				});
 				
 				try {
 					await this.executeStep(step);
-					this.logger?.debugSync(`Step ${i + 1} completed`, {
+					this.logger?.infoSync(`Step ${i + 1} completed`, {
 						component: LogComponents.containerManager,
 						action: step.action
 					});
@@ -797,6 +797,9 @@ export class ContainerManager extends EventEmitter {
 			if (saveState) {
 				await this.saveCurrentStateToDB();
 			}
+
+			// Ensure logs are attached to all running containers (including pre-existing ones)
+			await this.attachLogsToAllContainers();
 
 			this.emit('state-applied');
 			

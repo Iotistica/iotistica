@@ -52,6 +52,8 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
         const { OPCUAClient } = await import('node-opcua-client');
 
         const client = OPCUAClient.create({
+          applicationName: 'Iotistic Sensor Agent',
+          applicationUri: 'urn:iotistic:sensor-agent',
           endpointMustExist : false,
           connectionStrategy: {
             maxRetry: 1,

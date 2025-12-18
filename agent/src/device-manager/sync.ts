@@ -296,7 +296,7 @@ export class CloudSync extends EventEmitter {
 		}
 		
 		// Default to plain HTTP client
-		this.logger?.infoSync('Using plain HTTP client', {
+		this.logger?.infoSync('Using HTTP client', {
 			component: LogComponents.cloudSync,
 			endpoint: endpoint
 		});
@@ -718,6 +718,16 @@ export class CloudSync extends EventEmitter {
 				operation: 'apply-state',
 				version: this.currentVersion
 			});
+			
+			// Update CloudSync intervals if they changed in the new target state
+			const newIntervals = deviceState.config?.intervals;
+			if (newIntervals) {
+				this.updateIntervals({
+					pollInterval: newIntervals.targetStatePollIntervalMs || this.config.pollInterval,
+					reportInterval: newIntervals.deviceReportIntervalMs || this.config.reportInterval,
+					metricsInterval: newIntervals.metricsIntervalMs || this.config.metricsInterval,
+				});
+			}
 		} else {
 			this.logger?.debugSync('Target state fetched (no changes)', {
 				component: LogComponents.cloudSync,
@@ -1129,9 +1139,9 @@ export class CloudSync extends EventEmitter {
 	};
 	
 	// Add config only if it changed
-	if (configChanged) {
+	//if (configChanged) {
 		reportToSend[deviceInfo.uuid].config = currentState.config;
-	}
+	//}
 	
 	// Add endpoint health only if it changed or metrics cycle
 	if (healthChanged || includeMetrics) {

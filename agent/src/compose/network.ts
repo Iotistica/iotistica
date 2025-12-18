@@ -183,10 +183,6 @@ class NetworkImpl implements NetworkIface {
 	}
 
 	public async create(): Promise<void> {
-		logger.logSystemEvent('createNetwork', {
-			network: { name: this.name, appUuid: this.appUuid },
-		});
-
 		await docker.createNetwork(this.toDockerConfig());
 	}
 

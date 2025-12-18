@@ -2,6 +2,7 @@ import mqtt, { MqttClient, IClientOptions, IClientPublishOptions } from 'mqtt';
 import { EventEmitter } from 'events';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
+import { MessageIdGenerator } from './message-id';
 
 /**
  * Subscription handler entry
@@ -40,6 +41,7 @@ export class MqttManager extends EventEmitter {
   private readonly BASE_RECONNECT_DELAY_MS = 1000; // 1 second base
   private lastBrokerUrl?: string;
   private lastOptions?: IClientOptions;
+  private messageIdGenerator?: MessageIdGenerator; // For HA deduplication
 
   private constructor() {
     super();
@@ -57,6 +59,21 @@ export class MqttManager extends EventEmitter {
    */
   public setLogger(logger: AgentLogger | undefined): void {
     this.logger = logger;
+  }
+
+  /**
+   * Initialize message ID generator for HA deduplication
+   * 
+   * @param deviceUuid - Device UUID
+   */
+  public initMessageIdGenerator(deviceUuid: string): void {
+    if (!this.messageIdGenerator) {
+      this.messageIdGenerator = new MessageIdGenerator(deviceUuid);
+      this.logger?.infoSync('Message ID generator initialized for HA deduplication', {
+        component: LogComponents.mqtt,
+        deviceUuid
+      });
+    }
   }
 
   /**
@@ -182,15 +199,52 @@ export class MqttManager extends EventEmitter {
   }
 
   /**
+   * Inject msgId into payload for HA deduplication
+   * 
+   * @param payload - Original payload (string or Buffer)
+   * @returns Payload with msgId injected (if JSON), or original payload if not JSON or generator not initialized
+   */
+  private injectMessageId(payload: string | Buffer): string | Buffer {
+    if (!this.messageIdGenerator) {
+      return payload; // No generator, return original
+    }
+
+    try {
+      // Convert Buffer to string if needed
+      const payloadStr = Buffer.isBuffer(payload) ? payload.toString('utf-8') : payload;
+      
+      // Try to parse as JSON
+      const json = JSON.parse(payloadStr);
+      
+      // Inject msgId
+      json.msgId = this.messageIdGenerator.generate();
+      
+      // Return as string (MQTT will handle encoding)
+      return JSON.stringify(json);
+    } catch (error) {
+      // Not JSON or parse error - return original
+      this.logger?.debugSync('Cannot inject msgId into non-JSON payload', {
+        component: LogComponents.mqtt,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return payload;
+    }
+  }
+
+  /**
    * Publish message to MQTT topic
    * 
    * If offline, queues message for delivery on reconnect.
+   * Automatically adds msgId to JSON payloads for HA deduplication.
    */
   public async publish(
     topic: string,
     payload: string | Buffer,
     options?: IClientPublishOptions
   ): Promise<void> {
+    // Inject msgId for deduplication (only for JSON payloads)
+    const enrichedPayload = this.injectMessageId(payload);
+
     if (!this.client || !this.connected) {
       // Queue message for delivery on reconnect
       if (this.pendingPublishes.length >= this.MAX_PENDING_PUBLISHES) {
@@ -200,7 +254,7 @@ export class MqttManager extends EventEmitter {
         this.pendingPublishes.shift(); // Remove oldest
       }
       
-      this.pendingPublishes.push({ topic, payload, options });
+      this.pendingPublishes.push({ topic, payload: enrichedPayload, options });
       this.debugLog(`Queued message for offline delivery: ${topic} (queue size: ${this.pendingPublishes.length})`);
       return Promise.resolve();
     }
@@ -210,7 +264,7 @@ export class MqttManager extends EventEmitter {
         reject(new Error(`MQTT publish timeout after 5s: ${topic}`));
       }, 5000);
       
-      this.client!.publish(topic, payload, options || {}, (error) => {
+      this.client!.publish(topic, enrichedPayload, options || {}, (error) => {
         clearTimeout(timeout);
         if (error) {
           reject(error);
@@ -227,12 +281,16 @@ export class MqttManager extends EventEmitter {
    * 
    * Throws error immediately if not connected (no offline queue).
    * Use this for messages that have alternative delivery methods (e.g., HTTP fallback).
+   * Automatically adds msgId to JSON payloads for HA deduplication.
    */
   public async publishNoQueue(
     topic: string,
     payload: string | Buffer,
     options?: IClientPublishOptions
   ): Promise<void> {
+    // Inject msgId for deduplication (only for JSON payloads)
+    const enrichedPayload = this.injectMessageId(payload);
+
     if (!this.client || !this.connected) {
       throw new Error(`MQTT not connected - cannot publish to ${topic}`);
     }
@@ -242,7 +300,7 @@ export class MqttManager extends EventEmitter {
         reject(new Error(`MQTT publish timeout after 5s: ${topic}`));
       }, 5000);
       
-      this.client!.publish(topic, payload, options || {}, (error) => {
+      this.client!.publish(topic, enrichedPayload, options || {}, (error) => {
         clearTimeout(timeout);
         if (error) {
           reject(error);

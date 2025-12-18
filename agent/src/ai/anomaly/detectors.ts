@@ -183,6 +183,53 @@ export class IQRDetector implements AnomalyDetector {
 }
 
 /**
+ * Expected Range Detector
+ * Simple range check against configured min/max values
+ */
+export class ExpectedRangeDetector implements AnomalyDetector {
+	readonly method = 'expected_range' as const;
+	
+	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig): DetectionResult {
+		// Must have expectedRange configured
+		if (!config.expectedRange || config.expectedRange.length !== 2) {
+			return {
+				method: this.method,
+				isAnomaly: false,
+				confidence: 0,
+				deviation: 0,
+				expectedRange: [value, value],
+				message: 'No expected range configured',
+			};
+		}
+		
+		const [min, max] = config.expectedRange;
+		const isAnomaly = value < min || value > max;
+		
+		// Calculate deviation as percentage outside range
+		let deviation = 0;
+		if (value < min) {
+			deviation = (min - value) / (max - min);
+		} else if (value > max) {
+			deviation = (value - max) / (max - min);
+		}
+		
+		// Confidence is high for range violations (1.0 for values outside, 0 for inside)
+		const confidence = isAnomaly ? 1.0 : 0;
+		
+		return {
+			method: this.method,
+			isAnomaly,
+			confidence,
+			deviation: Math.abs(deviation),
+			expectedRange: [min, max],
+			message: isAnomaly
+				? `Value ${value.toFixed(2)} outside expected range [${min}, ${max}]`
+				: `Value within expected range [${min}, ${max}]`,
+		};
+	}
+}
+
+/**
  * Rate of Change Detector
  * Detects sudden spikes/drops based on velocity
  */
@@ -301,6 +348,7 @@ export class EWMADetector implements AnomalyDetector {
  */
 export function getAllDetectors(): AnomalyDetector[] {
 	return [
+		new ExpectedRangeDetector(),
 		new ZScoreDetector(),
 		new MADDetector(),
 		new IQRDetector(),

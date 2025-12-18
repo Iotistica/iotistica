@@ -85,9 +85,6 @@ class VolumeImpl implements Volume {
 	}
 
 	public async create(): Promise<void> {
-		logger.logSystemEvent('createVolume', {
-			volume: { name: this.name },
-		});
 		await docker.createVolume({
 			Name: Volume.generateDockerName(this.appId, this.name),
 			Labels: this.config.labels,

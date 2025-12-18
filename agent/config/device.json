@@ -7,7 +7,7 @@
   },
   "features": {
     "enableDeviceJobs": true,
-    "enableAnomalyDetection": false,
+    "enableAnomalyDetection": true,
     "enableDeviceRemoteAccess": true,
     "enableDeviceSensorPublish": true
   },

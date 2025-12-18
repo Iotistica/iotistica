@@ -10,10 +10,23 @@ export { LocalLogBackend } from './local-backend';
 export { ContainerLogMonitor } from './docker-monitor';
 export { AgentLogger } from './agent-logger';
 
+import { AgentLogger } from './agent-logger';
+import { LogComponents } from './types';
+
 /**
  * Log system events (for network operations, etc.)
+ * Uses AgentLogger if available, falls back to console.log
  */
-export function logSystemEvent(eventType: string, data: any): void {
-  const timestamp = new Date().toISOString();
-  console.log(`[SYSTEM_EVENT] ${timestamp} - ${eventType}:`, JSON.stringify(data, null, 2));
+export function logSystemEvent(eventType: string, data: any, logger?: AgentLogger): void {
+  if (logger) {
+    logger.debugSync(`System event: ${eventType}`, {
+      component: LogComponents.containerManager,
+      eventType,
+      ...data
+    });
+  } else {
+    // Fallback for cases where logger is not available
+    const timestamp = new Date().toISOString();
+    console.log(`[SYSTEM_EVENT] ${timestamp} - ${eventType}:`, JSON.stringify(data, null, 2));
+  }
 }

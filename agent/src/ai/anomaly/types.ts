@@ -23,6 +23,7 @@ export interface DataPoint {
  * Detection methods available
  */
 export type DetectionMethod = 
+	| 'expected_range' // Simple min/max range check
 	| 'zscore'        // Z-score (standard deviations from mean)
 	| 'mad'           // Median Absolute Deviation
 	| 'iqr'           // Interquartile Range
@@ -82,7 +83,6 @@ export interface MetricConfig {
  * Anomaly detection configuration
  */
 export interface AnomalyConfig {
-	enabled: boolean;
 	sensitivity: number;             // 1-10 (higher = more sensitive)
 	metrics: MetricConfig[];
 	alerts: {
@@ -92,9 +92,10 @@ export interface AnomalyConfig {
 		cooldownMs: number;
 		maxQueueSize: number;
 	};
-	storage: {
-		historyDays: number;
-		dbPath: string;
+	storage?: {
+		retention: number;       // Days to retain anomaly history
+		dbPath?: string;  // Optional - db connection takes precedence
+		minSamples?: number; // Minimum samples required before saving baseline (default: 5)
 	};
 	ml?: {
 		enabled: boolean;

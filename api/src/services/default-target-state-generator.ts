@@ -98,6 +98,31 @@ interface TargetStateConfig {
         reason: string
       }
   };
+  anomaly?: {
+    sensitivity: number;
+    metrics: Array<{
+      name: string;
+      enabled: boolean;
+      methods: Array<'zscore' | 'mad' | 'iqr' | 'rate_change' | 'ewma' | 'correlation'>;
+      threshold: number;
+      windowSize: number;
+      expectedRange?: [number, number];
+      minConfidence?: number;
+      cooldownMs?: number;
+    }>;
+    alerts: {
+      mqtt: boolean;
+      cloud: boolean;
+      minConfidence: number;
+      cooldownMs: number;
+      maxQueueSize: number;
+    };
+    storage?: {
+      retention: number;  // Days to retain anomaly history
+      dbPath?: string;
+      minSamples?: number; // Minimum samples required before saving baseline
+    };
+  };
   intervals?: {
     discoveryFullIntervalMs?: number;
     discoveryLightIntervalMs?: number;
@@ -185,7 +210,7 @@ export function generateDefaultTargetStateConfig(
       enableDeviceJobs: true, // Always enabled (API access required for system to work)
       enableDeviceSensorPublish: true, // Enabled by default (protocols enabled)
       enableDeviceRemoteAccess: true,
-      enableAnomalyDetection: false, // Disabled by default (resource-intensive)
+      enableAnomalyDetection: true, // Disabled by default (resource-intensive)
     },
     settings: {
       stateReportIntervalMs: 10000, // 10 seconds
@@ -200,10 +225,50 @@ export function generateDefaultTargetStateConfig(
         reason: "heap_fragmentation_cleanup"
       }
     },
+    anomaly: {
+      sensitivity: 5,
+      metrics: [
+        {
+          name: 'cpu_usage',
+          enabled: true,
+          methods: ['zscore', 'ewma'],
+          threshold: 3.0,
+          windowSize: 100,
+          expectedRange: [0, 85],
+        },
+        {
+          name: 'memory_percent',
+          enabled: true,
+          methods: ['zscore', 'ewma', 'rate_change'],
+          threshold: 3.0,
+          windowSize: 200,
+          expectedRange: [0, 85],
+        },
+        {
+          name: 'cpu_temp',
+          enabled: true,
+          methods: ['zscore', 'mad'],
+          threshold: 3.0,
+          windowSize: 300,
+          expectedRange: [30, 80],
+        },
+      ],
+      alerts: {
+        mqtt: true,
+        cloud: true,
+        minConfidence: 0.7,
+        cooldownMs: 300000,  // 5 minutes
+        maxQueueSize: 1000,
+      },
+      storage: {
+        retention: 30,  // Automatic cleanup after 30 days (uses existing device.sqlite)
+        minSamples: 5,  // Minimum data points required before saving baseline (5 samples = ~5 minutes at 60s interval)
+      },
+    },
     protocols: {
       modbus: {
         enabled: true, // Enabled by default with simulator
-        tcpHost: process.env.MODBUS_TCP_HOST || 'localhost', // Docker: container name, Local: override with 'localhost'
+        tcpHost: 'localhost', // Always use localhost for agent discovery
         tcpPort: 502,
         slaveRangeStart: 1,
         slaveRangeEnd: 10,
@@ -212,7 +277,7 @@ export function generateDefaultTargetStateConfig(
         vendorFile: '/app/dist/config/vendors/dataPoints.json',
       },
       opcua: {
-        enabled: false,
+        enabled: true, // Enabled by default for discovery
         discoveryUrls: [],
       },
       snmp: {
@@ -279,11 +344,49 @@ export function generateDefaultTargetStateConfig(
  * Generate complete target state (apps + config) for new device
  * 
  * @param licenseData - License data from system_config
- * @returns Complete target state with empty apps and generated config
+ * @returns Complete target state with preinstalled core services and generated config
  */
 export function generateDefaultTargetState(licenseData: LicenseData | null) {
   return {
-    apps: {}, // No apps deployed by default
+    apps: {
+      "1000": {
+        appId: "1000",
+        appName: "core-services",
+        services: [
+          {
+            serviceId: 1,
+            serviceName: "mosquitto",
+            imageName: "eclipse-mosquitto:2.0",
+            config: {
+              image: "eclipse-mosquitto:2.0",
+              ports: ["1883:1883", "9001:9001"],
+              volumes: [
+                "mosquitto-data:/mosquitto/data",
+                "mosquitto-config:/mosquitto/config",
+                "mosquitto-log:/mosquitto/log"
+              ],
+              restart: "unless-stopped",
+              networks: ["default"]
+            }
+          },
+          {
+            serviceId: 2,
+            serviceName: "nodered",
+            imageName: "nodered/node-red:latest",
+            config: {
+              image: "nodered/node-red:latest",
+              ports: ["8880:1880"],
+              volumes: ["nodered-data:/data"],
+              environment: {
+                "TZ": "UTC"
+              },
+              restart: "unless-stopped",
+              networks: ["default"]
+            }
+          }
+        ]
+      }
+    },
     config: generateDefaultTargetStateConfig(licenseData),
   };
 }

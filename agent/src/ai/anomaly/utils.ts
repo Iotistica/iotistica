@@ -8,7 +8,19 @@
 import type { AnomalyConfig, MetricConfig, DataPoint, DetectionMethod } from './types';
 
 /**
- * Load configuration from environment variables
+ * Load configuration from cloud target state (preferred) or environment variables (fallback)
+ */
+export function loadConfigFromTargetState(targetStateConfig?: any): AnomalyConfig {
+	// Use target state config if provided, otherwise fall back to environment variables
+	if (targetStateConfig?.anomaly) {
+		return targetStateConfig.anomaly as AnomalyConfig;
+	}
+	
+	return loadConfigFromEnv();
+}
+
+/**
+ * Load configuration from environment variables (fallback)
  */
 export function loadConfigFromEnv(): AnomalyConfig {
 	const enabled = process.env.ANOMALY_DETECTION_ENABLED === 'true';
@@ -49,7 +61,7 @@ export function loadConfigFromEnv(): AnomalyConfig {
 		{
 			name: 'cpu_usage',
 			enabled: true,
-			methods: ['zscore', 'ewma'],
+			methods: ['expected_range', 'zscore', 'ewma'],
 			threshold: zscoreThreshold,
 			windowSize: 100,
 			expectedRange: [0, 85],
@@ -57,7 +69,7 @@ export function loadConfigFromEnv(): AnomalyConfig {
 		{
 			name: 'memory_percent',
 			enabled: true,
-			methods: ['zscore', 'ewma', 'rate_change'],
+			methods: ['expected_range', 'zscore', 'ewma', 'rate_change'],
 			threshold: zscoreThreshold,
 			windowSize: 200,
 			expectedRange: [0, 85],
@@ -65,7 +77,7 @@ export function loadConfigFromEnv(): AnomalyConfig {
 		{
 			name: 'cpu_temp',
 			enabled: true,
-			methods: ['zscore', 'mad'],
+			methods: ['expected_range', 'zscore', 'mad'],
 			threshold: madThreshold,
 			windowSize: 300,
 			expectedRange: [30, 80],
@@ -94,7 +106,6 @@ export function loadConfigFromEnv(): AnomalyConfig {
 	];
 	
 	return {
-		enabled,
 		sensitivity,
 		metrics,
 		alerts: {
@@ -105,7 +116,7 @@ export function loadConfigFromEnv(): AnomalyConfig {
 			maxQueueSize: alertMaxQueue,
 		},
 		storage: {
-			historyDays,
+			retention: historyDays,
 			dbPath,
 		},
 		ml: mlEnabled ? {
@@ -224,7 +235,6 @@ export function getConfigSummary(config: AnomalyConfig): string {
 	
 	return `
 Anomaly Detection Configuration:
-  Status: ${config.enabled ? 'Enabled' : 'Disabled'}
   Sensitivity: ${config.sensitivity}/10
   Metrics Tracked: ${enabledMetrics.length}
   Detection Methods: ${Array.from(uniqueMethods).join(', ')}
