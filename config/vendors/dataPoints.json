@@ -20,12 +20,12 @@
   },
   "Generic": {
     "dataPoints": [
-      { "name": "holding_register_0", "address": 1, "type": "holding", "dataType": "uint16", "base": 100, "noise_pct": 0.1 },
-      { "name": "holding_register_1", "address": 2, "type": "holding", "dataType": "uint16", "base": 200, "noise_pct": 0.1 },
-      { "name": "holding_register_2", "address": 3, "type": "holding", "dataType": "uint16", "base": 300, "noise_pct": 0.1 },
-      { "name": "temperature", "address": 10, "type": "holding", "dataType": "uint16", "base": 250, "noise_pct": 0.05 },
-      { "name": "humidity", "address": 11, "type": "holding", "dataType": "uint16", "base": 650, "noise_pct": 0.05 },
-      { "name": "pressure", "address": 12, "type": "holding", "dataType": "uint16", "base": 1013, "noise_pct": 0.02 }
+      { "name": "holding_register_0", "address": 1, "type": "holding", "dataType": "uint16", "base": 200, "noise_pct": 0.1, "unit": "count" },
+      { "name": "holding_register_1", "address": 2, "type": "holding", "dataType": "uint16", "base": 280, "noise_pct": 0.1, "unit": "count" },
+      { "name": "holding_register_2", "address": 3, "type": "holding", "dataType": "uint16", "base": 150, "noise_pct": 0.15, "unit": "count" },
+      { "name": "temperature", "address": 10, "type": "holding", "dataType": "uint16", "base": 230, "noise_pct": 0.08, "unit": "°C", "scale": 0.1, "description": "Ambient temperature (scaled ×10, e.g., 230 = 23.0°C)" },
+      { "name": "humidity", "address": 11, "type": "holding", "dataType": "uint16", "base": 550, "noise_pct": 0.1, "unit": "%RH", "scale": 0.1, "description": "Relative humidity (scaled ×10, e.g., 550 = 55.0%)" },
+      { "name": "pressure", "address": 12, "type": "holding", "dataType": "uint16", "base": 1013, "noise_pct": 0.015, "unit": "hPa", "description": "Atmospheric pressure in hectopascals (1013 hPa = sea level)" }
     ]
   }
 }

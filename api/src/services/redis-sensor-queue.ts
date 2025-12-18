@@ -341,9 +341,16 @@ class RedisSensorQueue {
               extra.deviceName = reading.deviceName;
             }
             
-            // Add any additional fields
+            // Extract anomaly fields (if present from edge AI)
+            const anomaly_score = typeof reading.anomaly_score === 'number' ? reading.anomaly_score : undefined;
+            const anomaly_threshold = typeof reading.anomaly_threshold === 'number' ? reading.anomaly_threshold : undefined;
+            const baseline_samples = typeof reading.baseline_samples === 'number' ? reading.baseline_samples : undefined;
+            const detection_methods = reading.detection_methods || undefined;
+            
+            // Add any additional fields to extra (excluding anomaly fields now in dedicated columns)
             Object.entries(reading).forEach(([key, val]) => {
-              if (!['value', 'quality', 'unit', 'timestamp', 'registerName', 'deviceName'].includes(key)) {
+              if (!['value', 'quality', 'unit', 'timestamp', 'registerName', 'deviceName', 
+                    'anomaly_score', 'anomaly_threshold', 'baseline_samples', 'detection_methods'].includes(key)) {
                 extra[key] = val;
               }
             });
@@ -356,7 +363,12 @@ class RedisSensorQueue {
               unit: reading.unit || null,
               protocol,
               extra,
-              time: new Date(reading.timestamp || entry.timestamp)
+              time: new Date(reading.timestamp || entry.timestamp),
+              // Add anomaly fields
+              ...(anomaly_score !== undefined && { anomaly_score }),
+              ...(anomaly_threshold !== undefined && { anomaly_threshold }),
+              ...(baseline_samples !== undefined && { baseline_samples }),
+              ...(detection_methods !== undefined && { detection_methods })
             });
           });
         } else {

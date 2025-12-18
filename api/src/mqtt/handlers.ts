@@ -26,15 +26,17 @@ export async function handleEndpointsData(data: SensorData): Promise<void> {
     if (isBatch) {
       // Process batch of messages
       const batch = data.data as any;
-      const messages = batch.messages as string[];
+      const messages = batch.messages as (string | object)[];
       
       logger.debug(`Processing endpoints data batch: ${messages.length} messages from ${data.deviceUuid}/${data.sensorName}`);
       
       // Transform all messages to queue format
+      // Handle both JSON strings (legacy) and objects (current format)
       const queueEntries = messages
-        .map((messageStr: string) => {
+        .map((messageData: string | object) => {
           try {
-            const message = JSON.parse(messageStr);
+            // If it's a string, parse it; if it's already an object, use it directly
+            const message = typeof messageData === 'string' ? JSON.parse(messageData) : messageData;
             return {
               deviceUuid: data.deviceUuid,
               sensorName: data.sensorName,
@@ -43,7 +45,7 @@ export async function handleEndpointsData(data: SensorData): Promise<void> {
               metadata: data.metadata || {}
             };
           } catch (parseError) {
-            logger.error(`Failed to parse message in batch: ${messageStr}`, parseError);
+            logger.error(`Failed to parse message in batch: ${messageData}`, parseError);
             return null;
           }
         })

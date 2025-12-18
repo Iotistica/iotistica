@@ -159,13 +159,13 @@ export class AnomalyStorageService {
 				window_end: buffer.timestamps[buffer.size - 1] || null,
 			};
 
-			this.logger?.debugSync('Inserting baseline record', {
-				component: LogComponents.metrics,
-				metric,
-				sample_count: buffer.size,
-				mean: record.mean,
-				median: record.median,
-			});
+		this.logger?.debugSync('Inserting baseline record', {
+			component: LogComponents.metrics,
+			metric,
+			sample_count: buffer.size,
+			mean: record.mean,
+			median: record.median,
+		});
 
 			await this.db('anomaly_baselines').insert(record);
 

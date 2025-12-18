@@ -221,30 +221,64 @@ export class Sensor extends EventEmitter {
         },
       });
     } else if (typeof data === 'object' && data !== null) {
-      // Handle special case: Modbus/OPC-UA "readings" array format
+      // Handle individual reading objects (OPC-UA format)
+      // Must check BEFORE Modbus array check to handle both formats
+      if (
+        !Array.isArray(data) &&
+        data.deviceName &&
+        (data.registerName || data.name) &&
+        data.value !== undefined
+      ) {
+        const deviceName = data.deviceName;
+        const fieldName = data.registerName || data.name;
+        const value = data.value;
+        const quality = data.quality || 'GOOD';
+        
+        // Feed if numeric value
+        if (typeof value === 'number') {
+          anomalyService.processDataPoint({
+            source: 'endpoint',
+            metric: `${deviceName}_${fieldName}`,
+            value: value,
+            unit: data.unit || this.inferUnit(fieldName),
+            timestamp: timestampMs,
+            quality: quality === 'GOOD' || quality === 'Good' ? 'GOOD' : 'BAD',
+            deviceId: this.deviceUuid,
+            tags: {
+              sensorName,
+              deviceName,
+              fieldName,
+            },
+          });
+        }
+        return; // Don't recurse further into reading object
+      }
+      
+      // Handle special case: Modbus "readings" array format
       if (Array.isArray(data) && prefix === 'readings') {
         // Process each reading in the array
         for (const reading of data) {
           if (typeof reading === 'object' && reading !== null) {
             const deviceName = reading.deviceName || sensorName;
-            const registerName = reading.registerName;
+            // Support both Modbus (registerName) and OPC-UA (name) formats
+            const fieldName = reading.registerName || reading.name;
             const value = reading.value;
             const quality = reading.quality || 'GOOD';
             
-            // Feed if we have both registerName and numeric value
-            if (registerName && typeof value === 'number') {
+            // Feed if we have both fieldName and numeric value
+            if (fieldName && typeof value === 'number') {
               anomalyService.processDataPoint({
                 source: 'endpoint',
-                metric: `${deviceName}_${registerName}`,
+                metric: `${deviceName}_${fieldName}`,
                 value: value,
-                unit: this.inferUnit(registerName),
+                unit: this.inferUnit(fieldName),
                 timestamp: timestampMs,
-                quality: quality === 'GOOD' ? 'GOOD' : 'BAD',
+                quality: quality === 'GOOD' || quality === 'Good' ? 'GOOD' : 'BAD',
                 deviceId: this.deviceUuid,
                 tags: {
                   sensorName,
                   deviceName,
-                  registerName,
+                  fieldName,
                 },
               });
             }
@@ -478,6 +512,81 @@ export class Sensor extends EventEmitter {
   }
 
   /**
+   * Enrich messages with anomaly scores from edge AI
+   * Modifies readings in-place to add anomaly_score field
+   */
+  private enrichMessagesWithAnomalyScores(messages: any[]): any[] {
+    if (!anomalyService) return messages;
+
+    const sensorName = this.getSensorName();
+    const enrichedMessages: any[] = [];
+
+    for (const message of messages) {
+      try {
+        // Parse message if it's a string
+        const data = typeof message === 'string' ? JSON.parse(message) : message;
+        
+        // Handle Modbus format: { readings: [...] }
+        if (data.readings && Array.isArray(data.readings)) {
+          for (const reading of data.readings) {
+            if (typeof reading === 'object' && reading !== null) {
+              const deviceName = reading.deviceName || sensorName;
+              const fieldName = reading.registerName || reading.name;
+              
+              // Get anomaly score and metadata for this metric
+              if (fieldName) {
+                const metricName = `${deviceName}_${fieldName}`;
+                const score = anomalyService.getAnomalyScore(metricName);
+                const metadata = anomalyService.getAnomalyMetadata(metricName);
+                
+                // Only add score if it exists (metric is monitored)
+                if (score !== undefined) {
+                  reading.anomaly_score = score;
+                  
+                  // Add metadata for ML training and debugging
+                  if (metadata) {
+                    reading.anomaly_threshold = metadata.threshold;
+                    reading.baseline_samples = metadata.samples;
+                    reading.detection_methods = metadata.methods;
+                  }
+                }
+              }
+            }
+          }
+        }
+        // Handle OPC-UA format: direct reading object (no readings array)
+        else if (data.deviceName && (data.registerName || data.name) && data.value !== undefined) {
+          const deviceName = data.deviceName;
+          const fieldName = data.registerName || data.name;
+          const metricName = `${deviceName}_${fieldName}`;
+          const score = anomalyService.getAnomalyScore(metricName);
+          const metadata = anomalyService.getAnomalyMetadata(metricName);
+          
+          // Only add score if it exists (metric is monitored)
+          if (score !== undefined) {
+            data.anomaly_score = score;
+            
+            // Add metadata for ML training and debugging
+            if (metadata) {
+              data.anomaly_threshold = metadata.threshold;
+              data.baseline_samples = metadata.samples;
+              data.detection_methods = metadata.methods;
+            }
+          }
+        }
+        
+        // Return enriched message as object (for pretty MQTT display)
+        enrichedMessages.push(data);
+      } catch (error) {
+        // If parsing fails, return original message unchanged
+        enrichedMessages.push(message);
+      }
+    }
+
+    return enrichedMessages;
+  }
+
+  /**
    * Publish message batch to MQTT
    */
   private async publishBatch(): Promise<void> {
@@ -497,21 +606,26 @@ export class Sensor extends EventEmitter {
       // Build topic with device UUID (no leading $ - reserved for broker system topics)
       const topic = `iot/device/${this.deviceUuid}/endpoints/${this.config.mqttTopic}`;
       
-      // Publish as JSON array
+      // Feed to edge AI anomaly detection FIRST (before publishing)
+      // This ensures scores are available for enrichment
+      if (anomalyService) {
+        this.feedMessagesToAnomaly(this.messageBatch.messages);
+      }
+      
+      // Enrich messages with anomaly scores from edge AI
+      const enrichedMessages = this.enrichMessagesWithAnomalyScores(this.messageBatch.messages);
+      
+      // Publish as JSON array with enriched data
+      // Messages are objects for MQTT Explorer pretty-printing
+      // API handler will accept both objects and JSON strings
       const payload = JSON.stringify({
         sensor: this.getSensorName(),
         timestamp: new Date().toISOString(),
-        messages: this.messageBatch.messages
+        messages: enrichedMessages
       });
       
     
       await this.mqttConnection.publish(topic, payload, { qos: 1 });
-      
-      // Feed to edge AI anomaly detection if configured
-      // Device processes all sensor data locally with ML
-      if (anomalyService) {
-        this.feedMessagesToAnomaly(this.messageBatch.messages);
-      }
       
       this.stats.messagesPublished += this.messageBatch.messages.length;
       this.stats.bytesPublished += this.messageBatch.totalBytes;

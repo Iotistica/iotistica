@@ -85,21 +85,31 @@ export async function discoverEndpointMetrics(
 				// Infer expectedRange from base value and noise
 				let expectedRange: [number, number] | undefined;
 				if (dp.base !== undefined && dp.noise_pct !== undefined) {
-					const lowerBound = Math.floor(dp.base * (1 - dp.noise_pct * 2)); // 2x noise margin
-					const upperBound = Math.ceil(dp.base * (1 + dp.noise_pct * 2));
+				// Use 4x noise margin for wider tolerance (e.g., 5% noise → ±20% range)
+				// This accommodates normal variance without flooding alerts
+				const marginMultiplier = 4;
+				
+				// Handle special case: base = 0 (e.g., unused registers)
+				if (dp.base === 0) {
+					// For constant zero values, set small range to allow zero
+					expectedRange = [-1, 1];
+				} else {
+					const lowerBound = Math.floor(dp.base * (1 - dp.noise_pct * marginMultiplier));
+					const upperBound = Math.ceil(dp.base * (1 + dp.noise_pct * marginMultiplier));
 					expectedRange = [lowerBound, upperBound];
 				}
-				
-				// Choose detection methods based on data point type
-				const methods: DetectionMethod[] = ['expected_range', 'zscore', 'mad'];
-				
+			}
+			
+			// Choose detection methods based on data point type
+			// Only use statistical methods - no expected_range (user must configure via cloud)
+			const methods: DetectionMethod[] = ['zscore', 'mad'];
 				metrics.push({
 					name: metricName,
-					enabled: true,
+				enabled: true, // Auto-enabled for discovered metrics (can be disabled via cloud config)
 					methods,
 					threshold: 3.0,
 					windowSize: 100,
-					expectedRange,
+					expectedRange: undefined, // User must specify via cloud config
 					minConfidence: 0.7,
 				});
 			}

@@ -15,7 +15,7 @@ import { getMAD, getIQR, getPercentile, getRateOfChange } from './buffer';
 export class ZScoreDetector implements AnomalyDetector {
 	readonly method = 'zscore' as const;
 	
-	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig): DetectionResult {
+	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig, dbBaseline?: { mean: number; std_dev: number; sample_count: number }): DetectionResult {
 		if (buffer.size < 10) {
 			return {
 				method: this.method,
@@ -27,8 +27,11 @@ export class ZScoreDetector implements AnomalyDetector {
 			};
 		}
 		
-		const mean = buffer.mean;
-		const stdDev = buffer.stdDev;
+		// Prefer database baseline if available (more samples = more stable)
+		const useDbBaseline = dbBaseline && dbBaseline.sample_count >= 100;
+		const mean = useDbBaseline ? dbBaseline.mean : buffer.mean;
+		const stdDev = useDbBaseline ? dbBaseline.std_dev : buffer.stdDev;
+		const baselineSource = useDbBaseline ? 'database' as const : 'buffer' as const;
 		
 		// Handle zero stdDev (constant values)
 		if (stdDev === 0) {
@@ -61,9 +64,10 @@ export class ZScoreDetector implements AnomalyDetector {
 			confidence,
 			deviation: zScore,
 			expectedRange,
+			baselineSource,
 			message: isAnomaly 
-				? `Value ${value.toFixed(2)} is ${zScore.toFixed(2)}σ from mean ${mean.toFixed(2)}`
-				: `Value within ${threshold}σ of mean`,
+				? `Value ${value.toFixed(2)} is ${zScore.toFixed(2)}σ from mean ${mean.toFixed(2)} (${baselineSource})`
+				: `Value within ${threshold}σ of mean (${baselineSource})`,
 		};
 	}
 }
@@ -75,8 +79,8 @@ export class ZScoreDetector implements AnomalyDetector {
 export class MADDetector implements AnomalyDetector {
 	readonly method = 'mad' as const;
 	
-	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig): DetectionResult {
-		if (buffer.size < 10) {
+	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig, dbBaseline?: { median?: number; mad?: number; sample_count: number }): DetectionResult {
+		if (buffer.size < 10 && (!dbBaseline || dbBaseline.sample_count < 10)) {
 			return {
 				method: this.method,
 				isAnomaly: false,
@@ -87,8 +91,13 @@ export class MADDetector implements AnomalyDetector {
 			};
 		}
 		
-		const mad = getMAD(buffer);
-		const median = buffer.values.slice(0, buffer.size).sort((a, b) => a - b)[Math.floor(buffer.size / 2)];
+		// Prefer database baseline if available (more samples = more stable)
+		const useDbBaseline = dbBaseline && dbBaseline.sample_count >= 100 &&
+			dbBaseline.median !== null && dbBaseline.median !== undefined &&
+			dbBaseline.mad !== null && dbBaseline.mad !== undefined;
+		const mad = useDbBaseline ? dbBaseline.mad! : getMAD(buffer);
+		const median = useDbBaseline ? dbBaseline.median! : buffer.values.slice(0, buffer.size).sort((a, b) => a - b)[Math.floor(buffer.size / 2)];
+		const baselineSource = useDbBaseline ? 'database' as const : 'buffer' as const;
 		
 		// Handle zero MAD (constant values)
 		if (mad === 0) {
@@ -121,9 +130,10 @@ export class MADDetector implements AnomalyDetector {
 			confidence,
 			deviation: madScore,
 			expectedRange,
+			baselineSource,
 			message: isAnomaly 
-				? `Value ${value.toFixed(2)} is ${madScore.toFixed(2)} MAD from median ${median.toFixed(2)}`
-				: `Value within ${threshold} MAD of median`,
+				? `Value ${value.toFixed(2)} is ${madScore.toFixed(2)} MADs from median ${median.toFixed(2)} (${baselineSource})`
+				: `Value within ${threshold} MADs of median (${baselineSource})`,
 		};
 	}
 }
@@ -189,7 +199,7 @@ export class IQRDetector implements AnomalyDetector {
 export class ExpectedRangeDetector implements AnomalyDetector {
 	readonly method = 'expected_range' as const;
 	
-	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig): DetectionResult {
+	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig, dbBaseline?: { median?: number; mad?: number; sample_count: number }): DetectionResult {
 		// Must have expectedRange configured
 		if (!config.expectedRange || config.expectedRange.length !== 2) {
 			return {
@@ -199,6 +209,19 @@ export class ExpectedRangeDetector implements AnomalyDetector {
 				deviation: 0,
 				expectedRange: [value, value],
 				message: 'No expected range configured',
+			};
+		}
+		
+		// Require minimum baseline samples before alerting to avoid false positives during initial collection
+		const MIN_SAMPLES_FOR_RANGE_DETECTION = 30;
+		if (buffer.size < MIN_SAMPLES_FOR_RANGE_DETECTION) {
+			return {
+				method: this.method,
+				isAnomaly: false,
+				confidence: 0,
+				deviation: 0,
+				expectedRange: config.expectedRange,
+				message: `Collecting baseline data (${buffer.size}/${MIN_SAMPLES_FOR_RANGE_DETECTION} samples)`,
 			};
 		}
 		
@@ -236,7 +259,7 @@ export class ExpectedRangeDetector implements AnomalyDetector {
 export class RateChangeDetector implements AnomalyDetector {
 	readonly method = 'rate_change' as const;
 	
-	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig): DetectionResult {
+	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig, dbBaseline?: { median?: number; mad?: number; sample_count: number }): DetectionResult {
 		if (buffer.size < 2) {
 			return {
 				method: this.method,
@@ -287,7 +310,7 @@ export class EWMADetector implements AnomalyDetector {
 	readonly method = 'ewma' as const;
 	private ewmaValues = new Map<string, number>(); // metric -> EWMA value
 	
-	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig): DetectionResult {
+	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig, dbBaseline?: { median?: number; mad?: number; sample_count: number }): DetectionResult {
 		if (buffer.size < 5) {
 			return {
 				method: this.method,

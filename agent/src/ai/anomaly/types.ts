@@ -136,6 +136,7 @@ export interface DetectionResult {
 	deviation: number;               // Distance from normal
 	expectedRange: [number, number];
 	message: string;
+	baselineSource?: 'buffer' | 'database'; // Track source of baseline stats
 }
 
 /**
@@ -143,7 +144,18 @@ export interface DetectionResult {
  */
 export interface AnomalyDetector {
 	readonly method: DetectionMethod;
-	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig): DetectionResult;
+	detect(
+		value: number,
+		buffer: StatisticalBuffer,
+		config: MetricConfig,
+		dbBaseline?: {
+			mean?: number;
+			median?: number;
+			std_dev?: number;
+			mad?: number;
+			sample_count: number;
+		}
+	): DetectionResult;
 }
 
 /**

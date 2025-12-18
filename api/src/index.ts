@@ -36,6 +36,7 @@ import { startTrafficFlushService, stopTrafficFlushService } from './services/tr
 import alertsRoutes from './routes/alerts';
 import prometheusRoutes from './routes/prometheus';
 import endpointsDataRoutes from './routes/endpoints-data';
+import anomalyRoutes from './routes/anomaly';
 
 // Import jobs
 
@@ -223,6 +224,7 @@ app.use(API_BASE, trafficRoutes);
 app.use(API_BASE, deviceTagsRoutes);
 app.use(`${API_BASE}/dashboard-layouts`, dashboardLayoutsRoutes);
 app.use(`${API_BASE}/alerts`, alertsRoutes);
+app.use(`${API_BASE}/anomaly`, anomalyRoutes);  // Anomaly detection aggregates
 app.use(API_BASE, noderedStorageRoutes);
 
 

@@ -35,6 +35,14 @@ export class AnomalyDetectionService {
 	private storage?: AnomalyStorageService;
 	private baselineSaveTimer?: NodeJS.Timeout;
 	private baselineSaveIntervalMs: number = 300000; // 5 minutes
+	// Cache of latest anomaly scores for each metric (0.0-1.0 range)
+	private anomalyScores = new Map<string, number>();
+	// Cache of anomaly metadata for ML training and debugging
+	private anomalyMetadata = new Map<string, {
+		threshold: number;
+		methods: string[];
+		samples: number;
+	}>();
 	
 	constructor(config: AnomalyConfig, db?: Knex, logger?: AgentLogger) {
 		this.config = config;
@@ -77,6 +85,7 @@ export class AnomalyDetectionService {
 			metricsConfigured: config.metrics.filter(m => m.enabled).length,
 			methods: this.getUniqueDetectionMethods(),
 			storageEnabled: !!this.storage,
+			configuredMetrics: config.metrics.filter(m => m.enabled).map(m => m.name),
 		});
 	}
 	
@@ -110,21 +119,62 @@ export class AnomalyDetectionService {
 		// Add value to buffer
 		addValue(buffer, dataPoint.value, dataPoint.timestamp);
 		
-		// Run detection if buffer has enough samples
+		// Run detection if buffer has enough samples (async, updates cache)
 		if (buffer.size >= 10) {
 			this.runDetection(dataPoint, buffer, metricConfig);
+		} else {
+			// Buffer still building, cache zero score for this metric
+			this.anomalyScores.set(dataPoint.metric, 0.0);
+			// Cache metadata even while building buffer
+			this.anomalyMetadata.set(dataPoint.metric, {
+				threshold: metricConfig.minConfidence || this.config.alerts.minConfidence,
+				methods: metricConfig.methods,
+				samples: buffer.size
+			});
 		}
+	}
+	
+	/**
+	 * Get the latest anomaly score for a metric
+	 * Returns undefined if metric has never been scored
+	 * Returns 0.0 if metric is normal or buffer is still building
+	 * Returns 0.0-1.0 based on maximum confidence from all detectors
+	 */
+	getAnomalyScore(metricName: string): number | undefined {
+		return this.anomalyScores.get(metricName);
+	}
+	
+	/**
+	 * Get anomaly metadata for a metric (threshold, methods, sample count)
+	 * Used for ML training and debugging
+	 */
+	getAnomalyMetadata(metricName: string): { threshold: number; methods: string[]; samples: number } | undefined {
+		return this.anomalyMetadata.get(metricName);
 	}
 	
 	/**
 	 * Run all configured detection methods on a data point
 	 */
-	private runDetection(
+	private async runDetection(
 		dataPoint: DataPoint,
 		buffer: StatisticalBuffer,
 		metricConfig: MetricConfig
-	): void {
+	): Promise<void> {
 		const results: AnomalyAlert[] = [];
+		let maxConfidence = 0.0; // Track max confidence across all detectors
+		
+		// Load latest baseline from database if available
+		let dbBaseline: any = null;
+		if (this.storage) {
+			try {
+				dbBaseline = await this.storage.getLatestBaseline(dataPoint.metric);
+			} catch (error) {
+				this.logger?.debugSync('Failed to load baseline from database, using buffer stats', {
+					component: LogComponents.metrics,
+					metric: dataPoint.metric,
+				});
+			}
+		}
 		
 		// Build list of methods to run
 		const methodsToRun = [...metricConfig.methods];
@@ -144,15 +194,30 @@ export class AnomalyDetectionService {
 				continue;
 			}
 			
-			const result = detector.detect(dataPoint.value, buffer, metricConfig);
+			const result = detector.detect(dataPoint.value, buffer, metricConfig, dbBaseline);
 			
-			// Filter by confidence threshold
+			// Track maximum confidence across all methods (for anomaly score)
+			if (result.confidence > maxConfidence) {
+				maxConfidence = result.confidence;
+			}
+			
+			// Filter by confidence threshold for alerts
 			const minConfidence = metricConfig.minConfidence || this.config.alerts.minConfidence;
 			if (result.isAnomaly && result.confidence >= minConfidence) {
 				const alert = this.createAlert(dataPoint, buffer, metricConfig, result);
 				results.push(alert);
 			}
 		}
+		
+		// Cache the anomaly score for this metric (0.0-1.0 range)
+		this.anomalyScores.set(dataPoint.metric, maxConfidence);
+		
+		// Cache metadata for ML training and debugging
+		this.anomalyMetadata.set(dataPoint.metric, {
+			threshold: metricConfig.minConfidence || this.config.alerts.minConfidence,
+			methods: methodsToRun,
+			samples: buffer.size
+		});
 		
 		// Add alerts to manager
 		for (const alert of results) {
