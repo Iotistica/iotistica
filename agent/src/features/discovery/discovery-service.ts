@@ -143,7 +143,7 @@ export class DiscoveryService extends EventEmitter {
   private initializePlugins(): Map<string, BaseDiscoveryPlugin> {
     const plugins = new Map<string, BaseDiscoveryPlugin>();
     
-    plugins.set('modbus', new ModbusDiscoveryPlugin(this.logger));
+    plugins.set('modbus', new ModbusDiscoveryPlugin(this.logger, this.agentConfig));
     plugins.set('opcua', new OPCUADiscoveryPlugin(this.logger));
     plugins.set('can', new CANDiscoveryPlugin(this.logger));
     plugins.set('snmp', new SNMPDiscoveryPlugin(this.logger));

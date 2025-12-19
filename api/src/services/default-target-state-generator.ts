@@ -31,6 +31,23 @@
  */
 
 import logger from '../utils/logger';
+import { query } from '../db/connection.js';
+
+/**
+ * Fetch vendor data points from database
+ */
+async function getVendorDataPoints(vendorName: string, protocol: string = 'modbus'): Promise<any[]> {
+  try {
+    const result = await query(
+      'SELECT data_points FROM vendor_configs WHERE vendor_name = $1 AND protocol = $2',
+      [vendorName, protocol]
+    );
+    return result.rows[0]?.data_points || [];
+  } catch (error) {
+    console.error(`Failed to fetch vendor config for ${vendorName}:`, error);
+    return [];
+  }
+}
 
 interface LicenseData {
   plan: string; // "trial" | "starter" | "professional" | "enterprise"
@@ -144,6 +161,7 @@ interface TargetStateConfig {
       timeout?: number;
       vendor?: string;
       vendorFile?: string;
+      vendorDataPoints?: any[]; // Vendor data points from database
     };
     opcua?: {
       enabled: boolean;
@@ -274,7 +292,7 @@ export function generateDefaultTargetStateConfig(
         slaveRangeEnd: 10,
         timeout: 2000,
         vendor: 'Generic',
-        vendorFile: '/app/dist/config/vendors/dataPoints.json',
+        // NOTE: vendorDataPoints will be added dynamically in generateDefaultTargetState()
       },
       opcua: {
         enabled: true, // Enabled by default for discovery
@@ -346,7 +364,15 @@ export function generateDefaultTargetStateConfig(
  * @param licenseData - License data from system_config
  * @returns Complete target state with preinstalled core services and generated config
  */
-export function generateDefaultTargetState(licenseData: LicenseData | null) {
+export async function generateDefaultTargetState(licenseData: LicenseData | null) {
+  const config = generateDefaultTargetStateConfig(licenseData);
+  
+  // Fetch vendor data points from database and inject into modbus config
+  if (config.protocols?.modbus?.vendor) {
+    const vendorDataPoints = await getVendorDataPoints(config.protocols.modbus.vendor, 'modbus');
+    config.protocols.modbus.vendorDataPoints = vendorDataPoints;
+  }
+  
   return {
     apps: {
       "1000": {
@@ -387,6 +413,6 @@ export function generateDefaultTargetState(licenseData: LicenseData | null) {
         ]
       }
     },
-    config: generateDefaultTargetStateConfig(licenseData),
+    config,  // Use the modified config with vendorDataPoints
   };
 }

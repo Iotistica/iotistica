@@ -37,6 +37,7 @@ import alertsRoutes from './routes/alerts';
 import prometheusRoutes from './routes/prometheus';
 import endpointsDataRoutes from './routes/endpoints-data';
 import anomalyRoutes from './routes/anomaly';
+import vendorRoutes from './routes/vendors';
 
 // Import jobs
 
@@ -177,6 +178,7 @@ app.use(API_BASE, deviceMetricsRoutes);
 app.use(API_BASE, imageRegistryRoutes);
 app.use(API_BASE, deviceJobsRoutes);
 app.use(API_BASE, rotationRoutes);
+app.use(`${API_BASE}/vendors`, vendorRoutes);
 app.use(`${API_BASE}/digital-twin/graph`, digitalTwinGraphRoutes);
 app.use(`${API_BASE}/mqtt`, mqttMetricsRoutes);
 

@@ -24,13 +24,14 @@ import type { LogLevel } from '../logging/types.js';
 import { LogComponents } from '../logging/types.js';
 
 export interface ModbusConfig {
-  enabled?: boolean;
-  tcpHost?: string;
-  tcpPort?: number;
-  slaveRangeStart?: number;
-  slaveRangeEnd?: number;
-  timeout?: number;
-  vendor?: string;
+  enabled: boolean;
+  tcpHost: string;
+  tcpPort: number;
+  slaveRangeStart: number;
+  slaveRangeEnd: number;
+  timeout: number;
+  vendor: string;
+  vendorDataPoints?: any[]; // Data points from vendor config (pushed via CloudSync)
   // RTU configuration (optional)
   rtuPort?: string;
   rtuBaudRate?: number;
@@ -198,6 +199,7 @@ export class AgentConfig extends EventEmitter {
       slaveRangeEnd: cloudProtocol?.slaveRangeEnd ?? deviceProtocol?.slaveRangeEnd ?? 10,
       timeout: cloudProtocol?.timeout ?? deviceProtocol?.timeout ?? 2000,
       vendor: cloudProtocol?.vendor ?? deviceProtocol?.vendor ?? 'Generic',
+      vendorDataPoints: cloudProtocol?.vendorDataPoints ?? deviceProtocol?.vendorDataPoints,
       // RTU configuration (all optional)
       rtuPort: cloudProtocol?.serialPort ?? deviceProtocol?.serialPort,
       rtuBaudRate: cloudProtocol?.baudRate ?? deviceProtocol?.baudRate ?? 9600,

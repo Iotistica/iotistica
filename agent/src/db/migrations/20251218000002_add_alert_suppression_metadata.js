@@ -30,6 +30,8 @@ export async function up(knex) {
     await knex.schema.alterTable('anomaly_alerts', (table) => {
       table.index(['fingerprint', 'count', 'consecutive_count'], 'idx_anomaly_alerts_flapping');
     });
+
+    console.log('✓ Added alert suppresion metadata');
   }
 }
 

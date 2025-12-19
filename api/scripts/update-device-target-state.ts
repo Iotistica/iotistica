@@ -50,7 +50,7 @@ async function updateDeviceTargetState(deviceUuid: string): Promise<void> {
 
     // Generate new default config
     const licenseData = await configService.get('license_data');
-    const { apps, config } = generateDefaultTargetState(licenseData);
+    const { apps, config } = await generateDefaultTargetState(licenseData);
 
     console.log('Generated new config with keys:');
     console.log(`  - ${Object.keys(config).join(', ')}\n`);

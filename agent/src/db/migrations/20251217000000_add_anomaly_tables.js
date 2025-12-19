@@ -71,6 +71,8 @@ export async function up(knex) {
     table.index('calculated_at');
     table.unique(['metric', 'calculated_at']); // One baseline per metric per calculation time
   });
+
+  console.log('✓ Anomaly tables added');
 }
 
 export async function down(knex) {

@@ -292,7 +292,7 @@ export class ProvisioningService {
     const targetState = await DeviceTargetStateModel.get(deviceUuid);
     if (!targetState) {
       const licenseData = await configService.get('license_data');
-      const { apps, config } = generateDefaultTargetState(licenseData);
+      const { apps, config } = await generateDefaultTargetState(licenseData);
       await DeviceTargetStateModel.set(deviceUuid, apps, config, false); // Don't need deployment for default state
     }
   }

@@ -50,6 +50,8 @@ export async function up(knex) {
     await knex.schema.alterTable('anomaly_baselines', (table) => {
       table.index(['metric', 'calculated_at'], 'idx_anomaly_baselines_overall');
     });
+
+    console.log('✓ Added seasonality support');
   }
 }
 

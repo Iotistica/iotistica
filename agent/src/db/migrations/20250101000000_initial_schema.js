@@ -130,6 +130,8 @@ export async function up(knex) {
     table.timestamp('createdAt').defaultTo(knex.fn.now());
     table.timestamp('updatedAt').defaultTo(knex.fn.now());
   });
+
+  console.log('✓ Initial database schema applied');
 }
 
 export async function down(knex) {

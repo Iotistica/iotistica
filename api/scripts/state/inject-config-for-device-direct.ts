@@ -40,7 +40,7 @@ async function injectConfig() {
     }
 
     // Generate default config
-    const { apps, config } = generateDefaultTargetState(licenseData);
+    const { apps, config } = await generateDefaultTargetState(licenseData);
 
     console.log('Generated config:');
     console.log(`   - Metrics Interval: ${config.settings.metricsIntervalMs}ms (${config.settings.metricsIntervalMs / 1000}s)`);

@@ -23,6 +23,8 @@ export async function up(knex) {
       logging: JSON.stringify({ level: 'info' })
     });
   }
+
+  console.log('✓ Added OPC UA output configuration');
 }
 
 export async function down(knex) {

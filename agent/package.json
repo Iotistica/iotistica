@@ -5,9 +5,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc && npm run copy:migrations && npm run copy:vendors",
+    "build": "tsc && npm run copy:migrations",
     "copy:migrations": "node -e \"require('fs').cpSync('src/db/migrations', 'dist/db/migrations', {recursive: true})\"",
-    "copy:vendors": "node -e \"const fs = require('fs'); const path = require('path'); const srcPaths = ['../config/vendors', 'config/vendors', '/opt/iotistic/config/vendors']; const dest = 'dist/config/vendors'; for (const src of srcPaths) { try { if (fs.existsSync(src)) { fs.cpSync(src, dest, {recursive: true}); console.log('Copied vendors from:', src); break; } } catch(e) { continue; } }\"",
     "watch": "tsc --watch",
     "clean": "rimraf dist && rimraf protocol-adapters/dist",
     "dev": "tsx watch src/app.ts",

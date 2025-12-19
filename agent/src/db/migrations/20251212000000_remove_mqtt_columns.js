@@ -16,6 +16,8 @@ export async function up(knex) {
     table.dropColumn('mqttBrokerUrl');
   });
 
+  console.log('✓ Removed deprecated MQTT credential columns');
+
 }
 
 export async function down(knex) {

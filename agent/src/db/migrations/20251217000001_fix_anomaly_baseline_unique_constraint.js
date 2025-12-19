@@ -62,6 +62,8 @@ export async function up(knex) {
   
   // 4. Rename new table
   await knex.schema.renameTable('anomaly_baselines_new', 'anomaly_baselines');
+
+  console.log('✓ Fixed Anomaly Baselines Unique Constraint');
 }
 
 export async function down(knex) {

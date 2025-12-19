@@ -15,8 +15,7 @@ import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, DiscoveredDevice } from './base.discovery';
 import { generateModbusFingerprint } from './fingerprint';
-import fs from 'fs';
-import path from 'path';
+import type { AgentConfig } from '../../config/agent-config.js';
 
 export interface ModbusDiscoveryOptions {
   serialPort?: string; // e.g., '/dev/ttyUSB0' or 'COM3'
@@ -46,23 +45,13 @@ interface VendorMap {
 
 const VENDOR_ENV = process.env.MODBUS_VENDOR || 'Generic';
 
-// Flexible path resolution: env var > shared config file
-// Resolve vendor file path based on environment
-// Development (tsx): agent/src/features/discovery → ../../../../config/vendors/dataPoints.json
-// Production: /app/dist/features/discovery → ../../config/vendors/dataPoints.json
-const isDevelopment = __dirname.includes('agent\\src') || __dirname.includes('agent/src');
-const vendorFile = process.env.MODBUS_VENDOR_FILE || 
-  (isDevelopment 
-    ? path.resolve(__dirname, '..', '..', '..', '..', 'config', 'vendors', 'dataPoints.json')
-    : path.resolve(__dirname, '..', '..', 'config', 'vendors', 'dataPoints.json')
-  );
-const vendorMap: VendorMap = JSON.parse(fs.readFileSync(vendorFile, 'utf-8'));
-
 export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
   private connection?: ModbusConnection;
+  private agentConfig?: AgentConfig;
 
-  constructor(logger?: AgentLogger) {
+  constructor(logger?: AgentLogger, agentConfig?: AgentConfig) {
     super('modbus', logger);
+    this.agentConfig = agentConfig;
   }
 
   /**
@@ -71,8 +60,19 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
    */
   async discover(options?: ModbusDiscoveryOptions): Promise<DiscoveredDevice[]> {
 
-    const vendorKey = VENDOR_ENV;
-    const dataPoints = vendorMap[vendorKey]?.dataPoints || vendorMap['Generic'].dataPoints;
+    // Get vendor data points from target state (pushed via CloudSync)
+    const modbusConfig = this.agentConfig?.getModbusConfig();
+    const dataPoints: DataPoint[] = modbusConfig?.vendorDataPoints || [];
+    
+    if (dataPoints.length === 0) {
+      this.logger?.warnSync(`No vendor data points in config (vendor: ${modbusConfig?.vendor || 'unknown'})`, {
+        component: LogComponents.discovery
+      });
+    } else {
+      this.logger?.infoSync(`Using ${dataPoints.length} data points from vendor '${modbusConfig?.vendor}'`, {
+        component: LogComponents.discovery
+      });
+    }
 
     const discovered: DiscoveredDevice[] = [];
 

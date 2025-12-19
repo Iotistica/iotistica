@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
 Generic Modbus TCP Simulator
-Supports multiple slave IDs with vendor-specific data points loaded from JSON.
+Supports multiple slave IDs with vendor-specific data points loaded from API or JSON.
 Environment Variables:
 - MODBUS_VENDOR: name of the vendor to simulate (default: 'Generic')
-- MODBUS_VENDOR_JSON: path to JSON file containing vendor data points (default: './vendors/dataPoints.json')
+- MODBUS_API_URL: API URL to fetch vendor data (default: 'http://api:3002')
+- MODBUS_VENDOR_JSON: fallback path to JSON file (default: './vendors/dataPoints.json')
 - MODBUS_SLAVES: number of slave IDs to simulate (default: 3)
 - MODBUS_PORT: TCP port to listen on (default: 502)
 """
@@ -13,6 +14,7 @@ import time
 import random
 import os
 import json
+import urllib.request
 from pymodbus.server import StartTcpServer
 from pymodbus.device import ModbusDeviceIdentification
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusSlaveContext, ModbusServerContext
@@ -20,17 +22,47 @@ from pymodbus.datastore import ModbusSequentialDataBlock, ModbusSlaveContext, Mo
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Load vendor JSON
+# Configuration
 VENDOR = os.environ.get("MODBUS_VENDOR", "Generic")
+API_URL = os.environ.get("MODBUS_API_URL", "http://api:3002")
 JSON_FILE = os.environ.get("MODBUS_VENDOR_JSON", "./vendors/dataPoints.json")
 
-try:
-    with open(JSON_FILE, "r") as f:
-        vendor_data = json.load(f)
-except Exception as e:
-    logger.warning(f"Failed to load vendor JSON '{JSON_FILE}': {e}")
-    vendor_data = {}
+# Load vendor data from API or fallback to file
+def load_vendor_data():
+    """Load vendor data points from API, fallback to local file"""
+    # Try API first (with retries)
+    max_retries = 3
+    retry_delay = 2  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            url = f"{API_URL}/api/v1/vendors/datapoints?protocol=modbus"
+            logger.info(f"Fetching vendor data from API: {url} (attempt {attempt + 1}/{max_retries})")
+            
+            req = urllib.request.Request(url, headers={'User-Agent': 'modbus-simulator/1.0'})
+            with urllib.request.urlopen(req, timeout=5) as response:
+                vendor_data = json.loads(response.read().decode())
+                logger.info(f"✓ Loaded vendor data from API ({len(vendor_data)} vendors)")
+                return vendor_data
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"API attempt {attempt + 1} failed: {e}, retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+            else:
+                logger.warning(f"Failed to load from API after {max_retries} attempts: {e}")
+    
+    # Fallback to file
+    try:
+        logger.info(f"Falling back to local file: {JSON_FILE}")
+        with open(JSON_FILE, "r") as f:
+            vendor_data = json.load(f)
+            logger.info(f"✓ Loaded vendor data from file ({len(vendor_data)} vendors)")
+            return vendor_data
+    except Exception as e:
+        logger.error(f"Failed to load vendor data from file '{JSON_FILE}': {e}")
+        return {}
 
+vendor_data = load_vendor_data()
 DATA_POINTS = vendor_data.get(VENDOR, {}).get("dataPoints", [])
 
 class VendorDataBlock(ModbusSequentialDataBlock):

@@ -212,10 +212,13 @@ services:
             - ./config/vendors:/app/vendors:ro
         environment:
           - MODBUS_VENDOR=Generic
+          - MODBUS_API_URL=http://api:3002
         ports:
             - "502:502"
         networks:
             - iotistic-net
+        depends_on:
+            - api
         logging:
             driver: "json-file"
             options:
