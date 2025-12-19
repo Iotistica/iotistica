@@ -8,6 +8,7 @@ import { query } from '../db/connection';
 import type { SensorData, MetricsData, StateMessage } from './mqtt-manager';
 import { processDeviceStateReport } from '../services/device-state';
 import { redisSensorQueue } from '../services/redis-sensor-queue';
+import { getAnomalyEventHandler, type AnomalyEvent } from './anomaly-handler';
 import logger from '../utils/logger';
 
 /**
@@ -313,3 +314,16 @@ export async function handleAgentStatus(data: any): Promise<void> {
   }
 }
 
+/**
+ * Handle anomaly events from edge devices
+ * Performs cloud-side correlation, deduplication, and alerting
+ */
+export async function handleAnomalyEvent(event: AnomalyEvent): Promise<void> {
+  try {
+    const handler = getAnomalyEventHandler();
+    await handler.handleEvent(event);
+  } catch (error) {
+    logger.error('Failed to handle anomaly event:', error);
+    throw error;
+  }
+}

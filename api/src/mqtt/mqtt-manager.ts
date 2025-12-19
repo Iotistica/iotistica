@@ -92,6 +92,7 @@ export interface TopicMessageMap {
   logs: LogMessage;
   metrics: MetricsData;
   status: { deviceUuid: string; status: any };
+  anomaly: any;  // Anomaly events from edge detection
   unknown: UnknownMessage;
 }
 
@@ -166,7 +167,8 @@ export class MqttManager extends EventEmitter {
       agent: this.handleAgentMessage.bind(this),
       logs: this.handleLogMessage.bind(this),
       metrics: this.handleMetricsMessage.bind(this),
-      status: this.handleStatusMessage.bind(this)
+      status: this.handleStatusMessage.bind(this),
+      events: this.handleEventsMessage.bind(this)
     };
   }
 
@@ -371,8 +373,13 @@ export class MqttManager extends EventEmitter {
           return `iot/device/${mqttDevicePattern}/metrics`;
         case 'status':
           return `iot/device/${mqttDevicePattern}/status`;
+        case 'events':
+          return `iot/device/${mqttDevicePattern}/events/+`;
+        default:
+          logger.warn(`Unknown topic type: ${type}`);
+          return null;
       }
-    });
+    }).filter(Boolean);  // Remove null values
 
     logger.info('Subscribing to MQTT topic patterns', { 
       count: topicPatterns.length, 
@@ -716,6 +723,39 @@ export class MqttManager extends EventEmitter {
    */
   private handleStatusMessage(deviceUuid: string, subTopic: string | undefined, data: any): void {
     this.handleStatus(deviceUuid, data);
+  }
+
+  /**
+   * Handle events message (anomalies, alerts, etc.)
+   */
+  private handleEventsMessage(deviceUuid: string, subTopic: string | undefined, data: any): void {
+    logger.info('handleEventsMessage called', {
+      deviceUuid: deviceUuid.substring(0, 8) + '...',
+      subTopic: subTopic || 'unknown',
+      hasData: !!data,
+      dataKeys: data ? Object.keys(data).join(',') : 'none'
+    });
+    
+    // Route based on event subTopic
+    if (subTopic === 'anomaly') {
+      const event = { deviceId: deviceUuid, ...data };
+      
+      // Validate required fields
+      if (!event.timestampMs || !event.metric || !event.fingerprint) {
+        logger.error('Invalid anomaly event - missing required fields', {
+          deviceId: deviceUuid,
+          hasTimestampMs: !!event.timestampMs,
+          hasMetric: !!event.metric,
+          hasFingerprint: !!event.fingerprint,
+          receivedKeys: Object.keys(data || {}).join(',')
+        });
+        return;
+      }
+      
+      this.emitTyped('anomaly', event);
+    } else {
+      logger.warn('Unknown event subTopic', { subTopic, deviceUuid });
+    }
   }
 
 

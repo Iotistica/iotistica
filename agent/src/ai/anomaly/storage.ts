@@ -29,11 +29,16 @@ export interface AnomalyAlertRecord {
 	fingerprint: string;
 	count: number;
 	created_at?: Date;
+	// Suppression metadata
+	cooldown_sec: number;
+	first_seen: number;
+	consecutive_count: number;
 }
 
 export interface AnomalyBaselineRecord {
 	id?: number;
 	metric: string;
+	time_slot: number; // -1 for overall, 0-1 for day/night, 0-23 for hourly, 0-167 for weekly
 	mean: number | null;
 	median: number | null;
 	std_dev: number | null;
@@ -89,6 +94,7 @@ export class AnomalyStorageService {
 
 	/**
 	 * Store an anomaly alert
+	 * Backward compatible: falls back to old schema if suppression columns don't exist
 	 */
 	async storeAlert(alert: AnomalyAlert): Promise<void> {
 		try {
@@ -107,9 +113,33 @@ export class AnomalyStorageService {
 				message: alert.message,
 				fingerprint: alert.fingerprint,
 				count: alert.count,
+				// Suppression metadata
+				cooldown_sec: alert.cooldownSec,
+				first_seen: alert.firstSeen,
+				consecutive_count: alert.consecutiveCount,
 			};
 
-			await this.db('anomaly_alerts').insert(record);
+			try {
+				await this.db('anomaly_alerts').insert(record);
+			} catch (insertError: any) {
+				// Backward compatibility: if suppression columns don't exist, insert without them
+				if (insertError?.message?.includes('no such column: cooldown_sec') ||
+				    insertError?.message?.includes('no such column: first_seen') ||
+				    insertError?.message?.includes('no such column: consecutive_count') ||
+				    insertError?.message?.includes('has no column named cooldown_sec')) {
+					this.logger?.debugSync('Inserting alert without suppression metadata (legacy schema)', {
+						component: LogComponents.metrics,
+						alert_id: alert.id,
+						note: 'Run migration 003_add_alert_suppression_metadata.sql to enable suppression tracking',
+					});
+					
+					// Create record without suppression fields
+					const { cooldown_sec, first_seen, consecutive_count, ...legacyRecord } = record;
+					await this.db('anomaly_alerts').insert(legacyRecord);
+				} else {
+					throw insertError;
+				}
+			}
 
 			this.logger?.debugSync('Stored anomaly alert', {
 				component: LogComponents.metrics,
@@ -131,7 +161,8 @@ export class AnomalyStorageService {
 	async storeBaseline(
 		metric: string,
 		buffer: StatisticalBuffer,
-		calculatedAt: number
+		calculatedAt: number,
+		timeSlot: number = -1 // -1 = overall baseline (default)
 	): Promise<void> {
 		try {
 			// Calculate percentiles for IQR
@@ -144,6 +175,7 @@ export class AnomalyStorageService {
 
 			const record: AnomalyBaselineRecord = {
 				metric,
+				time_slot: timeSlot,
 				mean: buffer.mean,
 				median: getMedian(buffer),
 				std_dev: Math.sqrt(buffer.variance),
@@ -159,34 +191,92 @@ export class AnomalyStorageService {
 				window_end: buffer.timestamps[buffer.size - 1] || null,
 			};
 
-		this.logger?.debugSync('Inserting baseline record', {
-			component: LogComponents.metrics,
-			metric,
-			sample_count: buffer.size,
-			mean: record.mean,
-			median: record.median,
-		});
-
-			await this.db('anomaly_baselines').insert(record);
-
-			this.logger?.infoSync('Stored anomaly baseline', {
+			this.logger?.debugSync('Inserting baseline record', {
 				component: LogComponents.metrics,
 				metric,
 				sample_count: buffer.size,
 				mean: record.mean,
 				median: record.median,
 			});
-		} catch (error) {
-			this.logger?.errorSync('Failed to store anomaly baseline', error as Error, {
-				component: LogComponents.metrics,
-				metric,
-				error: error instanceof Error ? error.message : String(error),
-				stack: error instanceof Error ? error.stack : undefined,
-			});
-			// Re-throw to propagate error
-			throw error;
+
+			try {
+			// Use INSERT OR REPLACE to handle updates (SQLite upsert)
+			await this.db.raw(`
+				INSERT OR REPLACE INTO anomaly_baselines (
+					metric, time_slot, mean, median, std_dev, mad, min, max,
+					q1, q3, iqr, sample_count, calculated_at, window_start, window_end
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`, [
+				record.metric,
+				record.time_slot,
+				record.mean,
+				record.median,
+				record.std_dev,
+				record.mad,
+				record.min,
+				record.max,
+				record.q1,
+				record.q3,
+				record.iqr,
+				record.sample_count,
+				record.calculated_at,
+				record.window_start,
+				record.window_end
+			]);
+		} catch (insertError: any) {
+			// Backward compatibility: if time_slot column doesn't exist, use legacy insert
+			if (insertError?.message?.includes('no such column: time_slot') ||
+			    insertError?.message?.includes('has no column named time_slot')) {
+				this.logger?.debugSync('Inserting baseline without time_slot (legacy schema)', {
+					component: LogComponents.metrics,
+					metric,
+				});
+				
+				// Use INSERT OR REPLACE for legacy schema (without time_slot)
+				const { time_slot, ...legacyRecord } = record;
+				await this.db.raw(`
+					INSERT OR REPLACE INTO anomaly_baselines (
+						metric, mean, median, std_dev, mad, min, max,
+						q1, q3, iqr, sample_count, calculated_at, window_start, window_end
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`, [
+					legacyRecord.metric,
+					legacyRecord.mean,
+					legacyRecord.median,
+					legacyRecord.std_dev,
+					legacyRecord.mad,
+					legacyRecord.min,
+					legacyRecord.max,
+					legacyRecord.q1,
+					legacyRecord.q3,
+					legacyRecord.iqr,
+					legacyRecord.sample_count,
+					legacyRecord.calculated_at,
+					legacyRecord.window_start,
+					legacyRecord.window_end
+				]);
+			} else {
+				throw insertError;
+			}
 		}
+
+		this.logger?.infoSync('Stored anomaly baseline', {
+			component: LogComponents.metrics,
+			metric,
+			sample_count: buffer.size,
+			mean: record.mean,
+			median: record.median,
+		});
+	} catch (error) {
+		this.logger?.errorSync('Failed to store anomaly baseline', error as Error, {
+			component: LogComponents.metrics,
+			metric,
+			error: error instanceof Error ? error.message : String(error),
+			stack: error instanceof Error ? error.stack : undefined,
+		});
+		// Don't re-throw - baseline storage failures shouldn't break anomaly detection
 	}
+}
 
 	/**
 	 * Get recent alerts for a metric
@@ -238,20 +328,77 @@ export class AnomalyStorageService {
 	}
 
 	/**
-	 * Get latest baseline for a metric
+	 * Get latest baseline for a metric and time slot
+	 * Falls back to overall baseline (-1) if seasonal baseline not found or has insufficient data
+	 * Backward compatible: falls back to old schema if time_slot column doesn't exist
 	 */
-	async getLatestBaseline(metric: string): Promise<AnomalyBaselineRecord | null> {
+	async getLatestBaseline(
+		metric: string,
+		timeSlot: number = -1,
+		minimumSamples: number = 10
+	): Promise<AnomalyBaselineRecord | null> {
 		try {
-			const baseline = await this.db('anomaly_baselines')
-				.where({ metric })
-				.orderBy('calculated_at', 'desc')
-				.first();
+			// Try to get seasonal baseline first
+			if (timeSlot !== -1) {
+				try {
+					const seasonalBaseline = await this.db('anomaly_baselines')
+						.where({ metric, time_slot: timeSlot })
+						.orderBy('calculated_at', 'desc')
+						.first();
+					
+					// Use seasonal baseline if it has enough samples
+					if (seasonalBaseline && seasonalBaseline.sample_count >= minimumSamples) {
+						return seasonalBaseline;
+					}
+					
+					// Fall back to overall baseline if seasonal baseline insufficient
+					this.logger?.debugSync('Seasonal baseline insufficient, falling back to overall', {
+						component: LogComponents.metrics,
+						metric,
+						timeSlot,
+						samples: seasonalBaseline?.sample_count || 0,
+						minimumSamples,
+					});
+				} catch (seasonalError: any) {
+					// Backward compatibility: if time_slot column doesn't exist, fall back to old schema
+					if (seasonalError?.message?.includes('no such column: time_slot')) {
+						this.logger?.debugSync('Seasonality not supported (time_slot column missing), using legacy baseline', {
+							component: LogComponents.metrics,
+							metric,
+							note: 'Run migration 002_add_seasonality_support.sql to enable seasonality',
+						});
+						// Fall through to overall baseline query without time_slot
+					} else {
+						throw seasonalError;
+					}
+				}
+			}
+			
+			// Get overall baseline (time_slot = -1) or legacy baseline (no time_slot)
+			try {
+				const baseline = await this.db('anomaly_baselines')
+					.where({ metric, time_slot: -1 })
+					.orderBy('calculated_at', 'desc')
+					.first();
 
-			return baseline || null;
+				return baseline || null;
+			} catch (overallError: any) {
+				// Backward compatibility: if time_slot column doesn't exist, query without it
+				if (overallError?.message?.includes('no such column: time_slot')) {
+					const legacyBaseline = await this.db('anomaly_baselines')
+						.where({ metric })
+						.orderBy('calculated_at', 'desc')
+						.first();
+					
+					return legacyBaseline || null;
+				}
+				throw overallError;
+			}
 		} catch (error) {
 			this.logger?.errorSync('Failed to fetch latest baseline', error as Error, {
 				component: LogComponents.metrics,
 				metric,
+				timeSlot,
 			});
 			return null;
 		}

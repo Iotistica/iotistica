@@ -27,7 +27,34 @@ export function createBuffer(maxSize: number): StatisticalBuffer {
 		variance: 0,
 		stdDev: 0,
 		sortedDirty: true,
+		reset: false, // Initialize reset flag
 	};
+}
+
+/**
+ * Reset buffer and mark for EWMA state clearing
+ * Sets reset flag to trigger detector state cleanup
+ */
+export function resetBuffer(buffer: StatisticalBuffer): void {
+	// Clear all values
+	buffer.values.fill(0);
+	buffer.timestamps.fill(0);
+	buffer.size = 0;
+	buffer.head = 0;
+	
+	// Reset statistics
+	buffer.sum = 0;
+	buffer.sumSquares = 0;
+	buffer.mean = 0;
+	buffer.variance = 0;
+	buffer.stdDev = 0;
+	
+	// Mark for recalculation
+	buffer.sortedDirty = true;
+	buffer.sortedValues = undefined;
+	
+	// Set reset flag to trigger detector state cleanup (e.g., EWMA)
+	buffer.reset = true;
 }
 
 /**
@@ -77,6 +104,11 @@ export function addValue(buffer: StatisticalBuffer, value: number, timestamp: nu
 	
 	// Mark sorted values as dirty
 	buffer.sortedDirty = true;
+	
+	// Clear reset flag after first value is added post-reset
+	if (buffer.reset) {
+		buffer.reset = false;
+	}
 }
 
 /**
@@ -260,4 +292,12 @@ export function getBufferStats(buffer: StatisticalBuffer) {
 		trend: getTrend(buffer),
 		rateOfChange: getRateOfChange(buffer),
 	};
+}
+
+/**
+ * Helper function for tests: add value with auto-generated timestamp
+ * @deprecated Use addValue() with explicit timestamp in production code
+ */
+export function addToBuffer(buffer: StatisticalBuffer, value: number): void {
+	addValue(buffer, value, Date.now());
 }

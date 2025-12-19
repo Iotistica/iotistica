@@ -720,6 +720,15 @@ export default class DeviceAgent {
       return;
     }
     
+    // Clean up existing service before reinitializing (prevents memory leaks)
+    if (this.anomalyService) {
+      this.agentLogger?.infoSync("Cleaning up existing Anomaly Detection Service before reinitializing", {
+        component: LogComponents.agent,
+      });
+      this.anomalyService.stop();
+      this.anomalyService = undefined;
+    }
+    
     this.agentLogger?.infoSync("Initializing Anomaly Detection Service", {
       component: LogComponents.agent,
     });
@@ -764,8 +773,14 @@ export default class DeviceAgent {
         }
       }
       
-      // Create anomaly detection service with database storage
-      this.anomalyService = new AnomalyDetectionService(config, dbInstance, this.agentLogger);
+      // Create anomaly detection service with database storage and MQTT publishing
+      this.anomalyService = new AnomalyDetectionService(
+        config,
+        dbInstance,
+        this.agentLogger,
+        MqttManager.getInstance(),
+        this.deviceInfo.uuid
+      );
       
       this.agentLogger?.infoSync("Anomaly Detection Service initialized", {
         component: LogComponents.agent,

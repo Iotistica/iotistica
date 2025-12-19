@@ -9,7 +9,8 @@ import logger from '../utils/logger';
 import {
   handleEndpointsData,
   handleDeviceState,
-  handleAgentStatus
+  handleAgentStatus,
+  handleAnomalyEvent
 } from './handlers';
 
 let mqttManager: MqttManager | null = null;
@@ -67,6 +68,14 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
       }
     });
 
+    mqttManager.on('anomaly', async (data) => {
+      try {
+        await handleAnomalyEvent(data);
+      } catch (error) {
+        logger.error('Error handling anomaly event:', error);
+      }
+    });
+
     // Subscribe to all device topics
     // Use '*' wildcard for all devices, or specific UUIDs for targeted subscriptions
     const subscribeToAll = process.env.MQTT_SUBSCRIBE_ALL !== 'false';
@@ -77,6 +86,7 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
         'endpoints',
         'state',
         'agent',
+        'events'
       ]);
     } else {
       logger.warn('MQTT subscription disabled. Set MQTT_SUBSCRIBE_ALL=true to enable.');

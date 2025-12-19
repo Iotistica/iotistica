@@ -11,6 +11,7 @@ import type { AnomalyAlert, AlertManager as IAlertManager, AnomalySeverity } fro
 export class AlertManager implements IAlertManager {
 	private alerts: Map<string, AnomalyAlert> = new Map();
 	private lastAlertTime: Map<string, number> = new Map();
+	private consecutiveCounts: Map<string, number> = new Map();
 	private readonly maxQueueSize: number;
 	private readonly defaultCooldownMs: number;
 	
@@ -31,22 +32,34 @@ export class AlertManager implements IAlertManager {
 		const now = Date.now();
 		const cooldownMs = this.defaultCooldownMs;
 		
+		// Populate suppression metadata
+		alert.cooldownSec = Math.floor(cooldownMs / 1000);
+		
 		if (lastTime && (now - lastTime) < cooldownMs) {
 			// Within cooldown - increment count instead of creating new alert
 			const existing = this.alerts.get(fingerprint);
 			if (existing) {
 				existing.count++;
+				existing.consecutiveCount++;
 				existing.timestamp = now;
 				existing.context.recent_values.push(alert.value);
 				existing.context.recent_values = existing.context.recent_values.slice(-10);
+				
+				// Update consecutive count tracker
+				this.consecutiveCounts.set(fingerprint, existing.consecutiveCount);
 			}
 			return;
 		}
 		
 		// Add new alert
+		const existingConsecutive = this.consecutiveCounts.get(fingerprint) || 0;
 		alert.count = 1;
+		alert.firstSeen = now;
+		alert.consecutiveCount = existingConsecutive + 1;
+		
 		this.alerts.set(fingerprint, alert);
 		this.lastAlertTime.set(fingerprint, now);
+		this.consecutiveCounts.set(fingerprint, alert.consecutiveCount);
 		
 		// Enforce max queue size (remove oldest alerts)
 		if (this.alerts.size > this.maxQueueSize) {
@@ -83,6 +96,14 @@ export class AlertManager implements IAlertManager {
 	clearAlerts(): void {
 		this.alerts.clear();
 		this.lastAlertTime.clear();
+		this.consecutiveCounts.clear();
+	}
+	
+	/**
+	 * Reset consecutive count for a metric (e.g., after resolution)
+	 */
+	resetConsecutiveCount(fingerprint: string): void {
+		this.consecutiveCounts.delete(fingerprint);
 	}
 	
 	/**

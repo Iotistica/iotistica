@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto';
 import type { Knex } from 'knex';
 import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
+import type { MqttManager } from '../../mqtt/manager';
 import type {
 	DataPoint,
 	AnomalyConfig,
@@ -18,18 +19,21 @@ import type {
 	DetectionMethod,
 	AnomalySeverity,
 } from './types';
-import { createBuffer, addValue, getRecentValues, getTrend } from './buffer';
+import { createBuffer, addValue, getRecentValues, getTrend, getMedian } from './buffer';
 import { getDetector } from './detectors';
 import { AlertManager } from './alert-manager';
 import { LinearPredictor } from './forecaster';
 import type { Prediction } from './forecaster';
 import { AnomalyStorageService } from './storage';
+import { getTimeSlot, getMinimumSamplesForSeasonalBaseline } from './seasonality';
 
 export class AnomalyDetectionService {
 	private config: AnomalyConfig;
 	private buffers = new Map<string, StatisticalBuffer>();
 	private alertManager: AlertManager;
 	private logger?: AgentLogger;
+	private mqttManager?: MqttManager;
+	private deviceUuid?: string;
 	private enabled: boolean = false;
 	private predictor: LinearPredictor;
 	private storage?: AnomalyStorageService;
@@ -44,9 +48,11 @@ export class AnomalyDetectionService {
 		samples: number;
 	}>();
 	
-	constructor(config: AnomalyConfig, db?: Knex, logger?: AgentLogger) {
+	constructor(config: AnomalyConfig, db?: Knex, logger?: AgentLogger, mqttManager?: MqttManager, deviceUuid?: string) {
 		this.config = config;
 		this.logger = logger;
+		this.mqttManager = mqttManager;
+		this.deviceUuid = deviceUuid;
 		this.enabled = true; // Controlled by features.enableAnomalyDetection
 		
 		this.alertManager = new AlertManager(
@@ -163,15 +169,26 @@ export class AnomalyDetectionService {
 		const results: AnomalyAlert[] = [];
 		let maxConfidence = 0.0; // Track max confidence across all detectors
 		
-		// Load latest baseline from database if available
+		// Get time slot for seasonal baseline lookup
+		const seasonalityPattern = metricConfig.seasonality || 'none';
+		const timeSlot = getTimeSlot(dataPoint.timestamp, seasonalityPattern);
+		const minimumSamples = getMinimumSamplesForSeasonalBaseline(seasonalityPattern);
+		
+		// Load latest baseline from database if available (with seasonality support)
 		let dbBaseline: any = null;
 		if (this.storage) {
 			try {
-				dbBaseline = await this.storage.getLatestBaseline(dataPoint.metric);
+				dbBaseline = await this.storage.getLatestBaseline(
+					dataPoint.metric,
+					timeSlot,
+					minimumSamples
+				);
 			} catch (error) {
 				this.logger?.debugSync('Failed to load baseline from database, using buffer stats', {
 					component: LogComponents.metrics,
 					metric: dataPoint.metric,
+					timeSlot,
+					seasonalityPattern,
 				});
 			}
 		}
@@ -219,7 +236,7 @@ export class AnomalyDetectionService {
 			samples: buffer.size
 		});
 		
-		// Add alerts to manager
+		// Add alerts to manager first (calculates fingerprints)
 		for (const alert of results) {
 			this.alertManager.addAlert(alert);
 			
@@ -242,6 +259,133 @@ export class AnomalyDetectionService {
 				deviation: alert.deviation,
 			});
 		}
+		
+		// Emit single canonical anomaly event (MQTT-friendly) after fingerprints calculated
+		if (results.length > 0) {
+			this.emitAnomalyEvent(dataPoint, results, methodsToRun, maxConfidence, metricConfig, buffer);
+		}
+	}
+	
+	/**
+	 * Emit single canonical anomaly event (MQTT-friendly)
+	 */
+	private emitAnomalyEvent(
+		dataPoint: DataPoint,
+		alerts: AnomalyAlert[],
+		methodsRun: DetectionMethod[],
+		anomalyScore: number,
+		metricConfig: MetricConfig,
+		buffer: StatisticalBuffer
+	): void {
+		// Find highest-confidence alert for expected range and deviation
+		const primaryAlert = alerts.reduce((max, alert) => 
+			alert.confidence > max.confidence ? alert : max
+		);
+		
+		// Determine which detectors triggered
+		const triggeredBy = alerts.map(a => a.detectionMethod);
+		
+		// Get fingerprint from alert manager (already calculated)
+		const fingerprint = primaryAlert.fingerprint || '';
+		
+		// Check if suppressed (within cooldown)
+		const lastAlertTime = this.alertManager['lastAlertTime']?.get(fingerprint);
+		const cooldownMs = metricConfig.cooldownMs || 300000;
+		const suppressed = lastAlertTime 
+			? (Date.now() - lastAlertTime) < cooldownMs
+			: false;
+		
+		// Calculate window boundaries from buffer
+		// Buffer timestamps are in circular order, so we need to find min/max
+		const windowTimestamps = buffer.timestamps.slice(0, buffer.size);
+		const windowStartMs = buffer.size > 0 ? Math.min(...windowTimestamps) : dataPoint.timestamp;
+		const windowEndMs = buffer.size > 0 ? Math.max(...windowTimestamps) : dataPoint.timestamp;
+		
+		// Build baseline info for explainability
+		const baseline: import('./types').BaselineInfo = {
+			median: getMedian(buffer),
+			mean: buffer.mean,
+			stdDev: buffer.stdDev,
+			sampleCount: buffer.size,
+			method: primaryAlert.detectionMethod,
+			source: (primaryAlert as any).baselineSource || 'buffer', // From detection result if available
+		};
+		
+		// Generate severity reason for auditability
+		const severityReason = this.generateSeverityReason(
+			anomalyScore,
+			primaryAlert.deviation,
+			primaryAlert.severity
+		);
+		
+		// Calculate confidence (post-fusion certainty adjusted for baseline quality)
+		const confidence = this.calculateConfidence(anomalyScore, baseline);
+		
+		const event: import('./types').AnomalyEvent = {
+			deviceId: this.deviceUuid || 'unknown',
+			metric: dataPoint.metric,
+			timestampMs: dataPoint.timestamp,
+			windowStartMs,
+			windowEndMs,
+			observedValue: dataPoint.value,
+			baseline,
+			anomalyScore,
+			confidence,
+			severity: primaryAlert.severity,
+			severityReason,
+			triggeredBy,
+			suppressed,
+			expectedRange: primaryAlert.expectedRange,
+			deviation: primaryAlert.deviation,
+			fingerprint,
+			cooldownSec: Math.floor(cooldownMs / 1000),
+			firstSeen: primaryAlert.firstSeen,
+			consecutiveCount: primaryAlert.consecutiveCount,
+			eventCount: primaryAlert.count,
+		};
+		
+		// Log canonical event
+		this.logger?.warnSync('Anomaly event', {
+			component: LogComponents.metrics,
+			metric: event.metric,
+			anomalyScore: event.anomalyScore.toFixed(3),
+			severity: event.severity,
+			triggeredBy: event.triggeredBy.join('+'),
+			suppressed: event.suppressed,
+		});
+		
+		// Publish to MQTT (iot/device/{uuid}/events/anomaly)
+		const mqttConnected = this.mqttManager?.isConnected();
+		const hasDeviceUuid = !!this.deviceUuid;
+		
+		if (!mqttConnected || !hasDeviceUuid || !this.mqttManager) {
+			this.logger?.infoSync('Cannot publish anomaly event to MQTT', {
+				component: LogComponents.metrics,
+				metric: event.metric,
+				mqttConnected,
+				hasDeviceUuid,
+				hasMqttManager: !!this.mqttManager,
+				deviceUuid: this.deviceUuid,
+			});
+			return;
+		}
+		
+		const topic = `iot/device/${this.deviceUuid}/events/anomaly`;
+		this.mqttManager.publish(topic, JSON.stringify(event), { qos: 1, retain: false })
+			.then(() => {
+				this.logger?.infoSync('Published anomaly event to MQTT', {
+					component: LogComponents.metrics,
+					metric: event.metric,
+					topic,
+				});
+			})
+			.catch(error => {
+				this.logger?.errorSync('Failed to publish anomaly event to MQTT', error as Error, {
+					component: LogComponents.metrics,
+					metric: event.metric,
+					topic,
+				});
+			});
 	}
 	
 	/**
@@ -274,6 +418,10 @@ export class AnomalyDetectionService {
 			message: result.message,
 			fingerprint: '', // Set by AlertManager
 			count: 1,
+			// Suppression metadata (populated by AlertManager)
+			cooldownSec: Math.floor((metricConfig.cooldownMs || 300000) / 1000),
+			firstSeen: dataPoint.timestamp,
+			consecutiveCount: 1,
 		};
 	}
 	
@@ -288,6 +436,66 @@ export class AnomalyDetectionService {
 		} else {
 			return 'info';
 		}
+	}
+	
+	/**
+	 * Generate severity reason for auditability and tuning
+	 */
+	private generateSeverityReason(
+		score: number,
+		deviation: number,
+		severity: AnomalySeverity
+	): string {
+		const reasons: string[] = [];
+		
+		// Document which thresholds were met
+		if (score >= 0.85) {
+			reasons.push('score>=0.85');
+		} else if (score >= 0.7) {
+			reasons.push('score>=0.7');
+		}
+		
+		if (deviation >= 5.0) {
+			reasons.push('deviation>=5.0');
+		} else if (deviation >= 3.0) {
+			reasons.push('deviation>=3.0');
+		}
+		
+		// If no thresholds met, it's info level by default
+		if (reasons.length === 0) {
+			reasons.push('score<0.7');
+		}
+		
+		return `${severity}: ${reasons.join(' || ')}`;
+	}
+	
+	/**
+	 * Calculate confidence (post-fusion certainty)
+	 * Adjusts anomalyScore based on baseline quality factors
+	 */
+	private calculateConfidence(
+		anomalyScore: number,
+		baseline: import('./types').BaselineInfo
+	): number {
+		let confidence = anomalyScore;
+		
+		// Penalize low sample counts (less than 30 samples = less confidence)
+		if (baseline.sampleCount < 30) {
+			const samplePenalty = baseline.sampleCount / 30; // 0.0-1.0 multiplier
+			confidence *= (0.7 + 0.3 * samplePenalty); // Min 70% of original score
+		}
+		
+		// Bonus for database-sourced baselines (more stable than buffer-only)
+		if (baseline.source === 'database') {
+			confidence = Math.min(1.0, confidence * 1.05); // Up to 5% boost
+		}
+		
+		// Penalize very high stdDev (unstable baseline = less confidence)
+		if (baseline.stdDev > baseline.mean * 0.5) { // CV > 50%
+			confidence *= 0.9; // 10% penalty for high variability
+		}
+		
+		return Math.min(1.0, Math.max(0.0, confidence));
 	}
 	
 	/**
