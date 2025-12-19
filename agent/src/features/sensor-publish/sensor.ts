@@ -59,6 +59,12 @@ export class Sensor extends EventEmitter {
   
   private delimiterRegex: RegExp;
   private needStop = false;
+  
+  // Exponential backoff for initial connection attempts
+  private readonly INITIAL_RETRY_DELAY_MS = 500;  // Start fast for startup race conditions
+  private readonly MAX_FAST_RETRY_DELAY_MS = 8000; // Max 8s for fast retries
+  private readonly FAST_RETRY_THRESHOLD = 5;       // After 5 attempts, use normal poll interval
+  private currentRetryDelay: number;
 
   constructor(
     config: SensorConfig,
@@ -71,6 +77,7 @@ export class Sensor extends EventEmitter {
     this.mqttConnection = mqttConnection;
     this.logger = logger;
     this.deviceUuid = deviceUuid;
+    this.currentRetryDelay = this.INITIAL_RETRY_DELAY_MS;
     
     // Compile delimiter regex
     try {
@@ -429,6 +436,7 @@ export class Sensor extends EventEmitter {
     this.logger?.info(`Connected to endpoint '${this.getSensorName()}'`);
     this.state = SensorState.CONNECTED;
     this.stats.reconnectAttempts = 0;
+    this.currentRetryDelay = this.INITIAL_RETRY_DELAY_MS; // Reset for next disconnect
     this.stats.lastConnectedTime = new Date();
     // Keep lastError for debugging - don't clear it on successful connection
     // This allows us to see what errors occurred before connection succeeded
@@ -708,18 +716,34 @@ export class Sensor extends EventEmitter {
   }
 
   /**
-   * Schedule reconnection attempt
+   * Schedule reconnection attempt with exponential backoff for initial attempts
+   * Uses fast retries (500ms → 8s) for first 5 attempts to handle startup race conditions,
+   * then falls back to normal poll interval for steady-state operation
    */
   private scheduleReconnect(): void {
     this.clearReconnectTimer();
     
-    const pollInterval = this.config.addrPollSec * 1000;
-    this.logger?.debug(`Scheduling reconnect for endpoint '${this.getSensorName()}' in ${this.config.addrPollSec}s`);
+    let delay: number;
+    
+    // Use exponential backoff for initial connection attempts (handles startup race conditions)
+    if (this.stats.reconnectAttempts < this.FAST_RETRY_THRESHOLD) {
+      delay = Math.min(this.currentRetryDelay, this.MAX_FAST_RETRY_DELAY_MS);
+      this.currentRetryDelay *= 2; // Exponential backoff
+      this.logger?.debug(
+        `Fast reconnect for endpoint '${this.getSensorName()}' in ${delay}ms (attempt ${this.stats.reconnectAttempts + 1})`
+      );
+    } else {
+      // After initial attempts, use normal poll interval
+      delay = this.config.addrPollSec * 1000;
+      this.logger?.debug(
+        `Scheduling reconnect for endpoint '${this.getSensorName()}' in ${this.config.addrPollSec}s`
+      );
+    }
     
     this.reconnectTimer = setTimeout(() => {
       this.stats.reconnectAttempts++;
       this.connect();
-    }, pollInterval);
+    }, delay);
   }
 
   /**
