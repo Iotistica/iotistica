@@ -91,9 +91,12 @@ export class AnomalyEventHandler {
 		if (!this.redis) {
 			try {
 				const module = await import('../redis/client');
-				this.redis = module.redisClient;
+				await module.redisClient.connect(); // Ensure connected
+				this.redis = module.redisClient.getClient(); // Get actual Redis instance
 			} catch (error) {
-				logger.warn('Redis client not available for anomaly correlation caching');
+				logger.warn('Redis client not available for anomaly correlation caching', {
+					error: error instanceof Error ? error.message : String(error)
+				});
 				return null;
 			}
 		}
@@ -105,25 +108,37 @@ export class AnomalyEventHandler {
 	 */
 	async handleEvent(event: AnomalyEvent): Promise<void> {
 		try {
+			// TEMPORARY: Store all events for testing (remove in production)
 			// 1. Skip suppressed events (already handled at edge)
 			if (event.suppressed) {
-				logger.debug('Skipping suppressed anomaly event', {
+				logger.info('⏭️ Suppressed event - storing anyway for testing', {
 					deviceId: event.deviceId,
 					metric: event.metric,
 					fingerprint: event.fingerprint,
 				});
-				return;
+				// Don't return - continue to store
 			}
 			
 			// 2. Store raw event to database
 			await this.storeEvent(event);
+			logger.info('✅ Event stored, starting correlation', {
+				deviceId: event.deviceId,
+				metric: event.metric,
+				fingerprint: event.fingerprint
+			});
 			
 			// 3. Get or create incident
 			const incident = await this.correlateEvent(event);
+			logger.info('✅ Correlation complete', {
+				incidentId: incident.incidentId,
+				eventCount: incident.eventCount,
+				affectedDevices: incident.affectedDevices.length
+			});
 			
 			// 4. Check if alert should be triggered
 			if (this.shouldTriggerAlert(incident, event)) {
 				await this.triggerAlert(incident, event);
+				logger.info('🚨 Alert triggered');
 			}
 			
 			logger.info('Processed anomaly event', {
@@ -137,9 +152,11 @@ export class AnomalyEventHandler {
 		} catch (error) {
 			logger.error('Failed to process anomaly event', {
 				error: error instanceof Error ? error.message : String(error),
+				stack: error instanceof Error ? error.stack : undefined,
 				deviceId: event.deviceId,
 				metric: event.metric,
 			});
+			throw error; // Re-throw to see in outer handler
 		}
 	}
 	

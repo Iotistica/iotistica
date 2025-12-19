@@ -419,7 +419,7 @@ export class AnomalyDetectionService {
 			fingerprint: '', // Set by AlertManager
 			count: 1,
 			// Suppression metadata (populated by AlertManager)
-			cooldownSec: Math.floor((metricConfig.cooldownMs || 300000) / 1000),
+			cooldownSec: Math.floor((metricConfig.cooldownMs || 30000) / 1000),  // 30s for testing
 			firstSeen: dataPoint.timestamp,
 			consecutiveCount: 1,
 		};

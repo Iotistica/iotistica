@@ -70,9 +70,18 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
 
     mqttManager.on('anomaly', async (data) => {
       try {
+        logger.info('🔥 Anomaly event handler called', {
+          deviceId: data.deviceId?.substring(0, 8),
+          metric: data.metric,
+          suppressed: data.suppressed
+        });
         await handleAnomalyEvent(data);
       } catch (error) {
-        logger.error('Error handling anomaly event:', error);
+        logger.error('Error handling anomaly event:', {
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          deviceId: data.deviceId
+        });
       }
     });
 

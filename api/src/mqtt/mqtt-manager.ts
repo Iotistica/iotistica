@@ -752,6 +752,13 @@ export class MqttManager extends EventEmitter {
         return;
       }
       
+      logger.info('✅ Anomaly event validated, emitting to handler', {
+        deviceId: deviceUuid.substring(0, 8),
+        metric: event.metric,
+        timestampMs: event.timestampMs,
+        suppressed: event.suppressed
+      });
+      
       this.emitTyped('anomaly', event);
     } else {
       logger.warn('Unknown event subTopic', { subTopic, deviceUuid });
