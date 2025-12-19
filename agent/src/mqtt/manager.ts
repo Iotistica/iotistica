@@ -42,6 +42,7 @@ export class MqttManager extends EventEmitter {
   private lastBrokerUrl?: string;
   private lastOptions?: IClientOptions;
   private messageIdGenerator?: MessageIdGenerator; // For HA deduplication
+  private isReconnecting: boolean = false; // Prevent overlapping reconnection chains
 
   private constructor() {
     super();
@@ -124,12 +125,15 @@ export class MqttManager extends EventEmitter {
         clean: true,
         reconnectPeriod: 0, // Disable auto-reconnect, we'll handle it manually
         connectTimeout: 10000,
+        keepalive: 60, // Send PINGREQ every 60s to detect dead connections
+        reschedulePings: true, // Reschedule ping timer on activity
       });
 
       this.client.on('connect', () => {
         clearTimeout(connectionTimeout);
         this.connected = true;
         this.reconnectAttempts = 0; // Reset backoff counter on successful connect
+        this.isReconnecting = false; // Reset reconnection state
         
         this.logger?.infoSync('Connected to MQTT broker', {
           component: LogComponents.mqtt,
@@ -175,6 +179,8 @@ export class MqttManager extends EventEmitter {
           component: LogComponents.mqtt,
           pendingPublishes: this.pendingPublishes.length
         });
+        // Trigger reconnect immediately on offline
+        this.scheduleReconnect(brokerUrl, options);
       });
 
       this.client.on('close', () => {
@@ -186,6 +192,17 @@ export class MqttManager extends EventEmitter {
         });
         
         // Schedule reconnect with exponential backoff
+        this.scheduleReconnect(brokerUrl, options);
+      });
+
+      // Critical: Handle 'disconnect' event (broker-initiated disconnect)
+      this.client.on('disconnect', () => {
+        this.connected = false;
+        this.logger?.warnSync('MQTT broker disconnected client (possibly API restart)', {
+          component: LogComponents.mqtt,
+          pendingPublishes: this.pendingPublishes.length
+        });
+        // Trigger immediate reconnect
         this.scheduleReconnect(brokerUrl, options);
       });
 
@@ -246,6 +263,15 @@ export class MqttManager extends EventEmitter {
     const enrichedPayload = this.injectMessageId(payload);
 
     if (!this.client || !this.connected) {
+      // Trigger reconnection if we have broker config (self-healing)
+      if (this.lastBrokerUrl && !this.connectionPromise) {
+        this.logger?.warnSync('MQTT disconnected - triggering reconnection', {
+          component: LogComponents.mqtt,
+          pendingMessages: this.pendingPublishes.length
+        });
+        this.scheduleReconnect(this.lastBrokerUrl, this.lastOptions);
+      }
+      
       // Queue message for delivery on reconnect
       if (this.pendingPublishes.length >= this.MAX_PENDING_PUBLISHES) {
         this.logger?.warnSync(`Pending publish queue full (${this.MAX_PENDING_PUBLISHES}), dropping oldest message`, {
@@ -261,12 +287,30 @@ export class MqttManager extends EventEmitter {
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error(`MQTT publish timeout after 5s: ${topic}`));
+        const timeoutError = new Error(`MQTT publish timeout after 5s: ${topic}`);
+        console.warn('[MQTT] Publish timeout - forcing reconnect:', topic);
+        
+        // Force reconnect on timeout
+        if (this.lastBrokerUrl) {
+          this.connected = false; // Mark as disconnected
+          this.scheduleReconnect(this.lastBrokerUrl, this.lastOptions);
+        }
+        reject(timeoutError);
       }, 5000);
       
       this.client!.publish(topic, enrichedPayload, options || {}, (error) => {
         clearTimeout(timeout);
         if (error) {
+          this.logger?.warnSync('MQTT publish failed - forcing reconnect', {
+            component: LogComponents.mqtt,
+            topic,
+            error: error.message
+          });
+          // Force reconnect on publish error (e.g., ACL denied)
+          if (this.lastBrokerUrl) {
+            this.connected = false; // Mark as disconnected
+            this.scheduleReconnect(this.lastBrokerUrl, this.lastOptions);
+          }
           reject(error);
         } else {
           resolve();
@@ -492,23 +536,41 @@ export class MqttManager extends EventEmitter {
    * Schedule reconnect with exponential backoff
    */
   private scheduleReconnect(brokerUrl: string, options?: IClientOptions): void {
+    // Prevent overlapping reconnection chains
+    if (this.isReconnecting) {
+      return;
+    }
+    this.isReconnecting = true;
+    
     this.reconnectAttempts++;
     const delay = Math.min(
       this.MAX_RECONNECT_DELAY_MS,
       this.BASE_RECONNECT_DELAY_MS * Math.pow(2, this.reconnectAttempts - 1)
     );
     
-    this.logger?.infoSync(`Scheduling MQTT reconnect attempt ${this.reconnectAttempts} in ${delay}ms`, {
-      component: LogComponents.mqtt
-    });
+    // Use console.log to avoid logging system recursion
+    console.log(`[MQTT] Scheduling reconnect attempt ${this.reconnectAttempts} in ${delay}ms`);
     
     setTimeout(() => {
       if (!this.connected && !this.connectionPromise) {
-        this.debugLog(`Reconnecting to MQTT broker (attempt ${this.reconnectAttempts})...`);
+        // Force close stale client before reconnecting (critical for stuck connections)
+        if (this.client) {
+          console.warn(`[MQTT] Forcefully closing stale client before reconnect (attempt ${this.reconnectAttempts})`);
+          this.client.removeAllListeners();
+          try {
+            this.client.end(true); // Force disconnect
+          } catch (error) {
+            this.debugLog(`Error ending stale client: ${error}`);
+          }
+          this.client = null;
+        }
+        
         this.connect(brokerUrl, options).catch((error) => {
-          this.logger?.errorSync(`Reconnect attempt ${this.reconnectAttempts} failed`, error, {
-            component: LogComponents.mqtt
-          });
+          console.error(`[MQTT] Reconnect attempt ${this.reconnectAttempts} failed:`, error);
+          // Reset reconnection state (including connection promise) and schedule next attempt
+          this.isReconnecting = false;
+          this.connectionPromise = null; // Critical: clear promise so next attempt can proceed
+          this.scheduleReconnect(brokerUrl, options);
         });
       }
     }, delay);
