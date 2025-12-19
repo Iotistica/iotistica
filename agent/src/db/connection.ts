@@ -40,6 +40,12 @@ const db = knex({
 		filename: databasePath,
 	},
 	useNullAsDefault: true,
+	pool: {
+		min: 2,
+		max: 10,
+		acquireTimeoutMillis: 30000,
+		idleTimeoutMillis: 30000,
+	},
 });
 
 /**

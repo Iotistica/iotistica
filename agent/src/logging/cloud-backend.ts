@@ -173,17 +173,15 @@ export class CloudLogBackend implements LogBackend {
 					if (this.consecutiveFailures >= this.CIRCUIT_BREAKER_THRESHOLD && !this.circuitBreakerOpen) {
 						this.circuitBreakerOpen = true;
 						this.circuitBreakerOpenedAt = Date.now();
-						this.logger?.errorSync(`Circuit breaker OPEN - too many failures (${this.consecutiveFailures}). Will retry in ${this.CIRCUIT_BREAKER_RESET_MS / 1000}s`, undefined, {
-							component: LogComponents.cloudSync
-						});
+						// CRITICAL: Use console.error to prevent recursive logging (logging errors during flush causes stack overflow)
+						console.error(`[CloudLogBackend] Circuit breaker OPEN - too many failures (${this.consecutiveFailures}). Will retry in ${this.CIRCUIT_BREAKER_RESET_MS / 1000}s`);
 					}
 					
 					const now = Date.now();
 					if (now - this.lastErrorLog > this.errorLogThrottle) {
 						const errorType = getNetworkErrorType(error);
-						this.logger?.errorSync(`Persistent network error: ${errorType} (failures: ${this.consecutiveFailures})`, undefined, {
-							component: LogComponents.cloudSync
-						});
+						// CRITICAL: Use console.error to prevent recursive logging
+						console.error(`[CloudLogBackend] Persistent network error: ${errorType} (failures: ${this.consecutiveFailures})`);
 						this.lastErrorLog = now;
 					}
 				}
@@ -332,9 +330,8 @@ export class CloudLogBackend implements LogBackend {
 				return;
 			} else {
 				// Try to close circuit breaker
-				this.logger?.infoSync('Circuit breaker attempting reset...', {
-					component: LogComponents.cloudSync
-				});
+				// CRITICAL: Use console.log to prevent recursive logging
+				console.log('[CloudLogBackend] Circuit breaker attempting reset...');
 				this.circuitBreakerOpen = false;
 				this.consecutiveFailures = 0;
 			}
@@ -369,17 +366,11 @@ export class CloudLogBackend implements LogBackend {
 				this.retryPolicy.reset();
 				
 				// Log successful upload
+				// CRITICAL: Use console.log to prevent recursive logging
 				if (wasCircuitOpen) {
-					this.logger?.infoSync(`Circuit breaker CLOSED - connection restored (sent ${batch.length} logs)`, {
-						component: LogComponents.cloudSync
-					});
+					console.log(`[CloudLogBackend] Circuit breaker CLOSED - connection restored (sent ${batch.length} logs)`);
 				} else {
-					this.logger?.infoSync(`Uploaded ${batch.length} logs to cloud`, {
-						component: LogComponents.cloudSync,
-						totalLogsInFlush: totalLogsToFlush,
-						batchCount: batches.length,
-						batchSize
-					});
+					console.log(`[CloudLogBackend] Uploaded ${batch.length} logs to cloud (total: ${totalLogsToFlush}, batches: ${batches.length})`);
 				}
 			} catch (error) {
 				// All retries exhausted - create summary before dropping
@@ -387,11 +378,8 @@ export class CloudLogBackend implements LogBackend {
 					const summary = this.createDroppedLogSummary(batch, 'retry_exhausted');
 					this.storeDroppedLogSummary(summary);
 					
-					this.logger?.warnSync('Dropping logs due to persistent network errors', { 
-						component: LogComponents.logs,
-						droppedLogs: batch.length,
-						consecutiveFailures: this.retryPolicy.getConsecutiveFailures()
-					});
+					// CRITICAL: Use console.warn to prevent recursive logging
+					console.warn(`[CloudLogBackend] Dropping ${batch.length} logs due to persistent network errors (failures: ${this.retryPolicy.getConsecutiveFailures()})`);
 					continue; // Drop these logs
 				}
 				
@@ -411,10 +399,8 @@ export class CloudLogBackend implements LogBackend {
 				const summary = this.createDroppedLogSummary(droppedLogs, 'buffer_overflow');
 				this.storeDroppedLogSummary(summary);
 				
-				this.logger?.warnSync('Buffer overflow: dropping oldest logs', { 
-					component: LogComponents.logs,
-					droppedLogs: droppedLogs.length
-				});
+				// CRITICAL: Use console.warn to prevent recursive logging
+				console.warn(`[CloudLogBackend] Buffer overflow: dropping ${droppedLogs.length} oldest logs`);
 			}
 			
 			this.buffer = [...logsToKeep, ...this.buffer];
