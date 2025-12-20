@@ -193,7 +193,6 @@ export interface TargetState {
 			// Legacy interval fields (DEPRECATED - use config.intervals instead)
 			reconciliationIntervalMs?: number;
 			targetStatePollIntervalMs?: number;
-			stateReportIntervalMs?: number; // Renamed to match actual field
 			
 			// Performance and resource settings
 			memoryCheckIntervalMs?: number;
@@ -257,10 +256,6 @@ export interface TargetState {
 			can?: {
 				enabled: boolean;
 				// CAN bus specific configuration (future)
-			};
-			comap?: {
-				enabled: boolean;
-				// CoMAP specific configuration (future)
 			};
 		};
 		

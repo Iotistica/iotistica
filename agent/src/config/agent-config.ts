@@ -1,10 +1,9 @@
 /**
  * Agent Configuration Access Layer
  * 
- * Provides centralized access to agent configuration with three-tier fallback:
+ * Provides centralized access to agent configuration with two-tier fallback:
  * 1. Cloud Config (from target state) - highest priority (runtime overrides)
- * 2. device.json - baseline defaults (static configuration file)
- * 3. Hardcoded defaults - emergency fallbacks
+ * 2. Hardcoded defaults - emergency fallbacks
  * 
  * This is a REACTIVE configuration layer that listens to StateReconciler events
  * and automatically applies configuration changes without Agent intervention.
@@ -85,12 +84,11 @@ export interface IntervalConfig {
 /**
  * Agent Configuration Accessor (Reactive)
  * 
- * Implements cloud → device.json → hardcoded defaults pattern for all agent settings.
+ * Implements cloud → hardcoded defaults pattern for all agent settings.
  * Extends EventEmitter to react to StateReconciler events and apply changes automatically.
  */
 export class AgentConfig extends EventEmitter {
   private stateReconciler: StateReconciler;
-  private deviceJsonDefaults: any;
   private logger?: AgentLogger;
   
   // References to agent components (initialized via initialize())
@@ -104,7 +102,6 @@ export class AgentConfig extends EventEmitter {
   constructor(stateReconciler: StateReconciler) {
     super();
     this.stateReconciler = stateReconciler;
-    this.deviceJsonDefaults = this.loadDeviceJson();
   }
 
   /**
@@ -136,45 +133,6 @@ export class AgentConfig extends EventEmitter {
   }
 
   /**
-   * Load device.json configuration (one-time on construction)
-   * 
-   * Priority:
-   * 1. DEVICE_CONFIG_PATH environment variable
-   * 2. ./config/device.json (relative to agent root)
-   * 3. /app/config/device.json (Docker container path)
-   */
-  private loadDeviceJson(): any {
-    const configPath = process.env.DEVICE_CONFIG_PATH 
-      || path.join(process.cwd(), 'config', 'device.json')
-      || '/app/config/device.json';
-    
-    try {
-      if (fs.existsSync(configPath)) {
-        const content = fs.readFileSync(configPath, 'utf-8');
-        const parsed = JSON.parse(content);
-        this.logger?.debugSync(`Loaded device.json from ${configPath}`, {
-          component: LogComponents.agentConfig,
-          configPath
-        });
-        return parsed;
-      } else {
-        this.logger?.warnSync(`device.json not found at ${configPath}, using hardcoded defaults`, {
-          component: LogComponents.agentConfig,
-          configPath
-        });
-      }
-    } catch (error) {
-      this.logger?.errorSync(
-        `Failed to load device.json from ${configPath}`,
-        error as Error,
-        { component: LogComponents.agentConfig, configPath }
-      );
-    }
-    
-    return {}; // Empty object if file not found or parse error
-  }
-
-  /**
    * Get target config from cloud (via StateReconciler)
    */
   private getTargetConfig(): any {
@@ -185,109 +143,147 @@ export class AgentConfig extends EventEmitter {
   /**
    * Get Modbus protocol adapter configuration
    * 
-   * Fallback: Cloud config.protocols.modbus → device.json protocols.modbus → hardcoded defaults
+   * Supports both V1 (vendorDataPoints array) and V2 (points object) formats.
+   * V2 format: protocols.modbus.points {temperature: {address: 10, ...}}
+   * V1 format: protocols.modbus.vendorDataPoints [{name: "temperature", address: 10, ...}]
+   * 
+   * Fallback: Cloud config.protocols.modbus → hardcoded defaults
    */
   getModbusConfig(): ModbusConfig {
     const cloudProtocol = this.getTargetConfig().protocols?.modbus;
-    const deviceProtocol = this.deviceJsonDefaults.protocols?.modbus;
+
+    // Transform V2 points object → V1 vendorDataPoints array if needed
+    let vendorDataPoints = cloudProtocol?.vendorDataPoints;
+    
+    // Check if V2 format (points object exists)
+    if (cloudProtocol?.points && typeof cloudProtocol.points === 'object') {
+      // Transform points object → vendorDataPoints array
+      vendorDataPoints = Object.entries(cloudProtocol.points).map(([name, point]: [string, any]) => ({
+        name,
+        ...point
+      }));
+    }
+
+    // V2 format uses connection.host/port, V1 uses tcpHost/tcpPort
+    const cloudConnection = cloudProtocol?.connection;
+    const cloudAddressing = cloudProtocol?.addressing;
 
     return {
-      enabled: cloudProtocol?.enabled ?? deviceProtocol?.enabled ?? false,
-      tcpHost: cloudProtocol?.tcpHost ?? deviceProtocol?.tcpHost ?? 'localhost',
-      tcpPort: cloudProtocol?.tcpPort ?? deviceProtocol?.tcpPort ?? 502,
-      slaveRangeStart: cloudProtocol?.slaveRangeStart ?? deviceProtocol?.slaveRangeStart ?? 1,
-      slaveRangeEnd: cloudProtocol?.slaveRangeEnd ?? deviceProtocol?.slaveRangeEnd ?? 10,
-      timeout: cloudProtocol?.timeout ?? deviceProtocol?.timeout ?? 2000,
-      vendor: cloudProtocol?.vendor ?? deviceProtocol?.vendor ?? 'Generic',
-      vendorDataPoints: cloudProtocol?.vendorDataPoints ?? deviceProtocol?.vendorDataPoints,
+      enabled: cloudProtocol?.enabled ?? true,
+      tcpHost: cloudConnection?.host ?? cloudProtocol?.tcpHost ?? 'localhost',
+      tcpPort: cloudConnection?.port ?? cloudProtocol?.tcpPort ?? 502,
+      timeout: cloudConnection?.timeoutMs ?? cloudProtocol?.timeout ?? 2000,
+      slaveRangeStart: cloudAddressing?.slaveRange?.start ?? cloudProtocol?.slaveRangeStart ?? 1,
+      slaveRangeEnd: cloudAddressing?.slaveRange?.end ?? cloudProtocol?.slaveRangeEnd ?? 10,
+      vendor: cloudProtocol?.vendor ?? 'Generic',
+      vendorDataPoints: vendorDataPoints,
       // RTU configuration (all optional)
-      rtuPort: cloudProtocol?.serialPort ?? deviceProtocol?.serialPort,
-      rtuBaudRate: cloudProtocol?.baudRate ?? deviceProtocol?.baudRate ?? 9600,
+      rtuPort: cloudProtocol?.serialPort,
+      rtuBaudRate: cloudProtocol?.baudRate ?? 9600,
     };
   }
 
   /**
    * Get OPC-UA protocol adapter configuration
    * 
-   * Fallback: Cloud config.protocols.opcua → device.json protocols.opcua → hardcoded defaults
+   * Fallback: Cloud config.protocols.opcua → hardcoded defaults
    */
   getOPCUAConfig(): OPCUAConfig {
     const cloudProtocol = this.getTargetConfig().protocols?.opcua;
-    const deviceProtocol = this.deviceJsonDefaults.protocols?.opcua;
 
     return {
-      enabled: cloudProtocol?.enabled ?? deviceProtocol?.enabled ?? false,
-      discoveryUrls: cloudProtocol?.discoveryUrls ?? deviceProtocol?.discoveryUrls ?? []
+      enabled: cloudProtocol?.enabled ?? false,
+      discoveryUrls: cloudProtocol?.discoveryUrls ?? []
     };
   }
 
   /**
    * Get SNMP protocol adapter configuration
    * 
-   * Fallback: Cloud config.protocols.snmp → device.json protocols.snmp → hardcoded defaults
+   * Fallback: Cloud config.protocols.snmp → hardcoded defaults
    */
   getSNMPConfig(): SNMPConfig {
     const cloudProtocol = this.getTargetConfig().protocols?.snmp;
-    const deviceProtocol = this.deviceJsonDefaults.protocols?.snmp;
 
     return {
-      enabled: cloudProtocol?.enabled ?? deviceProtocol?.enabled ?? false,
-      ipRanges: cloudProtocol?.ipRanges ?? deviceProtocol?.ipRanges ?? [],
-      port: cloudProtocol?.port ?? deviceProtocol?.port ?? 161,
+      enabled: cloudProtocol?.enabled ?? false,
+      ipRanges: cloudProtocol?.ipRanges ?? [],
+      port: cloudProtocol?.port ?? 161,
     };
   }
 
   /**
    * Get performance settings (memory monitoring)
    * 
-   * Fallback: Cloud config.settings → device.json settings → hardcoded defaults
+   * Supports V2 format (runtime.memory.*) and V1 format (runtime.memory* or settings.memory*)
+   * 
+   * Fallback: Cloud config.runtime.memory → config.runtime → config.settings → hardcoded defaults
    */
   getPerformanceConfig(): PerformanceConfig {
-    const cloud = this.getTargetConfig().settings;
-    const device = this.deviceJsonDefaults.settings;
+    const cloudRuntime = this.getTargetConfig().runtime;
+    const cloudSettings = this.getTargetConfig().settings;
+
+    // V2 nested memory section support
+    const cloudMemory = (cloudRuntime as any)?.memory;
 
     return {
-      memoryCheckIntervalMs: cloud?.memoryCheckIntervalMs ?? device?.memoryCheckIntervalMs ?? 30000,
-      memoryThresholdMb: cloud?.memoryThresholdMb ?? device?.memoryThresholdMb ?? 15,
+      memoryCheckIntervalMs: cloudMemory?.checkIntervalMs ?? cloudRuntime?.memoryCheckIntervalMs ?? cloudSettings?.memoryCheckIntervalMs ?? 30000,
+      memoryThresholdMb: cloudMemory?.thresholdMb ?? cloudRuntime?.memoryThresholdMb ?? cloudSettings?.memoryThresholdMb ?? 15,
     };
   }
 
   /**
    * Get logging configuration
    * 
-   * Fallback: Cloud config → device.json → hardcoded defaults
+   * Supports V2 format (logging.maxLogs/logMaxAge/maxLogFileSize) and V1 format (settings.*)
+   * 
+   * Fallback: Cloud config.logging → config.settings → hardcoded defaults
    */
   getLoggingConfig(): LoggingConfig {
-    const cloudSettings = this.getTargetConfig().settings;
     const cloudLogging = this.getTargetConfig().logging;
-    const deviceSettings = this.deviceJsonDefaults.settings;
-    const deviceLogging = this.deviceJsonDefaults.logging;
+    const cloudSettings = this.getTargetConfig().settings;
 
     return {
-      logMaxAge: cloudSettings?.logMaxAge ?? deviceSettings?.logMaxAge ?? 86400000, // 24 hours
-      maxLogFileSize: cloudSettings?.maxLogFileSize ?? deviceSettings?.maxLogFileSize ?? 5242880, // 5MB
-      maxLogs: cloudSettings?.maxLogs ?? deviceSettings?.maxLogs ?? 1000,
-      enableFilePersistence: cloudLogging?.enableFilePersistence ?? deviceLogging?.enableFilePersistence ?? false,
-      enableCompression: cloudLogging?.enableCompression ?? deviceLogging?.enableCompression ?? true,
-      logBatchSize: cloudLogging?.logBatchSize ?? deviceLogging?.logBatchSize ?? 500,
-      logFlushIntervalMs: cloudLogging?.logFlushIntervalMs ?? deviceLogging?.logFlushIntervalMs ?? 30000,
-      logDir: process.env.LOG_DIR ?? deviceSettings?.logDir ?? "/app/data/logs",
-      logLevel: process.env.LOG_LEVEL ?? cloudLogging?.level ?? deviceLogging?.level ?? "info",
+      // V2: logging.maxLogs, V1: settings.maxLogs
+      maxLogs: cloudLogging?.maxLogs ?? cloudSettings?.maxLogs ?? 1000,
+      
+      // V2: logging.logMaxAge, V1: settings.logMaxAge
+      logMaxAge: cloudLogging?.logMaxAge ?? cloudSettings?.logMaxAge ?? 86400000, // 24 hours
+      
+      // V2: logging.maxLogFileSize, V1: settings.maxLogFileSize
+      maxLogFileSize: cloudLogging?.maxLogFileSize ?? cloudSettings?.maxLogFileSize ?? 5242880, // 5MB
+      
+      // V2: logging.enableFilePersistence, V1: logging.enableFilePersistence (same path)
+      enableFilePersistence: cloudLogging?.enableFilePersistence ?? false,
+      
+      // V2: logging.enableCompression, V1: logging.enableCompression (same path)
+      enableCompression: cloudLogging?.enableCompression ?? true,
+      
+      logBatchSize: cloudLogging?.logBatchSize ?? 500,
+      logFlushIntervalMs: cloudLogging?.logFlushIntervalMs ?? 30000,
+      logDir: process.env.LOG_DIR ?? cloudSettings?.logDir ?? "/app/data/logs",
+      
+      // V2: logging.level, V1: logging.level (same path)
+      logLevel: process.env.LOG_LEVEL ?? cloudLogging?.level ?? "info",
     };
   }
 
   /**
    * Get feature toggles
    * 
-   * Fallback: Cloud config.features → device.json features → hardcoded defaults
+   * Supports both V2 format (features.enableDeviceSensorPublish) and V1 format (features.enableSensorPublish)
+   * 
+   * Fallback: Cloud config.features → hardcoded defaults
    */
   getFeatures(): FeatureToggles {
     const cloud = this.getTargetConfig().features;
-    const device = this.deviceJsonDefaults.features;
 
     return {
-      enableSensorPublish: cloud?.enableSensorPublish ?? device?.enableDeviceSensorPublish ?? false,
-      enableAnomalyDetection: cloud?.enableAnomalyDetection ?? device?.enableAnomalyDetection ?? false,
+      // V2: enableDeviceSensorPublish, V1: enableSensorPublish
+      enableSensorPublish: cloud?.enableDeviceSensorPublish ?? cloud?.enableSensorPublish ?? false,
+      
+      // V2: enableAnomalyDetection, V1: enableAnomalyDetection (same)
+      enableAnomalyDetection: cloud?.enableAnomalyDetection ?? false,
     };
   }
 
@@ -296,46 +292,50 @@ export class AgentConfig extends EventEmitter {
    * 
    * Controls agent ↔ cloud communication frequency and discovery schedules.
    * 
-   * Fallback: Cloud config.intervals → device.json intervals → hardcoded defaults
+   * Fallback: Cloud config.intervals → hardcoded defaults
    */
   getIntervalConfig(): IntervalConfig {
     const cloud = this.getTargetConfig().intervals;
-    const device = this.deviceJsonDefaults.intervals;
+
+    // V2 nested structure support (intervals.device.* and intervals.discovery.*)
+    const cloudDevice = (cloud as any)?.device;
+    const cloudDiscovery = (cloud as any)?.discovery;
 
     return {
-      discoveryFullIntervalMs: cloud?.discoveryFullIntervalMs ?? device?.discoveryFullIntervalMs ?? 86400000, // 24 hours
-      discoveryLightIntervalMs: cloud?.discoveryLightIntervalMs ?? device?.discoveryLightIntervalMs ?? 14400000, // 4 hours
-      targetStatePollIntervalMs: cloud?.targetStatePollIntervalMs ?? device?.targetStatePollIntervalMs ?? 60000, // 1 minute
-      deviceReportIntervalMs: cloud?.deviceReportIntervalMs ?? device?.deviceReportIntervalMs ?? 60000, // 1 minute
-      metricsIntervalMs: cloud?.metricsIntervalMs ?? device?.metricsIntervalMs ?? 300000, // 5 minutes
-      reconciliationIntervalMs: cloud?.reconciliationIntervalMs ?? device?.reconciliationIntervalMs ?? 30000, // 30 seconds
+      // Discovery intervals - check nested first, then flat
+      discoveryFullIntervalMs: cloudDiscovery?.fullIntervalMs ?? (cloud as any)?.discoveryFullIntervalMs ?? 86400000, // 24 hours
+      discoveryLightIntervalMs: cloudDiscovery?.lightIntervalMs ?? (cloud as any)?.discoveryLightIntervalMs ?? 14400000, // 4 hours
+      
+      // Device intervals - check nested first, then flat
+      targetStatePollIntervalMs: cloudDevice?.targetStatePollIntervalMs ?? (cloud as any)?.targetStatePollIntervalMs ?? 60000, // 1 minute
+      deviceReportIntervalMs: cloudDevice?.reportIntervalMs ?? (cloud as any)?.deviceReportIntervalMs ?? 60000, // 1 minute
+      metricsIntervalMs: cloudDevice?.metricsIntervalMs ?? (cloud as any)?.metricsIntervalMs ?? 300000, // 5 minutes
+      reconciliationIntervalMs: cloudDevice?.reconciliationIntervalMs ?? (cloud as any)?.reconciliationIntervalMs ?? 30000, // 30 seconds
     };
   }
 
   /**
    * Get cloud API endpoint
    * 
-   * Fallback: Environment variable → device.json settings.cloudApiEndpoint → hardcoded default
+   * Fallback: Environment variable → hardcoded default
    * Note: Environment takes priority for deployment-specific overrides (e.g., different cloud regions)
    */
   getCloudApiEndpoint(): string {
     const env = process.env.CLOUD_API_ENDPOINT;
-    const device = this.deviceJsonDefaults.settings?.cloudApiEndpoint;
     
-    return env ?? device ?? 'http://localhost:4002';
+    return env ?? 'http://localhost:4002';
   }
 
   /**
    * Get device API port (local REST API for device management)
    * 
-   * Fallback: Environment variable → device.json settings.deviceApiPort → hardcoded default
+   * Fallback: Environment variable → hardcoded default
    * Note: Environment takes priority for deployment-specific overrides (e.g., port conflicts)
    */
   getDeviceApiPort(): number {
     const env = process.env.DEVICE_API_PORT;
-    const device = this.deviceJsonDefaults.settings?.deviceApiPort;
     
-    const port = env ? parseInt(env, 10) : device ?? 48484;
+    const port = env ? parseInt(env, 10) : 48484;
     return isNaN(port) ? 48484 : port;
   }
 

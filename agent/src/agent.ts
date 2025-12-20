@@ -82,7 +82,7 @@ export default class DeviceAgent {
   private anomalyService?: AnomalyDetectionService; // Edge-based AI anomaly detection for metrics and sensors
   private simulationOrchestrator?: SimulationOrchestrator; // Simulation framework for testing
   private discoveryService?: DiscoveryService; // Protocol discovery (Modbus, OPC-UA, CAN, etc.)
-  private agentConfig!: AgentConfig; // Configuration accessor (cloud → device.json → hardcoded fallback)
+  private agentConfig!: AgentConfig; // Configuration accessor (cloud → hardcoded fallback)
 
   // System settings (config-driven with env var defaults)
   // Note: All settings now accessed via agentConfig getters (intervals, endpoints, ports, etc.)

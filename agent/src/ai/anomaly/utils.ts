@@ -9,13 +9,26 @@ import type { AnomalyConfig, MetricConfig, DataPoint, DetectionMethod } from './
 
 /**
  * Load configuration from cloud target state (preferred) or environment variables (fallback)
+ * 
+ * Supports V2 format (anomalyDetection), V1.5 format (anomaly), and V1 format (config.anomaly)
  */
 export function loadConfigFromTargetState(targetStateConfig?: any): AnomalyConfig {
-	// Use target state config if provided, otherwise fall back to environment variables
+	// V2 format: Top-level anomalyDetection section
+	if (targetStateConfig?.anomalyDetection) {
+		return targetStateConfig.anomalyDetection as AnomalyConfig;
+	}
+	
+	// V1.5 format: Top-level anomaly section (backward compat)
 	if (targetStateConfig?.anomaly) {
 		return targetStateConfig.anomaly as AnomalyConfig;
 	}
 	
+	// V1 format: config.anomaly (legacy)
+	if (targetStateConfig?.config?.anomaly) {
+		return targetStateConfig.config.anomaly as AnomalyConfig;
+	}
+	
+	// Fallback to environment variables
 	return loadConfigFromEnv();
 }
 
