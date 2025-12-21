@@ -319,37 +319,75 @@ export class DiscoveryService extends EventEmitter {
             component: LogComponents.discovery,
             traceId,
             protocol,
-            phase: 'validation',
-            concurrency: this.VALIDATION_CONCURRENCY
+            phase: 'validation'
           });
 
-          // Concurrent validation with pooling to avoid overwhelming resources
-          const { default: pLimit } = await import('p-limit');
-          const limit = pLimit(this.VALIDATION_CONCURRENCY);
-          
-          await Promise.all(discovered.map(device => 
-            limit(async () => {
-              try {
-                const validationData = await plugin.validate(device);
-                if (validationData) {
-                  device.validated = true;
-                  device.validationData = validationData;
-                  device.confidence = 'high';
+          // Sequential validation for clean logging (slaves appear in order)
+          for (const device of discovered) {
+            try {
+              const validationData = await plugin.validate(device);
+              if (validationData) {
+                device.validated = true;
+                device.validationData = validationData;
+                device.confidence = 'high';
 
-                  // Update name if manufacturer/model detected
-                  if (validationData.manufacturer || validationData.modelNumber) {
-                    device.name = `${validationData.manufacturer || protocol}_${validationData.modelNumber || device.name}`.toLowerCase().replace(/\s+/g, '_');
+                // Update name if manufacturer/model detected
+                if (validationData.manufacturer || validationData.modelNumber) {
+                  device.name = `${validationData.manufacturer || protocol}_${validationData.modelNumber || device.name}`.toLowerCase().replace(/\s+/g, '_');
+                }
+
+                // Check vendor validation results (Modbus-specific)
+                if (validationData.vendorValidation) {
+                  const vv = validationData.vendorValidation;
+                  
+                  if (vv.result === 'vendor_mismatch') {
+                    this.logger?.warnSync(`⚠️  Vendor mismatch detected for ${device.name}`, {
+                      component: LogComponents.discovery,
+                      traceId,
+                      slaveId: device.metadata?.slaveId,
+                      result: vv.result,
+                      responseConfidence: vv.responseConfidence.toFixed(2),
+                      dataConfidence: vv.dataConfidence.toFixed(2),
+                      readableCount: vv.readableCount,
+                      errorCount: vv.errorCount,
+                      details: vv.details,
+                      guidance: vv.guidance || 'Check vendor configuration in dashboard',
+                      meiVendor: vv.meiVendor,
+                      meiModel: vv.meiModel
+                    });
+                  }
+                  
+                  // Update validation results in database (for both new and existing devices)
+                  try {
+                    await DeviceEndpointModel.update(device.name, {
+                      metadata: {
+                        ...device.metadata,
+                        vendorValidation: vv,
+                        validated: true,
+                        confidence: device.confidence
+                      }
+                    });
+                    this.logger?.debugSync(`Updated validation results for ${device.name}`, {
+                      component: LogComponents.discovery,
+                      result: vv.result,
+                      state: vv.state
+                    });
+                  } catch (updateError) {
+                    this.logger?.warnSync(`Failed to update validation results for ${device.name}`, {
+                      component: LogComponents.discovery,
+                      error: (updateError as Error).message
+                    });
                   }
                 }
-              } catch (error) {
-                this.logger?.warnSync(`Validation failed for ${device.name}`, {
-                  component: LogComponents.discovery,
-                  traceId,
-                  error: (error as Error).message
-                });
               }
-            })
-          ));
+            } catch (error) {
+              this.logger?.warnSync(`Validation failed for ${device.name}`, {
+                component: LogComponents.discovery,
+                traceId,
+                error: (error as Error).message
+              });
+            }
+          }
         }
       } catch (error) {
         this.logger?.errorSync(
@@ -859,38 +897,105 @@ export class DiscoveryService extends EventEmitter {
         const existing = existingByFingerprint || existingByName;
         
         if (existing) {
-          // Device already known - update lastSeenAt
-          await DeviceEndpointModel.updateLastSeen(sensor.fingerprint);
-          
           // Check if config changed
           const configChanged = JSON.stringify(existing.connection) !== JSON.stringify(sensor.connection);
           const fingerprintChanged = existing.metadata?.fingerprint !== sensor.fingerprint;
+          // Treat undefined vendor as "Generic" (backward compatibility)
+          const existingVendor = existing.metadata?.vendor || 'Generic';
+          const newVendor = sensor.metadata?.vendor || 'Generic';
+          const vendorChanged = existingVendor !== newVendor;
           
-          if (configChanged) {
-            this.logger?.infoSync(`Device "${sensor.name}" moved/reconfigured`, {
+          // CRITICAL: Also check if data points changed (vendor same, but points different)
+          const dataPointsChanged = JSON.stringify(existing.data_points) !== JSON.stringify(sensor.dataPoints);
+          
+          // DEBUG: Log vendor and data points comparison
+          this.logger?.infoSync(`Vendor comparison for "${sensor.name}"`, {
+            component: LogComponents.discovery,
+            traceId,
+            existingVendor,
+            newVendor,
+            vendorChanged,
+            existingDataPointsCount: existing.data_points?.length || 0,
+            newDataPointsCount: sensor.dataPoints?.length || 0,
+            dataPointsChanged
+          });
+          
+          if (vendorChanged || dataPointsChanged) {
+            // CRITICAL: Vendor or data points changed - must update and revalidate
+            const reason = vendorChanged ? 'Vendor changed' : 'Data points changed (same vendor)';
+            this.logger?.warnSync(`${reason} for "${sensor.name}" - updating configuration`, {
               component: LogComponents.discovery,
               traceId,
-              oldConnection: existing.connection,
-              newConnection: sensor.connection
+              oldVendor: existingVendor,
+              newVendor: newVendor,
+              oldDataPoints: existing.data_points?.length || 0,
+              newDataPoints: sensor.dataPoints?.length || 0,
+              vendorChanged,
+              dataPointsChanged
             });
-            // Could update connection here if desired
-          } else if (fingerprintChanged) {
-            this.logger?.infoSync(`Device "${sensor.name}" fingerprint changed (dynamic data)`, {
-              component: LogComponents.discovery,
-              traceId,
-              oldFingerprint: existing.metadata?.fingerprint,
-              newFingerprint: sensor.fingerprint
+            
+            // Update device with new vendor config and data points
+            await DeviceEndpointModel.update(existing.name, {
+              data_points: sensor.dataPoints || [],
+              metadata: {
+                ...existing.metadata,
+                vendor: sensor.metadata?.vendor,
+                // Clear old validation data - will be revalidated
+                vendorValidation: undefined
+              },
+              lastSeenAt: new Date()
             });
+            
+            // CRITICAL: Force Sensor Publish to reload endpoints (vendor changed)
+            // This ensures polling uses the new COMAP addresses immediately
+            if (existing.enabled) {
+              this.emit('endpoint-enabled', {
+                protocol: sensor.protocol,
+                endpoint: {
+                  ...existing,
+                  data_points: sensor.dataPoints || [],
+                  metadata: {
+                    ...existing.metadata,
+                    vendor: sensor.metadata?.vendor
+                  }
+                },
+                isBatchDiscovery: !!traceId,
+                vendorChanged: true // Flag to indicate this is a vendor change
+              });
+            }
+            
+            saved++; // Count as saved (updated)
+            continue; // Move to next device (don't fall through to create)
+            
           } else {
-            this.logger?.infoSync(`Device "${sensor.name}" already known - skipping`, {
-              component: LogComponents.discovery,
-              traceId,
-              protocol: sensor.protocol,
-              lastSeen: existing.lastSeenAt
-            });
+            // No vendor change - just update lastSeenAt and skip
+            await DeviceEndpointModel.updateLastSeen(sensor.fingerprint);
+            
+            if (configChanged) {
+              this.logger?.infoSync(`Device "${sensor.name}" moved/reconfigured`, {
+                component: LogComponents.discovery,
+                traceId,
+                oldConnection: existing.connection,
+                newConnection: sensor.connection
+              });
+            } else if (fingerprintChanged) {
+              this.logger?.infoSync(`Device "${sensor.name}" fingerprint changed (dynamic data)`, {
+                component: LogComponents.discovery,
+                traceId,
+                oldFingerprint: existing.metadata?.fingerprint,
+                newFingerprint: sensor.fingerprint
+              });
+            } else {
+              this.logger?.infoSync(`Device "${sensor.name}" already known - skipping`, {
+                component: LogComponents.discovery,
+                traceId,
+                protocol: sensor.protocol,
+                lastSeen: existing.lastSeenAt
+              });
+            }
+            skipped++;
+            continue;
           }
-          skipped++;
-          continue;
         }
 
         // Convert to DeviceEndpoint format and save
@@ -914,7 +1019,9 @@ export class DiscoveryService extends EventEmitter {
               modelNumber: sensor.validationData.modelNumber,
               firmwareVersion: sensor.validationData.firmwareVersion,
               capabilities: sensor.validationData.capabilities,
-              deviceInfo: sensor.validationData.deviceInfo
+              deviceInfo: sensor.validationData.deviceInfo,
+              // Vendor validation results (Modbus)
+              vendorValidation: sensor.validationData.vendorValidation
             })
           }
         };

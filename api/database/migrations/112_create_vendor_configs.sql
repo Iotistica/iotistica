@@ -17,20 +17,22 @@ CREATE INDEX IF NOT EXISTS idx_vendor_configs_vendor_name ON vendor_configs(vend
 CREATE INDEX IF NOT EXISTS idx_vendor_configs_protocol ON vendor_configs(protocol);
 
 -- Seed with existing COMAP configuration (idempotent - skip if already exists)
+-- NOTE: Addresses are 0-based (modbus-serial library auto-increments by 1)
+-- So address 99 here becomes 100 when read, address 109 becomes 110, etc.
 INSERT INTO vendor_configs (vendor_name, protocol, data_points, metadata) VALUES
 ('COMAP', 'modbus', 
  '[
-   {"name": "engine_rpm", "address": 100, "type": "holding", "dataType": "uint16"},
-   {"name": "gen_voltage_a", "address": 110, "type": "holding", "dataType": "uint16"},
-   {"name": "gen_voltage_b", "address": 111, "type": "holding", "dataType": "uint16"},
-   {"name": "gen_voltage_c", "address": 112, "type": "holding", "dataType": "uint16"},
-   {"name": "gen_current_a", "address": 120, "type": "holding", "dataType": "uint16"},
-   {"name": "gen_current_b", "address": 121, "type": "holding", "dataType": "uint16"},
-   {"name": "gen_current_c", "address": 122, "type": "holding", "dataType": "uint16"},
-   {"name": "frequency", "address": 130, "type": "holding", "dataType": "uint16"},
-   {"name": "power_kw", "address": 140, "type": "holding", "dataType": "uint16"},
-   {"name": "engine_temp", "address": 150, "type": "holding", "dataType": "uint16"},
-   {"name": "fuel_level", "address": 160, "type": "holding", "dataType": "uint16"},
+   {"name": "engine_rpm", "address": 99, "type": "holding", "dataType": "uint16", "base": 1500, "noise_pct": 0.05, "unit": "RPM"},
+   {"name": "gen_voltage_a", "address": 109, "type": "holding", "dataType": "uint16", "base": 230, "noise_pct": 0.02, "unit": "V"},
+   {"name": "gen_voltage_b", "address": 110, "type": "holding", "dataType": "uint16", "base": 230, "noise_pct": 0.02, "unit": "V"},
+   {"name": "gen_voltage_c", "address": 111, "type": "holding", "dataType": "uint16", "base": 230, "noise_pct": 0.02, "unit": "V"},
+   {"name": "gen_current_a", "address": 119, "type": "holding", "dataType": "uint16", "base": 50, "noise_pct": 0.1, "unit": "A"},
+   {"name": "gen_current_b", "address": 120, "type": "holding", "dataType": "uint16", "base": 50, "noise_pct": 0.1, "unit": "A"},
+   {"name": "gen_current_c", "address": 121, "type": "holding", "dataType": "uint16", "base": 50, "noise_pct": 0.1, "unit": "A"},
+   {"name": "frequency", "address": 129, "type": "holding", "dataType": "uint16", "base": 50, "noise_pct": 0.01, "unit": "Hz"},
+   {"name": "power_kw", "address": 139, "type": "holding", "dataType": "uint16", "base": 100, "noise_pct": 0.15, "unit": "kW"},
+   {"name": "engine_temp", "address": 149, "type": "holding", "dataType": "uint16", "base": 85, "noise_pct": 0.05, "unit": "°C"},
+   {"name": "fuel_level", "address": 159, "type": "holding", "dataType": "uint16", "base": 75, "noise_pct": 0.02, "unit": "%"},
    {"name": "alarm_1", "address": 0, "type": "coil", "dataType": "boolean"},
    {"name": "alarm_2", "address": 1, "type": "coil", "dataType": "boolean"},
    {"name": "alarm_3", "address": 2, "type": "coil", "dataType": "boolean"},

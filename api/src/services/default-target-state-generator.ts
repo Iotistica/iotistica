@@ -296,7 +296,7 @@ export function generateDefaultTargetStateConfig(
         slaveRangeStart: 1,
         slaveRangeEnd: 10,
         timeout: 2000,
-        vendor: 'Generic',
+        vendor: 'COMAP',
         // NOTE: vendorDataPoints will be added dynamically in generateDefaultTargetState()
       },
       opcua: {
@@ -466,7 +466,7 @@ export function generateDefaultTargetStateConfigV2(
       },
       modbus: {
         enabled: true,
-        vendor: 'Generic',
+        vendor: 'COMAP',
         connection: {
           host: 'localhost',
           port: 502,
@@ -528,7 +528,7 @@ export function generateDefaultTargetStateConfigV2(
  */
 export async function generateDefaultTargetStateV2(licenseData: LicenseData | null) {
   // Fetch vendor data points from database (array format)
-  const vendorDataPoints = await getVendorDataPoints('Generic', 'modbus');
+  const vendorDataPoints = await getVendorDataPoints('COMAP', 'modbus');
   
   // Generate V2 config (converts array → points object internally)
   const config = generateDefaultTargetStateConfigV2(licenseData, vendorDataPoints as ModbusVendorDataPoint[]);

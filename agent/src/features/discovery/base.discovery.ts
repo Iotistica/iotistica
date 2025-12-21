@@ -16,6 +16,22 @@ export interface ValidationResult {
   modelNumber?: string;
   firmwareVersion?: string;
   capabilities?: string[];
+  
+  // Vendor validation (Modbus-specific)
+  vendorValidation?: {
+    result: 'vendor_match' | 'vendor_mismatch' | 'degraded' | 'unknown';
+    state: 'idle' | 'active' | 'unknown';  // Device activity state
+    responseConfidence: number;  // How confident addresses are correct (readable ratio)
+    dataConfidence: number;      // How confident data is meaningful (variance)
+    readableCount: number;
+    errorCount: number;
+    zeroCount: number;
+    totalPoints: number;
+    details?: string;
+    guidance?: string;      // Specific guidance based on pattern
+    meiVendor?: string;     // MEI vendor name (if available)
+    meiModel?: string;      // MEI model name (if available)
+  };
 }
 
 /**

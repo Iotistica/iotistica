@@ -286,6 +286,24 @@ export default class DeviceAgent {
           this.anomalyService.updateConfig(change.new);
         }
       });
+      
+      // Listen for protocol config changes (includes vendor changes)
+      this.stateReconciler.on('protocol-config-changed', async (change: { old: any; new: any }) => {
+        // Check for Modbus vendor change
+        const oldVendor = change.old?.protocols?.modbus?.vendor;
+        const newVendor = change.new?.protocols?.modbus?.vendor;
+        
+        if (oldVendor && newVendor && oldVendor !== newVendor && this.anomalyService) {
+          this.agentLogger?.infoSync('Modbus vendor changed - resetting anomaly baselines', {
+            component: LogComponents.agent,
+            oldVendor,
+            newVendor,
+          });
+          
+          // Handle vendor change (resets in-memory buffers, preserves DB baselines)
+          this.anomalyService.handleVendorChange(newVendor, 'modbus_slave_%');
+        }
+      });
 
       //Final words
       const mode: "Cloud-connected" | "Standalone (not provisioned)" = this.deviceInfo.provisioned
@@ -788,6 +806,17 @@ export default class DeviceAgent {
         source: targetStateConfig?.anomaly ? 'cloud' : 'environment',
         storageEnabled: !!config.storage,
       });
+      
+      // Set vendor for Modbus metrics (for baseline filtering)
+      const modbusConfig = this.agentConfig.getModbusConfig();
+      if (modbusConfig?.vendor) {
+        this.anomalyService.setVendorForMetrics('modbus_slave_%', modbusConfig.vendor);
+        this.agentLogger?.infoSync("Vendor configured for Modbus metrics", {
+          component: LogComponents.agent,
+          vendor: modbusConfig.vendor,
+          pattern: 'modbus_slave_%',
+        });
+      }
       
       // Wire anomaly service to system metrics and sensor-publish
       this.configureAnomalyFeed();

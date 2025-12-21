@@ -13,7 +13,7 @@
 
 import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
-import { BaseDiscoveryPlugin, DiscoveredDevice } from './base.discovery';
+import { BaseDiscoveryPlugin, DiscoveredDevice, ValidationResult } from './base.discovery';
 import { generateModbusFingerprint } from './fingerprint';
 import type { AgentConfig } from '../../config/agent-config.js';
 
@@ -37,6 +37,7 @@ interface DataPoint {
   address: number;
   type: string;
   dataType: string;
+  safe?: boolean; // Default true - false for control registers that trigger actions
 }
 
 interface VendorMap {
@@ -147,7 +148,8 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
               metadata: {
                 slaveId,
                 deviceId: deviceInfo.deviceId,
-                discoveryMethod: deviceInfo.method
+                discoveryMethod: deviceInfo.method,
+                vendor: modbusConfig?.vendor || 'Generic'  // Store vendor for change detection
               }
             });
 
@@ -179,21 +181,234 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
   }
 
   /**
-   * Phase 2: Validate device (read device identification)
+   * Phase 2: Validate device and vendor hypothesis
+   * Tests if configured vendor data points are readable
    */
-  async validate(device: DiscoveredDevice, timeout = 2000): Promise<any> {
-    this.logger?.infoSync('Validating Modbus device', {
+  async validate(device: DiscoveredDevice, timeout = 2000): Promise<ValidationResult> {
+    this.logger?.infoSync('Validating Modbus device and vendor config', {
       component: LogComponents.discovery,
       slaveId: device.metadata?.slaveId,
-      phase: 'validation'
+      phase: 'validation',
+      dataPointsCount: device.dataPoints?.length || 0
     });
 
-    // TODO: Implement Modbus device validation
-    // - Read Device Identification (function code 0x2B/0x0E)
-    // - Read manufacturer-specific info registers
-    // - Parse manufacturer, model, firmware
+    // Try to get MEI device identification for cross-reference
+    let meiVendor: string | undefined;
+    let meiModel: string | undefined;
+
+    const dataPoints = device.dataPoints || [];
     
-    return null; // Placeholder
+    if (dataPoints.length === 0) {
+      return {
+        vendorValidation: {
+          result: 'unknown',
+          state: 'unknown',
+          responseConfidence: 0,
+          dataConfidence: 0,
+          readableCount: 0,
+          errorCount: 0,
+          zeroCount: 0,
+          totalPoints: 0,
+          details: 'No vendor data points configured'
+        }
+      };
+    }
+
+    let readableCount = 0;
+    let errorCount = 0;
+    let zeroCount = 0;
+    const total = dataPoints.length;
+
+    // Filter to safe data points only (avoid control registers)
+    // Industrial safety: never probe registers that might trigger actions
+    const safePoints = dataPoints.filter(p => p.safe !== false);
+    
+    if (safePoints.length === 0) {
+      this.logger?.warnSync('No safe data points to validate', {
+        component: LogComponents.discovery,
+        slaveId: device.metadata?.slaveId,
+        totalPoints: total,
+        note: 'All data points marked unsafe or no safe flag set'
+      });
+      return {
+        vendorValidation: {
+          result: 'unknown',
+          state: 'unknown',
+          responseConfidence: 0,
+          dataConfidence: 0,
+          readableCount: 0,
+          errorCount: 0,
+          zeroCount: 0,
+          totalPoints: total,
+          details: 'No safe data points available for validation'
+        }
+      };
+    }
+
+    // Sample first few safe data points for speed
+    const sampleSize = Math.min(5, safePoints.length);
+    const sampled = safePoints.slice(0, sampleSize);
+
+    try {
+      await this.withValidationClient(device, timeout, async (client) => {
+        // Try MEI device identification first (provides vendor/model for cross-reference)
+        try {
+          const meiResult = await Promise.race([
+            client.readDeviceIdentification(1),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('MEI timeout')), 500))
+          ]);
+          if (meiResult?.Basic?.VendorName) {
+            meiVendor = meiResult.Basic.VendorName.toString();
+            meiModel = meiResult.Basic?.ProductName?.toString();
+          }
+        } catch {
+          // MEI not supported - not an error
+        }
+
+        for (const point of sampled) {
+          try {
+            // Only test holding registers for now (most common)
+            if (point.type === 'holding') {
+              // Normalize address (40001-style → zero-based)
+              const addr = this.normalizeAddress(point.address);
+              const result = await client.readHoldingRegisters(addr, 1);
+              
+              if (result?.data?.length) {
+                readableCount++;
+                if (result.data[0] === 0) {
+                  zeroCount++;
+                }
+              } else {
+                errorCount++;
+              }
+            }
+          } catch (error) {
+            errorCount++;
+            this.logger?.debugSync(`Failed to read ${point.name} at address ${point.address}`, {
+              component: LogComponents.discovery,
+              error: (error as Error).message
+            });
+          }
+        }
+      });
+    } catch (error) {
+      // Connection failed
+      return {
+        vendorValidation: {
+          result: 'unknown',
+          state: 'unknown',
+          responseConfidence: 0,
+          dataConfidence: 0,
+          readableCount: 0,
+          errorCount: 0,
+          zeroCount: 0,
+          totalPoints: dataPoints.length,
+          details: `Failed to open connection: ${(error as Error).message}`
+        }
+      };
+    }
+
+    // Calculate ratios for pattern analysis
+    const readableRatio = readableCount / sampleSize;
+    const errorRatio = errorCount / sampleSize;
+    const zeroRatio = readableCount > 0 ? zeroCount / readableCount : 0;
+
+    // Determine result based on error pattern (NOT zero values)
+    let result: 'vendor_match' | 'vendor_mismatch' | 'degraded' | 'unknown';
+    let state: 'idle' | 'active' | 'unknown';
+    let responseConfidence: number;  // Addresses respond correctly
+    let dataConfidence: number;      // Data is meaningful (not all zeros)
+    let details: string;
+    let guidance: string | undefined;
+
+    // Determine device state from zero pattern
+    if (readableCount === 0) {
+      state = 'unknown';
+    } else if (zeroRatio === 1.0) {
+      state = 'idle';  // All zeros - device idle, startup, or sensors at rest
+    } else if (zeroRatio < 0.2) {
+      state = 'active';  // <20% zeros - device actively running
+    } else {
+      state = 'active';  // Some variance - device is active
+    }
+
+    if (errorRatio > 0.8) {
+      // STRONG INDICATOR: Most addresses don't respond - likely wrong vendor
+      result = 'vendor_mismatch';
+      responseConfidence = 1 - errorRatio;  // Low - addresses don't work
+      dataConfidence = 0;  // No meaningful data
+      details = `${errorCount}/${sampleSize} addresses unreadable - likely wrong vendor config`;
+      guidance = meiVendor 
+        ? `Device reports vendor '${meiVendor}' via MEI - verify configured vendor matches`
+        : 'Check vendor configuration in dashboard';
+    } else if (readableRatio > 0.7) {
+      // Addresses respond - vendor config is likely correct
+      responseConfidence = readableRatio;  // High - addresses work
+      dataConfidence = 1 - zeroRatio;      // 0.0 for all zeros, 1.0 for all variance
+      result = 'vendor_match';
+      
+      if (zeroRatio === 1.0) {
+        // All zeros - common in idle/startup, but note it
+        details = `${readableCount}/${sampleSize} addresses readable (all zeros)`;
+        if (meiVendor) {
+          guidance = `Device idle or at startup. MEI reports: ${meiVendor}${meiModel ? ` ${meiModel}` : ''}`;
+        } else {
+          guidance = 'All values zero - device may be idle, at startup, or verify vendor config';
+        }
+      } else if (dataConfidence > 0.5) {
+        // Good variance - strong match
+        details = `${readableCount}/${sampleSize} addresses readable with good variance`;
+        if (meiVendor) {
+          guidance = `Strong match. Device: ${meiVendor}${meiModel ? ` ${meiModel}` : ''}`;
+        }
+      } else {
+        // Some variance - acceptable
+        details = `${readableCount}/${sampleSize} addresses readable with limited variance`;
+      }
+    } else {
+      // Mixed results - some work, some don't
+      result = 'degraded';
+      responseConfidence = readableRatio;  // Partial
+      dataConfidence = 1 - zeroRatio;      // Based on variance
+      details = `Mixed results: ${readableCount} readable, ${errorCount} errors`;
+      guidance = 'Partial address accessibility - wrong model variant or bus issues';
+    }
+
+    this.logger?.infoSync('Vendor validation complete', {
+      component: LogComponents.discovery,
+      slaveId: device.metadata?.slaveId,
+      result,
+      state,  // idle | active | unknown
+      responseConfidence: responseConfidence.toFixed(2),
+      dataConfidence: dataConfidence.toFixed(2),
+      readableRatio: readableRatio.toFixed(2),
+      errorRatio: errorRatio.toFixed(2),
+      zeroRatio: zeroRatio.toFixed(2),
+      readableCount,
+      errorCount,
+      zeroCount,
+      totalSampled: sampleSize,
+      guidance,
+      meiVendor,
+      meiModel
+    });
+
+    return {
+      vendorValidation: {
+        result,
+        state,
+        responseConfidence,
+        dataConfidence,
+        readableCount,
+        errorCount,
+        zeroCount,
+        totalPoints: total,
+        details,
+        guidance,
+        meiVendor,
+        meiModel
+      }
+    };
   }
 
   /**
@@ -207,6 +422,77 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Execute validation logic with a dedicated client connection
+   * Avoids corrupting discovery state and ensures proper cleanup
+   */
+  private async withValidationClient(
+    device: DiscoveredDevice,
+    timeout: number,
+    fn: (client: any) => Promise<void>
+  ): Promise<void> {
+    const { default: ModbusRTU } = await import('modbus-serial') as any;
+    const client = new ModbusRTU();
+
+    try {
+      // Connect based on device connection type
+      if (device.connection.type === 'serial') {
+        await client.connectRTUBuffered(device.connection.port, {
+          baudRate: device.connection.baudRate || 9600,
+          dataBits: 8,
+          stopBits: 1,
+          parity: 'none'
+        });
+      } else {
+        await client.connectTCP(device.connection.host, {
+          port: device.connection.port || 502
+        });
+      }
+
+      // Configure client for this specific slave
+      client.setID(device.metadata?.slaveId || 1);
+      client.setTimeout(timeout);
+
+      // Execute validation logic
+      await fn(client);
+    } finally {
+      // Always cleanup, even on error
+      try {
+        client.close();
+      } catch (closeError) {
+        this.logger?.debugSync('Error closing validation client', {
+          component: LogComponents.discovery,
+          error: (closeError as Error).message
+        });
+      }
+    }
+  }
+
+  /**
+   * Normalize Modbus address notation
+   * 
+   * Vendor maps often use 40001-style notation (1-based with offset),
+   * but modbus-serial expects zero-based offsets.
+   * 
+   * Examples:
+   *   40001 → 0 (holding register 0)
+   *   40100 → 99 (holding register 99)
+   *   0 → 0 (already zero-based)
+   *   99 → 99 (already zero-based)
+   */
+  private normalizeAddress(address: number): number {
+    // Holding registers: 40001-49999 → 0-9998
+    if (address >= 40001 && address <= 49999) {
+      return address - 40001;
+    }
+    // Input registers: 30001-39999 → 0-9998
+    if (address >= 30001 && address <= 39999) {
+      return address - 30001;
+    }
+    // Already zero-based or other types
+    return address;
   }
 
   /**
@@ -238,8 +524,9 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
           isOpen: true
         };
 
-        this.logger?.infoSync('Opened Modbus RTU connection', {
-          component: LogComponents.agent,
+        this.logger?.debugSync('Opened Modbus RTU connection', {
+          component: LogComponents.discovery,
+          phase: 'discovery',
           port: options!.serialPort,
           baudRate: options?.baudRate || 9600
         });
@@ -276,8 +563,9 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     if (this.connection?.isOpen) {
       try {
         this.connection.client.close(() => {
-          this.logger?.infoSync('Closed Modbus connection', {
+          this.logger?.debugSync('Closed Modbus connection', {
             component: LogComponents.discovery,
+            phase: 'discovery',
             type: this.connection?.type
           });
         });

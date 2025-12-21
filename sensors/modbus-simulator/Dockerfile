@@ -3,13 +3,21 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install dependencies
-RUN pip install --no-cache-dir pymodbus==3.5.4
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy simulator script (build context is sensors/modbus-simulator)
+# Copy all files
 COPY modbus_simulator.py .
+COPY web_gui.py .
+COPY start.sh .
+COPY templates/ templates/
+COPY static/ static/
 
-# Expose Modbus TCP port
-EXPOSE 502
+# Make start script executable
+RUN chmod +x start.sh
 
-# Run simulator
-CMD ["python", "-u", "modbus_simulator.py"]
+# Expose Modbus TCP port and Web GUI port
+EXPOSE 502 5000
+
+# Run both services
+CMD ["./start.sh"]
