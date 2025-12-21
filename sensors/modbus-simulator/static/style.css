@@ -223,9 +223,9 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .slave-controls {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
     margin-top: 8px;
 }
 
