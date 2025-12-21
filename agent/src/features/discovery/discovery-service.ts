@@ -336,24 +336,24 @@ export class DiscoveryService extends EventEmitter {
                   device.name = `${validationData.manufacturer || protocol}_${validationData.modelNumber || device.name}`.toLowerCase().replace(/\s+/g, '_');
                 }
 
-                // Check vendor validation results (Modbus-specific)
-                if (validationData.vendorValidation) {
-                  const vv = validationData.vendorValidation;
+                // Check profile validation results (Modbus-specific)
+                if (validationData.profileValidation) {
+                  const pv = validationData.profileValidation;
                   
-                  if (vv.result === 'vendor_mismatch') {
-                    this.logger?.warnSync(`⚠️  Vendor mismatch detected for ${device.name}`, {
+                  if (pv.result === 'profile_mismatch') {
+                    this.logger?.warnSync(`⚠️  Profile mismatch detected for ${device.name}`, {
                       component: LogComponents.discovery,
                       traceId,
                       slaveId: device.metadata?.slaveId,
-                      result: vv.result,
-                      responseConfidence: vv.responseConfidence.toFixed(2),
-                      dataConfidence: vv.dataConfidence.toFixed(2),
-                      readableCount: vv.readableCount,
-                      errorCount: vv.errorCount,
-                      details: vv.details,
-                      guidance: vv.guidance || 'Check vendor configuration in dashboard',
-                      meiVendor: vv.meiVendor,
-                      meiModel: vv.meiModel
+                      result: pv.result,
+                      responseConfidence: pv.responseConfidence.toFixed(2),
+                      dataConfidence: pv.dataConfidence.toFixed(2),
+                      readableCount: pv.readableCount,
+                      errorCount: pv.errorCount,
+                      details: pv.details,
+                      guidance: pv.guidance || 'Check profile configuration in dashboard',
+                      meiVendor: pv.meiVendor,
+                      meiModel: pv.meiModel
                     });
                   }
                   
@@ -362,15 +362,15 @@ export class DiscoveryService extends EventEmitter {
                     await DeviceEndpointModel.update(device.name, {
                       metadata: {
                         ...device.metadata,
-                        vendorValidation: vv,
+                        profileValidation: pv,
                         validated: true,
                         confidence: device.confidence
                       }
                     });
                     this.logger?.debugSync(`Updated validation results for ${device.name}`, {
                       component: LogComponents.discovery,
-                      result: vv.result,
-                      state: vv.state
+                      result: pv.result,
+                      state: pv.state
                     });
                   } catch (updateError) {
                     this.logger?.warnSync(`Failed to update validation results for ${device.name}`, {
@@ -900,53 +900,53 @@ export class DiscoveryService extends EventEmitter {
           // Check if config changed
           const configChanged = JSON.stringify(existing.connection) !== JSON.stringify(sensor.connection);
           const fingerprintChanged = existing.metadata?.fingerprint !== sensor.fingerprint;
-          // Treat undefined vendor as "Generic" (backward compatibility)
-          const existingVendor = existing.metadata?.vendor || 'Generic';
-          const newVendor = sensor.metadata?.vendor || 'Generic';
-          const vendorChanged = existingVendor !== newVendor;
+          // Treat undefined profile as "Generic" (backward compatibility)
+          const existingProfile = existing.metadata?.profile || 'Generic';
+          const newProfile = sensor.metadata?.profile || 'Generic';
+          const profileChanged = existingProfile !== newProfile;
           
-          // CRITICAL: Also check if data points changed (vendor same, but points different)
+          // CRITICAL: Also check if data points changed (profile same, but points different)
           const dataPointsChanged = JSON.stringify(existing.data_points) !== JSON.stringify(sensor.dataPoints);
           
-          // DEBUG: Log vendor and data points comparison
-          this.logger?.infoSync(`Vendor comparison for "${sensor.name}"`, {
+          // DEBUG: Log profile and data points comparison
+          this.logger?.infoSync(`Profile comparison for "${sensor.name}"`, {
             component: LogComponents.discovery,
             traceId,
-            existingVendor,
-            newVendor,
-            vendorChanged,
+            existingProfile,
+            newProfile,
+            profileChanged,
             existingDataPointsCount: existing.data_points?.length || 0,
             newDataPointsCount: sensor.dataPoints?.length || 0,
             dataPointsChanged
           });
           
-          if (vendorChanged || dataPointsChanged) {
-            // CRITICAL: Vendor or data points changed - must update and revalidate
-            const reason = vendorChanged ? 'Vendor changed' : 'Data points changed (same vendor)';
+          if (profileChanged || dataPointsChanged) {
+            // CRITICAL: Profile or data points changed - must update and revalidate
+            const reason = profileChanged ? 'Profile changed' : 'Data points changed (same profile)';
             this.logger?.warnSync(`${reason} for "${sensor.name}" - updating configuration`, {
               component: LogComponents.discovery,
               traceId,
-              oldVendor: existingVendor,
-              newVendor: newVendor,
+              oldProfile: existingProfile,
+              newProfile: newProfile,
               oldDataPoints: existing.data_points?.length || 0,
               newDataPoints: sensor.dataPoints?.length || 0,
-              vendorChanged,
+              profileChanged,
               dataPointsChanged
             });
             
-            // Update device with new vendor config and data points
+            // Update device with new profile config and data points
             await DeviceEndpointModel.update(existing.name, {
               data_points: sensor.dataPoints || [],
               metadata: {
                 ...existing.metadata,
-                vendor: sensor.metadata?.vendor,
+                profile: sensor.metadata?.profile,
                 // Clear old validation data - will be revalidated
-                vendorValidation: undefined
+                profileValidation: undefined
               },
               lastSeenAt: new Date()
             });
             
-            // CRITICAL: Force Sensor Publish to reload endpoints (vendor changed)
+            // CRITICAL: Force Sensor Publish to reload endpoints (profile changed)
             // This ensures polling uses the new COMAP addresses immediately
             if (existing.enabled) {
               this.emit('endpoint-enabled', {
@@ -956,11 +956,11 @@ export class DiscoveryService extends EventEmitter {
                   data_points: sensor.dataPoints || [],
                   metadata: {
                     ...existing.metadata,
-                    vendor: sensor.metadata?.vendor
+                    profile: sensor.metadata?.profile
                   }
                 },
                 isBatchDiscovery: !!traceId,
-                vendorChanged: true // Flag to indicate this is a vendor change
+                profileChanged: true // Flag to indicate this is a profile change
               });
             }
             
@@ -968,7 +968,7 @@ export class DiscoveryService extends EventEmitter {
             continue; // Move to next device (don't fall through to create)
             
           } else {
-            // No vendor change - just update lastSeenAt and skip
+            // No profile change - just update lastSeenAt and skip
             await DeviceEndpointModel.updateLastSeen(sensor.fingerprint);
             
             if (configChanged) {
@@ -1020,8 +1020,8 @@ export class DiscoveryService extends EventEmitter {
               firmwareVersion: sensor.validationData.firmwareVersion,
               capabilities: sensor.validationData.capabilities,
               deviceInfo: sensor.validationData.deviceInfo,
-              // Vendor validation results (Modbus)
-              vendorValidation: sensor.validationData.vendorValidation
+              // Profile validation results (Modbus)
+              profileValidation: sensor.validationData.profileValidation
             })
           }
         };

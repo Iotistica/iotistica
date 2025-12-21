@@ -47,8 +47,8 @@ export class AnomalyDetectionService {
 		methods: string[];
 		samples: number;
 	}>();
-	// Vendor tracking: Map metric prefix to vendor (e.g., 'modbus_slave_1' → 'Generic')
-	private metricVendors = new Map<string, string>();
+	// Profile tracking: Map metric prefix to profile (e.g., 'modbus_slave_1' → 'Generic')
+	private metricProfiles = new Map<string, string>();
 	
 	constructor(config: AnomalyConfig, db?: Knex, logger?: AgentLogger, mqttManager?: MqttManager, deviceUuid?: string) {
 		this.config = config;
@@ -753,13 +753,13 @@ export class AnomalyDetectionService {
 		
 		for (const [metricName, buffer] of this.buffers.entries()) {
 			if (buffer.size >= minSamples) {
-				const vendor = this.getVendorForMetric(metricName);
+				const profile = this.getProfileForMetric(metricName);
 				savePromises.push(
-					this.storage.storeBaseline(metricName, buffer, now, -1, vendor).catch(error => {
+					this.storage.storeBaseline(metricName, buffer, now, -1, profile).catch(error => {
 						this.logger?.errorSync('Failed to save baseline', error as Error, {
 							component: LogComponents.metrics,
 							metric: metricName,
-							vendor,
+							profile,
 						});
 					})
 				);
@@ -794,35 +794,35 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Set vendor for a metric pattern (e.g., set 'Generic' for 'modbus_slave_%' metrics)
+	 * Set profile for a metric pattern (e.g., set 'Generic' for 'modbus_slave_%' metrics)
 	 * @param metricPattern - Metric pattern (e.g., 'modbus_slave_1', 'modbus_slave_%')
-	 * @param vendor - Vendor identifier (e.g., 'Generic', 'COMAP')
+	 * @param profile - Profile identifier (e.g., 'Generic', 'COMAP')
 	 */
-	setVendorForMetrics(metricPattern: string, vendor: string): void {
-		this.metricVendors.set(metricPattern, vendor);
+	setProfileForMetrics(metricPattern: string, profile: string): void {
+		this.metricProfiles.set(metricPattern, profile);
 		
-		this.logger?.infoSync('Vendor set for metric pattern', {
+		this.logger?.infoSync('Profile set for metric pattern', {
 			component: LogComponents.metrics,
 			metricPattern,
-			vendor,
+			profile,
 		});
 	}
 	
 	/**
-	 * Handle vendor change - reset in-memory buffers for fresh baseline learning
-	 * Historical baselines are preserved in database, filtered by vendor field
-	 * @param newVendor - New vendor identifier
+	 * Handle profile change - reset in-memory buffers for fresh baseline learning
+	 * Historical baselines are preserved in database, filtered by profile field
+	 * @param newProfile - New profile identifier
 	 * @param metricPattern - Pattern to match metrics (e.g., 'modbus_slave_%')
 	 */
-	handleVendorChange(newVendor: string, metricPattern: string = 'modbus_%'): void {
-		this.logger?.infoSync('Handling vendor change', {
+	handleProfileChange(newProfile: string, metricPattern: string = 'modbus_%'): void {
+		this.logger?.infoSync('Handling profile change', {
 			component: LogComponents.metrics,
-			newVendor,
+			newProfile,
 			metricPattern,
 		});
 		
-		// Clear in-memory buffers to start fresh learning for new vendor
-		// (Database baselines are preserved, filtered by vendor when queried)
+		// Clear in-memory buffers to start fresh learning for new profile
+		// (Database baselines are preserved, filtered by profile when queried)
 		const clearedBuffers: string[] = [];
 		const regex = new RegExp(metricPattern.replace(/%/g, '.*'));
 		
@@ -839,40 +839,40 @@ export class AnomalyDetectionService {
 			}
 		}
 		
-		this.logger?.infoSync('Reset in-memory buffers for new vendor', {
+		this.logger?.infoSync('Reset in-memory buffers for new profile', {
 			component: LogComponents.metrics,
-			newVendor,
+			newProfile,
 			clearedBuffers,
 			count: clearedBuffers.length,
 			note: 'Historical baselines preserved in database',
 		});
 		
-		// Update vendor mapping
-		this.metricVendors.set(metricPattern, newVendor);
+		// Update profile mapping
+		this.metricProfiles.set(metricPattern, newProfile);
 	}
 	
 	/**
-	 * Get vendor for a metric (extracts from metric name prefix)
-	 * Returns vendor from cache or null for system metrics
+	 * Get profile for a metric (extracts from metric name prefix)
+	 * Returns profile from cache or null for system metrics
 	 */
-	private getVendorForMetric(metricName: string): string | null {
-		// Check cached vendor mappings
-		for (const [pattern, vendor] of this.metricVendors.entries()) {
+	private getProfileForMetric(metricName: string): string | null {
+		// Check cached profile mappings
+		for (const [pattern, profile] of this.metricProfiles.entries()) {
 			const regex = new RegExp(pattern.replace(/%/g, '.*'));
 			if (metricName.match(regex)) {
-				return vendor;
+				return profile;
 			}
 		}
 		
-		// System metrics (cpu_usage, memory_percent, etc.) don't have vendor
+		// System metrics (cpu_usage, memory_percent, etc.) don't have profile
 		if (metricName.startsWith('modbus_') || metricName.startsWith('opcua_') || metricName.startsWith('snmp_')) {
-			this.logger?.debugSync('Protocol metric without vendor mapping', {
+			this.logger?.debugSync('Protocol metric without profile mapping', {
 				component: LogComponents.metrics,
 				metric: metricName,
-				note: 'Consider calling setVendorForMetrics()',
+				note: 'Consider calling setProfileForMetrics()',
 			});
 		}
 		
-		return null; // System metric or no vendor mapping
+		return null; // System metric or no profile mapping
 	}
 }

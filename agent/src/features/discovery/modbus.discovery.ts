@@ -40,11 +40,11 @@ interface DataPoint {
   safe?: boolean; // Default true - false for control registers that trigger actions
 }
 
-interface VendorMap {
-  [vendor: string]: { dataPoints: DataPoint[] };
+interface ProfileMap {
+  [profile: string]: { dataPoints: DataPoint[] };
 }
 
-const VENDOR_ENV = process.env.MODBUS_VENDOR || 'Generic';
+const PROFILE_ENV = process.env.MODBUS_PROFILE || 'Generic';
 
 export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
   private connection?: ModbusConnection;
@@ -61,16 +61,16 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
    */
   async discover(options?: ModbusDiscoveryOptions): Promise<DiscoveredDevice[]> {
 
-    // Get vendor data points from target state (pushed via CloudSync)
+    // Get profile data points from target state (pushed via CloudSync)
     const modbusConfig = this.agentConfig?.getModbusConfig();
-    const dataPoints: DataPoint[] = modbusConfig?.vendorDataPoints || [];
+    const dataPoints: DataPoint[] = modbusConfig?.profileDataPoints || [];
     
     if (dataPoints.length === 0) {
-      this.logger?.warnSync(`No vendor data points in config (vendor: ${modbusConfig?.vendor || 'unknown'})`, {
+      this.logger?.warnSync(`No profile data points in config (profile: ${modbusConfig?.profile || 'unknown'})`, {
         component: LogComponents.discovery
       });
     } else {
-      this.logger?.infoSync(`Using ${dataPoints.length} data points from vendor '${modbusConfig?.vendor}'`, {
+      this.logger?.infoSync(`Using ${dataPoints.length} data points from profile '${modbusConfig?.profile}'`, {
         component: LogComponents.discovery
       });
     }
@@ -149,7 +149,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
                 slaveId,
                 deviceId: deviceInfo.deviceId,
                 discoveryMethod: deviceInfo.method,
-                vendor: modbusConfig?.vendor || 'Generic'  // Store vendor for change detection
+                profile: modbusConfig?.profile || 'Generic'  // Store profile for change detection
               }
             });
 
@@ -181,11 +181,11 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
   }
 
   /**
-   * Phase 2: Validate device and vendor hypothesis
-   * Tests if configured vendor data points are readable
+   * Phase 2: Validate device and profile hypothesis
+   * Tests if configured profile data points are readable
    */
   async validate(device: DiscoveredDevice, timeout = 2000): Promise<ValidationResult> {
-    this.logger?.infoSync('Validating Modbus device and vendor config', {
+    this.logger?.infoSync('Validating Modbus device and profile config', {
       component: LogComponents.discovery,
       slaveId: device.metadata?.slaveId,
       phase: 'validation',
@@ -200,7 +200,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     
     if (dataPoints.length === 0) {
       return {
-        vendorValidation: {
+        profileValidation: {
           result: 'unknown',
           state: 'unknown',
           responseConfidence: 0,
@@ -209,7 +209,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
           errorCount: 0,
           zeroCount: 0,
           totalPoints: 0,
-          details: 'No vendor data points configured'
+          details: 'No profile data points configured'
         }
       };
     }
@@ -231,7 +231,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
         note: 'All data points marked unsafe or no safe flag set'
       });
       return {
-        vendorValidation: {
+        profileValidation: {
           result: 'unknown',
           state: 'unknown',
           responseConfidence: 0,
@@ -294,7 +294,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     } catch (error) {
       // Connection failed
       return {
-        vendorValidation: {
+        profileValidation: {
           result: 'unknown',
           state: 'unknown',
           responseConfidence: 0,
@@ -314,7 +314,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     const zeroRatio = readableCount > 0 ? zeroCount / readableCount : 0;
 
     // Determine result based on error pattern (NOT zero values)
-    let result: 'vendor_match' | 'vendor_mismatch' | 'degraded' | 'unknown';
+    let result: 'profile_match' | 'profile_mismatch' | 'degraded' | 'unknown';
     let state: 'idle' | 'active' | 'unknown';
     let responseConfidence: number;  // Addresses respond correctly
     let dataConfidence: number;      // Data is meaningful (not all zeros)
@@ -333,19 +333,19 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     }
 
     if (errorRatio > 0.8) {
-      // STRONG INDICATOR: Most addresses don't respond - likely wrong vendor
-      result = 'vendor_mismatch';
+      // STRONG INDICATOR: Most addresses don't respond - likely wrong profile
+      result = 'profile_mismatch';
       responseConfidence = 1 - errorRatio;  // Low - addresses don't work
       dataConfidence = 0;  // No meaningful data
-      details = `${errorCount}/${sampleSize} addresses unreadable - likely wrong vendor config`;
+      details = `${errorCount}/${sampleSize} addresses unreadable - likely wrong profile config`;
       guidance = meiVendor 
-        ? `Device reports vendor '${meiVendor}' via MEI - verify configured vendor matches`
-        : 'Check vendor configuration in dashboard';
+        ? `Device reports vendor '${meiVendor}' via MEI - verify configured profile matches`
+        : 'Check profile configuration in dashboard';
     } else if (readableRatio > 0.7) {
-      // Addresses respond - vendor config is likely correct
+      // Addresses respond - profile config is likely correct
       responseConfidence = readableRatio;  // High - addresses work
       dataConfidence = 1 - zeroRatio;      // 0.0 for all zeros, 1.0 for all variance
-      result = 'vendor_match';
+      result = 'profile_match';
       
       if (zeroRatio === 1.0) {
         // All zeros - common in idle/startup, but note it
@@ -353,7 +353,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
         if (meiVendor) {
           guidance = `Device idle or at startup. MEI reports: ${meiVendor}${meiModel ? ` ${meiModel}` : ''}`;
         } else {
-          guidance = 'All values zero - device may be idle, at startup, or verify vendor config';
+          guidance = 'All values zero - device may be idle, at startup, or verify profile config';
         }
       } else if (dataConfidence > 0.5) {
         // Good variance - strong match
@@ -374,7 +374,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
       guidance = 'Partial address accessibility - wrong model variant or bus issues';
     }
 
-    this.logger?.infoSync('Vendor validation complete', {
+    this.logger?.infoSync('Profile validation complete', {
       component: LogComponents.discovery,
       slaveId: device.metadata?.slaveId,
       result,
@@ -394,7 +394,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     });
 
     return {
-      vendorValidation: {
+      profileValidation: {
         result,
         state,
         responseConfidence,

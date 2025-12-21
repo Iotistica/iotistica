@@ -17,9 +17,9 @@ export interface ValidationResult {
   firmwareVersion?: string;
   capabilities?: string[];
   
-  // Vendor validation (Modbus-specific)
-  vendorValidation?: {
-    result: 'vendor_match' | 'vendor_mismatch' | 'degraded' | 'unknown';
+  // Profile validation (Modbus-specific)
+  profileValidation?: {
+    result: 'profile_match' | 'profile_mismatch' | 'degraded' | 'unknown';
     state: 'idle' | 'active' | 'unknown';  // Device activity state
     responseConfidence: number;  // How confident addresses are correct (readable ratio)
     dataConfidence: number;      // How confident data is meaningful (variance)

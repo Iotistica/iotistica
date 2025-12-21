@@ -38,7 +38,7 @@ export interface AnomalyAlertRecord {
 export interface AnomalyBaselineRecord {
 	id?: number;
 	metric: string;
-	vendor: string | null; // Vendor config identifier (e.g., 'Generic', 'COMAP')
+	profile: string | null; // Profile config identifier (e.g., 'Generic', 'COMAP')
 	time_slot: number; // -1 for overall, 0-1 for day/night, 0-23 for hourly, 0-167 for weekly
 	mean: number | null;
 	median: number | null;
@@ -164,7 +164,7 @@ export class AnomalyStorageService {
 		buffer: StatisticalBuffer,
 		calculatedAt: number,
 		timeSlot: number = -1, // -1 = overall baseline (default)
-		vendor: string | null = null // Vendor identifier (null for system metrics)
+		profile: string | null = null // Profile identifier (null for system metrics)
 	): Promise<void> {
 		try {
 			// Calculate percentiles for IQR
@@ -177,7 +177,7 @@ export class AnomalyStorageService {
 
 			const record: AnomalyBaselineRecord = {
 				metric,
-				vendor,
+				profile,
 				time_slot: timeSlot,
 				mean: buffer.mean,
 				median: getMedian(buffer),
@@ -206,12 +206,12 @@ export class AnomalyStorageService {
 			// Use INSERT OR REPLACE to handle updates (SQLite upsert)
 			await this.db.raw(`
 				INSERT OR REPLACE INTO anomaly_baselines (
-					metric, vendor, time_slot, mean, median, std_dev, mad, min, max,
+					metric, profile, time_slot, mean, median, std_dev, mad, min, max,
 					q1, q3, iqr, sample_count, calculated_at, window_start, window_end
 				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`, [
 				record.metric,
-				record.vendor,
+				record.profile,
 				record.time_slot,
 				record.mean,
 				record.median,
@@ -236,8 +236,8 @@ export class AnomalyStorageService {
 					metric,
 				});
 				
-				// Use INSERT OR REPLACE for legacy schema (without time_slot and vendor)
-				const { time_slot, vendor, ...legacyRecord } = record;
+				// Use INSERT OR REPLACE for legacy schema (without time_slot and profile)
+				const { time_slot, profile, ...legacyRecord } = record;
 				await this.db.raw(`
 					INSERT OR REPLACE INTO anomaly_baselines (
 						metric, mean, median, std_dev, mad, min, max,
@@ -340,7 +340,7 @@ export class AnomalyStorageService {
 		metric: string,
 		timeSlot: number = -1,
 		minimumSamples: number = 10,
-		vendor: string | null = null // Filter by vendor (null for system metrics)
+		profile: string | null = null // Filter by profile (null for system metrics)
 	): Promise<AnomalyBaselineRecord | null> {
 		try {
 			// Try to get seasonal baseline first
@@ -349,9 +349,9 @@ export class AnomalyStorageService {
 					const query = this.db('anomaly_baselines')
 						.where({ metric, time_slot: timeSlot });
 					
-					// Add vendor filter if provided
-					if (vendor !== null) {
-						query.where({ vendor });
+					// Add profile filter if provided
+					if (profile !== null) {
+						query.where({ profile });
 					}
 					
 					const seasonalBaseline = await query
@@ -391,9 +391,9 @@ export class AnomalyStorageService {
 				const query = this.db('anomaly_baselines')
 					.where({ metric, time_slot: -1 });
 				
-				// Add vendor filter if provided
-				if (vendor !== null) {
-					query.where({ vendor });
+				// Add profile filter if provided
+				if (profile !== null) {
+					query.where({ profile });
 				}
 				
 				const baseline = await query
@@ -464,15 +464,15 @@ export class AnomalyStorageService {
 	}
 
 	/**
-	 * Clear baselines for a specific vendor (OPTIONAL - for manual cleanup only)
-	 * Normally not needed - vendor field automatically filters baselines
-	 * Use only when permanently removing a vendor config from system
-	 * @param vendor - Vendor identifier (e.g., 'Generic', 'COMAP')
+	 * Clear baselines for a specific profile (OPTIONAL - for manual cleanup only)
+	 * Normally not needed - profile field automatically filters baselines
+	 * Use only when permanently removing a profile config from system
+	 * @param profile - Profile identifier (e.g., 'Generic', 'COMAP')
 	 * @param metricPattern - Optional metric pattern (e.g., 'modbus_%' for all Modbus metrics)
 	 */
-	async clearBaselinesForVendor(vendor: string, metricPattern?: string): Promise<number> {
+	async clearBaselinesForProfile(profile: string, metricPattern?: string): Promise<number> {
 		try {
-			const query = this.db('anomaly_baselines').where({ vendor });
+			const query = this.db('anomaly_baselines').where({ profile });
 			
 			// Optional: filter by metric pattern (SQLite LIKE)
 			if (metricPattern) {
@@ -482,9 +482,9 @@ export class AnomalyStorageService {
 			const deleted = await query.delete();
 			
 			if (deleted > 0) {
-				this.logger?.infoSync('Cleared baselines after vendor change', {
+				this.logger?.infoSync('Cleared baselines after profile change', {
 					component: LogComponents.metrics,
-					vendor,
+					profile,
 					metricPattern: metricPattern || 'all',
 					deleted,
 				});
@@ -492,9 +492,9 @@ export class AnomalyStorageService {
 			
 			return deleted;
 		} catch (error) {
-			this.logger?.errorSync('Failed to clear baselines for vendor', error as Error, {
+			this.logger?.errorSync('Failed to clear baselines for profile', error as Error, {
 				component: LogComponents.metrics,
-				vendor,
+				profile,
 				metricPattern,
 			});
 			return 0;

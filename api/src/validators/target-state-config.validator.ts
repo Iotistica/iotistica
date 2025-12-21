@@ -283,11 +283,11 @@ export function validateTargetStateConfig(config: any): ValidationResult {
       }
     }
 
-    if (modbus.vendor !== undefined && typeof modbus.vendor !== 'string') {
+    if (modbus.profile !== undefined && typeof modbus.profile !== 'string') {
       errors.push({
-        field: 'protocols.modbus.vendor',
+        field: 'protocols.modbus.profile',
         message: 'Must be a string',
-        value: modbus.vendor
+        value: modbus.profile
       });
     }
 

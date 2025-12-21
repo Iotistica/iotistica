@@ -19,12 +19,12 @@ CORS(app)
 REGISTER_OVERRIDES = {}
 STATE_FILE = "/tmp/modbus_simulator_state.json"
 
-def write_state(vendor):
+def write_state(profile):
     """Write state to file for Modbus process to read"""
     try:
         with open(STATE_FILE, "w") as f:
-            json.dump({"vendor": vendor}, f)
-        logger.info(f"Wrote vendor state: {vendor}")
+            json.dump({"profile": profile}, f)
+        logger.info(f"Wrote profile state: {profile}")
     except Exception as e:
         logger.error(f"Failed to write state file: {e}")
 
@@ -36,27 +36,27 @@ def read_state():
                 return json.load(f)
     except Exception as e:
         logger.error(f"Failed to read state file: {e}")
-    return {"vendor": os.environ.get("MODBUS_VENDOR", "Generic")}
+    return {"profile": os.environ.get("MODBUS_PROFILE", "Generic")}
 
-# Load vendor data (same function as simulator)
-def load_vendor_data():
-    """Load vendor data points from API or fallback to local file"""
+# Load profile data (same function as simulator)
+def load_profile_data():
+    """Load profile data points from API or fallback to local file"""
     import urllib.request
     import time
     
     API_URL = os.environ.get("MODBUS_API_URL", "http://api:3002")
-    JSON_FILE = os.environ.get("MODBUS_VENDOR_JSON", "./vendors/dataPoints.json")
+    JSON_FILE = os.environ.get("MODBUS_PROFILE_JSON", "./profiles/dataPoints.json")
     
     # Try API first
     max_retries = 2
     for attempt in range(max_retries):
         try:
-            url = f"{API_URL}/api/v1/vendors/datapoints?protocol=modbus"
+            url = f"{API_URL}/api/v1/profiles/datapoints?protocol=modbus"
             req = urllib.request.Request(url, headers={'User-Agent': 'modbus-gui/1.0'})
             with urllib.request.urlopen(req, timeout=3) as response:
-                vendor_data = json.loads(response.read().decode())
-                logger.info(f"Loaded vendor data from API ({len(vendor_data)} vendors)")
-                return vendor_data
+                profile_data = json.loads(response.read().decode())
+                logger.info(f"Loaded profile data from API ({len(profile_data)} profiles)")
+                return profile_data
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(1)
@@ -66,40 +66,40 @@ def load_vendor_data():
     # Fallback to file
     try:
         with open(JSON_FILE, "r") as f:
-            vendor_data = json.load(f)
-            logger.info(f"Loaded vendor data from file ({len(vendor_data)} vendors)")
-            return vendor_data
+            profile_data = json.load(f)
+            logger.info(f"Loaded profile data from file ({len(profile_data)} profiles)")
+            return profile_data
     except Exception as e:
-        logger.error(f"Failed to load vendor data: {e}")
+        logger.error(f"Failed to load profile data: {e}")
         return {}
 
-vendor_data_cache = None
+profile_data_cache = None
 
-def get_vendor_data():
-    """Get vendor data with caching"""
-    global vendor_data_cache
-    if vendor_data_cache is None:
-        vendor_data_cache = load_vendor_data()
-    return vendor_data_cache
+def get_profile_data():
+    """Get profile data with caching"""
+    global profile_data_cache
+    if profile_data_cache is None:
+        profile_data_cache = load_profile_data()
+    return profile_data_cache
 
 @app.route('/')
 def index():
     """Main GUI page"""
-    vendors = list(get_vendor_data().keys())
-    current_vendor = os.environ.get("MODBUS_VENDOR", "Generic")
-    return render_template('index.html', vendors=vendors, current_vendor=current_vendor)
+    profiles = list(get_profile_data().keys())
+    current_profile = os.environ.get("MODBUS_PROFILE", "Generic")
+    return render_template('index.html', profiles=profiles, current_profile=current_profile)
 
-@app.route('/api/vendors')
-def get_vendors():
-    """Get list of available vendors"""
-    vendors = list(get_vendor_data().keys())
-    return jsonify({"vendors": vendors})
+@app.route('/api/profiles')
+def get_profiles():
+    """Get list of available profiles"""
+    profiles = list(get_profile_data().keys())
+    return jsonify({"profiles": profiles})
 
-@app.route('/api/datapoints/<vendor>')
-def get_datapoints(vendor):
-    """Get data points for a specific vendor"""
-    vendor_data = get_vendor_data()
-    data_points = vendor_data.get(vendor, {}).get("dataPoints", [])
+@app.route('/api/datapoints/<profile>')
+def get_datapoints(profile):
+    """Get data points for a specific profile"""
+    profile_data = get_profile_data()
+    data_points = profile_data.get(profile, {}).get("dataPoints", [])
     return jsonify({"dataPoints": data_points})
 
 @app.route('/api/overrides', methods=['GET'])
@@ -170,35 +170,35 @@ def apply_scenario(scenario_name):
     logger.info(f"Applied scenario: {scenario_name}")
     return jsonify({"success": True, "scenario": scenario_name, "overrides": REGISTER_OVERRIDES})
 
-@app.route('/api/vendor/switch/<vendor_name>', methods=['POST'])
-def switch_vendor(vendor_name):
-    """Switch active vendor dynamically"""
+@app.route('/api/profile/switch/<profile_name>', methods=['POST'])
+def switch_profile(profile_name):
+    """Switch active profile dynamically"""
     try:
-        vendor_data = get_vendor_data()
-        if vendor_name in vendor_data:
-            write_state(vendor_name)
+        profile_data = get_profile_data()
+        if profile_name in profile_data:
+            write_state(profile_name)
             return jsonify({
                 "success": True,
-                "vendor": vendor_name,
-                "message": f"Switched to {vendor_name}"
+                "profile": profile_name,
+                "message": f"Switched to {profile_name}"
             })
         else:
             return jsonify({
                 "success": False,
-                "error": f"Unknown vendor: {vendor_name}"
+                "error": f"Unknown profile: {profile_name}"
             }), 400
     except Exception as e:
-        logger.error(f"Failed to switch vendor: {e}")
+        logger.error(f"Failed to switch profile: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/status')
 def get_status():
     """Get simulator status"""
     state = read_state()
-    active_vendor = state.get("vendor", os.environ.get("MODBUS_VENDOR", "Generic"))
+    active_profile = state.get("profile", os.environ.get("MODBUS_PROFILE", "Generic"))
     
     return jsonify({
-        "vendor": active_vendor,
+        "profile": active_profile,
         "slaves": int(os.environ.get("MODBUS_SLAVES", 3)),
         "port": int(os.environ.get("MODBUS_PORT", 502)),
         "active_overrides": len(REGISTER_OVERRIDES),

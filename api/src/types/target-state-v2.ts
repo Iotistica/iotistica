@@ -9,7 +9,7 @@
  * - Logging settings grouped together (including maxLogs, logMaxAge, maxLogFileSize)
  * - Runtime section (renamed from "settings") for memory/restart policies
  * - Intervals extracted into dedicated section
- * - Modbus vendor points as object instead of array (keyed by point name)
+ * - Modbus profile points as object instead of array (keyed by point name)
  */
 
 // ============================================================================
@@ -153,7 +153,7 @@ export interface ModbusDataPoint {
 
 export interface ModbusProtocolConfig {
   enabled: boolean;
-  vendor: string;
+  profile: string;
   connection: ModbusConnection;
   addressing: ModbusAddressing;
   points: Record<string, ModbusDataPoint>;  // Object keyed by point name (e.g., "temperature", "humidity")
@@ -184,9 +184,9 @@ export interface TargetStateV2 {
 // ============================================================================
 
 /**
- * Legacy V1 format (flat structure with vendorDataPoints as array)
+ * Legacy V1 format (flat structure with profileDataPoints as array)
  */
-export interface ModbusVendorDataPoint {
+export interface ModbusProfileDataPoint {
   name: string;
   base?: number;
   address: number;
@@ -199,14 +199,14 @@ export interface ModbusVendorDataPoint {
 }
 
 /**
- * Transform vendorDataPoints array → points object
+ * Transform profileDataPoints array → points object
  */
-export function vendorDataPointsToPointsObject(
-  vendorDataPoints: ModbusVendorDataPoint[]
+export function profileDataPointsToPointsObject(
+  profileDataPoints: ModbusProfileDataPoint[]
 ): Record<string, ModbusDataPoint> {
   const points: Record<string, ModbusDataPoint> = {};
   
-  for (const point of vendorDataPoints) {
+  for (const point of profileDataPoints) {
     const { name, ...rest } = point;
     points[name] = rest;
   }
@@ -215,11 +215,11 @@ export function vendorDataPointsToPointsObject(
 }
 
 /**
- * Transform points object → vendorDataPoints array (for backward compatibility)
+ * Transform points object → profileDataPoints array (for backward compatibility)
  */
-export function pointsObjectToVendorDataPoints(
+export function pointsObjectToProfileDataPoints(
   points: Record<string, ModbusDataPoint>
-): ModbusVendorDataPoint[] {
+): ModbusProfileDataPoint[] {
   return Object.entries(points).map(([name, point]) => ({
     name,
     ...point

@@ -2,12 +2,20 @@
 """
 Generic Modbus TCP Simulator
 Supports multiple slave IDs with vendor-specific data points loaded from API or JSON.
+
+Architecture:
+- Dedicated simulation threads update register values continuously at 1Hz
+- getValues() performs pure reads (no side effects)
+- O(1) data point lookups via pre-indexed dictionary
+- Hot-swap profile support with automatic index rebuilding
+
 Environment Variables:
-- MODBUS_VENDOR: name of the vendor to simulate (default: 'Generic')
-- MODBUS_API_URL: API URL to fetch vendor data (default: 'http://api:3002')
-- MODBUS_VENDOR_JSON: fallback path to JSON file (default: './vendors/dataPoints.json')
+- MODBUS_PROFILE: name of the profile to simulate (default: 'Generic')
+- MODBUS_API_URL: API URL to fetch profile data (default: 'http://api:3002')
+- MODBUS_PROFILE_JSON: fallback path to JSON file (default: './profiles/dataPoints.json')
 - MODBUS_SLAVES: number of slave IDs to simulate (default: 3)
 - MODBUS_PORT: TCP port to listen on (default: 502)
+- LOG_LEVEL: logging verbosity (DEBUG for per-register details, INFO for summaries)
 """
 import logging
 import time
@@ -15,6 +23,7 @@ import random
 import os
 import json
 import urllib.request
+import threading
 from pymodbus.server import StartTcpServer
 from pymodbus.device import ModbusDeviceIdentification
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusSlaveContext, ModbusServerContext
@@ -23,27 +32,27 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuration
-VENDOR = os.environ.get("MODBUS_VENDOR", "Generic")
+PROFILE = os.environ.get("MODBUS_PROFILE", "Generic")
 API_URL = os.environ.get("MODBUS_API_URL", "http://api:3002")
-JSON_FILE = os.environ.get("MODBUS_VENDOR_JSON", "./vendors/dataPoints.json")
+JSON_FILE = os.environ.get("MODBUS_PROFILE_JSON", "./profiles/dataPoints.json")
 
-# Load vendor data from API or fallback to file
-def load_vendor_data():
-    """Load vendor data points from API, fallback to local file"""
+# Load profile data from API or fallback to file
+def load_profile_data():
+    """Load profile data points from API, fallback to local file"""
     # Try API first (with retries)
     max_retries = 3
     retry_delay = 2  # seconds
     
     for attempt in range(max_retries):
         try:
-            url = f"{API_URL}/api/v1/vendors/datapoints?protocol=modbus"
-            logger.info(f"Fetching vendor data from API: {url} (attempt {attempt + 1}/{max_retries})")
+            url = f"{API_URL}/api/v1/profiles/datapoints?protocol=modbus"
+            logger.info(f"Fetching profile data from API: {url} (attempt {attempt + 1}/{max_retries})")
             
             req = urllib.request.Request(url, headers={'User-Agent': 'modbus-simulator/1.0'})
             with urllib.request.urlopen(req, timeout=5) as response:
-                vendor_data = json.loads(response.read().decode())
-                logger.info(f"✓ Loaded vendor data from API ({len(vendor_data)} vendors)")
-                return vendor_data
+                profile_data = json.loads(response.read().decode())
+                logger.info(f"✓ Loaded profile data from API ({len(profile_data)} profiles)")
+                return profile_data
         except Exception as e:
             if attempt < max_retries - 1:
                 logger.warning(f"API attempt {attempt + 1} failed: {e}, retrying in {retry_delay}s...")
@@ -55,33 +64,54 @@ def load_vendor_data():
     try:
         logger.info(f"Falling back to local file: {JSON_FILE}")
         with open(JSON_FILE, "r") as f:
-            vendor_data = json.load(f)
-            logger.info(f"✓ Loaded vendor data from file ({len(vendor_data)} vendors)")
-            return vendor_data
+            profile_data = json.load(f)
+            logger.info(f"✓ Loaded profile data from file ({len(profile_data)} profiles)")
+            return profile_data
     except Exception as e:
-        logger.error(f"Failed to load vendor data from file '{JSON_FILE}': {e}")
+        logger.error(f"Failed to load profile data from file '{JSON_FILE}': {e}")
         return {}
 
-vendor_data = load_vendor_data()
+profile_data = load_profile_data()
+
+# Global profile index cache: {profile_name: {(type, address): datapoint}}
+# Built once at startup, shared by all ProfileDataBlock instances
+# Reduces 4x redundant indexing (HR, IR, CO, DI) to 1x per profile
+def build_profile_index(profile_name: str) -> dict:
+    """Build O(1) lookup index for a profile's data points"""
+    data_points = profile_data.get(profile_name, {}).get("dataPoints", [])
+    index = {}
+    for dp in data_points:
+        addr = dp.get("address")
+        dp_type = dp.get("type", "holding")
+        key = (dp_type, addr)
+        index[key] = dp
+    return index
+
+# Preload indexes for all profiles
+PROFILE_INDEX = {
+    profile: build_profile_index(profile)
+    for profile in profile_data.keys()
+}
+logger.info(f"Preloaded profile indexes: {list(PROFILE_INDEX.keys())}")
 
 # State file for inter-process communication
 STATE_FILE = "/tmp/modbus_simulator_state.json"
 
-def get_active_vendor():
-    """Read active vendor from state file (shared with GUI)"""
+def get_active_profile():
+    """Read active profile from state file (shared with GUI)"""
     try:
         if os.path.exists(STATE_FILE):
             with open(STATE_FILE, "r") as f:
                 state = json.load(f)
-                return state.get("vendor", VENDOR)
+                return state.get("profile", PROFILE)
     except Exception as e:
         logger.warning(f"Failed to read state file: {e}")
-    return VENDOR
+    return PROFILE
 
 def get_data_points():
-    """Get data points for active vendor"""
-    active_vendor = get_active_vendor()
-    return vendor_data.get(active_vendor, {}).get("dataPoints", [])
+    """Get data points for active profile"""
+    active_profile = get_active_profile()
+    return profile_data.get(active_profile, {}).get("dataPoints", [])
 
 # Shared state for GUI overrides (imported by web_gui.py)
 try:
@@ -91,104 +121,151 @@ except ImportError:
     REGISTER_OVERRIDES = {}
     logger.info("GUI not available - running in standalone mode")
 
-class VendorDataBlock(ModbusSequentialDataBlock):
-    """Simulate Modbus registers for any vendor with stateful updates"""
-    def __init__(self, address, values, is_coil=False, register_type='holding'):
+class ProfileDataBlock(ModbusSequentialDataBlock):
+    """Simulate Modbus registers for any profile with stateful updates"""
+    def __init__(self, address, values, register_type='holding'):
         super().__init__(address, values)
         self.start_time = time.time()
-        self.is_coil = is_coil
         self.register_type = register_type  # 'holding', 'input', 'coil', 'discrete'
-        self.last_update = time.time()
         self.update_interval = 1.0  # Update stored values every 1 second
+        self.last_profile = None  # Track profile changes
+        self._stop_simulation = threading.Event()
+        
+        # Pre-indexed data points for O(1) lookup: {(type, address): datapoint}
+        self._dp_index = {}
+        self._rebuild_index()
         
         # Initialize registers with realistic values
         self._initialize_registers()
+        
+        # Start background simulation loop (daemon thread)
+        self._sim_thread = threading.Thread(target=self._simulation_loop, daemon=True)
+        self._sim_thread.start()
+        logger.debug(f"Started simulation thread for {self.register_type} registers")
+    
+    def _rebuild_index(self):
+        """Use prebuilt profile index from global cache (O(1) operation)"""
+        active_profile = get_active_profile()
+        
+        # Check if profile exists in cache
+        if active_profile not in PROFILE_INDEX:
+            logger.warning(f"Profile '{active_profile}' not in cache, rebuilding...")
+            PROFILE_INDEX[active_profile] = build_profile_index(active_profile)
+        
+        # Reference the global cache (shared across all instances)
+        self._dp_index = PROFILE_INDEX[active_profile]
+        logger.debug(f"{self.register_type} using cached index for {active_profile} ({len(self._dp_index)} data points)")
     
     def _initialize_registers(self):
         """Initialize register values based on vendor data points"""
-        current_data_points = get_data_points()
-        
-        for dp in current_data_points:
-            addr = dp.get("address")
-            dp_type = dp.get("type", "holding")
+        for addr in range(self.address, self.address + len(self.values)):
+            key = (self.register_type, addr)
+            dp = self._dp_index.get(key)
             
-            # Skip if address is out of range for this block
-            if addr < self.address or addr >= self.address + len(self.values):
-                continue
-            
-            # Skip if data point type doesn't match this block's register type
-            if self.is_coil and dp_type not in ["coil", "discrete"]:
-                continue
-            if not self.is_coil and dp_type not in ["holding", "input"]:
-                continue
-            if self.register_type != dp_type:
-                continue
+            if not dp:
+                continue  # No data point configured for this address
             
             idx = addr - self.address
             
-            if self.is_coil:
-                # Initialize coils/discrete inputs as False (no alarms)
+            if self.register_type in ['coil', 'discrete']:
+                # Initialize boolean registers as False (no alarms/outputs)
                 self.values[idx] = False
             else:
-                # Initialize holding/input registers with base value
+                # Initialize numeric registers with base value
                 base = dp.get("base", 100)
                 noise_pct = dp.get("noise_pct", 0.05)
                 self.values[idx] = int(base * (1 + random.uniform(-noise_pct, noise_pct)))
     
+    def _simulation_loop(self):
+        """Background thread: continuously update register values at fixed interval"""
+        logger.info(f"Simulation loop started for {self.register_type} registers (interval={self.update_interval}s)")
+        
+        while not self._stop_simulation.is_set():
+            try:
+                # Check for vendor changes and update registers
+                self._update_registers()
+                
+                # Sleep until next update cycle
+                self._stop_simulation.wait(timeout=self.update_interval)
+            except Exception as e:
+                logger.error(f"Error in simulation loop: {e}", exc_info=True)
+                time.sleep(self.update_interval)  # Fallback sleep on error
+        
+        logger.info(f"Simulation loop stopped for {self.register_type} registers")
+    
+    def stop_simulation(self):
+        """Stop the background simulation thread (for cleanup)"""
+        self._stop_simulation.set()
+        if self._sim_thread.is_alive():
+            self._sim_thread.join(timeout=2.0)
+    
     def _update_registers(self):
         """Update register values with realistic drift (called periodically)"""
-        current_data_points = get_data_points()
-        active_vendor = get_active_vendor()
+        active_profile = get_active_profile()
         
-        for dp in current_data_points:
-            addr = dp.get("address")
-            dp_type = dp.get("type", "holding")
+        # Rebuild global cache if profile changed (hot-swap support)
+        if active_profile != self.last_profile:
+            logger.info(f"Profile switched: {self.last_profile} → {active_profile}")
             
-            # Skip if address is out of range
-            if addr < self.address or addr >= self.address + len(self.values):
-                continue
+            # Rebuild profile index in global cache if missing
+            if active_profile not in PROFILE_INDEX:
+                logger.info(f"Building new profile index for {active_profile}...")
+                PROFILE_INDEX[active_profile] = build_profile_index(active_profile)
             
-            # Skip if data point type doesn't match this block's register type
-            if self.is_coil and dp_type not in ["coil", "discrete"]:
-                continue
-            if not self.is_coil and dp_type not in ["holding", "input"]:
-                continue
-            if self.register_type != dp_type:
-                continue
+            # Update instance to use new profile's index
+            self._dp_index = PROFILE_INDEX[active_profile]
+            self.last_profile = active_profile
+            logger.info(f"Switched to {active_profile} index ({len(self._dp_index)} data points)")
+        
+        for addr in range(self.address, self.address + len(self.values)):
+            key = (self.register_type, addr)
+            dp = self._dp_index.get(key)
+            
+            if not dp:
+                continue  # No data point configured for this address
             
             idx = addr - self.address
             
-            if self.is_coil:
-                # Alarms: 5% chance to trigger
+            if self.register_type == 'discrete':
+                # Discrete Inputs: Read-only status (e.g., alarms, sensor states)
+                # Simulate with 5% chance to trigger
                 self.values[idx] = bool(random.random() < 0.05)
-            else:
-                # Check for GUI override first (only for holding registers)
-                if self.register_type == 'holding' and addr in REGISTER_OVERRIDES:
+            
+            elif self.register_type == 'coil':
+                # Coils: Writable outputs - check for GUI override first
+                if addr in REGISTER_OVERRIDES:
+                    # GUI can override coil states
+                    self.values[idx] = bool(REGISTER_OVERRIDES[addr].get('value', False))
+                else:
+                    # Default: simulate with 5% chance to be ON
+                    self.values[idx] = bool(random.random() < 0.05)
+            
+            elif self.register_type == 'holding':
+                # Holding Registers: Read/write - check for GUI override first
+                if addr in REGISTER_OVERRIDES:
                     override = REGISTER_OVERRIDES[addr]
                     base = override.get("base", 100)
                     noise_pct = override.get("noise_pct", 0.05)
                     self.values[idx] = int(base * (1 + random.uniform(-noise_pct, noise_pct)))
                 else:
-                    # Use vendor config (for both holding and input registers)
-                    # Input registers simulate sensor readings that change over time
+                    # Use vendor config
                     base = dp.get("base", 100)
                     noise_pct = dp.get("noise_pct", 0.05)
                     self.values[idx] = int(base * (1 + random.uniform(-noise_pct, noise_pct)))
+            
+            elif self.register_type == 'input':
+                # Input Registers: Read-only sensor readings (no GUI overrides)
+                base = dp.get("base", 100)
+                noise_pct = dp.get("noise_pct", 0.05)
+                self.values[idx] = int(base * (1 + random.uniform(-noise_pct, noise_pct)))
 
     def getValues(self, address, count=1):
-        """Read stored register values (stateful, no mutation on read)"""
-        # Update registers if enough time has passed
-        current_time = time.time()
-        if current_time - self.last_update >= self.update_interval:
-            self._update_registers()
-            self.last_update = current_time
+        """Read stored register values (pure read, simulation thread updates values)"""
+        # Get current profile for logging
+        active_profile = get_active_profile()
         
-        # Get current vendor for logging
-        active_vendor = get_active_vendor()
-        current_data_points = get_data_points()
-        
-        # Log the request
-        logger.info(f"Agent polling: vendor={active_vendor}, type={self.register_type}, addr={address}, count={count}")
+        # Log the request (summary only at INFO)
+        logger.info(f"Poll: profile={active_profile}, type={self.register_type}, addr={address}, count={count}")
 
         values = []
         for i in range(count):
@@ -200,58 +277,108 @@ class VendorDataBlock(ModbusSequentialDataBlock):
                 val = self.values[idx]
                 values.append(val)
                 
-                # Log with data point name if available
-                dp = next((dp for dp in current_data_points if dp["address"] == addr and dp.get("type") == self.register_type), None)
+                # Log with data point name if available (O(1) lookup)
+                key = (self.register_type, addr)
+                dp = self._dp_index.get(key)
                 if dp:
                     dp_name = dp.get("name", "unknown")
-                    if self.register_type == 'holding' and addr in REGISTER_OVERRIDES:
-                        logger.info(f"  → addr {addr}: {val} (source: GUI override for {active_vendor}.{dp_name})")
+                    
+                    # Check for GUI overrides (only for writable types)
+                    if self.register_type in ['holding', 'coil'] and addr in REGISTER_OVERRIDES:
+                        logger.debug(f"  → {addr}: {val} (GUI override: {active_profile}.{dp_name})")
                     else:
-                        base = dp.get("base", 100)
-                        source_type = "read-only sensor" if self.register_type == 'input' else "read/write register"
-                        logger.info(f"  → addr {addr}: {val} (source: {active_vendor}.{dp_name}, base={base}, type={source_type})")
+                        # Define register type semantics
+                        type_desc = {
+                            'holding': 'R/W',
+                            'input': 'R/O sensor',
+                            'coil': 'W output',
+                            'discrete': 'R/O status'
+                        }.get(self.register_type, 'unknown')
+                        
+                        base = dp.get("base", 100) if self.register_type in ['holding', 'input'] else None
+                        if base:
+                            logger.debug(f"  → {addr}: {val} ({active_profile}.{dp_name}, base={base}, {type_desc})")
+                        else:
+                            logger.debug(f"  → {addr}: {val} ({active_profile}.{dp_name}, {type_desc})")
                 else:
-                    if val != 0 and not self.is_coil:
-                        logger.warning(f"  → addr {addr}: {val} (source: DEFAULT - no {self.register_type} config for address {addr} in {active_vendor})")
-                    else:
-                        logger.info(f"  → addr {addr}: {val} (source: DEFAULT)")
+                    if val != 0 and self.register_type in ['holding', 'input']:
+                        logger.debug(f"  → {addr}: {val} (DEFAULT - no {self.register_type} config)")
+                    elif logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"  → {addr}: {val} (DEFAULT)")
             else:
                 # Address out of range
-                val = False if self.is_coil else 0
+                val = False if self.register_type in ['coil', 'discrete'] else 0
                 values.append(val)
-                logger.warning(f"  → addr {addr}: {val} (source: OUT OF RANGE)")
+                logger.warning(f"  → {addr}: {val} (OUT OF RANGE)")
 
-        logger.info(f"Returned {len(values)} values: {values}")
+        logger.debug(f"Returned {len(values)} values: {values}")
         return values
+    
+    def setValues(self, address, values):
+        """Handle Modbus write commands (for holding registers and coils)"""
+        active_profile = get_active_profile()
+        
+        # Log write command
+        writable = self.register_type in ['holding', 'coil']
+        if not writable:
+            logger.warning(f"Write attempt to read-only {self.register_type} registers: addr={address}, values={values}")
+            return  # Silently ignore (pymodbus should block this anyway)
+        
+        logger.info(f"Write command: profile={active_profile}, type={self.register_type}, addr={address}, values={values}")
+        
+        # Apply writes to storage
+        for i, value in enumerate(values):
+            addr = address + i
+            idx = addr - self.address
+            
+            if 0 <= idx < len(self.values):
+                old_val = self.values[idx]
+                
+                # Lookup data point for logging (O(1))
+                key = (self.register_type, addr)
+                dp = self._dp_index.get(key)
+                dp_name = dp.get("name", "unknown") if dp else "unconfigured"
+                
+                # Store new value
+                super().setValues(addr, [value])
+                
+                # Log the change with context
+                if self.register_type == 'coil':
+                    logger.info(f"  → Coil {addr} ({dp_name}): {old_val} → {value}")
+                else:
+                    logger.info(f"  → Register {addr} ({dp_name}): {old_val} → {value}")
+                    logger.debug(f"     Control action applied to {active_profile}.{dp_name}")
+            else:
+                logger.warning(f"  → Write to out-of-range address {addr} (ignored)")
 
 def setup_server(slaves=3):
-    """Setup Modbus TCP server simulating vendor devices"""
+    """Setup Modbus TCP server simulating profile devices"""
     slave_contexts = {}
     identities = {}
 
     for unit_id in range(1, slaves + 1):
         # Holding Registers (HR): Read/write registers for configuration, setpoints
-        hr = VendorDataBlock(1, [0]*200, register_type='holding')
+        hr = ProfileDataBlock(1, [0]*200, register_type='holding')
         
         # Input Registers (IR): Read-only registers for sensor readings, status
-        ir = VendorDataBlock(1, [0]*100, register_type='input')
+        ir = ProfileDataBlock(1, [0]*100, register_type='input')
         
-        # Coils (CO): Read/write boolean outputs
-        co = VendorDataBlock(1, [False]*20, is_coil=True, register_type='coil')
+        # Coils (CO): Writable boolean outputs (commands, control signals)
+        co = ProfileDataBlock(1, [False]*20, register_type='coil')
         
-        # Discrete Inputs (DI): Read-only boolean inputs
-        di = VendorDataBlock(1, [False]*20, is_coil=True, register_type='discrete')
+        # Discrete Inputs (DI): Read-only boolean inputs (status, alarms)
+        di = ProfileDataBlock(1, [False]*20, register_type='discrete')
 
         store = ModbusSlaveContext(hr=hr, ir=ir, co=co, di=di)
         slave_contexts[unit_id] = store
 
         identity = ModbusDeviceIdentification()
-        identity.VendorName = VENDOR
-        identity.ProductCode = f"{VENDOR}-{unit_id}"
-        identity.VendorUrl = vendor_data.get(VENDOR, {}).get("vendorUrl", "")
-        identity.ProductName = f"{VENDOR} Modbus Simulator"
-        identity.ModelName = vendor_data.get(VENDOR, {}).get("model", "Generic Controller")
-        identity.MajorMinorRevision = vendor_data.get(VENDOR, {}).get("version", "1.0.0")
+        identity.VendorName = PROFILE
+        identity.ProductCode = f"{PROFILE}-{unit_id}"
+        identity.VendorUrl = profile_data.get(PROFILE, {}).get("vendorUrl", "")
+        identity.ProductName = f"{PROFILE} Modbus Simulator"
+        identity.ModelName = profile_data.get(PROFILE, {}).get("model", "Generic Controller")
+        identity.MajorMinorRevision = profile_data.get(PROFILE, {}).get("version", "1.0.0")
         identities[unit_id] = identity
 
     context = ModbusServerContext(slaves=slave_contexts, single=False)
@@ -261,18 +388,32 @@ def main():
     slaves_to_simulate = int(os.environ.get("MODBUS_SLAVES", 3))
     tcp_port = int(os.environ.get("MODBUS_PORT", 502))
     tcp_host = os.environ.get("MODBUS_HOST", "0.0.0.0")
-    logger.info(f"Starting Modbus TCP Simulator for vendor '{VENDOR}' with {slaves_to_simulate} slaves on {tcp_host}:{tcp_port}")
+    
+    # MODBUS TCP LIMITATION: All slave units share the same device identity
+    # Unlike Modbus RTU, Modbus TCP does not support per-slave identities.
+    # This means all slaves (unit IDs 1, 2, 3...) appear as the same profile/model.
+    #
+    # WORKAROUND FOR MULTI-PROFILE TESTING:
+    # Run separate simulator instances on different ports:
+    #   docker run -e MODBUS_PROFILE=COMAP -e MODBUS_PORT=502 modbus-simulator
+    #   docker run -e MODBUS_PROFILE=ComAp-InteliGen -e MODBUS_PORT=503 modbus-simulator
+    #
+    # This provides realistic multi-profile simulation for edge device testing.
+    logger.info(f"Starting Modbus TCP Simulator for profile '{PROFILE}' with {slaves_to_simulate} slaves on {tcp_host}:{tcp_port}")
+    if slaves_to_simulate > 1:
+        logger.warning(f"⚠️  All {slaves_to_simulate} slaves will share profile identity '{PROFILE}' (Modbus TCP limitation)")
+        logger.warning(f"⚠️  For multi-profile testing, run separate simulator instances on different ports")
 
     context, identities = setup_server(slaves=slaves_to_simulate)
 
     try:
         StartTcpServer(
             context=context,
-            identity=identities[1],  # use first slave's identity
+            identity=identities[1],  # Modbus TCP: shared identity for all slaves
             address=(tcp_host, tcp_port)
         )
     except KeyboardInterrupt:
-        logger.info(f"Shutting down Modbus TCP Simulator for vendor '{VENDOR}'")
+        logger.info(f"Shutting down Modbus TCP Simulator for profile '{PROFILE}'")
 
 if __name__ == "__main__":
     main()

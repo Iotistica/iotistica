@@ -34,22 +34,22 @@ import logger from '../utils/logger';
 import { query } from '../db/connection.js';
 import { 
   TargetStateV2, 
-  vendorDataPointsToPointsObject,
-  type ModbusVendorDataPoint 
+  profileDataPointsToPointsObject,
+  type ModbusProfileDataPoint 
 } from '../types/target-state-v2.js';
 
 /**
- * Fetch vendor data points from database
+ * Fetch profile data points from database
  */
-async function getVendorDataPoints(vendorName: string, protocol: string = 'modbus'): Promise<any[]> {
+async function getProfileDataPoints(profileName: string, protocol: string = 'modbus'): Promise<any[]> {
   try {
     const result = await query(
-      'SELECT data_points FROM vendor_configs WHERE vendor_name = $1 AND protocol = $2',
-      [vendorName, protocol]
+      'SELECT data_points FROM profile_configs WHERE profile_name = $1 AND protocol = $2',
+      [profileName, protocol]
     );
     return result.rows[0]?.data_points || [];
   } catch (error) {
-    console.error(`Failed to fetch vendor config for ${vendorName}:`, error);
+    console.error(`Failed to fetch profile config for ${profileName}:`, error);
     return [];
   }
 }
@@ -164,9 +164,9 @@ interface TargetStateConfig {
       slaveRangeStart?: number;
       slaveRangeEnd?: number;
       timeout?: number;
-      vendor?: string;
-      vendorFile?: string;
-      vendorDataPoints?: any[]; // Vendor data points from database
+      profile?: string;
+      profileFile?: string;
+      profileDataPoints?: any[]; // Profile data points from database
     };
     opcua?: {
       enabled: boolean;
@@ -296,8 +296,8 @@ export function generateDefaultTargetStateConfig(
         slaveRangeStart: 1,
         slaveRangeEnd: 10,
         timeout: 2000,
-        vendor: 'COMAP',
-        // NOTE: vendorDataPoints will be added dynamically in generateDefaultTargetState()
+        profile: 'COMAP',
+        // NOTE: profileDataPoints will be added dynamically in generateDefaultTargetState()
       },
       opcua: {
         enabled: true, // Enabled by default for discovery
@@ -364,15 +364,15 @@ export function generateDefaultTargetStateConfig(
  * Generate default target state config V2 (new structure)
  * 
  * @param licenseData - License data from system_config
- * @param vendorDataPoints - Vendor data points from database (array format)
+ * @param profileDataPoints - Profile data points from database (array format)
  * @returns Target state V2 configuration object
  */
 export function generateDefaultTargetStateConfigV2(
   licenseData: LicenseData | null,
-  vendorDataPoints: ModbusVendorDataPoint[] = []
+  profileDataPoints: ModbusProfileDataPoint[] = []
 ): TargetStateV2 {
-  // Transform vendorDataPoints array → points object
-  const modbusPoints = vendorDataPointsToPointsObject(vendorDataPoints);
+  // Transform profileDataPoints array → points object
+  const modbusPoints = profileDataPointsToPointsObject(profileDataPoints);
   
   // Default V2 config
   const defaultConfig: TargetStateV2 = {
@@ -466,7 +466,7 @@ export function generateDefaultTargetStateConfigV2(
       },
       modbus: {
         enabled: true,
-        vendor: 'COMAP',
+        profile: 'COMAP',
         connection: {
           host: 'localhost',
           port: 502,
@@ -527,11 +527,11 @@ export function generateDefaultTargetStateConfigV2(
  * @returns Complete target state V2 with preinstalled core services and generated config
  */
 export async function generateDefaultTargetStateV2(licenseData: LicenseData | null) {
-  // Fetch vendor data points from database (array format)
-  const vendorDataPoints = await getVendorDataPoints('COMAP', 'modbus');
+  // Fetch profile data points from database (array format)
+  const profileDataPoints = await getProfileDataPoints('COMAP', 'modbus');
   
   // Generate V2 config (converts array → points object internally)
-  const config = generateDefaultTargetStateConfigV2(licenseData, vendorDataPoints as ModbusVendorDataPoint[]);
+  const config = generateDefaultTargetStateConfigV2(licenseData, profileDataPoints as ModbusProfileDataPoint[]);
   
   return {
     apps: {
@@ -587,10 +587,10 @@ export async function generateDefaultTargetStateV2(licenseData: LicenseData | nu
 export async function generateDefaultTargetState(licenseData: LicenseData | null) {
   const config = generateDefaultTargetStateConfig(licenseData);
   
-  // Fetch vendor data points from database and inject into modbus config
-  if (config.protocols?.modbus?.vendor) {
-    const vendorDataPoints = await getVendorDataPoints(config.protocols.modbus.vendor, 'modbus');
-    config.protocols.modbus.vendorDataPoints = vendorDataPoints;
+  // Fetch profile data points from database and inject into modbus config
+  if (config.protocols?.modbus?.profile) {
+    const profileDataPoints = await getProfileDataPoints(config.protocols.modbus.profile, 'modbus');
+    config.protocols.modbus.profileDataPoints = profileDataPoints;
   }
   
   return {

@@ -287,21 +287,21 @@ export default class DeviceAgent {
         }
       });
       
-      // Listen for protocol config changes (includes vendor changes)
+      // Listen for protocol config changes (includes profile changes)
       this.stateReconciler.on('protocol-config-changed', async (change: { old: any; new: any }) => {
-        // Check for Modbus vendor change
-        const oldVendor = change.old?.protocols?.modbus?.vendor;
-        const newVendor = change.new?.protocols?.modbus?.vendor;
+        // Check for Modbus profile change
+        const oldProfile = change.old?.protocols?.modbus?.profile;
+        const newProfile = change.new?.protocols?.modbus?.profile;
         
-        if (oldVendor && newVendor && oldVendor !== newVendor && this.anomalyService) {
-          this.agentLogger?.infoSync('Modbus vendor changed - resetting anomaly baselines', {
+        if (oldProfile && newProfile && oldProfile !== newProfile && this.anomalyService) {
+          this.agentLogger?.infoSync('Modbus profile changed - resetting anomaly baselines', {
             component: LogComponents.agent,
-            oldVendor,
-            newVendor,
+            oldProfile,
+            newProfile,
           });
           
-          // Handle vendor change (resets in-memory buffers, preserves DB baselines)
-          this.anomalyService.handleVendorChange(newVendor, 'modbus_slave_%');
+          // Handle profile change (resets in-memory buffers, preserves DB baselines)
+          this.anomalyService.handleProfileChange(newProfile, 'modbus_slave_%');
         }
       });
 
@@ -807,13 +807,13 @@ export default class DeviceAgent {
         storageEnabled: !!config.storage,
       });
       
-      // Set vendor for Modbus metrics (for baseline filtering)
+      // Set profile for Modbus metrics (for baseline filtering)
       const modbusConfig = this.agentConfig.getModbusConfig();
-      if (modbusConfig?.vendor) {
-        this.anomalyService.setVendorForMetrics('modbus_slave_%', modbusConfig.vendor);
-        this.agentLogger?.infoSync("Vendor configured for Modbus metrics", {
+      if (modbusConfig?.profile) {
+        this.anomalyService.setProfileForMetrics('modbus_slave_%', modbusConfig.profile);
+        this.agentLogger?.infoSync("Profile configured for Modbus metrics", {
           component: LogComponents.agent,
-          vendor: modbusConfig.vendor,
+          profile: modbusConfig.profile,
           pattern: 'modbus_slave_%',
         });
       }

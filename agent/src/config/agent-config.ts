@@ -29,8 +29,8 @@ export interface ModbusConfig {
   slaveRangeStart: number;
   slaveRangeEnd: number;
   timeout: number;
-  vendor: string;
-  vendorDataPoints?: any[]; // Data points from vendor config (pushed via CloudSync)
+  profile: string;
+  profileDataPoints?: any[]; // Data points from profile config (pushed via CloudSync)
   // RTU configuration (optional)
   rtuPort?: string;
   rtuBaudRate?: number;
@@ -143,22 +143,22 @@ export class AgentConfig extends EventEmitter {
   /**
    * Get Modbus protocol adapter configuration
    * 
-   * Supports both V1 (vendorDataPoints array) and V2 (points object) formats.
+   * Supports both V1 (profileDataPoints array) and V2 (points object) formats.
    * V2 format: protocols.modbus.points {temperature: {address: 10, ...}}
-   * V1 format: protocols.modbus.vendorDataPoints [{name: "temperature", address: 10, ...}]
+   * V1 format: protocols.modbus.profileDataPoints [{name: "temperature", address: 10, ...}]
    * 
    * Fallback: Cloud config.protocols.modbus → hardcoded defaults
    */
   getModbusConfig(): ModbusConfig {
     const cloudProtocol = this.getTargetConfig().protocols?.modbus;
 
-    // Transform V2 points object → V1 vendorDataPoints array if needed
-    let vendorDataPoints = cloudProtocol?.vendorDataPoints;
+    // Transform V2 points object → V1 profileDataPoints array if needed
+    let profileDataPoints = cloudProtocol?.profileDataPoints;
     
     // Check if V2 format (points object exists)
     if (cloudProtocol?.points && typeof cloudProtocol.points === 'object') {
-      // Transform points object → vendorDataPoints array
-      vendorDataPoints = Object.entries(cloudProtocol.points).map(([name, point]: [string, any]) => ({
+      // Transform points object → profileDataPoints array
+      profileDataPoints = Object.entries(cloudProtocol.points).map(([name, point]: [string, any]) => ({
         name,
         ...point
       }));
@@ -175,8 +175,8 @@ export class AgentConfig extends EventEmitter {
       timeout: cloudConnection?.timeoutMs ?? cloudProtocol?.timeout ?? 2000,
       slaveRangeStart: cloudAddressing?.slaveRange?.start ?? cloudProtocol?.slaveRangeStart ?? 1,
       slaveRangeEnd: cloudAddressing?.slaveRange?.end ?? cloudProtocol?.slaveRangeEnd ?? 10,
-      vendor: cloudProtocol?.vendor ?? 'Generic',
-      vendorDataPoints: vendorDataPoints,
+      profile: cloudProtocol?.profile ?? 'Generic',
+      profileDataPoints: profileDataPoints,
       // RTU configuration (all optional)
       rtuPort: cloudProtocol?.serialPort,
       rtuBaudRate: cloudProtocol?.baudRate ?? 9600,

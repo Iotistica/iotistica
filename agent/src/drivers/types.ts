@@ -239,8 +239,8 @@ export interface TargetState {
 				slaveRangeStart?: number;
 				slaveRangeEnd?: number;
 				timeout?: number;
-				vendor?: string;
-				vendorFile?: string;
+				profile?: string;
+				profileFile?: string;
 			};
 			opcua?: {
 				enabled: boolean;
@@ -271,8 +271,8 @@ export interface TargetState {
 				slaveRangeStart?: number;
 				slaveRangeEnd?: number;
 				timeout?: number;
-				vendor?: string;
-				vendorFile?: string;
+				profile?: string;
+				profileFile?: string;
 			};
 			opcua?: {
 				enabled?: boolean;

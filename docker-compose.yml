@@ -212,7 +212,7 @@ services:
         volumes:
             - ./config/vendors:/app/vendors:ro
         environment:
-          - MODBUS_VENDOR=COMAP
+          - MODBUS_PROFILE=COMAP
           - MODBUS_API_URL=http://api:3002
           - GUI_PORT=5000
           - GUI_HOST=0.0.0.0

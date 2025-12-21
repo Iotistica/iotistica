@@ -11,7 +11,7 @@
         <header>
             <h1>Modbus Simulator Control Panel</h1>
             <div class="status-bar">
-                <span id="vendor-status">Vendor: {{ current_vendor }}</span>
+                <span id="profile-status">Profile: {{ current_profile }}</span>
                 <span id="slaves-status">Slaves: -</span>
                 <span id="overrides-status">Active Overrides: 0</span>
             </div>
@@ -19,13 +19,13 @@
 
         <div class="controls-section">
             <div class="control-group">
-                <label for="vendor-select">Vendor:</label>
-                <select id="vendor-select">
-                    {% for vendor in vendors %}
-                    <option value="{{ vendor }}" {% if vendor == current_vendor %}selected{% endif %}>{{ vendor }}</option>
+                <label for="profile-select">Profile:</label>
+                <select id="profile-select">
+                    {% for profile in profiles %}
+                    <option value="{{ profile }}" {% if profile == current_profile %}selected{% endif %}>{{ profile }}</option>
                     {% endfor %}
                 </select>
-                <button onclick="loadVendorDataPoints()">Load Data Points</button>
+                <button onclick="loadProfileDataPoints()">Load Data Points</button>
             </div>
 
             <div class="control-group">
@@ -44,7 +44,7 @@
     </div>
 
     <script>
-        let currentVendor = '{{ current_vendor }}';
+        let currentProfile = '{{ current_profile }}';
         let dataPoints = [];
 
         // Load status on page load
@@ -52,7 +52,7 @@
             try {
                 const response = await fetch('/api/status');
                 const status = await response.json();
-                document.getElementById('vendor-status').textContent = `Vendor: ${status.vendor}`;
+                document.getElementById('profile-status').textContent = `Profile: ${status.profile}`;
                 document.getElementById('slaves-status').textContent = `Slaves: ${status.slaves}`;
                 document.getElementById('overrides-status').textContent = `Active Overrides: ${status.active_overrides}`;
                 
@@ -70,27 +70,27 @@
             }
         }
 
-        // Load data points for current vendor
-        async function loadVendorDataPoints() {
-            const vendor = document.getElementById('vendor-select').value;
-            currentVendor = vendor;
+        // Load data points for current profile
+        async function loadProfileDataPoints() {
+            const profile = document.getElementById('profile-select').value;
+            currentProfile = profile;
             
             try {
-                // Switch vendor in Modbus simulator
-                const switchResponse = await fetch(`/api/vendor/switch/${vendor}`, {method: 'POST'});
+                // Switch profile in Modbus simulator
+                const switchResponse = await fetch(`/api/profile/switch/${profile}`, {method: 'POST'});
                 const switchResult = await switchResponse.json();
                 
                 if (switchResult.success) {
-                    console.log(`Switched Modbus server to ${vendor}`);
+                    console.log(`Switched Modbus server to ${profile}`);
                     // Show success notification
-                    showNotification(`Modbus server now simulating: ${vendor}`, 'success');
+                    showNotification(`Modbus server now simulating: ${profile}`, 'success');
                 } else {
-                    console.error('Failed to switch vendor:', switchResult.error);
+                    console.error('Failed to switch profile:', switchResult.error);
                     showNotification(`Failed to switch: ${switchResult.error}`, 'error');
                 }
                 
                 // Load data points for UI
-                const response = await fetch(`/api/datapoints/${vendor}`);
+                const response = await fetch(`/api/datapoints/${profile}`);
                 const data = await response.json();
                 dataPoints = data.dataPoints;
                 renderDataPoints(dataPoints);
@@ -107,7 +107,7 @@
             const container = document.getElementById('datapoints-container');
             
             if (points.length === 0) {
-                container.innerHTML = '<p class="warning">No data points found for this vendor</p>';
+                container.innerHTML = '<p class="warning">No data points found for this profile</p>';
                 return;
             }
 
@@ -267,7 +267,7 @@
 
         // Load on page load
         window.addEventListener('load', () => {
-            loadVendorDataPoints();
+            loadProfileDataPoints();
             loadStatus();
         });
     </script>

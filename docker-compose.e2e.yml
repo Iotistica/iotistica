@@ -151,7 +151,7 @@ services:
         volumes:
             - ./vendors:/app/vendors:ro
         environment:
-          - MODBUS_VENDOR=COMAP
+          - MODBUS_PROFILE=COMAP
         ports:
             - "502:502"
         networks:

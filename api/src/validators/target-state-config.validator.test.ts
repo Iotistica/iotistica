@@ -116,7 +116,7 @@ describe('Target State Config Validator', () => {
             slaveRangeStart: 1,
             slaveRangeEnd: 10,
             timeout: 2000,
-            vendor: 'Generic'
+            profile: 'Generic'
           }
         }
       };
