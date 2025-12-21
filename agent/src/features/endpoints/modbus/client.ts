@@ -379,17 +379,34 @@ export class ModbusClient {
    * Perform raw batch read (not wrapped in retry logic)
    */
   private async readBatchRaw(functionCode: number, address: number, count: number): Promise<any> {
-    switch (functionCode) {
-      case ModbusFunctionCode.READ_COILS:
-        return await this.client.readCoils(address, count);
-      case ModbusFunctionCode.READ_DISCRETE_INPUTS:
-        return await this.client.readDiscreteInputs(address, count);
-      case ModbusFunctionCode.READ_HOLDING_REGISTERS:
-        return await this.client.readHoldingRegisters(address, count);
-      case ModbusFunctionCode.READ_INPUT_REGISTERS:
-        return await this.client.readInputRegisters(address, count);
-      default:
-        throw new Error(`Unsupported function code for batch read: ${functionCode}`);
+    this.logger.info(`[MODBUS READ] Device ${this.device.name} slave=${this.device.slaveId} reading FC${functionCode} addr=${address} count=${count}`);
+    
+    try {
+      let result;
+      switch (functionCode) {
+        case ModbusFunctionCode.READ_COILS:
+          result = await this.client.readCoils(address, count);
+          break;
+        case ModbusFunctionCode.READ_DISCRETE_INPUTS:
+          result = await this.client.readDiscreteInputs(address, count);
+          break;
+        case ModbusFunctionCode.READ_HOLDING_REGISTERS:
+          result = await this.client.readHoldingRegisters(address, count);
+          break;
+        case ModbusFunctionCode.READ_INPUT_REGISTERS:
+          result = await this.client.readInputRegisters(address, count);
+          break;
+        default:
+          throw new Error(`Unsupported function code for batch read: ${functionCode}`);
+      }
+      
+      this.logger.info(`[MODBUS READ SUCCESS] Device ${this.device.name} slave=${this.device.slaveId} FC${functionCode} addr=${address} got ${result?.data?.length || 0} values`);
+      return result;
+      
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`[MODBUS READ EXCEPTION] Device ${this.device.name} slave=${this.device.slaveId} FC${functionCode} addr=${address}: ${errorMessage}`);
+      throw error;
     }
   }
   
@@ -559,27 +576,39 @@ export class ModbusClient {
    */
   private async readRegister(register: any): Promise<number | boolean | string> {
     return this.lock(async () => {
+      this.logger.info(`[MODBUS READ] Device ${this.device.name} slave=${this.device.slaveId} reading ${register.name} FC${register.functionCode} addr=${register.address}`);
+      
       let rawData: any;
 
-      switch (register.functionCode) {
-        case ModbusFunctionCode.READ_COILS:
-          rawData = await this.client.readCoils(register.address, register.count);
-          return this.parseCoilData(rawData, register);
+      try {
+        switch (register.functionCode) {
+          case ModbusFunctionCode.READ_COILS:
+            rawData = await this.client.readCoils(register.address, register.count);
+            this.logger.info(`[MODBUS READ SUCCESS] Device ${this.device.name} slave=${this.device.slaveId} ${register.name}: got ${rawData?.data?.length || 0} values`);
+            return this.parseCoilData(rawData, register);
 
-        case ModbusFunctionCode.READ_DISCRETE_INPUTS:
-          rawData = await this.client.readDiscreteInputs(register.address, register.count);
-          return this.parseCoilData(rawData, register);
+          case ModbusFunctionCode.READ_DISCRETE_INPUTS:
+            rawData = await this.client.readDiscreteInputs(register.address, register.count);
+            this.logger.info(`[MODBUS READ SUCCESS] Device ${this.device.name} slave=${this.device.slaveId} ${register.name}: got ${rawData?.data?.length || 0} values`);
+            return this.parseCoilData(rawData, register);
 
-        case ModbusFunctionCode.READ_HOLDING_REGISTERS:
-          rawData = await this.client.readHoldingRegisters(register.address, register.count);
-          return this.parseRegisterData(rawData, register);
+          case ModbusFunctionCode.READ_HOLDING_REGISTERS:
+            rawData = await this.client.readHoldingRegisters(register.address, register.count);
+            this.logger.info(`[MODBUS READ SUCCESS] Device ${this.device.name} slave=${this.device.slaveId} ${register.name}: got ${rawData?.data?.length || 0} values`);
+            return this.parseRegisterData(rawData, register);
 
-        case ModbusFunctionCode.READ_INPUT_REGISTERS:
-          rawData = await this.client.readInputRegisters(register.address, register.count);
-          return this.parseRegisterData(rawData, register);
+          case ModbusFunctionCode.READ_INPUT_REGISTERS:
+            rawData = await this.client.readInputRegisters(register.address, register.count);
+            this.logger.info(`[MODBUS READ SUCCESS] Device ${this.device.name} slave=${this.device.slaveId} ${register.name}: got ${rawData?.data?.length || 0} values`);
+            return this.parseRegisterData(rawData, register);
 
-        default:
-          throw new Error(`Unsupported function code: ${register.functionCode}`);
+          default:
+            throw new Error(`Unsupported function code: ${register.functionCode}`);
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.logger.error(`[MODBUS READ EXCEPTION] Device ${this.device.name} slave=${this.device.slaveId} ${register.name}: ${errorMessage}`);
+        throw error;
       }
     });
   }

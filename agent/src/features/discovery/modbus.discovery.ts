@@ -160,8 +160,10 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
             });
           }
         } catch (error) {
-          this.logger?.debugSync(`No response from slave ${slaveId}`, {
+          // Use infoSync for visibility - important to know which slaves are offline
+          this.logger?.infoSync(`No response from slave ${slaveId} (offline or not configured)`, {
             component: LogComponents.discovery,
+            slaveId,
             error: (error as Error).message
           });
         }

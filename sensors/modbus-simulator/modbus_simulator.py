@@ -27,6 +27,8 @@ import threading
 from pymodbus.server import StartTcpServer
 from pymodbus.device import ModbusDeviceIdentification
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusSlaveContext, ModbusServerContext
+from pymodbus.pdu import ExceptionResponse
+from pymodbus.exceptions import NoSuchSlaveException
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -115,18 +117,37 @@ def get_data_points():
 
 # Shared state for GUI overrides (imported by web_gui.py)
 try:
-    from web_gui import REGISTER_OVERRIDES
-    logger.info("GUI integration enabled - using shared REGISTER_OVERRIDES")
+    from web_gui import REGISTER_OVERRIDES, DISABLED_SLAVES, SLAVE_DELAYS, REGISTER_ACCESS_LOG, EXCEPTION_INJECTIONS
+    logger.info("GUI integration enabled - using shared state")
 except ImportError:
     REGISTER_OVERRIDES = {}
+    DISABLED_SLAVES = set()  # Set of disabled slave unit IDs
+    SLAVE_DELAYS = {}  # {slave_id: {"delay_ms": int, "jitter_ms": int}}
+    REGISTER_ACCESS_LOG = {}  # {(slave_id, reg_type, address): {reads: int, writes: int, last_read: float, last_write: float}}
+    EXCEPTION_INJECTIONS = {}  # {(slave_id, reg_type, address): exception_code} or {slave_id: exception_code}
     logger.info("GUI not available - running in standalone mode")
+
+class DisableableSlaveContext(ModbusSlaveContext):
+    """ModbusSlaveContext that can be disabled to simulate device failure"""
+    def __init__(self, unit_id, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.unit_id = unit_id
+    
+    def validate(self, fx, address, count=1):
+        """Override validation to reject requests if slave is disabled"""
+        if self.unit_id in DISABLED_SLAVES:
+            print(f"[SIMULATOR] Slave {self.unit_id} DISABLED - validate() returning False for fx={fx}", flush=True)
+            logger.debug(f"Slave {self.unit_id} is disabled - rejecting request")
+            return False  # Validation fails for disabled slaves
+        return super().validate(fx, address, count)
 
 class ProfileDataBlock(ModbusSequentialDataBlock):
     """Simulate Modbus registers for any profile with stateful updates"""
-    def __init__(self, address, values, register_type='holding'):
+    def __init__(self, address, values, register_type='holding', unit_id=1):
         super().__init__(address, values)
         self.start_time = time.time()
         self.register_type = register_type  # 'holding', 'input', 'coil', 'discrete'
+        self.unit_id = unit_id  # Track which slave this block belongs to
         self.update_interval = 1.0  # Update stored values every 1 second
         self.last_profile = None  # Track profile changes
         self._stop_simulation = threading.Event()
@@ -141,7 +162,7 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
         # Start background simulation loop (daemon thread)
         self._sim_thread = threading.Thread(target=self._simulation_loop, daemon=True)
         self._sim_thread.start()
-        logger.debug(f"Started simulation thread for {self.register_type} registers")
+        logger.debug(f"Started simulation thread for {self.register_type} registers (unit {self.unit_id})")
     
     def _rebuild_index(self):
         """Use prebuilt profile index from global cache (O(1) operation)"""
@@ -261,11 +282,71 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
 
     def getValues(self, address, count=1):
         """Read stored register values (pure read, simulation thread updates values)"""
+        # Reload disabled slaves from shared state file (cross-process communication)
+        global DISABLED_SLAVES
+        try:
+            import json
+            if os.path.exists('/tmp/modbus_simulator_state.json'):
+                with open('/tmp/modbus_simulator_state.json', 'r') as f:
+                    state = json.load(f)
+                    DISABLED_SLAVES = set(state.get('disabled_slaves', []))
+        except:
+            pass
+        
+        print(f"[GETVALUES ENTRY] unit_id={getattr(self, 'unit_id', 'UNKNOWN')}, addr={address}, count={count}", flush=True)
+        
+        # CRITICAL: Check if slave is disabled first (simulates device offline/failure)
+        print(f"[SIMULATOR DEBUG] getValues called: slave={self.unit_id}, addr={address}, count={count}, DISABLED_SLAVES={DISABLED_SLAVES}", flush=True)
+        if self.unit_id in DISABLED_SLAVES:
+            print(f"[SIMULATOR] Slave {self.unit_id} DISABLED - Rejecting read for {self.register_type}[{address}:{address+count-1}]", flush=True)
+            logger.warning(f"Slave {self.unit_id} is disabled - rejecting read request for {self.register_type}[{address}:{address+count-1}]")
+            # Return empty list to trigger Modbus exception
+            return []
+        
+        # Check for register-specific exception injection
+        for i in range(count):
+            addr = address + i
+            exception_key = (self.unit_id, self.register_type, addr)
+            if exception_key in EXCEPTION_INJECTIONS:
+                exception_code = EXCEPTION_INJECTIONS[exception_key]
+                logger.warning(f"Exception injection: slave {self.unit_id} {self.register_type}[{addr}] -> 0x{exception_code:02X}")
+                # Return empty list to trigger exception in pymodbus
+                return []
+        
+        # Simulate response delay if configured for this slave
+        if self.unit_id in SLAVE_DELAYS:
+            delay_config = SLAVE_DELAYS[self.unit_id]
+            base_delay_ms = delay_config.get("delay_ms", 0)
+            jitter_ms = delay_config.get("jitter_ms", 0)
+            
+            if base_delay_ms > 0 or jitter_ms > 0:
+                # Calculate total delay with random jitter
+                total_delay_ms = base_delay_ms
+                if jitter_ms > 0:
+                    total_delay_ms += random.uniform(-jitter_ms, jitter_ms)
+                
+                # Ensure non-negative
+                total_delay_ms = max(0, total_delay_ms)
+                
+                if total_delay_ms > 0:
+                    logger.debug(f"Slave {self.unit_id} response delay: {total_delay_ms:.1f}ms")
+                    time.sleep(total_delay_ms / 1000.0)  # Convert to seconds
+        
+        # Log register access for statistics
+        for i in range(count):
+            addr = address + i
+            log_key = (self.unit_id, self.register_type, addr)
+            if log_key not in REGISTER_ACCESS_LOG:
+                REGISTER_ACCESS_LOG[log_key] = {"reads": 0, "writes": 0}
+            
+            REGISTER_ACCESS_LOG[log_key]["reads"] += 1
+            REGISTER_ACCESS_LOG[log_key]["last_read"] = time.time()
+        
         # Get current profile for logging
         active_profile = get_active_profile()
         
         # Log the request (summary only at INFO)
-        logger.info(f"Poll: profile={active_profile}, type={self.register_type}, addr={address}, count={count}")
+        logger.info(f"Poll: profile={active_profile}, slave={self.unit_id}, type={self.register_type}, addr={address}, count={count}")
 
         values = []
         for i in range(count):
@@ -324,6 +405,30 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
             logger.warning(f"Write attempt to read-only {self.register_type} registers: addr={address}, values={values}")
             return  # Silently ignore (pymodbus should block this anyway)
         
+        # Check if slave is disabled (simulates device offline/failure)
+        if self.unit_id in DISABLED_SLAVES:
+            logger.warning(f"Slave {self.unit_id} is disabled - rejecting write request for {self.register_type}[{address}:{address+len(values)-1}]")
+            return  # Skip write to trigger Modbus exception
+        
+        # Check for register-specific exception injection
+        for i in range(len(values)):
+            addr = address + i
+            exception_key = (self.unit_id, self.register_type, addr)
+            if exception_key in EXCEPTION_INJECTIONS:
+                exception_code = EXCEPTION_INJECTIONS[exception_key]
+                logger.warning(f"Exception injection on write: slave {self.unit_id} {self.register_type}[{addr}] -> 0x{exception_code:02X}")
+                return  # Skip write to trigger exception
+        
+        # Log register access for statistics
+        for i in range(len(values)):
+            addr = address + i
+            log_key = (self.unit_id, self.register_type, addr)
+            if log_key not in REGISTER_ACCESS_LOG:
+                REGISTER_ACCESS_LOG[log_key] = {"reads": 0, "writes": 0}
+            
+            REGISTER_ACCESS_LOG[log_key]["writes"] += 1
+            REGISTER_ACCESS_LOG[log_key]["last_write"] = time.time()
+        
         logger.info(f"Write command: profile={active_profile}, type={self.register_type}, addr={address}, values={values}")
         
         # Apply writes to storage
@@ -358,18 +463,19 @@ def setup_server(slaves=3):
 
     for unit_id in range(1, slaves + 1):
         # Holding Registers (HR): Read/write registers for configuration, setpoints
-        hr = ProfileDataBlock(1, [0]*200, register_type='holding')
+        hr = ProfileDataBlock(1, [0]*200, register_type='holding', unit_id=unit_id)
         
         # Input Registers (IR): Read-only registers for sensor readings, status
-        ir = ProfileDataBlock(1, [0]*100, register_type='input')
+        ir = ProfileDataBlock(1, [0]*100, register_type='input', unit_id=unit_id)
         
         # Coils (CO): Writable boolean outputs (commands, control signals)
-        co = ProfileDataBlock(1, [False]*20, register_type='coil')
+        co = ProfileDataBlock(1, [False]*20, register_type='coil', unit_id=unit_id)
         
         # Discrete Inputs (DI): Read-only boolean inputs (status, alarms)
-        di = ProfileDataBlock(1, [False]*20, register_type='discrete')
+        di = ProfileDataBlock(1, [False]*20, register_type='discrete', unit_id=unit_id)
 
-        store = ModbusSlaveContext(hr=hr, ir=ir, co=co, di=di)
+        # Use DisableableSlaveContext to support slave failure simulation
+        store = DisableableSlaveContext(unit_id=unit_id, hr=hr, ir=ir, co=co, di=di)
         slave_contexts[unit_id] = store
 
         identity = ModbusDeviceIdentification()

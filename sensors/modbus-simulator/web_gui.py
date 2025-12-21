@@ -16,8 +16,22 @@ app = Flask(__name__)
 CORS(app)
 
 # Shared state with modbus_simulator.py
-REGISTER_OVERRIDES = {}
+REGISTER_OVERRIDES = {}  # {address: override_value}
+DISABLED_SLAVES = set()  # Set of disabled slave unit IDs (simulates device failure)
+SLAVE_DELAYS = {}  # {slave_id: {"delay_ms": int, "jitter_ms": int}} - Response delay simulation
+REGISTER_ACCESS_LOG = {}  # {(slave_id, reg_type, address): {reads: int, writes: int, last_read: float, last_write: float}}
+EXCEPTION_INJECTIONS = {}  # {(slave_id, reg_type, address): exception_code} or {slave_id: exception_code} for slave-wide
 STATE_FILE = "/tmp/modbus_simulator_state.json"
+
+# Modbus exception codes
+EXCEPTION_CODES = {
+    "illegal_function": 0x01,
+    "illegal_address": 0x02,
+    "illegal_value": 0x03,
+    "slave_failure": 0x04,
+    "acknowledge": 0x05,
+    "slave_busy": 0x06
+}
 
 def write_state(profile):
     """Write state to file for Modbus process to read"""
@@ -197,12 +211,307 @@ def get_status():
     state = read_state()
     active_profile = state.get("profile", os.environ.get("MODBUS_PROFILE", "Generic"))
     
+    total_slaves = int(os.environ.get("MODBUS_SLAVES", 3))
+    slave_states = [
+        {
+            "id": i,
+            "enabled": i not in DISABLED_SLAVES,
+            "status": "online" if i not in DISABLED_SLAVES else "offline",
+            "delay_ms": SLAVE_DELAYS.get(i, {}).get("delay_ms", 0),
+            "jitter_ms": SLAVE_DELAYS.get(i, {}).get("jitter_ms", 0)
+        }
+        for i in range(1, total_slaves + 1)
+    ]
+    
     return jsonify({
         "profile": active_profile,
-        "slaves": int(os.environ.get("MODBUS_SLAVES", 3)),
+        "slaves": total_slaves,
+        "slave_states": slave_states,
         "port": int(os.environ.get("MODBUS_PORT", 502)),
         "active_overrides": len(REGISTER_OVERRIDES),
         "overrides": REGISTER_OVERRIDES
+    })
+
+@app.route('/api/slave/<int:slave_id>/toggle', methods=['POST'])
+def toggle_slave(slave_id):
+    """Enable or disable a specific slave (simulates device failure)"""
+    total_slaves = int(os.environ.get("MODBUS_SLAVES", 3))
+    
+    if slave_id < 1 or slave_id > total_slaves:
+        return jsonify({
+            "success": False,
+            "error": f"Invalid slave ID {slave_id} (must be 1-{total_slaves})"
+        }), 400
+    
+    if slave_id in DISABLED_SLAVES:
+        DISABLED_SLAVES.remove(slave_id)
+        action = "enabled"
+    else:
+        DISABLED_SLAVES.add(slave_id)
+        action = "disabled"
+    
+    # Save state to file for cross-process communication
+    try:
+        with open(STATE_FILE, 'w') as f:
+            json.dump({'disabled_slaves': list(DISABLED_SLAVES)}, f)
+    except Exception as e:
+        logger.error(f"Failed to save state: {e}")
+    
+    logger.info(f"Slave {slave_id} {action}")
+    
+    return jsonify({
+        "success": True,
+        "slave_id": slave_id,
+        "enabled": slave_id not in DISABLED_SLAVES,
+        "message": f"Slave {slave_id} {action}"
+    })
+
+@app.route('/api/slave/<int:slave_id>/delay', methods=['POST'])
+def set_slave_delay(slave_id):
+    """Set response delay for a specific slave (simulates slow/unreliable device)"""
+    total_slaves = int(os.environ.get("MODBUS_SLAVES", 3))
+    
+    if slave_id < 1 or slave_id > total_slaves:
+        return jsonify({
+            "success": False,
+            "error": f"Invalid slave ID {slave_id} (must be 1-{total_slaves})"
+        }), 400
+    
+    data = request.json
+    delay_ms = int(data.get("delay_ms", 0))
+    jitter_ms = int(data.get("jitter_ms", 0))
+    
+    # Validate ranges
+    if delay_ms < 0 or delay_ms > 10000:
+        return jsonify({
+            "success": False,
+            "error": "Delay must be between 0-10000ms"
+        }), 400
+    
+    if jitter_ms < 0 or jitter_ms > 1000:
+        return jsonify({
+            "success": False,
+            "error": "Jitter must be between 0-1000ms"
+        }), 400
+    
+    # Store delay config
+    if delay_ms == 0 and jitter_ms == 0:
+        # Remove delay if both are 0
+        SLAVE_DELAYS.pop(slave_id, None)
+        logger.info(f"Slave {slave_id} delay cleared")
+    else:
+        SLAVE_DELAYS[slave_id] = {
+            "delay_ms": delay_ms,
+            "jitter_ms": jitter_ms
+        }
+        logger.info(f"Slave {slave_id} delay set: {delay_ms}ms ±{jitter_ms}ms")
+    
+    return jsonify({
+        "success": True,
+        "slave_id": slave_id,
+        "delay_ms": delay_ms,
+        "jitter_ms": jitter_ms,
+        "message": f"Slave {slave_id} delay: {delay_ms}ms ±{jitter_ms}ms"
+    })
+
+@app.route('/api/exceptions', methods=['GET'])
+def get_exception_injections():
+    """Get current exception injections"""
+    # Convert to readable format
+    exceptions = []
+    for key, code in EXCEPTION_INJECTIONS.items():
+        if isinstance(key, tuple):
+            slave_id, reg_type, address = key
+            exceptions.append({
+                "type": "register",
+                "slave_id": slave_id,
+                "register_type": reg_type,
+                "address": address,
+                "exception_code": code,
+                "exception_name": next((name for name, val in EXCEPTION_CODES.items() if val == code), "unknown")
+            })
+        else:
+            exceptions.append({
+                "type": "slave",
+                "slave_id": key,
+                "exception_code": code,
+                "exception_name": next((name for name, val in EXCEPTION_CODES.items() if val == code), "unknown")
+            })
+    
+    return jsonify({
+        "count": len(exceptions),
+        "injections": exceptions,
+        "available_codes": EXCEPTION_CODES
+    })
+
+@app.route('/api/exception/slave/<int:slave_id>', methods=['POST'])
+def inject_slave_exception(slave_id):
+    """Inject exception for all operations on a slave"""
+    total_slaves = int(os.environ.get("MODBUS_SLAVES", 3))
+    
+    if slave_id < 1 or slave_id > total_slaves:
+        return jsonify({
+            "success": False,
+            "error": f"Invalid slave ID {slave_id}"
+        }), 400
+    
+    data = request.json
+    exception_name = data.get("exception")
+    
+    if exception_name not in EXCEPTION_CODES:
+        return jsonify({
+            "success": False,
+            "error": f"Invalid exception. Use one of: {list(EXCEPTION_CODES.keys())}"
+        }), 400
+    
+    exception_code = EXCEPTION_CODES[exception_name]
+    EXCEPTION_INJECTIONS[slave_id] = exception_code
+    
+    logger.info(f"Injecting {exception_name} (0x{exception_code:02X}) for slave {slave_id}")
+    
+    return jsonify({
+        "success": True,
+        "slave_id": slave_id,
+        "exception": exception_name,
+        "code": f"0x{exception_code:02X}",
+        "message": f"Slave {slave_id} will return {exception_name} for all operations"
+    })
+
+@app.route('/api/exception/clear', methods=['POST'])
+def clear_exceptions():
+    """Clear all exception injections"""
+    data = request.json or {}
+    
+    if "slave_id" in data:
+        # Clear specific slave
+        slave_id = int(data["slave_id"])
+        
+        # Remove slave-wide exception
+        if slave_id in EXCEPTION_INJECTIONS:
+            del EXCEPTION_INJECTIONS[slave_id]
+        
+        # Remove all register-specific exceptions for this slave
+        keys_to_remove = [k for k in EXCEPTION_INJECTIONS.keys() if isinstance(k, tuple) and k[0] == slave_id]
+        for key in keys_to_remove:
+            del EXCEPTION_INJECTIONS[key]
+        
+        logger.info(f"Cleared all exceptions for slave {slave_id}")
+        return jsonify({"success": True, "message": f"Cleared exceptions for slave {slave_id}"})
+    else:
+        # Clear all
+        EXCEPTION_INJECTIONS.clear()
+        logger.info("Cleared all exception injections")
+        return jsonify({"success": True, "message": "Cleared all exceptions"})
+
+@app.route('/api/access-log', methods=['GET'])
+def get_access_log():
+    """Get register access statistics"""
+    import time
+    
+    # Convert log to readable format
+    log_data = []
+    for key, stats in REGISTER_ACCESS_LOG.items():
+        slave_id, reg_type, address = key
+        log_data.append({
+            "slave_id": slave_id,
+            "register_type": reg_type,
+            "address": address,
+            "reads": stats.get("reads", 0),
+            "writes": stats.get("writes", 0),
+            "last_read": stats.get("last_read"),
+            "last_write": stats.get("last_write"),
+            "last_read_ago": f"{time.time() - stats['last_read']:.1f}s" if stats.get("last_read") else None,
+            "last_write_ago": f"{time.time() - stats['last_write']:.1f}s" if stats.get("last_write") else None
+        })
+    
+    # Sort by total access (reads + writes) descending
+    log_data.sort(key=lambda x: x['reads'] + x['writes'], reverse=True)
+    
+    return jsonify({
+        "total_registers": len(log_data),
+        "total_reads": sum(x['reads'] for x in log_data),
+        "total_writes": sum(x['writes'] for x in log_data),
+        "log": log_data
+    })
+
+@app.route('/api/access-log/export/<format>', methods=['GET'])
+def export_access_log(format):
+    """Export access log as CSV or JSON"""
+    import time
+    import io
+    import csv
+    from flask import make_response
+    
+    # Build log data
+    log_data = []
+    for key, stats in REGISTER_ACCESS_LOG.items():
+        slave_id, reg_type, address = key
+        log_data.append({
+            "slave_id": slave_id,
+            "register_type": reg_type,
+            "address": address,
+            "reads": stats.get("reads", 0),
+            "writes": stats.get("writes", 0),
+            "last_read": stats.get("last_read"),
+            "last_write": stats.get("last_write")
+        })
+    
+    log_data.sort(key=lambda x: x['reads'] + x['writes'], reverse=True)
+    
+    if format == 'json':
+        response = make_response(json.dumps(log_data, indent=2))
+        response.headers['Content-Type'] = 'application/json'
+        response.headers['Content-Disposition'] = 'attachment; filename=modbus_access_log.json'
+        return response
+    
+    elif format == 'csv':
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=['slave_id', 'register_type', 'address', 'reads', 'writes', 'last_read', 'last_write'])
+        writer.writeheader()
+        writer.writerows(log_data)
+        
+        response = make_response(output.getvalue())
+        response.headers['Content-Type'] = 'text/csv'
+        response.headers['Content-Disposition'] = 'attachment; filename=modbus_access_log.csv'
+        return response
+    
+    return jsonify({"error": "Invalid format. Use 'json' or 'csv'"}), 400
+
+@app.route('/api/access-log/clear', methods=['POST'])
+def clear_access_log():
+    """Clear all access statistics"""
+    REGISTER_ACCESS_LOG.clear()
+    logger.info("Access log cleared")
+    return jsonify({"success": True, "message": "Access log cleared"})
+
+@app.route('/api/access-log/top/<int:limit>', methods=['GET'])
+def get_top_accessed(limit):
+    """Get top N most accessed registers"""
+    import time
+    
+    log_data = []
+    for key, stats in REGISTER_ACCESS_LOG.items():
+        slave_id, reg_type, address = key
+        total_access = stats.get("reads", 0) + stats.get("writes", 0)
+        if total_access > 0:
+            log_data.append({
+                "slave_id": slave_id,
+                "register_type": reg_type,
+                "address": address,
+                "reads": stats.get("reads", 0),
+                "writes": stats.get("writes", 0),
+                "total_access": total_access,
+                "last_access": max(stats.get("last_read", 0), stats.get("last_write", 0))
+            })
+    
+    # Sort by total access and take top N
+    log_data.sort(key=lambda x: x['total_access'], reverse=True)
+    top_registers = log_data[:limit]
+    
+    return jsonify({
+        "limit": limit,
+        "count": len(top_registers),
+        "registers": top_registers
     })
 
 if __name__ == '__main__':

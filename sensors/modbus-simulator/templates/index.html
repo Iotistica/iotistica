@@ -27,6 +27,13 @@
                 </select>
                 <button onclick="loadProfileDataPoints()">Load Data Points</button>
             </div>
+            
+            <div class="control-group">
+                <label>Slave Devices:</label>
+                <div id="slave-controls" class="slave-controls">
+                    <!-- Dynamically populated via JavaScript -->
+                </div>
+            </div>
 
             <div class="control-group">
                 <label>Scenarios:</label>
@@ -35,6 +42,60 @@
                 <button id="scenario-fault" onclick="applyScenario('fault')">Fault Condition</button>
                 <button id="scenario-unstable" onclick="applyScenario('unstable')">Unstable</button>
                 <button onclick="clearAllOverrides()" class="danger">Clear All</button>
+            </div>
+            
+            <div class="control-group">
+                <label>Access Log:</label>
+                <button onclick="showAccessLog()">📊 View Statistics</button>
+                <button onclick="exportAccessLog('json')">📥 Export JSON</button>
+                <button onclick="exportAccessLog('csv')">📥 Export CSV</button>
+                <button onclick="clearAccessLog()" class="danger">Clear Log</button>
+            </div>
+            
+            <div class="control-group">
+                <label>Exception Injection:</label>
+                <button onclick="showExceptionInjector()">⚠️ Inject Exceptions</button>
+                <button onclick="clearAllExceptions()" class="danger">Clear All Exceptions</button>
+            </div>
+        </div>
+
+        <div id="exception-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Exception Code Injection</h2>
+                    <button class="modal-close" onclick="closeExceptionModal()">×</button>
+                </div>
+                <div class="modal-body">
+                    <p class="info">Inject Modbus exception codes to test client error handling</p>
+                    
+                    <h3>Slave-Wide Exceptions</h3>
+                    <div class="exception-controls">
+                        <div id="slave-exception-controls"></div>
+                    </div>
+                    
+                    <h3>Available Exception Codes</h3>
+                    <div class="exception-codes">
+                        <div class="code-item"><code>illegal_function</code> - Function not supported (0x01)</div>
+                        <div class="code-item"><code>illegal_address</code> - Invalid register address (0x02)</div>
+                        <div class="code-item"><code>illegal_value</code> - Invalid data value (0x03)</div>
+                        <div class="code-item"><code>slave_failure</code> - Slave device failure (0x04)</div>
+                        <div class="code-item"><code>acknowledge</code> - Long operation in progress (0x05)</div>
+                        <div class="code-item"><code>slave_busy</code> - Slave busy, retry later (0x06)</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="access-log-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Register Access Statistics</h2>
+                    <button class="modal-close" onclick="closeAccessLog()">×</button>
+                </div>
+                <div class="modal-body">
+                    <div id="access-log-summary" class="stats-summary"></div>
+                    <div id="access-log-table"></div>
+                </div>
             </div>
         </div>
 
@@ -55,6 +116,9 @@
                 document.getElementById('profile-status').textContent = `Profile: ${status.profile}`;
                 document.getElementById('slaves-status').textContent = `Slaves: ${status.slaves}`;
                 document.getElementById('overrides-status').textContent = `Active Overrides: ${status.active_overrides}`;
+                
+                // Update slave controls
+                renderSlaveControls(status.slave_states);
                 
                 // Update slider values if overrides exist
                 Object.keys(status.overrides).forEach(address => {
@@ -265,6 +329,347 @@
         // Auto-refresh status every 2 seconds
         setInterval(loadStatus, 2000);
 
+        // Render slave control buttons
+        function renderSlaveControls(slaveStates) {
+            const container = document.getElementById('slave-controls');
+            if (!slaveStates || slaveStates.length === 0) {
+                container.innerHTML = '<p class="info">No slaves configured</p>';
+                return;
+            }
+            
+            container.innerHTML = slaveStates.map(slave => `
+                <div class="slave-control">
+                    <div class="slave-header">
+                        <span class="slave-id">Slave ${slave.id}</span>
+                        <span class="slave-status status-${slave.status}">${slave.status}</span>
+                        <button 
+                            class="btn-toggle ${slave.enabled ? 'btn-stop' : 'btn-start'}" 
+                            onclick="toggleSlave(${slave.id})"
+                        >
+                            ${slave.enabled ? '⏹ Stop' : '▶ Start'}
+                        </button>
+                    </div>
+                    <div class="slave-delay-controls">
+                        <div class="delay-slider-group">
+                            <label for="delay-${slave.id}">
+                                Delay: <span id="delay-value-${slave.id}">${slave.delay_ms}</span>ms
+                            </label>
+                            <input 
+                                type="range" 
+                                id="delay-${slave.id}" 
+                                min="0" 
+                                max="5000" 
+                                step="50"
+                                value="${slave.delay_ms}"
+                                oninput="updateDelayDisplay(${slave.id})"
+                                onchange="setSlaveDelay(${slave.id})"
+                            >
+                        </div>
+                        <div class="delay-slider-group">
+                            <label for="jitter-${slave.id}">
+                                Jitter: <span id="jitter-value-${slave.id}">${slave.jitter_ms}</span>ms
+                            </label>
+                            <input 
+                                type="range" 
+                                id="jitter-${slave.id}" 
+                                min="0" 
+                                max="500" 
+                                step="10"
+                                value="${slave.jitter_ms}"
+                                oninput="updateDelayDisplay(${slave.id})"
+                                onchange="setSlaveDelay(${slave.id})"
+                            >
+                        </div>
+                        ${slave.delay_ms > 0 || slave.jitter_ms > 0 ? 
+                            `<div class="delay-info">Response time: ${slave.delay_ms}ms ±${slave.jitter_ms}ms</div>` : 
+                            '<div class="delay-info delay-disabled">No delay (instant response)</div>'
+                        }
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        // Toggle slave enable/disable (simulate failure)
+        async function toggleSlave(slaveId) {
+            try {
+                const response = await fetch(`/api/slave/${slaveId}/toggle`, {method: 'POST'});
+                const result = await response.json();
+                
+                if (result.success) {
+                    showNotification(result.message, 'success');
+                    // Refresh status to update UI
+                    await loadStatus();
+                } else {
+                    showNotification(`Failed to toggle slave: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                console.error('Error toggling slave:', error);
+                showNotification(`Error toggling slave: ${error.message}`, 'error');
+            }
+        }
+        
+        // Update delay display values
+        function updateDelayDisplay(slaveId) {
+            const delayValue = document.getElementById(`delay-${slaveId}`).value;
+            const jitterValue = document.getElementById(`jitter-${slaveId}`).value;
+            
+            document.getElementById(`delay-value-${slaveId}`).textContent = delayValue;
+            document.getElementById(`jitter-value-${slaveId}`).textContent = jitterValue;
+        }
+        
+        // Set slave response delay
+        async function setSlaveDelay(slaveId) {
+            const delay_ms = parseInt(document.getElementById(`delay-${slaveId}`).value);
+            const jitter_ms = parseInt(document.getElementById(`jitter-${slaveId}`).value);
+            
+            try {
+                const response = await fetch(`/api/slave/${slaveId}/delay`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({delay_ms, jitter_ms})
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    const msg = delay_ms > 0 || jitter_ms > 0 
+                        ? `Slave ${slaveId} delay: ${delay_ms}ms ±${jitter_ms}ms`
+                        : `Slave ${slaveId} delay cleared`;
+                    showNotification(msg, 'success');
+                    await loadStatus();
+                } else {
+                    showNotification(`Failed to set delay: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                console.error('Error setting delay:', error);
+                showNotification(`Error setting delay: ${error.message}`, 'error');
+            }
+        }
+        
+        // Show access log modal
+        async function showAccessLog() {
+            try {
+                const response = await fetch('/api/access-log');
+                const data = await response.json();
+                
+                // Show summary
+                const summary = document.getElementById('access-log-summary');
+                summary.innerHTML = `
+                    <div class="stat-card">
+                        <div class="stat-value">${data.total_registers}</div>
+                        <div class="stat-label">Registers Accessed</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${data.total_reads.toLocaleString()}</div>
+                        <div class="stat-label">Total Reads</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${data.total_writes.toLocaleString()}</div>
+                        <div class="stat-label">Total Writes</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${(data.total_reads + data.total_writes).toLocaleString()}</div>
+                        <div class="stat-label">Total Operations</div>
+                    </div>
+                `;
+                
+                // Show top 50 registers
+                const tableContainer = document.getElementById('access-log-table');
+                if (data.log.length === 0) {
+                    tableContainer.innerHTML = '<p class="info">No register access logged yet. Start polling to collect data.</p>';
+                } else {
+                    const topRecords = data.log.slice(0, 50);
+                    tableContainer.innerHTML = `
+                        <h3>Top 50 Most Accessed Registers</h3>
+                        <table class="access-log-table">
+                            <thead>
+                                <tr>
+                                    <th>Slave</th>
+                                    <th>Type</th>
+                                    <th>Address</th>
+                                    <th>Reads</th>
+                                    <th>Writes</th>
+                                    <th>Total</th>
+                                    <th>Last Read</th>
+                                    <th>Last Write</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${topRecords.map(r => `
+                                    <tr>
+                                        <td>${r.slave_id}</td>
+                                        <td><span class="reg-type">${r.register_type}</span></td>
+                                        <td>${r.address}</td>
+                                        <td>${r.reads.toLocaleString()}</td>
+                                        <td>${r.writes.toLocaleString()}</td>
+                                        <td><strong>${(r.reads + r.writes).toLocaleString()}</strong></td>
+                                        <td>${r.last_read_ago || '-'}</td>
+                                        <td>${r.last_write_ago || '-'}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                }
+                
+                // Show modal
+                document.getElementById('access-log-modal').style.display = 'flex';
+            } catch (error) {
+                console.error('Error loading access log:', error);
+                showNotification(`Failed to load access log: ${error.message}`, 'error');
+            }
+        }
+        
+        // Close access log modal
+        function closeAccessLog() {
+            document.getElementById('access-log-modal').style.display = 'none';
+        }
+        
+        // Export access log
+        function exportAccessLog(format) {
+            window.open(`/api/access-log/export/${format}`, '_blank');
+            showNotification(`Downloading access log as ${format.toUpperCase()}...`, 'success');
+        }
+        
+        // Clear access log
+        async function clearAccessLog() {
+            if (!confirm('Clear all access statistics? This cannot be undone.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/access-log/clear', {method: 'POST'});
+                const result = await response.json();
+                
+                if (result.success) {
+                    showNotification('Access log cleared', 'success');
+                    closeAccessLog();
+                } else {
+                    showNotification('Failed to clear access log', 'error');
+                }
+            } catch (error) {
+                console.error('Error clearing access log:', error);
+                showNotification(`Error clearing log: ${error.message}`, 'error');
+            }
+        }
+
+        // Exception Injection Functions
+        async function showExceptionInjector() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                const container = document.getElementById('slave-exception-controls');
+                container.innerHTML = data.slaves.map(slave => `
+                    <div class="slave-exception-control">
+                        <div class="slave-exception-header">
+                            <span class="slave-id">Slave ${slave.id}</span>
+                            <select id="exception-select-${slave.id}" class="exception-select">
+                                <option value="">No Exception</option>
+                                <option value="illegal_function">Illegal Function (0x01)</option>
+                                <option value="illegal_address">Illegal Address (0x02)</option>
+                                <option value="illegal_value">Illegal Value (0x03)</option>
+                                <option value="slave_failure">Slave Failure (0x04)</option>
+                                <option value="acknowledge">Acknowledge (0x05)</option>
+                                <option value="slave_busy">Slave Busy (0x06)</option>
+                            </select>
+                            <button class="btn-inject" onclick="injectSlaveException(${slave.id})">
+                                ⚠️ Inject
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+                
+                // Load current exceptions
+                await updateExceptionStatus();
+                
+                document.getElementById('exception-modal').style.display = 'flex';
+            } catch (error) {
+                console.error('Error loading exception injector:', error);
+                showNotification(`Failed to load exception injector: ${error.message}`, 'error');
+            }
+        }
+
+        async function injectSlaveException(slaveId) {
+            const select = document.getElementById(`exception-select-${slaveId}`);
+            const exception = select.value;
+            
+            try {
+                if (!exception) {
+                    // Clear exception
+                    const response = await fetch('/api/exception/clear', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ slave_id: slaveId })
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        showNotification(`Cleared exception for Slave ${slaveId}`, 'success');
+                        await updateExceptionStatus();
+                    }
+                } else {
+                    // Inject exception
+                    const response = await fetch(`/api/exception/slave/${slaveId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ exception })
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        showNotification(`Injected ${exception} on Slave ${slaveId}`, 'success');
+                        await updateExceptionStatus();
+                    } else {
+                        showNotification('Failed to inject exception', 'error');
+                    }
+                }
+            } catch (error) {
+                console.error('Error injecting exception:', error);
+                showNotification(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function updateExceptionStatus() {
+            try {
+                const response = await fetch('/api/exceptions');
+                const data = await response.json();
+                
+                // Update select elements with current exceptions
+                data.injections.forEach(inj => {
+                    if (inj.type === 'slave') {
+                        const select = document.getElementById(`exception-select-${inj.slave_id}`);
+                        if (select) {
+                            select.value = inj.exception;
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Error updating exception status:', error);
+            }
+        }
+
+        async function clearAllExceptions() {
+            if (!confirm('Clear all exception injections?')) return;
+            
+            try {
+                const response = await fetch('/api/exception/clear', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    showNotification('All exceptions cleared', 'success');
+                    await updateExceptionStatus();
+                } else {
+                    showNotification('Failed to clear exceptions', 'error');
+                }
+            } catch (error) {
+                console.error('Error clearing exceptions:', error);
+                showNotification(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        function closeExceptionModal() {
+            document.getElementById('exception-modal').style.display = 'none';
+        }
+
+        
         // Load on page load
         window.addEventListener('load', () => {
             loadProfileDataPoints();
