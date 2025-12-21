@@ -23,6 +23,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy simulator script and lib folder (build context is sensors/opcua-simulator)
 COPY opcua_simulator.py .
 COPY lib/ ./lib/
+COPY profiles/ ./profiles/
 
 # Expose OPC UA port
 EXPOSE 4840

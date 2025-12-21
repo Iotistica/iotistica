@@ -1,0 +1,36 @@
+{
+  "name": "Test",
+  "description": "Minimal profile for testing with 2 sensor types",
+  "sensors": [
+    {
+      "folder": "Temperature",
+      "prefix": "Test_Temp",
+      "model": "temperature",
+      "count": 2,
+      "unit": "°C",
+      "config": {
+        "base": 22.0,
+        "variation": 3.0,
+        "noise": 0.2,
+        "period": 20.0,
+        "min_value": -50.0,
+        "max_value": 150.0
+      }
+    },
+    {
+      "folder": "Pressure",
+      "prefix": "Test_Pressure",
+      "model": "pressure",
+      "count": 2,
+      "unit": "mbar",
+      "config": {
+        "base": 1013.0,
+        "variation": 10.0,
+        "noise": 1.0,
+        "period": 30.0,
+        "min_value": 0.0,
+        "max_value": 2000.0
+      }
+    }
+  ]
+}

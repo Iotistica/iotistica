@@ -68,8 +68,15 @@ class NodeManager:
             else:
                 folder = folders_created[folder_name]
             
-            # Get model instance to extract min/max
-            model = get_model(model_type)
+            # Get sensor config for this group (may override model defaults)
+            sensor_config = sensor_group.get('config', {})
+            
+            # Get model instance to extract default min/max
+            model = get_model(model_type, sensor_config)
+            
+            # Extract min/max from config or model
+            min_value = sensor_config.get('min_value', getattr(model, 'min_value', None))
+            max_value = sensor_config.get('max_value', getattr(model, 'max_value', None))
             
             # Create sensor nodes
             for i in range(count):
@@ -86,8 +93,9 @@ class NodeManager:
                     name=node_name,
                     folder=folder_name,
                     unit=unit,
-                    min_value=model.min_value,
-                    max_value=model.max_value
+                    min_value=min_value,
+                    max_value=max_value,
+                    config=sensor_config
                 )
                 
                 self.sensors.append(sensor)
