@@ -60,13 +60,50 @@ class NodeManager:
             count = sensor_group['count']
             unit = sensor_group.get('unit', '')
             
-            # Create or get folder
+            # Build folder hierarchy (supports: folder -> subfolder -> zone -> sensors)
+            current_folder = main_folder
+            folder_path = []
+            
+            # Level 1: Main folder (required)
             if folder_name not in folders_created:
                 folder = await main_folder.add_folder(2, folder_name)
                 folders_created[folder_name] = folder
                 logger.debug(f"  Created folder: {folder_name}")
             else:
                 folder = folders_created[folder_name]
+            
+            current_folder = folder
+            folder_path.append(folder_name)
+            
+            # Level 2: Subfolder (optional)
+            if 'subfolder' in sensor_group:
+                subfolder_name = sensor_group['subfolder']
+                subfolder_key = f"{folder_name}/{subfolder_name}"
+                
+                if subfolder_key not in folders_created:
+                    subfolder = await current_folder.add_folder(2, subfolder_name)
+                    folders_created[subfolder_key] = subfolder
+                    logger.debug(f"    Created subfolder: {subfolder_name}")
+                else:
+                    subfolder = folders_created[subfolder_key]
+                
+                current_folder = subfolder
+                folder_path.append(subfolder_name)
+            
+            # Level 3: Zone (optional)
+            if 'zone' in sensor_group:
+                zone_name = sensor_group['zone']
+                zone_key = f"{'/'.join(folder_path)}/{zone_name}"
+                
+                if zone_key not in folders_created:
+                    zone_folder = await current_folder.add_folder(2, zone_name)
+                    folders_created[zone_key] = zone_folder
+                    logger.debug(f"      Created zone: {zone_name}")
+                else:
+                    zone_folder = folders_created[zone_key]
+                
+                current_folder = zone_folder
+                folder_path.append(zone_name)
             
             # Get sensor config for this group (may override model defaults)
             sensor_config = sensor_group.get('config', {})
@@ -78,10 +115,10 @@ class NodeManager:
             min_value = sensor_config.get('min_value', getattr(model, 'min_value', None))
             max_value = sensor_config.get('max_value', getattr(model, 'max_value', None))
             
-            # Create sensor nodes
+            # Create sensor nodes in the deepest folder
             for i in range(count):
                 node_name = f"{prefix}_{i+1}"
-                node = await folder.add_variable(2, node_name, 0.0)
+                node = await current_folder.add_variable(2, node_name, 0.0)
                 await node.set_writable()
                 
                 # Create structured sensor object
@@ -91,7 +128,7 @@ class NodeManager:
                     model_type=model_type,
                     index=i,
                     name=node_name,
-                    folder=folder_name,
+                    folder='/'.join(folder_path),  # Full path
                     unit=unit,
                     min_value=min_value,
                     max_value=max_value,

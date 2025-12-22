@@ -114,17 +114,20 @@ export interface IntervalsConfig {
 
 export interface CANProtocolConfig {
   enabled: boolean;
+  bufferCapacity?: number; // Buffer size in bytes for CAN bus messages
 }
 
 export interface SNMPProtocolConfig {
   enabled: boolean;
   port: number;
   ipRanges: string[];
+  bufferCapacity?: number; // Buffer size in bytes for SNMP trap messages
 }
 
 export interface OPCUAProtocolConfig {
   enabled: boolean;
   discoveryUrls: string[];
+  bufferCapacity?: number; // Buffer size in bytes for OPC UA messages
 }
 
 export interface ModbusConnection {
@@ -154,6 +157,7 @@ export interface ModbusDataPoint {
 export interface ModbusProtocolConfig {
   enabled: boolean;
   profile: string;
+  bufferCapacity?: number; // Buffer size in bytes for Modbus responses
   connection: ModbusConnection;
   addressing: ModbusAddressing;
   points: Record<string, ModbusDataPoint>;  // Object keyed by point name (e.g., "temperature", "humidity")

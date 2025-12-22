@@ -88,7 +88,7 @@ export class AnomalyDetectionService {
 		// Buffers are created lazily when data is first received (more efficient)
 		// This ensures metricsTracked reflects only actively monitored metrics
 		
-		this.logger?.infoSync('Anomaly detection service initialized', {
+		this.logger?.debugSync('Anomaly detection service initialized', {
 			component: LogComponents.metrics,
 			metricsConfigured: config.metrics.filter(m => m.enabled).length,
 			methods: this.getUniqueDetectionMethods(),

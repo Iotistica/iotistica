@@ -36,7 +36,7 @@ import {
   formatBrokerConfigForClient
 } from '../utils/mqtt-broker-config';
 
-import { generateDefaultTargetState, generateDefaultTargetStateV2 } from './default-target-state-generator';
+import { generateDefaultTargetStateV2 } from './default-target-state-generator';
 import logger from '../utils/logger';
 import { configService }  from './config.service';
 
@@ -293,11 +293,8 @@ export class ProvisioningService {
     if (!targetState) {
       const licenseData = await configService.get('license_data');
       
-      // Use V2 format if enabled via environment variable (default: false for backward compatibility)
-      const useV2Format = process.env.USE_TARGET_STATE_V2 === 'true';
-      const { apps, config } = useV2Format 
-        ? await generateDefaultTargetStateV2(licenseData)
-        : await generateDefaultTargetState(licenseData);
+      // Always use V2 format (single source of truth)
+      const { apps, config } = await generateDefaultTargetStateV2(licenseData);
       
       await DeviceTargetStateModel.set(deviceUuid, apps, config, false); // Don't need deployment for default state
     }

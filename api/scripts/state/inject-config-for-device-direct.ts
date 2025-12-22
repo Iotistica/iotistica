@@ -5,7 +5,7 @@
 
 import { query } from '../../src/db/connection';
 import { SystemConfigModel } from '../../src/db/system-config-model';
-import { generateDefaultTargetState } from '../../src/services/default-target-state-generator';
+import { generateDefaultTargetStateV2 } from '../../src/services/default-target-state-generator.js';
 
 const DEVICE_UUID = 'cad1a747-44e0-4530-87c8-944d4981a42c';
 
@@ -40,7 +40,7 @@ async function injectConfig() {
     }
 
     // Generate default config
-    const { apps, config } = await generateDefaultTargetState(licenseData);
+    const { apps, config } = await generateDefaultTargetStateV2(licenseData);
 
     console.log('Generated config:');
     console.log(`   - Metrics Interval: ${config.settings.metricsIntervalMs}ms (${config.settings.metricsIntervalMs / 1000}s)`);

@@ -173,6 +173,9 @@ export class FeatureInitializer {
       const { EndpointOutputModel: EndpointOutputModel } = await import('../db/models/endpoint-outputs.model.js');
       const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
       
+      // Apply buffer capacities from target state to endpoint_outputs table
+      await this.applyBufferCapacitiesFromTargetState(EndpointOutputModel, logger);
+      
       const endpointOutputs = await EndpointOutputModel.getAll();
 
       if (endpointOutputs.length === 0) {
@@ -198,6 +201,11 @@ export class FeatureInitializer {
       }
 
       // Build sensor configs only for enabled protocols
+      // bufferCapacity is configured per-protocol in endpoint_outputs table:
+      // - OPC UA: 1MB (large discovery messages with many nodes)
+      // - Modbus: 128KB (standard register responses)
+      // - CAN: 64KB (bus messages)
+      // - SNMP: 128KB (trap messages)
       const endpoints = endpointOutputs
         .filter(output => enabledEndpoints.has(output.protocol))
         .map((output) => ({
@@ -205,7 +213,7 @@ export class FeatureInitializer {
           addr: output.socket_path,
           eomDelimiter: output.delimiter || '\n',
           mqttTopic: output.protocol,
-          bufferCapacity: 4096,
+          bufferCapacity: output.buffer_capacity || 1024 * 1024, // Default 1MB, configurable per protocol
           bufferSize: 12,
           bufferTimeMs: 60000,
           enabled: true,
@@ -256,6 +264,51 @@ export class FeatureInitializer {
         note: 'Continuing without Sensor Publish'
       });
       this.features.sensorPublish = undefined;
+    }
+  }
+
+  /**
+   * Apply buffer capacities from target state to endpoint_outputs table
+   */
+  private async applyBufferCapacitiesFromTargetState(
+    EndpointOutputModel: any,
+    logger: AgentLogger
+  ): Promise<void> {
+    try {
+      const protocols = this.context.configProtocols || {};
+      
+      // Map of protocol names to buffer capacities from target state
+      const bufferCapacities: Record<string, number | undefined> = {
+        'opcua': protocols.opcua?.bufferCapacity,
+        'modbus': protocols.modbus?.bufferCapacity,
+        'can': protocols.can?.bufferCapacity,
+        'snmp': protocols.snmp?.bufferCapacity,
+      };
+
+      // Update each protocol's buffer capacity if specified in target state
+      for (const [protocol, bufferCapacity] of Object.entries(bufferCapacities)) {
+        if (bufferCapacity !== undefined) {
+          const output = await EndpointOutputModel.getOutput(protocol);
+          if (output) {
+            await EndpointOutputModel.setOutput({
+              ...output,
+              buffer_capacity: bufferCapacity
+            });
+            
+            logger.debugSync(`Updated buffer capacity for ${protocol}`, {
+              component: LogComponents.agent,
+              protocol,
+              bufferCapacity,
+              bufferCapacityMB: (bufferCapacity / 1024 / 1024).toFixed(2)
+            });
+          }
+        }
+      }
+    } catch (error) {
+      logger.warnSync('Failed to apply buffer capacities from target state', {
+        component: LogComponents.agent,
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 

@@ -13,6 +13,7 @@ export interface DeviceEndpointOutput {
   delimiter: string;
   include_timestamp: boolean;
   include_device_name: boolean;
+  buffer_capacity?: number; // Buffer capacity in bytes (default 1MB for large OPC UA messages)
   logging?: Record<string, any>;
   created_at?: Date;
   updated_at?: Date;

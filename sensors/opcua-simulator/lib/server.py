@@ -3,6 +3,7 @@ OPC UA Server bootstrap and main entry point
 """
 import logging
 import asyncio
+import json
 from typing import List
 from asyncua import Server, ua
 from .nodes import NodeManager
@@ -130,9 +131,22 @@ class OPCUASimulator:
 async def main():
     """Main entry point"""
     import sys
+    import os
     
-    # Parse command line arguments
-    profile_name = sys.argv[1] if len(sys.argv) > 1 else 'factory'
+    # Parse profile name from environment variable, command line, or default to 'factory'
+    profile_name = os.getenv('PROFILE') or (sys.argv[1] if len(sys.argv) > 1 else 'factory')
+    
+    # Check for state file override (set by web GUI)
+    STATE_FILE = "/tmp/opcua_simulator_state.json"
+    try:
+        if os.path.exists(STATE_FILE):
+            with open(STATE_FILE, "r") as f:
+                state = json.load(f)
+                if state.get("profile"):
+                    profile_name = state["profile"]
+                    logger.info(f"Profile overridden from state file: {profile_name}")
+    except Exception as e:
+        logger.warning(f"Failed to read state file: {e}")
     
     simulator = OPCUASimulator(profile_name=profile_name)
     await simulator.run()

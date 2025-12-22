@@ -18,15 +18,17 @@ RUN apt-get update && \
 
 # Upgrade pip and install dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir asyncua==1.0.6
+    pip install --no-cache-dir asyncua==1.0.6 flask==3.0.0 flask-cors==4.0.0
 
-# Copy simulator script and lib folder (build context is sensors/opcua-simulator)
+# Copy simulator files (build context is sensors/opcua-simulator)
 COPY opcua_simulator.py .
+COPY web_gui.py .
 COPY lib/ ./lib/
 COPY profiles/ ./profiles/
+COPY templates/ ./templates/
 
-# Expose OPC UA port
-EXPOSE 4840
+# Expose OPC UA port and web GUI port
+EXPOSE 4840 5001
 
 # Run simulator
 CMD ["python", "-u", "opcua_simulator.py"]

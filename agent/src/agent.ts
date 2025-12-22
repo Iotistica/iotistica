@@ -800,13 +800,6 @@ export default class DeviceAgent {
         this.deviceInfo.uuid
       );
       
-      this.agentLogger?.infoSync("Anomaly Detection Service initialized", {
-        component: LogComponents.agent,
-        metricsCount: config.metrics.filter(m => m.enabled).length,
-        source: targetStateConfig?.anomaly ? 'cloud' : 'environment',
-        storageEnabled: !!config.storage,
-      });
-      
       // Set profile for Modbus metrics (for baseline filtering)
       const modbusConfig = this.agentConfig.getModbusConfig();
       if (modbusConfig?.profile) {

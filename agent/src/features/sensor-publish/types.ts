@@ -21,7 +21,7 @@ export const SensorConfigSchema = z.object({
   publishInterval: z.number().optional().default(30000), // Publish interval in milliseconds
   bufferTimeMs: z.number().optional().default(0),
   bufferSize: z.number().optional().default(0),
-  bufferCapacity: z.number().optional().default(128 * 1024), // 128KB default
+  bufferCapacity: z.number().optional().default(1024 * 1024), // 1MB default (increased from 128KB for large OPC UA messages)
   eomDelimiter: z.string(),
   mqttTopic: z.string(),
   mqttHeartbeatTopic: z.string().optional(),

@@ -9,7 +9,7 @@
  */
 
 import { query } from '../src/db/connection';
-import { generateDefaultTargetState } from '../src/services/default-target-state-generator';
+import { generateDefaultTargetStateV2 } from '../src/services/default-target-state-generator.js';
 import { configService } from '../src/services/config.service';
 
 async function updateDeviceTargetState(deviceUuid: string): Promise<void> {
@@ -50,7 +50,7 @@ async function updateDeviceTargetState(deviceUuid: string): Promise<void> {
 
     // Generate new default config
     const licenseData = await configService.get('license_data');
-    const { apps, config } = await generateDefaultTargetState(licenseData);
+    const { apps, config } = await generateDefaultTargetStateV2(licenseData);
 
     console.log('Generated new config with keys:');
     console.log(`  - ${Object.keys(config).join(', ')}\n`);

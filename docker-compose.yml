@@ -251,10 +251,18 @@ services:
             dockerfile: Dockerfile
         container_name: iotistic-opcua-sim
         restart: unless-stopped
+        command: sh -c "python web_gui.py & python opcua_simulator.py"
+        environment:
+            - PROFILE=${PROFILE:-factory}
+            - OPCUA_API_URL=http://api:3002
+            - WEB_PORT=5002
         ports:
-            - "4840:4840"
+            - "4840:4840"     # OPC UA server
+            - "5002:5002"     # Web GUI
         networks:
             - iotistic-net
+        depends_on:
+            - api
         logging:
             driver: "json-file"
             options:

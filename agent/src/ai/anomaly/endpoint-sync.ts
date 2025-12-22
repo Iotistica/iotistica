@@ -115,7 +115,7 @@ export async function discoverEndpointMetrics(
 			}
 		}
 		
-		logger?.infoSync(`Discovered ${metrics.length} endpoint metrics for anomaly detection`, {
+		logger?.debugSync(`Discovered ${metrics.length} endpoint metrics for anomaly detection`, {
 			component: LogComponents.metrics,
 			endpointCount: endpoints.length,
 			metricNames: metrics.map(m => m.name),
