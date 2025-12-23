@@ -1072,13 +1072,45 @@ export class CloudSync extends EventEmitter {
 				const sensorStats = this.sensorPublish.getStats();
 				(stateReport[deviceInfo.uuid] as any).sensor_health = sensorStats;
 			} catch (error) {
-				this.logger?.warnSync('Failed to collect endpoints stats', {
+				this.logger?.warnSync('Failed to collect sensor stats', {
 					component: LogComponents.cloudSync,
 					operation: 'collect-sensor-stats',
 					error: error instanceof Error ? error.message : String(error)
 				});
 			}
 	}
+		
+		// Add VPN health stats (if provisioned and Tailscale enabled)
+		if (deviceInfo.provisioned) {
+			try {
+				const { TailscaleManager } = await import('../network/vpn/tailscale-manager.js');
+				const tailscale = new TailscaleManager(this.logger);
+				const vpnHealth = await tailscale.getHealth();
+				(stateReport[deviceInfo.uuid] as any).vpn_health = vpnHealth;
+				
+				// Log VPN issues for ops visibility
+				if (vpnHealth.installed && vpnHealth.daemonRunning && !vpnHealth.connected) {
+					this.logger?.warnSync('VPN daemon running but not connected - device may be isolated', {
+						component: LogComponents.cloudSync,
+						operation: 'vpn-health-check',
+						backendState: vpnHealth.backendState,
+						note: 'Cloud can trigger reprovisioning or alert user'
+					});
+				} else if (vpnHealth.installed && !vpnHealth.daemonRunning) {
+					this.logger?.warnSync('VPN installed but daemon not running', {
+						component: LogComponents.cloudSync,
+						operation: 'vpn-health-check',
+						note: 'Device may need restart or daemon crashed'
+					});
+				}
+			} catch (error) {
+				this.logger?.warnSync('Failed to collect VPN health stats', {
+					component: LogComponents.cloudSync,
+					operation: 'collect-vpn-health',
+					error: error instanceof Error ? error.message : String(error)
+				});
+			}
+		}
 		
 		// Log complete metrics report if metrics were collected
 	   if (includeMetrics) {
@@ -1173,6 +1205,11 @@ export class CloudSync extends EventEmitter {
 	// Add sensor health if available and metrics cycle
 	if (includeMetrics && (stateReport[deviceInfo.uuid] as any).sensor_health) {
 		(reportToSend[deviceInfo.uuid] as any).sensor_health = (stateReport[deviceInfo.uuid] as any).sensor_health;
+	}
+	
+	// Add VPN health if available and metrics cycle
+	if (includeMetrics && (stateReport[deviceInfo.uuid] as any).vpn_health) {
+		(reportToSend[deviceInfo.uuid] as any).vpn_health = (stateReport[deviceInfo.uuid] as any).vpn_health;
 	}
 		
 		// Send report to cloud

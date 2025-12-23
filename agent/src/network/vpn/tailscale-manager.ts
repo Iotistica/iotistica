@@ -173,25 +173,40 @@ export class TailscaleManager {
 				// Without this, tailscale CLI may fail or talk to wrong daemon
 				process.env.TAILSCALE_SOCKET = '/var/run/tailscale/tailscaled.sock';
 
-				// Wait for daemon to start
-				await new Promise(resolve => setTimeout(resolve, 3000));
+				// Wait for daemon to start with exponential backoff (edge networks are slow/lossy)
+				// Max attempts: 6 (delays: ~1s, ~2s, ~4s, ~8s, ~10s, ~10s = ~35s total)
+				const maxAttempts = 6;
+				for (let attempt = 0; attempt < maxAttempts; attempt++) {
+					// Exponential backoff: 1s * 2^attempt, capped at 10s, with jitter
+					const baseDelay = Math.min(1000 * Math.pow(2, attempt), 10000);
+					const jitter = Math.random() * 200; // ±200ms jitter
+					const delay = baseDelay + jitter;
+					
+					await new Promise(resolve => setTimeout(resolve, delay));
 
-				// Verify daemon started (pgrep returns exit 1 if not found)
-				try {
-					const { stdout } = await execAsync('pgrep tailscaled');
-					if (stdout.trim()) {
-						this.logger?.infoSync('Tailscaled daemon started successfully (container mode)', {
-							component: LogComponents.tailscaleManager,
-							pid: stdout.trim(),
-						});
-						return;
+					// Verify daemon started (pgrep returns exit 1 if not found)
+					try {
+						const { stdout } = await execAsync('pgrep tailscaled');
+						if (stdout.trim()) {
+							this.logger?.infoSync('Tailscaled daemon started successfully (container mode)', {
+								component: LogComponents.tailscaleManager,
+								pid: stdout.trim(),
+								attempt: attempt + 1,
+								delayMs: Math.round(delay),
+							});
+							return;
+						}
+					} catch {
+						// Not running yet, continue retrying
+						if (attempt === maxAttempts - 1) {
+							// Final attempt failed
+							this.logger?.errorSync('Tailscaled spawn output', new Error(daemonOutput || 'No output captured'), {
+								component: LogComponents.tailscaleManager,
+								maxAttempts,
+							});
+							throw new Error('Tailscaled daemon failed to start (process not found)');
+						}
 					}
-				} catch {
-					// pgrep failed - daemon didn't start
-					this.logger?.errorSync('Tailscaled spawn output', new Error(daemonOutput || 'No output captured'), {
-						component: LogComponents.tailscaleManager,
-					});
-					throw new Error('Tailscaled daemon failed to start (process not found)');
 				}
 			} catch (error: any) {
 				const err = error instanceof Error ? error : new Error(String(error));
@@ -365,6 +380,18 @@ export class TailscaleManager {
 				throw new Error('Auth key persistence is disabled for security - daemon state file handles reconnection');
 			}
 
+			// SECURITY: Prevent accidental subnet route acceptance on edge devices
+			// acceptRoutes should ONLY be enabled on routers/gateways that also advertise routes
+			// Generic edge devices should NEVER accept routes (attack surface)
+			if (config.acceptRoutes === true && !config.advertiseRoutes?.length) {
+				this.logger?.errorSync('Invalid routing configuration', new Error('acceptRoutes requires advertiseRoutes'), {
+					component: LogComponents.tailscaleManager,
+					note: 'SECURITY: Only routers/gateways should accept routes',
+					recommendation: 'Set advertiseRoutes to enable router/gateway mode',
+				});
+				throw new Error('acceptRoutes=true requires advertiseRoutes (router/gateway mode)');
+			}
+
 			this.logger?.infoSync('Connecting to Tailscale network...', {
 				component: LogComponents.tailscaleManager,
 				tailnet: config.tailnetName,
@@ -413,15 +440,21 @@ export class TailscaleManager {
 				online: result.Self?.Online,
 			});
 
-			// Wait for connection to fully establish (daemon may take time to connect)
+			// Wait for connection to fully establish with exponential backoff
 			// BackendState goes: NeedsLogin → Starting → Running
 			// Self.Online goes: undefined → true when fully connected
-			const maxWaitSeconds = 15;
-			const pollIntervalMs = 1000;
-			const maxAttempts = maxWaitSeconds;
+			// Max attempts: 10 (delays: ~1s, ~2s, ~4s, ~8s, ~16s, ~32s, ~60s, ~60s, ~60s, ~60s = ~303s total)
+			const maxAttempts = 10;
+			let totalWaitMs = 0;
 			
-			for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-				await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+			for (let attempt = 0; attempt < maxAttempts; attempt++) {
+				// Exponential backoff: 1s * 2^attempt, capped at 60s, with jitter
+				const baseDelay = Math.min(1000 * Math.pow(2, attempt), 60000);
+				const jitter = Math.random() * 500; // ±500ms jitter
+				const delay = baseDelay + jitter;
+				
+				await new Promise(resolve => setTimeout(resolve, delay));
+				totalWaitMs += delay;
 				
 				const status = await this.getStatus();
 				
@@ -431,17 +464,18 @@ export class TailscaleManager {
 						tailnet: config.tailnetName,
 						hostname: status.hostname,
 						tailscaleIP: status.tailnetIP,
-						attemptNumber: attempt,
-						waitTimeSeconds: attempt,
+						attemptNumber: attempt + 1,
+						waitTimeSeconds: Math.round(totalWaitMs / 1000),
 					});
 					return; // Success!
 				}
 				
-				// Log progress every 5 seconds
-				if (attempt % 5 === 0) {
-					this.logger?.debugSync(`Waiting for Tailscale connection... (${attempt}/${maxAttempts}s)`, {
+				// Log progress on longer delays (attempts 4+)
+				if (attempt >= 4) {
+					this.logger?.debugSync(`Waiting for Tailscale connection... (attempt ${attempt + 1}/${maxAttempts})`, {
 						component: LogComponents.tailscaleManager,
 						backendState: status.backendState,
+						waitedSeconds: Math.round(totalWaitMs / 1000),
 					});
 				}
 			}
@@ -451,9 +485,9 @@ export class TailscaleManager {
 			this.logger?.warnSync('Tailscale connection timeout', {
 				component: LogComponents.tailscaleManager,
 				backendState: finalStatus.backendState,
-				waitedSeconds: maxWaitSeconds,
+				waitedSeconds: Math.round(totalWaitMs / 1000),
 			});
-			throw new Error(`Tailscale connection timeout after ${maxWaitSeconds}s (BackendState: ${finalStatus.backendState})`);
+			throw new Error(`Tailscale connection timeout after ${Math.round(totalWaitMs / 1000)}s (BackendState: ${finalStatus.backendState})`);
 		} catch (error: any) {
 			const err = error instanceof Error ? error : new Error(String(error));
 			this.logger?.errorSync('Tailscale configuration failed', err, {
@@ -588,5 +622,67 @@ export class TailscaleManager {
 			});
 			return false;
 		}
+	}
+
+	/**
+	 * Get machine-readable VPN health state for cloud reporting
+	 * Used for ops monitoring: detect isolation, trigger reprovisioning, alert users
+	 */
+	async getHealth(): Promise<{
+		installed: boolean;
+		daemonRunning: boolean;
+		connected: boolean;
+		backendState?: string;
+		ip?: string;
+		hostname?: string;
+		online?: boolean;
+		lastSeen?: string;
+	}> {
+		// Check if Tailscale is installed
+		if (!this.isInstalled) {
+			// Try to detect installation
+			await this.checkInstallation();
+		}
+
+		if (!this.isInstalled) {
+			return {
+				installed: false,
+				daemonRunning: false,
+				connected: false,
+			};
+		}
+
+		// Check if daemon is running (non-blocking check)
+		let daemonRunning = false;
+		try {
+			const { stdout } = await execAsync('pgrep tailscaled');
+			daemonRunning = !!stdout.trim();
+		} catch {
+			// pgrep returns exit 1 if not found
+			daemonRunning = false;
+		}
+
+		// If daemon not running, return early
+		if (!daemonRunning) {
+			return {
+				installed: true,
+				daemonRunning: false,
+				connected: false,
+			};
+		}
+
+		// Get connection status
+		const status = await this.getStatus();
+
+		return {
+			installed: true,
+			daemonRunning: true,
+			connected: status.connected,
+			backendState: status.backendState,
+			ip: status.tailnetIP,
+			hostname: status.hostname,
+			online: status.online,
+			lastSeen: status.lastSeen,
+		};
 	}
 }
