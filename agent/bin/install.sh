@@ -428,7 +428,7 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
         echo "✗ Error: Build failed - dist/app.js not found"
         exit 1
     fi
-    echo "✓ Agent built successfully (with vendors file)"
+    echo "✓ Agent built successfully"
 
     # Install update script
     if [ -f /opt/iotistic/agent/bin/update-agent-systemd.sh ]; then
