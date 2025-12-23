@@ -124,6 +124,10 @@ export default class DeviceAgent {
       // Initialize device provisioning
       await this.initializeDeviceManager();
 
+      // Initialize VPN auto-reconnection EARLY (right after device manager)
+      // This ensures device is reachable via VPN as soon as possible
+      await this.initializeVpnReconnection();
+
       // Initialize cloud logging if device is provisioned
       await this.initializeCloudLogging();
 
@@ -1280,6 +1284,74 @@ export default class DeviceAgent {
         }
       );
       throw error;
+    }
+  }
+
+  /**
+   * Initialize VPN auto-reconnection
+   * Ensures Tailscale daemon is running and reconnects if device was previously connected
+   */
+  private async initializeVpnReconnection(): Promise<void> {
+    this.agentLogger?.infoSync('Checking VPN auto-reconnection status', {
+      component: LogComponents.agent,
+      provisioned: this.deviceInfo.provisioned,
+    });
+
+    // Only attempt VPN reconnection if device is provisioned
+    if (!this.deviceInfo.provisioned) {
+      this.agentLogger?.infoSync('VPN auto-reconnection skipped (device not provisioned)', {
+        component: LogComponents.agent,
+      });
+      return;
+    }
+
+    try {
+      const { TailscaleManager } = await import('./network/vpn/tailscale-manager.js');
+      const tailscale = new TailscaleManager(this.agentLogger);
+
+      // Check if Tailscale is installed
+      const isInstalled = await tailscale.checkInstallation();
+      if (!isInstalled) {
+        this.agentLogger?.infoSync('VPN auto-reconnection skipped (Tailscale not installed)', {
+          component: LogComponents.agent,
+        });
+        return;
+      }
+
+      // Ensure daemon is running (critical for container restarts)
+      this.agentLogger?.infoSync('Starting Tailscale daemon for auto-reconnection', {
+        component: LogComponents.agent,
+      });
+      await tailscale.ensureDaemonRunning();
+
+      // Check if Tailscale is connected
+      const status = await tailscale.getStatus();
+      
+      if (status.connected) {
+        this.agentLogger?.infoSync('Tailscale VPN reconnected on startup', {
+          component: LogComponents.agent,
+          tailnetIP: status.tailnetIP,
+          hostname: status.hostname,
+          online: status.online,
+        });
+      } else {
+        // Daemon running but not authenticated - needs manual connection
+        this.agentLogger?.infoSync('Tailscale daemon started but not authenticated', {
+          component: LogComponents.agent,
+          backendState: status.backendState,
+          note: 'Device needs to be provisioned with VPN auth key',
+        });
+      }
+    } catch (error) {
+      // VPN reconnection failure should not stop agent startup
+      this.agentLogger?.warnSync(
+        'Failed to reconnect VPN on startup (non-critical)',
+        {
+          component: LogComponents.agent,
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+        }
+      );
     }
   }
 

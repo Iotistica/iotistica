@@ -8,6 +8,7 @@ import express from 'express';
 import type { Server } from 'http';
 import * as middleware from './middleware';
 import * as actions from './actions';
+import * as vpnActions from './vpn-actions';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 
@@ -35,6 +36,7 @@ export class DeviceAPI {
 			middleware.setLoggingLogger(logger);
 			middleware.setNetworkSecurityLogger(logger);
 			middleware.setErrorsLogger(logger);
+			vpnActions.initVpnActions(logger);  // Initialize VPN actions
 		}
 
 		this.api.disable('x-powered-by');

@@ -67,6 +67,7 @@ export interface TailscaleConfig {
 	acceptRoutes?: boolean;      // DANGEROUS: Accept subnet routes from other nodes (false unless device is router/gateway/site-to-site bridge)
 	acceptDNS?: boolean;         // Hijack DNS for MagicDNS (false unless you need device-name.tailnet.ts.net resolution - can break embedded workloads)
 	shieldsUp?: boolean;         // Block ALL inbound traffic (recommended true for IoT edge devices)
+	persistAuthKey?: boolean;    // DANGEROUS: Persist auth key to disk (default false - ephemeral keys should not be stored)
 }
 
 export interface TailscaleStatus {
@@ -111,8 +112,9 @@ export class TailscaleManager {
 	/**
 	 * Ensure tailscaled daemon is enabled and running
 	 * Detects if running in Docker container and uses appropriate method
+	 * PUBLIC: Called during auto-reconnection on agent startup
 	 */
-	private async ensureDaemonRunning(): Promise<void> {
+	async ensureDaemonRunning(): Promise<void> {
 		const isContainer = await this.isRunningInContainer();
 
 		if (isContainer) {
@@ -166,6 +168,10 @@ export class TailscaleManager {
 				});
 				
 				daemon.unref();
+
+				// CRITICAL: Set socket path for all CLI commands in container mode
+				// Without this, tailscale CLI may fail or talk to wrong daemon
+				process.env.TAILSCALE_SOCKET = '/var/run/tailscale/tailscaled.sock';
 
 				// Wait for daemon to start
 				await new Promise(resolve => setTimeout(resolve, 3000));
@@ -333,9 +339,31 @@ export class TailscaleManager {
 				await mkdir(this.configDir, { recursive: true });
 			}
 
-			// Save auth key to file (for backup/audit)
-			const authKeyPath = path.join(this.configDir, 'authkey');
-			await writeFile(authKeyPath, config.authKey, { mode: 0o600 });
+			// SECURITY: Enforce ephemeral auth keys only
+			// Ephemeral keys auto-expire and cannot be reused
+			// This prevents accidental use of reusable keys and human error in provisioning
+			if (!config.authKey.startsWith('tskey-auth-') && !config.authKey.startsWith('tskey-ephemeral-')) {
+				this.logger?.errorSync('Invalid Tailscale auth key format', new Error('Auth key must be ephemeral'), {
+					component: LogComponents.tailscaleManager,
+					keyPrefix: config.authKey.substring(0, 10),
+					note: 'Only ephemeral or standard auth keys are allowed on edge devices',
+				});
+				throw new Error('Invalid Tailscale auth key format - must start with tskey-auth- or tskey-ephemeral-');
+			}
+
+			// SECURITY: Do NOT persist auth keys to disk
+			// Auth keys are credentials that should never be stored
+			// Tailscale daemon persists authentication state in /var/lib/tailscale/tailscaled.state
+			// which is sufficient for auto-reconnection after restarts
+			// Storing keys enables forensic recovery after device compromise
+			if (config.persistAuthKey === true) {
+				this.logger?.errorSync('Auth key persistence rejected', new Error('Auth key persistence is disabled'), {
+					component: LogComponents.tailscaleManager,
+					note: 'SECURITY: Auth keys must never be persisted to disk in production',
+					recommendation: 'Tailscale daemon state file provides auto-reconnection',
+				});
+				throw new Error('Auth key persistence is disabled for security - daemon state file handles reconnection');
+			}
 
 			this.logger?.infoSync('Connecting to Tailscale network...', {
 				component: LogComponents.tailscaleManager,

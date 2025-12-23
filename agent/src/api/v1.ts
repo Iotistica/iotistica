@@ -6,6 +6,7 @@
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import * as actions from './actions';
+import * as vpnActions from './vpn-actions';
 
 export const router = express.Router();
 
@@ -393,6 +394,109 @@ router.post('/v1/factory-reset', async (req: Request, res: Response, next: NextF
 			message: 'Factory reset complete. All data deleted. Only UUID preserved.',
 			status: 'factory-reset'
 		});
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * POST /v1/vpn/tailscale/connect
+ * Connect to Tailscale VPN
+ * 
+ * Body: {
+ *   authKey: string,
+ *   tailnetName: string,
+ *   hostname?: string,
+ *   shieldsUp?: boolean,
+ *   acceptRoutes?: boolean,
+ *   acceptDNS?: boolean
+ * }
+ */
+router.post('/v1/vpn/tailscale/connect', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { authKey, tailnetName, hostname, shieldsUp, acceptRoutes, acceptDNS } = req.body;
+
+		if (!authKey || !tailnetName) {
+			return res.status(400).json({ 
+				error: 'Missing required fields: authKey and tailnetName are required' 
+			});
+		}
+
+		const result = await vpnActions.connectTailscale({
+			authKey,
+			tailnetName,
+			hostname,
+			shieldsUp: shieldsUp ?? true,  // Default true for security
+			acceptRoutes: acceptRoutes ?? false,  // Default false for edge devices
+			acceptDNS: acceptDNS ?? false,  // Default false to avoid DNS hijacking
+		});
+
+		return res.status(200).json(result);
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * POST /v1/vpn/tailscale/disconnect
+ * Disconnect from Tailscale VPN
+ */
+router.post('/v1/vpn/tailscale/disconnect', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const result = await vpnActions.disconnectTailscale();
+		return res.status(200).json(result);
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/vpn/tailscale/status
+ * Get Tailscale VPN status
+ */
+router.get('/v1/vpn/tailscale/status', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const status = await vpnActions.getTailscaleStatus();
+		return res.status(200).json(status);
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/vpn/tailscale/ip
+ * Get Tailscale IP address
+ */
+router.get('/v1/vpn/tailscale/ip', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const ip = await vpnActions.getTailscaleIP();
+		return res.status(200).json({ ip });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * POST /v1/vpn/tailscale/ping
+ * Ping another Tailscale node
+ * 
+ * Body: {
+ *   hostname: string,
+ *   count?: number
+ * }
+ */
+router.post('/v1/vpn/tailscale/ping', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { hostname, count } = req.body;
+
+		if (!hostname) {
+			return res.status(400).json({ 
+				error: 'Missing required field: hostname' 
+			});
+		}
+
+		const success = await vpnActions.pingTailscaleNode(hostname, count);
+		return res.status(200).json({ success, hostname });
 	} catch (error) {
 		next(error);
 	}
