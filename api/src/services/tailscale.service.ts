@@ -35,6 +35,9 @@ interface TailscaleCredentials {
   authKey: string;
   tailnetName: string;
   expiresAt: string;
+  shieldsUp: boolean;      // Block all inbound traffic by default (IoT security)
+  acceptRoutes: boolean;   // Accept subnet routes from other nodes (false for edge devices)
+  acceptDNS: boolean;      // Use Tailscale DNS (false unless MagicDNS needed)
 }
 
 /**
@@ -106,9 +109,9 @@ export class TailscaleService {
       // Default options for IoT devices
       const {
         reusable = false,        // One-time use (more secure)
-        ephemeral = false,       // Persistent device (not ephemeral)
+        ephemeral = true,        // Ephemeral device (removed on disconnect)
         preauthorized = true,    // Auto-approve device
-        expiryDays = 90,         // 90-day expiry
+        expiryDays = 1,          // 1 day expiry (reasonable for provisioning)
         tags = []                // Device tags for ACLs
       } = options;
 
@@ -158,7 +161,10 @@ export class TailscaleService {
       return {
         authKey: authKeyData.key,
         tailnetName: this.tailnet,
-        expiresAt: authKeyData.expires
+        expiresAt: authKeyData.expires,
+        shieldsUp: true,      // Block ALL inbound traffic (IoT security best practice)
+        acceptRoutes: false,  // NEVER accept routes for edge devices (only for routers/gateways)
+        acceptDNS: false,     // Don't hijack DNS unless MagicDNS needed (can break embedded workloads)
       };
     } catch (error: any) {
       logger.error(`Failed to create Tailscale auth key:`, error);

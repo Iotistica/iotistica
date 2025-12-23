@@ -281,22 +281,20 @@ export class ProvisioningService {
   }
 
   try {
+    // Use default IoT security options from tailscaleService (ephemeral, 30min expiry, shields up)
     const tailscaleCredentials = await tailscaleService.createAuthKey(
       deviceUuid,
-      deviceName,
-      {
-        reusable: false,
-        ephemeral: false,
-        preauthorized: true,
-        expiryDays: 90
-      }
+      deviceName
+      // No options = use secure defaults from tailscaleService
     );
     logger.info(`Tailscale VPN credentials created for device: ${deviceUuid.substring(0,8)}...`, {
       deviceUuid,
       deviceName,
       authKey: tailscaleCredentials.authKey ? `${tailscaleCredentials.authKey.substring(0, 20)}...` : 'none',
       tailnetName: tailscaleCredentials.tailnetName,
-      expiresAt: tailscaleCredentials.expiresAt
+      shieldsUp: tailscaleCredentials.shieldsUp,
+      acceptRoutes: tailscaleCredentials.acceptRoutes,
+      acceptDNS: tailscaleCredentials.acceptDNS,
     });
     return { 
       type: 'tailscale',

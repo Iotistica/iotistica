@@ -327,48 +327,62 @@ export class DeviceManager {
 				mqttBrokerHost: this.deviceInfo.mqttBrokerConfig?.host,
 				vpnEnabled: response.vpn?.enabled ?? false,
 				vpnType: response.vpn?.type,
-				tailnetName: response.vpn?.type === 'tailscale' ? response.vpn.tailscale?.tailnetName : undefined,
-				vpnAuthKey: response.vpn?.type === 'tailscale' && response.vpn.tailscale?.authKey 
-					? `${response.vpn.tailscale.authKey.substring(0, 20)}...` 
-					: undefined,
+				vpnData: response.vpn?.type === 'tailscale' ? {
+					tailnetName: response.vpn.tailscale.tailnetName,
+					authKey: response.vpn.tailscale.authKey ? `${response.vpn.tailscale.authKey.substring(0, 20)}...` : undefined,
+					shieldsUp: response.vpn.tailscale.shieldsUp,
+					acceptRoutes: response.vpn.tailscale.acceptRoutes,
+					acceptDNS: response.vpn.tailscale.acceptDNS,
+					expiresAt: response.vpn.tailscale.expiresAt,
+				} : undefined,
 			});
-		
 
-				try {
-					const { TailscaleManager } = await import('../network/vpn/tailscale-manager.js');
-					const tailscaleManager = new TailscaleManager(this.logger);
-					
-					// Check if Tailscale is installed, install if needed
-					const isInstalled = await tailscaleManager.checkInstallation();
-					if (!isInstalled) {
-						await tailscaleManager.install();
-					}
+		// Phase 4: Setup Tailscale VPN if provided in response
+		if (response.vpn?.enabled && response.vpn.type === 'tailscale') {
+			this.logger?.infoSync('Setting up Tailscale VPN', {
+				component: LogComponents.deviceManager,
+				operation: 'provision',
+				tailnetName: response.vpn.tailscale.tailnetName,
+			});
 
-					// Configure and connect to Tailnet
-					await tailscaleManager.configure({
-						authKey: response.vpn.tailscale.authKey,
-						tailnetName: response.vpn.tailscale.tailnetName,
-						hostname: this.deviceInfo.deviceName,
-					});
-
-					// Get Tailscale IP
-					const tailscaleIP = await tailscaleManager.getIP();
-
-					this.logger?.infoSync('Tailscale VPN tunnel established successfully', {
-						component: LogComponents.deviceManager,
-						operation: 'provision',
-						tailscaleIP,
-						tailnetName: response.vpn.tailscale.tailnetName,
-					});
-				} catch (vpnError) {
-					// VPN setup failure is non-critical - device can still operate
-					this.logger?.warnSync('Tailscale VPN setup failed (device will continue without VPN)', {
-						component: LogComponents.deviceManager,
-						operation: 'provision',
-						error: vpnError instanceof Error ? vpnError.message : String(vpnError),
-					});
+			try {
+				const { TailscaleManager } = await import('../network/vpn/tailscale-manager.js');
+				const tailscaleManager = new TailscaleManager(this.logger);
+				
+				// Check if Tailscale is installed, install if needed
+				const isInstalled = await tailscaleManager.checkInstallation();
+				if (!isInstalled) {
+					await tailscaleManager.install();
 				}
+
+				// Configure and connect to Tailnet
+				await tailscaleManager.configure({
+					authKey: response.vpn.tailscale.authKey,
+					tailnetName: response.vpn.tailscale.tailnetName,
+					hostname: this.deviceInfo.deviceName,
+					shieldsUp: response.vpn.tailscale.shieldsUp ?? true,        // Default shields up for security
+					acceptRoutes: response.vpn.tailscale.acceptRoutes ?? false, // Don't accept routes by default
+					acceptDNS: response.vpn.tailscale.acceptDNS ?? false,       // Don't hijack DNS unless MagicDNS needed
+				});
+
+				// Get Tailscale IP
+				const tailscaleIP = await tailscaleManager.getIP();
+
+				this.logger?.infoSync('Tailscale VPN tunnel established successfully', {
+					component: LogComponents.deviceManager,
+					operation: 'provision',
+					tailscaleIP,
+					tailnetName: response.vpn.tailscale.tailnetName,
+				});
+			} catch (vpnError) {
+				// VPN setup failure is non-critical - device can still operate
+				this.logger?.warnSync('Tailscale VPN setup failed (device will continue without VPN)', {
+					component: LogComponents.deviceManager,
+					operation: 'provision',
+					error: vpnError instanceof Error ? vpnError.message : String(vpnError),
+				});
 			}
+		}
 
 			return this.getDeviceInfo();
 		} catch (error: any) {

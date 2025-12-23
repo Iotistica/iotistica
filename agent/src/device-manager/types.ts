@@ -123,6 +123,9 @@ export interface ProvisionResponse {
 					authKey: string;
 					tailnetName: string;
 					expiresAt: string;
+					shieldsUp?: boolean;      // Block all inbound traffic (IoT security)
+					acceptRoutes?: boolean;   // Accept subnet routes (routers/gateways only)
+					acceptDNS?: boolean;      // Use Tailscale MagicDNS
 				};
 		  }
 	createdAt: string;

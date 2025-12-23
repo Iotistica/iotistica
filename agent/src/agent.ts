@@ -417,7 +417,7 @@ export default class DeviceAgent {
       provisioningApiKey &&
       cloudEndpoint
     ) {
-      this.agentLogger.debugSync(
+      this.agentLogger.infoSync(
         "Auto-provisioning device with two-phase authentication",
         {
           component: LogComponents.agent,
@@ -429,7 +429,7 @@ export default class DeviceAgent {
         const macAddress = process.env.MAC_ADDRESS || (await getMacAddress());
         const osVersion = process.env.OS_VERSION || (await getOsVersion());
 
-        this.agentLogger.debugSync("System information detected", {
+        this.agentLogger.infoSync("System information detected", {
           component: LogComponents.agent,
           macAddress: macAddress
             ? `${macAddress.substring(0, 8)}...`
@@ -448,6 +448,7 @@ export default class DeviceAgent {
           agentVersion: process.env.AGENT_VERSION || getPackageVersion(),
         });
         deviceInfo = this.deviceManager.getDeviceInfo();
+        this.deviceInfo = deviceInfo;
         this.agentLogger.infoSync("Device auto-provisioned successfully", {
           component: LogComponents.agent,
         });
@@ -460,7 +461,7 @@ export default class DeviceAgent {
             note: "Device will remain unprovisioned. Check PROVISIONING_KEY or boot config file.",
           }
         );
-
+        return;
       }
     } else if (!deviceInfo.provisioned && cloudEndpoint && !provisioningApiKey
     ) {

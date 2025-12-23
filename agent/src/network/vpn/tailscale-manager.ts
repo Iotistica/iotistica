@@ -24,14 +24,49 @@ import { LogComponents } from '../../logging/types';
 
 const execAsync = promisify(exec);
 
+/**
+ * Execute command using spawn with args array (prevents shell injection)
+ */
+function spawnAsync(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+	return new Promise((resolve, reject) => {
+		const child = spawn(command, args, { stdio: 'pipe' });
+		let stdout = '';
+		let stderr = '';
+
+		child.stdout?.on('data', (data) => {
+			stdout += data.toString();
+		});
+
+		child.stderr?.on('data', (data) => {
+			stderr += data.toString();
+		});
+
+		child.on('close', (code) => {
+			if (code === 0) {
+				resolve({ stdout, stderr });
+			} else {
+				const error = new Error(`Command failed with exit code ${code}: ${stderr || stdout}`);
+				(error as any).code = code;
+				(error as any).stdout = stdout;
+				(error as any).stderr = stderr;
+				reject(error);
+			}
+		});
+
+		child.on('error', (err) => {
+			reject(err);
+		});
+	});
+}
+
 export interface TailscaleConfig {
 	authKey: string;
 	tailnetName: string;
 	hostname?: string;
-	advertiseRoutes?: string[];  // CIDR ranges to advertise
-	acceptRoutes?: boolean;      // Accept routes from other nodes
-	acceptDNS?: boolean;         // Use Tailscale DNS
-	shieldsUp?: boolean;         // Enable shields up (block incoming)
+	advertiseRoutes?: string[];  // CIDR ranges to advertise (use for routers/gateways only)
+	acceptRoutes?: boolean;      // DANGEROUS: Accept subnet routes from other nodes (false unless device is router/gateway/site-to-site bridge)
+	acceptDNS?: boolean;         // Hijack DNS for MagicDNS (false unless you need device-name.tailnet.ts.net resolution - can break embedded workloads)
+	shieldsUp?: boolean;         // Block ALL inbound traffic (recommended true for IoT edge devices)
 }
 
 export interface TailscaleStatus {
@@ -73,6 +108,43 @@ export class TailscaleManager {
 	}
 
 	/**
+	 * Ensure tailscaled daemon is enabled and running
+	 */
+	private async ensureDaemonRunning(): Promise<void> {
+		try {
+			// Check if tailscaled service is active
+			const { stdout } = await execAsync('systemctl is-active tailscaled');
+			if (stdout.trim() === 'active') {
+				this.logger?.infoSync('Tailscaled daemon is running', {
+					component: LogComponents.tailscaleManager,
+				});
+				return;
+			}
+		} catch {
+			// Service not active, will enable and start below
+		}
+
+		try {
+			this.logger?.infoSync('Starting tailscaled daemon...', {
+				component: LogComponents.tailscaleManager,
+			});
+
+			// Enable and start tailscaled service
+			await execAsync('systemctl enable --now tailscaled');
+
+			this.logger?.infoSync('Tailscaled daemon started successfully', {
+				component: LogComponents.tailscaleManager,
+			});
+		} catch (error: any) {
+			const err = error instanceof Error ? error : new Error(String(error));
+			this.logger?.errorSync('Failed to start tailscaled daemon', err, {
+				component: LogComponents.tailscaleManager,
+			});
+			throw err;
+		}
+	}
+
+	/**
 	 * Install Tailscale client
 	 * Downloads and installs using official installation script
 	 */
@@ -98,6 +170,9 @@ export class TailscaleManager {
 			await execAsync('tailscale --version');
 			this.isInstalled = true;
 
+			// Ensure daemon is enabled and running
+			await this.ensureDaemonRunning();
+
 			this.logger?.infoSync('Tailscale client installed successfully', {
 				component: LogComponents.tailscaleManager,
 			});
@@ -112,6 +187,7 @@ export class TailscaleManager {
 
 	/**
 	 * Configure and start Tailscale with auth key
+	 * Only re-authenticates if not already running or configuration changed
 	 */
 	async configure(config: TailscaleConfig): Promise<void> {
 		if (!this.isInstalled) {
@@ -119,6 +195,25 @@ export class TailscaleManager {
 		}
 
 		try {
+			// Ensure tailscaled daemon is running before attempting connection
+			await this.ensureDaemonRunning();
+
+			// Check if already authenticated and running
+			const currentStatus = await this.getStatus();
+			
+			if (currentStatus.connected) {
+				this.logger?.infoSync('Tailscale already connected, skipping re-authentication', {
+					component: LogComponents.tailscaleManager,
+					tailnet: config.tailnetName,
+					tailscaleIP: currentStatus.tailnetIP,
+					hostname: currentStatus.hostname,
+				});
+				
+				// Note: We could add flag comparison here in the future to detect config changes
+				// For now, trust that if connected, the existing config is correct
+				return;
+			}
+
 			// Ensure config directory exists
 			if (!existsSync(this.configDir)) {
 				await mkdir(this.configDir, { recursive: true });
@@ -134,48 +229,62 @@ export class TailscaleManager {
 				hostname: config.hostname,
 			});
 
-			// Build tailscale up command
-			const args = ['up', '--authkey', config.authKey];
+			// Build tailscale up command with JSON output for structured parsing
+			const args = ['up', '--authkey', config.authKey, '--json'];
 
 			// Optional: Set hostname
 			if (config.hostname) {
 				args.push('--hostname', config.hostname);
 			}
 
-			// Optional: Advertise routes
+			// Optional: Advertise routes (for routers/gateways only)
 			if (config.advertiseRoutes && config.advertiseRoutes.length > 0) {
 				args.push('--advertise-routes', config.advertiseRoutes.join(','));
 			}
 
-			// Optional: Accept routes
-			if (config.acceptRoutes) {
+			// Optional: Accept routes - ONLY enable for routers/gateways/site-to-site bridges
+			// Regular IoT edge devices should NEVER accept routes (security risk)
+			if (config.acceptRoutes === true) {
 				args.push('--accept-routes');
 			}
 
-			// Optional: Accept DNS
-			if (config.acceptDNS !== false) {
+			// Optional: Accept DNS - ONLY enable if MagicDNS needed (can break embedded DNS)
+			// Default false to avoid hijacking DNS on IoT devices with custom DNS configs
+			if (config.acceptDNS === true) {
 				args.push('--accept-dns');
 			}
 
-			// Optional: Shields up
-			if (config.shieldsUp) {
+			// Optional: Shields up - RECOMMENDED for IoT edge devices (blocks all inbound traffic)
+			if (config.shieldsUp === true) {
 				args.push('--shields-up');
 			}
 
-			// Execute tailscale up
-			const { stdout, stderr } = await execAsync(`tailscale ${args.join(' ')}`);
+			// Execute tailscale up with JSON output using spawn (prevents shell injection)
+			const { stdout } = await spawnAsync('tailscale', args);
 
-			if (stderr && !stderr.includes('Success')) {
-				this.logger?.warnSync('Tailscale connection warning', {
+			// Parse JSON response for structured validation
+			const result = JSON.parse(stdout);
+
+			// Check backend state - use defensive checks against schema drift
+			// Instead of exact match, check that we're online and not stopped
+			const isConnected = result.Self?.Online === true && result.BackendState !== 'Stopped';
+			
+			if (!isConnected) {
+				this.logger?.warnSync('Tailscale authentication completed but not connected', {
 					component: LogComponents.tailscaleManager,
-					stderr,
+					backendState: result.BackendState,
+					online: result.Self?.Online,
+					authURL: result.AuthURL,
 				});
+				throw new Error(`Tailscale not connected (BackendState: ${result.BackendState}, Online: ${result.Self?.Online})`);
 			}
 
 			this.logger?.infoSync('Connected to Tailscale network', {
 				component: LogComponents.tailscaleManager,
 				tailnet: config.tailnetName,
-				output: stdout.trim(),
+				backendState: result.BackendState,
+				selfNode: result.Self?.HostName,
+				tailscaleIP: result.Self?.TailscaleIPs?.[0],
 			});
 		} catch (error: any) {
 			const err = error instanceof Error ? error : new Error(String(error));
@@ -200,7 +309,11 @@ export class TailscaleManager {
 
 			// Extract self node information
 			const selfNode = status.Self;
-			const connected = selfNode && status.BackendState === 'Running';
+			
+			// Use defensive checks against schema drift:
+			// - Check node is online (positive check)
+			// - Check backend is not stopped (negative check, more future-proof)
+			const connected = selfNode?.Online === true && status.BackendState !== 'Stopped';
 
 			return {
 				connected,
@@ -289,7 +402,8 @@ export class TailscaleManager {
 		}
 
 		try {
-			const { stdout } = await execAsync(`tailscale ping -c ${count} ${hostname}`);
+			// Use spawn to prevent shell injection via hostname parameter
+			const { stdout } = await spawnAsync('tailscale', ['ping', '-c', count.toString(), hostname]);
 			const success = stdout.includes('pong');
 
 			this.logger?.infoSync('Tailscale ping result', {
