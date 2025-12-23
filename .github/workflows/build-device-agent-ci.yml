@@ -257,8 +257,8 @@ jobs:
         run: |
           echo "Testing agent API..."
           
-          if curl -f http://localhost:48484/health 2>/dev/null || \
-             curl -f http://localhost:48484/v2/device 2>/dev/null; then
+          if curl -f http://localhost:48484/v1/healthy 2>/dev/null || \
+             curl -f http://localhost:48484/ping 2>/dev/null; then
             echo "✓ Agent API is responding"
           else
             echo "⚠ Agent API not responding"
