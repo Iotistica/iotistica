@@ -348,11 +348,10 @@ export class DeviceManager {
 						enabled: true,
 						type: 'wireguard',
 						ipAddress: response.vpn.peer?.ipAddress || '',
-						publicKey: '',
-						config: response.vpn.config || ''
+						wgConfig: response.vpn.config || ''
 					});
 
-				if (vpnSetupSuccess) {
+					if (vpnSetupSuccess) {
 						this.logger?.infoSync('VPN tunnel established successfully', {
 							component: LogComponents.deviceManager,
 							operation: 'provision',
