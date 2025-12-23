@@ -205,9 +205,25 @@ export class Sensor extends EventEmitter {
     data: any,
     sensorName: string,
     timestamp: Date,
-    prefix = ''
+    prefix = '',
+    depth = 0,
+    visited = new WeakSet()
   ): void {
     if (!anomalyService) return;
+
+    // Prevent infinite recursion
+    const MAX_DEPTH = 3;
+    if (depth > MAX_DEPTH) {
+      return;
+    }
+
+    // Prevent circular references
+    if (typeof data === 'object' && data !== null) {
+      if (visited.has(data)) {
+        return;
+      }
+      visited.add(data);
+    }
 
     const timestampMs = timestamp.getTime();
 
@@ -314,12 +330,10 @@ export class Sensor extends EventEmitter {
           });
         } else if (Array.isArray(value)) {
           // Handle arrays (e.g., "readings" array)
-          this.extractNumericFields(value, sensorName, timestamp, key);
+          this.extractNumericFields(value, sensorName, timestamp, key, depth + 1, visited);
         } else if (typeof value === 'object' && value !== null) {
-          // Recurse into nested object (max depth 2 to avoid deep nesting)
-          if (!prefix) {
-            this.extractNumericFields(value, sensorName, timestamp, key);
-          }
+          // Recurse into nested object (depth-limited)
+          this.extractNumericFields(value, sensorName, timestamp, key, depth + 1, visited);
         }
       }
     }
@@ -454,18 +468,39 @@ export class Sensor extends EventEmitter {
    */
   private onData(data: Buffer): void {
     this.stats.bytesReceived += data.length;
-    // Append to buffer
-    this.buffer = Buffer.concat([this.buffer, data]);
     
-    // Parse messages from buffer first (this adds them to messageBatch)
-    this.parseMessages();
-    
-    // Check if buffer capacity exceeded after parsing
-    if (this.buffer.length > this.config.bufferCapacity) {
-      this.logger?.warn(`Buffer capacity exceeded for endpoint '${this.getSensorName()}', publishing batch`);
-      this.publishBatch();
+    // Check if appending data would exceed buffer capacity BEFORE concatenation
+    // This prevents heap exhaustion from unbounded buffer growth
+    if (this.buffer.length + data.length > this.config.bufferCapacity) {
+      this.logger?.error(
+        `Buffer capacity would be exceeded for endpoint '${this.getSensorName()}' ` +
+        `(current: ${this.buffer.length}, incoming: ${data.length}, capacity: ${this.config.bufferCapacity}). ` +
+        `Discarding buffer and starting fresh. This likely indicates missing/incorrect delimiter or extremely large messages.`
+      );
+      
+      // Emergency: Clear buffer to prevent heap exhaustion
+      // This is a hard reset - we lose unparsed data, but we prevent OOM crash
+      this.buffer = Buffer.alloc(0);
+      
+      // Try to parse the new data alone (might contain complete messages)
+      this.buffer = data;
+      this.parseMessages();
+      
+      // If still too large after parsing, discard entirely
+      if (this.buffer.length > this.config.bufferCapacity) {
+        this.logger?.error(
+          `Single chunk exceeds buffer capacity (${data.length} > ${this.config.bufferCapacity}), discarding`
+        );
+        this.buffer = Buffer.alloc(0);
+      }
       return;
     }
+    
+    // Append to buffer (safe - we checked capacity above)
+    this.buffer = Buffer.concat([this.buffer, data]);
+    
+    // Parse messages from buffer (this adds them to messageBatch)
+    this.parseMessages();
   }
 
   /**
@@ -478,7 +513,19 @@ export class Sensor extends EventEmitter {
     // Keep the last part (incomplete message) in buffer
     if (parts.length > 0) {
       const lastPart = parts[parts.length - 1];
-      this.buffer = Buffer.from(lastPart, 'utf8');
+      
+      // Safety check: If incomplete message exceeds capacity, it's likely a delimiter mismatch
+      // Discard it to prevent unbounded growth
+      if (Buffer.byteLength(lastPart, 'utf8') > this.config.bufferCapacity) {
+        this.logger?.error(
+          `Incomplete message exceeds buffer capacity for endpoint '${this.getSensorName()}' ` +
+          `(${Buffer.byteLength(lastPart, 'utf8')} > ${this.config.bufferCapacity}). ` +
+          `This indicates incorrect delimiter or malformed data. Discarding incomplete message.`
+        );
+        this.buffer = Buffer.alloc(0);
+      } else {
+        this.buffer = Buffer.from(lastPart, 'utf8');
+      }
       
       // Process complete messages (all except last)
       for (let i = 0; i < parts.length - 1; i++) {
@@ -508,6 +555,22 @@ export class Sensor extends EventEmitter {
     this.messageBatch.messages.push(message);
     this.messageBatch.totalBytes += Buffer.byteLength(message, 'utf8');
     this.stats.messagesReceived++;
+    
+    // Safety: Force publish if batch grows too large (prevent unbounded memory growth)
+    // This happens if MQTT is down or publishing is failing
+    const MAX_BATCH_MESSAGES = 10000; // Safety limit
+    const MAX_BATCH_BYTES = 10 * 1024 * 1024; // 10MB safety limit
+    
+    if (this.messageBatch.messages.length >= MAX_BATCH_MESSAGES || 
+        this.messageBatch.totalBytes >= MAX_BATCH_BYTES) {
+      this.logger?.warn(
+        `Message batch exceeds safety limits for endpoint '${this.getSensorName()}' ` +
+        `(messages: ${this.messageBatch.messages.length}, bytes: ${this.messageBatch.totalBytes}). ` +
+        `Force publishing to prevent memory exhaustion.`
+      );
+      this.publishBatch();
+      return;
+    }
     
     // Check if should publish batch immediately (buffer size reached)
     // Timer will handle time-based publishing (bufferTimeMs)

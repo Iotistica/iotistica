@@ -18,6 +18,8 @@ import type { AgentLogger } from '../logging/agent-logger';
 import { RetryPolicy } from '../utils/retry-policy';
 import { isRetryableNetworkError, getNetworkErrorType } from '../utils/network';
 import { HttpClient, FetchHttpClient } from '../lib/http-client';
+import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * Summary of dropped logs for analysis
@@ -74,6 +76,9 @@ interface CloudLogBackendConfig {
 	flushInterval?: number;
 	reconnectInterval?: number;
 	maxReconnectInterval?: number;
+	// Disk-backed spool configuration (survives restarts/power loss)
+	spoolPath?: string; // Path to spool directory (e.g., /var/lib/agent/log-spool)
+	maxSpoolSizeMb?: number; // Max spool file size before rotation (default: 50MB)
 	// Sampling configuration (reduce log volume)
 	samplingRates?: {
 		error?: number;   // Default: 1.0 (100% - all errors)
@@ -97,6 +102,26 @@ export class CloudLogBackend implements LogBackend {
 	private sampledLogCount: number = 0;
 	private totalLogCount: number = 0;
 	private httpClient: HttpClient;
+	
+	/** Adaptive batch sizing for self-adjusting to API limits */
+	private adaptiveBatchSize: number = 50; // Start conservative
+	private adaptiveMaxBytes: number = 5 * 1024 * 1024; // Start at 5MB
+	private readonly MIN_BATCH_SIZE = 10;
+	private readonly MAX_BATCH_SIZE = 200;
+	private readonly MIN_BATCH_BYTES = 1 * 1024 * 1024; // 1MB
+	private readonly MAX_BATCH_BYTES = 20 * 1024 * 1024; // 20MB
+	private consecutiveSuccesses: number = 0;
+	
+	/** Incremental buffer byte tracking (avoids O(n) JSON.stringify on every log) */
+	private bufferBytes: number = 0;
+	
+	/** Flush concurrency guard (prevents overlapping flushes) */
+	private flushing: boolean = false;
+	
+	/** Disk-backed spool for surviving restarts/power loss */
+	private spoolPath?: string;
+	private spoolFilePath?: string;
+	private maxSpoolSize: number = 50 * 1024 * 1024; // 50MB default
 	
 	/** Circular buffer of dropped log summaries (for later analysis) */
 	private droppedLogSummaries: DroppedLogSummary[] = [];
@@ -122,13 +147,34 @@ export class CloudLogBackend implements LogBackend {
 			deviceUuid: config.deviceUuid,
 			deviceApiKey: config.deviceApiKey ?? '',
 		compression: config.compression ?? true,
-		batchSize: config.batchSize ?? 500, // 500 logs per batch (changed from 100)
+		batchSize: config.batchSize ?? 100, // 100 logs per batch (reduced from 500 to prevent payload too large)
 		maxRetries: config.maxRetries ?? 3,		bufferSize: config.bufferSize ?? 256 * 1024, // 256KB
 		flushInterval: config.flushInterval ?? 30000, // 30 seconds (changed from 100ms)
 		reconnectInterval: config.reconnectInterval ?? 5000, // 5s
 		maxReconnectInterval: config.maxReconnectInterval ?? 300000, // 5min
+		spoolPath: config.spoolPath ?? '', // Empty string if not provided
+		maxSpoolSizeMb: config.maxSpoolSizeMb ?? 50,
 		samplingRates: config.samplingRates ?? { debug: 0.05, info: 1, warn: 1, error: 1 }, // All info/warn/error, sample 5% debug
-	};		// Initialize HTTP client with default headers
+	};		
+		// Initialize disk-backed spool (if configured)
+		if (this.config.spoolPath) {
+			this.spoolPath = this.config.spoolPath;
+			this.spoolFilePath = path.join(this.spoolPath, 'buffer.ndjson');
+			this.maxSpoolSize = this.config.maxSpoolSizeMb * 1024 * 1024;
+			
+			// Create spool directory if it doesn't exist
+			try {
+				if (!fs.existsSync(this.spoolPath)) {
+					fs.mkdirSync(this.spoolPath, { recursive: true });
+				}
+			} catch (error) {
+				console.error(`[CloudLogBackend] Failed to create spool directory: ${error}`);
+				this.spoolPath = undefined; // Disable spooling if directory creation fails
+				this.spoolFilePath = undefined;
+			}
+		}
+		
+		// Initialize HTTP client with default headers
 		this.httpClient = new FetchHttpClient({
 			defaultHeaders: {
 				'X-Device-API-Key': this.config.deviceApiKey
@@ -192,6 +238,7 @@ export class CloudLogBackend implements LogBackend {
 			endpoint: this.config.cloudEndpoint,
 			device: this.config.deviceUuid,
 			compression: this.config.compression,
+			spooling: this.spoolPath ? 'enabled' : 'disabled',
 			samplingRates: {
 				error: `${(this.samplingRates.error * 100).toFixed(0)}%`,
 				warn: `${(this.samplingRates.warn * 100).toFixed(0)}%`,
@@ -199,6 +246,11 @@ export class CloudLogBackend implements LogBackend {
 				debug: `${(this.samplingRates.debug * 100).toFixed(1)}%`
 			}
 		});
+		
+		// Replay spooled logs from previous session (if spool exists)
+		if (this.spoolPath) {
+			await this.replaySpooledLogs();
+		}
 		
 		// Start streaming
 		await this.connect();
@@ -219,8 +271,10 @@ export class CloudLogBackend implements LogBackend {
 		
 		this.sampledLogCount++;
 		
-		// Add to buffer
+		// Calculate log size and add to buffer
+		const logSize = JSON.stringify(logMessage).length + 1; // +1 for newline
 		this.buffer.push(logMessage);
+		this.bufferBytes += logSize;
 		
 		// this.logger?.debugSync - REMOVED (too verbose + prevents infinite recursion)
 		
@@ -232,9 +286,8 @@ export class CloudLogBackend implements LogBackend {
 		}
 		
 		// Check buffer size (prevent memory overflow)
-		const bufferBytes = JSON.stringify(this.buffer).length;
-		if (bufferBytes > this.config.bufferSize) {
-			console.warn(`[CloudLogBackend] Log buffer full, forcing flush (${Math.round(bufferBytes / 1024)} KB)`);
+		if (this.bufferBytes > this.config.bufferSize) {
+			console.warn(`[CloudLogBackend] Log buffer full, forcing flush (${Math.round(this.bufferBytes / 1024)} KB)`);
 			await this.flush();
 		}
 	}
@@ -277,10 +330,6 @@ export class CloudLogBackend implements LogBackend {
 			clearTimeout(this.reconnectTimer);
 		}
 		
-		if (this.reconnectTimer) {
-			clearTimeout(this.reconnectTimer);
-		}
-		
 		// this.logger?.infoSync - REMOVED to prevent infinite recursion
 		console.log('[CloudSync] Cloud Log Backend stopped');
 	}
@@ -300,16 +349,24 @@ export class CloudLogBackend implements LogBackend {
 	}
 	
 	private async flush(): Promise<void> {
-		// Clear flush timer
-		if (this.flushTimer) {
-			clearTimeout(this.flushTimer);
-			this.flushTimer = undefined;
-		}
-		
-		// Nothing to flush
-		if (this.buffer.length === 0) {
+		// Concurrency guard: prevent overlapping flushes
+		if (this.flushing) {
 			return;
 		}
+		
+		this.flushing = true;
+		
+		try {
+			// Clear flush timer
+			if (this.flushTimer) {
+				clearTimeout(this.flushTimer);
+				this.flushTimer = undefined;
+			}
+			
+			// Nothing to flush
+			if (this.buffer.length === 0) {
+				return;
+			}
 		
 		// Check circuit breaker
 		if (this.circuitBreakerOpen) {
@@ -329,17 +386,55 @@ export class CloudLogBackend implements LogBackend {
 		}
 		
 		// Split buffer into smaller batches if too large
-		const batchSize = this.config.batchSize;
+		// Use ADAPTIVE sizing that learns from failures (TCP congestion control style)
+		// - On error: Cut batch size by 50% (multiplicative decrease)
+		// - On success: Grow batch size by 10% (additive increase)
+		const maxBatchSize = Math.floor(this.adaptiveBatchSize);
+		const maxBatchBytes = Math.floor(this.adaptiveMaxBytes);
 		const batches: LogMessage[][] = [];
 		const totalLogsToFlush = this.buffer.length; // Store before clearing
 		
-		for (let i = 0; i < this.buffer.length; i += batchSize) {
-			batches.push(this.buffer.slice(i, i + batchSize));
+		let currentBatch: LogMessage[] = [];
+		let currentBatchBytes = 0;
+		
+		for (const log of this.buffer) {
+			// Estimate log size (JSON serialization + newline)
+			const logSize = JSON.stringify(log).length + 1;
+			
+			// Check if adding this log would exceed adaptive limits
+			const wouldExceedSize = currentBatchBytes + logSize > maxBatchBytes;
+			const wouldExceedCount = currentBatch.length >= maxBatchSize;
+			
+			if ((wouldExceedSize || wouldExceedCount) && currentBatch.length > 0) {
+				// Start new batch
+				batches.push(currentBatch);
+				currentBatch = [];
+				currentBatchBytes = 0;
+			}
+			
+			currentBatch.push(log);
+			currentBatchBytes += logSize;
+		}
+		
+		// Add final batch
+		if (currentBatch.length > 0) {
+			batches.push(currentBatch);
+		}
+		
+		// Log adaptive batch sizing info
+		if (batches.length > 0) {
+			console.log(`[CloudLogBackend] Adaptive batching: ${batches.length} batches (size limit: ${maxBatchSize} logs / ${(maxBatchBytes / 1024 / 1024).toFixed(1)}MB)`);
 		}
 		
 		
 		// Clear buffer immediately to prevent duplicate sends
 		this.buffer = [];
+		this.bufferBytes = 0;
+		
+		// Write to disk spool before sending (survives crashes/power loss)
+		if (this.spoolFilePath) {
+			await this.writeToSpool(batches);
+		}
 		
 		// Send batches sequentially
 		const failedLogs: LogMessage[] = [];
@@ -348,6 +443,28 @@ export class CloudLogBackend implements LogBackend {
 				try {
 				// Use retry policy for network resilience
 				await this.retryPolicy.execute(() => this.sendLogs(batch));
+				
+				// SUCCESS: Increase batch size gradually (additive increase)
+				this.consecutiveSuccesses++;
+				
+				// Grow by 10% every 3 consecutive successes
+				if (this.consecutiveSuccesses >= 3) {
+					const oldSize = this.adaptiveBatchSize;
+					const oldBytes = this.adaptiveMaxBytes;
+					
+					this.adaptiveBatchSize = Math.min(
+						this.adaptiveBatchSize * 1.1,
+						this.MAX_BATCH_SIZE
+					);
+					this.adaptiveMaxBytes = Math.min(
+						this.adaptiveMaxBytes * 1.1,
+						this.MAX_BATCH_BYTES
+					);
+					
+					this.consecutiveSuccesses = 0;
+					
+					console.log(`[CloudLogBackend] Adaptive growth: ${Math.floor(oldSize)}→${Math.floor(this.adaptiveBatchSize)} logs, ${(oldBytes/1024/1024).toFixed(1)}→${(this.adaptiveMaxBytes/1024/1024).toFixed(1)}MB`);
+				}
 				
 				// Reset retry counters on success
 				this.retryCount = 0;
@@ -363,7 +480,29 @@ export class CloudLogBackend implements LogBackend {
 				} else {
 					console.log(`[CloudLogBackend] Uploaded ${batch.length} logs to cloud (total: ${totalLogsToFlush}, batches: ${batches.length})`);
 				}
+				
+				// Clear spool file on successful send (all batches succeeded)
+				if (this.spoolFilePath && batch === batches[batches.length - 1]) {
+					await this.clearSpool();
+				}
 			} catch (error) {
+				// FAILURE: Cut batch size in half (multiplicative decrease)
+				const oldSize = this.adaptiveBatchSize;
+				const oldBytes = this.adaptiveMaxBytes;
+				
+				this.adaptiveBatchSize = Math.max(
+					this.adaptiveBatchSize * 0.5,
+					this.MIN_BATCH_SIZE
+				);
+				this.adaptiveMaxBytes = Math.max(
+					this.adaptiveMaxBytes * 0.5,
+					this.MIN_BATCH_BYTES
+				);
+				
+				this.consecutiveSuccesses = 0; // Reset growth counter
+				
+				console.warn(`[CloudLogBackend] Adaptive decrease due to error: ${Math.floor(oldSize)}→${Math.floor(this.adaptiveBatchSize)} logs, ${(oldBytes/1024/1024).toFixed(1)}→${(this.adaptiveMaxBytes/1024/1024).toFixed(1)}MB`);
+				
 				// All retries exhausted - create summary before dropping
 				if (this.retryPolicy.hasExhaustedRetries()) {
 					const summary = this.createDroppedLogSummary(batch, 'retry_exhausted');
@@ -400,6 +539,10 @@ export class CloudLogBackend implements LogBackend {
 			this.scheduleReconnect();
 		}
 		// Note: Connection recovery tracking removed - sendDroppedLogSummaries endpoint not yet implemented
+		} finally {
+			// Always reset flushing flag (even if errors occur)
+			this.flushing = false;
+		}
 	}
 	
 	private async sendLogs(logs: LogMessage[]): Promise<void> {
@@ -408,12 +551,15 @@ export class CloudLogBackend implements LogBackend {
 		// Convert to NDJSON (newline-delimited JSON)
 		const ndjson = logs.map(log => JSON.stringify(log)).join('\n') + '\n';
 		
+		// Only compress if payload is large enough to benefit (CPU > bandwidth on edge devices)
+		const shouldCompress = this.config.compression && ndjson.length > 2048;
+		
 		// Send to cloud using HTTP client (compression handled automatically)
 		const response = await this.httpClient.post(endpoint, ndjson, {
 			headers: {
 				'Content-Type': 'application/x-ndjson'
 			},
-			compress: this.config.compression
+			compress: shouldCompress
 		});
 		
 		if (!response.ok) {
@@ -457,22 +603,83 @@ export class CloudLogBackend implements LogBackend {
 		// Detect log level from message content
 		const level = this.detectLogLevel(logMessage);
 		
+		// Circuit breaker: aggressive sampling during outages (prevents memory growth)
+		if (this.circuitBreakerOpen) {
+			// Always keep errors and warnings (important signals)
+			if (level === 'error' || level === 'warn') {
+				return true;
+			}
+			// Drop all debug logs during outages
+			if (level === 'debug') {
+				return false;
+			}
+			// Heavily sample info logs (10% to preserve signal/noise ratio)
+			if (level === 'info') {
+				return this.deterministicSample(logMessage, 0.1);
+			}
+		}
+		
 		// Get sampling rate for this level
 		const rate = this.samplingRates[level] ?? 1.0;
 		
-		// Sample: keep if random value is less than rate
-		// Examples:
-		//   rate = 1.0 → always keep (100%)
-		//   rate = 0.1 → keep 10%
-		//   rate = 0.01 → keep 1%
-		return Math.random() < rate;
+		// Use deterministic sampling for consistent dashboard behavior
+		// Same logs consistently appear/disappear (better UX)
+		return this.deterministicSample(logMessage, rate);
+	}
+	
+	/**
+	 * Deterministic sampling based on hash of device+service+time
+	 * Same service will consistently be sampled or not (better dashboard UX)
+	 * 
+	 * @param logMessage Log message to sample
+	 * @param rate Sampling rate (0.0 to 1.0)
+	 * @returns true if log should be kept
+	 */
+	private deterministicSample(logMessage: LogMessage, rate: number): boolean {
+		// Always keep if rate is 100%
+		if (rate >= 1.0) return true;
+		
+		// Always drop if rate is 0%
+		if (rate <= 0.0) return false;
+		
+		// Hash key: deviceUuid + serviceName + minute bucket
+		// Minute bucket ensures sampling changes over time (not stuck forever)
+		const minuteBucket = Math.floor(Date.now() / 60000);
+		const serviceName = logMessage.serviceName || 'unknown';
+		const hashKey = `${this.config.deviceUuid}:${serviceName}:${minuteBucket}`;
+		
+		// Simple DJB2 hash (fast, good distribution)
+		const hashValue = this.simpleHash(hashKey);
+		
+		// Convert hash to 0-1 range and compare with rate
+		// Same hash always produces same result within same minute
+		return (hashValue % 1000) / 1000 < rate;
+	}
+	
+	/**
+	 * Simple DJB2 hash function (fast, good distribution)
+	 * Returns positive integer
+	 */
+	private simpleHash(str: string): number {
+		let hash = 5381;
+		for (let i = 0; i < str.length; i++) {
+			hash = ((hash << 5) + hash) + str.charCodeAt(i); // hash * 33 + char
+		}
+		return Math.abs(hash);
 	}
 	
 	/**
 	 * Detect log level from message content
-	 * Uses regex patterns similar to dashboard display logic
+	 * Prefers structured log.level field, falls back to regex patterns
 	 */
 	private detectLogLevel(logMessage: LogMessage): 'error' | 'warn' | 'info' | 'debug' {
+		// PREFER: Use structured log.level if available (fast, reliable)
+		if (logMessage.level) {
+			return logMessage.level;
+		}
+		
+		// FALLBACK: Regex parsing (CPU expensive, error-prone)
+		// Only used for logs without structured level field
 		const msg = logMessage.message.toLowerCase();
 		
 		// Error patterns
@@ -632,5 +839,114 @@ export class CloudLogBackend implements LogBackend {
 			});
 		}
 		*/
+	}
+	
+	/**
+	 * Write log batches to disk spool (survives process restarts/power loss)
+	 */
+	private async writeToSpool(batches: LogMessage[][]): Promise<void> {
+		if (!this.spoolFilePath) return;
+		
+		try {
+			// Convert batches to NDJSON
+			const ndjson = batches
+				.flat()
+				.map(log => JSON.stringify(log))
+				.join('\n') + '\n';
+			
+			// Append to spool file
+			fs.appendFileSync(this.spoolFilePath, ndjson, 'utf8');
+			
+			// Check spool file size and rotate if needed
+			const stats = fs.statSync(this.spoolFilePath);
+			if (stats.size > this.maxSpoolSize) {
+				await this.rotateSpool();
+			}
+		} catch (error) {
+			console.error(`[CloudLogBackend] Failed to write to spool: ${error}`);
+		}
+	}
+	
+	/**
+	 * Clear spool file after successful upload
+	 */
+	private async clearSpool(): Promise<void> {
+		if (!this.spoolFilePath) return;
+		
+		try {
+			if (fs.existsSync(this.spoolFilePath)) {
+				fs.unlinkSync(this.spoolFilePath);
+				console.log('[CloudLogBackend] Spool cleared after successful upload');
+			}
+		} catch (error) {
+			console.error(`[CloudLogBackend] Failed to clear spool: ${error}`);
+		}
+	}
+	
+	/**
+	 * Rotate spool file when it exceeds max size
+	 * Keeps most recent logs, drops oldest
+	 */
+	private async rotateSpool(): Promise<void> {
+		if (!this.spoolFilePath) return;
+		
+		try {
+			console.warn(`[CloudLogBackend] Spool file exceeds ${this.maxSpoolSize / 1024 / 1024}MB, rotating...`);
+			
+			// Read all lines
+			const content = fs.readFileSync(this.spoolFilePath, 'utf8');
+			const lines = content.split('\n').filter(line => line.trim());
+			
+			// Keep last 50% of logs
+			const keepCount = Math.floor(lines.length / 2);
+			const keptLines = lines.slice(-keepCount);
+			
+			// Write back truncated content
+			fs.writeFileSync(this.spoolFilePath, keptLines.join('\n') + '\n', 'utf8');
+			
+			console.log(`[CloudLogBackend] Spool rotated: kept ${keepCount}/${lines.length} logs`);
+		} catch (error) {
+			console.error(`[CloudLogBackend] Failed to rotate spool: ${error}`);
+		}
+	}
+	
+	/**
+	 * Replay spooled logs from previous session on startup
+	 */
+	private async replaySpooledLogs(): Promise<void> {
+		if (!this.spoolFilePath || !fs.existsSync(this.spoolFilePath)) {
+			return;
+		}
+		
+		try {
+			const content = fs.readFileSync(this.spoolFilePath, 'utf8');
+			const lines = content.split('\n').filter(line => line.trim());
+			
+			if (lines.length === 0) {
+				return;
+			}
+			
+			console.log(`[CloudLogBackend] Replaying ${lines.length} spooled logs from previous session`);
+			
+			// Parse logs and add to buffer
+			for (const line of lines) {
+				try {
+					const log: LogMessage = JSON.parse(line);
+					this.buffer.push(log);
+					this.bufferBytes += line.length + 1;
+				} catch (parseError) {
+					// Skip corrupted log entries
+					console.warn(`[CloudLogBackend] Skipping corrupted spool entry: ${parseError}`);
+				}
+			}
+			
+			// Flush replayed logs immediately
+			if (this.buffer.length > 0) {
+				console.log(`[CloudLogBackend] Flushing ${this.buffer.length} replayed logs`);
+				setTimeout(() => this.flush(), 1000); // Delay to allow connection to establish
+			}
+		} catch (error) {
+			console.error(`[CloudLogBackend] Failed to replay spooled logs: ${error}`);
+		}
 	}
 }

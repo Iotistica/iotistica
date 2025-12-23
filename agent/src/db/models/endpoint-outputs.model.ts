@@ -26,8 +26,12 @@ export class EndpointOutputModel {
    * Get output configuration for a protocol
    */
   static async getOutput(protocol: string): Promise<DeviceEndpointOutput | null> {
+    // Exclude 'logging' column to avoid loading massive TEXT fields
     const output = await models(this.table)
       .where('protocol', protocol)
+      .select('id', 'protocol', 'socket_path', 'data_format', 'delimiter', 
+              'include_timestamp', 'include_device_name', 'buffer_capacity', 
+              'created_at', 'updated_at')
       .first();
     return output || null;
   }
@@ -71,6 +75,11 @@ export class EndpointOutputModel {
    * Get all output configurations
    */
   static async getAll(): Promise<DeviceEndpointOutput[]> {
-    return await models(this.table).select('*').orderBy('protocol');
+    // Exclude 'logging' column to avoid loading massive TEXT fields
+    return await models(this.table)
+      .select('id', 'protocol', 'socket_path', 'data_format', 'delimiter', 
+              'include_timestamp', 'include_device_name', 'buffer_capacity', 
+              'created_at', 'updated_at')
+      .orderBy('protocol');
   }
 }

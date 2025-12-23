@@ -41,7 +41,10 @@ export const router = express.Router();
  * 
  * Accepts both JSON array and NDJSON (newline-delimited JSON) formats
  */
-router.post('/device/:uuid/logs', deviceAuth, express.text({ type: 'application/x-ndjson' }), async (req, res) => {
+router.post('/device/:uuid/logs', deviceAuth, express.text({ 
+  type: 'application/x-ndjson',
+  limit: '100mb' // Match global JSON limit (decompressed logs can be 4-6x compressed size)
+}), async (req, res) => {
   logger.debug('POST /device/:uuid/logs endpoint hit', { uuid: req.params.uuid });
   try {
     const { uuid } = req.params;
@@ -163,7 +166,12 @@ router.post('/device/:uuid/logs', deviceAuth, express.text({ type: 'application/
 
     res.json({ status: 'ok', received: Array.isArray(logs) ? logs.length : 0 });
   } catch (error: any) {
-    logger.error('Error storing logs', { error: error.message });
+    logger.error('Error storing logs', { 
+      error: error.message,
+      stack: error.stack,
+      uuid: req.params.uuid?.substring(0, 8),
+      bodySize: typeof req.body === 'string' ? req.body.length : 0
+    });
     res.status(500).json({
       error: 'Failed to process logs',
       message: error.message

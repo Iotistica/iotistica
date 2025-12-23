@@ -60,6 +60,9 @@ export const LogComponents = {
   // Provisioning
   deviceManager: 'DeviceManager',
   
+  // Security
+  security: 'Security',
+  
   // Network
   firewall: 'Firewall',
   wireGuardManager: 'WireGuardManager',

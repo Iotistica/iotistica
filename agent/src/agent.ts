@@ -145,6 +145,28 @@ export default class DeviceAgent {
       // Initialize device API
       await this.initDeviceAPI();
 
+      // Memory checkpoint: Before loading target state
+      const mem1 = process.memoryUsage();
+      this.agentLogger.debugSync('Memory before loading target state', {
+        component: 'Agent' as any,
+        heapUsed: `${Math.round(mem1.heapUsed / 1024 / 1024)}MB`
+      });
+
+      // Get target state ONCE to avoid multiple calls
+      const targetState = this.stateReconciler.getTargetState();
+      
+      // Memory checkpoint: After loading target state
+      const mem2 = process.memoryUsage();
+      const targetStateSize = targetState ? JSON.stringify(targetState).length : 0;
+      this.agentLogger.debugSync('Memory after loading target state', {
+        component: 'Agent' as any,
+        heapUsed: `${Math.round(mem2.heapUsed / 1024 / 1024)}MB`,
+        targetStateSize,
+        targetStateSizeMB: (targetStateSize / 1024 / 1024).toFixed(2),
+        hasConfig: !!targetState?.config,
+        hasProtocols: !!targetState?.config?.protocols,
+        hasSettings: !!targetState?.config?.settings
+      });
      
       // Initialize optional features using FeatureInitializer
       const featureContext: FeatureContext = {
@@ -154,13 +176,20 @@ export default class DeviceAgent {
         stateReconciler: this.stateReconciler,
         mqttManager: MqttManager.getInstance(),
         containerManager: this.containerManager,
-        configSettings: this.stateReconciler.getTargetState()?.config?.settings || {},
+        configSettings: targetState?.config?.settings || {},
         configFeatures: this.agentConfig.getFeatures(),
-        configProtocols: this.stateReconciler.getTargetState()?.config?.protocols || {},
+        configProtocols: targetState?.config?.protocols || {},
         cloudApiEndpoint: this.agentConfig.getCloudApiEndpoint(),
         deviceApiPort: this.agentConfig.getDeviceApiPort(),
         anomalyService: this.anomalyService
       };
+
+      // Memory checkpoint: After creating featureContext
+      const mem3 = process.memoryUsage();
+      this.agentLogger.debugSync('Memory after creating featureContext', {
+        component: 'Agent' as any,
+        heapUsed: `${Math.round(mem3.heapUsed / 1024 / 1024)}MB`
+      });
 
       this.featureInitializer = new FeatureInitializer(featureContext);
 

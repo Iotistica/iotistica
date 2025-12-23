@@ -169,14 +169,39 @@ export class FeatureInitializer {
     });
 
     try {
+      const mem1 = process.memoryUsage();
+      logger.debugSync('Memory before imports', {
+        component: LogComponents.agent,
+        heapUsed: `${Math.round(mem1.heapUsed / 1024 / 1024)}MB`
+      });
+      
       // Load sensor output configurations from database
       const { EndpointOutputModel: EndpointOutputModel } = await import('../db/models/endpoint-outputs.model.js');
       const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
       
+      const mem2 = process.memoryUsage();
+      logger.debugSync('Memory after imports', {
+        component: LogComponents.agent,
+        heapUsed: `${Math.round(mem2.heapUsed / 1024 / 1024)}MB`
+      });
+      
       // Apply buffer capacities from target state to endpoint_outputs table
       await this.applyBufferCapacitiesFromTargetState(EndpointOutputModel, logger);
       
+      const mem3 = process.memoryUsage();
+      logger.debugSync('Memory after applyBufferCapacities', {
+        component: LogComponents.agent,
+        heapUsed: `${Math.round(mem3.heapUsed / 1024 / 1024)}MB`
+      });
+      
       const endpointOutputs = await EndpointOutputModel.getAll();
+
+      const mem4 = process.memoryUsage();
+      logger.debugSync('Memory after getAll()', {
+        component: LogComponents.agent,
+        heapUsed: `${Math.round(mem4.heapUsed / 1024 / 1024)}MB`,
+        outputCount: endpointOutputs.length
+      });
 
       if (endpointOutputs.length === 0) {
         logger.warnSync('No sensor outputs configured in database', {
@@ -251,12 +276,18 @@ export class FeatureInitializer {
 
       await this.features.sensorPublish.start();
 
+      const memUsage = process.memoryUsage();
       logger.debugSync('Sensor Publish Feature initialized', {
         component: LogComponents.agent,
         pipeCount: endpoints.length,
         enabledProtocols: Array.from(enabledEndpoints),
         pipes: endpoints.map(s => s.addr),
-        mqttTopicPattern: 'iot/device/{deviceUuid}/endpoints/{topic}'
+        mqttTopicPattern: 'iot/device/{deviceUuid}/endpoints/{topic}',
+        memoryUsage: {
+          heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
+          heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`,
+          external: `${Math.round(memUsage.external / 1024 / 1024)}MB`
+        }
       });
     } catch (error) {
       logger.errorSync('Failed to initialize Sensor Publish Feature', error as Error, {
@@ -274,8 +305,27 @@ export class FeatureInitializer {
     EndpointOutputModel: any,
     logger: AgentLogger
   ): Promise<void> {
+    // Import models for direct query
+    const { models } = await import('../db/connection.js');
+
     try {
+      // Memory checkpoint 1: Before accessing configProtocols
+      const mem1 = process.memoryUsage();
+      logger.debugSync('Memory at start of applyBufferCapacities', {
+        component: LogComponents.agent,
+        heapUsed: `${(mem1.heapUsed / 1024 / 1024).toFixed(0)}MB`
+      });
+
       const protocols = this.context.configProtocols || {};
+      
+      // Memory checkpoint 2: After accessing configProtocols
+      const mem2 = process.memoryUsage();
+      logger.debugSync('Memory after accessing configProtocols', {
+        component: LogComponents.agent,
+        heapUsed: `${(mem2.heapUsed / 1024 / 1024).toFixed(0)}MB`,
+        protocolKeys: Object.keys(protocols),
+        protocolsSize: JSON.stringify(protocols).length
+      });
       
       // Map of protocol names to buffer capacities from target state
       const bufferCapacities: Record<string, number | undefined> = {
@@ -285,15 +335,46 @@ export class FeatureInitializer {
         'snmp': protocols.snmp?.bufferCapacity,
       };
 
+      // Memory checkpoint 3: After creating bufferCapacities map
+      const mem3 = process.memoryUsage();
+      logger.debugSync('Memory after creating bufferCapacities map', {
+        component: LogComponents.agent,
+        heapUsed: `${(mem3.heapUsed / 1024 / 1024).toFixed(0)}MB`
+      });
+
       // Update each protocol's buffer capacity if specified in target state
       for (const [protocol, bufferCapacity] of Object.entries(bufferCapacities)) {
         if (bufferCapacity !== undefined) {
-          const output = await EndpointOutputModel.getOutput(protocol);
+          // Memory checkpoint 4: Before getOutput
+          const mem4 = process.memoryUsage();
+          logger.debugSync(`Memory before getOutput for ${protocol}`, {
+            component: LogComponents.agent,
+            protocol,
+            heapUsed: `${(mem4.heapUsed / 1024 / 1024).toFixed(0)}MB`
+          });
+
+          // CRITICAL FIX: Only select needed columns to avoid loading massive logging field
+          const output = await models('endpoint_outputs')
+            .where('protocol', protocol)
+            .select('protocol', 'buffer_capacity')
+            .first();
+          
+          // Memory checkpoint 5: After getOutput
+          const mem5 = process.memoryUsage();
+          logger.debugSync(`Memory after getOutput for ${protocol}`, {
+            component: LogComponents.agent,
+            protocol,
+            heapUsed: `${(mem5.heapUsed / 1024 / 1024).toFixed(0)}MB`,
+            hasOutput: !!output
+          });
+
           if (output) {
-            await EndpointOutputModel.setOutput({
-              ...output,
-              buffer_capacity: bufferCapacity
-            });
+            await models('endpoint_outputs')
+              .where('protocol', protocol)
+              .update({
+                buffer_capacity: bufferCapacity,
+                updated_at: new Date()
+              });
             
             logger.debugSync(`Updated buffer capacity for ${protocol}`, {
               component: LogComponents.agent,

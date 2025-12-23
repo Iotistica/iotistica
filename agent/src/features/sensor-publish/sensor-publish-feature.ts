@@ -98,34 +98,48 @@ export class SensorPublishFeature extends BaseFeature {
         config.name = `sensor-${i + 1}`;
       }
       
-      // Create sensor
-      const sensor = new Sensor(
-        config,
-        this.mqttConnection,
-        this.logger,
-        this.deviceUuid
-      );
-      
-      // Set up event handlers
-      sensor.on('connected', () => {
-        this.logger.debug(`Sensor '${config.name}' connected`);
-        this.emit('sensor-connected', config.name);
-      });
-      
-      sensor.on('disconnected', () => {
-        this.logger.debug(`Sensor '${config.name}' disconnected`);
-        this.emit('sensor-disconnected', config.name);
-      });
-      
-      sensor.on('error', (error: Error) => {
-        this.logger.error(`Sensor '${config.name}' error: ${error.message}`, error);
-        this.emit('sensor-error', config.name, error);
-      });
-      
-      this.sensors.push(sensor);
-      
-      // Start sensor
-      await sensor.start();
+      try {
+        this.logger.debug(`Creating sensor '${config.name}' (${i + 1}/${sensorConfig.endpoints.length})`);
+        
+        // Create sensor
+        const sensor = new Sensor(
+          config,
+          this.mqttConnection,
+          this.logger,
+          this.deviceUuid
+        );
+        
+        // Set up event handlers
+        sensor.on('connected', () => {
+          this.logger.debug(`Sensor '${config.name}' connected`);
+          this.emit('sensor-connected', config.name);
+        });
+        
+        sensor.on('disconnected', () => {
+          this.logger.debug(`Sensor '${config.name}' disconnected`);
+          this.emit('sensor-disconnected', config.name);
+        });
+        
+        sensor.on('error', (error: Error) => {
+          this.logger.error(`Sensor '${config.name}' error: ${error.message}`, error);
+          this.emit('sensor-error', config.name, error);
+        });
+        
+        this.sensors.push(sensor);
+        
+        this.logger.debug(`Starting sensor '${config.name}'...`);
+        
+        // Start sensor
+        await sensor.start();
+        
+        this.logger.debug(`Sensor '${config.name}' started successfully`);
+      } catch (error) {
+        this.logger.error(
+          `Failed to create/start sensor '${config.name}' at ${config.addr}`,
+          error
+        );
+        throw error; // Re-throw to prevent partial initialization
+      }
     }
     
     this.emit('started');
