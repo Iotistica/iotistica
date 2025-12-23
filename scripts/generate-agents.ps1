@@ -372,6 +372,10 @@ $buildOrImage
     restart: always
     mem_limit: $MemLimit
     mem_reservation: $MemReservation
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
 $networkConfig
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

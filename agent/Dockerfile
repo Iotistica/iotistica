@@ -60,8 +60,14 @@ RUN apk add --no-cache \
     curl \
     jq \
     procps \
-    tini && \
-    rm -rf /var/cache/apk/*
+    tini  \
+    tailscale \
+    ca-certificates && \
+    rm -rf /var/cache/apk/* 
+  
+
+# Required for Tailscale state
+VOLUME ["/var/lib/tailscale"]
 
 # Create non-root user and group early
 RUN addgroup -S agentgroup && \
@@ -91,9 +97,22 @@ RUN chmod +x /app/dist/cli/iotctl.js && \
 # Data volume for persistent storage
 VOLUME ["/app/data"]
 
-# TEMPORARY: Run as root for development to avoid volume permission issues
-# TODO: For production, use init container or entrypoint script to fix permissions
-# USER agentuser
+# IMPORTANT: Container must run as root for Tailscale VPN to work
+# Tailscale requires:
+#   - Root privileges for iptables/network configuration
+#   - /dev/net/tun device access
+#   - NET_ADMIN capability
+# 
+# Docker run example:
+#   docker run --cap-add=NET_ADMIN --device=/dev/net/tun:/dev/net/tun <image>
+# 
+# Docker Compose example:
+#   cap_add:
+#     - NET_ADMIN
+#   devices:
+#     - /dev/net/tun:/dev/net/tun
+#
+# USER agentuser  # Disabled - must run as root for Tailscale
 
 # Expose device API port
 EXPOSE 48484

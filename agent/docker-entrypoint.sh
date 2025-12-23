@@ -1,6 +1,10 @@
 #!/bin/sh
 set -e
 
+# Create Tailscale socket directory (required for tailscaled daemon)
+mkdir -p /var/run/tailscale
+mkdir -p /var/lib/tailscale
+
 # Insert default sensor outputs if not exists (idempotent)
 node -e "
 const Database = require('better-sqlite3');

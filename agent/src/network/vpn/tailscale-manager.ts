@@ -16,7 +16,7 @@
 
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
-import { writeFile, mkdir } from 'fs/promises';
+import { writeFile, mkdir, access, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import type { AgentLogger } from '../../logging/agent-logger';
@@ -75,6 +75,7 @@ export interface TailscaleStatus {
 	hostname?: string;
 	online?: boolean;
 	lastSeen?: string;
+	backendState?: string;
 }
 
 export class TailscaleManager {
@@ -109,44 +110,148 @@ export class TailscaleManager {
 
 	/**
 	 * Ensure tailscaled daemon is enabled and running
+	 * Detects if running in Docker container and uses appropriate method
 	 */
 	private async ensureDaemonRunning(): Promise<void> {
-		try {
-			// Check if tailscaled service is active
-			const { stdout } = await execAsync('systemctl is-active tailscaled');
-			if (stdout.trim() === 'active') {
-				this.logger?.infoSync('Tailscaled daemon is running', {
+		const isContainer = await this.isRunningInContainer();
+
+		if (isContainer) {
+			// In container: Start tailscaled directly (no systemd)
+			try {
+				// Check if tailscaled is already running (pgrep returns exit 1 if not found)
+				try {
+					const { stdout } = await execAsync('pgrep tailscaled');
+					if (stdout.trim()) {
+						this.logger?.infoSync('Tailscaled daemon already running', {
+							component: LogComponents.tailscaleManager,
+							pid: stdout.trim(),
+						});
+						return;
+					}
+				} catch {
+					// Not running, will start it below
+				}
+
+				this.logger?.infoSync('Starting tailscaled daemon in container mode...', {
 					component: LogComponents.tailscaleManager,
 				});
-				return;
+
+				// Create state and socket directories
+				await execAsync('mkdir -p /var/lib/tailscale /var/run/tailscale');
+
+				// Check if tailscaled binary exists
+				try {
+					await execAsync('which tailscaled');
+				} catch {
+					throw new Error('tailscaled binary not found - install tailscale in Docker image');
+				}
+
+				// Start tailscaled in background (Docker container mode)
+				// Capture output to log errors
+				let daemonOutput = '';
+				const daemon = spawn('tailscaled', [
+					'--state=/var/lib/tailscale/tailscaled.state',
+					'--socket=/var/run/tailscale/tailscaled.sock'
+				], {
+					detached: true,
+					stdio: ['ignore', 'pipe', 'pipe'],
+				});
+				
+				// Capture stdout/stderr for debugging
+				daemon.stdout?.on('data', (data) => {
+					daemonOutput += data.toString();
+				});
+				daemon.stderr?.on('data', (data) => {
+					daemonOutput += data.toString();
+				});
+				
+				daemon.unref();
+
+				// Wait for daemon to start
+				await new Promise(resolve => setTimeout(resolve, 3000));
+
+				// Verify daemon started (pgrep returns exit 1 if not found)
+				try {
+					const { stdout } = await execAsync('pgrep tailscaled');
+					if (stdout.trim()) {
+						this.logger?.infoSync('Tailscaled daemon started successfully (container mode)', {
+							component: LogComponents.tailscaleManager,
+							pid: stdout.trim(),
+						});
+						return;
+					}
+				} catch {
+					// pgrep failed - daemon didn't start
+					this.logger?.errorSync('Tailscaled spawn output', new Error(daemonOutput || 'No output captured'), {
+						component: LogComponents.tailscaleManager,
+					});
+					throw new Error('Tailscaled daemon failed to start (process not found)');
+				}
+			} catch (error: any) {
+				const err = error instanceof Error ? error : new Error(String(error));
+				this.logger?.errorSync('Failed to start tailscaled daemon (container mode)', err, {
+					component: LogComponents.tailscaleManager,
+				});
+				throw err;
 			}
-		} catch {
-			// Service not active, will enable and start below
+		} else {
+			// On host: Use systemd
+			try {
+				// Check if tailscaled service is active
+				const { stdout } = await execAsync('systemctl is-active tailscaled');
+				if (stdout.trim() === 'active') {
+					this.logger?.infoSync('Tailscaled daemon is running', {
+						component: LogComponents.tailscaleManager,
+					});
+					return;
+				}
+			} catch {
+				// Service not active, will enable and start below
+			}
+
+			try {
+				this.logger?.infoSync('Starting tailscaled daemon (systemd)...', {
+					component: LogComponents.tailscaleManager,
+				});
+
+				// Enable and start tailscaled service
+				await execAsync('systemctl enable --now tailscaled');
+
+				this.logger?.infoSync('Tailscaled daemon started successfully (systemd)', {
+					component: LogComponents.tailscaleManager,
+				});
+			} catch (error: any) {
+				const err = error instanceof Error ? error : new Error(String(error));
+				this.logger?.errorSync('Failed to start tailscaled daemon (systemd)', err, {
+					component: LogComponents.tailscaleManager,
+				});
+				throw err;
+			}
 		}
+	}
 
+	/**
+	 * Detect if running in Docker container
+	 */
+	private async isRunningInContainer(): Promise<boolean> {
 		try {
-			this.logger?.infoSync('Starting tailscaled daemon...', {
-				component: LogComponents.tailscaleManager,
-			});
-
-			// Enable and start tailscaled service
-			await execAsync('systemctl enable --now tailscaled');
-
-			this.logger?.infoSync('Tailscaled daemon started successfully', {
-				component: LogComponents.tailscaleManager,
-			});
-		} catch (error: any) {
-			const err = error instanceof Error ? error : new Error(String(error));
-			this.logger?.errorSync('Failed to start tailscaled daemon', err, {
-				component: LogComponents.tailscaleManager,
-			});
-			throw err;
+			// Check for /.dockerenv file (most reliable)
+			await access('/.dockerenv');
+			return true;
+		} catch {
+			// Check /proc/1/cgroup for container indicators
+			try {
+				const cgroup = await readFile('/proc/1/cgroup', 'utf-8');
+				return cgroup.includes('docker') || cgroup.includes('kubepods');
+			} catch {
+				return false;
+			}
 		}
 	}
 
 	/**
 	 * Install Tailscale client
-	 * Downloads and installs using official installation script
+	 * Skips installation in containers (should be pre-installed in Dockerfile)
 	 */
 	async install(): Promise<void> {
 		if (this.isInstalled) {
@@ -156,12 +261,21 @@ export class TailscaleManager {
 			return;
 		}
 
+		const isContainer = await this.isRunningInContainer();
+		if (isContainer) {
+			this.logger?.errorSync('Tailscale not found in container', new Error('Tailscale should be pre-installed in Docker image'), {
+				component: LogComponents.tailscaleManager,
+				note: 'Add tailscale to Dockerfile: RUN apk add --no-cache tailscale',
+			});
+			throw new Error('Tailscale not available in container - must be installed in Docker image');
+		}
+
 		try {
-			this.logger?.infoSync('Installing Tailscale client...', {
+			this.logger?.infoSync('Installing Tailscale client on host...', {
 				component: LogComponents.tailscaleManager,
 			});
 
-			// Use official Tailscale installation script
+			// Use official Tailscale installation script (host only)
 			const installScript = `curl -fsSL https://tailscale.com/install.sh | sh`;
 
 			await execAsync(installScript);
@@ -173,12 +287,12 @@ export class TailscaleManager {
 			// Ensure daemon is enabled and running
 			await this.ensureDaemonRunning();
 
-			this.logger?.infoSync('Tailscale client installed successfully', {
+			this.logger?.infoSync('Tailscale client installed successfully (host)', {
 				component: LogComponents.tailscaleManager,
 			});
 		} catch (error: any) {
 			const err = error instanceof Error ? error : new Error(String(error));
-			this.logger?.errorSync('Tailscale installation failed', err, {
+			this.logger?.errorSync('Tailscale installation failed (host)', err, {
 				component: LogComponents.tailscaleManager,
 			});
 			throw err;
@@ -265,27 +379,53 @@ export class TailscaleManager {
 			// Parse JSON response for structured validation
 			const result = JSON.parse(stdout);
 
-			// Check backend state - use defensive checks against schema drift
-			// Instead of exact match, check that we're online and not stopped
-			const isConnected = result.Self?.Online === true && result.BackendState !== 'Stopped';
-			
-			if (!isConnected) {
-				this.logger?.warnSync('Tailscale authentication completed but not connected', {
-					component: LogComponents.tailscaleManager,
-					backendState: result.BackendState,
-					online: result.Self?.Online,
-					authURL: result.AuthURL,
-				});
-				throw new Error(`Tailscale not connected (BackendState: ${result.BackendState}, Online: ${result.Self?.Online})`);
-			}
-
-			this.logger?.infoSync('Connected to Tailscale network', {
+			this.logger?.infoSync('Tailscale authentication initiated', {
 				component: LogComponents.tailscaleManager,
-				tailnet: config.tailnetName,
 				backendState: result.BackendState,
-				selfNode: result.Self?.HostName,
-				tailscaleIP: result.Self?.TailscaleIPs?.[0],
+				online: result.Self?.Online,
 			});
+
+			// Wait for connection to fully establish (daemon may take time to connect)
+			// BackendState goes: NeedsLogin → Starting → Running
+			// Self.Online goes: undefined → true when fully connected
+			const maxWaitSeconds = 15;
+			const pollIntervalMs = 1000;
+			const maxAttempts = maxWaitSeconds;
+			
+			for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+				await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+				
+				const status = await this.getStatus();
+				
+				if (status.connected) {
+					this.logger?.infoSync('Tailscale connection established', {
+						component: LogComponents.tailscaleManager,
+						tailnet: config.tailnetName,
+						hostname: status.hostname,
+						tailscaleIP: status.tailnetIP,
+						attemptNumber: attempt,
+						waitTimeSeconds: attempt,
+					});
+					return; // Success!
+				}
+				
+				// Log progress every 5 seconds
+				if (attempt % 5 === 0) {
+					this.logger?.debugSync(`Waiting for Tailscale connection... (${attempt}/${maxAttempts}s)`, {
+						component: LogComponents.tailscaleManager,
+						backendState: status.backendState,
+					});
+				}
+			}
+			
+			// Timeout - connection didn't establish
+			const finalStatus = await this.getStatus();
+			this.logger?.warnSync('Tailscale connection timeout', {
+				component: LogComponents.tailscaleManager,
+				backendState: finalStatus.backendState,
+				waitedSeconds: maxWaitSeconds,
+			});
+			throw new Error(`Tailscale connection timeout after ${maxWaitSeconds}s (BackendState: ${finalStatus.backendState})`);
 		} catch (error: any) {
 			const err = error instanceof Error ? error : new Error(String(error));
 			this.logger?.errorSync('Tailscale configuration failed', err, {

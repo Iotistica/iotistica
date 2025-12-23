@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2025-12-22 22:44:14
+# Generated: 2025-12-23 10:16:38
 # Agents: 27 to 27
 # Ports: 48507 to 48507
 
@@ -12,6 +12,10 @@ services:
     restart: always
     mem_limit: 512m
     mem_reservation: 256m
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
     network_mode: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -23,7 +27,7 @@ services:
       - NODE_ENV=development
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=50dde5269c0fb48ddb8a82bd7e9086801f42335e46b974add8758158a42ce5af
+      - PROVISIONING_KEY=55236f43d3be67d9ad3641383d68f101cfb6c628c8a0efdeaec47471fa0d54a0
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)
