@@ -423,15 +423,6 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
         echo "✗ Error: Migrations copy failed - dist/db/migrations not found"
         exit 1
     fi
-    
-    echo "Copying vendors file..."
-    npm run copy:vendors
-    if [ ! -f dist/config/vendors/dataPoints.json ]; then
-        echo "✗ Error: Vendors copy failed - dist/config/vendors/dataPoints.json not found"
-        echo "Source file check:"
-        ls -la ../config/vendors/ || echo "Source vendors directory not found!"
-        exit 1
-    fi
 
     if [ ! -f dist/app.js ]; then
         echo "✗ Error: Build failed - dist/app.js not found"
