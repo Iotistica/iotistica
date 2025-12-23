@@ -33,10 +33,19 @@ FROM node:20-alpine AS production
 WORKDIR /app
 
 # Install runtime system dependencies in single layer with cleanup
+# Added ca-certificates and iptables for Tailscale support
 RUN apk add --no-cache \
     curl \
-    tini && \
+    tini \
+    ca-certificates \
+    iptables \
+    ip6tables && \
     rm -rf /var/cache/apk/*
+
+# Install Tailscale (optional - only if API needs to join tailnet)
+# For most deployments, API only needs the Admin API (no client install needed)
+# Uncomment if you want the API container itself to join the tailnet:
+# RUN wget -qO- https://tailscale.com/install.sh | sh
 
 # Create non-root user and group
 RUN addgroup -S appgroup && \

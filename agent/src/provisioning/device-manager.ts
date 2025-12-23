@@ -329,22 +329,22 @@ export class DeviceManager {
 			});
 
 			// Phase 4: Setup VPN if provided in response
-			if (response.vpnConfig?.enabled) {
+			if (response.vpn?.enabled) {
 				this.logger?.infoSync('Setting up WireGuard VPN', {
 					component: LogComponents.deviceManager,
 					operation: 'provision',
-					vpnIpAddress: response.vpnConfig.ipAddress,
+					vpnIpAddress: response.vpn.ipAddress,
 				});
 
 				try {
 					const vpnManager = new WireGuardManager('wg0', '/etc/wireguard', this.logger);
-					const vpnSetupSuccess = await vpnManager.setup(response.vpnConfig);
+					const vpnSetupSuccess = await vpnManager.setup(response.vpn);
 
 					if (vpnSetupSuccess) {
 						this.logger?.infoSync('VPN tunnel established successfully', {
 							component: LogComponents.deviceManager,
 							operation: 'provision',
-							vpnIpAddress: response.vpnConfig.ipAddress,
+							vpnIpAddress: response.vpn.ipAddress,
 						});
 					} else {
 						this.logger?.warnSync('VPN setup was skipped or failed (non-critical)', {
@@ -685,3 +685,4 @@ export class DeviceManager {
 }
 
 export default DeviceManager;
+

@@ -63,6 +63,7 @@ export const LogComponents = {
   // Network
   firewall: 'Firewall',
   wireGuardManager: 'WireGuardManager',
+  tailscaleManager: 'TailscaleManager',
   networkRouteManager: 'NetworkRouteManager',
   
   // Database

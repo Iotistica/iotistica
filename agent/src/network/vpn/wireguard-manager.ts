@@ -11,11 +11,22 @@ import { LogComponents } from '../../logging/types';
 
 const execAsync = promisify(exec);
 
-export interface VpnConfig {
-	enabled: boolean;
-	ipAddress: string;
-	wgConfig: string;
-}
+export type VpnConfig = 
+	| {
+			enabled: boolean;
+			type: 'wireguard';
+			ipAddress: string;
+			wgConfig: string;
+	  }
+	| {
+			enabled: boolean;
+			type: 'tailscale';
+			tailscale: {
+				authKey: string;
+				tailnetName: string;
+				expiresAt: string;
+			};
+	  };
 
 export interface VpnStatus {
 	interfaceUp: boolean;
@@ -60,7 +71,7 @@ export class WireGuardManager {
 	 * Setup WireGuard VPN tunnel
 	 * @param vpnConfig VPN configuration from provisioning response
 	 */
-	async setup(vpnConfig: VpnConfig): Promise<boolean> {
+	async setup(vpnConfig: Extract<VpnConfig, { type: 'wireguard' }>): Promise<boolean> {
 		if (!vpnConfig.enabled) {
 			this.logger?.infoSync('VPN not enabled for this device', {
 				component: LogComponents.wireGuardManager,

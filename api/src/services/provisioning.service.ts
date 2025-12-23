@@ -20,7 +20,7 @@ import {
   validateProvisioningKey,
   incrementProvisioningKeyUsage,
 } from '../utils/provisioning-keys';
-import { wireGuardService } from './wireguard.service';
+import { tailscaleService } from './tailscale.service';
 import {
   logAuditEvent,
   logProvisioningAttempt,
@@ -85,17 +85,22 @@ export interface ProvisioningResponse {
   };
   vpn?: {
     enabled: boolean;
-    type: string;
-    peer: {
+    type: 'wireguard' | 'tailscale';
+    peer?: {
       id: string;
       ipAddress: string;
     };
-    server: {
+    server?: {
       endpoint: string;
       port: number;
       protocol: string;
     };
-    config: string;
+    config?: string;
+    tailscale?: {
+      authKey: string;
+      tailnetName: string;
+      expiresAt: string;
+    };
   };
 }
 
@@ -159,7 +164,7 @@ export class ProvisioningService {
       agent_version: agentVersion || null,
       mqtt_username: mqttCredentials.username,
       vpn_enabled: !!vpnCredentials,
-      vpn_ip_address: vpnCredentials?.ipAddress || null,
+      vpn_ip_address: null, // Tailscale uses dynamic IP assignment
       is_online: true,
       is_active: true,
       status: 'online',
@@ -256,21 +261,49 @@ export class ProvisioningService {
   }
 
   /**
-   * Generate VPN credentials for device
+   * Generate Tailscale VPN credentials for device
    */
- private async generateVpnCredentials(
-  deviceUuid: string,
-  deviceName: string,
-  ipAddress?: string
-): Promise<{ peerId: string; ipAddress: string; config: string } | undefined> {
-  if (!wireGuardService.isEnabled()) return undefined;
+  private async generateVpnCredentials(
+    deviceUuid: string,
+    deviceName: string,
+    ipAddress?: string
+  ): Promise<{ type: 'tailscale'; tailscale: any } | undefined> {
+  logger.info(`Generating Tailscale VPN credentials for device: ${deviceUuid.substring(0,8)}...`, {
+    deviceUuid,
+    deviceName,
+    tailscaleEnabled: tailscaleService.isEnabled()
+  });
+  
+  // Use Tailscale VPN (only option)
+  if (!tailscaleService.isEnabled()) {
+    logger.warn(`Tailscale VPN is not enabled - device ${deviceUuid.substring(0,8)}... will provision without VPN`);
+    return undefined;
+  }
 
   try {
-    const peer = await wireGuardService.createPeer(deviceUuid, deviceName);
-    logger.info(`WireGuard VPN credentials created for device: ${deviceUuid.substring(0,8)}... (IP: ${peer.ipAddress})`);
-    return { peerId: peer.peerId, ipAddress: peer.ipAddress, config: peer.config };
+    const tailscaleCredentials = await tailscaleService.createAuthKey(
+      deviceUuid,
+      deviceName,
+      {
+        reusable: false,
+        ephemeral: false,
+        preauthorized: true,
+        expiryDays: 90
+      }
+    );
+    logger.info(`Tailscale VPN credentials created for device: ${deviceUuid.substring(0,8)}...`, {
+      deviceUuid,
+      deviceName,
+      authKey: tailscaleCredentials.authKey ? `${tailscaleCredentials.authKey.substring(0, 20)}...` : 'none',
+      tailnetName: tailscaleCredentials.tailnetName,
+      expiresAt: tailscaleCredentials.expiresAt
+    });
+    return { 
+      type: 'tailscale',
+      tailscale: tailscaleCredentials
+    };
   } catch (error: any) {
-    logger.error(`VPN credential creation failed for device ${deviceUuid}: ${error.message}`);
+    logger.error(`Tailscale credential creation failed for device ${deviceUuid}: ${error.message}`);
     
     // Fire-and-forget audit log
     logAuditEvent({
@@ -278,9 +311,9 @@ export class ProvisioningService {
       deviceUuid,
       ipAddress,
       severity: AuditSeverity.WARNING,
-      details: { reason: 'VPN credential creation failed', error: error.message }
-    }).catch(err => logger.error('Failed to log VPN provisioning failure', err));
-
+      details: { reason: 'Tailscale credential creation failed', error: error.message }
+    }).catch(err => logger.error('Failed to log Tailscale provisioning failure', err));
+    
     return undefined;
   }
 }
@@ -308,7 +341,7 @@ export class ProvisioningService {
     data: RegistrationRequest,
     provisioningKeyRecord: any,
     mqttCredentials: { username: string; password: string },
-    vpnCredentials?: { peerId: string; ipAddress: string; config: string }
+    vpnCredentials?: { type: 'tailscale'; tailscale: any }
   ): Promise<ProvisioningResponse> {
     const { uuid, deviceName, deviceType, applicationId } = data;
 
@@ -383,27 +416,20 @@ export class ProvisioningService {
       })
     };
 
-    // Add VPN configuration if enabled
+    // Add Tailscale VPN configuration if credentials were generated
     if (vpnCredentials) {
-      const vpnServerEndpoint = process.env.VPN_SERVER_ENDPOINT || 'vpn.iotistic.ca';
-      const vpnServerPort = parseInt(process.env.VPN_SERVER_PORT || '51820');
-      
       response.vpn = {
         enabled: true,
-        type: 'wireguard',
-        peer: {
-          id: vpnCredentials.peerId,
-          ipAddress: vpnCredentials.ipAddress
-        },
-        server: {
-          endpoint: vpnServerEndpoint,
-          port: vpnServerPort,
-          protocol: 'udp'
-        },
-        config: vpnCredentials.config
+        type: 'tailscale',
+        tailscale: vpnCredentials.tailscale
       };
-      
-      logger.info(`WireGuard VPN configuration added to provisioning response (IP: ${vpnCredentials.ipAddress})`);
+      logger.info(`Tailscale VPN configuration added to provisioning response`, {
+        deviceUuid: device.uuid,
+        vpnType: 'tailscale',
+        hasAuthKey: !!vpnCredentials.tailscale?.authKey,
+        tailnetName: vpnCredentials.tailscale?.tailnetName,
+        expiresAt: vpnCredentials.tailscale?.expiresAt
+      });
     }
 
     return response;

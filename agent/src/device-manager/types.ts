@@ -101,11 +101,30 @@ export interface ProvisionResponse {
 	api?: {
 		tlsConfig?: ApiTlsConfig;  // API HTTPS TLS configuration
 	}
-	vpnConfig?: {
-		enabled: boolean;
-		ipAddress: string;
-		wgConfig: string;  // Complete WireGuard config file content
-	}
+	vpn?: 
+		| {
+				enabled: boolean;
+				type: 'wireguard';
+				peer?: {
+					id: string;
+					ipAddress: string;
+				};
+				server?: {
+					endpoint: string;
+					port: number;
+					protocol: string;
+				};
+				config?: string;  // Complete WireGuard config file content
+		  }
+		| {
+				enabled: boolean;
+				type: 'tailscale';
+				tailscale: {
+					authKey: string;
+					tailnetName: string;
+					expiresAt: string;
+				};
+		  }
 	createdAt: string;
 }
 
