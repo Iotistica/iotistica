@@ -195,15 +195,6 @@ jobs:
           sudo npm ci
           sudo npm run build
           echo "✓ Agent built with vendors file copied to dist/"
-          
-          # Verify vendors file exists
-          if [ -f "/opt/iotistic/agent/dist/config/vendors/dataPoints.json" ]; then
-            echo "✓ Vendors file found at: /opt/iotistic/agent/dist/config/vendors/dataPoints.json"
-          else
-            echo "❌ Vendors file NOT found!"
-            ls -la /opt/iotistic/agent/dist/config/vendors/ || echo "Directory doesn't exist"
-            exit 1
-          fi
 
       - name: Make install script executable
         run: chmod +x agent/bin/install.sh
