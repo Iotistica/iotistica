@@ -325,15 +325,14 @@ export class DeviceManager {
 				deviceName: this.deviceInfo.deviceName,
 				applicationId: this.deviceInfo.applicationId,
 				mqttBrokerHost: this.deviceInfo.mqttBrokerConfig?.host,
+				vpnEnabled: response.vpn?.enabled ?? false,
+				vpnType: response.vpn?.type,
+				tailnetName: response.vpn?.type === 'tailscale' ? response.vpn.tailscale?.tailnetName : undefined,
+				vpnAuthKey: response.vpn?.type === 'tailscale' && response.vpn.tailscale?.authKey 
+					? `${response.vpn.tailscale.authKey.substring(0, 20)}...` 
+					: undefined,
 			});
-
-			// Phase 4: Setup Tailscale VPN if provided in response
-			if (response.vpn?.enabled && response.vpn.type === 'tailscale') {
-				this.logger?.infoSync('Setting up Tailscale VPN', {
-					component: LogComponents.deviceManager,
-					operation: 'provision',
-					tailnetName: response.vpn.tailscale.tailnetName,
-				});
+		
 
 				try {
 					const { TailscaleManager } = await import('../network/vpn/tailscale-manager.js');
