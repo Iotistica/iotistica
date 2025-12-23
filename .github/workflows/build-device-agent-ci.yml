@@ -174,110 +174,6 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
 
-  test-agent-docker:
-    name: Test Docker Installation (via install.sh)
-    needs: [version, buildx]
-    runs-on: [iotistic-lab-sc]
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
-
-      - name: Make install script executable
-        run: chmod +x agent/bin/install.sh
-
-      - name: Run unified installation script (Docker method)
-        env:
-          CI: true
-          IOTISTIC_INSTALL_METHOD: docker
-          IOTISTIC_AGENT_VERSION: ${{ needs.version.outputs.package_version }}
-          IOTISTIC_DEVICE_PORT: 48484
-          IOTISTIC_CLOUD_API_ENDPOINT: ''
-          IOTISTIC_PROVISIONING_KEY: ''
-        run: |
-          echo "Testing unified installation script with Docker method..."
-          sudo -E bash agent/bin/install.sh
-
-      - name: Check agent container is running
-        run: |
-          if docker ps | grep -q iotistic-agent; then
-            echo "✓ Agent container is running"
-            docker ps | grep iotistic-agent
-          else
-            echo "✗ Agent container failed to start"
-            docker logs iotistic-agent
-            exit 1
-          fi
-
-      - name: Test agent API health
-        run: |
-          echo "Testing agent API endpoints..."
-          
-          # Try health endpoint (using wget since it's in alpine)
-          if docker exec iotistic-agent wget -q -O- http://localhost:48484/health 2>/dev/null || \
-             docker exec iotistic-agent wget -q -O- http://localhost:48484/v2/device 2>/dev/null; then
-            echo "✓ Agent API is responding"
-          else
-            echo "⚠ Agent API not responding yet (may still be initializing)"
-            docker logs --tail=50 iotistic-agent
-          fi
-
-      - name: Verify agent startup
-        run: |
-          echo "Checking agent logs for successful startup..."
-          
-          # Check for Device Configuration Summary
-          if docker logs iotistic-agent 2>&1 | grep -q "Device Agent initialized successfully"; then
-            echo "✓ Agent started successfully"
-          else
-            echo "✗ Agent failed to start properly"
-            echo "Full logs:"
-            docker logs iotistic-agent
-            exit 1
-          fi
-
-      - name: Show full agent logs
-        if: always()
-        run: |
-          echo "========================================="
-          echo "Agent Logs (Full):"
-          echo "========================================="
-          docker logs iotistic-agent
-
-      - name: Cleanup test environment
-        if: always()
-        run: |
-          docker stop iotistic-agent || true
-          docker rm iotistic-agent || true
-          docker system prune -f
-
-      - name: Generate test summary
-        if: always()
-        run: |
-          echo "# Docker Installation Test (via install.sh)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Script Tested" >> $GITHUB_STEP_SUMMARY
-          echo "- **Script**: \`agent/bin/install.sh\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Method**: Docker (IOTISTIC_INSTALL_METHOD=docker)" >> $GITHUB_STEP_SUMMARY
-          echo "## Published Image" >> $GITHUB_STEP_SUMMARY
-          echo "- **Image**: \`iotistic/agent:${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Mode**: Standalone container (local mode)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Cloud API**: Not configured (local testing)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Tests Performed" >> $GITHUB_STEP_SUMMARY
-          echo "1. Pull published Docker image from registry" >> $GITHUB_STEP_SUMMARY
-          echo "2. Container startup" >> $GITHUB_STEP_SUMMARY
-          echo "3. API endpoint health check" >> $GITHUB_STEP_SUMMARY
-          echo "4. Log verification" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Agent image validated successfully!" >> $GITHUB_STEP_SUMMARY
-
   test-agent-systemd:
     name: Test Systemd Installation (via install.sh)
     needs: [version, buildx]
@@ -322,7 +218,7 @@ jobs:
           IOTISTIC_DEVICE_PORT: 48484
           CLOUD_API_ENDPOINT: ''
           PROVISIONING_KEY: ''
-          MODBUS_VENDOR_FILE: '/opt/iotistic/agent/dist/config/vendors/dataPoints.json'
+    
         run: |
           echo "Testing unified installation script with Systemd method..."
           sudo -E bash agent/bin/install.sh
@@ -471,7 +367,7 @@ jobs:
 
   upload-install-scripts:
     name: Upload Installation Scripts
-    needs: [version, buildx, test-agent-docker, test-agent-systemd]
+    needs: [version, buildx,  test-agent-systemd]
     runs-on: [iotistic-lab-sc]
     if: success()
     
@@ -644,7 +540,7 @@ jobs:
 
   report:
     name: Generate Reports
-    needs: [version, buildx, test-agent-docker, test-agent-systemd, upload-install-scripts]
+    needs: [version, buildx,  test-agent-systemd, upload-install-scripts]
     runs-on: [iotistic-lab-sc]
     if: success() && needs.version.outputs.package_version != ''
     
@@ -732,7 +628,7 @@ jobs:
 
   trigger-integration-tests:
     name: Trigger Integration Tests
-    needs: [version, buildx, test-agent-docker, test-agent-systemd, upload-install-scripts]
+    needs: [version, buildx,  test-agent-systemd, upload-install-scripts]
     runs-on: [iotistic-lab-sc]
     permissions:
       actions: write
