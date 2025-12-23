@@ -26,7 +26,6 @@ import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import { HttpClient, FetchHttpClient } from '../lib/http-client';
 import { DatabaseClient, KnexDatabaseClient } from '../db/client';
-import { WireGuardManager } from '../network/vpn/wireguard-manager';
 
 export class DeviceManager {
 	private deviceInfo: DeviceInfo | null = null;
@@ -334,38 +333,43 @@ export class DeviceManager {
 				mqttBrokerConfig: this.deviceInfo.mqttBrokerConfig,
 			});
 
-			// Phase 4: Setup VPN if provided in response
-			if (response.vpn?.enabled && response.vpn.type === 'wireguard') {
-				this.logger?.infoSync('Setting up WireGuard VPN', {
+			// Phase 4: Setup Tailscale VPN if provided in response
+			if (response.vpn?.enabled && response.vpn.type === 'tailscale') {
+				this.logger?.infoSync('Setting up Tailscale VPN', {
 					component: LogComponents.deviceManager,
 					operation: 'provision',
-					vpnIpAddress: response.vpn.peer?.ipAddress,
+					tailnetName: response.vpn.tailscale.tailnetName,
 				});
 
 				try {
-					const vpnManager = new WireGuardManager('wg0', '/etc/wireguard', this.logger);
-					const vpnSetupSuccess = await vpnManager.setup({
-						enabled: true,
-						type: 'wireguard',
-						ipAddress: response.vpn.peer?.ipAddress || '',
-						wgConfig: response.vpn.config || ''
+					const { TailscaleManager } = await import('../network/vpn/tailscale-manager.js');
+					const tailscaleManager = new TailscaleManager(this.logger);
+					
+					// Check if Tailscale is installed, install if needed
+					const isInstalled = await tailscaleManager.checkInstallation();
+					if (!isInstalled) {
+						await tailscaleManager.install();
+					}
+
+					// Configure and connect to Tailnet
+					await tailscaleManager.configure({
+						authKey: response.vpn.tailscale.authKey,
+						tailnetName: response.vpn.tailscale.tailnetName,
+						hostname: this.deviceInfo.deviceName,
 					});
 
-					if (vpnSetupSuccess) {
-						this.logger?.infoSync('VPN tunnel established successfully', {
-							component: LogComponents.deviceManager,
-							operation: 'provision',
-							vpnIpAddress: response.vpn.peer?.ipAddress,
-						});
-					} else {
-						this.logger?.warnSync('VPN setup was skipped or failed (non-critical)', {
-							component: LogComponents.deviceManager,
-							operation: 'provision',
-						});
-					}
+					// Get Tailscale IP
+					const tailscaleIP = await tailscaleManager.getIP();
+
+					this.logger?.infoSync('Tailscale VPN tunnel established successfully', {
+						component: LogComponents.deviceManager,
+						operation: 'provision',
+						tailscaleIP,
+						tailnetName: response.vpn.tailscale.tailnetName,
+					});
 				} catch (vpnError) {
 					// VPN setup failure is non-critical - device can still operate
-					this.logger?.warnSync('VPN setup failed (device will continue without VPN)', {
+					this.logger?.warnSync('Tailscale VPN setup failed (device will continue without VPN)', {
 						component: LogComponents.deviceManager,
 						operation: 'provision',
 						error: vpnError instanceof Error ? vpnError.message : String(vpnError),
