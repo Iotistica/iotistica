@@ -384,7 +384,7 @@ export default class DeviceAgent {
   }
 
   private async initializeDeviceManager(): Promise<void> {
-    this.deviceManager = new DeviceManager();
+    this.deviceManager = new DeviceManager(this.agentLogger);
     await this.deviceManager.initialize();
 
     let deviceInfo = this.deviceManager.getDeviceInfo();
