@@ -864,7 +864,7 @@ export default class DeviceAgent {
   private async configureAnomalyFeed(): Promise<void> {
     if (!this.anomalyService) return;
     
-    this.agentLogger?.infoSync('Configuring edge AI anomaly detection', {
+    this.agentLogger?.infoSync('Configuring edge anomaly detection', {
       component: LogComponents.agent,
     });
     
