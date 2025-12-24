@@ -10,6 +10,7 @@ import Docker from 'dockerode';
 import { ContainerService } from './container-manager';
 import { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
+import { EventEmitter } from 'events';
 
 export interface DockerContainerInfo {
 	id: string;
@@ -21,11 +22,22 @@ export interface DockerContainerInfo {
 	ports?: Docker.Port[];
 }
 
-export class DockerManager {
+export interface DockerAuthConfig {
+	username: string;
+	password: string;
+	serveraddress?: string;
+	email?: string;
+}
+
+export class DockerManager extends EventEmitter {
 	private docker: Docker;
 	private logger?: AgentLogger;
+	private eventStream?: NodeJS.ReadableStream;
+	private isMonitoringEvents: boolean = false;
+	private imageCache: Map<string, boolean> = new Map(); // Cache image existence checks
 
 	constructor(dockerOptions?: Docker.DockerOptions, logger?: AgentLogger) {
+		super(); // EventEmitter
 		this.logger = logger;
 		// Default: connect to local Docker daemon
 		// Detect platform and use appropriate socket
@@ -63,21 +75,323 @@ export class DockerManager {
 	}
 
 	// ========================================================================
+	// EVENT-DRIVEN RECONCILIATION
+	// ========================================================================
+
+	/**
+	 * Start monitoring Docker events for declarative reconciliation
+	 * 
+	 * Event-driven approach for edge devices:
+	 * - Detects crashes immediately (no polling)
+	 * - Auto-restarts critical services
+	 * - Updates internal state in real-time
+	 * - Works with label-based filtering
+	 * 
+	 * Emits events:
+	 * - 'container:start' - Container started
+	 * - 'container:stop' - Container stopped
+	 * - 'container:die' - Container crashed
+	 * - 'container:health' - Health status changed
+	 * - 'container:oom' - Out of memory killed
+	 */
+	async startEventMonitoring(): Promise<void> {
+		if (this.isMonitoringEvents) {
+			this.logger?.debugSync('Event monitoring already active', {
+				component: LogComponents.dockerManager,
+				operation: 'startEventMonitoring'
+			});
+			return;
+		}
+
+		this.logger?.infoSync('Starting Docker event monitoring', {
+			component: LogComponents.dockerManager,
+			operation: 'startEventMonitoring'
+		});
+
+		try {
+			// Subscribe to Docker events
+			this.eventStream = await this.docker.getEvents({
+				filters: {
+					// Only monitor containers managed by our app
+					label: ['iotistic.app-id'],
+					type: ['container']
+				}
+			});
+
+			this.eventStream.on('data', (chunk: Buffer) => {
+				try {
+					const event = JSON.parse(chunk.toString());
+					this.handleDockerEvent(event);
+				} catch (error: any) {
+					this.logger?.errorSync('Failed to parse Docker event', error, {
+						component: LogComponents.dockerManager,
+						operation: 'startEventMonitoring'
+					});
+				}
+			});
+
+			this.eventStream.on('error', (error: any) => {
+				this.logger?.errorSync('Docker event stream error', error, {
+					component: LogComponents.dockerManager,
+					operation: 'startEventMonitoring'
+				});
+				this.isMonitoringEvents = false;
+				// Attempt to restart monitoring after delay
+				setTimeout(() => this.startEventMonitoring(), 5000);
+			});
+
+			this.eventStream.on('end', () => {
+				this.logger?.warnSync('Docker event stream ended', {
+					component: LogComponents.dockerManager,
+					operation: 'startEventMonitoring'
+				});
+				this.isMonitoringEvents = false;
+				// Attempt to restart monitoring
+				setTimeout(() => this.startEventMonitoring(), 5000);
+			});
+
+			this.isMonitoringEvents = true;
+			this.logger?.infoSync('Docker event monitoring started', {
+				component: LogComponents.dockerManager,
+				operation: 'startEventMonitoring'
+			});
+		} catch (error: any) {
+			this.logger?.errorSync('Failed to start event monitoring', error, {
+				component: LogComponents.dockerManager,
+				operation: 'startEventMonitoring'
+			});
+			throw error;
+		}
+	}
+
+	/**
+	 * Stop monitoring Docker events
+	 */
+	stopEventMonitoring(): void {
+		if (this.eventStream) {
+			this.logger?.infoSync('Stopping Docker event monitoring', {
+				component: LogComponents.dockerManager,
+				operation: 'stopEventMonitoring'
+			});
+			// Remove all listeners and unpipe to close the stream
+			this.eventStream.removeAllListeners();
+			if (typeof (this.eventStream as any).destroy === 'function') {
+				(this.eventStream as any).destroy();
+			}
+			this.eventStream = undefined;
+			this.isMonitoringEvents = false;
+		}
+	}
+
+	/**
+	 * Handle Docker event and emit appropriate signals
+	 */
+	private handleDockerEvent(event: any): void {
+		const action = event.Action as string;
+		const containerId = event.Actor?.ID as string;
+		const labels = event.Actor?.Attributes || {};
+		const containerName = labels['name'] || 'unknown';
+		const appId = labels['iotistic.app-id'];
+		const serviceName = labels['iotistic.service-name'];
+
+		// Log all events for debugging
+		this.logger?.debugSync('Docker event received', {
+			component: LogComponents.dockerManager,
+			operation: 'handleDockerEvent',
+			action,
+			containerId: containerId?.substring(0, 12),
+			containerName,
+			appId,
+			serviceName
+		});
+
+		// Handle different event types
+		switch (action) {
+			case 'start':
+				this.logger?.infoSync('Container started', {
+					component: LogComponents.dockerManager,
+					operation: 'handleDockerEvent',
+					containerId: containerId?.substring(0, 12),
+					containerName
+				});
+				this.emit('container:start', { containerId, containerName, appId, serviceName });
+				break;
+
+			case 'stop':
+				this.logger?.infoSync('Container stopped', {
+					component: LogComponents.dockerManager,
+					operation: 'handleDockerEvent',
+					containerId: containerId?.substring(0, 12),
+					containerName
+				});
+				this.emit('container:stop', { containerId, containerName, appId, serviceName });
+				break;
+
+			case 'die':
+				const exitCode = event.Actor?.Attributes?.exitCode;
+				this.logger?.warnSync('Container died', {
+					component: LogComponents.dockerManager,
+					operation: 'handleDockerEvent',
+					containerId: containerId?.substring(0, 12),
+					containerName,
+					exitCode
+				});
+				this.emit('container:die', { containerId, containerName, appId, serviceName, exitCode });
+				
+				// Trigger auto-restart for critical services (handled by ContainerManager)
+				if (exitCode !== '0') {
+					this.emit('container:crash', { containerId, containerName, appId, serviceName, exitCode });
+				}
+				break;
+
+			case 'kill':
+				this.logger?.warnSync('Container killed', {
+					component: LogComponents.dockerManager,
+					operation: 'handleDockerEvent',
+					containerId: containerId?.substring(0, 12),
+					containerName
+				});
+				this.emit('container:kill', { containerId, containerName, appId, serviceName });
+				break;
+
+			case 'pause':
+				this.logger?.infoSync('Container paused', {
+					component: LogComponents.dockerManager,
+					operation: 'handleDockerEvent',
+					containerId: containerId?.substring(0, 12),
+					containerName
+				});
+				this.emit('container:pause', { containerId, containerName, appId, serviceName });
+				break;
+
+			case 'unpause':
+				this.logger?.infoSync('Container unpaused', {
+					component: LogComponents.dockerManager,
+					operation: 'handleDockerEvent',
+					containerId: containerId?.substring(0, 12),
+					containerName
+				});
+				this.emit('container:unpause', { containerId, containerName, appId, serviceName });
+				break;
+
+			case 'health_status':
+				const healthStatus = event.Actor?.Attributes?.['health_status'];
+				this.logger?.infoSync('Container health status changed', {
+					component: LogComponents.dockerManager,
+					operation: 'handleDockerEvent',
+					containerId: containerId?.substring(0, 12),
+					containerName,
+					healthStatus
+				});
+				this.emit('container:health', { containerId, containerName, appId, serviceName, healthStatus });
+				break;
+
+			case 'oom':
+				this.logger?.errorSync('Container out of memory', new Error('OOM'), {
+					component: LogComponents.dockerManager,
+					operation: 'handleDockerEvent',
+					containerId: containerId?.substring(0, 12),
+					containerName
+				});
+				this.emit('container:oom', { containerId, containerName, appId, serviceName });
+				break;
+
+			default:
+				// Log other events at debug level
+				this.logger?.debugSync('Unhandled Docker event', {
+					component: LogComponents.dockerManager,
+					operation: 'handleDockerEvent',
+					action,
+					containerId: containerId?.substring(0, 12)
+				});
+		}
+	}
+
+	// ========================================================================
+	// SECURITY VALIDATION
+	// ========================================================================
+
+	/**
+	 * Validate container security configuration for edge devices
+	 * 
+	 * CRITICAL: Edge devices have Docker socket access (root equivalent)
+	 * Must prevent container escape and privilege escalation
+	 * 
+	 * Blocked configurations:
+	 * - privileged: true (full root access to host)
+	 * - cap_add (capability additions)
+	 * - pid=host (access to all host processes)
+	 * - ipc=host (access to host IPC namespace)
+	 * - userns=host (bypass user namespace isolation)
+	 * 
+	 * @throws Error if configuration violates security policy
+	 */
+	private validateSecurityConfig(service: ContainerService): void {
+		const violations: string[] = [];
+
+		// Block privileged containers (full root access)
+		if (service.config.privileged) {
+			violations.push('privileged=true (grants full root access to host)');
+		}
+
+		// Block capability additions (privilege escalation)
+		if (service.config.capAdd && service.config.capAdd.length > 0) {
+			violations.push(`cap_add=${service.config.capAdd.join(',')} (capability additions blocked)`);
+		}
+
+		// Block host PID namespace (access to all host processes)
+		if (service.config.pidMode === 'host') {
+			violations.push('pid=host (exposes all host processes)');
+		}
+
+		// Block host IPC namespace (shared memory access)
+		if (service.config.ipcMode === 'host') {
+			violations.push('ipc=host (exposes host IPC namespace)');
+		}
+
+		// Block host user namespace (bypasses isolation)
+		if (service.config.usernsMode === 'host') {
+			violations.push('userns=host (bypasses user namespace isolation)');
+		}
+
+		if (violations.length > 0) {
+			const errorMsg = `Security policy violation: ${violations.join(', ')}. Edge devices cannot run containers with elevated privileges due to Docker socket access.`;
+			this.logger?.errorSync('Container security validation failed', new Error(errorMsg), {
+				component: LogComponents.dockerManager,
+				operation: 'validateSecurityConfig',
+				serviceName: service.serviceName,
+				violations
+			});
+			throw new Error(errorMsg);
+		}
+
+		this.logger?.debugSync('Security validation passed', {
+			component: LogComponents.dockerManager,
+			operation: 'validateSecurityConfig',
+			serviceName: service.serviceName
+		});
+	}
+
+	// ========================================================================
 	// IMAGE OPERATIONS
 	// ========================================================================
 
 	/**
 	 * Pull an image from registry
+	 * @param imageName - Image name (e.g., "nginx:latest")
+	 * @param authConfig - Optional authentication for private registries
 	 */
-	async pullImage(imageName: string): Promise<void> {
+	async pullImage(imageName: string, authConfig?: DockerAuthConfig): Promise<void> {
 		this.logger?.infoSync('Pulling Docker image', {
 			component: LogComponents.dockerManager,
 			operation: 'pullImage',
-			imageName
+			imageName,
+			hasAuth: !!authConfig
 		});
 
 		return new Promise((resolve, reject) => {
-			this.docker.pull(imageName, (err: any, stream: NodeJS.ReadableStream) => {
+			const pullOptions = authConfig ? { authconfig: authConfig } : {};
+			this.docker.pull(imageName, pullOptions, (err: any, stream: NodeJS.ReadableStream) => {
 				if (err) {
 					this.logger?.errorSync('Failed to pull image', err, {
 						component: LogComponents.dockerManager,
@@ -118,16 +432,84 @@ export class DockerManager {
 	}
 
 	/**
-	 * Check if image exists locally
+	 * Pull an image with retry logic and exponential backoff
+	 * Critical for edge devices with flaky network connections
+	 * @param imageName - Image name to pull
+	 * @param authConfig - Optional authentication for private registries
+	 * @param retries - Number of retry attempts (default: 3)
+	 */
+	async pullImageWithRetry(
+		imageName: string,
+		authConfig?: DockerAuthConfig,
+		retries: number = 3
+	): Promise<void> {
+		for (let attempt = 0; attempt < retries; attempt++) {
+			try {
+				if (attempt > 0) {
+					this.logger?.infoSync('Retrying image pull', {
+						component: LogComponents.dockerManager,
+						operation: 'pullImageWithRetry',
+						imageName,
+						attempt: attempt + 1,
+						maxRetries: retries
+					});
+				}
+				await this.pullImage(imageName, authConfig);
+				// Clear cache after successful pull
+				this.imageCache.set(imageName, true);
+				return; // Success
+			} catch (err: any) {
+				if (attempt === retries - 1) {
+					// Final attempt failed
+					this.logger?.errorSync('Image pull failed after all retries', err, {
+						component: LogComponents.dockerManager,
+						operation: 'pullImageWithRetry',
+						imageName,
+						attempts: retries
+					});
+					throw err;
+				}
+				
+				// Exponential backoff: 2s, 4s, 6s...
+				const delayMs = 2000 * (attempt + 1);
+				this.logger?.warnSync('Image pull failed, retrying after delay', {
+					component: LogComponents.dockerManager,
+					operation: 'pullImageWithRetry',
+					imageName,
+					attempt: attempt + 1,
+					delayMs,
+					error: err.message
+				});
+				await new Promise(resolve => setTimeout(resolve, delayMs));
+			}
+		}
+	}
+
+	/**
+	 * Check if image exists locally (with caching)
 	 */
 	async hasImage(imageName: string): Promise<boolean> {
+		// Check cache first
+		if (this.imageCache.has(imageName)) {
+			return this.imageCache.get(imageName)!;
+		}
+
 		try {
 			const image = this.docker.getImage(imageName);
 			await image.inspect();
+			this.imageCache.set(imageName, true);
 			return true;
 		} catch (error) {
+			this.imageCache.set(imageName, false);
 			return false;
 		}
+	}
+
+	/**
+	 * Clear image cache (call after pulling images)
+	 */
+	clearImageCache(): void {
+		this.imageCache.clear();
 	}
 
 	/**
@@ -142,7 +524,19 @@ export class DockerManager {
 	// ========================================================================
 
 	/**
+	 * Find a container by name
+	 */
+	async findContainerByName(name: string): Promise<Docker.Container | null> {
+		const containers = await this.docker.listContainers({ all: true });
+		const found = containers.find(c =>
+			c.Names.some(n => n === `/${name}`)
+		);
+		return found ? this.docker.getContainer(found.Id) : null;
+	}
+
+	/**
 	 * Create and start a container from a service definition
+	 * Idempotent: Reuses existing containers if found (crash-safe/restart-safe)
 	 */
 	async startContainer(service: ContainerService): Promise<string> {
 		this.logger?.infoSync('Starting container', {
@@ -153,15 +547,48 @@ export class DockerManager {
 		});
 
 		try {
-			// 1. Ensure image exists (pull if needed)
+			// 0a. Validate security configuration (CRITICAL for edge devices)
+			this.validateSecurityConfig(service);
+
+			// 0b. Check for existing container (idempotency)
+			const containerName = `${service.appName}_${service.serviceName}_${service.serviceId}`;
+			const existing = await this.findContainerByName(containerName);
+			
+			if (existing) {
+				const info = await existing.inspect();
+				if (info.State.Running) {
+					this.logger?.infoSync('Container already running, reusing existing', {
+						component: LogComponents.dockerManager,
+						operation: 'startContainer',
+						serviceName: service.serviceName,
+						containerId: info.Id.substring(0, 12),
+						state: info.State.Status
+					});
+					return info.Id;
+				} else {
+					this.logger?.infoSync('Container exists but not running, starting it', {
+						component: LogComponents.dockerManager,
+						operation: 'startContainer',
+						serviceName: service.serviceName,
+						containerId: info.Id.substring(0, 12),
+						state: info.State.Status
+					});
+					await existing.start();
+					return info.Id;
+				}
+			}
+
+			// 1. Ensure image exists (pull if needed, with retry for edge reliability)
 			const hasImage = await this.hasImage(service.imageName);
 			if (!hasImage) {
-				this.logger?.infoSync('Image not found locally, pulling...', {
+				this.logger?.infoSync('Image not found locally, pulling with retry...', {
 					component: LogComponents.dockerManager,
 					operation: 'startContainer',
 					imageName: service.imageName
 				});
-				await this.pullImage(service.imageName);
+				// Use retry logic for flaky edge networks
+				// TODO: Support authConfig from service.config.imagePullSecrets
+				await this.pullImageWithRetry(service.imageName);
 			}
 
 			// 2. Parse port bindings
@@ -210,25 +637,72 @@ export class DockerManager {
 				}
 			}
 
-			// 4. Build container configuration
-			const containerName = `${service.appName}_${service.serviceName}_${service.serviceId}`;
-
-			// 5. Parse resource limits (K8s-style)
+			// 4. Parse resource limits (K8s-style)
 			const resourceLimits = this.parseResourceLimits(service);
+
+			// 5. Parse health check configuration
+			let healthcheck: Docker.HealthConfig | undefined;
+			if (service.config.healthcheck) {
+				// Use Docker native healthcheck if provided
+				healthcheck = {
+					Test: service.config.healthcheck.test,
+					Interval: service.config.healthcheck.interval,
+					Timeout: service.config.healthcheck.timeout,
+					Retries: service.config.healthcheck.retries,
+					StartPeriod: service.config.healthcheck.startPeriod,
+				};
+				this.logger?.debugSync('Using native Docker healthcheck', {
+					component: LogComponents.dockerManager,
+					operation: 'startContainer',
+					serviceName: service.serviceName,
+					test: service.config.healthcheck.test
+				});
+			} else if (service.config.livenessProbe) {
+				// Convert K8s livenessProbe to Docker healthcheck
+				healthcheck = this.convertProbeToDockerHealthcheck(service.config.livenessProbe);
+				this.logger?.debugSync('Converted livenessProbe to Docker healthcheck', {
+					component: LogComponents.dockerManager,
+					operation: 'startContainer',
+					serviceName: service.serviceName,
+					probeType: service.config.livenessProbe.type
+				});
+			}
+
+			// 6. Guard: Remove port bindings for incompatible network modes
+			const networkMode = service.config.networkMode || 'bridge';
+			if (networkMode === 'host' || networkMode.startsWith('container:')) {
+				if (Object.keys(portBindings).length > 0) {
+					this.logger?.warnSync('Port bindings ignored - incompatible with network mode', {
+						component: LogComponents.dockerManager,
+						operation: 'startContainer',
+						serviceName: service.serviceName,
+						networkMode,
+						reason: 'Docker ignores PortBindings with host/container network modes'
+					});
+				}
+				// Clear port configurations
+				Object.keys(portBindings).forEach(key => delete portBindings[key]);
+				Object.keys(exposedPorts).forEach(key => delete exposedPorts[key]);
+			}
 
 			const createOptions: Docker.ContainerCreateOptions = {
 				name: containerName,
 				Image: service.imageName,
+				User: service.config.user,
+				StopSignal: service.config.stopSignal,
+				StopTimeout: service.config.stopTimeout,
 				Env: service.config.environment
 					? Object.entries(service.config.environment).map(
 							([key, value]) => `${key}=${value}`,
 					  )
 					: [],
 				ExposedPorts: exposedPorts,
+				Healthcheck: healthcheck,
 				HostConfig: {
 					PortBindings: portBindings,
 					Binds: binds.length > 0 ? binds : undefined,
 					NetworkMode: service.config.networkMode || 'bridge',
+					ReadonlyRootfs: service.config.readonlyRootfs || false,
 					RestartPolicy: {
 						Name: service.config.restart || 'unless-stopped',
 						MaximumRetryCount: 0,
@@ -440,6 +914,362 @@ export class DockerManager {
 	}
 
 	/**
+	 * Rename a container
+	 */
+	async renameContainer(containerId: string, newName: string): Promise<void> {
+		this.logger?.infoSync('Renaming container', {
+			component: LogComponents.dockerManager,
+			operation: 'renameContainer',
+			containerId: containerId.substring(0, 12),
+			newName
+		});
+
+		try {
+			const container = this.docker.getContainer(containerId);
+			await container.rename({ name: newName });
+			this.logger?.infoSync('Container renamed successfully', {
+				component: LogComponents.dockerManager,
+				operation: 'renameContainer',
+				containerId: containerId.substring(0, 12),
+				newName
+			});
+		} catch (error: any) {
+			this.logger?.errorSync('Failed to rename container', error, {
+				component: LogComponents.dockerManager,
+				operation: 'renameContainer',
+				containerId: containerId.substring(0, 12),
+				newName
+			});
+			throw error;
+		}
+	}
+
+	/**
+	 * Wait for container to become healthy
+	 * @param containerId - Container ID to monitor
+	 * @param timeoutMs - Maximum time to wait (default: 30 seconds)
+	 * @param intervalMs - Poll interval (default: 1 second)
+	 * @returns true if healthy, false if timeout
+	 */
+	async waitForHealthy(
+		containerId: string,
+		timeoutMs: number = 30000,
+		intervalMs: number = 1000
+	): Promise<boolean> {
+		this.logger?.infoSync('Waiting for container to become healthy', {
+			component: LogComponents.dockerManager,
+			operation: 'waitForHealthy',
+			containerId: containerId.substring(0, 12),
+			timeoutMs,
+			intervalMs
+		});
+
+		const startTime = Date.now();
+		const container = this.docker.getContainer(containerId);
+
+		while (Date.now() - startTime < timeoutMs) {
+			try {
+				const info = await container.inspect();
+				
+				// If container has health check, use it
+				if (info.State.Health) {
+					if (info.State.Health.Status === 'healthy') {
+						this.logger?.infoSync('Container is healthy', {
+							component: LogComponents.dockerManager,
+							operation: 'waitForHealthy',
+							containerId: containerId.substring(0, 12),
+							elapsedMs: Date.now() - startTime
+						});
+						return true;
+					} else if (info.State.Health.Status === 'unhealthy') {
+						this.logger?.warnSync('Container is unhealthy', {
+							component: LogComponents.dockerManager,
+							operation: 'waitForHealthy',
+							containerId: containerId.substring(0, 12),
+							healthStatus: info.State.Health.Status
+						});
+						return false;
+					}
+					// Status is 'starting', continue waiting
+				} else if (info.State.Running) {
+					// No health check defined, just check if running
+					this.logger?.infoSync('Container is running (no health check defined)', {
+						component: LogComponents.dockerManager,
+						operation: 'waitForHealthy',
+						containerId: containerId.substring(0, 12),
+						elapsedMs: Date.now() - startTime
+					});
+					return true;
+				} else if (!info.State.Running) {
+					this.logger?.errorSync('Container stopped during health check', new Error('Container not running'), {
+						component: LogComponents.dockerManager,
+						operation: 'waitForHealthy',
+						containerId: containerId.substring(0, 12)
+					});
+					return false;
+				}
+			} catch (error: any) {
+				this.logger?.errorSync('Failed to inspect container during health check', error, {
+					component: LogComponents.dockerManager,
+					operation: 'waitForHealthy',
+					containerId: containerId.substring(0, 12)
+				});
+				return false;
+			}
+
+			// Wait before next check
+			await new Promise(resolve => setTimeout(resolve, intervalMs));
+		}
+
+		this.logger?.warnSync('Health check timeout', {
+			component: LogComponents.dockerManager,
+			operation: 'waitForHealthy',
+			containerId: containerId.substring(0, 12),
+			timeoutMs
+		});
+		return false;
+	}
+
+	/**
+	 * Update a container with zero-downtime (blue-green deployment)
+	 * Critical for edge services like MQTT brokers, OPC UA simulators, gateways
+	 * 
+	 * Strategy:
+	 * 1. Create new container with temp name
+	 * 2. Wait for health check to pass
+	 * 3. Stop old container
+	 * 4. Rename new container to final name
+	 * 5. Remove old container
+	 * 
+	 * @param service - Service definition for new container
+	 * @param healthCheckTimeoutMs - Time to wait for health check (default: 30s)
+	 * @returns New container ID
+	 */
+	async updateContainer(
+		service: ContainerService,
+		healthCheckTimeoutMs: number = 30000
+	): Promise<string> {
+		const finalName = `${service.appName}_${service.serviceName}_${service.serviceId}`;
+		const tempName = `${finalName}_new_${Date.now()}`;
+		
+		this.logger?.infoSync('Starting zero-downtime container update', {
+			component: LogComponents.dockerManager,
+			operation: 'updateContainer',
+			serviceName: service.serviceName,
+			finalName,
+			tempName
+		});
+
+		try {
+			// 0. Validate security configuration (CRITICAL for edge devices)
+			this.validateSecurityConfig(service);
+
+			// 1. Find existing container
+			const oldContainer = await this.findContainerByName(finalName);
+			let oldContainerId: string | undefined;
+			
+			if (oldContainer) {
+				const oldInfo = await oldContainer.inspect();
+				oldContainerId = oldInfo.Id;
+				this.logger?.infoSync('Found existing container to update', {
+					component: LogComponents.dockerManager,
+					operation: 'updateContainer',
+					oldContainerId: oldContainerId.substring(0, 12),
+					state: oldInfo.State.Status
+				});
+			}
+
+			// 2. Ensure image exists (pull if needed)
+			const hasImage = await this.hasImage(service.imageName);
+			if (!hasImage) {
+				this.logger?.infoSync('Pulling new image for update', {
+					component: LogComponents.dockerManager,
+					operation: 'updateContainer',
+					imageName: service.imageName
+				});
+				await this.pullImageWithRetry(service.imageName);
+			}
+
+			// 3. Create new container with temp name
+			const tempService = { ...service };
+			const portBindings: Docker.PortMap = {};
+			const exposedPorts: { [port: string]: {} } = {};
+
+			if (service.config.ports) {
+				for (const portMapping of service.config.ports) {
+					const portStr = typeof portMapping === 'string' ? portMapping : String(portMapping);
+					const [hostPort, containerPort] = portStr.split(':');
+					
+					if (hostPort && containerPort) {
+						const port = `${containerPort}/tcp`;
+						exposedPorts[port] = {};
+						portBindings[port] = [{ HostPort: hostPort }];
+					}
+				}
+			}
+
+			const binds: string[] = [];
+			if (service.config.volumes) {
+				for (const volume of service.config.volumes) {
+					binds.push(volume);
+				}
+			}
+
+			const resourceLimits = this.parseResourceLimits(service);
+
+			// Guard: Remove port bindings for incompatible network modes
+			const networkMode = service.config.networkMode || 'bridge';
+			if (networkMode === 'host' || networkMode.startsWith('container:')) {
+				if (Object.keys(portBindings).length > 0) {
+					this.logger?.warnSync('Port bindings ignored - incompatible with network mode', {
+						component: LogComponents.dockerManager,
+						operation: 'updateContainer',
+						serviceName: service.serviceName,
+						networkMode,
+						reason: 'Docker ignores PortBindings with host/container network modes'
+					});
+				}
+				// Clear port configurations
+				Object.keys(portBindings).forEach(key => delete portBindings[key]);
+				Object.keys(exposedPorts).forEach(key => delete exposedPorts[key]);
+			}
+
+			const createOptions: Docker.ContainerCreateOptions = {
+				name: tempName,
+				Image: service.imageName,
+				User: service.config.user,
+				StopSignal: service.config.stopSignal,
+				StopTimeout: service.config.stopTimeout,
+				Env: service.config.environment
+					? Object.entries(service.config.environment).map(
+							([key, value]) => `${key}=${value}`,
+					  )
+					: [],
+				ExposedPorts: exposedPorts,
+				HostConfig: {
+					PortBindings: portBindings,
+					Binds: binds.length > 0 ? binds : undefined,
+					NetworkMode: service.config.networkMode || 'bridge',
+					ReadonlyRootfs: service.config.readonlyRootfs || false,
+					RestartPolicy: {
+						Name: service.config.restart || 'unless-stopped',
+						MaximumRetryCount: 0,
+					},
+					...resourceLimits,
+				},
+				Labels: {
+					'iotistic.app-id': service.appId.toString(),
+					'iotistic.app-name': service.appName,
+					'iotistic.service-id': service.serviceId.toString(),
+					'iotistic.service-name': service.serviceName,
+					...(service.config.labels || {}),
+				},
+			};
+
+			const newContainer = await this.docker.createContainer(createOptions);
+			const newContainerId = newContainer.id;
+			
+			this.logger?.infoSync('Created new container for update', {
+				component: LogComponents.dockerManager,
+				operation: 'updateContainer',
+				newContainerId: newContainerId.substring(0, 12),
+				tempName
+			});
+
+			// 4. Start new container
+			await newContainer.start();
+			this.logger?.infoSync('Started new container', {
+				component: LogComponents.dockerManager,
+				operation: 'updateContainer',
+				newContainerId: newContainerId.substring(0, 12)
+			});
+
+			// 5. Wait for health check
+			const isHealthy = await this.waitForHealthy(newContainerId, healthCheckTimeoutMs);
+			
+			if (!isHealthy) {
+				this.logger?.errorSync('New container failed health check, rolling back', new Error('Health check failed'), {
+					component: LogComponents.dockerManager,
+					operation: 'updateContainer',
+					newContainerId: newContainerId.substring(0, 12)
+				});
+				
+				// Rollback: stop and remove new container
+				try {
+					await this.stopContainer(newContainerId, 5);
+					await this.removeContainer(newContainerId, true);
+				} catch (cleanupError: any) {
+					this.logger?.warnSync('Failed to cleanup unhealthy container', {
+						component: LogComponents.dockerManager,
+						operation: 'updateContainer',
+						error: cleanupError.message
+					});
+				}
+				
+				throw new Error('Container health check failed during update');
+			}
+
+			// 6. Stop old container (if exists)
+			if (oldContainerId) {
+				this.logger?.infoSync('Stopping old container', {
+					component: LogComponents.dockerManager,
+					operation: 'updateContainer',
+					oldContainerId: oldContainerId.substring(0, 12)
+				});
+				
+				try {
+					await this.stopContainer(oldContainerId, 10);
+				} catch (error: any) {
+					this.logger?.warnSync('Failed to stop old container gracefully', {
+						component: LogComponents.dockerManager,
+						operation: 'updateContainer',
+						error: error.message
+					});
+				}
+			}
+
+			// 7. Rename new container to final name
+			await this.renameContainer(newContainerId, finalName);
+			
+			// 8. Remove old container (if exists)
+			if (oldContainerId) {
+				this.logger?.infoSync('Removing old container', {
+					component: LogComponents.dockerManager,
+					operation: 'updateContainer',
+					oldContainerId: oldContainerId.substring(0, 12)
+				});
+				
+				try {
+					await this.removeContainer(oldContainerId, true);
+				} catch (error: any) {
+					this.logger?.warnSync('Failed to remove old container', {
+						component: LogComponents.dockerManager,
+						operation: 'updateContainer',
+						error: error.message
+					});
+				}
+			}
+
+			this.logger?.infoSync('Zero-downtime update completed successfully', {
+				component: LogComponents.dockerManager,
+				operation: 'updateContainer',
+				serviceName: service.serviceName,
+				newContainerId: newContainerId.substring(0, 12),
+				finalName
+			});
+
+			return newContainerId;
+		} catch (error: any) {
+			this.logger?.errorSync('Zero-downtime update failed', error, {
+				component: LogComponents.dockerManager,
+				operation: 'updateContainer',
+				serviceName: service.serviceName
+			});
+			throw error;
+		}
+	}
+
+	/**
 	 * Get container information
 	 */
 	async inspectContainer(containerId: string): Promise<Docker.ContainerInspectInfo> {
@@ -605,6 +1435,53 @@ export class DockerManager {
 	// ========================================================================
 
 	/**
+	 * Convert K8s-style health probe to Docker native healthcheck
+	 */
+	private convertProbeToDockerHealthcheck(probe: {
+		type: 'http' | 'tcp' | 'exec';
+		path?: string;
+		port?: number;
+		scheme?: 'http' | 'https';
+		tcpPort?: number;
+		command?: string[];
+		periodSeconds?: number;
+		timeoutSeconds?: number;
+		failureThreshold?: number;
+		initialDelaySeconds?: number;
+	}): Docker.HealthConfig {
+		const healthcheck: Docker.HealthConfig = {};
+
+		// Build test command based on probe type
+		if (probe.type === 'http') {
+			const scheme = probe.scheme || 'http';
+			const port = probe.port || 80;
+			const path = probe.path || '/';
+			healthcheck.Test = ['CMD-SHELL', `curl -f ${scheme}://localhost:${port}${path} || exit 1`];
+		} else if (probe.type === 'tcp') {
+			const port = probe.tcpPort || probe.port || 80;
+			healthcheck.Test = ['CMD-SHELL', `nc -z localhost ${port} || exit 1`];
+		} else if (probe.type === 'exec' && probe.command) {
+			healthcheck.Test = ['CMD', ...probe.command];
+		}
+
+		// Convert seconds to nanoseconds for Docker API
+		if (probe.periodSeconds) {
+			healthcheck.Interval = probe.periodSeconds * 1_000_000_000;
+		}
+		if (probe.timeoutSeconds) {
+			healthcheck.Timeout = probe.timeoutSeconds * 1_000_000_000;
+		}
+		if (probe.failureThreshold) {
+			healthcheck.Retries = probe.failureThreshold;
+		}
+		if (probe.initialDelaySeconds) {
+			healthcheck.StartPeriod = probe.initialDelaySeconds * 1_000_000_000;
+		}
+
+		return healthcheck;
+	}
+
+	/**
 	 * Parse K8s-style resource limits to Docker format
 	 * 
 	 * K8s format:
@@ -683,6 +1560,20 @@ export class DockerManager {
 					bytes: memoryRequest
 				});
 			}
+		}
+
+		// Guard: Don't mix NanoCpus (hard limit) with CpuShares (relative weight)
+		// Docker docs recommend using one or the other for consistent behavior
+		// Prioritize hard limits (NanoCpus) for edge device isolation
+		if (hostConfig.NanoCpus && hostConfig.CpuShares) {
+			this.logger?.debugSync('Removing CpuShares (conflicts with NanoCpus hard limit)', {
+				component: LogComponents.dockerManager,
+				operation: 'parseResourceLimits',
+				serviceName: service.serviceName,
+				nanocpus: hostConfig.NanoCpus,
+				removedCpuShares: hostConfig.CpuShares
+			});
+			delete hostConfig.CpuShares;
 		}
 
 		return hostConfig;

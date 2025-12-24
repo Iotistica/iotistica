@@ -5,7 +5,8 @@ import * as fs from 'fs';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 
-type DBTransactionCallback = (trx: Knex.Transaction) => void;
+// Generic transaction callback - supports return values (sync or async)
+type DBTransactionCallback<T = any> = (trx: Knex.Transaction) => Promise<T> | T;
 
 export type Transaction = Knex.Transaction;
 
@@ -13,10 +14,9 @@ export type Transaction = Knex.Transaction;
 // Docker: /app/data/device.sqlite (matches volume mount)
 // Local dev: ./data/device.sqlite (relative to project root)
 const getDefaultDatabasePath = (): string => {
-	// Check if running in Docker container (common indicators)
-	const isDocker = fs.existsSync('/.dockerenv') || 
-	                 fs.existsSync('/app/package.json') ||
-	                 process.env.DOCKER_CONTAINER === 'true';
+	// RELIABLE Docker detection: /.dockerenv is created by Docker runtime
+	// Avoid fragile checks like /app/package.json (can exist in non-Docker environments)
+	const isDocker = fs.existsSync('/.dockerenv');
 	
 	if (isDocker) {
 		return '/app/data/device.sqlite';
@@ -26,6 +26,8 @@ const getDefaultDatabasePath = (): string => {
 	}
 };
 
+// Explicit configuration beats auto-detection
+// Edge rule: prefer DATABASE_PATH env var over heuristics
 const databasePath = process.env.DATABASE_PATH || getDefaultDatabasePath();
 
 // Ensure the data directory exists
@@ -40,9 +42,13 @@ const db = knex({
 		filename: databasePath,
 	},
 	useNullAsDefault: true,
+	// CRITICAL for SQLite: Use minimal pool size
+	// SQLite has single-writer lock - multiple connections cause lock contention
+	// WAL mode still serializes writes, so pool > 1 only adds overhead
+	// This dramatically reduces SQLITE_BUSY errors under load
 	pool: {
-		min: 2,
-		max: 10,
+		min: 1,
+		max: 1, // Single connection = no lock contention
 		acquireTimeoutMillis: 30000,
 		idleTimeoutMillis: 30000,
 		// Critical for concurrent writes: enable WAL mode and busy timeout
@@ -52,7 +58,18 @@ const db = knex({
 				if (err) return done(err, conn);
 				// Set busy timeout to 5 seconds (SQLite will retry locks)
 				conn.run('PRAGMA busy_timeout = 5000;', (err2: any) => {
-					done(err2, conn);
+					if (err2) return done(err2, conn);
+					
+					// Optional: Enable readonly mode for diagnostics or fail-safe degraded operation
+					// Useful for: read-only diagnostics, preventing writes during recovery, fail-safe mode
+					// Set SQLITE_READONLY_MODE=true to enable
+					if (process.env.SQLITE_READONLY_MODE === 'true') {
+						conn.run('PRAGMA query_only = ON;', (err3: any) => {
+							done(err3, conn);
+						});
+					} else {
+						done(null, conn);
+					}
 				});
 			});
 		},
@@ -64,21 +81,120 @@ const db = knex({
  * Should be called once at application startup
  */
 export const initialized = async (logger?: AgentLogger): Promise<void> => {
+	// CRITICAL: Only clear migration lock if safe
+	// Edge scenarios: OTA update, systemd restart, two agents briefly overlapping
+	// Clearing active lock = corrupt schema from concurrent migrations
 	try {
-		// Release any stale migration locks
-		await db('knex_migrations_lock').update({ is_locked: 0 });
-	} catch {
-		// Table doesn't exist yet, ignore
+		const lockRows = await db('knex_migrations_lock').select('*');
+		if (lockRows.length > 0 && lockRows[0].is_locked) {
+			// Lock is held - check if it's stale or legitimate
+			
+			// Option 1: Explicit force unlock (manual recovery)
+			if (process.env.FORCE_MIGRATION_UNLOCK === 'true') {
+				logger?.warnSync('Force unlocking migration lock (FORCE_MIGRATION_UNLOCK=true)', {
+					component: LogComponents.database,
+					message: 'This should only be used for manual recovery after agent crash',
+				});
+				await db('knex_migrations_lock').update({ is_locked: 0 });
+			} else {
+				// Option 2: Skip unlock - let Knex handle it or fail fast
+				logger?.warnSync('Migration lock is held - skipping unlock', {
+					component: LogComponents.database,
+					message: 'Another agent may be running migrations. If this persists, set FORCE_MIGRATION_UNLOCK=true',
+					isLocked: lockRows[0].is_locked,
+				});
+				// Don't clear lock - either:
+				// - Another agent is legitimately migrating (let it finish)
+				// - Stale lock will cause migration to fail (safer than corruption)
+			}
+		} else {
+			// Lock not held - safe to proceed
+			logger?.debugSync('Migration lock not held', {
+				component: LogComponents.database,
+			});
+		}
+	} catch (err) {
+		// Table doesn't exist yet (first run) - safe to proceed
+		logger?.debugSync('Migration lock table does not exist (first run)', {
+			component: LogComponents.database,
+		});
 	}
 	
 	// Run all pending migrations
+	// If lock is held by another process, this will fail (safer than corruption)
 	await db.migrate.latest({
 		directory: path.join(__dirname, 'migrations'),
 	});
 	
+	// CRITICAL: Check database integrity after migrations
+	// Edge devices: SD card corruption, power loss, flash wear
+	// Fail fast > silent corruption leading to data loss or mysterious errors
+	try {
+		const result = await db.raw('PRAGMA integrity_check;');
+		const integrityCheck = result[0]?.integrity_check || result;
+		
+		if (integrityCheck !== 'ok') {
+			// Corruption detected - log details and fail fast
+			const errorMessage = `Database corruption detected: ${JSON.stringify(integrityCheck)}. ` +
+				`Common causes: SD card failure, power loss, flash wear. ` +
+				`Recovery: Restore from backup or delete ${databasePath} to reinitialize.`;
+			
+			logger?.errorSync('Database corruption detected!', undefined, {
+				component: LogComponents.database,
+				path: databasePath,
+				integrityCheck,
+				message: 'SQLite database is corrupted. Common causes: SD card failure, power loss during write, flash wear',
+				recovery: 'Restore from backup or reinitialize database',
+			});
+			
+			throw new Error(errorMessage);
+		}
+		
+		logger?.debugSync('Database integrity check passed', {
+			component: LogComponents.database,
+		});
+	} catch (err: any) {
+		// If error is from our throw above, re-throw it
+		if (err.message.includes('Database corruption detected')) {
+			throw err;
+		}
+		// Otherwise log but continue (integrity_check not supported on older SQLite)
+		logger?.warnSync('Database integrity check failed to run', {
+			component: LogComponents.database,
+			error: err.message,
+			message: 'SQLite may be too old to support integrity_check',
+		});
+	}
+	
+	// CRITICAL: Checkpoint WAL to prevent unbounded growth
+	// Edge devices: Limited storage on SD cards, low read traffic + frequent writes
+	// WAL can grow indefinitely if not checkpointed, leading to disk exhaustion
+	// TRUNCATE mode: Move WAL contents to main DB file and truncate WAL to zero bytes
+	try {
+		await db.raw('PRAGMA wal_checkpoint(TRUNCATE);');
+		logger?.debugSync('WAL checkpoint completed', {
+			component: LogComponents.database,
+			message: 'WAL file truncated to prevent disk exhaustion',
+		});
+	} catch (err: any) {
+		logger?.warnSync('WAL checkpoint failed', {
+			component: LogComponents.database,
+			error: err.message,
+			message: 'WAL may grow unbounded - consider periodic manual checkpoints',
+		});
+	}
+	
+	// Log readonly mode status if enabled
+	if (process.env.SQLITE_READONLY_MODE === 'true') {
+		logger?.infoSync('SQLite readonly mode enabled (diagnostics/fail-safe)', {
+			component: LogComponents.database,
+		});
+	}
+	
 	logger?.infoSync('Database initialized', {
 		component: LogComponents.database,
-		path: databasePath
+		path: databasePath,
+		readonly: process.env.SQLITE_READONLY_MODE === 'true',
 	});
 };
 
@@ -90,8 +206,23 @@ export function models(modelName: string): Knex.QueryBuilder {
 }
 
 /**
- * Upsert (update or insert) a model
- * If a record matching the id exists, update it; otherwise insert it
+ * Upsert (update or insert) a model - ATOMIC version
+ * Uses SQLite's native INSERT ... ON CONFLICT ... DO UPDATE
+ * 
+ * CRITICAL for edge devices: Concurrent writes are common
+ * - Multiple metrics collectors writing simultaneously
+ * - State reconciliation + health checks
+ * - Agent update + normal operations
+ * 
+ * Old approach had race condition:
+ *   Writer 1: UPDATE (0 rows) → INSERT
+ *   Writer 2: UPDATE (0 rows) → INSERT
+ *   Result: ❌ Constraint violation
+ * 
+ * New approach is atomic:
+ *   Writer 1: INSERT ON CONFLICT UPDATE
+ *   Writer 2: INSERT ON CONFLICT UPDATE
+ *   Result: ✅ Last writer wins, no errors
  */
 export async function upsertModel(
 	modelName: string,
@@ -100,19 +231,28 @@ export async function upsertModel(
 	trx?: Knex.Transaction,
 ): Promise<any> {
 	const k = trx || db;
-
-	const numUpdated = await k(modelName).update(obj).where(id);
-	if (numUpdated === 0) {
-		return k(modelName).insert(obj);
-	}
+	
+	// Get conflict columns (the id fields)
+	const conflictColumns = Object.keys(id);
+	
+	// Merge id into obj (ensure id fields are included in insert)
+	const insertData = { ...id, ...obj };
+	
+	// For SQLite: Use INSERT ... ON CONFLICT ... DO UPDATE
+	// This is atomic - no race condition possible
+	return k(modelName)
+		.insert(insertData)
+		.onConflict(conflictColumns)
+		.merge(); // merge() = DO UPDATE SET all non-conflict columns
 }
 
 /**
  * Execute a callback within a database transaction
+ * Supports both sync and async callbacks with return values
  */
-export function transaction(
-	cb: DBTransactionCallback,
-): Promise<Knex.Transaction> {
+export function transaction<T = any>(
+	cb: (trx: Knex.Transaction) => Promise<T>,
+): Promise<T> {
 	return db.transaction(cb);
 }
 
@@ -129,5 +269,30 @@ export function getKnex(): Knex {
 export async function close(): Promise<void> {
 	await db.destroy();
 }
+
+// Graceful shutdown handlers for edge devices
+// Edge devices can be killed hard (docker stop, systemctl stop, power loss recovery)
+// SIGTERM: Clean shutdown (docker stop, systemctl stop)
+// SIGINT: User interrupt (Ctrl+C during development)
+let shuttingDown = false;
+
+async function gracefulShutdown(signal: string): Promise<void> {
+	if (shuttingDown) return;
+	shuttingDown = true;
+	
+	console.log(`\n[${signal}] Gracefully shutting down database...`);
+	
+	try {
+		await db.destroy();
+		console.log(`[${signal}] Database connection closed`);
+		process.exit(0);
+	} catch (err: any) {
+		console.error(`[${signal}] Error during database shutdown:`, err.message);
+		process.exit(1);
+	}
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 export default db;

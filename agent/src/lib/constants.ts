@@ -81,8 +81,15 @@ const constants = {
 	maxApiJitterDelay: 60 * 1000,
 
 	defaultVolumeLabels: {
-	   'iotistic.managed': 'true',
-    },
+		'iotistic.managed': 'true',
+		// Volume versioning for future migrations (schema changes, data layout changes)
+		// When version mismatch detected: trigger migration container, upgrade safely
+		'iotistic.volume-version': '1',
+	},
+	
+	// Current volume schema version
+	// Increment when making breaking changes that require data migration
+	currentVolumeVersion: 1,
 }
 
 

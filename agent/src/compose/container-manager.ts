@@ -64,6 +64,19 @@ export interface ContainerService {
 		restart?: string;
 		labels?: Record<string, string>;
 		
+		// Container runtime options
+		stopSignal?: string;         // e.g., 'SIGTERM', 'SIGINT', 'SIGKILL'
+		stopTimeout?: number;        // seconds to wait before force kill (default: 10)
+		user?: string;               // run as non-root user (e.g., '1000:1000', 'node')
+		readonlyRootfs?: boolean;    // make root filesystem read-only (security hardening)
+		
+		// Security configuration (edge-hardened)
+		privileged?: boolean;        // BLOCKED on edge devices
+		capAdd?: string[];           // BLOCKED on edge devices
+		pidMode?: string;            // BLOCKED if 'host'
+		ipcMode?: string;            // BLOCKED if 'host'
+		usernsMode?: string;         // BLOCKED if 'host'
+		
 		// K8s-style resource limits
 		resources?: {
 			limits?: {
@@ -76,7 +89,16 @@ export interface ContainerService {
 			};
 		};
 		
-		// K8s-style health probes
+		// Docker native health check (takes precedence if defined)
+		healthcheck?: {
+			test: string[];  // e.g., ['CMD-SHELL', 'curl -f http://localhost:8080/health || exit 1']
+			interval?: number;  // nanoseconds (e.g., 30_000_000_000 = 30s)
+			timeout?: number;   // nanoseconds (e.g., 5_000_000_000 = 5s)
+			retries?: number;   // number of consecutive failures
+			startPeriod?: number;  // nanoseconds, grace period before health checks start
+		};
+		
+		// K8s-style health probes (converted to Docker health check if no native healthcheck)
 		livenessProbe?: {
 			type: 'http' | 'tcp' | 'exec';
 			// HTTP specific
