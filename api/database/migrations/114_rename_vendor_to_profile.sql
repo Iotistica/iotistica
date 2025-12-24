@@ -37,4 +37,3 @@ BEGIN
   RAISE NOTICE 'Updated indexes, triggers, and comments';
   RAISE NOTICE 'Note: API routes must be updated from /api/v1/vendors to /api/v1/profiles';
 END $$;
-docker
