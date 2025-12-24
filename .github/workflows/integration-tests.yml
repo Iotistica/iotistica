@@ -547,12 +547,14 @@ jobs:
           MQTT_BROKER_HOST: localhost
           MQTT_BROKER_PORT: 5883
           MQTT_USE_TLS: false
+          MQTT_USERNAME: admin
+          MQTT_PASSWORD: iotistic2024
           PROVISIONING_KEY: ${{ steps.provision.outputs.provisioning_key }}
         run: |
           echo "Installing agent with systemd method..."
           echo "Provisioning key (first 20 chars): ${PROVISIONING_KEY:0:20}..."
           echo "Cloud API endpoint: $CLOUD_API_ENDPOINT"
-          echo "MQTT broker: mqtt://${MQTT_BROKER_HOST}:${MQTT_BROKER_PORT}"
+          echo "MQTT broker: mqtt://${MQTT_USERNAME}@${MQTT_BROKER_HOST}:${MQTT_BROKER_PORT}"
           sudo -E bash agent/bin/install.sh
           
           echo "✓ Agent installed"
@@ -586,6 +588,17 @@ jobs:
               sudo grep "MQTT_USE_TLS" /etc/iotistic/agent.env
             else
               echo "✗ MQTT_USE_TLS is NOT set"
+            fi
+            if sudo grep -q "MQTT_USERNAME" /etc/iotistic/agent.env; then
+              echo "✓ MQTT_USERNAME is set"
+              sudo grep "MQTT_USERNAME" /etc/iotistic/agent.env
+            else
+              echo "✗ MQTT_USERNAME is NOT set"
+            fi
+            if sudo grep -q "MQTT_PASSWORD" /etc/iotistic/agent.env; then
+              echo "✓ MQTT_PASSWORD is set (not displaying value)"
+            else
+              echo "✗ MQTT_PASSWORD is NOT set"
             fi
           else
             echo "✗ Environment file NOT found!"
