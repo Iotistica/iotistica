@@ -16,7 +16,7 @@
 services:
   # Database Services
   postgres:
-    image: postgres:16-alpine
+    image: timescale/timescaledb:latest-pg16
     container_name: iotistic-postgres-e2e
     restart: unless-stopped
     environment:

@@ -478,25 +478,6 @@ services:
     #     depends_on:
     #     - postgres
 
-    cadvisor:
-        image: gcr.io/cadvisor/cadvisor:latest
-        container_name: iotistic-cadvisor
-        restart: unless-stopped
-        ports:
-            - "8080:8080"
-        volumes:
-            - /:/rootfs:ro
-            - /var/run:/var/run:ro
-            - /sys:/sys:ro
-            - /var/lib/docker/:/var/lib/docker:ro
-        privileged: true
-        networks:
-            - iotistic-net
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "5m"
-                max-file: "2"
 
     nodered:
         build:
