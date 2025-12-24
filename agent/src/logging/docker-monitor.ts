@@ -45,6 +45,41 @@ export class ContainerLogMonitor {
 	}
 
 	/**
+	 * Find container ID by service name
+	 * Returns null if container not found
+	 */
+	private async findContainerByServiceName(serviceName: string): Promise<string | null> {
+		try {
+			// List all containers (including stopped ones)
+			const containers = await this.docker.listContainers({ all: true });
+			
+			// Look for container with matching service name
+			// Docker Compose containers have labels like com.docker.compose.service=serviceName
+			for (const container of containers) {
+				const composeService = container.Labels?.['com.docker.compose.service'];
+				if (composeService === serviceName) {
+					return container.Id;
+				}
+				
+				// Also check container name (fallback for non-compose containers)
+				// Container names include the service name
+				const containerName = container.Names?.[0]?.replace(/^\//, ''); // Remove leading /
+				if (containerName?.includes(serviceName)) {
+					return container.Id;
+				}
+			}
+			
+			return null;
+		} catch (error) {
+			this.logger?.errorSync('Failed to find container by service name', error as Error, {
+				component: LogComponents.logMonitor,
+				serviceName,
+			});
+			return null;
+		}
+	}
+
+	/**
 	 * Attach to a container's logs
 	 */
 	public async attach(options: LogStreamOptions): Promise<ContainerLogAttachment> {
@@ -136,11 +171,26 @@ export class ContainerLogMonitor {
 			return attachment;
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
-			this.logger?.errorSync(`Failed to attach to container`, error as Error, {
-				component: LogComponents.logMonitor,
-				containerId: containerId.substring(0, 12),
-				serviceName
-			});
+			
+			// Check if this is a "container not found" error (HTTP 404)
+			const isContainerNotFound = errorMessage.includes('404') || 
+				errorMessage.includes('no such container') ||
+				errorMessage.includes('not found');
+			
+			if (isContainerNotFound) {
+				this.logger?.warnSync(`Container not found - may have been recreated`, {
+					component: LogComponents.logMonitor,
+					containerId: containerId.substring(0, 12),
+					serviceName,
+					message: 'Will attempt to find container by service name on reconnect'
+				});
+			} else {
+				this.logger?.errorSync(`Failed to attach to container`, error as Error, {
+					component: LogComponents.logMonitor,
+					containerId: containerId.substring(0, 12),
+					serviceName
+				});
+			}
 			
 			// Schedule reconnection with exponential backoff
 			this.scheduleReconnection(containerId, errorMessage);
@@ -217,7 +267,58 @@ export class ContainerLogMonitor {
 		const retryKey = `log-stream-${containerId}`;
 		
 		try {
-			// Try to reattach
+			// Container may have been recreated with new ID
+			// Try to find container by service name first
+			const currentContainerId = await this.findContainerByServiceName(options.serviceName);
+			
+			if (currentContainerId && currentContainerId !== containerId) {
+				// Container was recreated with new ID
+				this.logger?.infoSync('Container recreated with new ID, updating attachment', {
+					component: LogComponents.logMonitor,
+					oldContainerId: containerId.substring(0, 12),
+					newContainerId: currentContainerId.substring(0, 12),
+					serviceName: options.serviceName,
+				});
+				
+				// Clean up old attachment state
+				this.attachments.delete(containerId);
+				this.reconnectionOptions.delete(containerId);
+				this.retryManager.clearState(retryKey);
+				
+				// Update options with new container ID
+				const newOptions = { ...options, containerId: currentContainerId };
+				this.reconnectionOptions.set(currentContainerId, newOptions);
+				
+				// Try to attach to new container
+				await this.attach(newOptions);
+				
+				// Success! Clear retry state for old key
+				this.retryManager.recordSuccess(retryKey);
+				
+				this.logger?.infoSync('Log stream reconnection successful with new container ID', {
+					component: LogComponents.logMonitor,
+					containerId: currentContainerId.substring(0, 12),
+					serviceName: options.serviceName,
+				});
+				return;
+			}
+			
+			if (!currentContainerId) {
+				// Container no longer exists (service removed)
+				this.logger?.warnSync('Container no longer exists, stopping reconnection attempts', {
+					component: LogComponents.logMonitor,
+					containerId: containerId.substring(0, 12),
+					serviceName: options.serviceName,
+					message: 'Service may have been removed or stopped permanently',
+				});
+				
+				// Clean up state
+				this.reconnectionOptions.delete(containerId);
+				this.retryManager.clearState(retryKey);
+				return;
+			}
+			
+			// Try to reattach with original ID
 			await this.attach(options);
 			
 			// Success! Clear retry state
