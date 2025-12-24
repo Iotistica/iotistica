@@ -302,26 +302,65 @@ jobs:
       - name: Start dependencies and API
         run: docker compose -f $COMPOSE_FILE up -d 
 
+      - name: Check PostgreSQL container status
+        run: |
+          echo "=== PostgreSQL Container Status ==="
+          docker compose -f $COMPOSE_FILE ps postgres
+          
+          echo ""
+          echo "=== PostgreSQL Health Status ==="
+          docker inspect iotistic-postgres-e2e --format='{{.State.Health.Status}}' || echo "No health status"
+          
+          echo ""
+          echo "=== PostgreSQL Container State ==="
+          docker inspect iotistic-postgres-e2e --format='{{json .State}}' | jq '.' || echo "Container state check failed"
+          
+          echo ""
+          echo "=== PostgreSQL Logs ==="
+          docker compose -f $COMPOSE_FILE logs postgres --tail=100
+
       - name: Wait for dependencies to be healthy
         run: |
           echo "Waiting for PostgreSQL..."
-          timeout 60 bash -c '
+          if ! timeout 60 bash -c '
             until docker compose -f $COMPOSE_FILE exec -T postgres pg_isready -U postgres > /dev/null 2>&1; do
+              echo "PostgreSQL not ready yet..."
               sleep 2
             done
-          '
+          '; then
+            echo "✗ PostgreSQL failed to become ready within 60 seconds"
+            echo ""
+            echo "=== PostgreSQL logs (last 100 lines) ==="
+            docker compose -f $COMPOSE_FILE logs postgres --tail=100
+            echo ""
+            echo "=== PostgreSQL container inspect ==="
+            docker inspect iotistic-postgres-e2e
+            exit 1
+          fi
+          echo "✓ PostgreSQL is ready"
           
+          echo ""
           echo "Waiting for Redis..."
-          timeout 30 bash -c '
+          if ! timeout 30 bash -c '
             until docker compose -f $COMPOSE_FILE exec -T redis redis-cli ping > /dev/null 2>&1; do
+              echo "Redis not ready yet..."
               sleep 2
             done
-          '
+          '; then
+            echo "✗ Redis failed to become ready within 30 seconds"
+            echo ""
+            echo "=== Redis logs ==="
+            docker compose -f $COMPOSE_FILE logs redis --tail=50
+            exit 1
+          fi
+          echo "✓ Redis is ready"
           
+          echo ""
           echo "Waiting for Mosquitto (additional time)..."
           sleep 15
           
-          echo "All dependencies are ready!"
+          echo ""
+          echo "✓ All dependencies are ready!"
 
       - name: Check Mosquitto status and logs
         run: |
@@ -636,8 +675,7 @@ jobs:
         run: |
           echo "Testing agent API..."
           
-          if curl -f http://localhost:48484/v1/healthy 2>/dev/null || \
-             curl -f http://localhost:48484/v1/device 2>/dev/null; then
+          if curl -f http://localhost:48484/v1/healthy 2>/dev/null; then
             echo "✓ Agent API is responding"
           else
             echo "⚠ Agent API not responding"
