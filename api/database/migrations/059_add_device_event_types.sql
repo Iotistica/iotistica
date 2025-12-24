@@ -380,7 +380,7 @@ BEGIN
     v_correlation_id := COALESCE(p_correlation_id, gen_random_uuid());
     
     -- Calculate checksum
-    v_checksum := encode(digest(p_data::text, 'sha256'), 'hex');
+    v_checksum := encode(sha256(p_data::text::bytea), 'hex');
     
     -- Insert event with metadata enrichment
     INSERT INTO events (

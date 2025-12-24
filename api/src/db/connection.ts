@@ -19,6 +19,11 @@ const dbConfig = {
   statementTimeout: 60000, // 60 seconds max query execution time
   // Queue incoming requests when all connections busy
   allowExitOnIdle: false,
+  // SSL configuration for cloud-hosted PostgreSQL (Azure, AWS RDS, etc.)
+  // Azure PostgreSQL requires SSL by default
+  ssl: process.env.DB_SSL === 'false' ? false : {
+    rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'false' ? false : true,
+  },
 };
 
 // Create connection pool

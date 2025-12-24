@@ -1,13 +1,13 @@
 -- Iotistic Cloud API - PostgreSQL Database Schema
 -- Inspired by Balena Cloud architecture
 
--- Enable UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- Note: PostgreSQL 13+ has built-in gen_random_uuid() - no extension needed
+-- Azure PostgreSQL blocks uuid-ossp extension
 
 -- Devices table - stores device metadata
 CREATE TABLE IF NOT EXISTS devices (
     id SERIAL PRIMARY KEY,
-    uuid UUID NOT NULL UNIQUE DEFAULT uuid_generate_v4(),
+    uuid UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
     device_name VARCHAR(255),
     device_type VARCHAR(100),
     is_online BOOLEAN DEFAULT false,

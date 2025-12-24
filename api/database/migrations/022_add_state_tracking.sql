@@ -105,7 +105,7 @@ BEGIN
     WHERE device_uuid = p_device_uuid AND state_type = p_state_type;
     
     -- Calculate checksum (SHA256)
-    v_checksum := encode(digest(p_state::text, 'sha256'), 'hex');
+    v_checksum := encode(sha256(p_state::text::bytea), 'hex');
     
     -- Check if state actually changed (compare with last snapshot)
     IF EXISTS (
@@ -260,7 +260,7 @@ SELECT
     'target' as state_type,
     dts.apps as state,  -- Using apps from device_target_state table
     dts.version,
-    encode(digest(dts.apps::text, 'sha256'), 'hex') as checksum,
+    encode(sha256(dts.apps::text::bytea), 'hex') as checksum,
     'migration' as source,
     'Initial snapshot from migration' as notes
 FROM device_target_state dts

@@ -9,9 +9,21 @@ import type Docker from 'dockerode';
 import type { LogMessage, LogStreamOptions, ContainerLogAttachment, LogBackend } from './types';
 import { AgentLogger } from './agent-logger';
 import { LogComponents } from './types';
+import { RetryManager, DOCKER_POLICY } from '../compose/retry-manager';
+
+// Edge device safety: Prevent unbounded memory growth from noisy containers
+const MAX_BUFFER_SIZE = 1024 * 1024; // 1MB max buffer per container
+const BUFFER_WARNING_THRESHOLD = 512 * 1024; // 512KB warning threshold
+
+// Backpressure: Prevent memory spikes when backends are slow
+const MAX_PENDING_WRITES = 100; // Max concurrent backend writes per container
+const RESUME_THRESHOLD = 50; // Resume stream when pending drops below this
 
 export class ContainerLogMonitor {
 	private attachments: Map<string, ContainerLogAttachment> = new Map();
+	private reconnectionOptions: Map<string, LogStreamOptions> = new Map();
+	private pendingWrites: Map<string, number> = new Map(); // Track pending backend writes per container
+	private retryManager: RetryManager;
 	private docker: Docker;
 	private logBackends: LogBackend[];
 	private logger?: AgentLogger;
@@ -20,6 +32,8 @@ export class ContainerLogMonitor {
 		this.docker = docker;
 		this.logger = logger;
 		this.logBackends = logger?.getBackends() || [];
+		// Use Docker policy: fast retries for local operations
+		this.retryManager = new RetryManager(logger, DOCKER_POLICY);
 	}
 
 	/**
@@ -45,6 +59,9 @@ export class ContainerLogMonitor {
 			});
 			return this.attachments.get(containerId)!;
 		}
+
+		// Store options for reconnection
+		this.reconnectionOptions.set(containerId, options);
 
 		this.logger?.infoSync(`Attaching to container logs`, {
 			component: LogComponents.logMonitor,
@@ -84,6 +101,8 @@ export class ContainerLogMonitor {
 						logStream.destroy();
 					}
 					this.attachments.delete(containerId);
+					this.reconnectionOptions.delete(containerId);
+					this.retryManager.clearState(`log-stream-${containerId}`);
 				},
 			};
 
@@ -91,12 +110,15 @@ export class ContainerLogMonitor {
 
 			// Handle stream end
 			logStream.on('end', () => {
-				this.logger?.debugSync(`Log stream ended for container`, {
+				this.logger?.warnSync(`Log stream ended for container - will retry`, {
 					component: LogComponents.logMonitor,
 					containerId: containerId.substring(0, 12),
 					serviceName
 				});
 				this.attachments.delete(containerId);
+				
+				// Attempt reconnection with exponential backoff
+				this.scheduleReconnection(containerId, 'Stream ended');
 			});
 
 			logStream.on('error', (error) => {
@@ -106,15 +128,23 @@ export class ContainerLogMonitor {
 					serviceName
 				});
 				this.attachments.delete(containerId);
+				
+				// Attempt reconnection with exponential backoff
+				this.scheduleReconnection(containerId, error.message);
 			});
 
 			return attachment;
 		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
 			this.logger?.errorSync(`Failed to attach to container`, error as Error, {
 				component: LogComponents.logMonitor,
 				containerId: containerId.substring(0, 12),
 				serviceName
 			});
+			
+			// Schedule reconnection with exponential backoff
+			this.scheduleReconnection(containerId, errorMessage);
+			
 			throw error;
 		}
 	}
@@ -126,6 +156,81 @@ export class ContainerLogMonitor {
 		const attachment = this.attachments.get(containerId);
 		if (attachment) {
 			await attachment.detach();
+		}
+	}
+
+	/**
+	 * Schedule reconnection with exponential backoff
+	 * Uses RetryManager to prevent retry storms during mass failures
+	 */
+	private scheduleReconnection(containerId: string, error: string): void {
+		const retryKey = `log-stream-${containerId}`;
+		
+		// Check if we should retry
+		if (!this.retryManager.shouldRetry(retryKey)) {
+			if (this.retryManager.isTerminal(retryKey)) {
+				this.logger?.errorSync('Log stream reconnection failed permanently', undefined, {
+					component: LogComponents.logMonitor,
+					containerId: containerId.substring(0, 12),
+					message: 'Max retries exceeded. Container may be stopped or deleted.',
+				});
+				this.reconnectionOptions.delete(containerId);
+			}
+			return;
+		}
+		
+		// Record failure and schedule retry
+		this.retryManager.recordFailure(retryKey, error);
+		
+		// Get retry state to determine backoff time
+		const state = this.retryManager.getState(retryKey);
+		if (!state) return;
+		
+		const delayMs = state.nextRetry.getTime() - Date.now();
+		
+		this.logger?.infoSync('Scheduling log stream reconnection', {
+			component: LogComponents.logMonitor,
+			containerId: containerId.substring(0, 12),
+			attempt: state.count,
+			delayMs,
+			nextRetry: state.nextRetry.toISOString(),
+		});
+		
+		// Schedule reconnection attempt
+		setTimeout(() => {
+			this.attemptReconnection(containerId).catch(() => {
+				// Errors are already logged in attemptReconnection
+			});
+		}, Math.max(0, delayMs));
+	}
+
+	/**
+	 * Attempt to reconnect to a container's log stream
+	 */
+	private async attemptReconnection(containerId: string): Promise<void> {
+		const options = this.reconnectionOptions.get(containerId);
+		if (!options) {
+			// Reconnection was cancelled (manual detach)
+			return;
+		}
+		
+		const retryKey = `log-stream-${containerId}`;
+		
+		try {
+			// Try to reattach
+			await this.attach(options);
+			
+			// Success! Clear retry state
+			this.retryManager.recordSuccess(retryKey);
+			
+			this.logger?.infoSync('Log stream reconnection successful', {
+				component: LogComponents.logMonitor,
+				containerId: containerId.substring(0, 12),
+				serviceName: options.serviceName,
+			});
+		} catch (error) {
+			// Reconnection failed, scheduleReconnection will be called from attach()
+			// which already logged the error
 		}
 	}
 
@@ -164,8 +269,70 @@ export class ContainerLogMonitor {
 		serviceName: string,
 	): void {
 		let buffer = Buffer.alloc(0);
+		let droppedMessages = 0;
+		let lastWarningTime = 0;
+		let isPaused = false;
+
+		// Initialize pending writes counter
+		this.pendingWrites.set(containerId, 0);
 
 		stream.on('data', (chunk: Buffer) => {
+			// Backpressure: Check if backends are slow BEFORE processing
+			const pending = this.pendingWrites.get(containerId) || 0;
+			if (pending >= MAX_PENDING_WRITES && !isPaused) {
+				isPaused = true;
+				stream.pause();
+				
+				this.logger?.warnSync('Pausing log stream - backends are slow', {
+					component: LogComponents.logMonitor,
+					containerId: containerId.substring(0, 12),
+					serviceName,
+					pendingWrites: pending,
+					maxPending: MAX_PENDING_WRITES,
+					message: 'SQLite busy or disk slow. Stream paused to prevent memory exhaustion.',
+				});
+				return;
+			}
+			
+			// Edge device protection: Check buffer size BEFORE concatenating
+			if (buffer.length + chunk.length > MAX_BUFFER_SIZE) {
+				droppedMessages++;
+				
+				// Throttle warnings (max 1 per minute)
+				const now = Date.now();
+				if (now - lastWarningTime > 60000) {
+					this.logger?.warnSync('Log buffer overflow - dropping messages', {
+						component: LogComponents.logMonitor,
+						containerId: containerId.substring(0, 12),
+						serviceName,
+						bufferSize: buffer.length,
+						maxBufferSize: MAX_BUFFER_SIZE,
+						droppedMessages,
+						message: 'Container is too noisy or backend is slow. Consider reducing log verbosity.',
+					});
+					lastWarningTime = now;
+				}
+				
+				// Drop the chunk to prevent memory exhaustion
+				// Alternative: could pause the stream with backpressure
+				return;
+			}
+			
+			// Warning threshold (allows proactive action before overflow)
+			if (buffer.length > BUFFER_WARNING_THRESHOLD) {
+				const now = Date.now();
+				if (now - lastWarningTime > 60000) {
+					this.logger?.warnSync('Log buffer growing large', {
+						component: LogComponents.logMonitor,
+						containerId: containerId.substring(0, 12),
+						serviceName,
+						bufferSize: buffer.length,
+						threshold: BUFFER_WARNING_THRESHOLD,
+					});
+					lastWarningTime = now;
+				}
+			}
+			
 			buffer = Buffer.concat([buffer, chunk]);
 
 			while (buffer.length >= 8) {
@@ -224,10 +391,41 @@ export class ContainerLogMonitor {
 						isSystem: false,
 					};
 
+					// Backpressure: Track pending writes
+					const currentPending = this.pendingWrites.get(containerId) || 0;
+					this.pendingWrites.set(containerId, currentPending + 1);
+
 					// Send to all backends
 					Promise.all(
 						this.logBackends.map((backend) => backend.log(logMessage)),
-					).catch((error: Error) => {
+					).then(() => {
+						// Backpressure: Decrement pending writes
+						const pending = (this.pendingWrites.get(containerId) || 1) - 1;
+						this.pendingWrites.set(containerId, pending);
+						
+						// Resume stream if backpressure relieved
+						if (isPaused && pending <= RESUME_THRESHOLD) {
+							isPaused = false;
+							stream.resume();
+							
+							this.logger?.infoSync('Resuming log stream - backends caught up', {
+								component: LogComponents.logMonitor,
+								containerId: containerId.substring(0, 12),
+								serviceName,
+								pendingWrites: pending,
+							});
+						}
+					}).catch((error: Error) => {
+						// Backpressure: Decrement pending writes even on error
+						const pending = (this.pendingWrites.get(containerId) || 1) - 1;
+						this.pendingWrites.set(containerId, pending);
+						
+						// Resume stream if backpressure relieved
+						if (isPaused && pending <= RESUME_THRESHOLD) {
+							isPaused = false;
+							stream.resume();
+						}
+						
 						this.logger?.errorSync('Failed to store log', error, {
 							component: LogComponents.logMonitor,
 							containerId: containerId.substring(0, 12),
@@ -236,6 +434,27 @@ export class ContainerLogMonitor {
 					});
 				}
 			}
+			
+			// Hard cap: Reset buffer if it's stuck large (malformed stream protection)
+			if (buffer.length > MAX_BUFFER_SIZE) {
+				this.logger?.warnSync('Log buffer stuck at max size - resetting', {
+					component: LogComponents.logMonitor,
+					containerId: containerId.substring(0, 12),
+					serviceName,
+					bufferSize: buffer.length,
+					message: 'Stream may be malformed. Dropping buffered data to prevent memory exhaustion.',
+				});
+				buffer = Buffer.alloc(0);
+				droppedMessages++;
+			}
+		});
+		
+		// Cleanup pending writes counter on stream end
+		stream.on('end', () => {
+			this.pendingWrites.delete(containerId);
+		});
+		stream.on('error', () => {
+			this.pendingWrites.delete(containerId);
 		});
 	}
 

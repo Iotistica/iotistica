@@ -8,8 +8,8 @@
 -- STEP 0: Enable required extensions
 -- ============================================================================
 
--- Enable pg_trgm extension for trigram-based fuzzy text search (optional but recommended)
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+-- Note: pg_trgm extension blocked by Azure PostgreSQL
+-- Trigram indexes are optional - migration creates conditional index below
 
 -- ============================================================================
 -- OVERVIEW
@@ -256,18 +256,21 @@ ON CONFLICT (key) DO NOTHING;
 -- STEP 9: Grant permissions
 -- ============================================================================
 
+-- Note: Azure PostgreSQL user already has full permissions
+-- GRANT statements not needed for cloud-managed instances
+
 -- Grant basic CRUD on device_tags to application role (adjust as needed)
-GRANT SELECT, INSERT, UPDATE, DELETE ON device_tags TO postgres;
-GRANT USAGE, SELECT ON SEQUENCE device_tags_id_seq TO postgres;
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON device_tags TO postgres;
+-- GRANT USAGE, SELECT ON SEQUENCE device_tags_id_seq TO postgres;
 
 -- Grant read access to tag_definitions
-GRANT SELECT ON tag_definitions TO postgres;
-GRANT USAGE, SELECT ON SEQUENCE tag_definitions_id_seq TO postgres;
+-- GRANT SELECT ON tag_definitions TO postgres;
+-- GRANT USAGE, SELECT ON SEQUENCE tag_definitions_id_seq TO postgres;
 
 -- Grant execute on helper functions
-GRANT EXECUTE ON FUNCTION get_device_tags_json(UUID) TO postgres;
-GRANT EXECUTE ON FUNCTION find_devices_by_tags(JSONB) TO postgres;
-GRANT EXECUTE ON FUNCTION count_devices_by_tags(JSONB) TO postgres;
+-- GRANT EXECUTE ON FUNCTION get_device_tags_json(UUID) TO postgres;
+-- GRANT EXECUTE ON FUNCTION find_devices_by_tags(JSONB) TO postgres;
+-- GRANT EXECUTE ON FUNCTION count_devices_by_tags(JSONB) TO postgres;
 
 -- ============================================================================
 -- COMPLETION

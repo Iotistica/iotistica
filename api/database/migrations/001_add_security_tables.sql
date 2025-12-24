@@ -4,7 +4,7 @@
 
 -- Provisioning keys table - for fleet-level device registration
 CREATE TABLE IF NOT EXISTS provisioning_keys (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     key_hash VARCHAR(255) NOT NULL,  -- bcrypt hashed provisioning key
     fleet_id VARCHAR(100) NOT NULL,  -- Fleet/application identifier
     description TEXT,

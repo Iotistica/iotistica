@@ -4,8 +4,8 @@
 
 BEGIN;
 
--- Enable pgcrypto extension for digest function (checksums)
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- Note: PostgreSQL 13+ has built-in sha256() - no extension needed
+-- Azure PostgreSQL blocks pgcrypto extension
 
 -- ============================================================================
 -- 1. EVENT STORE (Core of Event Sourcing)
@@ -203,8 +203,8 @@ BEGIN
     -- Generate correlation ID if not provided
     v_correlation_id := COALESCE(p_correlation_id, gen_random_uuid());
     
-    -- Calculate checksum
-    v_checksum := encode(digest(p_data::text, 'sha256'), 'hex');
+    -- Calculate checksum using built-in sha256()
+    v_checksum := encode(sha256(p_data::text::bytea), 'hex');
     
     -- Insert event
     INSERT INTO events (
