@@ -672,7 +672,7 @@ jobs:
           sleep 5
           
           # Extract Device manager initialization log from journalctl
-          DEVICE_INFO=$(sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep "Device manager initialized" | tail -1)
+          DEVICE_INFO=$(sudo journalctl -u iotistic-agent --no-pager --since "5 minutes ago" | grep "Device provisioned successfully" | tail -1)
           
           if [ -z "$DEVICE_INFO" ]; then
             echo "✗ Device manager initialization log not found"
