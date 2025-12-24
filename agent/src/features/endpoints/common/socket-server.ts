@@ -95,8 +95,17 @@ export class SocketServer {
       });
 
       // Remove Unix socket file (Named Pipes are cleaned up automatically by Windows)
-      if (!this.isWindowsNamedPipe && fs.existsSync(this.config.socketPath)) {
-        fs.unlinkSync(this.config.socketPath);
+      if (!this.isWindowsNamedPipe) {
+        try {
+          if (fs.existsSync(this.config.socketPath)) {
+            fs.unlinkSync(this.config.socketPath);
+          }
+        } catch (unlinkError: any) {
+          // Ignore ENOENT (file already deleted) - not an error condition
+          if (unlinkError?.code !== 'ENOENT') {
+            this.logger.warn(`Failed to remove socket file: ${unlinkError?.message || unlinkError}`);
+          }
+        }
       }
 
       this.started = false;
