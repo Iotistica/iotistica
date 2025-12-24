@@ -11,17 +11,40 @@
 DO $$
 DECLARE
     timescaledb_available BOOLEAN;
+    timescaledb_installed BOOLEAN;
+    is_superuser BOOLEAN;
 BEGIN
+    -- Check if we have superuser privileges
+    SELECT usesuper FROM pg_user WHERE usename = CURRENT_USER INTO is_superuser;
+    
+    -- Check if TimescaleDB is available as an extension
     SELECT EXISTS (
         SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb'
     ) INTO timescaledb_available;
+    
+    -- Check if TimescaleDB is already installed
+    SELECT EXISTS (
+        SELECT 1 FROM pg_extension WHERE extname = 'timescaledb'
+    ) INTO timescaledb_installed;
 
-    IF timescaledb_available THEN
-        RAISE NOTICE 'TimescaleDB extension found, enabling...';
-        CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+    IF timescaledb_installed THEN
+        RAISE NOTICE 'TimescaleDB extension already enabled';
+    ELSIF timescaledb_available THEN
+        -- Try to enable TimescaleDB (may fail on managed services without superuser)
+        BEGIN
+            RAISE NOTICE 'TimescaleDB extension found, attempting to enable...';
+            CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
 
-        COMMENT ON EXTENSION timescaledb IS
-            'Enables high-performance time-series data handling with automatic partitioning';
+            COMMENT ON EXTENSION timescaledb IS
+                'Enables high-performance time-series data handling with automatic partitioning';
+            
+            RAISE NOTICE 'TimescaleDB extension successfully enabled';
+        EXCEPTION
+            WHEN insufficient_privilege THEN
+                RAISE WARNING 'Cannot enable TimescaleDB: insufficient privileges (requires superuser or rds_superuser). Continuing without TimescaleDB features.';
+            WHEN OTHERS THEN
+                RAISE WARNING 'Failed to enable TimescaleDB: % (%). Continuing without TimescaleDB features.', SQLERRM, SQLSTATE;
+        END;
 
         -- ============================================================================
         -- 2. PREPARE FOR HYPERTABLE CONVERSION

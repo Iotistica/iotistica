@@ -84,7 +84,7 @@ services:
             - HTTPS_CERT_PATH=/app/certs/server.crt
             - HTTPS_KEY_PATH=/app/certs/server.key
             - HTTPS_CA_CERT_PATH=/app/certs/ca.crt
-            - DB_HOST=postgres
+            - DB_HOST=${DB_HOST:-postgres}
             - DB_PORT=${DB_PORT:-5432}
             - DB_NAME=${DB_NAME:-iotistic}
             - DB_USER=${DB_USER:-postgres}
