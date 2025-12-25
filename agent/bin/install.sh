@@ -363,23 +363,36 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
         AGENT_VERSION="${IOTISTIC_AGENT_VERSION:-dev}"
         CLOUD_API_ENDPOINT="${CLOUD_API_ENDPOINT:-}"
         
-        echo "Using current repository code (CI mode)"
-        
-        # Copy current directory to /opt/iotistic/agent if we're running from the repository
-        # (detect if we're in agent/ directory by checking for package.json)
+        # Detect if we're running from a checked-out repository
         SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
         AGENT_DIR="$(dirname "$SCRIPT_DIR")"
+        REPO_ROOT="$(dirname "$AGENT_DIR")"
         
         if [ -f "$AGENT_DIR/package.json" ]; then
-            echo "Copying agent code from $AGENT_DIR to /opt/iotistic/agent..."
+            echo "Using current repository checkout from: $AGENT_DIR"
+            
+            # Copy agent code
+            echo "Copying agent code..."
             cp -r "$AGENT_DIR"/* /opt/iotistic/agent/
             
-            # Also copy config if it exists (one level up from agent)
-            REPO_ROOT="$(dirname "$AGENT_DIR")"
+            # Copy config if it exists
             if [ -d "$REPO_ROOT/config" ]; then
+                echo "Copying config..."
                 mkdir -p /opt/iotistic/config
                 cp -r "$REPO_ROOT/config"/* /opt/iotistic/config/
             fi
+            
+            echo "✓ Repository code copied to /opt/iotistic/agent"
+        else
+            echo "No local repository found, cloning from GitHub..."
+            cd /tmp
+            rm -rf iotistic-clone-temp
+            git clone --depth 1 https://github.com/Iotistica/iotistic.git iotistic-clone-temp
+            cp -r iotistic-clone-temp/agent/* /opt/iotistic/agent/
+            mkdir -p /opt/iotistic/config
+            cp -r iotistic-clone-temp/config/* /opt/iotistic/config/
+            rm -rf iotistic-clone-temp
+            echo "✓ Repository cloned and copied"
         fi
     else
         # Interactive mode
