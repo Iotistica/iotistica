@@ -332,16 +332,6 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
         echo "✓ Node.js is already installed ($(node --version))"
     fi
 
-    # Install PM2
-    if ! command -v pm2 &> /dev/null; then
-        echo ""
-        echo "Installing PM2 process manager..."
-        npm install -g pm2
-        echo "✓ PM2 installed successfully"
-    else
-        echo "✓ PM2 is already installed"
-    fi
-
     # Create iotistic user
     if ! id -u iotistic &> /dev/null; then
         echo ""
@@ -368,7 +358,9 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
 
     if [ -n "$CI" ] || [ ! -t 0 ]; then
         echo "Running in non-interactive mode"
-        echo "[DEBUG] PROVISIONING_KEY (from env): ${PROVISIONING_KEY}..."
+        if [ -n "$PROVISIONING_KEY" ]; then
+            echo "[DEBUG] PROVISIONING_KEY found in environment (redacted)"
+        fi
         DEVICE_API_PORT="${IOTISTIC_DEVICE_PORT:-48484}"
         AGENT_VERSION="${IOTISTIC_AGENT_VERSION:-dev}"
         CLOUD_API_ENDPOINT="${CLOUD_API_ENDPOINT:-}"
@@ -464,7 +456,7 @@ DATABASE_PATH=/var/lib/iotistic/agent/device.sqlite
 EOF
 
     if [ -n "$PROVISIONING_KEY" ]; then
-        echo "[DEBUG] Writing PROVISIONING_KEY to agent.env: ${PROVISIONING_KEY:0:20}..."
+        echo "[DEBUG] Writing PROVISIONING_KEY to agent.env (redacted)"
         echo "PROVISIONING_KEY=${PROVISIONING_KEY}" >> /etc/iotistic/agent.env
     else
         echo "[DEBUG] PROVISIONING_KEY is empty, not writing to agent.env"
@@ -487,31 +479,9 @@ EOF
         echo "MQTT_USE_TLS=${MQTT_USE_TLS}" >> /etc/iotistic/agent.env
     fi
 
-    # Create PM2 config
-    echo ""
-    echo "Creating PM2 configuration..."
-    cat > /opt/iotistic/agent/ecosystem.config.js << 'EOFCONFIG'
-module.exports = {
-  apps: [{
-    name: 'iotistic-agent',
-    script: 'dist/app.js',
-    cwd: '/opt/iotistic/agent',
-    instances: 1,
-    autorestart: true,
-    watch: false,
-    max_memory_restart: '1G',
-    env_file: '/etc/iotistic/agent.env',
-    output: '/var/log/iotistic/agent-out.log',
-    error: '/var/log/iotistic/agent-error.log',
-    log_date_format: 'YYYY-MM-DD HH:mm:ss Z'
-  }]
-};
-EOFCONFIG
-
     # Set permissions
+    echo ""
     echo "Setting permissions..."
-    touch /var/log/iotistic/agent-out.log
-    touch /var/log/iotistic/agent-error.log
     chown -R iotistic:iotistic /opt/iotistic/agent
     chown -R iotistic:iotistic /var/lib/iotistic/agent
     chown -R iotistic:iotistic /var/log/iotistic
@@ -522,9 +492,9 @@ EOFCONFIG
     echo ""
     echo "Creating systemd service..."
 
-    PM2_PATH=$(which pm2-runtime)
+    NODE_PATH=$(which node)
 
-    echo "PM2_PATH: ${PM2_PATH}"
+    echo "Node path: ${NODE_PATH}"
     
     cat > /etc/systemd/system/iotistic-agent.service << EOFSVC
 [Unit]
@@ -536,15 +506,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
+User=iotistic
+Group=iotistic
 WorkingDirectory=/opt/iotistic/agent
 EnvironmentFile=/etc/iotistic/agent.env
-Environment=PM2_HOME=/root/.pm2
-Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=NODE_ENV=production
 
-ExecStart=$PM2_PATH start /opt/iotistic/agent/ecosystem.config.js 
-ExecReload=$PM2_PATH reload /opt/iotistic/agent/ecosystem.config.js
-ExecStop=/bin/kill -s SIGTERM \$MAINPID
+ExecStart=$NODE_PATH /opt/iotistic/agent/dist/app.js
 
 Restart=always
 RestartSec=10
@@ -553,9 +521,65 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=iotistic-agent
 
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/iotistic /var/log/iotistic /opt/iotistic/agent
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryAccounting=true
+CPUAccounting=true
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=1G
+
 [Install]
 WantedBy=multi-user.target
 EOFSVC
+
+    # Configure journald limits (prevent disk exhaustion on edge devices)
+    echo ""
+    echo "Configuring journald log limits..."
+    
+    # Backup existing config if it exists
+    if [ -f /etc/systemd/journald.conf ]; then
+        cp /etc/systemd/journald.conf /etc/systemd/journald.conf.bak.$(date +%s)
+    fi
+    
+    # Set bounded log storage for edge devices
+    cat > /etc/systemd/journald.conf << EOFJOURNALD
+[Journal]
+# Disk storage limits (important for edge devices)
+SystemMaxUse=200M
+RuntimeMaxUse=100M
+MaxRetentionSec=7day
+
+# Keep logs structured and compressed
+Compress=yes
+Storage=persistent
+
+# Forward to syslog if needed
+ForwardToSyslog=no
+ForwardToKMsg=no
+ForwardToConsole=no
+EOFJOURNALD
+
+    # Restart journald to apply limits
+    systemctl restart systemd-journald
+    echo "✓ Journald limits configured (200M disk, 7 day retention)"
+
+    # Verify agent.env permissions before starting service
+    echo ""
+    echo "Verifying configuration file permissions..."
+    if [ "$(stat -c %a /etc/iotistic/agent.env)" != "600" ]; then
+        echo "✗ Error: agent.env permissions are insecure"
+        echo "Expected: 600, Found: $(stat -c %a /etc/iotistic/agent.env)"
+        exit 1
+    fi
+    echo "✓ Configuration file permissions verified (600)"
 
     # Start service
     systemctl daemon-reload
@@ -571,12 +595,8 @@ EOFSVC
         echo "✓ Agent service is running"
         
         echo ""
-        echo "PM2 Status:"
-        pm2 list
-        
-        echo ""
         echo "Recent logs:"
-        journalctl -u iotistic-agent -n 200 --no-pager
+        journalctl -u iotistic-agent -n 50 --no-pager
         
         echo ""
         echo "====================================="
@@ -589,9 +609,8 @@ EOFSVC
         echo "Useful commands:"
         echo "  systemctl status iotistic-agent        # Check status"
         echo "  journalctl -u iotistic-agent -f        # View logs"
-        echo "  pm2 list                               # List PM2 processes"
-        echo "  pm2 logs iotistic-agent                # View PM2 logs"
         echo "  systemctl restart iotistic-agent       # Restart agent"
+        echo "  systemctl stop iotistic-agent          # Stop agent"
         echo ""
     else
         echo ""
