@@ -180,7 +180,7 @@ export abstract class BaseFeature extends EventEmitter {
     }
 
     // Check if feature requires provisioning (cloud API endpoint)
-    if (this.requiresProvisioning && !this.config.cloudApiUrl) {
+    if (this.requiresProvisioning && (!this.config.cloudApiUrl || this.config.cloudApiUrl.trim() === '')) {
       this.logger.info(`${this.featureName} skipped - device not provisioned (requires cloud API endpoint)`);
       return; // Gracefully skip without throwing error
     }
