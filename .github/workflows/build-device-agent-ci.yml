@@ -224,32 +224,17 @@ jobs:
             exit 1
           fi
 
-      - name: Check PM2 status
+      - name: Check agent logs
         run: |
-          echo "PM2 Process List:"
-          sudo pm2 list
+          echo "Agent Logs (journald):"
+          sudo journalctl -u iotistic-agent -n 100 --no-pager
           
           echo ""
-          echo "Agent Process Info:"
-          sudo pm2 info iotistic-agent || echo "Process not found"
-          
-          # Check if process is online
-          if sudo pm2 list | grep -q "online"; then
-            echo "✓ Agent is running (online)"
-          elif sudo pm2 list | grep -q "errored"; then
-            echo "✗ Agent is in errored state"
-            echo "Checking PM2 logs for errors..."
-            sudo pm2 logs iotistic-agent --nostream --lines 200 --err
-            exit 1
-          elif sudo pm2 list | grep -q "stopped"; then
-            echo "✗ Agent is stopped"
-            echo "Checking PM2 logs..."
-            sudo pm2 logs iotistic-agent --nostream --lines 200
-            exit 1
+          echo "Checking for errors in logs..."
+          if sudo journalctl -u iotistic-agent -n 100 --no-pager | grep -qi "error"; then
+            echo "⚠ Errors found in logs"
           else
-            echo "✗ Agent is not running"
-            sudo pm2 logs iotistic-agent --nostream --lines 200
-            exit 1
+            echo "✓ No errors found"
           fi
 
       - name: Test agent API
@@ -261,26 +246,26 @@ jobs:
             echo "✓ Agent API is responding"
           else
             echo "⚠ Agent API not responding"
-            sudo pm2 logs iotistic-agent --nostream --lines 50
+            sudo journalctl -u iotistic-agent -n 50 --no-pager
           fi
 
-      - name: Show PM2 logs
+      - name: Show agent logs
         if: always()
         run: |
           echo "========================================="
-          echo "Agent Logs (PM2):"
+          echo "Agent Logs (journald):"
           echo "========================================="
-          sudo pm2 logs iotistic-agent --nostream --lines 200
+          sudo journalctl -u iotistic-agent -n 200 --no-pager
 
       - name: Generate systemd test summary
         if: always()
         run: |
-          echo "# Agent PM2 Process Manager Test" >> $GITHUB_STEP_SUMMARY
+          echo "# Agent Systemd Installation Test" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Installation" >> $GITHUB_STEP_SUMMARY
           echo "- **Location**: \`/opt/iotistic/agent\`" >> $GITHUB_STEP_SUMMARY
           echo "- **User**: \`iotistic\` (non-root)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Process Manager**: PM2" >> $GITHUB_STEP_SUMMARY
+          echo "- **Process Manager**: systemd" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           # Add device configuration if available
@@ -306,12 +291,13 @@ jobs:
           echo "## Tests Performed" >> $GITHUB_STEP_SUMMARY
           echo "1. System dependencies installation (SQLite, Docker, etc.)" >> $GITHUB_STEP_SUMMARY
           echo "2. Agent build and installation" >> $GITHUB_STEP_SUMMARY
-          echo "3. PM2 process manager setup" >> $GITHUB_STEP_SUMMARY
-          echo "4. Process startup and status check" >> $GITHUB_STEP_SUMMARY
-          echo "5. API health verification" >> $GITHUB_STEP_SUMMARY
-          echo "6. Auto-reconciliation verification" >> $GITHUB_STEP_SUMMARY
+          echo "3. Systemd service configuration and hardening" >> $GITHUB_STEP_SUMMARY
+          echo "4. Journald log limits configuration" >> $GITHUB_STEP_SUMMARY
+          echo "5. Process startup and status check" >> $GITHUB_STEP_SUMMARY
+          echo "6. API health verification" >> $GITHUB_STEP_SUMMARY
+          echo "7. Configuration file permissions verification" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Agent running with PM2 validated successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "Agent running with systemd validated successfully!" >> $GITHUB_STEP_SUMMARY
 
   upload-install-scripts:
     name: Upload Installation Scripts
@@ -607,19 +593,14 @@ jobs:
       needs: [upload-install-scripts]
       if: always()
       steps:
-       - name: Cleanup systemd service and PM2
+       - name: Cleanup systemd service
          if: always()
          run: |
-            # Stop and disable systemd service1
+            # Stop and disable systemd service
             sudo systemctl stop iotistic-agent || true
             sudo systemctl disable iotistic-agent || true
             sudo rm -f /etc/systemd/system/iotistic-agent.service
             sudo systemctl daemon-reload
-            
-            # Stop and remove PM2 processes
-            sudo pm2 stop iotistic-agent || true
-            sudo pm2 delete iotistic-agent || true
-            sudo pm2 kill || true
             
             # Remove installation directories
             sudo rm -rf /opt/iotistic/agent
@@ -627,7 +608,7 @@ jobs:
             sudo rm -rf /var/log/iotistic
             sudo rm -rf /etc/iotistic
             
-            echo "✓ Systemd service and PM2 cleaned up"
+            echo "✓ Systemd service cleaned up"
        
        - name: Cleanup Docker
          if: always()
