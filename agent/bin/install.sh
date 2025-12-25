@@ -40,6 +40,51 @@ fi
 
 echo "Detected OS: $OS $OS_VERSION"
 
+# Helper function to install Docker if needed
+install_docker_if_needed() {
+    local REQUIRE_INSTALL="${1:-no}"  # 'yes' = install without asking, 'no' = ask in interactive mode
+    
+    if command -v docker &> /dev/null; then
+        echo "✓ Docker is already installed ($(docker --version))"
+        return 0
+    fi
+    
+    echo "⚠️  Docker is not installed on this system."
+    echo ""
+    
+    # Determine if we should install
+    local SHOULD_INSTALL="$REQUIRE_INSTALL"
+    if [ "$SHOULD_INSTALL" != "yes" ]; then
+        if [ -n "$CI" ] || [ ! -t 0 ]; then
+            echo "Running in non-interactive mode - Docker will be installed automatically."
+            SHOULD_INSTALL="yes"
+        else
+            read -p "Would you like to install Docker now? (yes/no): " SHOULD_INSTALL
+        fi
+    fi
+    
+    if [ "$SHOULD_INSTALL" = "yes" ] || [ "$SHOULD_INSTALL" = "y" ]; then
+        echo "Installing Docker..."
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sh get-docker.sh
+        rm get-docker.sh
+        
+        systemctl start docker
+        systemctl enable docker
+        
+        echo "✓ Docker installed successfully"
+        return 0
+    else
+        echo ""
+        echo "Error: Docker is required for this installation method."
+        echo "Please install Docker manually or choose Systemd installation."
+        echo ""
+        echo "To install Docker, run:"
+        echo "  curl -fsSL https://get.docker.com | sh"
+        return 1
+    fi
+}
+
 # Determine installation method
 INSTALL_METHOD="${IOTISTIC_INSTALL_METHOD:-}"
 
@@ -95,42 +140,7 @@ if [ "$INSTALL_METHOD" = "docker" ]; then
     echo ""
 
     # Check if Docker is installed
-    if ! command -v docker &> /dev/null; then
-        echo "⚠️  Docker is not installed on this system."
-        echo ""
-        
-        # Check if running in non-interactive mode
-        if [ -n "$CI" ] || [ ! -t 0 ]; then
-            echo "Running in non-interactive mode - Docker will be installed automatically."
-            INSTALL_DOCKER="yes"
-        else
-            # Interactive mode - ask user
-            read -p "Would you like to install Docker now? (yes/no): " INSTALL_DOCKER
-        fi
-        
-        if [ "$INSTALL_DOCKER" = "yes" ] || [ "$INSTALL_DOCKER" = "y" ]; then
-            echo "Installing Docker..."
-            curl -fsSL https://get.docker.com -o get-docker.sh
-            sh get-docker.sh
-            rm get-docker.sh
-            
-            # Start and enable Docker
-            systemctl start docker
-            systemctl enable docker
-            
-            echo "✓ Docker installed successfully"
-        else
-            echo ""
-            echo "Error: Docker is required for this installation method."
-            echo "Please install Docker manually or choose Systemd installation."
-            echo ""
-            echo "To install Docker, run:"
-            echo "  curl -fsSL https://get.docker.com | sh"
-            exit 1
-        fi
-    else
-        echo "✓ Docker is already installed ($(docker --version))"
-    fi
+    install_docker_if_needed || exit 1
 
     # Verify Docker daemon is accessible
     if ! docker ps &> /dev/null; then
@@ -306,20 +316,8 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
     echo "✓ System dependencies installed"
 
     # Install Docker (required for agent functionality)
-    if ! command -v docker &> /dev/null; then
-        echo ""
-        echo "Installing Docker..."
-        curl -fsSL https://get.docker.com -o get-docker.sh
-        sh get-docker.sh
-        rm get-docker.sh
-        
-        systemctl start docker
-        systemctl enable docker
-        
-        echo "✓ Docker installed successfully"
-    else
-        echo "✓ Docker is already installed"
-    fi
+    echo ""
+    install_docker_if_needed "yes"
 
     # Install Node.js 20
     if ! command -v node &> /dev/null || [ "$(node -v | cut -d'v' -f2 | cut -d'.' -f1)" -lt 20 ]; then
@@ -516,6 +514,7 @@ ExecStart=$NODE_PATH /opt/iotistic/agent/dist/app.js
 
 Restart=always
 RestartSec=10
+WatchdogSec=30
 
 StandardOutput=journal
 StandardError=journal
@@ -524,7 +523,7 @@ SyslogIdentifier=iotistic-agent
 # Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=strict
+ProtectSystem=full
 ProtectHome=true
 ReadWritePaths=/var/lib/iotistic /var/log/iotistic /opt/iotistic/agent /var/run/docker.sock
 CapabilityBoundingSet=
@@ -544,13 +543,10 @@ EOFSVC
     echo ""
     echo "Configuring journald log limits..."
     
-    # Backup existing config if it exists
-    if [ -f /etc/systemd/journald.conf ]; then
-        cp /etc/systemd/journald.conf /etc/systemd/journald.conf.bak.$(date +%s)
-    fi
+    # Use drop-in config instead of overwriting system file
+    mkdir -p /etc/systemd/journald.conf.d
     
-    # Set bounded log storage for edge devices
-    cat > /etc/systemd/journald.conf << EOFJOURNALD
+    cat > /etc/systemd/journald.conf.d/iotistic.conf << EOFJOURNALD
 [Journal]
 # Disk storage limits (important for edge devices)
 SystemMaxUse=200M
@@ -560,11 +556,6 @@ MaxRetentionSec=7day
 # Keep logs structured and compressed
 Compress=yes
 Storage=persistent
-
-# Forward to syslog if needed
-ForwardToSyslog=no
-ForwardToKMsg=no
-ForwardToConsole=no
 EOFJOURNALD
 
     # Restart journald to apply limits

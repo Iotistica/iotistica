@@ -11,9 +11,13 @@
 
 import process from 'process';
 import DeviceAgent from './agent';
+import { startWatchdog, notifySystemd } from './systemd-watchdog';
 
 // Start the device agent
 const agent = new DeviceAgent();
+
+// Start systemd watchdog (automatically detects if running under systemd)
+const stopWatchdog = startWatchdog(agent.logger);
 
 // Track if shutdown is in progress
 let shuttingDown = false;
@@ -29,6 +33,12 @@ async function gracefulShutdown(signal: string) {
 	console.log(`\n${signal} received. Starting graceful shutdown...`);
 
 	try {
+		// Notify systemd we're stopping
+		notifySystemd('STOPPING=1', agent.logger);
+		
+		// Stop watchdog
+		stopWatchdog();
+		
 		// Stop the agent (closes Device API, MQTT, etc.)
 		await agent.stop();
 		process.exit(0);
