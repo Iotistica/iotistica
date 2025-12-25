@@ -1,0 +1,11 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: ImageCatalog
+metadata:
+  name: timescaledb
+  namespace: iotistic-system
+spec:
+  images:
+  - major: 17
+    # Replace with your registry after building and pushing the image
+    # Example: ghcr.io/iotistica/timescaledb-cnpg:pg17
+    image: YOUR_REGISTRY/timescaledb-cnpg:pg17

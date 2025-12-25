@@ -1,0 +1,109 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: timescaledb-cluster
+  namespace: iotistic-system
+spec:
+  instances: 3
+  
+  # Reference the ImageCatalog for custom TimescaleDB image
+  imageCatalogRef:
+    apiGroup: postgresql.cnpg.io
+    kind: ImageCatalog
+    name: timescaledb
+    major: 17
+  
+  # Storage configuration
+  storage:
+    size: 20Gi
+    storageClass: standard  # Adjust based on your cluster
+  
+  # PostgreSQL configuration
+  postgresql:
+    # CRITICAL: TimescaleDB must be preloaded at startup
+    shared_preload_libraries:
+      - timescaledb
+    
+    parameters:
+      # Memory settings (adjust based on pod resources)
+      work_mem: '128MB'
+      maintenance_work_mem: '1GB'
+      shared_buffers: '512MB'
+      effective_cache_size: '1536MB'
+      
+      # Connection settings
+      max_connections: '100'
+      
+      # TimescaleDB-specific parameters
+      timescaledb.max_background_workers: '4'
+      
+      # Logging (optional - for debugging)
+      log_statement: 'none'  # or 'all' for debugging
+      log_duration: 'off'
+  
+  # Bootstrap configuration
+  bootstrap:
+    initdb:
+      database: iotistic
+      owner: iotistic
+      # Enable TimescaleDB extension on startup
+      postInitApplicationSQL:
+        - CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+        - |
+          -- Create sample hypertable for device metrics
+          CREATE TABLE IF NOT EXISTS device_metrics (
+            time TIMESTAMPTZ NOT NULL,
+            device_id TEXT NOT NULL,
+            metric_name TEXT NOT NULL,
+            value DOUBLE PRECISION,
+            tags JSONB
+          );
+        - SELECT create_hypertable('device_metrics', 'time', if_not_exists => TRUE);
+        - |
+          -- Enable compression for data older than 7 days
+          ALTER TABLE device_metrics SET (
+            timescaledb.compress,
+            timescaledb.compress_segmentby = 'device_id',
+            timescaledb.compress_orderby = 'time DESC'
+          );
+        - |
+          SELECT add_compression_policy('device_metrics', INTERVAL '7 days');
+  
+  # Resource limits (adjust based on your environment)
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1"
+    limits:
+      memory: "4Gi"
+      cpu: "2"
+  
+  # Monitoring (optional - requires Prometheus Operator)
+  monitoring:
+    enablePodMonitor: true
+  
+  # Backup configuration (optional - configure for production)
+  # backup:
+  #   barmanObjectStore:
+  #     destinationPath: s3://your-bucket/timescaledb-backups
+  #     s3Credentials:
+  #       accessKeyId:
+  #         name: backup-credentials
+  #         key: ACCESS_KEY_ID
+  #       secretAccessKey:
+  #         name: backup-credentials
+  #         key: SECRET_ACCESS_KEY
+  #     wal:
+  #       compression: gzip
+  #   retentionPolicy: "30d"
+  
+  # Connection pooling (optional - recommended for AI/IoT workloads)
+  # pooler:
+  #   enabled: true
+  #   type: rw
+  #   instances: 2
+  #   pgbouncer:
+  #     poolMode: transaction
+  #     parameters:
+  #       max_client_conn: "1000"
+  #       default_pool_size: "25"

@@ -1,0 +1,127 @@
+name: Build & Push TimescaleDB Image
+
+on: 
+  push:
+    branches:
+      - master
+    paths:
+      - 'timescaledb/**'
+      - '.github/workflows/build-timescaledb-image.yml'
+
+jobs:
+  build-and-push:
+    name: Build & Push TimescaleDB Image
+    runs-on: [iotistic-lab-sc]
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set image metadata
+        id: meta
+        run: |
+          # Generate version tag from current date and short commit SHA
+          VERSION="pg17-$(date +%Y%m%d)-$(git rev-parse --short HEAD)"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
+      - name: Display build information
+        run: |
+          echo "## Building TimescaleDB Image" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ steps.meta.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ steps.meta.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Build Date:** \`${{ steps.meta.outputs.build_date }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker Images:" >> $GITHUB_STEP_SUMMARY
+          echo "- [\`iotistic/timescaledb-cnpg:pg17\`](https://hub.docker.com/r/iotistic/timescaledb-cnpg/tags?name=pg17)" >> $GITHUB_STEP_SUMMARY
+          echo "- [\`iotistic/timescaledb-cnpg:${{ steps.meta.outputs.version }}\`](https://hub.docker.com/r/iotistic/timescaledb-cnpg/tags?name=${{ steps.meta.outputs.version }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### CloudNativePG ImageCatalog:" >> $GITHUB_STEP_SUMMARY
+          echo '```yaml' >> $GITHUB_STEP_SUMMARY
+          echo 'apiVersion: postgresql.cnpg.io/v1' >> $GITHUB_STEP_SUMMARY
+          echo 'kind: ImageCatalog' >> $GITHUB_STEP_SUMMARY
+          echo 'metadata:' >> $GITHUB_STEP_SUMMARY
+          echo '  name: timescaledb' >> $GITHUB_STEP_SUMMARY
+          echo 'spec:' >> $GITHUB_STEP_SUMMARY
+          echo '  images:' >> $GITHUB_STEP_SUMMARY
+          echo '  - major: 17' >> $GITHUB_STEP_SUMMARY
+          echo '    image: iotistic/timescaledb-cnpg:pg17' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:buildx-stable-1
+            network=host
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-timescaledb
+          key: ${{ runner.os }}-buildx-timescaledb-${{ hashFiles('timescaledb/Dockerfile') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-timescaledb-
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Build & Push TimescaleDB image
+        id: docker_build
+        uses: docker/build-push-action@v5
+        with:
+          context: ./timescaledb
+          file: ./timescaledb/Dockerfile
+          push: true
+          platforms: linux/amd64
+          cache-from: |
+            type=local,src=/tmp/.buildx-cache-timescaledb
+            type=registry,ref=iotistic/timescaledb-cnpg:buildcache
+          cache-to: type=local,dest=/tmp/.buildx-cache-timescaledb-new,mode=max
+          tags: |
+            iotistic/timescaledb-cnpg:pg17
+            iotistic/timescaledb-cnpg:latest
+            iotistic/timescaledb-cnpg:${{ steps.meta.outputs.version }}
+          labels: |
+            org.opencontainers.image.title=TimescaleDB for CloudNativePG
+            org.opencontainers.image.description=PostgreSQL 17 with TimescaleDB extension, optimized for CloudNativePG operator
+            org.opencontainers.image.source=https://github.com/Iotistica/iotistic
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.created=${{ steps.meta.outputs.build_date }}
+            org.opencontainers.image.revision=${{ steps.meta.outputs.sha_short }}
+            com.iotistic.postgresql.version=17
+            com.iotistic.timescaledb.version=2.x
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+
+      - name: Move cache
+        if: always()
+        run: |
+          rm -rf /tmp/.buildx-cache-timescaledb
+          mv /tmp/.buildx-cache-timescaledb-new /tmp/.buildx-cache-timescaledb || true
+
+      - name: Image digest
+        run: |
+          echo "## Build Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Image digest: \`${{ steps.docker_build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Pull image:" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo 'docker pull iotistic/timescaledb-cnpg:pg17' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Deploy to CloudNativePG:" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo 'cd timescaledb' >> $GITHUB_STEP_SUMMARY
+          echo './deploy.sh' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
