@@ -11,7 +11,7 @@
 
 import process from 'process';
 import DeviceAgent from './agent';
-import { startWatchdog, notifySystemd } from './systemd-watchdog';
+import { startWatchdog, notifySystemd } from './system/systemd-watchdog';
 
 // Start the device agent
 const agent = new DeviceAgent();

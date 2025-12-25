@@ -364,6 +364,23 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
         CLOUD_API_ENDPOINT="${CLOUD_API_ENDPOINT:-}"
         
         echo "Using current repository code (CI mode)"
+        
+        # Copy current directory to /opt/iotistic/agent if we're running from the repository
+        # (detect if we're in agent/ directory by checking for package.json)
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        AGENT_DIR="$(dirname "$SCRIPT_DIR")"
+        
+        if [ -f "$AGENT_DIR/package.json" ]; then
+            echo "Copying agent code from $AGENT_DIR to /opt/iotistic/agent..."
+            cp -r "$AGENT_DIR"/* /opt/iotistic/agent/
+            
+            # Also copy config if it exists (one level up from agent)
+            REPO_ROOT="$(dirname "$AGENT_DIR")"
+            if [ -d "$REPO_ROOT/config" ]; then
+                mkdir -p /opt/iotistic/config
+                cp -r "$REPO_ROOT/config"/* /opt/iotistic/config/
+            fi
+        fi
     else
         # Interactive mode
         read -p "Enter cloud API endpoint (leave empty for local mode): " CLOUD_API_ENDPOINT

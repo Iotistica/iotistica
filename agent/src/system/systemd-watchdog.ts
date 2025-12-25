@@ -11,8 +11,8 @@
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import type { AgentLogger } from './logging/agent-logger';
-import { LogComponents } from './logging/types';
+import type { AgentLogger } from '../logging/agent-logger';
+import { LogComponents } from '../logging/types';
 
 const execFileAsync = promisify(execFile);
 let watchdogInterval: NodeJS.Timeout | null = null;
