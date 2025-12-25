@@ -15,6 +15,7 @@ import { AgentLogger } from '../logging/agent-logger.js';
 
 export interface FeatureConfig {
   enabled: boolean;
+  cloudApiUrl?: string; // Optional: for features that need cloud connectivity
   [key: string]: any;
 }
 
@@ -39,6 +40,7 @@ export abstract class BaseFeature extends EventEmitter {
   protected deviceUuid: string;
   protected featureName: string;
   protected isRunning: boolean = false;
+  protected requiresProvisioning: boolean = false; // Set to true for cloud-dependent features
   private debugEnvVar: string;
 
   constructor(
@@ -47,13 +49,15 @@ export abstract class BaseFeature extends EventEmitter {
     featureName: string,
     deviceUuid: string,
     requiresMqtt: boolean = true,
-    debugEnvVar?: string
+    debugEnvVar?: string,
+    requiresProvisioning: boolean = false
   ) {
     super(); // Initialize EventEmitter
     this.config = config;
     this.deviceUuid = deviceUuid;
     this.featureName = featureName;
     this.debugEnvVar = debugEnvVar || 'DEBUG';
+    this.requiresProvisioning = requiresProvisioning;
 
     // Create feature-specific logger wrapper
     this.logger = this.createLogger(agentLogger, featureName);
@@ -173,6 +177,12 @@ export abstract class BaseFeature extends EventEmitter {
     if (this.isRunning) {
       this.logger.warn('Feature already running');
       return;
+    }
+
+    // Check if feature requires provisioning (cloud API endpoint)
+    if (this.requiresProvisioning && !this.config.cloudApiUrl) {
+      this.logger.info(`${this.featureName} skipped - device not provisioned (requires cloud API endpoint)`);
+      return; // Gracefully skip without throwing error
     }
 
     try {

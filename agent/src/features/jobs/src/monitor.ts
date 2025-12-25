@@ -91,7 +91,8 @@ export class JobsFeature extends BaseFeature {
       LogComponents.jobs,
       deviceUuid,
       false, // We'll manage MQTT ourselves
-      'JOBS_DEBUG'
+      'JOBS_DEBUG',
+      true  // requiresProvisioning: Jobs feature requires cloud API
     );
 
     // Create shared JobEngine - pass agentLogger instead of this.logger
