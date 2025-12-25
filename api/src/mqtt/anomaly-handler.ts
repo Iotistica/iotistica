@@ -174,6 +174,31 @@ export class AnomalyEventHandler {
 			timestampMsType: typeof event.timestampMs
 		});
 		
+		// Calculate deviation if missing (deviation from expected range)
+		let deviation = event.deviation;
+		if (deviation === null || deviation === undefined) {
+			const [min, max] = event.expectedRange;
+			const value = event.observedValue;
+			
+			// Calculate how far outside the expected range
+			if (value < min) {
+				deviation = min - value;
+			} else if (value > max) {
+				deviation = value - max;
+			} else {
+				// Value is within range, deviation is 0
+				deviation = 0;
+			}
+			
+			logger.warn('Deviation was missing, calculated from expected range', {
+				deviceId: event.deviceId,
+				metric: event.metric,
+				observedValue: value,
+				expectedRange: event.expectedRange,
+				calculatedDeviation: deviation
+			});
+		}
+		
 		await query(
 			`INSERT INTO anomaly_events (
 				msg_id,
@@ -216,7 +241,7 @@ export class AnomalyEventHandler {
 				JSON.stringify(event.triggeredBy),
 				JSON.stringify(event.baseline),
 				JSON.stringify(event.expectedRange),
-				event.deviation,
+				deviation,
 				event.cooldownSec,
 				event.firstSeen,
 			]
