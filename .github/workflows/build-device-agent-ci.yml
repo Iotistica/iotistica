@@ -183,18 +183,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Copy agent code to /opt/iotistic/agent (for CI mode)
+      - name: Clean build artifacts
         run: |
-          sudo mkdir -p /opt/iotistic/agent
-          sudo mkdir -p /opt/iotistic/config
-          sudo cp -r agent/* /opt/iotistic/agent/
-
-      - name: Build agent in /opt/iotistic/agent
-        run: |
-          cd /opt/iotistic/agent
-          sudo npm ci
-          sudo npm run build
-          echo "✓ Agent built with vendors file copied to dist/"
+          echo "Cleaning any stale build artifacts..."
+          rm -rf agent/dist
+          rm -rf agent/node_modules
+          echo "✓ Build artifacts cleaned"
 
       - name: Make install script executable
         run: chmod +x agent/bin/install.sh
