@@ -183,12 +183,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Clean build artifacts
+      - name: Clean build artifacts and installation directories
         run: |
-          echo "Cleaning any stale build artifacts..."
+          echo "Cleaning any stale build artifacts from repository..."
           rm -rf agent/dist
           rm -rf agent/node_modules
-          echo "✓ Build artifacts cleaned"
+          
+          echo "Cleaning any previous installations..."
+          sudo rm -rf /opt/iotistic/agent
+          sudo rm -rf /var/lib/iotistic/agent
+          sudo rm -rf /etc/iotistic
+          
+          echo "✓ All artifacts and installations cleaned"
 
       - name: Make install script executable
         run: chmod +x agent/bin/install.sh
