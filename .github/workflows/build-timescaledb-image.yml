@@ -20,6 +20,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
       - name: Set image metadata
         id: meta
         run: |
@@ -68,12 +74,6 @@ jobs:
           key: ${{ runner.os }}-buildx-timescaledb-${{ hashFiles('timescaledb/Dockerfile') }}
           restore-keys: |
             ${{ runner.os }}-buildx-timescaledb-
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
       - name: Build & Push TimescaleDB image
         id: docker_build
