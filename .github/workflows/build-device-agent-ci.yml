@@ -590,19 +590,29 @@ jobs:
        - name: Cleanup systemd service
          if: always()
          run: |
-            # Stop and disable systemd service
-            sudo systemctl stop iotistic-agent || true
-            sudo systemctl disable iotistic-agent || true
-            sudo rm -f /etc/systemd/system/iotistic-agent.service
-            sudo systemctl daemon-reload
+            # Stop and disable systemd service (only if it exists)
+            if sudo systemctl list-unit-files | grep -q iotistic-agent.service; then
+              echo "Stopping and disabling iotistic-agent service..."
+              sudo systemctl stop iotistic-agent 2>/dev/null || true
+              sudo systemctl disable iotistic-agent 2>/dev/null || true
+              sudo rm -f /etc/systemd/system/iotistic-agent.service
+              sudo systemctl daemon-reload
+              echo "✓ Systemd service stopped and removed"
+            else
+              echo "ℹ Systemd service not found (already cleaned or not installed)"
+            fi
             
             # Remove installation directories
-            sudo rm -rf /opt/iotistic/agent
-            sudo rm -rf /var/lib/iotistic/agent
-            sudo rm -rf /var/log/iotistic
-            sudo rm -rf /etc/iotistic
-            
-            echo "✓ Systemd service cleaned up"
+            if [ -d /opt/iotistic ] || [ -d /var/lib/iotistic ] || [ -d /var/log/iotistic ] || [ -d /etc/iotistic ]; then
+              echo "Removing installation directories..."
+              sudo rm -rf /opt/iotistic/agent
+              sudo rm -rf /var/lib/iotistic/agent
+              sudo rm -rf /var/log/iotistic
+              sudo rm -rf /etc/iotistic
+              echo "✓ Installation directories removed"
+            else
+              echo "ℹ Installation directories not found (already cleaned)"
+            fi
        
        - name: Cleanup Docker
          if: always()
