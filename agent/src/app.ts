@@ -17,7 +17,7 @@ import { startWatchdog, notifySystemd } from './systemd-watchdog';
 const agent = new DeviceAgent();
 
 // Start systemd watchdog (automatically detects if running under systemd)
-const stopWatchdog = startWatchdog(agent.logger);
+const stopWatchdog = startWatchdog();
 
 // Track if shutdown is in progress
 let shuttingDown = false;
@@ -34,7 +34,7 @@ async function gracefulShutdown(signal: string) {
 
 	try {
 		// Notify systemd we're stopping
-		notifySystemd('STOPPING=1', agent.logger);
+		notifySystemd('STOPPING=1');
 		
 		// Stop watchdog
 		stopWatchdog();

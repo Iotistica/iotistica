@@ -533,7 +533,9 @@ CPUAccounting=true
 
 # Resource limits
 LimitNOFILE=65536
+LimitNPROC=65536
 MemoryMax=1G
+TasksMax=infinity
 
 [Install]
 WantedBy=multi-user.target
