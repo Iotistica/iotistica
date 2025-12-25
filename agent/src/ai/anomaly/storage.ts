@@ -264,7 +264,7 @@ export class AnomalyStorageService {
 			}
 		}
 
-		this.logger?.infoSync('Stored anomaly baseline', {
+		this.logger?.debugSync('Stored anomaly baseline', {
 			component: LogComponents.metrics,
 			metric,
 			sample_count: buffer.size,

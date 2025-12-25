@@ -1,6 +1,11 @@
--- Migration 108: Convert device_metrics from manual partitioning to TimescaleDB hypertable
+-- Migration 108: Convert device_metrics to TimescaleDB hypertable
 -- Purpose: Replace manual RANGE partitioning with TimescaleDB's automatic chunk management
 -- Benefits: Automatic compression (90% storage reduction), retention policies, continuous aggregates
+-- NOTE: This version DOES NOT copy existing data - starts fresh
+
+-- Azure PostgreSQL: Set reasonable timeouts
+SET statement_timeout = '120s';
+SET lock_timeout = '30s';
 
 BEGIN;
 
@@ -28,19 +33,21 @@ BEGIN
     RAISE NOTICE 'TimescaleDB extension verified';
 END $$;
 
--- Step 2: Get row count for validation
+-- Step 2: Archive old table (if exists)
 DO $$
-DECLARE
-    original_count INTEGER;
 BEGIN
-    -- Count rows in all partitions
-    SELECT COUNT(*) INTO original_count FROM device_metrics;
-    RAISE NOTICE 'Current device_metrics row count: %', original_count;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'device_metrics') THEN
+        -- Rename old table for potential recovery
+        ALTER TABLE device_metrics RENAME TO device_metrics_old;
+        RAISE NOTICE 'Old device_metrics table archived as device_metrics_old';
+        RAISE NOTICE 'You can drop it later with: DROP TABLE device_metrics_old CASCADE;';
+    ELSE
+        RAISE NOTICE 'No existing device_metrics table found';
+    END IF;
 END $$;
 
--- Step 3: Create new unpartitioned table (cannot convert partitioned table directly)
--- CRITICAL: PRIMARY KEY must include partitioning column for TimescaleDB
-CREATE TABLE device_metrics_ts (
+-- Step 3: Create new unpartitioned table with TimescaleDB-compatible schema
+CREATE TABLE device_metrics (
     id BIGSERIAL,
     device_uuid UUID NOT NULL,
     cpu_usage NUMERIC,
@@ -54,75 +61,7 @@ CREATE TABLE device_metrics_ts (
     PRIMARY KEY (id, recorded_at)  -- Composite PK required by TimescaleDB
 );
 
--- Step 4: Copy all data from partitioned table
--- This reads from all partitions automatically
-DO $$
-DECLARE
-    copied_count INTEGER;
-    original_count INTEGER;
-BEGIN
-    -- Get original count
-    SELECT COUNT(*) INTO original_count FROM device_metrics;
-    
-    -- Copy data
-    -- Handle case where top_processes column might not exist in source
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'device_metrics' AND column_name = 'top_processes'
-    ) THEN
-        -- Source has top_processes column
-        INSERT INTO device_metrics_ts (
-            id, device_uuid, cpu_usage, cpu_temp,
-            memory_usage, memory_total, storage_usage, storage_total, top_processes, recorded_at
-        )
-        SELECT 
-            id, device_uuid, cpu_usage, cpu_temp,
-            memory_usage, memory_total, storage_usage, storage_total, top_processes, recorded_at
-        FROM device_metrics
-        ORDER BY recorded_at;
-    ELSE
-        -- Source doesn't have top_processes column, use default
-        INSERT INTO device_metrics_ts (
-            id, device_uuid, cpu_usage, cpu_temp,
-            memory_usage, memory_total, storage_usage, storage_total, top_processes, recorded_at
-        )
-        SELECT 
-            id, device_uuid, cpu_usage, cpu_temp,
-            memory_usage, memory_total, storage_usage, storage_total, '[]'::jsonb, recorded_at
-        FROM device_metrics
-        ORDER BY recorded_at;
-    END IF;
-    
-    GET DIAGNOSTICS copied_count = ROW_COUNT;
-    RAISE NOTICE 'Copied % rows from device_metrics to device_metrics_ts', copied_count;
-    
-    -- Validation
-    IF copied_count != original_count THEN
-        RAISE EXCEPTION 'Row count mismatch! Original: %, Copied: %', original_count, copied_count;
-    END IF;
-    
-    RAISE NOTICE 'Data copy validated successfully';
-END $$;
-
--- Step 5: Rename tables (keep old as backup)
-ALTER TABLE device_metrics RENAME TO device_metrics_old;
-ALTER TABLE device_metrics_ts RENAME TO device_metrics;
-
--- Step 6: Reset sequence to continue from max ID
-DO $$
-DECLARE
-    max_id BIGINT;
-    seq_name TEXT;
-BEGIN
-    -- Get the sequence name created by BIGSERIAL
-    SELECT pg_get_serial_sequence('device_metrics', 'id') INTO seq_name;
-    
-    IF seq_name IS NOT NULL THEN
-        SELECT COALESCE(MAX(id), 0) INTO max_id FROM device_metrics;
-        IF max_id > 0 THEN
-            EXECUTE format('SELECT setval(%L, %s, true)', seq_name, max_id);
-            RAISE NOTICE 'Sequence % reset to %', seq_name, max_id;
-        END IF;
+RAISE NOTICE 'Created new device_metrics table (empty)';
     END IF;
 END $$;
 
@@ -188,37 +127,49 @@ ON device_metrics USING GIN (top_processes);
 
 -- Step 12: Drop obsolete partition management functions
 -- These were for manual partitioning and are no longer needed
-DROP FUNCTION IF EXISTS create_device_metrics_partition(DATE);
-DROP FUNCTION IF EXISTS create_device_metrics_partitions_range(INTEGER, INTEGER);
-DROP FUNCTION IF EXISTS drop_old_device_metrics_partitions(INTEGER);
-DROP FUNCTION IF EXISTS get_device_metrics_partition_stats();
+-- Step 4: Convert to hypertable
+SELECT create_hypertable('device_metrics', 'recorded_at', 
+    chunk_time_interval => INTERVAL '7 days',
+    if_not_exists => TRUE
+);
 
--- Step 13: Final validation
+RAISE NOTICE 'Created hypertable with 7-day chunks';
+
+-- Step 5: Create indexes for common queries
+CREATE INDEX IF NOT EXISTS idx_device_metrics_device_uuid 
+    ON device_metrics (device_uuid, recorded_at DESC);
+    
+CREATE INDEX IF NOT EXISTS idx_device_metrics_recorded_at 
+    ON device_metrics (recorded_at DESC);
+
+RAISE NOTICE 'Created indexes';
+
+-- Step 6: Enable compression (requires TimescaleDB 2.0+)
 DO $$
-DECLARE
-    old_count INTEGER;
-    new_count INTEGER;
-    chunk_count INTEGER;
 BEGIN
-    -- Count rows in old and new tables
-    SELECT COUNT(*) INTO old_count FROM device_metrics_old;
-    SELECT COUNT(*) INTO new_count FROM device_metrics;
+    -- Enable compression on chunks older than 7 days
+    ALTER TABLE device_metrics SET (
+        timescaledb.compress,
+        timescaledb.compress_segmentby = 'device_uuid'
+    );
     
-    -- Count chunks
-    SELECT COUNT(*) INTO chunk_count 
-    FROM timescaledb_information.chunks
-    WHERE hypertable_name = 'device_metrics';
+    -- Add compression policy
+    SELECT add_compression_policy('device_metrics', INTERVAL '7 days');
     
-    RAISE NOTICE '=== Migration Validation ===';
-    RAISE NOTICE 'Old table rows: %', old_count;
-    RAISE NOTICE 'New table rows: %', new_count;
-    RAISE NOTICE 'TimescaleDB chunks: %', chunk_count;
-    
-    IF old_count != new_count THEN
-        RAISE EXCEPTION 'Row count mismatch! Old: %, New: %', old_count, new_count;
-    END IF;
-    
-    RAISE NOTICE 'Migration validated successfully!';
+    RAISE NOTICE 'Compression enabled (90% storage reduction for old data)';
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE WARNING 'Could not enable compression: % (continuing without compression)', SQLERRM;
+END $$;
+
+-- Step 7: Add retention policy (optional - keeps last 90 days)
+DO $$
+BEGIN
+    SELECT add_retention_policy('device_metrics', INTERVAL '90 days');
+    RAISE NOTICE 'Retention policy added (keeps last 90 days)';
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE WARNING 'Could not add retention policy: % (continuing without retention)', SQLERRM;
 END $$;
 
 COMMIT;
@@ -227,7 +178,7 @@ COMMIT;
 -- CONTINUOUS AGGREGATES (Must be outside transaction)
 -- =============================================================================
 
--- Step 14: Create continuous aggregates for dashboards
+-- Step 8: Create continuous aggregates for dashboards
 
 -- 5-minute aggregates (real-time monitoring)
 CREATE MATERIALIZED VIEW device_metrics_5min
@@ -333,9 +284,15 @@ SELECT add_continuous_aggregate_policy('device_metrics_daily',
 DO $$
 BEGIN
     RAISE NOTICE 'Migration 108 completed successfully!';
-    RAISE NOTICE 'Check hypertable status with: SELECT * FROM timescaledb_information.hypertables WHERE hypertable_name = ''device_metrics'';';
-    RAISE NOTICE 'Check continuous aggregates with: SELECT * FROM timescaledb_information.continuous_aggregates;';
+    RAISE NOTICE 'Device metrics table is now a TimescaleDB hypertable (empty, ready for new data)';
+    RAISE NOTICE 'Old data preserved in device_metrics_old (drop manually if not needed)';
+    RAISE NOTICE 'Check hypertable: SELECT * FROM timescaledb_information.hypertables WHERE hypertable_name = ''device_metrics'';';
+    RAISE NOTICE 'Check aggregates: SELECT * FROM timescaledb_information.continuous_aggregates;';
 END $$;
+
+-- Reset timeouts to defaults
+RESET statement_timeout;
+RESET lock_timeout;
 
 -- Migration 108 complete
 -- 

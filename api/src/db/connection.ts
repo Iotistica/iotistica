@@ -19,6 +19,9 @@ const dbConfig = {
   statementTimeout: 60000, // 60 seconds max query execution time
   // Queue incoming requests when all connections busy
   allowExitOnIdle: false,
+  // TCP keepalive to prevent Azure from closing idle connections during long operations
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000, // Start keepalive after 10 seconds
   // SSL configuration for cloud-hosted PostgreSQL (Azure, AWS RDS, etc.)
   // Azure PostgreSQL requires SSL by default
   ssl: process.env.DB_SSL === 'false' ? false : {

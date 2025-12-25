@@ -119,6 +119,9 @@ async function applyMigration(migration: Migration): Promise<void> {
   while (retries > 0) {
     try {
       await transaction(async (client) => {
+        // Increase statement timeout for migrations (some take longer, e.g., TimescaleDB extension)
+        await client.query('SET statement_timeout = 600000'); // 10 minutes for migrations
+        
         // Execute migration SQL
         await client.query(migration.sql);
         
@@ -132,6 +135,9 @@ async function applyMigration(migration: Migration): Promise<void> {
            VALUES ($1, $2, $3, $4, $5)`,
           [migration.id, migration.name, migration.filename, checksum, executionTime]
         );
+        
+        // Reset timeout to default
+        await client.query('RESET statement_timeout');
       });
       
       const executionTime = Date.now() - startTime;

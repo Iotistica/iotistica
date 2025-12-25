@@ -145,10 +145,11 @@ export class ContainerLogMonitor {
 
 			// Handle stream end
 			logStream.on('end', () => {
-				this.logger?.warnSync(`Log stream ended for container - will retry`, {
+				this.logger?.debugSync(`Log stream ended for container`, {
 					component: LogComponents.logMonitor,
 					containerId: containerId.substring(0, 12),
-					serviceName
+					serviceName,
+					message: 'Normal during container restart/recreation'
 				});
 				this.attachments.delete(containerId);
 				
@@ -214,15 +215,22 @@ export class ContainerLogMonitor {
 	 * Uses RetryManager to prevent retry storms during mass failures
 	 */
 	private scheduleReconnection(containerId: string, error: string): void {
+		const options = this.reconnectionOptions.get(containerId);
+		if (!options) {
+			// Reconnection was cancelled (manual detach)
+			return;
+		}
+		
 		const retryKey = `log-stream-${containerId}`;
 		
 		// Check if we should retry
 		if (!this.retryManager.shouldRetry(retryKey)) {
 			if (this.retryManager.isTerminal(retryKey)) {
-				this.logger?.errorSync('Log stream reconnection failed permanently', undefined, {
+				this.logger?.warnSync('Log stream reconnection failed permanently', {
 					component: LogComponents.logMonitor,
 					containerId: containerId.substring(0, 12),
-					message: 'Max retries exceeded. Container may be stopped or deleted.',
+					serviceName: options.serviceName,
+					message: 'Max retries exceeded. Container will reattach if recreated by reconciliation.',
 				});
 				this.reconnectionOptions.delete(containerId);
 			}
@@ -238,13 +246,21 @@ export class ContainerLogMonitor {
 		
 		const delayMs = state.nextRetry.getTime() - Date.now();
 		
-		this.logger?.infoSync('Scheduling log stream reconnection', {
-			component: LogComponents.logMonitor,
-			containerId: containerId.substring(0, 12),
-			attempt: state.count,
-			delayMs,
-			nextRetry: state.nextRetry.toISOString(),
-		});
+		// Only log first attempt to reduce spam
+		if (state.count === 1) {
+			this.logger?.infoSync('Scheduling log stream reconnection', {
+				component: LogComponents.logMonitor,
+				containerId: containerId.substring(0, 12),
+				serviceName: options.serviceName,
+			});
+		} else {
+			this.logger?.debugSync('Retrying log stream reconnection', {
+				component: LogComponents.logMonitor,
+				containerId: containerId.substring(0, 12),
+				attempt: state.count,
+				delayMs,
+			});
+		}
 		
 		// Schedule reconnection attempt
 		setTimeout(() => {
@@ -295,26 +311,29 @@ export class ContainerLogMonitor {
 				// Success! Clear retry state for old key
 				this.retryManager.recordSuccess(retryKey);
 				
-				this.logger?.infoSync('Log stream reconnection successful with new container ID', {
+				this.logger?.infoSync('Reattached to recreated container', {
 					component: LogComponents.logMonitor,
-					containerId: currentContainerId.substring(0, 12),
+					newContainerId: currentContainerId.substring(0, 12),
 					serviceName: options.serviceName,
 				});
 				return;
 			}
 			
 			if (!currentContainerId) {
-				// Container no longer exists (service removed)
-				this.logger?.warnSync('Container no longer exists, stopping reconnection attempts', {
+				// Container not found yet - may be in process of being created during reconciliation
+				// Let RetryManager handle backoff and eventual timeout (don't spam logs)
+				this.logger?.debugSync('Container not found, will retry', {
 					component: LogComponents.logMonitor,
 					containerId: containerId.substring(0, 12),
 					serviceName: options.serviceName,
-					message: 'Service may have been removed or stopped permanently',
+					message: 'Container may be deleted or in process of being recreated',
 				});
 				
-				// Clean up state
-				this.reconnectionOptions.delete(containerId);
-				this.retryManager.clearState(retryKey);
+				// Record failure to trigger exponential backoff
+				this.retryManager.recordFailure(retryKey, 'Container not found');
+				
+				// Schedule next retry attempt
+				this.scheduleReconnection(containerId, 'Container not found');
 				return;
 			}
 			

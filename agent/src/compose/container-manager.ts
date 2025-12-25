@@ -1677,6 +1677,16 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	private async stopContainer(containerId: string): Promise<void> {
+		// Detach logs before stopping container (stream will end anyway)
+		if (this.logMonitor) {
+			await this.logMonitor.detach(containerId);
+			this.logger?.debugSync('Detached logs before stopping container', {
+				component: LogComponents.containerManager,
+				operation: 'stopContainer',
+				containerId: containerId.substring(0, 12)
+			});
+		}
+		
 		if (this.useRealDocker) {
 			// Real Docker stop
 			await this.dockerManager.stopContainer(containerId);
@@ -1710,6 +1720,16 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	private async removeContainer(containerId: string): Promise<void> {
+		// Detach logs before removing container (prevents reconnection attempts to stale IDs)
+		if (this.logMonitor) {
+			await this.logMonitor.detach(containerId);
+			this.logger?.debugSync('Detached logs before removing container', {
+				component: LogComponents.containerManager,
+				operation: 'removeContainer',
+				containerId: containerId.substring(0, 12)
+			});
+		}
+		
 		if (this.useRealDocker) {
 			// Real Docker remove
 			await this.dockerManager.removeContainer(containerId);

@@ -30,8 +30,14 @@ from pymodbus.datastore import ModbusSequentialDataBlock, ModbusSlaveContext, Mo
 from pymodbus.pdu import ExceptionResponse
 from pymodbus.exceptions import NoSuchSlaveException
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging level from environment (default: INFO)
+log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, log_level, logging.INFO),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+logger.info(f"Logging level set to: {log_level}")
 
 # Configuration
 PROFILE = os.environ.get("MODBUS_PROFILE", "Generic")
@@ -80,7 +86,10 @@ profile_data = load_profile_data()
 # Reduces 4x redundant indexing (HR, IR, CO, DI) to 1x per profile
 def build_profile_index(profile_name: str) -> dict:
     """Build O(1) lookup index for a profile's data points"""
-    data_points = profile_data.get(profile_name, {}).get("dataPoints", [])
+    profile_obj = profile_data.get(profile_name, {})
+    logger.debug(f"[DEBUG] build_profile_index('{profile_name}'): profile_obj type={type(profile_obj)}, keys={list(profile_obj.keys()) if isinstance(profile_obj, dict) else 'N/A'}")
+    data_points = profile_obj.get("dataPoints", [])
+    logger.info(f"[DEBUG] Profile '{profile_name}' has {len(data_points)} data points to index")
     index = {}
     for dp in data_points:
         addr = dp.get("address")
@@ -238,9 +247,13 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
             self.last_profile = active_profile
             logger.info(f"Switched to {active_profile} index ({len(self._dp_index)} data points)")
         
+        updates_count = 0
         for addr in range(self.address, self.address + len(self.values)):
             key = (self.register_type, addr)
             dp = self._dp_index.get(key)
+            
+            if dp:  # DEBUG: Track successful updates
+                updates_count += 1
             
             if not dp:
                 continue  # No data point configured for this address
@@ -272,16 +285,29 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
                     # Use vendor config
                     base = dp.get("base", 100)
                     noise_pct = dp.get("noise_pct", 0.05)
-                    self.values[idx] = int(base * (1 + random.uniform(-noise_pct, noise_pct)))
+                    new_value = int(base * (1 + random.uniform(-noise_pct, noise_pct)))
+                    self.values[idx] = new_value
+                    # DEBUG: Log specific problematic addresses
+                    if addr in [99, 129, 139, 149, 159] and self.unit_id == 1:
+                        logger.info(f"[DEBUG] Updated holding[{addr}] idx={idx} value={new_value} (base={base})")
             
             elif self.register_type == 'input':
                 # Input Registers: Read-only sensor readings (no GUI overrides)
                 base = dp.get("base", 100)
                 noise_pct = dp.get("noise_pct", 0.05)
                 self.values[idx] = int(base * (1 + random.uniform(-noise_pct, noise_pct)))
+        
+        # DEBUG: Log update counts periodically
+        if updates_count > 0 and self.unit_id == 1 and self.register_type == 'holding':
+            logger.debug(f"[{self.register_type}] Updated {updates_count} registers (range {self.address}-{self.address + len(self.values) - 1})")
 
     def getValues(self, address, count=1):
         """Read stored register values (pure read, simulation thread updates values)"""
+        # CRITICAL FIX: pymodbus server adds +1 to incoming addresses (Modbus 1-based protocol)
+        # Client sends 99 → server calls getValues(100)
+        # We need 0-based addressing, so subtract 1
+        address = address - 1
+        
         # Reload disabled slaves from shared state file (cross-process communication)
         global DISABLED_SLAVES
         try:
@@ -346,9 +372,11 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
         active_profile = get_active_profile()
         
         # Log the request (summary only at INFO)
-        logger.info(f"Poll: profile={active_profile}, slave={self.unit_id}, type={self.register_type}, addr={address}, count={count}")
+        logger.info(f"📤 SENDING DATA - Poll: profile={active_profile}, slave={self.unit_id}, type={self.register_type}, addr={address}, count={count}")
 
         values = []
+        data_points_details = []  # Collect details for summary log
+        
         for i in range(count):
             addr = address + i
             idx = addr - self.address
@@ -358,6 +386,10 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
                 val = self.values[idx]
                 values.append(val)
                 
+                # DEBUG: Log problematic addresses
+                if addr in [99, 129, 139, 149, 159] and self.unit_id == 1 and self.register_type == 'holding':
+                    logger.info(f"[DEBUG] getValues() reading addr={addr} idx={idx} value={val} (self.address={self.address})")
+                
                 # Log with data point name if available (O(1) lookup)
                 key = (self.register_type, addr)
                 dp = self._dp_index.get(key)
@@ -366,7 +398,8 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
                     
                     # Check for GUI overrides (only for writable types)
                     if self.register_type in ['holding', 'coil'] and addr in REGISTER_OVERRIDES:
-                        logger.debug(f"  → {addr}: {val} (GUI override: {active_profile}.{dp_name})")
+                        logger.info(f"  → 📊 {addr}: {val} (GUI override: {active_profile}.{dp_name})")
+                        data_points_details.append(f"{dp_name}={val}")
                     else:
                         # Define register type semantics
                         type_desc = {
@@ -378,25 +411,36 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
                         
                         base = dp.get("base", 100) if self.register_type in ['holding', 'input'] else None
                         if base:
-                            logger.debug(f"  → {addr}: {val} ({active_profile}.{dp_name}, base={base}, {type_desc})")
+                            logger.info(f"  → 📊 {addr}: {val} ({active_profile}.{dp_name}, base={base}, {type_desc})")
                         else:
-                            logger.debug(f"  → {addr}: {val} ({active_profile}.{dp_name}, {type_desc})")
+                            logger.info(f"  → 📊 {addr}: {val} ({active_profile}.{dp_name}, {type_desc})")
+                        data_points_details.append(f"{dp_name}={val}")
                 else:
                     if val != 0 and self.register_type in ['holding', 'input']:
-                        logger.debug(f"  → {addr}: {val} (DEFAULT - no {self.register_type} config)")
+                        logger.info(f"  → 📊 {addr}: {val} (DEFAULT - no {self.register_type} config)")
+                        data_points_details.append(f"addr_{addr}={val}")
                     elif logger.isEnabledFor(logging.DEBUG):
                         logger.debug(f"  → {addr}: {val} (DEFAULT)")
+                        if val != 0:
+                            data_points_details.append(f"addr_{addr}={val}")
             else:
                 # Address out of range
                 val = False if self.register_type in ['coil', 'discrete'] else 0
                 values.append(val)
-                logger.warning(f"  → {addr}: {val} (OUT OF RANGE)")
+                logger.warning(f"  → ⚠️ {addr}: {val} (OUT OF RANGE)")
 
-        logger.debug(f"Returned {len(values)} values: {values}")
+        # Summary log with all values
+        logger.info(f"✅ RESPONSE SENT: {len(values)} values - {data_points_details if data_points_details else values}")
+        logger.debug(f"Raw values returned: {values}")
         return values
     
     def setValues(self, address, values):
         """Handle Modbus write commands (for holding registers and coils)"""
+        # CRITICAL FIX: pymodbus server adds +1 to incoming addresses (Modbus 1-based protocol)
+        # Client sends write to 99 → server calls setValues(100)
+        # We need 0-based addressing, so subtract 1
+        address = address - 1
+        
         active_profile = get_active_profile()
         
         # Log write command
@@ -429,9 +473,10 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
             REGISTER_ACCESS_LOG[log_key]["writes"] += 1
             REGISTER_ACCESS_LOG[log_key]["last_write"] = time.time()
         
-        logger.info(f"Write command: profile={active_profile}, type={self.register_type}, addr={address}, values={values}")
+        logger.info(f"📥 RECEIVING WRITE - profile={active_profile}, type={self.register_type}, addr={address}, values={values}")
         
         # Apply writes to storage
+        changes = []
         for i, value in enumerate(values):
             addr = address + i
             idx = addr - self.address
@@ -449,12 +494,18 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
                 
                 # Log the change with context
                 if self.register_type == 'coil':
-                    logger.info(f"  → Coil {addr} ({dp_name}): {old_val} → {value}")
+                    logger.info(f"  → 💾 Coil {addr} ({dp_name}): {old_val} → {value}")
+                    changes.append(f"{dp_name}: {old_val}→{value}")
                 else:
-                    logger.info(f"  → Register {addr} ({dp_name}): {old_val} → {value}")
+                    logger.info(f"  → 💾 Register {addr} ({dp_name}): {old_val} → {value}")
                     logger.debug(f"     Control action applied to {active_profile}.{dp_name}")
+                    changes.append(f"{dp_name}: {old_val}→{value}")
             else:
-                logger.warning(f"  → Write to out-of-range address {addr} (ignored)")
+                logger.warning(f"  → ⚠️ Write to out-of-range address {addr} (ignored)")
+        
+        # Summary log
+        if changes:
+            logger.info(f"✅ WRITE COMPLETE: {len(changes)} changes - {changes}")
 
 def setup_server(slaves=3):
     """Setup Modbus TCP server simulating profile devices"""
@@ -463,19 +514,24 @@ def setup_server(slaves=3):
 
     for unit_id in range(1, slaves + 1):
         # Holding Registers (HR): Read/write registers for configuration, setpoints
-        hr = ProfileDataBlock(1, [0]*200, register_type='holding', unit_id=unit_id)
+        # 0-based addressing to match Modbus protocol (agent sends 0-based addresses)
+        hr = ProfileDataBlock(0, [0]*200, register_type='holding', unit_id=unit_id)
         
         # Input Registers (IR): Read-only registers for sensor readings, status
-        ir = ProfileDataBlock(1, [0]*100, register_type='input', unit_id=unit_id)
+        # 0-based addressing to match Modbus protocol
+        ir = ProfileDataBlock(0, [0]*100, register_type='input', unit_id=unit_id)
         
-        # Coils (CO): Writable boolean outputs (commands, control signals)
-        co = ProfileDataBlock(1, [False]*20, register_type='coil', unit_id=unit_id)
+        # Coils (CO): Writable binary outputs (alarms, control signals)
+        # 0-based addressing to match Modbus protocol
+        co = ProfileDataBlock(0, [False]*20, register_type='coil', unit_id=unit_id)
         
-        # Discrete Inputs (DI): Read-only boolean inputs (status, alarms)
-        di = ProfileDataBlock(1, [False]*20, register_type='discrete', unit_id=unit_id)
+        # Discrete Inputs (DI): Read-only binary status (sensor triggers, faults)
+        # 0-based addressing to match Modbus protocol
+        di = ProfileDataBlock(0, [False]*20, register_type='discrete', unit_id=unit_id)
 
         # Use DisableableSlaveContext to support slave failure simulation
-        store = DisableableSlaveContext(unit_id=unit_id, hr=hr, ir=ir, co=co, di=di)
+        # zero=True means addresses are 0-based (not 1-based Modbus protocol convention)
+        store = DisableableSlaveContext(unit_id=unit_id, hr=hr, ir=ir, co=co, di=di, zero=True)
         slave_contexts[unit_id] = store
 
         identity = ModbusDeviceIdentification()

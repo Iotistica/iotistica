@@ -33,13 +33,62 @@ import { redisSensorQueue } from '../services/redis-sensor-queue';
 
 export const router = express.Router();
 
+/**
+ * Check if batch ID has been processed before (idempotency)
+ * Uses Redis with 24-hour TTL
+ */
+async function checkBatchIdempotency(deviceUuid: string, batchId: string): Promise<boolean> {
+  try {
+    const { redisClient } = await import('../redis/client');
+    const client = redisClient.getClient();
+    if (!client) {
+      logger.warn('Redis client not available for idempotency check');
+      return false;
+    }
+    const key = `batch:${deviceUuid}:${batchId}`;
+    const exists = await client.exists(key);
+    return exists === 1;
+  } catch (error) {
+    logger.warn('Failed to check batch idempotency (Redis unavailable)', { error });
+    return false; // Fail open (allow duplicate if Redis down)
+  }
+}
+
+/**
+ * Store batch ID for duplicate detection (24-hour TTL)
+ */
+async function storeBatchId(deviceUuid: string, batchId: string): Promise<void> {
+  try {
+    const { redisClient } = await import('../redis/client');
+    const client = redisClient.getClient();
+    if (!client) {
+      logger.warn('Redis client not available for batch storage');
+      return;
+    }
+    const key = `batch:${deviceUuid}:${batchId}`;
+    const TTL = 24 * 60 * 60; // 24 hours
+    await client.setex(key, TTL, Date.now().toString());
+    logger.debug('Stored batch ID for idempotency', { deviceUuid: deviceUuid.substring(0, 8), batchId });
+  } catch (error) {
+    logger.warn('Failed to store batch ID (Redis unavailable)', { error });
+    // Don't fail request if Redis unavailable
+  }
+}
+
 
 
 /**
- * Device uploads logs
+ * Device uploads logs with ACK-based durability
  * POST /api/v1/device/:uuid/logs
  * 
  * Accepts both JSON array and NDJSON (newline-delimited JSON) formats
+ * 
+ * Headers:
+ * - X-Batch-Id: Unique batch identifier for idempotency
+ * - X-Batch-Attempt: Retry attempt number (optional)
+ * 
+ * Response:
+ * - { batchId: string, accepted: boolean } - ACK confirmation
  */
 router.post('/device/:uuid/logs', deviceAuth, express.text({ 
   type: 'application/x-ndjson',
@@ -49,6 +98,10 @@ router.post('/device/:uuid/logs', deviceAuth, express.text({
   try {
     const { uuid } = req.params;
     let logs: any[];
+    
+    // Extract batch metadata for idempotency
+    const batchId = req.headers['x-batch-id'] as string | undefined;
+    const batchAttempt = parseInt(req.headers['x-batch-attempt'] as string || '1');
 
     // Check Content-Type to determine format
     const contentType = req.headers['content-type'] || '';
@@ -163,8 +216,36 @@ router.post('/device/:uuid/logs', deviceAuth, express.text({
     } else {
       logger.warn('No logs to store or invalid format');
     }
+    
+    // Check for duplicate batch (idempotency)
+    if (batchId) {
+      const isDuplicate = await checkBatchIdempotency(uuid, batchId);
+      
+      if (isDuplicate) {
+        logger.info('Duplicate batch detected (idempotent retry)', { 
+          uuid: uuid.substring(0, 8), 
+          batchId, 
+          attempt: batchAttempt 
+        });
+        
+        // Return cached ACK (idempotent response)
+        return res.json({ 
+          batchId, 
+          accepted: true,
+          duplicate: true 
+        });
+      }
+      
+      // Store batch ID for future duplicate detection
+      await storeBatchId(uuid, batchId);
+    }
 
-    res.json({ status: 'ok', received: Array.isArray(logs) ? logs.length : 0 });
+    // Return ACK confirmation
+    res.json({ 
+      batchId: batchId || 'unknown', 
+      accepted: true,
+      received: Array.isArray(logs) ? logs.length : 0 
+    });
   } catch (error: any) {
     logger.error('Error storing logs', { 
       error: error.message,
