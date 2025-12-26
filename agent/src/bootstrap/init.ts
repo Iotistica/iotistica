@@ -846,11 +846,8 @@ export class FeatureInitializer {
     const { logger, deviceInfo } = this.context;
 
     try {
-      const currentVersion = process.env.AGENT_VERSION || getPackageVersion();
-      
       this.features.updater = new AgentUpdater({
         deviceUuid: deviceInfo.uuid,
-        currentVersion,
         logger
       });
 

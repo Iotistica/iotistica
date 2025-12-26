@@ -11,17 +11,44 @@ echo "========================================"
 TARGET_VERSION="${1:-latest}"
 FORCE="${2:-false}"
 LOCK_FILE="${3:-/var/lib/iotistic/agent/update.lock}"
+STATUS_FILE="/var/lib/iotistic/agent/update-status.json"
 
-# Cleanup function to remove lock file on exit
-cleanup_lock() {
+# Cleanup function to remove lock file and write status on exit
+cleanup() {
+    local exit_code=$?
+    
+    # Remove lock file
     if [ -f "$LOCK_FILE" ]; then
         rm -f "$LOCK_FILE"
         echo "🔓 Update lock removed"
     fi
+    
+    # Write status file (agent reads this on next boot)
+    if [ $exit_code -eq 0 ]; then
+        cat > "$STATUS_FILE" <<EOF
+{
+  "version": "$TARGET_VERSION",
+  "success": true,
+  "completed_at": $(date +%s)000,
+  "deployment_type": "systemd"
+}
+EOF
+        echo "✅ Update status written: SUCCESS"
+    else
+        cat > "$STATUS_FILE" <<EOF
+{
+  "version": "$TARGET_VERSION",
+  "success": false,
+  "completed_at": $(date +%s)000,
+  "deployment_type": "systemd"
+}
+EOF
+        echo "❌ Update status written: FAILURE"
+    fi
 }
 
 # Register cleanup on script exit (success or failure)
-trap cleanup_lock EXIT INT TERM
+trap cleanup EXIT INT TERM
 
 # Detect architecture
 ARCH=$(uname -m)
@@ -94,51 +121,34 @@ if ! "/tmp/iotistic-agent-${TARGET_VERSION}" --version &>/dev/null; then
     exit 1
 fi
 
-# Stop service
+# Backup old binary (before replacement)
 echo ""
-echo "⏸️  Stopping agent service..."
-if ! sudo systemctl stop iotistic-agent; then
-    echo "❌ Failed to stop service"
-    rm -f "/tmp/iotistic-agent-${TARGET_VERSION}"
-    exit 1
-fi
-
-# Backup old binary
 echo "💾 Backing up current binary..."
 if [ -f /usr/local/bin/iotistic-agent ]; then
     sudo cp /usr/local/bin/iotistic-agent "$BACKUP_DIR/iotistic-agent-${CURRENT_VERSION}-${TIMESTAMP}"
 fi
 
-# Install new binary
+# Install new binary (agent still running at this point)
 echo ""
 echo "📦 Installing new binary..."
 sudo mv "/tmp/iotistic-agent-${TARGET_VERSION}" /usr/local/bin/iotistic-agent
 sudo chmod +x /usr/local/bin/iotistic-agent
 sudo chown root:root /usr/local/bin/iotistic-agent
 
-# Start service
+# At this point:
+# - Agent process has already exited cleanly (called process.exit(0))
+# - systemd's Restart=always policy will restart the service automatically
+# - New binary is in place, restart will use updated version
+# - No manual systemctl stop/start needed - let systemd handle it
+
 echo ""
-echo "🚀 Starting agent service..."
-if ! sudo systemctl start iotistic-agent; then
-    echo "❌ Failed to start service, rolling back..."
-    
-    # Restore old binary
-    if [ -f "$BACKUP_DIR/iotistic-agent-${CURRENT_VERSION}-${TIMESTAMP}" ]; then
-        sudo cp "$BACKUP_DIR/iotistic-agent-${CURRENT_VERSION}-${TIMESTAMP}" /usr/local/bin/iotistic-agent
-        sudo chmod +x /usr/local/bin/iotistic-agent
-    fi
-    
-    sudo systemctl start iotistic-agent
-    
-    echo "⚠️  Rollback complete, agent restored to version $CURRENT_VERSION"
-    exit 1
-fi
+echo "✅ Binary replaced successfully"
+echo "   systemd will restart agent automatically (Restart=always)"
+echo ""
+echo "⏳ Waiting for systemd restart (30 seconds)..."
+sleep 30
 
-# Wait for service to stabilize
-echo "⏳ Waiting for agent to start..."
-sleep 5
-
-# Verify service is running
+# Verify service is running with new version
 if sudo systemctl is-active --quiet iotistic-agent; then
     NEW_VERSION=$(iotistic-agent --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
     
@@ -161,17 +171,22 @@ if sudo systemctl is-active --quiet iotistic-agent; then
 else
     echo "❌ Service failed to start, rolling back..."
     
-    # Stop failed service
-    sudo systemctl stop iotistic-agent 2>/dev/null || true
-    
     # Restore old binary
     if [ -f "$BACKUP_DIR/iotistic-agent-${CURRENT_VERSION}-${TIMESTAMP}" ]; then
         sudo cp "$BACKUP_DIR/iotistic-agent-${CURRENT_VERSION}-${TIMESTAMP}" /usr/local/bin/iotistic-agent
         sudo chmod +x /usr/local/bin/iotistic-agent
     fi
     
-    sudo systemctl start iotistic-agent
+    # systemd will restart service automatically with old binary
+    echo "⏳ Waiting for systemd to restart with old binary..."
+    sleep 10
     
-    echo "⚠️  Rollback complete, agent restored to version $CURRENT_VERSION"
+    if sudo systemctl is-active --quiet iotistic-agent; then
+        echo "⚠️  Rollback complete, agent restored to version $CURRENT_VERSION"
+    else
+        echo "❌ CRITICAL: Service failed to start after rollback"
+        echo "   Manual intervention required: sudo systemctl status iotistic-agent"
+    fi
+    
     exit 1
 fi

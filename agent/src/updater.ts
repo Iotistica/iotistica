@@ -9,6 +9,7 @@ import { existsSync, writeFileSync, unlinkSync, readFileSync, statSync } from 'f
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { createHmac, timingSafeEqual } from 'crypto';
+import { join } from 'path';
 import { AgentLogger } from './logging/agent-logger.js';
 import { LogComponents } from './logging/types.js';
 import { MqttManager } from './mqtt/manager.js';
@@ -29,6 +30,9 @@ const PENDING_UPDATE_FILE = '/var/lib/iotistic/agent/pending-update.json';
 // Last update timestamp file (rate limiting)
 const LAST_UPDATE_FILE = '/var/lib/iotistic/agent/last-update.json';
 
+// Update status file written by update script (confirms success)
+const UPDATE_STATUS_FILE = '/var/lib/iotistic/agent/update-status.json';
+
 // Rate limit: 1 update per 24 hours (unless force=true)
 const UPDATE_RATE_LIMIT_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -42,6 +46,13 @@ interface PendingUpdate {
 interface LastUpdateRecord {
   version: string;
   timestamp: number;
+}
+
+interface UpdateStatusRecord {
+  version: string;
+  success: boolean;
+  completed_at: number;
+  deployment_type: string;
 }
 
 /**
@@ -68,6 +79,43 @@ function compareVersions(a: string, b: string): number {
  */
 function isValidVersion(version: string): boolean {
   return /^\d+\.\d+\.\d+(-[\w.]+)?$/.test(version);
+}
+
+/**
+ * Detect actual binary version from package.json
+ * This ensures we always use the real version after self-updates,
+ * not stale version from injected config.
+ */
+function detectBinaryVersion(): string {
+  try {
+    // Try to read package.json from agent directory
+    // In production: /app/package.json or /opt/iotistic/agent/package.json
+    const possiblePaths = [
+      '/app/package.json',
+      '/opt/iotistic/agent/package.json',
+      join(process.cwd(), 'package.json')
+    ];
+
+    for (const pkgPath of possiblePaths) {
+      if (existsSync(pkgPath)) {
+        const pkgData = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+        if (pkgData.version && isValidVersion(pkgData.version)) {
+          return pkgData.version;
+        }
+      }
+    }
+
+    // Fallback: try to read from environment (set by launcher)
+    if (process.env.AGENT_VERSION && isValidVersion(process.env.AGENT_VERSION)) {
+      return process.env.AGENT_VERSION;
+    }
+
+    // Last resort: unknown version
+    return '0.0.0';
+  } catch (error) {
+    // If detection fails, return unknown version
+    return '0.0.0';
+  }
 }
 
 /**
@@ -119,7 +167,6 @@ export interface UpdateCommand {
 
 export interface UpdaterConfig {
   deviceUuid: string;
-  currentVersion: string;
   logger: AgentLogger;
 }
 
@@ -138,8 +185,17 @@ export class AgentUpdater {
 
   constructor(config: UpdaterConfig) {
     this.deviceUuid = config.deviceUuid;
-    this.currentVersion = config.currentVersion;
     this.logger = config.logger;
+    
+    // Detect actual binary version (critical after self-updates)
+    // Using injected config would be stale after agent restart with new binary
+    this.currentVersion = detectBinaryVersion();
+    
+    this.logger.debugSync("Agent updater initialized with detected version", {
+      component: LogComponents.agentUpdater,
+      version: this.currentVersion,
+      note: "Version detected from binary, not injected config (prevents staleness after self-update)"
+    });
     
     // Follow standard IoT topic pattern: iot/device/{uuid}/agent/{action}
     this.updateTopic = `iot/device/${this.deviceUuid}/agent/update`;
@@ -150,6 +206,9 @@ export class AgentUpdater {
    * Initialize MQTT update listener and check for pending updates
    */
   async initialize(): Promise<void> {
+    // Check for successful update from previous run (update script writes this)
+    await this.checkUpdateStatus();
+    
     // Check for pending updates from previous agent run (survives restarts)
     await this.loadPendingUpdate();
 
@@ -421,7 +480,9 @@ export class AgentUpdater {
       return;
     }
 
-    // Create update lock file
+    // Create update lock file (agent owns lock until successful script spawn)
+    // OWNERSHIP: Agent creates lock, script removes it after successful spawn
+    // Agent only removes lock on spawn failure (before transfer of ownership)
     try {
       writeFileSync(UPDATE_LOCK_FILE, JSON.stringify({
         version,
@@ -548,10 +609,11 @@ export class AgentUpdater {
       component: LogComponents.agentUpdater,
       script: updateScript,
       version,
-      note: "Agent will restart shortly. Update script MUST remove lock file on completion."
+      note: "Agent will restart shortly. Update script MUST: 1) Remove lock file, 2) Write status file on completion."
     });
 
-    // Notify systemd that we're stopping (prevents watchdog false positives)
+    // Notify systemd of update sequence (prevents watchdog false positives)
+    notifySystemd('STATUS=Starting agent update', this.logger);
     notifySystemd('STOPPING=1', this.logger);
 
     // Execute update script in background (agent will restart)
@@ -580,7 +642,8 @@ export class AgentUpdater {
           timestamp: Date.now()
         });
         
-        // Remove lock file on script spawn failure
+        // Remove lock file on script spawn failure (agent still owns lock)
+        // OWNERSHIP: Spawn failed, so agent retains ownership and must clean up
         try {
           if (existsSync(UPDATE_LOCK_FILE)) {
             unlinkSync(UPDATE_LOCK_FILE);
@@ -596,19 +659,44 @@ export class AgentUpdater {
           });
         }
       } else {
-        this.logger.infoSync("Update script spawned successfully", {
+        // OWNERSHIP TRANSFER: Lock ownership transferred to update script
+        // Agent MUST NOT touch lock file after this point - script owns cleanup
+        // Violating this creates race conditions between exiting agent and running script
+        
+        this.logger.infoSync("Update script spawned successfully, exiting agent for systemd restart", {
           component: LogComponents.agentUpdater,
-          note: "Agent will restart to complete update"
+          deploymentType,
+          note: "Agent exiting cleanly - systemd will restart after update completes. Update script must write status file on success."
         });
 
-        // Record successful update timestamp (for rate limiting)
-        this.recordUpdateTimestamp(version);
+        // Do NOT record timestamp here - update hasn't completed yet
+        // Update script will write status file, next agent boot will verify and record
+
+        // Flush logs if async logger supports it
+        const logger = this.logger as any;
+        if (typeof logger.flush === 'function') {
+          try {
+            await logger.flush();
+          } catch (flushError) {
+            // Best effort - don't block on flush failure
+            console.error('Failed to flush logs before exit:', flushError);
+          }
+        }
+
+        // Exit cleanly so systemd restarts us (Restart=always policy)
+        // This prevents split-brain state where:
+        // - Agent is running with active watchdog
+        // - Update script is trying to stop/update the service
+        // - Race conditions, zombie processes, and partial state corruption
+        process.exit(0);
       }
     });
   }
 
   /**
    * Publish status update to MQTT
+   * Uses QoS 1 for guaranteed delivery and retain flag for last status
+   * This ensures backend doesn't miss critical state transitions during network drops or restarts
    */
   private async publishStatus(payload: Record<string, any>): Promise<void> {
     const mqttManager = MqttManager.getInstance();
@@ -618,7 +706,13 @@ export class AgentUpdater {
     }
 
     try {
-      await mqttManager.publish(this.statusTopic, JSON.stringify(payload));
+      // QoS 1: At least once delivery (survives network drops)
+      // Retain: Backend can retrieve last status even if it was offline during update
+      await mqttManager.publish(
+        this.statusTopic, 
+        JSON.stringify(payload),
+        { qos: 1, retain: true }
+      );
     } catch (error) {
       this.logger.warnSync("Failed to publish status update", {
         component: LogComponents.agentUpdater,
@@ -650,7 +744,9 @@ export class AgentUpdater {
 
     // Check 1: Disk space (require at least 500MB free)
     try {
-      const { stdout } = await execAsync("df -BM /var/lib/iotistic | tail -1 | awk '{print $4}' | sed 's/M//'");
+      // Check root filesystem where binary is installed (/usr/local/bin)
+      // Not /var/lib/iotistic which may be on different filesystem
+      const { stdout } = await execAsync("df -BM / | tail -1 | awk '{print $4}' | sed 's/M//'");
       const freeSpaceMB = parseInt(stdout.trim(), 10);
       const requiredSpaceMB = 500;
 
@@ -658,9 +754,11 @@ export class AgentUpdater {
 
       this.logger.debugSync("Disk space check", {
         component: LogComponents.agentUpdater,
+        filesystem: '/ (root)',
         freeSpaceMB,
         requiredSpaceMB,
-        passed: checks.diskSpace
+        passed: checks.diskSpace,
+        note: 'Checking root filesystem where binary is installed'
       });
 
       if (!checks.diskSpace) {
@@ -790,6 +888,82 @@ export class AgentUpdater {
     }
 
     return allChecksPassed;
+  }
+
+  /**
+   * Check for successful update status from previous run
+   * Update script writes this file on successful completion
+   * We verify on next boot and record timestamp for rate limiting
+   */
+  private async checkUpdateStatus(): Promise<void> {
+    if (!existsSync(UPDATE_STATUS_FILE)) {
+      return;
+    }
+
+    try {
+      const data = readFileSync(UPDATE_STATUS_FILE, 'utf-8');
+      const status: UpdateStatusRecord = JSON.parse(data);
+
+      if (status.success) {
+        this.logger.infoSync("Previous update completed successfully, recording timestamp", {
+          component: LogComponents.agentUpdater,
+          version: status.version,
+          current_version: this.currentVersion,
+          completed_at: new Date(status.completed_at).toISOString()
+        });
+
+        // Record timestamp for rate limiting (only after confirmed success)
+        this.recordUpdateTimestamp(status.version);
+
+        // Publish success status
+        await this.publishStatus({
+          type: 'update_completed',
+          version: status.version,
+          deployment_type: status.deployment_type,
+          completed_at: status.completed_at,
+          timestamp: Date.now()
+        });
+      } else {
+        this.logger.warnSync("Previous update failed", {
+          component: LogComponents.agentUpdater,
+          version: status.version,
+          deployment_type: status.deployment_type
+        });
+
+        // Publish failure status
+        await this.publishStatus({
+          type: 'update_failed_verified',
+          version: status.version,
+          deployment_type: status.deployment_type,
+          timestamp: Date.now()
+        });
+      }
+
+      // Remove status file after processing
+      unlinkSync(UPDATE_STATUS_FILE);
+      
+      this.logger.debugSync("Update status file processed and removed", {
+        component: LogComponents.agentUpdater,
+        file: UPDATE_STATUS_FILE
+      });
+      
+    } catch (error) {
+      this.logger.errorSync(
+        "Failed to process update status file",
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          component: LogComponents.agentUpdater,
+          file: UPDATE_STATUS_FILE
+        }
+      );
+
+      // Remove corrupted file
+      try {
+        unlinkSync(UPDATE_STATUS_FILE);
+      } catch (cleanupError) {
+        // Ignore cleanup errors
+      }
+    }
   }
 
   /**
@@ -1043,6 +1217,37 @@ export class AgentUpdater {
             expected_mode: '755'
           }
         };
+      }
+
+      // Check immutable bit (optional but recommended for hardening)
+      // This blocks post-exploit script tampering
+      // Don't fail if missing, just warn - some systems may not support it
+      // Note: Using sync exec to avoid making verifyScriptIntegrity async
+      try {
+        const { execSync } = require('child_process');
+        const output = execSync(`lsattr ${scriptPath} 2>/dev/null || true`, { encoding: 'utf8' });
+        const hasImmutableBit = output.includes('i');
+        
+        if (!hasImmutableBit) {
+          this.logger.warnSync("Update script missing immutable bit (hardening recommended)", {
+            component: LogComponents.agentUpdater,
+            scriptPath,
+            recommendation: `Run: sudo chattr +i ${scriptPath}`,
+            note: "Immutable bit prevents post-exploit script tampering"
+          });
+        } else {
+          this.logger.debugSync("Update script has immutable bit set (hardened)", {
+            component: LogComponents.agentUpdater,
+            scriptPath
+          });
+        }
+      } catch (error) {
+        // lsattr not available or failed - not critical, just note it
+        this.logger.debugSync("Could not check immutable bit (lsattr unavailable)", {
+          component: LogComponents.agentUpdater,
+          scriptPath,
+          note: "This is optional - script integrity still verified by uid/mode"
+        });
       }
 
       this.logger.debugSync("Script integrity verified", {
