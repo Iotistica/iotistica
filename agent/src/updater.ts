@@ -630,6 +630,46 @@ export class AgentUpdater {
     // Verify script integrity (prevents local compromise → remote root execution)
     const scriptIntegrityCheck = this.verifyScriptIntegrity(updateScript);
     if (!scriptIntegrityCheck.valid) {
+      // Gracefully skip update in development environments without update scripts
+      if (scriptIntegrityCheck.reason === 'Script not found' && deploymentType === 'systemd') {
+        this.logger.warnSync(
+          "Update skipped - running in development mode without update script",
+          {
+            component: LogComponents.agentUpdater,
+            updateScript,
+            deploymentType,
+            currentVersion: this.currentVersion,
+            targetVersion: version,
+            note: "Set DEPLOYMENT_TYPE=docker or install update script for production updates"
+          }
+        );
+        
+        await this.publishStatus({
+          type: 'update_skipped',
+          reason: 'development_mode_no_script',
+          script_path: updateScript,
+          current_version: this.currentVersion,
+          target_version: version,
+          note: 'Install update script or set DEPLOYMENT_TYPE appropriately',
+          timestamp: Date.now()
+        });
+        
+        // Remove update lock
+        try {
+          if (existsSync(UPDATE_LOCK_FILE)) {
+            unlinkSync(UPDATE_LOCK_FILE);
+          }
+        } catch (cleanupError) {
+          this.logger.warnSync("Failed to remove update lock", {
+            component: LogComponents.agentUpdater,
+            error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+          });
+        }
+        
+        return;
+      }
+      
+      // Actual integrity failures (not development mode)
       this.logger.errorSync(
         "Update script failed integrity check",
         new Error(scriptIntegrityCheck.reason || 'Integrity check failed'),
