@@ -88,6 +88,17 @@ export interface RuntimeConfig {
 }
 
 // ============================================================================
+// Agent Update (Reconciliation-based)
+// ============================================================================
+
+export interface AgentUpdateConfig {
+  version?: string;                  // Required/desired agent version
+  update_scheduled_at?: string;      // ISO 8601 timestamp for scheduled updates
+  update_force?: boolean;            // Override downgrade protection
+  update_signature?: string;         // HMAC-SHA256 signature for verification
+}
+
+// ============================================================================
 // Intervals
 // ============================================================================
 
@@ -179,6 +190,7 @@ export interface TargetStateV2 {
   logging: LoggingConfig;
   features: FeaturesConfig;
   runtime: RuntimeConfig;
+  agent?: AgentUpdateConfig;  // Cloud-controlled agent version policy
   intervals: IntervalsConfig;
   protocols: ProtocolsConfig;
 }

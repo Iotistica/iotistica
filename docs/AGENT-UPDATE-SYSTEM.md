@@ -191,50 +191,89 @@ sudo /usr/local/bin/update-agent-systemd.sh latest
 
 ### Systemd Deployment
 
-1. **Receive MQTT command** → Parse version
-2. **Download binary** → GitHub releases
-3. **Test binary** → `./iotistic-agent --version`
-4. **Stop service** → `systemctl stop iotistic-agent`
-5. **Backup binary** → Copy to `/var/lib/iotistic/backups/`
-6. **Install new** → Move to `/usr/local/bin/iotistic-agent`
-7. **Start service** → `systemctl start iotistic-agent`
-8. **Health check** → Verify service active
-9. **Cleanup** → Keep last 3 backups
+1. **Receive MQTT command** → Verify signature, check expiry
+2. **Validate version** → Semver format, downgrade protection
+3. **Check update lock** → Prevent concurrent updates
+4. **Check rate limit** → Max 1 update per 24 hours (unless force=true)
+5. **Run pre-flight checks:**
+   - **Disk space**: 500MB free on root filesystem (/)
+   - **Connectivity**: MQTT connection active
+   - **Power state**: AC power (if available)
+6. **Create update lock** → Agent owns lock until spawn succeeds
+7. **Verify script integrity:**
+   - Owner: root (uid 0)
+   - Permissions: 0755
+   - Immutable bit: Warned if missing (optional hardening)
+8. **Notify systemd** → `STATUS=Starting agent update`, `STOPPING=1`
+9. **Spawn update script** → Background process with lock file path
+10. **Agent exits cleanly** → `process.exit(0)` for systemd restart
+11. **Update script executes** (agent already exited):
+    - Download binary from GitHub releases
+    - Test binary (`--version` check)
+    - Backup old binary to `/var/lib/iotistic/backups/`
+    - Replace binary in `/usr/local/bin/iotistic-agent`
+    - **systemd auto-restarts** (Restart=always policy)
+    - Wait 30 seconds for restart
+    - Verify service running with new version
+    - Write status file: `/var/lib/iotistic/agent/update-status.json`
+    - Remove lock file
+12. **Next agent boot:**
+    - Read status file
+    - If success → Record timestamp for rate limiting
+    - Publish `update_completed` status
+    - Delete status file
+
+**Lock Ownership:**
+- **Before spawn**: Agent owns lock, removes on spawn failure
+- **After spawn**: Script owns lock, removes on completion
+- **NEVER**: Both touch lock (prevents race conditions)
 
 **Rollback (if fails):**
-- Stop service
-- Restore from backup
-- Start service
+- Script restores old binary from backup
+- systemd auto-restarts with old version
+- Status file written with `success: false`
 
 ## MQTT Message Format
 
 ### Update Command (Cloud → Device)
 
-**Topic:** `agent/{uuid}/update`
+**Topic:** `iot/device/{uuid}/agent/update`
 
 **Message:**
 ```json
 {
   "action": "update",
-  "version": "1.0.6",
+  "version": "1.0.230",
   "scheduled_time": "2025-11-10T02:00:00Z",  // Optional
   "force": false,                             // Optional
-  "timestamp": 1699564800000
+  
+  // Security fields (prevents replay attacks and stale messages)
+  "issued_at": 1735234567890,                 // Required: Unix timestamp when command issued
+  "expires_at": 1735238167890,                // Optional: Unix timestamp when command expires (1 hour)
+  "signature": "a1b2c3d4..."                  // Required: HMAC-SHA256 signature (if UPDATE_COMMAND_SECRET set)
 }
 ```
 
-**QoS:** 1 (at least once)  
-**Retained:** true (so offline devices receive when they reconnect)
+**Signature Verification:**
+- Canonical string: `action|version|issued_at|expires_at|scheduled_time|force`
+- HMAC-SHA256 with `UPDATE_COMMAND_SECRET`
+- Timing-safe comparison prevents timing attacks
+
+**QoS:** 1 (at least once delivery, survives network drops)  
+**Retained:** true (offline devices receive when they reconnect)
 
 ### Status Messages (Device → Cloud)
 
-**Topic:** `agent/{uuid}/status`
+**Topic:** `iot/device/{uuid}/agent/status`
+
+**QoS:** 1 (guaranteed delivery)  
+**Retained:** true (backend can query last status)
 
 **Update Command Received:**
 ```json
 {
   "type": "update_command_received",
-  "version": "1.0.6",
+  "version": "1.0.230",
   "timestamp": 1699564800000
 }
 ```
@@ -243,8 +282,31 @@ sudo /usr/local/bin/update-agent-systemd.sh latest
 ```json
 {
   "type": "update_scheduled",
-  "version": "1.0.6",
+  "version": "1.0.230",
   "scheduled_time": "2025-11-10T02:00:00Z",
+  "timestamp": 1699564800000
+}
+```
+
+**Pre-flight Started:**
+```json
+{
+  "type": "preflight_started",
+  "version": "1.0.230",
+  "timestamp": 1699564800000
+}
+```
+
+**Pre-flight Passed/Failed:**
+```json
+{
+  "type": "preflight_passed",
+  "version": "1.0.230",
+  "checks": {
+    "diskSpace": true,
+    "connectivity": true,
+    "powerState": true
+  },
   "timestamp": 1699564800000
 }
 ```
@@ -253,10 +315,21 @@ sudo /usr/local/bin/update-agent-systemd.sh latest
 ```json
 {
   "type": "update_started",
-  "current_version": "1.0.5",
-  "target_version": "1.0.6",
-  "deployment_type": "docker",
+  "current_version": "1.0.229",
+  "target_version": "1.0.230",
+  "deployment_type": "systemd",
   "timestamp": 1699564800000
+}
+```
+
+**Update Completed (verified on next boot):**
+```json
+{
+  "type": "update_completed",
+  "version": "1.0.230",
+  "deployment_type": "systemd",
+  "completed_at": 1699564800000,
+  "timestamp": 1699564900000
 }
 ```
 
@@ -264,8 +337,18 @@ sudo /usr/local/bin/update-agent-systemd.sh latest
 ```json
 {
   "type": "update_failed",
-  "reason": "script_execution_failed",
-  "error": "Failed to pull image",
+  "reason": "script_spawn_failed",
+  "error": "Failed to execute update script",
+  "timestamp": 1699564800000
+}
+```
+
+**Update Rejected:**
+```json
+{
+  "type": "update_rejected",
+  "reason": "rate_limit_exceeded",
+  "version": "1.0.230",
   "timestamp": 1699564800000
 }
 ```
@@ -489,6 +572,72 @@ INSERT INTO mqtt_acls (username, topic, rw) VALUES
 
 This follows the same pattern as jobs (`iot/device/{uuid}/jobs/...`) and sensors (`iot/device/{uuid}/sensor/...`).
 
+### Command Signature Verification (HMAC-SHA256)
+
+**Prevents:** Replay attacks, command tampering, unauthorized updates
+
+**Setup:**
+```bash
+# Generate secret (32 bytes minimum)
+openssl rand -hex 32
+
+# Set on all agents
+export UPDATE_COMMAND_SECRET="your-secret-here"
+```
+
+**Cloud generates signature:**
+```typescript
+const canonicalString = [
+  command.action,
+  command.version,
+  command.issued_at.toString(),
+  command.expires_at?.toString() || '',
+  command.scheduled_time || '',
+  command.force?.toString() || ''
+].join('|');
+
+const signature = createHmac('sha256', secret)
+  .update(canonicalString)
+  .digest('hex');
+```
+
+**Agent verifies with timing-safe comparison** (prevents timing attacks)
+
+### Update Script Integrity Checks
+
+**Requirements:**
+- Owner: root (uid 0)
+- Permissions: 0755 (rwxr-xr-x)
+- Path: Hardcoded (no user input)
+- Immutable bit: Recommended (`chattr +i`)
+
+**Set immutable bit:**
+```bash
+sudo chattr +i /usr/local/bin/update-agent-systemd.sh
+```
+
+**Prevents:** Local privilege escalation (unprivileged user modifies script → triggers MQTT update → agent executes as root)
+
+### Rate Limiting
+
+**Default:** 1 update per 24 hours (prevents excessive updates)
+
+**Override:** `force: true` flag
+
+**Implementation:**
+- Timestamp recorded **ONLY after verified successful boot** with new version
+- Status file written by update script
+- Agent reads status file on next boot
+- Prevents false positives from failed updates
+
+### Version Validation
+
+**Checks:**
+- Semver format: `\d+\.\d+\.\d+(-[\w.]+)?`
+- Downgrade protection (unless `force: true`)
+- Same version skip (unless `force: true`)
+- Version staleness: Detected from binary, not injected config
+
 ### TLS Encryption
 
 Updates transmitted over VPN tunnel (encrypted):
@@ -497,14 +646,26 @@ Edge Device (10.8.0.12) ←→ OpenVPN ←→ Cloud Mosquitto (10.8.0.1:1883)
                           AES-256-GCM
 ```
 
-### Signature Verification
+### Pre-flight Safety Checks
 
-Future enhancement: Verify Docker image signatures
+**Disk Space** (CRITICAL - cannot override):
+- 500MB free on root filesystem (/)
+- Checks where binary installed, not app data
+
+**Connectivity** (WARNING - can override with force):
+- MQTT connection active
+
+**Power State** (WARNING - can override with force):
+- AC power connected (if available via `/sys/class/power_supply`)
+
+### Signature Verification (Future)
+
+Verify Docker image signatures with Docker Content Trust:
 
 ```bash
 # Docker Content Trust
 export DOCKER_CONTENT_TRUST=1
-docker pull iotistic/agent:1.0.6
+docker pull iotistic/agent:1.0.230
 # Automatically verifies signature
 ```
 
@@ -579,6 +740,22 @@ console.log(`Success rate: ${successCount / (successCount + failureCount) * 100}
 - [Integration Testing Strategy](./INTEGRATION-TESTING-STRATEGY.md)
 
 ## Changelog
+
+### v2.0.0 (2025-12-26) - Production Hardening
+- ✅ **HMAC-SHA256 signature verification** (prevents replay attacks, tampering)
+- ✅ **Command expiry timestamps** (prevents stale message execution)
+- ✅ **Update lock with single ownership** (prevents concurrent updates, race conditions)
+- ✅ **Persistent scheduled updates** (survives agent restarts)
+- ✅ **Rate limiting** (24-hour limit, prevents excessive updates)
+- ✅ **Pre-flight safety checks** (disk space, connectivity, power state)
+- ✅ **Script integrity verification** (uid, permissions, immutable bit check)
+- ✅ **Version staleness fix** (detect from binary, not injected config)
+- ✅ **Delayed success tracking** (status file written by script, verified on next boot)
+- ✅ **Declarative systemd restart** (no manual stop/start, uses Restart=always)
+- ✅ **systemd notification sequence** (STATUS=, STOPPING=1 before exit)
+- ✅ **MQTT QoS 1 + retain** (guaranteed delivery, survives network drops)
+- ✅ **Downgrade protection** (semver comparison, force flag to override)
+- ✅ **Split-brain prevention** (agent exits cleanly, systemd controls lifecycle)
 
 ### v1.0.0 (2025-11-09)
 - Initial implementation of MQTT-based updates

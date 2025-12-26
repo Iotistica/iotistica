@@ -56,7 +56,21 @@ export interface DeviceTargetState {
   id: number;
   device_uuid: string;
   apps: any;
-  config: any;
+  config: {
+    agent?: {
+      version?: string;
+      update_scheduled_at?: string;
+      update_force?: boolean;
+      update_signature?: string;
+    };
+    endpoints?: any[];
+    intervals?: any;
+    logging?: any;
+    features?: any;
+    protocols?: any;
+    anomaly?: any;
+    [key: string]: any;
+  };
   version: number;
   needs_deployment?: boolean;
   last_deployed_at?: Date;

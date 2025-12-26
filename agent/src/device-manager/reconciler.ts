@@ -49,6 +49,7 @@ export class StateReconciler extends EventEmitter {
 	private previousState: DeviceState = { apps: {}, config: {} };
 	private containerManager: ContainerManager;
 	private configManager: ConfigManager;
+	private agentUpdater?: any; // AgentUpdater instance for version reconciliation
 	private lastSavedStateHash: string = '';
 	private logger?: AgentLogger;
 	private isReconciling = false;
@@ -212,6 +213,13 @@ export class StateReconciler extends EventEmitter {
 			
 			await this.configManager.setTarget(this.targetState.config || {});
 
+			// Step 3: Reconcile agent version (if needed)
+			this.logger?.debugSync('Step 3: Reconciling agent version', {
+				component: LogComponents.stateReconciler,
+			});
+			
+			await this.reconcileAgentVersion(this.targetState);
+
 			this.logger?.infoSync('Full state reconciliation complete', {
 				component: LogComponents.stateReconciler,
 				operation: 'reconcile',
@@ -230,6 +238,87 @@ export class StateReconciler extends EventEmitter {
 			throw error;
 		} finally {
 			this.isReconciling = false;
+		}
+	}
+
+	/**
+	 * Set AgentUpdater reference (called after initialization)
+	 */
+	public setAgentUpdater(agentUpdater: any): void {
+		this.agentUpdater = agentUpdater;
+		this.logger?.debugSync('AgentUpdater reference set', {
+			component: LogComponents.stateReconciler,
+			hasUpdater: !!agentUpdater
+		});
+	}
+
+	/**
+	 * Reconcile agent version with target state
+	 */
+	private async reconcileAgentVersion(targetState: DeviceState): Promise<void> {
+		const agentConfig = targetState.config?.agent;
+		
+		if (!agentConfig || !agentConfig.version) {
+			// No agent update requested
+			this.logger?.debugSync('No agent version specified in target state', {
+				component: LogComponents.stateReconciler,
+				operation: 'reconcileAgentVersion',
+			});
+			return;
+		}
+		
+		if (!this.agentUpdater) {
+			this.logger?.warnSync('AgentUpdater not available, skipping version reconciliation', {
+				component: LogComponents.stateReconciler,
+				operation: 'reconcileAgentVersion',
+				targetVersion: agentConfig.version,
+			});
+			return;
+		}
+		
+		// Get current version from AgentUpdater
+		const currentVersion = this.agentUpdater.getCurrentVersion();
+		
+		if (currentVersion === agentConfig.version) {
+			// Already at desired version
+			this.logger?.debugSync('Agent already at desired version', {
+				component: LogComponents.stateReconciler,
+				operation: 'reconcileAgentVersion',
+				currentVersion,
+				targetVersion: agentConfig.version,
+			});
+			return;
+		}
+		
+		// Delegate to AgentUpdater for reconciliation
+		this.logger?.infoSync('Agent version mismatch detected, triggering reconciliation', {
+			component: LogComponents.stateReconciler,
+			operation: 'reconcileAgentVersion',
+			currentVersion,
+			targetVersion: agentConfig.version,
+			scheduledAt: agentConfig.update_scheduled_at,
+			force: agentConfig.update_force,
+		});
+		
+		try {
+			await this.agentUpdater.reconcileVersion({
+				targetVersion: agentConfig.version,
+				scheduledAt: agentConfig.update_scheduled_at,
+				force: agentConfig.update_force || false,
+				signature: agentConfig.update_signature,
+			});
+		} catch (error) {
+			this.logger?.errorSync(
+				'Agent version reconciliation failed',
+				error instanceof Error ? error : new Error(String(error)),
+				{
+					component: LogComponents.stateReconciler,
+					operation: 'reconcileAgentVersion',
+					currentVersion,
+					targetVersion: agentConfig.version,
+				}
+			);
+			// Don't rethrow - allow other reconciliation to continue
 		}
 	}
 

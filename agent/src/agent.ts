@@ -226,6 +226,11 @@ export default class DeviceAgent {
       this.updater = features.updater;
       this.firewall = features.firewall;
 
+      // Set AgentUpdater on StateReconciler (for version reconciliation)
+      if (this.updater) {
+        this.stateReconciler.setAgentUpdater(this.updater);
+      }
+
       // 14. Start auto-reconciliation
       this.startAutoReconciliation();
 
@@ -1012,7 +1017,9 @@ export default class DeviceAgent {
       this.agentLogger, // Pass the agent logger
       undefined, // sensorPublish (unused)
       undefined, // sensors (unused)
-      MqttManager.getInstance() // Pass MQTT manager singleton for state reporting (optional)
+      MqttManager.getInstance(), // Pass MQTT manager singleton for state reporting (optional)
+      undefined, // httpClient (uses default)
+      this.updater // Pass AgentUpdater for version reporting
     );
 
     // Reinitialize device actions with cloudSync, anomaly service, and simulation

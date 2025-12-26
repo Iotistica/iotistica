@@ -90,6 +90,7 @@ export class CloudSync extends EventEmitter {
 	private deviceManager: DeviceManager;
 	private config: Required<CloudSyncConfig>;
 	private httpClient: HttpClient;
+	private agentUpdater?: any; // AgentUpdater instance for version reporting
 	
 	// State management
 	private targetState: DeviceState = { apps: {}, config: {} };
@@ -185,7 +186,8 @@ export class CloudSync extends EventEmitter {
 		sensorPublish?: any,
 		endpoints?: any,
 		mqttManager?: any,
-		httpClient?: HttpClient
+		httpClient?: HttpClient,
+		agentUpdater?: any
 	) {
 		super();
 		this.stateReconciler = stateReconciler;
@@ -194,6 +196,7 @@ export class CloudSync extends EventEmitter {
 		this.sensorPublish = sensorPublish;
 		this.endpoints = endpoints;
 		this.mqttManager = mqttManager;
+		this.agentUpdater = agentUpdater;
 		
 		// Set defaults FIRST (needed by createHttpClient)
 		this.config = {
@@ -1144,7 +1147,12 @@ export class CloudSync extends EventEmitter {
 	if (stateReport[deviceInfo.uuid].os_version !== undefined) {
 		stateOnlyReport[deviceInfo.uuid].os_version = stateReport[deviceInfo.uuid].os_version;
 	}
-	if (stateReport[deviceInfo.uuid].agent_version !== undefined) {
+	// Always include agent_version (critical for reconciliation)
+	if (this.agentUpdater) {
+		const agentVersion = this.agentUpdater.getCurrentVersion();
+		stateOnlyReport[deviceInfo.uuid].agent_version = agentVersion;
+		stateReport[deviceInfo.uuid].agent_version = agentVersion;
+	} else if (stateReport[deviceInfo.uuid].agent_version !== undefined) {
 		stateOnlyReport[deviceInfo.uuid].agent_version = stateReport[deviceInfo.uuid].agent_version;
 	}
 	

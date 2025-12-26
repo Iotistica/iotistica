@@ -173,8 +173,8 @@ export class ProvisioningService {
     });
 
 
-    // Create default target state
-    this.createDefaultTargetState(uuid).catch(err => console.error('Failed to create default target state', err));
+    // Create default target state with agent version
+    this.createDefaultTargetState(uuid, agentVersion).catch(err => console.error('Failed to create default target state', err));
 
     // Increment provisioning key usage, fire and forget
     incrementProvisioningKeyUsage(keyRecord.id).catch(err => console.error('Failed to increment provisioning key usage', err));
@@ -319,13 +319,33 @@ export class ProvisioningService {
   /**
    * Create default target state for device
    */
-  private async createDefaultTargetState(deviceUuid: string): Promise<void> {
+  private async createDefaultTargetState(deviceUuid: string, agentVersion?: string): Promise<void> {
     const targetState = await DeviceTargetStateModel.get(deviceUuid);
     if (!targetState) {
       const licenseData = await configService.get('license_data');
       
       // Always use V2 format (single source of truth)
       const { apps, config } = await generateDefaultTargetStateV2(licenseData);
+      
+      // Get required agent version from cloud policy (system_config)
+      const requiredAgentVersion = await configService.get('required_agent_version');
+      
+      // Set target version to cloud's required version (not agent's current)
+      // This enables immediate reconciliation if agent is outdated
+      config.agent = {
+        version: requiredAgentVersion || agentVersion || 'latest',
+        // No signature needed - this is policy, not an update command
+      };
+      
+      // Log warning if agent doesn't match required version
+      if (requiredAgentVersion && agentVersion && requiredAgentVersion !== agentVersion) {
+        logger.warn('Agent version mismatch at provisioning', {
+          deviceUuid,
+          agentVersion,
+          requiredVersion: requiredAgentVersion,
+          action: 'will_auto_update_on_first_poll'
+        });
+      }
       
       await DeviceTargetStateModel.set(deviceUuid, apps, config, false); // Don't need deployment for default state
     }

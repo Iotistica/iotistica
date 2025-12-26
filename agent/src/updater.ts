@@ -203,6 +203,75 @@ export class AgentUpdater {
   }
 
   /**
+   * Get current agent version (for state reporting)
+   */
+  public getCurrentVersion(): string {
+    return this.currentVersion;
+  }
+
+  /**
+   * Reconcile current version with target version (declarative updates)
+   * Called by StateReconciler during reconciliation loop
+   */
+  public async reconcileVersion(params: {
+    targetVersion: string;
+    scheduledAt?: string;
+    force?: boolean;
+    signature?: string;
+  }): Promise<void> {
+    const { targetVersion, scheduledAt, force = false } = params;
+    
+    this.logger.infoSync('Reconciling agent version', {
+      component: LogComponents.agentUpdater,
+      operation: 'reconcile-version',
+      currentVersion: this.currentVersion,
+      targetVersion,
+      scheduledAt,
+      force
+    });
+    
+    // If scheduled for future, save it as pending update
+    if (scheduledAt) {
+      const scheduledDate = new Date(scheduledAt);
+      const delay = scheduledDate.getTime() - Date.now();
+      
+      if (delay > 0) {
+        this.logger.infoSync('Reconciliation: Update scheduled for later', {
+          component: LogComponents.agentUpdater,
+          operation: 'reconcile-version',
+          scheduledAt,
+          delayMs: delay,
+          delayHours: Math.round(delay / 3600000)
+        });
+        
+        // Persist scheduled update (survives agent restart)
+        await this.savePendingUpdate({
+          version: targetVersion,
+          scheduled_time: scheduledAt,
+          force,
+          created_at: Date.now()
+        });
+        
+        // Schedule update execution
+        this.scheduleUpdate(targetVersion, force, delay);
+        
+        await this.publishStatus({
+          type: 'update_scheduled',
+          version: targetVersion,
+          scheduled_time: scheduledAt,
+          timestamp: Date.now()
+        });
+        
+        return;
+      }
+    }
+    
+    // Execute immediately - delegate to existing performUpdate()
+    // This ensures identical security validation as MQTT-triggered updates
+    await this.performUpdate(targetVersion, force);
+  }
+
+  /**
    * Initialize MQTT update listener and check for pending updates
    */
   async initialize(): Promise<void> {
