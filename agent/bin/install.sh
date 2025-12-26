@@ -376,24 +376,18 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
             echo "Copying agent code..."
             cp -r "$AGENT_DIR"/* /opt/iotistic/agent/
             
-            # Copy config if it exists
-            if [ -d "$REPO_ROOT/config" ]; then
-                echo "Copying config..."
-                mkdir -p /opt/iotistic/config
-                cp -r "$REPO_ROOT/config"/* /opt/iotistic/config/
-            fi
-            
             echo "✓ Repository code copied to /opt/iotistic/agent"
         else
-            echo "No local repository found, cloning from GitHub..."
+            echo "No local repository found, cloning agent from GitHub..."
             cd /tmp
             rm -rf iotistic-clone-temp
-            git clone --depth 1 https://github.com/Iotistica/iotistic.git iotistic-clone-temp
+            git clone --depth 1 --filter=blob:none --sparse https://github.com/Iotistica/iotistic.git iotistic-clone-temp
+            cd iotistic-clone-temp
+            git sparse-checkout set agent
+            cd ..
             cp -r iotistic-clone-temp/agent/* /opt/iotistic/agent/
-            mkdir -p /opt/iotistic/config
-            cp -r iotistic-clone-temp/config/* /opt/iotistic/config/
             rm -rf iotistic-clone-temp
-            echo "✓ Repository cloned and copied"
+            echo "✓ Agent cloned and copied"
         fi
     else
         # Interactive mode
@@ -417,13 +411,14 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
         SELECTED_VERSION=${SELECTED_VERSION:-$LATEST_TAG}
         
         if [ "$SELECTED_VERSION" = "master" ]; then
-            echo "Cloning master branch..."
+            echo "Cloning agent from master branch..."
             cd /tmp
             rm -rf iotistic-agent-temp
-            git clone --depth 1 https://github.com/Iotistica/iotistic.git iotistic-agent-temp
+            git clone --depth 1 --filter=blob:none --sparse https://github.com/Iotistica/iotistic.git iotistic-agent-temp
+            cd iotistic-agent-temp
+            git sparse-checkout set agent
+            cd ..
             cp -r iotistic-agent-temp/agent/* /opt/iotistic/agent/
-            mkdir -p /opt/iotistic/config
-            cp -r iotistic-agent-temp/config/* /opt/iotistic/config/
             # Read version from package.json
             AGENT_VERSION=$(jq -r '.version // "dev"' iotistic-agent-temp/agent/package.json)
             echo "Using agent version from package.json: $AGENT_VERSION"
