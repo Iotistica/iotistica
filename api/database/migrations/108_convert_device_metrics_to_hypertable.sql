@@ -47,7 +47,7 @@ BEGIN
 END $$;
 
 -- Step 3: Create new unpartitioned table with TimescaleDB-compatible schema
-CREATE TABLE device_metrics (
+CREATE TABLE IF NOT EXISTS device_metrics (
     id BIGSERIAL,
     device_uuid UUID NOT NULL,
     cpu_usage NUMERIC,
@@ -61,116 +61,105 @@ CREATE TABLE device_metrics (
     PRIMARY KEY (id, recorded_at)  -- Composite PK required by TimescaleDB
 );
 
-RAISE NOTICE 'Created new device_metrics table (empty)';
-    END IF;
-END $$;
-
--- Step 7: Convert to TimescaleDB hypertable
--- chunk_time_interval: 1 day (86400 seconds = 1 day in microseconds)
--- migrate_data: Required because table has data after copy operation
-SELECT create_hypertable(
-    'device_metrics',
-    'recorded_at',
-    chunk_time_interval => INTERVAL '1 day',
-    migrate_data => TRUE,
-    if_not_exists => TRUE
-);
-
--- Verify hypertable creation
+-- Step 4: Convert to TimescaleDB hypertable (idempotent)
 DO $$
 BEGIN
+    -- Only create hypertable if not already one
     IF NOT EXISTS (
         SELECT 1 FROM timescaledb_information.hypertables 
         WHERE hypertable_name = 'device_metrics'
     ) THEN
-        RAISE EXCEPTION 'Failed to create hypertable for device_metrics';
+        PERFORM create_hypertable(
+            'device_metrics',
+            'recorded_at',
+            chunk_time_interval => INTERVAL '7 days',
+            migrate_data => FALSE
+        );
+        RAISE NOTICE 'Hypertable created successfully with 7-day chunks';
+    ELSE
+        RAISE NOTICE 'device_metrics is already a hypertable, skipping creation';
     END IF;
-    RAISE NOTICE 'Hypertable created successfully';
 END $$;
 
--- Step 8: Enable compression (90% storage reduction expected)
--- segmentby device_uuid: Groups data by device for better compression
--- orderby recorded_at DESC: Recent data queries are faster
-ALTER TABLE device_metrics SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'device_uuid',
-    timescaledb.compress_orderby = 'recorded_at DESC'
-);
+-- Step 5: Enable compression (idempotent)
+DO $$
+BEGIN
+    -- Only enable compression if not already enabled
+    IF NOT EXISTS (
+        SELECT 1 FROM timescaledb_information.hypertables 
+        WHERE hypertable_name = 'device_metrics' 
+        AND compression_state > 0
+    ) THEN
+        ALTER TABLE device_metrics SET (
+            timescaledb.compress,
+            timescaledb.compress_segmentby = 'device_uuid',
+            timescaledb.compress_orderby = 'recorded_at DESC'
+        );
+        RAISE NOTICE 'Compression enabled';
+    ELSE
+        RAISE NOTICE 'Compression already enabled, skipping';
+    END IF;
+EXCEPTION
+    WHEN insufficient_privilege THEN
+        RAISE NOTICE 'Insufficient privileges to enable compression, skipping';
+    WHEN OTHERS THEN
+        RAISE WARNING 'Could not enable compression: %, skipping', SQLERRM;
+END $$;
 
--- Step 9: Add compression policy (compress chunks older than 7 days)
--- This runs automatically in the background
-SELECT add_compression_policy('device_metrics', INTERVAL '7 days');
+-- Step 6: Add compression policy (idempotent)
+DO $$
+BEGIN
+    -- Only add policy if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM timescaledb_information.jobs 
+        WHERE hypertable_name = 'device_metrics' 
+        AND proc_name = 'policy_compression'
+    ) THEN
+        PERFORM add_compression_policy('device_metrics', INTERVAL '7 days');
+        RAISE NOTICE 'Compression policy added';
+    ELSE
+        RAISE NOTICE 'Compression policy already exists, skipping';
+    END IF;
+EXCEPTION
+    WHEN insufficient_privilege THEN
+        RAISE NOTICE 'Insufficient privileges to add compression policy, skipping';
+    WHEN OTHERS THEN
+        RAISE WARNING 'Could not add compression policy: %, skipping', SQLERRM;
+END $$;
 
--- Step 10: Add retention policy (drop chunks older than 180 days)
--- Adjust retention period based on requirements:
--- - 90 days: Short-term monitoring
--- - 180 days: Medium-term analysis (RECOMMENDED)
--- - 365 days: Long-term compliance
-SELECT add_retention_policy('device_metrics', INTERVAL '180 days');
+-- Step 7: Add retention policy (idempotent)
+DO $$
+BEGIN
+    -- Only add policy if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM timescaledb_information.jobs 
+        WHERE hypertable_name = 'device_metrics' 
+        AND proc_name = 'policy_retention'
+    ) THEN
+        PERFORM add_retention_policy('device_metrics', INTERVAL '90 days');
+        RAISE NOTICE 'Retention policy added (90 days)';
+    ELSE
+        RAISE NOTICE 'Retention policy already exists, skipping';
+    END IF;
+EXCEPTION
+    WHEN insufficient_privilege THEN
+        RAISE NOTICE 'Insufficient privileges to add retention policy, skipping';
+    WHEN OTHERS THEN
+        RAISE WARNING 'Could not add retention policy: %, skipping', SQLERRM;
+END $$;
 
--- Step 11: Recreate indexes for query performance
--- Index 1: Device lookup
-CREATE INDEX IF NOT EXISTS idx_device_metrics_device_uuid 
-ON device_metrics (device_uuid);
-
--- Index 2: Time-series queries
-CREATE INDEX IF NOT EXISTS idx_device_metrics_recorded_at_desc 
-ON device_metrics (recorded_at DESC);
-
--- Index 3: Device + time range queries (most common)
+-- Step 8: Create indexes for query performance
+-- Index 1: Device + time range queries (most common pattern)
 CREATE INDEX IF NOT EXISTS idx_device_metrics_device_time 
 ON device_metrics (device_uuid, recorded_at DESC);
 
--- Index 4: GIN index for top_processes JSONB queries
+-- Index 2: Time-series queries only
+CREATE INDEX IF NOT EXISTS idx_device_metrics_recorded_at 
+ON device_metrics (recorded_at DESC);
+
+-- Index 3: GIN index for top_processes JSONB queries
 CREATE INDEX IF NOT EXISTS idx_device_metrics_top_processes 
 ON device_metrics USING GIN (top_processes);
-
--- Step 12: Drop obsolete partition management functions
--- These were for manual partitioning and are no longer needed
--- Step 4: Convert to hypertable
-SELECT create_hypertable('device_metrics', 'recorded_at', 
-    chunk_time_interval => INTERVAL '7 days',
-    if_not_exists => TRUE
-);
-
-RAISE NOTICE 'Created hypertable with 7-day chunks';
-
--- Step 5: Create indexes for common queries
-CREATE INDEX IF NOT EXISTS idx_device_metrics_device_uuid 
-    ON device_metrics (device_uuid, recorded_at DESC);
-    
-CREATE INDEX IF NOT EXISTS idx_device_metrics_recorded_at 
-    ON device_metrics (recorded_at DESC);
-
-RAISE NOTICE 'Created indexes';
-
--- Step 6: Enable compression (requires TimescaleDB 2.0+)
-DO $$
-BEGIN
-    -- Enable compression on chunks older than 7 days
-    ALTER TABLE device_metrics SET (
-        timescaledb.compress,
-        timescaledb.compress_segmentby = 'device_uuid'
-    );
-    
-    -- Add compression policy
-    SELECT add_compression_policy('device_metrics', INTERVAL '7 days');
-    
-    RAISE NOTICE 'Compression enabled (90% storage reduction for old data)';
-EXCEPTION
-    WHEN OTHERS THEN
-        RAISE WARNING 'Could not enable compression: % (continuing without compression)', SQLERRM;
-END $$;
-
--- Step 7: Add retention policy (optional - keeps last 90 days)
-DO $$
-BEGIN
-    SELECT add_retention_policy('device_metrics', INTERVAL '90 days');
-    RAISE NOTICE 'Retention policy added (keeps last 90 days)';
-EXCEPTION
-    WHEN OTHERS THEN
-        RAISE WARNING 'Could not add retention policy: % (continuing without retention)', SQLERRM;
-END $$;
 
 COMMIT;
 
@@ -178,7 +167,7 @@ COMMIT;
 -- CONTINUOUS AGGREGATES (Must be outside transaction)
 -- =============================================================================
 
--- Step 8: Create continuous aggregates for dashboards
+-- Step 9: Create continuous aggregates for dashboards
 
 -- 5-minute aggregates (real-time monitoring)
 CREATE MATERIALIZED VIEW device_metrics_5min
@@ -258,7 +247,7 @@ FROM device_metrics
 GROUP BY bucket, device_uuid
 WITH NO DATA;  -- Data populated by refresh policy
 
--- Step 15: Add refresh policies for continuous aggregates
+-- Step 10: Add refresh policies for continuous aggregates
 -- This keeps the materialized views up-to-date automatically
 
 -- 5-minute view: Refresh every 5 minutes, covering last 3 hours

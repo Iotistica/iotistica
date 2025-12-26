@@ -251,6 +251,11 @@ export class MqttManager extends EventEmitter {
         if (!initialConnectionSucceeded && !this.reconnecting) {
           this.client?.end(true); // Force close to prevent further events
           reject(error);
+        } else if (initialConnectionSucceeded && !this.reconnecting) {
+          // Connection was established but now errored (ECONNRESET, ECONNREFUSED, etc.)
+          // Schedule reconnection since offline/close events may not fire with reconnectPeriod=0
+          logger.warn('MQTT connection error after successful connect, scheduling reconnect');
+          this.scheduleReconnect();
         }
       });
 
