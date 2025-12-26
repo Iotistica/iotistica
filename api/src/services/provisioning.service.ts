@@ -173,8 +173,9 @@ export class ProvisioningService {
     });
 
 
-    // Create default target state with agent version
-    this.createDefaultTargetState(uuid, agentVersion).catch(err => console.error('Failed to create default target state', err));
+    // Create default target state with agent version (MUST happen before response)
+    // This ensures first poll after provisioning gets the correct target state
+    await this.createDefaultTargetState(uuid, agentVersion);
 
     // Increment provisioning key usage, fire and forget
     incrementProvisioningKeyUsage(keyRecord.id).catch(err => console.error('Failed to increment provisioning key usage', err));

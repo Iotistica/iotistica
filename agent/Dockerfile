@@ -75,8 +75,8 @@ RUN addgroup -S agentgroup && \
     mkdir -p /app/data/vpn && \
     chown -R agentuser:agentgroup /app
 
-# Copy package files
-COPY --chown=agentuser:agentgroup package*.json ./
+# Copy package files from agent directory (contains version info)
+COPY --chown=agentuser:agentgroup agent/package*.json ./
 
 # Copy production dependencies from deps stage (already cleaned)
 COPY --from=deps --chown=agentuser:agentgroup /app/node_modules ./node_modules

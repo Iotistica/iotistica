@@ -54,6 +54,13 @@ export class StateReconciler extends EventEmitter {
 	private logger?: AgentLogger;
 	private isReconciling = false;
 
+	/**
+	 * Set logger (called after logger is initialized)
+	 */
+	public setLogger(logger: AgentLogger): void {
+		this.logger = logger;
+	}
+
 	constructor(logger?: AgentLogger) {
 		super();
 		this.logger = logger;
@@ -142,6 +149,7 @@ export class StateReconciler extends EventEmitter {
 
 		// Trigger reconciliation
 		await this.reconcile();
+
 	}
 
 	/**
@@ -182,7 +190,7 @@ export class StateReconciler extends EventEmitter {
 	 */
 	public async reconcile(): Promise<void> {
 		if (this.isReconciling) {
-			this.logger?.debugSync('Already reconciling, skipping', {
+			this.logger?.warnSync('Already reconciling, skipping', {
 				component: LogComponents.stateReconciler,
 				operation: 'reconcile',
 			});
@@ -246,7 +254,7 @@ export class StateReconciler extends EventEmitter {
 	 */
 	public setAgentUpdater(agentUpdater: any): void {
 		this.agentUpdater = agentUpdater;
-		this.logger?.debugSync('AgentUpdater reference set', {
+		this.logger?.infoSync('AgentUpdater reference set', {
 			component: LogComponents.stateReconciler,
 			hasUpdater: !!agentUpdater
 		});
@@ -256,13 +264,23 @@ export class StateReconciler extends EventEmitter {
 	 * Reconcile agent version with target state
 	 */
 	private async reconcileAgentVersion(targetState: DeviceState): Promise<void> {
-		const agentConfig = targetState.config?.agent;
+		this.logger?.debugSync('Entering reconcileAgentVersion', {
+			component: LogComponents.stateReconciler,
+			operation: 'reconcileAgentVersion',
+			hasConfig: !!targetState.config,
+			hasAgentConfig: !!(targetState.config as any)?.agent,
+			agentVersion: (targetState.config as any)?.agent?.version,
+		});
+		
+		const agentConfig = (targetState.config as any)?.agent;
 		
 		if (!agentConfig || !agentConfig.version) {
 			// No agent update requested
 			this.logger?.debugSync('No agent version specified in target state', {
 				component: LogComponents.stateReconciler,
 				operation: 'reconcileAgentVersion',
+				hasAgentConfig: !!agentConfig,
+				agentConfigKeys: agentConfig ? Object.keys(agentConfig) : [],
 			});
 			return;
 		}
@@ -296,6 +314,7 @@ export class StateReconciler extends EventEmitter {
 			operation: 'reconcileAgentVersion',
 			currentVersion,
 			targetVersion: agentConfig.version,
+			isDowngrade: currentVersion > agentConfig.version,
 			scheduledAt: agentConfig.update_scheduled_at,
 			force: agentConfig.update_force,
 		});

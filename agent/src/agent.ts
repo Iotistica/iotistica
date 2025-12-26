@@ -121,6 +121,9 @@ export default class DeviceAgent {
       
       this.agentLogger = new AgentLogger(localBackend, logLevel);
 
+      // Pass logger to StateReconciler (created before logger was available)
+      this.stateReconciler.setLogger(this.agentLogger);
+
       // Initialize device provisioning
       await this.initializeDeviceManager();
 
@@ -212,24 +215,44 @@ export default class DeviceAgent {
       // 10.5. Initialize Simulation Orchestrator
       await this.initializeSimulationMode();
 
-      // init sync
-      await this.initDeviceSync();
-
-      // 11.5. Start periodic discovery timers
-      this.discoveryService?.startPeriodicDiscovery();
-
-      // 11-13. Initialize supporting features (updater, firewall, sensor config handler)
+      // 11. Initialize supporting features (updater, firewall, sensor config handler)
+      // MUST happen BEFORE initDeviceSync so AgentUpdater is available for CloudSync
+      this.agentLogger?.infoSync('About to initialize supporting features', {
+        component: LogComponents.agent
+      });
+      
       await this.featureInitializer.initSupportingFeatures();
 
       // Store references for backward compatibility
       const features = this.featureInitializer.getFeatures();
+      
+      this.agentLogger?.infoSync('Supporting features initialized', {
+        component: LogComponents.agent,
+        hasUpdater: !!features.updater,
+        hasFirewall: !!features.firewall
+      });
+      
       this.updater = features.updater;
       this.firewall = features.firewall;
 
       // Set AgentUpdater on StateReconciler (for version reconciliation)
       if (this.updater) {
+        this.agentLogger?.infoSync('Setting AgentUpdater on StateReconciler', {
+          component: LogComponents.agent,
+          hasUpdater: true
+        });
         this.stateReconciler.setAgentUpdater(this.updater);
+      } else {
+        this.agentLogger?.warnSync('AgentUpdater not initialized, version reconciliation unavailable', {
+          component: LogComponents.agent
+        });
       }
+
+      // 12. init sync (CloudSync will use AgentUpdater set above)
+      await this.initDeviceSync();
+
+      // 12.5. Start periodic discovery timers
+      this.discoveryService?.startPeriodicDiscovery();
 
       // 14. Start auto-reconciliation
       this.startAutoReconciliation();

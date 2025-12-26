@@ -5,7 +5,7 @@
  * Supports both Docker and systemd deployments with scheduled updates.
  */
 
-import { existsSync, writeFileSync, unlinkSync, readFileSync, statSync } from 'fs';
+import { existsSync, writeFileSync, unlinkSync, readFileSync, statSync, mkdirSync } from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { createHmac, timingSafeEqual } from 'crypto';
@@ -100,20 +100,26 @@ function detectBinaryVersion(): string {
       if (existsSync(pkgPath)) {
         const pkgData = JSON.parse(readFileSync(pkgPath, 'utf-8'));
         if (pkgData.version && isValidVersion(pkgData.version)) {
+          console.log('[AgentUpdater] Version detected:', { path: pkgPath, version: pkgData.version });
           return pkgData.version;
+        } else {
+          console.warn('[AgentUpdater] Invalid version in package.json:', { path: pkgPath, version: pkgData.version });
         }
       }
     }
 
     // Fallback: try to read from environment (set by launcher)
     if (process.env.AGENT_VERSION && isValidVersion(process.env.AGENT_VERSION)) {
+      console.log('[AgentUpdater] Version from env:', process.env.AGENT_VERSION);
       return process.env.AGENT_VERSION;
     }
 
     // Last resort: unknown version
+    console.warn('[AgentUpdater] Version detection failed, all paths checked:', possiblePaths);
     return '0.0.0';
   } catch (error) {
     // If detection fails, return unknown version
+    console.error('[AgentUpdater] Version detection error:', error);
     return '0.0.0';
   }
 }
@@ -507,6 +513,12 @@ export class AgentUpdater {
       });
       
       return;
+    }
+
+    // Ensure lock directory exists
+    const lockDir = UPDATE_LOCK_FILE.substring(0, UPDATE_LOCK_FILE.lastIndexOf('/'));
+    if (!existsSync(lockDir)) {
+      mkdirSync(lockDir, { recursive: true });
     }
 
     // Check for existing update lock (prevent concurrent updates)
