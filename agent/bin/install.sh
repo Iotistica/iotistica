@@ -401,12 +401,23 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
         read -p "Enter provisioning API key (leave empty for local mode): " PROVISIONING_KEY
         read -p "Enter device API port [48484]: " DEVICE_API_PORT
         DEVICE_API_PORT=${DEVICE_API_PORT:-48484}
-
+        
         echo ""
-        echo "Downloading latest agent release..."
+        echo "Fetching available agent versions..."
         LATEST_TAG=$(curl -s https://api.github.com/repos/Iotistica/iotistic/releases/latest | jq -r '.tag_name')
+        
         if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
-            echo "Warning: Could not fetch latest release, cloning master branch..."
+            LATEST_TAG="master"
+            echo "Warning: Could not fetch latest release from GitHub, using master branch"
+        else
+            echo "Latest release: $LATEST_TAG"
+        fi
+        
+        read -p "Enter agent version to install (leave empty for latest [$LATEST_TAG]): " SELECTED_VERSION
+        SELECTED_VERSION=${SELECTED_VERSION:-$LATEST_TAG}
+        
+        if [ "$SELECTED_VERSION" = "master" ]; then
+            echo "Cloning master branch..."
             cd /tmp
             rm -rf iotistic-agent-temp
             git clone --depth 1 https://github.com/Iotistica/iotistic.git iotistic-agent-temp
@@ -418,16 +429,16 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
             echo "Using agent version from package.json: $AGENT_VERSION"
             rm -rf iotistic-agent-temp
         else
-            echo "Latest release: $LATEST_TAG"
+            echo "Downloading version: $SELECTED_VERSION"
             cd /tmp
             rm -rf iotistic-agent-temp
-            wget -q https://github.com/Iotistica/iotistic/archive/refs/tags/${LATEST_TAG}.tar.gz
-            tar -xzf ${LATEST_TAG}.tar.gz
-            cp -r iotistic-${LATEST_TAG#v}/agent/* /opt/iotistic/agent/
+            wget -q https://github.com/Iotistica/iotistic/archive/refs/tags/${SELECTED_VERSION}.tar.gz
+            tar -xzf ${SELECTED_VERSION}.tar.gz
+            cp -r iotistic-${SELECTED_VERSION#v}/agent/* /opt/iotistic/agent/
             mkdir -p /opt/iotistic/config
-            cp -r iotistic-${LATEST_TAG#v}/config/* /opt/iotistic/config/
-            rm -rf iotistic-${LATEST_TAG#v} ${LATEST_TAG}.tar.gz
-            AGENT_VERSION="${LATEST_TAG#v}"
+            cp -r iotistic-${SELECTED_VERSION#v}/config/* /opt/iotistic/config/
+            rm -rf iotistic-${SELECTED_VERSION#v} ${SELECTED_VERSION}.tar.gz
+            AGENT_VERSION="${SELECTED_VERSION#v}"
         fi
     fi
 
