@@ -413,8 +413,10 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
             cp -r iotistic-agent-temp/agent/* /opt/iotistic/agent/
             mkdir -p /opt/iotistic/config
             cp -r iotistic-agent-temp/config/* /opt/iotistic/config/
+            # Read version from package.json
+            AGENT_VERSION=$(jq -r '.version // "dev"' iotistic-agent-temp/agent/package.json)
+            echo "Using agent version from package.json: $AGENT_VERSION"
             rm -rf iotistic-agent-temp
-            AGENT_VERSION="dev"
         else
             echo "Latest release: $LATEST_TAG"
             cd /tmp
