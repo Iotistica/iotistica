@@ -494,7 +494,8 @@ export default class DeviceAgent {
             note: "Device will remain unprovisioned. Check PROVISIONING_KEY or boot config file.",
           }
         );
-        return;
+        // Continue with unprovisioned device info (don't return early)
+        deviceInfo = this.deviceManager.getDeviceInfo();
       }
     } else if (!deviceInfo.provisioned && cloudEndpoint && !provisioningApiKey
     ) {

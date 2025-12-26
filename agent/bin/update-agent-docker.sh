@@ -10,6 +10,18 @@ echo "======================================"
 # Parse arguments
 TARGET_VERSION="${1:-latest}"
 FORCE="${2:-false}"
+LOCK_FILE="${3:-/var/lib/iotistic/agent/update.lock}"
+
+# Cleanup function to remove lock file on exit
+cleanup_lock() {
+    if [ -f "$LOCK_FILE" ]; then
+        rm -f "$LOCK_FILE"
+        echo "🔓 Update lock removed"
+    fi
+}
+
+# Register cleanup on script exit (success or failure)
+trap cleanup_lock EXIT INT TERM
 
 # Get current version
 CURRENT_VERSION=$(docker inspect iotistic-agent --format='{{.Config.Image}}' 2>/dev/null | cut -d':' -f2 || echo "unknown")

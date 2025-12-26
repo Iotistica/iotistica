@@ -227,7 +227,8 @@ if [ "$INSTALL_METHOD" = "docker" ]; then
     echo "Starting agent container..."
 
     # Build environment variables
-    ENV_VARS="-e DEVICE_API_PORT=48484 \
+    ENV_VARS="-e DEPLOYMENT_TYPE=docker \
+        -e DEVICE_API_PORT=48484 \
         -e AGENT_VERSION=${AGENT_VERSION} \
         -e NODE_ENV=production \
         -e LOG_LEVEL=info \
@@ -539,6 +540,7 @@ Group=iotistic
 WorkingDirectory=/opt/iotistic/agent
 EnvironmentFile=/etc/iotistic/agent.env
 Environment=NODE_ENV=production
+Environment=DEPLOYMENT_TYPE=systemd
 
 ExecStart=$NODE_PATH /opt/iotistic/agent/dist/app.js
 

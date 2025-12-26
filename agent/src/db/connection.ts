@@ -16,7 +16,7 @@ export type Transaction = Knex.Transaction;
 const getDefaultDatabasePath = (): string => {
 	// RELIABLE Docker detection: /.dockerenv is created by Docker runtime
 	// Avoid fragile checks like /app/package.json (can exist in non-Docker environments)
-	const isDocker = fs.existsSync('/.dockerenv');
+	const isDocker = process.env.DEPLOYMENT_TYPE === 'docker';
 	
 	if (isDocker) {
 		return '/app/data/device.sqlite';

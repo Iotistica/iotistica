@@ -6,6 +6,5 @@ metadata:
 spec:
   images:
   - major: 17
-    # Replace with your registry after building and pushing the image
-    # Example: ghcr.io/iotistica/timescaledb-cnpg:pg17
-    image: YOUR_REGISTRY/timescaledb-cnpg:pg17
+    # TimescaleDB image on Docker Hub (CNPG requires concrete version tags like :17.2)
+    image: iotistic/timescaledb-cnpg:17.2

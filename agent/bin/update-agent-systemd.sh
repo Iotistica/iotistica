@@ -10,6 +10,18 @@ echo "========================================"
 # Parse arguments
 TARGET_VERSION="${1:-latest}"
 FORCE="${2:-false}"
+LOCK_FILE="${3:-/var/lib/iotistic/agent/update.lock}"
+
+# Cleanup function to remove lock file on exit
+cleanup_lock() {
+    if [ -f "$LOCK_FILE" ]; then
+        rm -f "$LOCK_FILE"
+        echo "🔓 Update lock removed"
+    fi
+}
+
+# Register cleanup on script exit (success or failure)
+trap cleanup_lock EXIT INT TERM
 
 # Detect architecture
 ARCH=$(uname -m)

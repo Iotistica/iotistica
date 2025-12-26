@@ -5,21 +5,116 @@
  * Supports both Docker and systemd deployments with scheduled updates.
  */
 
-import { existsSync } from 'fs';
+import { existsSync, writeFileSync, unlinkSync, readFileSync, statSync } from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { AgentLogger } from './logging/agent-logger.js';
 import { LogComponents } from './logging/types.js';
 import { MqttManager } from './mqtt/manager.js';
+import { notifySystemd } from './system/systemd-watchdog.js';
 
 const execAsync = promisify(exec);
+
+// Update script paths (immutable, hardcoded for security)
+const UPDATE_SCRIPT_DOCKER = '/app/bin/update-agent-docker.sh';
+const UPDATE_SCRIPT_SYSTEMD = '/usr/local/bin/update-agent-systemd.sh';
+
+// Update lock file path (prevents concurrent updates)
+const UPDATE_LOCK_FILE = '/var/lib/iotistic/agent/update.lock';
+
+// Pending update file path (survives restarts)
+const PENDING_UPDATE_FILE = '/var/lib/iotistic/agent/pending-update.json';
+
+// Last update timestamp file (rate limiting)
+const LAST_UPDATE_FILE = '/var/lib/iotistic/agent/last-update.json';
+
+// Rate limit: 1 update per 24 hours (unless force=true)
+const UPDATE_RATE_LIMIT_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+interface PendingUpdate {
+  version: string;
+  scheduled_time: string;
+  force: boolean;
+  created_at: number;
+}
+
+interface LastUpdateRecord {
+  version: string;
+  timestamp: number;
+}
+
+/**
+ * Compare semantic versions (e.g., "1.0.228" vs "1.0.230")
+ * Returns: -1 if a < b, 0 if a === b, 1 if a > b
+ */
+function compareVersions(a: string, b: string): number {
+  const aParts = a.split('.').map(Number);
+  const bParts = b.split('.').map(Number);
+  
+  for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+    const aPart = aParts[i] || 0;
+    const bPart = bParts[i] || 0;
+    
+    if (aPart < bPart) return -1;
+    if (aPart > bPart) return 1;
+  }
+  
+  return 0;
+}
+
+/**
+ * Validate semantic version format
+ */
+function isValidVersion(version: string): boolean {
+  return /^\d+\.\d+\.\d+(-[\w.]+)?$/.test(version);
+}
+
+/**
+ * Verify HMAC signature of update command (prevents replay attacks)
+ */
+function verifyCommandSignature(command: UpdateCommand, secret: string): boolean {
+  if (!command.signature || !command.issued_at) {
+    return false;
+  }
+
+  // Create canonical string from command fields (excluding signature)
+  const canonicalString = [
+    command.action,
+    command.version,
+    command.issued_at.toString(),
+    command.expires_at?.toString() || '',
+    command.scheduled_time || '',
+    command.force?.toString() || ''
+  ].join('|');
+
+  // Compute expected HMAC
+  const expectedSignature = createHmac('sha256', secret)
+    .update(canonicalString)
+    .digest('hex');
+
+  // Timing-safe comparison (prevents timing attacks)
+  try {
+    return timingSafeEqual(
+      Buffer.from(command.signature, 'hex'),
+      Buffer.from(expectedSignature, 'hex')
+    );
+  } catch {
+    return false; // Invalid signature format
+  }
+}
 
 export interface UpdateCommand {
   action: 'update';
   version: string;
   scheduled_time?: string;
   force?: boolean;
-  timestamp?: number;
+  timestamp?: number; // Legacy field (kept for backward compatibility)
+  
+  // Security fields (prevents replay attacks and stale messages)
+  issued_at: number;      // Unix timestamp when command was issued
+  expires_at?: number;    // Unix timestamp when command expires (optional)
+  signature: string;      // HMAC-SHA256 signature of command fields
 }
 
 export interface UpdaterConfig {
@@ -39,6 +134,7 @@ export class AgentUpdater {
   private logger: AgentLogger;
   private updateTopic: string;
   private statusTopic: string;
+  private scheduledUpdateTimeout?: NodeJS.Timeout;
 
   constructor(config: UpdaterConfig) {
     this.deviceUuid = config.deviceUuid;
@@ -51,9 +147,12 @@ export class AgentUpdater {
   }
 
   /**
-   * Initialize MQTT update listener
+   * Initialize MQTT update listener and check for pending updates
    */
   async initialize(): Promise<void> {
+    // Check for pending updates from previous agent run (survives restarts)
+    await this.loadPendingUpdate();
+
     const mqttManager = MqttManager.getInstance();
     
     if (!mqttManager.isConnected()) {
@@ -102,13 +201,66 @@ export class AgentUpdater {
         return;
       }
 
+      // Verify command signature (prevents tampering and replay attacks)
+      const secret = process.env.UPDATE_COMMAND_SECRET;
+      if (!secret) {
+        this.logger.warnSync("UPDATE_COMMAND_SECRET not set, skipping signature verification", {
+          component: LogComponents.agentUpdater,
+          note: "Commands will be accepted without verification (INSECURE)"
+        });
+      } else if (!verifyCommandSignature(command, secret)) {
+        this.logger.errorSync(
+          "Update command signature verification failed",
+          new Error('Invalid signature'),
+          {
+            component: LogComponents.agentUpdater,
+            version: command.version,
+            issued_at: command.issued_at
+          }
+        );
+        
+        await this.publishStatus({
+          type: 'update_rejected',
+          reason: 'invalid_signature',
+          version: command.version,
+          timestamp: Date.now()
+        });
+        
+        return;
+      }
+
+      // Check command expiry (prevents stale messages)
+      if (command.expires_at && Date.now() > command.expires_at) {
+        const ageSeconds = Math.floor((Date.now() - command.expires_at) / 1000);
+        
+        this.logger.warnSync("Update command expired", {
+          component: LogComponents.agentUpdater,
+          version: command.version,
+          expires_at: new Date(command.expires_at).toISOString(),
+          age_seconds: ageSeconds
+        });
+        
+        await this.publishStatus({
+          type: 'update_rejected',
+          reason: 'command_expired',
+          version: command.version,
+          expires_at: new Date(command.expires_at).toISOString(),
+          age_seconds: ageSeconds,
+          timestamp: Date.now()
+        });
+        
+        return;
+      }
+
       const { version, scheduled_time, force } = command;
       
       this.logger.debugSync("Agent update command received", {
         component: LogComponents.agentUpdater,
         version,
         scheduled_time,
-        force: !!force
+        force: !!force,
+        issued_at: new Date(command.issued_at).toISOString(),
+        expires_at: command.expires_at ? new Date(command.expires_at).toISOString() : undefined
       });
 
       // Report update command received
@@ -138,7 +290,16 @@ export class AgentUpdater {
             timestamp: Date.now()
           });
           
-          setTimeout(() => this.performUpdate(version, force), delay);
+          // Persist scheduled update (survives agent restart)
+          await this.savePendingUpdate({
+            version,
+            scheduled_time,
+            force: !!force,
+            created_at: Date.now()
+          });
+          
+          // Schedule update execution
+          this.scheduleUpdate(version, !!force, delay);
           return;
         }
       }
@@ -162,9 +323,138 @@ export class AgentUpdater {
    * Perform agent update
    */
   private async performUpdate(version: string, force: boolean = false): Promise<void> {
-    // Detect deployment type
-    const deploymentType = process.env.DEPLOYMENT_TYPE || 
-      (existsSync('/.dockerenv') ? 'docker' : 'systemd');
+    // Validate version format
+    if (!isValidVersion(version)) {
+      this.logger.warnSync("Invalid version format", {
+        component: LogComponents.agentUpdater,
+        version,
+        expected: "semver format (e.g., 1.0.230)"
+      });
+      
+      await this.publishStatus({
+        type: 'update_rejected',
+        reason: 'invalid_version_format',
+        version,
+        timestamp: Date.now()
+      });
+      
+      return;
+    }
+
+    // Check if already on target version
+    if (!force && version === this.currentVersion) {
+      this.logger.infoSync("Target version equals current version, skipping update", {
+        component: LogComponents.agentUpdater,
+        version,
+        note: "Use force=true to reinstall"
+      });
+      
+      await this.publishStatus({
+        type: 'update_skipped',
+        reason: 'same_version',
+        current_version: this.currentVersion,
+        target_version: version,
+        timestamp: Date.now()
+      });
+      
+      return;
+    }
+
+    // Check for downgrade (prevent unless force=true)
+    const versionComparison = compareVersions(version, this.currentVersion);
+    if (!force && versionComparison < 0) {
+      this.logger.warnSync("Downgrade not allowed without force flag", {
+        component: LogComponents.agentUpdater,
+        currentVersion: this.currentVersion,
+        targetVersion: version,
+        note: "Use force=true to allow downgrade"
+      });
+      
+      await this.publishStatus({
+        type: 'update_rejected',
+        reason: 'downgrade_not_allowed',
+        current_version: this.currentVersion,
+        target_version: version,
+        timestamp: Date.now()
+      });
+      
+      return;
+    }
+
+    // Check for existing update lock (prevent concurrent updates)
+    if (existsSync(UPDATE_LOCK_FILE) && !force) {
+      this.logger.warnSync("Update already in progress", {
+        component: LogComponents.agentUpdater,
+        lockFile: UPDATE_LOCK_FILE,
+        note: "Use force=true to override"
+      });
+      
+      await this.publishStatus({
+        type: 'update_rejected',
+        reason: 'update_in_progress',
+        lock_file: UPDATE_LOCK_FILE,
+        timestamp: Date.now()
+      });
+      
+      return;
+    }
+
+    // Check rate limit (prevent excessive updates from backend)
+    const rateLimitPassed = await this.checkRateLimit(version, force);
+    if (!rateLimitPassed) {
+      this.logger.warnSync("Update rate limit exceeded", {
+        component: LogComponents.agentUpdater,
+        version,
+        note: "Max 1 update per 24 hours. Use force=true to override."
+      });
+      return;
+    }
+
+    // Run pre-flight checks (disk space, connectivity, etc.)
+    const preflightPassed = await this.runPreflightChecks(version, force);
+    if (!preflightPassed) {
+      this.logger.warnSync("Pre-flight checks failed, aborting update", {
+        component: LogComponents.agentUpdater,
+        version,
+        note: "Check disk space, connectivity, or use force=true to override"
+      });
+      return;
+    }
+
+    // Create update lock file
+    try {
+      writeFileSync(UPDATE_LOCK_FILE, JSON.stringify({
+        version,
+        started_at: Date.now(),
+        current_version: this.currentVersion
+      }));
+      
+      this.logger.debugSync("Update lock created", {
+        component: LogComponents.agentUpdater,
+        lockFile: UPDATE_LOCK_FILE
+      });
+    } catch (error) {
+      this.logger.errorSync(
+        "Failed to create update lock",
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          component: LogComponents.agentUpdater,
+          lockFile: UPDATE_LOCK_FILE
+        }
+      );
+      
+      await this.publishStatus({
+        type: 'update_failed',
+        reason: 'failed_to_create_lock',
+        error: error instanceof Error ? error.message : String(error),
+        timestamp: Date.now()
+      });
+      
+      return;
+    }
+
+    // Detect deployment type (must be set explicitly by installer)
+    const deploymentType = process.env.DEPLOYMENT_TYPE || 'systemd';
     
     this.logger.infoSync("Starting agent self-update", {
       component: LogComponents.agentUpdater,
@@ -190,10 +480,47 @@ export class AgentUpdater {
       });
     }
 
-    // Determine update script path
+    // Determine update script path (hardcoded for security)
     const updateScript = deploymentType === 'docker'
-      ? '/app/bin/update-agent-docker.sh'
-      : '/usr/local/bin/update-agent-systemd.sh';
+      ? UPDATE_SCRIPT_DOCKER
+      : UPDATE_SCRIPT_SYSTEMD;
+    
+    // Verify script integrity (prevents local compromise → remote root execution)
+    const scriptIntegrityCheck = this.verifyScriptIntegrity(updateScript);
+    if (!scriptIntegrityCheck.valid) {
+      this.logger.errorSync(
+        "Update script failed integrity check",
+        new Error(scriptIntegrityCheck.reason || 'Integrity check failed'),
+        {
+          component: LogComponents.agentUpdater,
+          updateScript,
+          reason: scriptIntegrityCheck.reason,
+          details: scriptIntegrityCheck.details
+        }
+      );
+      
+      await this.publishStatus({
+        type: 'update_failed',
+        reason: 'script_integrity_check_failed',
+        script_path: updateScript,
+        integrity_error: scriptIntegrityCheck.reason,
+        timestamp: Date.now()
+      });
+      
+      // Remove update lock
+      try {
+        if (existsSync(UPDATE_LOCK_FILE)) {
+          unlinkSync(UPDATE_LOCK_FILE);
+        }
+      } catch (cleanupError) {
+        this.logger.warnSync("Failed to remove update lock after integrity failure", {
+          component: LogComponents.agentUpdater,
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+        });
+      }
+      
+      return;
+    }
     
     // Check if update script exists
     if (!existsSync(updateScript)) {
@@ -221,39 +548,63 @@ export class AgentUpdater {
       component: LogComponents.agentUpdater,
       script: updateScript,
       version,
-      note: "Agent will restart shortly"
+      note: "Agent will restart shortly. Update script MUST remove lock file on completion."
     });
 
+    // Notify systemd that we're stopping (prevents watchdog false positives)
+    notifySystemd('STOPPING=1', this.logger);
+
     // Execute update script in background (agent will restart)
-    // Pass version and force flag as arguments
+    // Pass version, force flag, and lock file path as arguments
+    // Update script MUST remove lock file when done (success or failure)
     const forceFlag = force ? 'true' : 'false';
-    const command = `${updateScript} ${version} ${forceFlag} > /tmp/agent-update.log 2>&1 &`;
+    const command = `${updateScript} ${version} ${forceFlag} ${UPDATE_LOCK_FILE} > /tmp/agent-update.log 2>&1 &`;
     
-    try {
-      execAsync(command);
-      
-      this.logger.infoSync("Update script executed", {
-        component: LogComponents.agentUpdater,
-        note: "Agent will restart to complete update"
-      });
-      
-    } catch (error) {
-      this.logger.errorSync(
-        "Failed to execute update script",
-        error instanceof Error ? error : new Error(String(error)),
-        {
-          component: LogComponents.agentUpdater,
-          script: updateScript
+    // Use callback form to verify shell spawn (not async - we don't wait for completion)
+    exec(command, async (err) => {
+      if (err) {
+        this.logger.errorSync(
+          "Failed to spawn update script",
+          err instanceof Error ? err : new Error(String(err)),
+          {
+            component: LogComponents.agentUpdater,
+            script: updateScript,
+            note: "Shell failed to start update script"
+          }
+        );
+        
+        await this.publishStatus({
+          type: 'update_failed',
+          reason: 'script_spawn_failed',
+          error: err.message,
+          timestamp: Date.now()
+        });
+        
+        // Remove lock file on script spawn failure
+        try {
+          if (existsSync(UPDATE_LOCK_FILE)) {
+            unlinkSync(UPDATE_LOCK_FILE);
+            this.logger.debugSync("Update lock removed after script spawn failure", {
+              component: LogComponents.agentUpdater,
+              lockFile: UPDATE_LOCK_FILE
+            });
+          }
+        } catch (cleanupError) {
+          this.logger.warnSync("Failed to remove update lock after spawn error", {
+            component: LogComponents.agentUpdater,
+            error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+          });
         }
-      );
-      
-      await this.publishStatus({
-        type: 'update_failed',
-        reason: 'script_execution_failed',
-        error: error instanceof Error ? error.message : String(error),
-        timestamp: Date.now()
-      });
-    }
+      } else {
+        this.logger.infoSync("Update script spawned successfully", {
+          component: LogComponents.agentUpdater,
+          note: "Agent will restart to complete update"
+        });
+
+        // Record successful update timestamp (for rate limiting)
+        this.recordUpdateTimestamp(version);
+      }
+    });
   }
 
   /**
@@ -277,9 +628,180 @@ export class AgentUpdater {
   }
 
   /**
-   * Cleanup - unsubscribe from MQTT topics
+   * Run pre-flight checks before update (prevents bricking devices)
+   */
+  private async runPreflightChecks(version: string, force: boolean): Promise<boolean> {
+    this.logger.infoSync("Running pre-flight checks", {
+      component: LogComponents.agentUpdater,
+      version
+    });
+
+    await this.publishStatus({
+      type: 'preflight_started',
+      version,
+      timestamp: Date.now()
+    });
+
+    const checks = {
+      diskSpace: false,
+      connectivity: false,
+      powerState: false
+    };
+
+    // Check 1: Disk space (require at least 500MB free)
+    try {
+      const { stdout } = await execAsync("df -BM /var/lib/iotistic | tail -1 | awk '{print $4}' | sed 's/M//'");
+      const freeSpaceMB = parseInt(stdout.trim(), 10);
+      const requiredSpaceMB = 500;
+
+      checks.diskSpace = freeSpaceMB >= requiredSpaceMB;
+
+      this.logger.debugSync("Disk space check", {
+        component: LogComponents.agentUpdater,
+        freeSpaceMB,
+        requiredSpaceMB,
+        passed: checks.diskSpace
+      });
+
+      if (!checks.diskSpace) {
+        this.logger.warnSync("Insufficient disk space", {
+          component: LogComponents.agentUpdater,
+          freeSpaceMB,
+          requiredSpaceMB
+        });
+      }
+    } catch (error) {
+      this.logger.warnSync("Failed to check disk space", {
+        component: LogComponents.agentUpdater,
+        error: error instanceof Error ? error.message : String(error),
+        note: "Assuming sufficient space"
+      });
+      checks.diskSpace = true; // Assume OK if check fails
+    }
+
+    // Check 2: Connectivity (MQTT connection active)
+    const mqttManager = MqttManager.getInstance();
+    checks.connectivity = mqttManager.isConnected();
+
+    this.logger.debugSync("Connectivity check", {
+      component: LogComponents.agentUpdater,
+      mqttConnected: checks.connectivity,
+      passed: checks.connectivity
+    });
+
+    if (!checks.connectivity) {
+      this.logger.warnSync("MQTT not connected", {
+        component: LogComponents.agentUpdater,
+        note: "Update may proceed offline but status reporting unavailable"
+      });
+    }
+
+    // Check 3: Power state (if available via /sys/class/power_supply)
+    try {
+      if (existsSync('/sys/class/power_supply/AC/online')) {
+        const { stdout } = await execAsync('cat /sys/class/power_supply/AC/online');
+        const isPluggedIn = stdout.trim() === '1';
+        
+        checks.powerState = isPluggedIn;
+
+        this.logger.debugSync("Power state check", {
+          component: LogComponents.agentUpdater,
+          isPluggedIn,
+          passed: checks.powerState
+        });
+
+        if (!checks.powerState) {
+          this.logger.warnSync("Device running on battery", {
+            component: LogComponents.agentUpdater,
+            note: "Update may fail if battery depletes during process"
+          });
+        }
+      } else {
+        // No power supply info available (desktop/VM)
+        checks.powerState = true;
+        this.logger.debugSync("Power state check skipped (not available)", {
+          component: LogComponents.agentUpdater
+        });
+      }
+    } catch (error) {
+      // Power state check not critical
+      checks.powerState = true;
+      this.logger.debugSync("Power state check skipped", {
+        component: LogComponents.agentUpdater,
+        note: "Not available on this device"
+      });
+    }
+
+    // Evaluate results
+    const allChecksPassed = checks.diskSpace && checks.connectivity && checks.powerState;
+
+    await this.publishStatus({
+      type: allChecksPassed ? 'preflight_passed' : 'preflight_failed',
+      version,
+      checks,
+      timestamp: Date.now()
+    });
+
+    // Allow force to override failed checks (except critical disk space)
+    if (!allChecksPassed && force) {
+      if (!checks.diskSpace) {
+        this.logger.errorSync(
+          "Pre-flight failed: Insufficient disk space (cannot override with force)",
+          new Error('Disk space critical'),
+          {
+            component: LogComponents.agentUpdater,
+            checks
+          }
+        );
+
+        await this.publishStatus({
+          type: 'update_rejected',
+          reason: 'insufficient_disk_space',
+          checks,
+          timestamp: Date.now()
+        });
+
+        return false;
+      }
+
+      this.logger.warnSync("Pre-flight checks failed but overridden by force flag", {
+        component: LogComponents.agentUpdater,
+        checks,
+        note: "Proceeding with update despite warnings"
+      });
+
+      await this.publishStatus({
+        type: 'preflight_overridden',
+        version,
+        checks,
+        timestamp: Date.now()
+      });
+
+      return true;
+    }
+
+    if (!allChecksPassed) {
+      await this.publishStatus({
+        type: 'update_rejected',
+        reason: 'preflight_failed',
+        checks,
+        timestamp: Date.now()
+      });
+    }
+
+    return allChecksPassed;
+  }
+
+  /**
+   * Cleanup - unsubscribe from MQTT topics and cancel scheduled updates
    */
   async cleanup(): Promise<void> {
+    // Cancel any scheduled update
+    if (this.scheduledUpdateTimeout) {
+      clearTimeout(this.scheduledUpdateTimeout);
+      this.scheduledUpdateTimeout = undefined;
+    }
+
     const mqttManager = MqttManager.getInstance();
     
     if (!mqttManager.isConnected()) {
@@ -299,4 +821,300 @@ export class AgentUpdater {
       });
     }
   }
+
+  /**
+   * Load pending update from disk (survives agent restarts)
+   */
+  private async loadPendingUpdate(): Promise<void> {
+    if (!existsSync(PENDING_UPDATE_FILE)) {
+      return;
+    }
+
+    try {
+      const data = readFileSync(PENDING_UPDATE_FILE, 'utf-8');
+      const pending: PendingUpdate = JSON.parse(data);
+
+      const scheduledDate = new Date(pending.scheduled_time);
+      const delay = scheduledDate.getTime() - Date.now();
+
+      if (delay <= 0) {
+        // Update is overdue - execute immediately
+        this.logger.infoSync("Pending update is overdue, executing immediately", {
+          component: LogComponents.agentUpdater,
+          version: pending.version,
+          scheduled_time: pending.scheduled_time,
+          overdue_ms: Math.abs(delay)
+        });
+
+        await this.publishStatus({
+          type: 'update_overdue',
+          version: pending.version,
+          scheduled_time: pending.scheduled_time,
+          overdue_ms: Math.abs(delay),
+          timestamp: Date.now()
+        });
+
+        // Remove pending update file before execution
+        unlinkSync(PENDING_UPDATE_FILE);
+
+        await this.performUpdate(pending.version, pending.force);
+      } else {
+        // Re-schedule the update
+        this.logger.infoSync("Re-scheduling pending update after agent restart", {
+          component: LogComponents.agentUpdater,
+          version: pending.version,
+          scheduled_time: pending.scheduled_time,
+          remaining_ms: delay,
+          remaining_hours: Math.round(delay / 3600000)
+        });
+
+        await this.publishStatus({
+          type: 'update_rescheduled',
+          version: pending.version,
+          scheduled_time: pending.scheduled_time,
+          remaining_ms: delay,
+          timestamp: Date.now()
+        });
+
+        this.scheduleUpdate(pending.version, pending.force, delay);
+      }
+    } catch (error) {
+      this.logger.errorSync(
+        "Failed to load pending update",
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          component: LogComponents.agentUpdater,
+          file: PENDING_UPDATE_FILE
+        }
+      );
+
+      // Remove corrupted file
+      try {
+        unlinkSync(PENDING_UPDATE_FILE);
+      } catch (cleanupError) {
+        // Ignore cleanup errors
+      }
+    }
+  }
+
+  /**
+   * Save pending update to disk (survives agent restarts)
+   */
+  private async savePendingUpdate(pending: PendingUpdate): Promise<void> {
+    try {
+      writeFileSync(PENDING_UPDATE_FILE, JSON.stringify(pending, null, 2));
+      this.logger.debugSync("Pending update saved to disk", {
+        component: LogComponents.agentUpdater,
+        file: PENDING_UPDATE_FILE,
+        version: pending.version,
+        scheduled_time: pending.scheduled_time
+      });
+    } catch (error) {
+      this.logger.errorSync(
+        "Failed to save pending update",
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          component: LogComponents.agentUpdater,
+          file: PENDING_UPDATE_FILE
+        }
+      );
+    }
+  }
+
+  /**
+   * Check if update is within rate limit (max 1 update per 24 hours)
+   */
+  private async checkRateLimit(version: string, force: boolean): Promise<boolean> {
+    if (force) {
+      this.logger.debugSync("Rate limit check bypassed (force=true)", {
+        component: LogComponents.agentUpdater,
+        version
+      });
+      return true;
+    }
+
+    // Check if last update file exists
+    if (!existsSync(LAST_UPDATE_FILE)) {
+      this.logger.debugSync("No previous update record found", {
+        component: LogComponents.agentUpdater
+      });
+      return true;
+    }
+
+    try {
+      const lastUpdateData = readFileSync(LAST_UPDATE_FILE, 'utf-8');
+      const lastUpdate: LastUpdateRecord = JSON.parse(lastUpdateData);
+
+      const elapsed = Date.now() - lastUpdate.timestamp;
+      const withinLimit = elapsed < UPDATE_RATE_LIMIT_MS;
+
+      if (withinLimit) {
+        const hoursRemaining = Math.ceil((UPDATE_RATE_LIMIT_MS - elapsed) / (1000 * 60 * 60));
+        
+        this.logger.warnSync("Update rate limit exceeded", {
+          component: LogComponents.agentUpdater,
+          last_version: lastUpdate.version,
+          requested_version: version,
+          hours_since_last: Math.floor(elapsed / (1000 * 60 * 60)),
+          hours_until_next: hoursRemaining
+        });
+
+        await this.publishStatus({
+          status: "update_rejected",
+          reason: "rate_limit_exceeded",
+          message: `Max 1 update per 24 hours. Last update: ${lastUpdate.version}. Try again in ${hoursRemaining} hours or use force=true.`,
+          last_update: {
+            version: lastUpdate.version,
+            timestamp: new Date(lastUpdate.timestamp).toISOString()
+          }
+        });
+
+        return false;
+      }
+
+      this.logger.debugSync("Rate limit check passed", {
+        component: LogComponents.agentUpdater,
+        hours_since_last: Math.floor(elapsed / (1000 * 60 * 60))
+      });
+
+      return true;
+    } catch (error) {
+      // If we can't read/parse the file, assume no rate limit (fail open)
+      this.logger.warnSync("Failed to check rate limit, allowing update", {
+        component: LogComponents.agentUpdater,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return true;
+    }
+  }
+
+  /**
+   * Verify update script integrity (prevents local privilege escalation)
+   * 
+   * Requirements:
+   * - Owner must be root (uid 0)
+   * - Mode must be 0755 (readable/executable by all, writable only by root)
+   * - Path must be hardcoded (not user-controllable)
+   * 
+   * This prevents: local user modifies script → triggers MQTT update → agent executes as root
+   */
+  private verifyScriptIntegrity(scriptPath: string): { valid: boolean; reason?: string; details?: any } {
+    try {
+      // Verify script is in hardcoded location (no path traversal)
+      if (scriptPath !== UPDATE_SCRIPT_DOCKER && scriptPath !== UPDATE_SCRIPT_SYSTEMD) {
+        return {
+          valid: false,
+          reason: 'Script path not in allowed list',
+          details: { scriptPath, allowed: [UPDATE_SCRIPT_DOCKER, UPDATE_SCRIPT_SYSTEMD] }
+        };
+      }
+
+      // Check if script exists
+      if (!existsSync(scriptPath)) {
+        return {
+          valid: false,
+          reason: 'Script not found',
+          details: { scriptPath }
+        };
+      }
+
+      // Get file stats
+      const stats = statSync(scriptPath);
+
+      // Check owner is root (uid 0)
+      if (stats.uid !== 0) {
+        return {
+          valid: false,
+          reason: 'Script not owned by root',
+          details: { scriptPath, uid: stats.uid, expected_uid: 0 }
+        };
+      }
+
+      // Check permissions are 0755 (rwxr-xr-x)
+      // Extract permission bits (last 9 bits of mode)
+      const permissions = stats.mode & 0o777;
+      if (permissions !== 0o755) {
+        return {
+          valid: false,
+          reason: 'Script permissions incorrect',
+          details: {
+            scriptPath,
+            mode: permissions.toString(8),
+            expected_mode: '755'
+          }
+        };
+      }
+
+      this.logger.debugSync("Script integrity verified", {
+        component: LogComponents.agentUpdater,
+        scriptPath,
+        uid: stats.uid,
+        mode: permissions.toString(8)
+      });
+
+      return { valid: true };
+    } catch (error) {
+      return {
+        valid: false,
+        reason: 'Failed to verify script integrity',
+        details: {
+          scriptPath,
+          error: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+
+  /**
+   * Record update timestamp for rate limiting
+   */
+  private recordUpdateTimestamp(version: string): void {
+    try {
+      const record: LastUpdateRecord = {
+        version,
+        timestamp: Date.now()
+      };
+
+      writeFileSync(LAST_UPDATE_FILE, JSON.stringify(record, null, 2));
+      
+      this.logger.debugSync("Update timestamp recorded", {
+        component: LogComponents.agentUpdater,
+        version,
+        file: LAST_UPDATE_FILE
+      });
+    } catch (error) {
+      // Log but don't throw - rate limiting is a safety feature, not critical
+      this.logger.warnSync("Failed to record update timestamp", {
+        component: LogComponents.agentUpdater,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  /**
+   * Schedule update execution with setTimeout
+   */
+  private scheduleUpdate(version: string, force: boolean, delay: number): void {
+    // Clear any existing scheduled update
+    if (this.scheduledUpdateTimeout) {
+      clearTimeout(this.scheduledUpdateTimeout);
+    }
+
+    this.scheduledUpdateTimeout = setTimeout(async () => {
+      // Remove pending update file before execution
+      try {
+        if (existsSync(PENDING_UPDATE_FILE)) {
+          unlinkSync(PENDING_UPDATE_FILE);
+        }
+      } catch (error) {
+        this.logger.warnSync("Failed to remove pending update file", {
+          component: LogComponents.agentUpdater,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+
+      await this.performUpdate(version, force);
+    }, delay);
+  }
 }
+

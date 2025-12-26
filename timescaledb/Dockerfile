@@ -1,56 +1,56 @@
-# TimescaleDB with CloudNativePG Kubernetes Operator
-# Multi-stage build for TimescaleDB extension on PostgreSQL base
-# Note: Vector search extensions (pgvector, pgvectorscale) are NOT included
-
-# ==============================================================================
-# Stage 1: Install TimescaleDB from APT Repository
-# ==============================================================================
-FROM postgres:17-bookworm AS timescaledb-builder
-
-ARG PG_MAJOR=17
-ARG TIMESCALEDB_VERSION=2
-
-# Install TimescaleDB from official repository
-RUN apt-get update && apt-get install -y \
-    curl \
-    gnupg \
-    ca-certificates \
-    && mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://packagecloud.io/timescale/timescaledb/gpgkey | gpg --dearmor -o /etc/apt/keyrings/timescaledb.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/timescaledb.gpg] https://packagecloud.io/timescale/timescaledb/debian/ bookworm main" > /etc/apt/sources.list.d/timescaledb.list \
-    && apt-get update \
-    && apt-get install -y \
-        timescaledb-${TIMESCALEDB_VERSION}-postgresql-${PG_MAJOR} \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-# ==============================================================================
-# Stage 2: Assemble Runtime Image
-# ==============================================================================
-FROM postgres:17-bookworm
+# =============================================================================
+# Dockerfile for TimescaleDB + CloudNativePG
+# Installs TimescaleDB extension for PostgreSQL 17 on CloudNativePG base image
+# TimescaleDB version is determined by the apt package manager
+# =============================================================================
 
 ARG PG_MAJOR=17
 
-# Copy TimescaleDB shared libraries and SQL/control files
-# CloudNativePG requires strict adherence to standard PostgreSQL paths
+# Build TimescaleDB extension
+# Installs TimescaleDB extension via apt package manager
+FROM ghcr.io/cloudnative-pg/postgresql:${PG_MAJOR}-bookworm AS timescaledb-builder
+
+ARG PG_MAJOR
+
+USER root
+
+# Add Timescale package repository
+RUN apt-get update && apt-get install -y --no-install-recommends \
+   ca-certificates gnupg lsb-release curl && rm -rf /var/lib/apt/lists/*
+
+RUN echo "deb https://packagecloud.io/timescale/timescaledb/debian/ $(lsb_release -cs) main" > /etc/apt/sources.list.d/timescaledb.list && \
+   curl -fsSL https://packagecloud.io/timescale/timescaledb/gpgkey | gpg --dearmor -o /etc/apt/trusted.gpg.d/timescaledb.gpg
+
+# Add PGDG repository for PostgreSQL dependencies
+RUN echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list && \
+   curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+
+# Install TimescaleDB extension package for the target PostgreSQL version
+RUN apt-get update && apt-get install -y --no-install-recommends \
+   timescaledb-2-postgresql-${PG_MAJOR} \
+   && rm -rf /var/lib/apt/lists/*
+
+# Final image assembly
+FROM ghcr.io/cloudnative-pg/postgresql:${PG_MAJOR}-bookworm
+
+ARG PG_MAJOR
+
+USER root
+
+# Copy TimescaleDB extension artifacts from builder stage
 COPY --from=timescaledb-builder \
-    /usr/lib/postgresql/${PG_MAJOR}/lib/timescaledb*.so \
-    /usr/lib/postgresql/${PG_MAJOR}/lib/
-
+   /usr/lib/postgresql/${PG_MAJOR}/lib/timescaledb*.so \
+   /usr/lib/postgresql/${PG_MAJOR}/lib/
 COPY --from=timescaledb-builder \
-    /usr/share/postgresql/${PG_MAJOR}/extension/timescaledb*.sql \
-    /usr/share/postgresql/${PG_MAJOR}/extension/
-
+   /usr/share/postgresql/${PG_MAJOR}/extension/timescaledb*.sql \
+   /usr/share/postgresql/${PG_MAJOR}/extension/
 COPY --from=timescaledb-builder \
-    /usr/share/postgresql/${PG_MAJOR}/extension/timescaledb.control \
-    /usr/share/postgresql/${PG_MAJOR}/extension/
+   /usr/share/postgresql/${PG_MAJOR}/extension/timescaledb.control \
+   /usr/share/postgresql/${PG_MAJOR}/extension/
 
-# Metadata labels
-LABEL org.opencontainers.image.title="TimescaleDB for CloudNativePG"
-LABEL org.opencontainers.image.description="PostgreSQL 17 with TimescaleDB extension, optimized for CloudNativePG operator"
-LABEL org.opencontainers.image.source="https://github.com/Iotistica/iotistic"
-LABEL com.iotistic.postgresql.version="17"
-LABEL com.iotistic.timescaledb.version="2.x"
-
-# Switch to postgres user (UID 26) - CloudNativePG requirement
+# Switch to CloudNativePG's unprivileged user (UID 26)
 USER 26
+
+LABEL org.opencontainers.image.title="CloudNativePG TimescaleDB"
+LABEL org.opencontainers.image.description="PostgreSQL ${PG_MAJOR} with TimescaleDB extension for time-series workloads on Kubernetes"
+LABEL org.opencontainers.image.source="https://github.com/Iotistica/iotistic"
