@@ -342,13 +342,49 @@ jobs:
           
           echo "✓ Prepared unified install.sh with version ${{ needs.version.outputs.package_version }}"
 
+      - name: Prepare agent tarball
+        run: |
+          echo "Building agent tarball for distribution..."
+          cd agent
+          
+          # Install dependencies and build
+          npm ci --legacy-peer-deps
+          npm run build
+          
+          # Create tarball with necessary files
+          mkdir -p /tmp/iotistic-artifacts
+          tar -czf /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}.tar.gz \
+            dist/ \
+            package.json \
+            package-lock.json \
+            node_modules/ \
+            bin/ \
+            src/db/migrations/
+          
+          # Also create a 'latest' version
+          cp /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}.tar.gz \
+             /tmp/iotistic-artifacts/agent-latest.tar.gz
+          
+          echo "✓ Created agent tarballs:"
+          ls -lh /tmp/iotistic-artifacts/
+
       - name: Generate checksums
         run: |
+          # Install script checksums
           cd /tmp/iotistic-scripts
           sha256sum install.sh > install.sh.sha256
           
-          echo "✓ Generated SHA256 checksum:"
+          echo "✓ Generated install script checksum:"
           cat install.sh.sha256
+          
+          # Agent tarball checksums
+          cd /tmp/iotistic-artifacts
+          sha256sum agent-${{ needs.version.outputs.package_version }}.tar.gz > agent-${{ needs.version.outputs.package_version }}.tar.gz.sha256
+          sha256sum agent-latest.tar.gz > agent-latest.tar.gz.sha256
+          
+          echo "✓ Generated tarball checksums:"
+          cat agent-${{ needs.version.outputs.package_version }}.tar.gz.sha256
+          cat agent-latest.tar.gz.sha256
 
       - name: Upload install.sh (latest)
         run: |
@@ -401,6 +437,64 @@ jobs:
             --content-disposition "inline; filename=install-${{ needs.version.outputs.package_version }}.sh.sha256"
           
           echo "✓ Uploaded agent/versions/install-${{ needs.version.outputs.package_version }}.sh.sha256"
+
+      - name: Upload agent tarball (latest)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --contaArtifacts Uploaded" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Agent Tarball" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-latest.tar.gz](https://apps.iotistica.com/agent/agent-latest.tar.gz) ([checksum](https://apps.iotistica.com/agent/agent-latest.tar.gz.sha256))" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-${{ needs.version.outputs.package_version }}.tar.gz](https://apps.iotistica.com/agent/versions/agent-${{ needs.version.outputs.package_version }}.tar.gz) ([checksum](https://apps.iotistica.com/agent/versions/agent-${{ needs.version.outputs.package_version }}.tar.gz.sha256))" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## iner-name scripts \
+            --name agent/agent-latest.tar.gz \
+            --file /tmp/iotistic-artifacts/agent-latest.tar.gz \
+            --overwrite true \
+            --content-type application/gzip \
+            --content-disposition "attachment; filename=agent-latest.tar.gz"
+          
+          echo "✓ Uploaded agent/agent-latest.tar.gz"
+
+      - name: Upload agent tarball checksum (latest)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/agent-latest.tar.gz.sha256 \
+            --overwrite true \
+            --content-type text/plain \
+            --content-disposition "inline; filename=agent-latest.tar.gz.sha256"
+          
+          echo "✓ Uploaded agent/agent-latest.tar.gz.sha256"
+
+      - name: Upload agent tarball (versioned)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/versions/agent-${{ needs.version.outputs.package_version }}.tar.gz \
+            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}.tar.gz \
+            --overwrite true \
+            --content-type application/gzip \
+            --content-disposition "attachment; filename=agent-${{ needs.version.outputs.package_version }}.tar.gz"
+          
+          echo "✓ Uploaded agent/versions/agent-${{ needs.version.outputs.package_version }}.tar.gz"
+
+      - name: Upload agent tarball checksum (versioned)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/versions/agent-${{ needs.version.outputs.package_version }}.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}.tar.gz.sha256 \
+            --overwrite true \
+            --content-type text/plain \
+            --content-disposition "inline; filename=agent-${{ needs.version.outputs.package_version }}.tar.gz.sha256"
+          
+          echo "✓ Uploaded agent/versions/agent-${{ needs.version.outputs.package_version }}.tar.gz.sha256"
 
       - name: Generate upload summary
         run: |

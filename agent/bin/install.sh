@@ -224,123 +224,95 @@ echo ""
     echo "Configuration:"
     echo "-------------"
 
-    if [ -n "$CI" ] || [ ! -t 0 ]; then
+    # Detect if we're running from a checked-out repository FIRST
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    AGENT_DIR="$(dirname "$SCRIPT_DIR")"
+    
+    # Check if running interactively (has terminal and not CI)
+    if [ -t 0 ] && [ -z "$CI" ]; then
+        echo "Running in interactive mode"
+        
+        #Prompt for configuration
+        read -p "Enter cloud API endpoint (leave empty for local mode): " CLOUD_API_ENDPOINT
+        read -p "Enter provisioning API key (leave empty for local mode): " PROVISIONING_KEY
+        read -p "Enter device API port [48484]: " DEVICE_API_PORT
+        DEVICE_API_PORT=${DEVICE_API_PORT:-48484}
+        AGENT_VERSION="dev"
+    else
         echo "Running in non-interactive mode"
+        
         if [ -n "$PROVISIONING_KEY" ]; then
             echo "[DEBUG] PROVISIONING_KEY found in environment (redacted)"
         fi
         DEVICE_API_PORT="${IOTISTIC_DEVICE_PORT:-48484}"
         AGENT_VERSION="${IOTISTIC_AGENT_VERSION:-dev}"
         CLOUD_API_ENDPOINT="${CLOUD_API_ENDPOINT:-}"
+    fi
+    
+    # Now handle repository access (works for both modes)
+    if [ -f "$AGENT_DIR/package.json" ]; then
+        echo "Using current repository checkout from: $AGENT_DIR"
         
-        # Detect if we're running from a checked-out repository
-        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        AGENT_DIR="$(dirname "$SCRIPT_DIR")"
-        REPO_ROOT="$(dirname "$AGENT_DIR")"
+        # Copy agent code
+        echo "Copying agent code..."
+        cp -r "$AGENT_DIR"/* /opt/iotistic/agent/
         
-        if [ -f "$AGENT_DIR/package.json" ]; then
-            echo "Using current repository checkout from: $AGENT_DIR"
-            
-            # Copy agent code
-            echo "Copying agent code..."
-            cp -r "$AGENT_DIR"/* /opt/iotistic/agent/
-            
-            echo "✓ Repository code copied to /opt/iotistic/agent"
-        else
-            echo "No local repository found, downloading agent from GitHub..."
-            cd /tmp
-            rm -rf iotistic-clone-temp iotistic-agent-temp
-            
-            # Try git clone first (faster with sparse checkout)
-            if GIT_TERMINAL_PROMPT=0 git clone --depth 1 --filter=blob:none --sparse https://github.com/Iotistica/iotistic.git iotistic-clone-temp 2>/dev/null; then
-                echo "Cloning repository..."
-                cd iotistic-clone-temp
-                git sparse-checkout set agent 2>/dev/null || true
-                cd ..
-                cp -r iotistic-clone-temp/agent/* /opt/iotistic/agent/
-                rm -rf iotistic-clone-temp
-                echo "✓ Agent cloned and copied"
-            else
-                # Fallback to tarball download (works without git credentials)
-                echo "Git clone failed, downloading tarball instead..."
-                
-                # Try wget first, then curl
-                if wget --version &> /dev/null; then
-                    wget --no-check-certificate -O master.tar.gz https://github.com/Iotistica/iotistic/archive/refs/heads/master.tar.gz || DOWNLOAD_FAILED=1
-                elif curl --version &> /dev/null; then
-                    curl -L -o master.tar.gz https://github.com/Iotistica/iotistic/archive/refs/heads/master.tar.gz || DOWNLOAD_FAILED=1
-                else
-                    echo "Error: Neither wget nor curl is available"
-                    exit 1
-                fi
-                
-                if [ "$DOWNLOAD_FAILED" = "1" ]; then
-                    echo "Error: Failed to download agent from GitHub"
-                    echo "Please check your internet connection and try again"
-                    exit 1
-                fi
-                
-                echo "Extracting agent code..."
-                tar -xzf master.tar.gz || {
-                    echo "Error: Failed to extract tarball"
-                    exit 1
-                }
-                
-                cp -r iotistic-master/agent/* /opt/iotistic/agent/ || {
-                    echo "Error: Failed to copy agent files"
-                    exit 1
-                }
-                
-                rm -rf iotistic-master master.tar.gz
-                echo "✓ Agent downloaded and copied"
-            fi
-        fi
+        echo "✓ Repository code copied to /opt/iotistic/agent"
     else
-        # Interactive mode
-        read -p "Enter cloud API endpoint (leave empty for local mode): " CLOUD_API_ENDPOINT
-        read -p "Enter provisioning API key (leave empty for local mode): " PROVISIONING_KEY
-        read -p "Enter device API port [48484]: " DEVICE_API_PORT
-        DEVICE_API_PORT=${DEVICE_API_PORT:-48484}
+        # Download pre-built agent from public distribution server
+        echo "Downloading agent from distribution server..."
         
-        echo ""
-        echo "Fetching available agent versions..."
-        LATEST_TAG=$(curl -s https://api.github.com/repos/Iotistica/iotistic/releases/latest | jq -r '.tag_name')
+        # Use custom download URL if provided, otherwise use default
+        DOWNLOAD_URL="${IOTISTIC_DOWNLOAD_URL:-https://downloads.iotistica.com/agent/${AGENT_VERSION}.tar.gz}"
         
-        if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
-            LATEST_TAG="master"
-            echo "Warning: Could not fetch latest release from GitHub, using master branch"
+        cd /tmp
+        rm -rf iotistic-agent-download
+        
+        echo "Downloading from: $DOWNLOAD_URL"
+        
+        # Try to download with curl or wget
+        if command -v curl &> /dev/null; then
+            curl -fSL -o agent.tar.gz "$DOWNLOAD_URL" || DOWNLOAD_FAILED=1
+        elif command -v wget &> /dev/null; then
+            wget -O agent.tar.gz "$DOWNLOAD_URL" || DOWNLOAD_FAILED=1
         else
-            echo "Latest release: $LATEST_TAG"
+            echo "Error: Neither curl nor wget is available"
+            exit 1
         fi
         
-        read -p "Enter agent version to install (leave empty for latest [$LATEST_TAG]): " SELECTED_VERSION
-        SELECTED_VERSION=${SELECTED_VERSION:-$LATEST_TAG}
-        
-        if [ "$SELECTED_VERSION" = "master" ]; then
-            echo "Cloning agent from master branch..."
-            cd /tmp
-            rm -rf iotistic-agent-temp
-            git clone --depth 1 --filter=blob:none --sparse https://github.com/Iotistica/iotistic.git iotistic-agent-temp
-            cd iotistic-agent-temp
-            git sparse-checkout set agent
-            cd ..
-            cp -r iotistic-agent-temp/agent/* /opt/iotistic/agent/
-            # Read version from package.json
-            AGENT_VERSION=$(jq -r '.version // "dev"' iotistic-agent-temp/agent/package.json)
-            echo "Using agent version from package.json: $AGENT_VERSION"
-            rm -rf iotistic-agent-temp
-        else
-            echo "Downloading version: $SELECTED_VERSION"
-            cd /tmp
-            rm -rf iotistic-agent-temp
-            wget -q https://github.com/Iotistica/iotistic/archive/refs/tags/${SELECTED_VERSION}.tar.gz
-            tar -xzf ${SELECTED_VERSION}.tar.gz
-            cp -r iotistic-${SELECTED_VERSION#v}/agent/* /opt/iotistic/agent/
-            mkdir -p /opt/iotistic/config
-            cp -r iotistic-${SELECTED_VERSION#v}/config/* /opt/iotistic/config/
-            rm -rf iotistic-${SELECTED_VERSION#v} ${SELECTED_VERSION}.tar.gz
-            AGENT_VERSION="${SELECTED_VERSION#v}"
+        if [ "$DOWNLOAD_FAILED" = "1" ]; then
+            echo ""
+            echo "Error: Failed to download agent from distribution server"
+            echo ""
+            echo "Troubleshooting:"
+            echo "  1. Check your internet connection"
+            echo "  2. Verify the download URL: $DOWNLOAD_URL"
+            echo ""
+            echo "For development/internal installations:"
+            echo "  Run this script from within a cloned repository:"
+            echo "    git clone https://github.com/Iotistica/iotistic.git"
+            echo "    cd iotistic/agent/bin"
+            echo "    sudo ./install.sh"
+            exit 1
         fi
+        
+        echo "Extracting agent..."
+        mkdir -p iotistic-agent-download
+        tar -xzf agent.tar.gz -C iotistic-agent-download || {
+            echo "Error: Failed to extract agent tarball"
+            exit 1
+        }
+        
+        # Copy extracted files to installation directory
+        cp -r iotistic-agent-download/* /opt/iotistic/agent/ || {
+            echo "Error: Failed to copy agent files"
+            exit 1
+        }
+        
+        # Cleanup
+        rm -rf iotistic-agent-download agent.tar.gz
+        
+        echo "✓ Agent downloaded and installed"
     fi
 
     # Build agent
