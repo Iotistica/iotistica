@@ -507,7 +507,7 @@ EnvironmentFile=/etc/iotistic/agent.env
 Environment=NODE_ENV=production
 Environment=DEPLOYMENT_TYPE=systemd
 
-ExecStart=$NODE_PATH /opt/iotistic/agent/dist/src/app.js
+ExecStart=$NODE_PATH /opt/iotistic/agent/dist/app.js
 
 Restart=always
 RestartSec=10
@@ -587,10 +587,12 @@ EOFJOURNALD
     if [ -d /opt/iotistic/agent/dist ]; then
         echo "✓ dist/ exists"
         ls -la /opt/iotistic/agent/dist/
-        if [ -f /opt/iotistic/agent/dist/src/app.js ]; then
-            echo "✓ dist/src/app.js exists"
+        if [ -f /opt/iotistic/agent/dist/app.js ]; then
+            echo "✓ dist/app.js exists (CORRECT PATH)"
+        elif [ -f /opt/iotistic/agent/dist/src/app.js ]; then
+            echo "✓ dist/src/app.js exists (LEGACY PATH)"
         else
-            echo "✗ dist/src/app.js NOT FOUND"
+            echo "✗ app.js NOT FOUND in either location"
             echo "Available .js files:"
             find /opt/iotistic/agent/dist -name "*.js" | head -20
         fi
