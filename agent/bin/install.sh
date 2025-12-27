@@ -228,11 +228,17 @@ echo ""
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     AGENT_DIR="$(dirname "$SCRIPT_DIR")"
     
-    # Check if running interactively (has terminal and not CI)
-    if [ -t 0 ] && [ -z "$CI" ]; then
+    # Check if running interactively
+    # Interactive if: NOT in CI mode AND (has terminal OR stdin is from terminal)
+    # When piped (curl | sh), stdin is not a tty, but we can still prompt if we redirect from /dev/tty
+    if [ -z "$CI" ] && [ -z "$IOTISTIC_AGENT_VERSION" ] && [ -z "$IOTISTIC_DEVICE_PORT" ]; then
+        # No CI and no env vars set = assume interactive mode
         echo "Running in interactive mode"
         
-        #Prompt for configuration
+        # Redirect input from /dev/tty to allow prompts even when piped
+        exec < /dev/tty
+        
+        # Prompt for configuration
         read -p "Enter cloud API endpoint (leave empty for local mode): " CLOUD_API_ENDPOINT
         read -p "Enter provisioning API key (leave empty for local mode): " PROVISIONING_KEY
         read -p "Enter device API port [48484]: " DEVICE_API_PORT
@@ -325,29 +331,48 @@ echo ""
         rm -rf iotistic-agent-download agent.tar.gz
         
         echo "✓ Agent downloaded and installed"
+        SKIP_BUILD=true
     fi
 
-    # Build agent
-    echo ""
-    echo "Installing agent dependencies..."
-    cd /opt/iotistic/agent
-    npm ci --legacy-peer-deps
+    # Build agent (only if using repository checkout)
+    if [ "$SKIP_BUILD" != "true" ]; then
+        echo ""
+        echo "Installing agent dependencies..."
+        cd /opt/iotistic/agent
+        npm ci --legacy-peer-deps
 
-    echo "Building agent..."
-    npx tsc --project tsconfig.build.json
-    
-    echo "Copying migrations..."
-    npm run copy:migrations
-    if [ ! -d dist/db/migrations ]; then
-        echo "✗ Error: Migrations copy failed - dist/db/migrations not found"
-        exit 1
-    fi
+        echo "Building agent..."
+        npx tsc --project tsconfig.build.json
+        
+        echo "Copying migrations..."
+        npm run copy:migrations
+        if [ ! -d dist/db/migrations ]; then
+            echo "✗ Error: Migrations copy failed - dist/db/migrations not found"
+            exit 1
+        fi
 
-    if [ ! -f dist/app.js ]; then
-        echo "✗ Error: Build failed - dist/app.js not found"
-        exit 1
+        if [ ! -f dist/app.js ]; then
+            echo "✗ Error: Build failed - dist/app.js not found"
+            exit 1
+        fi
+        echo "✓ Agent built successfully"
+    else
+        echo ""
+        echo "Using pre-built agent from distribution server"
+        echo "✓ Skipping build step"
+        
+        # Verify pre-built files exist
+        cd /opt/iotistic/agent
+        if [ ! -d dist ]; then
+            echo "✗ Error: Pre-built dist/ directory not found"
+            exit 1
+        fi
+        if [ ! -f dist/app.js ]; then
+            echo "✗ Error: Pre-built dist/app.js not found"
+            exit 1
+        fi
+        echo "✓ Pre-built agent verified"
     fi
-    echo "✓ Agent built successfully"
 
     # Install update script
     if [ -f /opt/iotistic/agent/bin/update-agent-systemd.sh ]; then
