@@ -259,11 +259,20 @@ echo ""
         
         echo "✓ Repository code copied to /opt/iotistic/agent"
     else
-        # Download pre-built agent from public distribution server
+        # Download pre-built agent from Azure Blob Storage
         echo "Downloading agent from distribution server..."
         
-        # Use custom download URL if provided, otherwise use default
-        DOWNLOAD_URL="${IOTISTIC_DOWNLOAD_URL:-https://downloads.iotistica.com/agent/${AGENT_VERSION}.tar.gz}"
+        # Determine download URL
+        if [ -n "$IOTISTIC_DOWNLOAD_URL" ]; then
+            # Custom URL provided
+            DOWNLOAD_URL="$IOTISTIC_DOWNLOAD_URL"
+        elif [ "$AGENT_VERSION" = "dev" ] || [ "$AGENT_VERSION" = "latest" ]; then
+            # Use latest version
+            DOWNLOAD_URL="https://iotistic.blob.core.windows.net/scripts/agent/agent-latest.tar.gz"
+        else
+            # Use specific version
+            DOWNLOAD_URL="https://iotistic.blob.core.windows.net/scripts/agent/versions/agent-${AGENT_VERSION}.tar.gz"
+        fi
         
         cd /tmp
         rm -rf iotistic-agent-download
@@ -287,6 +296,9 @@ echo ""
             echo "Troubleshooting:"
             echo "  1. Check your internet connection"
             echo "  2. Verify the download URL: $DOWNLOAD_URL"
+            echo "  3. Verify the agent version exists: $AGENT_VERSION"
+            echo ""
+            echo "Available versions: https://iotistic.blob.core.windows.net/scripts/agent/versions/"
             echo ""
             echo "For development/internal installations:"
             echo "  Run this script from within a cloned repository:"
