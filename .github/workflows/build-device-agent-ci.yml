@@ -353,6 +353,11 @@ jobs:
           
           echo "✓ Prepared unified install.sh with version ${{ needs.version.outputs.package_version }}"
 
+      - name: Set up QEMU for multi-arch builds
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
       - name: Prepare agent tarball
         run: |
           echo "Building agent tarballs for multiple architectures..."
@@ -373,7 +378,7 @@ jobs:
             node_modules/ \
             bin/
           
-          # Create ARM64 tarball (rebuild sqlite3 for ARM in Docker)
+          # Create ARM64 tarball (rebuild sqlite3 for ARM in Docker with QEMU)
           echo "Creating ARM64 tarball with rebuilt native modules..."
           docker run --rm -v "$(pwd)":/app -w /app --platform linux/arm64 \
             node:20-slim bash -c "
