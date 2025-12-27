@@ -38,7 +38,25 @@ else
     exit 1
 fi
 
-echo "Detected OS: $OS $OS_VERSION"
+# Detect architecture
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64)
+        ARCH_NAME="x86_64"
+        ;;
+    aarch64|arm64)
+        ARCH_NAME="arm64"
+        ;;
+    armv7l|armhf)
+        ARCH_NAME="armhf"
+        ;;
+    *)
+        echo "Warning: Unknown architecture $ARCH, continuing anyway..."
+        ARCH_NAME="$ARCH"
+        ;;
+esac
+
+echo "Detected OS: $OS $OS_VERSION ($ARCH_NAME)"
 
 # Helper function to install Docker if needed
 install_docker_if_needed() {
@@ -85,214 +103,13 @@ install_docker_if_needed() {
     fi
 }
 
-# Determine installation method
-INSTALL_METHOD="systemd"
-
-if [ -z "$INSTALL_METHOD" ]; then
-    # Auto-detect or prompt
-    if [ -n "$CI" ] || [ ! -t 0 ]; then
-        # Non-interactive mode - auto-detect
-        # echo ""
-        # echo "Auto-detecting installation method..."
-        # if command -v docker &> /dev/null; then
-        #     INSTALL_METHOD="docker"
-        #     echo "✓ Docker found - using Docker installation"
-        # else
-        #     INSTALL_METHOD="systemd"
-        echo "⚠ Using Systemd installation"
-        # fi
-    else
-        # Interactive mode - ask user
-        echo ""
-        echo "Choose installation method:"
-        echo "  1) Docker container (recommended - easier updates, isolated environment)"
-        echo "  2) Systemd service (native - lower overhead, more control)"
-        echo ""
-        read -p "Enter choice [1]: " choice
-        choice=${choice:-1}
-        
-        case $choice in
-            1)
-                INSTALL_METHOD="docker"
-                ;;
-            2)
-                INSTALL_METHOD="systemd"
-                ;;
-            *)
-                echo "Invalid choice. Using Docker (default)"
-                INSTALL_METHOD="docker"
-                ;;
-        esac
-    fi
-fi
-
 echo ""
-echo "Installation method: $INSTALL_METHOD"
+echo "Installation method: Systemd + Docker"
 echo ""
-
-# ============================================================================
-# DOCKER INSTALLATION
-# ============================================================================
-if [ "$INSTALL_METHOD" = "docker" ]; then
-    echo "==================================="
-    echo "Docker Installation"
-    echo "==================================="
-    echo ""
-
-    # Check if Docker is installed
-    install_docker_if_needed || exit 1
-
-    # Verify Docker daemon is accessible
-    if ! docker ps &> /dev/null; then
-        echo ""
-        echo "⚠️  Docker is installed but the daemon is not accessible."
-        
-        # Check if Docker daemon is running
-        if ! systemctl is-active --quiet docker 2>/dev/null; then
-            echo "Starting Docker daemon..."
-            systemctl start docker
-            sleep 3
-        fi
-        
-        # Try again
-        if ! docker ps &> /dev/null; then
-            echo "✗ Error: Cannot connect to Docker daemon"
-            echo ""
-            echo "Possible causes:"
-            echo "  1. Docker daemon is not running: sudo systemctl start docker"
-            echo "  2. Permission denied: Add your user to docker group: sudo usermod -aG docker \$USER"
-            echo "  3. Docker socket not accessible: Check /var/run/docker.sock permissions"
-            exit 1
-        fi
-    fi
-
-    echo "✓ Docker is ready"
-
-    # Create directories
-    echo ""
-    echo "Creating directories..."
-    mkdir -p /var/lib/iotistic/agent
-    mkdir -p /var/log/iotistic
-
-    # Configuration
-    echo ""
-    echo "Configuration:"
-    echo "-------------"
-
-    # Check if running in non-interactive mode
-    if [ -n "$CI" ]; then
-        echo "Running in CI mode (non-interactive)"
-        PROVISIONING_KEY="${PROVISIONING_KEY:-}"
-        DEVICE_API_PORT="${IOTISTIC_DEVICE_PORT:-48484}"
-        AGENT_VERSION="${IOTISTIC_AGENT_VERSION:-latest}"
-        CLOUD_API_ENDPOINT="${CLOUD_API_ENDPOINT:-}"
-    elif [ ! -t 0 ] && [ -z "$FORCE_INTERACTIVE" ]; then
-        echo "Running in non-interactive mode (stdin is not a terminal)"
-        echo "Using default/environment variable configuration"
-        PROVISIONING_KEY="${PROVISIONING_KEY:-}"
-        DEVICE_API_PORT="${IOTISTIC_DEVICE_PORT:-48484}"
-        AGENT_VERSION="${IOTISTIC_AGENT_VERSION:-latest}"
-        CLOUD_API_ENDPOINT="${CLOUD_API_ENDPOINT:-}"
-    else
-        # Interactive mode - prompt user
-        read -p "Enter cloud API endpoint (leave empty for local mode): " CLOUD_API_ENDPOINT
-        read -p "Enter provisioning API key (leave empty for local mode): " PROVISIONING_KEY
-        read -p "Enter device API port [48484]: " DEVICE_API_PORT
-        DEVICE_API_PORT=${DEVICE_API_PORT:-48484}
-        
-        echo ""
-        echo "Fetching latest agent version..."
-        LATEST_VERSION=$(curl -s https://registry.hub.docker.com/v2/repositories/iotistic/agent/tags | jq -r '.results[].name' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
-        if [ -z "$LATEST_VERSION" ]; then
-            LATEST_VERSION="latest"
-        fi
-        AGENT_VERSION="$LATEST_VERSION"
-        echo "Using version: $AGENT_VERSION"
-    fi
-
-    # Pull the image
-    echo ""
-    echo "Pulling Docker image..."
-    docker pull iotistic/agent:$AGENT_VERSION
-
-    # Stop and remove existing container if it exists
-    if docker ps -a | grep -q iotistic-agent; then
-        echo "Stopping existing agent container..."
-        docker stop iotistic-agent || true
-        docker rm iotistic-agent || true
-    fi
-
-    # Create and start container
-    echo ""
-    echo "Starting agent container..."
-
-    # Build environment variables
-    ENV_VARS="-e DEPLOYMENT_TYPE=docker \
-        -e DEVICE_API_PORT=48484 \
-        -e AGENT_VERSION=${AGENT_VERSION} \
-        -e NODE_ENV=production \
-        -e LOG_LEVEL=info \
-        -e ORCHESTRATOR_TYPE=docker-compose \
-        -e ORCHESTRATOR_INTERVAL=30000"
-
-    if [ -n "$PROVISIONING_KEY" ]; then
-        ENV_VARS="$ENV_VARS -e PROVISIONING_KEY=${PROVISIONING_KEY}"
-    fi
-
-    if [ -n "$CLOUD_API_ENDPOINT" ]; then
-        ENV_VARS="$ENV_VARS -e CLOUD_API_ENDPOINT=${CLOUD_API_ENDPOINT}"
-    fi
-
-    docker run -d \
-        --name iotistic-agent \
-        --restart unless-stopped \
-        -v /var/run/docker.sock:/var/run/docker.sock \
-        -v /var/lib/iotistic/agent:/app/data \
-        -p ${DEVICE_API_PORT}:48484 \
-        $ENV_VARS \
-        iotistic/agent:$AGENT_VERSION
-
-    # Wait for container to start
-    echo "Waiting for agent to start..."
-    sleep 10
-
-    # Check if container is running
-    if docker ps | grep -q iotistic-agent; then
-        echo ""
-        echo "✓ Agent container is running"
-        
-        echo ""
-        echo "Recent logs:"
-        echo "------------"
-        docker logs --tail=20 iotistic-agent
-        
-        echo ""
-        echo "=================================="
-        echo "Installation complete!"
-        echo "=================================="
-        echo ""
-        echo "Agent is running as Docker container 'iotistic-agent'"
-        echo "Device API: http://localhost:${DEVICE_API_PORT}"
-        echo ""
-        echo "Useful commands:"
-        echo "  docker logs -f iotistic-agent          # View logs"
-        echo "  docker restart iotistic-agent          # Restart agent"
-        echo "  docker stop iotistic-agent             # Stop agent"
-        echo "  docker start iotistic-agent            # Start agent"
-        echo ""
-    else
-        echo ""
-        echo "✗ Error: Agent container failed to start"
-        echo ""
-        echo "Container logs:"
-        docker logs iotistic-agent
-        exit 1
-    fi
 
 # ============================================================================
 # SYSTEMD INSTALLATION
 # ============================================================================
-elif [ "$INSTALL_METHOD" = "systemd" ]; then
     echo "==================================="
     echo "Systemd Installation"
     echo "==================================="
@@ -307,12 +124,43 @@ elif [ "$INSTALL_METHOD" = "systemd" ]; then
 
     # Install system dependencies
     echo "Installing system dependencies..."
-    apt-get update
-    apt-get install -y \
-        curl wget git build-essential python3 make g++ \
-        sqlite3 libsqlite3-dev jq procps \
-        openvpn wireguard wireguard-tools \
-        iproute2 iptables net-tools iputils-ping
+    
+    # Fix multiarch configuration issues on Raspberry Pi
+    # Remove foreign architectures that may cause conflicts
+    if [ "$ARCH_NAME" = "arm64" ]; then
+        echo "Cleaning up multiarch configuration for arm64..."
+        dpkg --remove-architecture armhf 2>/dev/null || true
+        dpkg --remove-architecture i386 2>/dev/null || true
+    elif [ "$ARCH_NAME" = "armhf" ]; then
+        echo "Cleaning up multiarch configuration for armhf..."
+        dpkg --remove-architecture arm64 2>/dev/null || true
+        dpkg --remove-architecture i386 2>/dev/null || true
+    fi
+    
+    # Update package lists
+    apt-get update || {
+        echo "Warning: apt-get update failed, continuing anyway..."
+    }
+    
+    # Install essential dependencies first (these should always work)
+    apt-get install -y --no-install-recommends \
+        curl wget git build-essential python3 make g++ || {
+        echo "Error: Failed to install essential build tools"
+        exit 1
+    }
+    
+    # Install database and utilities (skip if fails due to architecture issues)
+    apt-get install -y --no-install-recommends \
+        sqlite3 libsqlite3-dev jq procps 2>/dev/null || {
+        echo "Warning: Some database packages failed to install, continuing..."
+    }
+    
+    
+    # Install networking tools
+    apt-get install -y --no-install-recommends \
+        iproute2 iptables net-tools iputils-ping || {
+        echo "Warning: Some network tools failed to install"
+    }
 
     echo "✓ System dependencies installed"
 
@@ -652,9 +500,3 @@ EOFJOURNALD
         journalctl -u iotistic-agent -n 50 --no-pager
         exit 1
     fi
-
-else
-    echo "Error: Invalid installation method: $INSTALL_METHOD"
-    echo "Valid options: docker, systemd"
-    exit 1
-fi
