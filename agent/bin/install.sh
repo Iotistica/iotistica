@@ -245,6 +245,14 @@ echo ""
     echo "[DEBUG]   Files in AGENT_DIR:"
     ls -la "$AGENT_DIR" | head -15
     
+    # Function to normalize API endpoint URL
+    normalize_api_endpoint() {
+        if [ -n "$CLOUD_API_ENDPOINT" ] && ! echo "$CLOUD_API_ENDPOINT" | grep -qE '^https?://'; then
+            CLOUD_API_ENDPOINT="http://${CLOUD_API_ENDPOINT}"
+            echo "Auto-prepended http:// to API endpoint: $CLOUD_API_ENDPOINT"
+        fi
+    }
+    
     # Check if running interactively
     # Interactive if: NOT in CI mode AND (has terminal OR stdin is from terminal)
     # When piped (curl | sh), stdin is not a tty, but we can still prompt if we redirect from /dev/tty
@@ -267,6 +275,19 @@ echo ""
         DEVICE_API_PORT="${IOTISTIC_DEVICE_PORT:-48484}"
         AGENT_VERSION="${IOTISTIC_AGENT_VERSION:-dev}"
         CLOUD_API_ENDPOINT="${CLOUD_API_ENDPOINT:-}"
+    fi
+    
+    # Normalize API endpoint - add http:// if protocol missing
+    normalize_api_endpoint
+    
+    # If package.json exists in AGENT_DIR, extract version from it
+    # This handles the case where install.sh is run from an extracted tarball
+    if [ "$AGENT_VERSION" = "dev" ] && [ -f "$AGENT_DIR/package.json" ]; then
+        EXTRACTED_VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$AGENT_DIR/package.json" | sed 's/.*"\([^"]*\)".*/\1/')
+        if [ -n "$EXTRACTED_VERSION" ]; then
+            AGENT_VERSION="$EXTRACTED_VERSION"
+            echo "Detected version from package.json: $AGENT_VERSION"
+        fi
     fi
     
     # Now handle repository access (works for both modes)
