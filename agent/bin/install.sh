@@ -413,6 +413,17 @@ echo ""
             find dist -name "*.js" | head -20
             exit 1
         fi
+        
+        # Rebuild native modules for target architecture
+        echo ""
+        echo "Rebuilding native modules for $(uname -m) architecture..."
+        chown -R iotistic:iotistic /opt/iotistic/agent
+        su - iotistic -c "cd /opt/iotistic/agent && npm rebuild" || {
+            echo "✗ Warning: Native module rebuild failed, trying as root..."
+            npm rebuild
+        }
+        echo "✓ Native modules rebuilt"
+        
         echo "✓ Pre-built agent verified"
     fi
 
@@ -487,8 +498,21 @@ EOF
     echo "Creating systemd service..."
 
     NODE_PATH=$(which node)
+    
+    # Auto-detect correct app.js path (handles both old and new build structures)
+    if [ -f /opt/iotistic/agent/dist/app.js ]; then
+        APP_JS_PATH="/opt/iotistic/agent/dist/app.js"
+        echo "Detected app.js at: dist/app.js (new structure)"
+    elif [ -f /opt/iotistic/agent/dist/src/app.js ]; then
+        APP_JS_PATH="/opt/iotistic/agent/dist/src/app.js"
+        echo "Detected app.js at: dist/src/app.js (legacy structure)"
+    else
+        echo "✗ Error: Could not find app.js in dist/ or dist/src/"
+        exit 1
+    fi
 
     echo "Node path: ${NODE_PATH}"
+    echo "App path: ${APP_JS_PATH}"
     
     cat > /etc/systemd/system/iotistic-agent.service << EOFSVC
 [Unit]
@@ -507,7 +531,7 @@ EnvironmentFile=/etc/iotistic/agent.env
 Environment=NODE_ENV=production
 Environment=DEPLOYMENT_TYPE=systemd
 
-ExecStart=$NODE_PATH /opt/iotistic/agent/dist/app.js
+ExecStart=$NODE_PATH $APP_JS_PATH
 
 Restart=always
 RestartSec=10
