@@ -420,9 +420,9 @@ echo ""
             echo ""
             echo "ARM architecture detected ($ARCH) - rebuilding native modules..."
             chown -R iotistic:iotistic /opt/iotistic/agent
-            su - iotistic -c "cd /opt/iotistic/agent && npm rebuild" || {
+            su - iotistic -c "cd /opt/iotistic/agent && npm rebuild sqlite3 --build-from-source" || {
                 echo "✗ Warning: Native module rebuild failed, trying as root..."
-                npm rebuild
+                npm rebuild sqlite3 --build-from-source
             }
             echo "✓ Native modules rebuilt for ARM"
         else
