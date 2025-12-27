@@ -228,6 +228,14 @@ echo ""
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     AGENT_DIR="$(dirname "$SCRIPT_DIR")"
     
+    echo "[DEBUG] Script location:"
+    echo "[DEBUG]   BASH_SOURCE[0]=${BASH_SOURCE[0]}"
+    echo "[DEBUG]   SCRIPT_DIR=$SCRIPT_DIR"
+    echo "[DEBUG]   AGENT_DIR=$AGENT_DIR"
+    echo "[DEBUG]   Current directory: $(pwd)"
+    echo "[DEBUG]   Files in AGENT_DIR:"
+    ls -la "$AGENT_DIR" | head -15
+    
     # Check if running interactively
     # Interactive if: NOT in CI mode AND (has terminal OR stdin is from terminal)
     # When piped (curl | sh), stdin is not a tty, but we can still prompt if we redirect from /dev/tty
@@ -253,8 +261,20 @@ echo ""
     fi
     
     # Now handle repository access (works for both modes)
-    if [ -f "$AGENT_DIR/package.json" ]; then
-        echo "Using current repository checkout from: $AGENT_DIR"
+    echo "[DEBUG] CI=$CI"
+    echo "[DEBUG] SCRIPT_DIR=$SCRIPT_DIR"
+    echo "[DEBUG] AGENT_DIR=$AGENT_DIR"
+    echo "[DEBUG] Checking for: $AGENT_DIR/package.json"
+    echo "[DEBUG] File exists: $([ -f "$AGENT_DIR/package.json" ] && echo 'YES' || echo 'NO')"
+    
+    # In CI mode, ALWAYS use local repository sources (never download)
+    # In non-CI mode, use local sources if package.json exists, otherwise download
+    if [ "$CI" = "true" ] || [ -f "$AGENT_DIR/package.json" ]; then
+        if [ "$CI" = "true" ]; then
+            echo "CI mode detected - using repository sources from: $AGENT_DIR"
+        else
+            echo "Using local repository checkout from: $AGENT_DIR"
+        fi
         
         # Copy agent code
         echo "Copying agent code..."
