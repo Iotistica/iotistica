@@ -493,6 +493,9 @@ Restart=always
 RestartSec=10
 WatchdogSec=30
 
+# Systemd notifications (watchdog, ready signals)
+NotifyAccess=all
+
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=iotistic-agent
