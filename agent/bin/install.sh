@@ -266,14 +266,17 @@ echo ""
     echo "[DEBUG] AGENT_DIR=$AGENT_DIR"
     echo "[DEBUG] Checking for: $AGENT_DIR/package.json"
     echo "[DEBUG] File exists: $([ -f "$AGENT_DIR/package.json" ] && echo 'YES' || echo 'NO')"
+    echo "[DEBUG] Checking for: $AGENT_DIR/.git"
+    echo "[DEBUG] Directory exists: $([ -d "$AGENT_DIR/.git" ] && echo 'YES' || echo 'NO')"
     
     # In CI mode, ALWAYS use local repository sources (never download)
-    # In non-CI mode, use local sources if package.json exists, otherwise download
-    if [ "$CI" = "true" ] || [ -f "$AGENT_DIR/package.json" ]; then
+    # In non-CI mode, use local sources ONLY if it's an actual git repository (has .git directory)
+    # This prevents treating an installed agent directory as a repository checkout
+    if [ "$CI" = "true" ] || [ -d "$AGENT_DIR/.git" ]; then
         if [ "$CI" = "true" ]; then
             echo "CI mode detected - using repository sources from: $AGENT_DIR"
         else
-            echo "Using local repository checkout from: $AGENT_DIR"
+            echo "Git repository detected - using local checkout from: $AGENT_DIR"
         fi
         
         # Copy agent code
