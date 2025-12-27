@@ -174,9 +174,120 @@ jobs:
   #         rm -rf /tmp/.buildx-cache
   #         mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
 
+  build-x86:
+    name: Build x86_64 Tarball
+    needs: [version]
+    runs-on: [iotistic-lab-sc]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build agent (x86_64)
+        run: |
+          echo "Building agent for x86_64..."
+          cd agent
+          
+          # Install dependencies and build
+          npm ci --legacy-peer-deps
+          npm run build
+          
+          mkdir -p /tmp/iotistic-artifacts
+          
+          # Create x86_64 tarball
+          echo "Creating x86_64 tarball..."
+          tar -czf /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
+            dist/ \
+            package.json \
+            package-lock.json \
+            node_modules/ \
+            bin/
+          
+          # Create 'latest' version
+          cp /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
+             /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz
+          
+          # Also create generic 'latest' (for backwards compatibility)
+          cp /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz \
+             /tmp/iotistic-artifacts/agent-latest.tar.gz
+          
+          echo "✓ Created x86_64 tarballs:"
+          ls -lh /tmp/iotistic-artifacts/
+
+      - name: Upload x86_64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-x86_64
+          path: /tmp/iotistic-artifacts/*
+          retention-days: 1
+
+  build-arm64:
+    name: Build ARM64 Tarball
+    needs: [version]
+    runs-on: [iotistic-lab-sc]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU for ARM64 emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Verify QEMU installation
+        run: |
+          docker run --rm --platform linux/arm64 arm64v8/alpine uname -m
+          echo "✓ QEMU ARM64 emulation working"
+
+      - name: Build agent (ARM64)
+        run: |
+          echo "Building agent for ARM64..."
+          cd agent
+          
+          # Install dependencies and build (architecture-neutral)
+          npm ci --legacy-peer-deps
+          npm run build
+          
+          mkdir -p /tmp/iotistic-artifacts
+          
+          # Rebuild sqlite3 for ARM64 using Docker with QEMU
+          echo "Rebuilding native modules for ARM64..."
+          docker run --rm -v "$(pwd)":/app -w /app --platform linux/arm64 \
+            node:20-slim bash -c "
+              apt-get update && apt-get install -y build-essential python3 libsqlite3-dev
+              npm rebuild sqlite3 --build-from-source
+            "
+          
+          # Create ARM64 tarball
+          echo "Creating ARM64 tarball..."
+          tar -czf /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
+            dist/ \
+            package.json \
+            package-lock.json \
+            node_modules/ \
+            bin/
+          
+          # Create 'latest' version
+          cp /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
+             /tmp/iotistic-artifacts/agent-latest-arm64.tar.gz
+          
+          echo "✓ Created ARM64 tarballs:"
+          ls -lh /tmp/iotistic-artifacts/
+
+      - name: Upload ARM64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-arm64
+          path: /tmp/iotistic-artifacts/*
+          retention-days: 1
+
   test-agent-systemd:
     name: Test Systemd Installation (via install.sh)
-    needs: [version]
+    needs: [version, build-x86]
     runs-on: [iotistic-lab-sc]
     
     steps:
@@ -312,7 +423,7 @@ jobs:
 
   upload-install-scripts:
     name: Upload Installation Scripts
-    needs: [version,  test-agent-systemd]
+    needs: [version, test-agent-systemd]
     runs-on: [iotistic-lab-sc]
     if: success()
     
@@ -353,79 +464,13 @@ jobs:
           
           echo "✓ Prepared unified install.sh with version ${{ needs.version.outputs.package_version }}"
 
-      - name: Set up QEMU for multi-arch builds
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - name: Prepare agent tarball
+      - name: Generate checksums for install script
         run: |
-          echo "Building agent tarballs for multiple architectures..."
-          cd agent
-          
-          # Install dependencies and build (architecture-neutral)
-          npm ci --legacy-peer-deps
-          npm run build
-          
-          mkdir -p /tmp/iotistic-artifacts
-          
-          # Create x86_64 tarball (with pre-built native modules from npm ci)
-          echo "Creating x86_64 tarball..."
-          tar -czf /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
-            dist/ \
-            package.json \
-            package-lock.json \
-            node_modules/ \
-            bin/
-          
-          # Create ARM64 tarball (rebuild sqlite3 for ARM in Docker with QEMU)
-          echo "Creating ARM64 tarball with rebuilt native modules..."
-          docker run --rm -v "$(pwd)":/app -w /app --platform linux/arm64 \
-            node:20-slim bash -c "
-              apt-get update && apt-get install -y build-essential python3 libsqlite3-dev
-              npm rebuild sqlite3 --build-from-source
-            "
-          
-          tar -czf /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
-            dist/ \
-            package.json \
-            package-lock.json \
-            node_modules/ \
-            bin/
-          
-          # Restore x86_64 node_modules for subsequent steps
-          npm ci --legacy-peer-deps
-          
-          # Create universal 'latest' versions
-          cp /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
-             /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz
-          cp /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
-             /tmp/iotistic-artifacts/agent-latest-arm64.tar.gz
-          
-          # Also create generic 'latest' (x86_64 for backwards compatibility)
-          cp /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz \
-             /tmp/iotistic-artifacts/agent-latest.tar.gz
-          
-          echo "✓ Created agent tarballs:"
-          ls -lh /tmp/iotistic-artifacts/
-
-      - name: Generate checksums
-        run: |
-          # Install script checksums
           cd /tmp/iotistic-scripts
           sha256sum install.sh > install.sh.sha256
           
           echo "✓ Generated install script checksum:"
           cat install.sh.sha256
-          
-          # Agent tarball checksums
-          cd /tmp/iotistic-artifacts
-          sha256sum agent-${{ needs.version.outputs.package_version }}.tar.gz > agent-${{ needs.version.outputs.package_version }}.tar.gz.sha256
-          sha256sum agent-latest.tar.gz > agent-latest.tar.gz.sha256
-          
-          echo "✓ Generated tarball checksums:"
-          cat agent-${{ needs.version.outputs.package_version }}.tar.gz.sha256
-          cat agent-latest.tar.gz.sha256
 
       - name: Upload install.sh (latest)
         run: |
@@ -479,67 +524,9 @@ jobs:
           
           echo "✓ Uploaded agent/versions/install-${{ needs.version.outputs.package_version }}.sh.sha256"
 
-      - name: Upload agent tarball (latest)
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest.tar.gz \
-            --file /tmp/iotistic-artifacts/agent-latest.tar.gz \
-            --overwrite true \
-            --content-type application/gzip \
-            --content-disposition "attachment; filename=agent-latest.tar.gz"
-          
-          echo "✓ Uploaded agent/agent-latest.tar.gz"
-
-      - name: Upload agent tarball checksum (latest)
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/agent-latest.tar.gz.sha256 \
-            --overwrite true \
-            --content-type text/plain \
-            --content-disposition "inline; filename=agent-latest.tar.gz.sha256"
-          
-          echo "✓ Uploaded agent/agent-latest.tar.gz.sha256"
-
-      - name: Upload agent tarball (versioned)
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/versions/agent-${{ needs.version.outputs.package_version }}.tar.gz \
-            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}.tar.gz \
-            --overwrite true \
-            --content-type application/gzip \
-            --content-disposition "attachment; filename=agent-${{ needs.version.outputs.package_version }}.tar.gz"
-          
-          echo "✓ Uploaded agent/versions/agent-${{ needs.version.outputs.package_version }}.tar.gz"
-
-      - name: Upload agent tarball checksum (versioned)
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/versions/agent-${{ needs.version.outputs.package_version }}.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}.tar.gz.sha256 \
-            --overwrite true \
-            --content-type text/plain \
-            --content-disposition "inline; filename=agent-${{ needs.version.outputs.package_version }}.tar.gz.sha256"
-          
-          echo "✓ Uploaded agent/versions/agent-${{ needs.version.outputs.package_version }}.tar.gz.sha256"
-
       - name: Generate upload summary
         run: |
-          echo "# Installation Script Uploaded (Unified)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Artifacts Uploaded" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Agent Tarball" >> $GITHUB_STEP_SUMMARY
-          echo "- [agent-latest.tar.gz](https://apps.iotistica.com/agent/agent-latest.tar.gz) - [checksum](https://apps.iotistica.com/agent/agent-latest.tar.gz.sha256)" >> $GITHUB_STEP_SUMMARY
-          echo "- [agent-${{ needs.version.outputs.package_version }}.tar.gz](https://apps.iotistica.com/agent/versions/agent-${{ needs.version.outputs.package_version }}.tar.gz) - [checksum](https://apps.iotistica.com/agent/versions/agent-${{ needs.version.outputs.package_version }}.tar.gz.sha256)" >> $GITHUB_STEP_SUMMARY
+          echo "# Installation Scripts Uploaded" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Quick Install (Recommended)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -695,9 +682,200 @@ jobs:
           echo "## Workflow Status" >> $GITHUB_STEP_SUMMARY
           echo "All jobs completed successfully! 🎉" >> $GITHUB_STEP_SUMMARY
 
+  upload-tarballs:
+    name: Upload Agent Tarballs to Azure
+    needs: [version, build-x86, build-arm64]
+    runs-on: [iotistic-lab-sc]
+    if: success()
+    
+    steps:
+      - name: Download x86_64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-x86_64
+          path: /tmp/iotistic-artifacts
+
+      - name: Download ARM64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-arm64
+          path: /tmp/iotistic-artifacts
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Generate checksums
+        run: |
+          cd /tmp/iotistic-artifacts
+          
+          # x86_64 checksums
+          sha256sum agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz > agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256
+          sha256sum agent-latest-x86_64.tar.gz > agent-latest-x86_64.tar.gz.sha256
+          
+          # ARM64 checksums
+          sha256sum agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz > agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256
+          sha256sum agent-latest-arm64.tar.gz > agent-latest-arm64.tar.gz.sha256
+          
+          # Generic latest checksum
+          sha256sum agent-latest.tar.gz > agent-latest.tar.gz.sha256
+          
+          echo "✓ Generated checksums:"
+          ls -lh *.sha256
+
+      - name: Upload x86_64 tarball (latest)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest-x86_64.tar.gz \
+            --file /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz \
+            --overwrite true \
+            --content-type application/gzip \
+            --content-disposition "attachment; filename=agent-latest-x86_64.tar.gz"
+          
+          echo "✓ Uploaded agent/agent-latest-x86_64.tar.gz"
+
+      - name: Upload x86_64 tarball checksum (latest)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest-x86_64.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz.sha256 \
+            --overwrite true \
+            --content-type text/plain \
+            --content-disposition "inline; filename=agent-latest-x86_64.tar.gz.sha256"
+          
+          echo "✓ Uploaded agent/agent-latest-x86_64.tar.gz.sha256"
+
+      - name: Upload ARM64 tarball (latest)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest-arm64.tar.gz \
+            --file /tmp/iotistic-artifacts/agent-latest-arm64.tar.gz \
+            --overwrite true \
+            --content-type application/gzip \
+            --content-disposition "attachment; filename=agent-latest-arm64.tar.gz"
+          
+          echo "✓ Uploaded agent/agent-latest-arm64.tar.gz"
+
+      - name: Upload ARM64 tarball checksum (latest)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest-arm64.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/agent-latest-arm64.tar.gz.sha256 \
+            --overwrite true \
+            --content-type text/plain \
+            --content-disposition "inline; filename=agent-latest-arm64.tar.gz.sha256"
+          
+          echo "✓ Uploaded agent/agent-latest-arm64.tar.gz.sha256"
+
+      - name: Upload generic latest tarball (x86_64 for backwards compatibility)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest.tar.gz \
+            --file /tmp/iotistic-artifacts/agent-latest.tar.gz \
+            --overwrite true \
+            --content-type application/gzip \
+            --content-disposition "attachment; filename=agent-latest.tar.gz"
+          
+          echo "✓ Uploaded agent/agent-latest.tar.gz (x86_64)"
+
+      - name: Upload generic latest tarball checksum
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/agent-latest.tar.gz.sha256 \
+            --overwrite true \
+            --content-type text/plain \
+            --content-disposition "inline; filename=agent-latest.tar.gz.sha256"
+          
+          echo "✓ Uploaded agent/agent-latest.tar.gz.sha256"
+
+      - name: Upload x86_64 tarball (versioned)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
+            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
+            --overwrite true \
+            --content-type application/gzip \
+            --content-disposition "attachment; filename=agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz"
+          
+          echo "✓ Uploaded agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz"
+
+      - name: Upload x86_64 tarball checksum (versioned)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256 \
+            --overwrite true \
+            --content-type text/plain \
+            --content-disposition "inline; filename=agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256"
+          
+          echo "✓ Uploaded agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256"
+
+      - name: Upload ARM64 tarball (versioned)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
+            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
+            --overwrite true \
+            --content-type application/gzip \
+            --content-disposition "attachment; filename=agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz"
+          
+          echo "✓ Uploaded agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz"
+
+      - name: Upload ARM64 tarball checksum (versioned)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256 \
+            --overwrite true \
+            --content-type text/plain \
+            --content-disposition "inline; filename=agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256"
+          
+          echo "✓ Uploaded agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256"
+
+      - name: Generate upload summary
+        run: |
+          echo "# Agent Tarballs Uploaded" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Artifacts Uploaded (Multi-Architecture)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### x86_64 (Intel/AMD)" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-latest-x86_64.tar.gz](https://apps.iotistica.com/agent/agent-latest-x86_64.tar.gz) - [checksum](https://apps.iotistica.com/agent/agent-latest-x86_64.tar.gz.sha256)" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz](https://apps.iotistica.com/agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz) - [checksum](https://apps.iotistica.com/agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ARM64 (Raspberry Pi 4+)" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-latest-arm64.tar.gz](https://apps.iotistica.com/agent/agent-latest-arm64.tar.gz) - [checksum](https://apps.iotistica.com/agent/agent-latest-arm64.tar.gz.sha256)" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz](https://apps.iotistica.com/agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz) - [checksum](https://apps.iotistica.com/agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Generic (x86_64, backwards compatibility)" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-latest.tar.gz](https://apps.iotistica.com/agent/agent-latest.tar.gz) - [checksum](https://apps.iotistica.com/agent/agent-latest.tar.gz.sha256)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Install script auto-detects architecture and downloads the appropriate tarball." >> $GITHUB_STEP_SUMMARY
+
   trigger-integration-tests:
     name: Trigger Integration Tests
-    needs: [version,  test-agent-systemd, upload-install-scripts]
+    needs: [version, test-agent-systemd, upload-install-scripts, upload-tarballs]
     runs-on: [iotistic-lab-sc]
     permissions:
       actions: write
