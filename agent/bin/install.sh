@@ -99,7 +99,7 @@ if [ -z "$INSTALL_METHOD" ]; then
         #     echo "✓ Docker found - using Docker installation"
         # else
         #     INSTALL_METHOD="systemd"
-        #     echo "⚠ Docker not found - using Systemd installation"
+        echo "⚠ Using Systemd installation"
         # fi
     else
         # Interactive mode - ask user
