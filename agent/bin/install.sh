@@ -487,7 +487,7 @@ EnvironmentFile=/etc/iotistic/agent.env
 Environment=NODE_ENV=production
 Environment=DEPLOYMENT_TYPE=systemd
 
-ExecStart=$NODE_PATH /opt/iotistic/agent/dist/app.js
+ExecStart=$NODE_PATH /opt/iotistic/agent/dist/src/app.js
 
 Restart=always
 RestartSec=10
