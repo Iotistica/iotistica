@@ -368,12 +368,29 @@ echo ""
         
         # Verify pre-built files exist
         cd /opt/iotistic/agent
+        
+        # Debug: Show what's in dist/
+        echo "Contents of dist directory:"
+        ls -la dist/
+        
         if [ ! -d dist ]; then
             echo "✗ Error: Pre-built dist/ directory not found"
             exit 1
         fi
-        if [ ! -f dist/app.js ]; then
-            echo "✗ Error: Pre-built dist/app.js not found"
+        
+        # Check for app.js in multiple possible locations
+        if [ -f dist/app.js ]; then
+            echo "✓ Found dist/app.js"
+        elif [ -f dist/src/app.js ]; then
+            echo "✓ Found dist/src/app.js"
+        else
+            echo "✗ Error: Pre-built app.js not found"
+            echo "Searched in:"
+            echo "  - dist/app.js"
+            echo "  - dist/src/app.js"
+            echo ""
+            echo "Available files:"
+            find dist -name "*.js" | head -20
             exit 1
         fi
         echo "✓ Pre-built agent verified"
