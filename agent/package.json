@@ -6,7 +6,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc && npm run copy:migrations",
-    "copy:migrations": "node -e \"require('fs').cpSync('src/db/migrations', 'dist/src/db/migrations', {recursive: true})\"",
+    "copy:migrations": "node -e \"require('fs').cpSync('src/db/migrations', 'dist/db/migrations', {recursive: true})\"",
     "watch": "tsc --watch",
     "clean": "rimraf dist && rimraf protocol-adapters/dist",
     "dev": "tsx watch src/app.ts",

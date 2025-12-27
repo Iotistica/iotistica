@@ -6,7 +6,7 @@
     "lib": ["ES2022"],
     "types": ["node"],
     "outDir": "./dist",
-    "rootDir": "./",
+    "rootDir": "./src",
     "strict": true,
     "strictFunctionTypes": false,
     "strictPropertyInitialization": false,
@@ -20,8 +20,7 @@
     "allowJs": false
   },
   "include": [
-    "src/**/*",
-    "cli/**/*"
+    "src/**/*"
   ],
   "exclude": [
     "node_modules",
