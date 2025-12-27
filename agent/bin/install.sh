@@ -201,7 +201,7 @@ echo ""
     fi
 
     # Create iotistic user
-    if ! id -u iotistic &> /dev/null; then
+    if ! id -u iotistic > /dev/null 2>&1; then
         echo ""
         echo "Creating iotistic user..."
         useradd --system --home-dir /opt/iotistic --shell /bin/bash iotistic
@@ -210,7 +210,7 @@ echo ""
     else
         echo ""
         echo "✓ User iotistic already exists"
-        # Ensure user is in docker group even if already existsgg
+        # Ensure user is in docker group even if already exists
         usermod -aG docker iotistic 2>/dev/null || true
     fi
 
