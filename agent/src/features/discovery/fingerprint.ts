@@ -87,3 +87,17 @@ export function generateSNMPFingerprint(
     .digest('hex')
     .substring(0, 32);
 }
+
+/**
+ * Generate MQTT fingerprint
+ * Based on topic path (stable identifier across reconnections)
+ * 
+ * @param topic - MQTT topic (e.g., "device/sensor01/temperature")
+ */
+export function generateMqttFingerprint(topic: string): string {
+  return crypto
+    .createHash('sha256')
+    .update(`mqtt:${topic}`)
+    .digest('hex')
+    .substring(0, 32);
+}

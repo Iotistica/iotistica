@@ -410,7 +410,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Auto-detect Installation Method" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "curl -sfL https://apps.iotistic.ca/agent/install | sh" >> $GITHUB_STEP_SUMMARY
+          echo "curl -sfL https://apps.iotistica.com/agent/install | sh" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "The script will:" >> $GITHUB_STEP_SUMMARY

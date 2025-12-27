@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2025-12-26 17:11:26
+# Generated: 2025-12-26 20:15:01
 # Agents: 27 to 27
 # Ports: 48507 to 48507
 
@@ -27,7 +27,7 @@ services:
       - NODE_ENV=development
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=8ca8404d234ae465c9648368bb29c51e0bafbe530ed0ad460e2d7682814c2587
+      - PROVISIONING_KEY=419f79f2a38be94c3fb190c65d5683268cbb493a269636070f1bbb0ae0394289
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)

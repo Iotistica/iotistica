@@ -86,21 +86,21 @@ install_docker_if_needed() {
 }
 
 # Determine installation method
-INSTALL_METHOD="${IOTISTIC_INSTALL_METHOD:-}"
+INSTALL_METHOD="systemd"
 
 if [ -z "$INSTALL_METHOD" ]; then
     # Auto-detect or prompt
     if [ -n "$CI" ] || [ ! -t 0 ]; then
         # Non-interactive mode - auto-detect
-        echo ""
-        echo "Auto-detecting installation method..."
-        if command -v docker &> /dev/null; then
-            INSTALL_METHOD="docker"
-            echo "✓ Docker found - using Docker installation"
-        else
-            INSTALL_METHOD="systemd"
-            echo "⚠ Docker not found - using Systemd installation"
-        fi
+        # echo ""
+        # echo "Auto-detecting installation method..."
+        # if command -v docker &> /dev/null; then
+        #     INSTALL_METHOD="docker"
+        #     echo "✓ Docker found - using Docker installation"
+        # else
+        #     INSTALL_METHOD="systemd"
+        #     echo "⚠ Docker not found - using Systemd installation"
+        # fi
     else
         # Interactive mode - ask user
         echo ""

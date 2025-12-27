@@ -35,11 +35,12 @@ import { ModbusDiscoveryPlugin } from './modbus.discovery';
 import { OPCUADiscoveryPlugin } from './opcua.discovery';
 import { CANDiscoveryPlugin } from './can.discovery';
 import { SNMPDiscoveryPlugin } from './snmp.discovery';
+import { MqttDiscoveryPlugin } from './mqtt.discovery';
 import { autoDetectLocalSubnets } from '../../utils/network';
 import type { AgentConfig } from '../../config/agent-config.js';
 
 export type DiscoveryTrigger = 'first_boot' | 'manual' | 'scheduled';
-export type DiscoveryProtocol = 'modbus' | 'opcua' | 'can' | 'snmp';
+export type DiscoveryProtocol = 'modbus' | 'opcua' | 'can' | 'snmp' | 'mqtt';
 
 export interface DiscoveryOptions {
   trigger: DiscoveryTrigger;
@@ -102,6 +103,18 @@ export interface SNMPDiscoveryOptions {
   v3PrivKey?: string;
 }
 
+export interface MqttDiscoveryOptions {
+  brokerUrl?: string;          // e.g., 'mqtt://mosquitto:1883' (default: env MQTT_BROKER_URL)
+  username?: string;           // MQTT username (optional)
+  password?: string;           // MQTT password (optional)
+  wildcardPattern?: string;    // Topic wildcard to subscribe (default: '#')
+  monitorDurationMs?: number;  // How long to listen for topics (default: 30000)
+  topicPatterns?: RegExp[];    // Expected topic patterns for metadata extraction
+  qos?: 0 | 1 | 2;             // QoS for discovery subscription (default: 0)
+  validate?: boolean;          // Run validation phase (collect more messages, verify consistency)
+  validationTimeout?: number;  // ms per topic validation (default: 15000)
+}
+
 /**
  * Discovery Service
  * Coordinates protocol-specific discovery plugins
@@ -147,6 +160,7 @@ export class DiscoveryService extends EventEmitter {
     plugins.set('opcua', new OPCUADiscoveryPlugin(this.logger));
     plugins.set('can', new CANDiscoveryPlugin(this.logger));
     plugins.set('snmp', new SNMPDiscoveryPlugin(this.logger));
+    plugins.set('mqtt', new MqttDiscoveryPlugin(this.logger));
     
     return plugins;
   }
@@ -507,6 +521,9 @@ export class DiscoveryService extends EventEmitter {
       case 'can':
         // TODO: Add getCANConfig() when available
         return !!process.env.CAN_INTERFACE;
+      case 'mqtt':
+        // MQTT is enabled if broker URL is configured
+        return !!(process.env.MQTT_BROKER_URL || 'mqtt://mosquitto:1883');
       default:
         return false;
     }
@@ -525,6 +542,8 @@ export class DiscoveryService extends EventEmitter {
         return this.getCANOptions();
       case 'snmp':
         return this.getSNMPOptions();
+      case 'mqtt':
+        return this.getMqttOptions();
       default:
         return undefined;
     }
@@ -771,6 +790,40 @@ export class DiscoveryService extends EventEmitter {
       options.v3AuthKey = process.env.SNMP_V3_AUTH_KEY;
       options.v3PrivProtocol = process.env.SNMP_V3_PRIV_PROTOCOL as 'DES' | 'AES';
       options.v3PrivKey = process.env.SNMP_V3_PRIV_KEY;
+    }
+
+    return options;
+  }
+
+  /**
+   * Get MQTT discovery options from environment variables
+   */
+  private getMqttOptions(): MqttDiscoveryOptions | undefined {
+    // MQTT discovery is enabled if MQTT_BROKER_URL is set or defaults to mosquitto
+    const options: MqttDiscoveryOptions = {
+      brokerUrl: process.env.MQTT_BROKER_URL || 'mqtt://mosquitto:1883'
+    };
+
+    // Optional authentication
+    if (process.env.MQTT_USERNAME) {
+      options.username = process.env.MQTT_USERNAME;
+    }
+
+    if (process.env.MQTT_PASSWORD) {
+      options.password = process.env.MQTT_PASSWORD;
+    }
+
+    // Optional discovery settings
+    if (process.env.MQTT_DISCOVERY_WILDCARD) {
+      options.wildcardPattern = process.env.MQTT_DISCOVERY_WILDCARD;
+    }
+
+    if (process.env.MQTT_DISCOVERY_DURATION_MS) {
+      options.monitorDurationMs = parseInt(process.env.MQTT_DISCOVERY_DURATION_MS, 10);
+    }
+
+    if (process.env.MQTT_DISCOVERY_QOS) {
+      options.qos = parseInt(process.env.MQTT_DISCOVERY_QOS, 10) as 0 | 1 | 2;
     }
 
     return options;
