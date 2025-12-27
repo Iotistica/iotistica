@@ -401,13 +401,13 @@ echo ""
         
         echo "Copying migrations..."
         npm run copy:migrations
-        if [ ! -d dist/db/migrations ]; then
-            echo "✗ Error: Migrations copy failed - dist/db/migrations not found"
+        if [ ! -d dist/src/db/migrations ]; then
+            echo "✗ Error: Migrations copy failed - dist/src/db/migrations not found"
             exit 1
         fi
 
-        if [ ! -f dist/app.js ]; then
-            echo "✗ Error: Build failed - dist/app.js not found"
+        if [ ! -f dist/src/app.js ]; then
+            echo "✗ Error: Build failed - dist/src/app.js not found"
             exit 1
         fi
         echo "✓ Agent built successfully"
