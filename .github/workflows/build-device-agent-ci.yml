@@ -215,12 +215,23 @@ jobs:
       - name: Check systemd service status
         run: |
           echo "Checking systemd service status..."
-          sudo systemctl status iotistic-agent --no-pager
+          sudo systemctl status iotistic-agent --no-pager || true
+          
+          echo ""
+          echo "========================================="
+          echo "Agent Startup Logs:"
+          echo "========================================="
+          sudo journalctl -u iotistic-agent -n 50 --no-pager
           
           if sudo systemctl is-active --quiet iotistic-agent; then
             echo "✓ Agent service is running"
           else
             echo "✗ Agent service is not running"
+            echo ""
+            echo "========================================="
+            echo "Full Error Logs:"
+            echo "========================================="
+            sudo journalctl -u iotistic-agent -n 200 --no-pager
             exit 1
           fi
 
