@@ -263,12 +263,34 @@ echo ""
             else
                 # Fallback to tarball download (works without git credentials)
                 echo "Git clone failed, downloading tarball instead..."
-                wget -q https://github.com/Iotistica/iotistic/archive/refs/heads/master.tar.gz -O master.tar.gz || {
+                
+                # Try wget first, then curl
+                if wget --version &> /dev/null; then
+                    wget --no-check-certificate -O master.tar.gz https://github.com/Iotistica/iotistic/archive/refs/heads/master.tar.gz || DOWNLOAD_FAILED=1
+                elif curl --version &> /dev/null; then
+                    curl -L -o master.tar.gz https://github.com/Iotistica/iotistic/archive/refs/heads/master.tar.gz || DOWNLOAD_FAILED=1
+                else
+                    echo "Error: Neither wget nor curl is available"
+                    exit 1
+                fi
+                
+                if [ "$DOWNLOAD_FAILED" = "1" ]; then
                     echo "Error: Failed to download agent from GitHub"
+                    echo "Please check your internet connection and try again"
+                    exit 1
+                fi
+                
+                echo "Extracting agent code..."
+                tar -xzf master.tar.gz || {
+                    echo "Error: Failed to extract tarball"
                     exit 1
                 }
-                tar -xzf master.tar.gz
-                cp -r iotistic-master/agent/* /opt/iotistic/agent/
+                
+                cp -r iotistic-master/agent/* /opt/iotistic/agent/ || {
+                    echo "Error: Failed to copy agent files"
+                    exit 1
+                }
+                
                 rm -rf iotistic-master master.tar.gz
                 echo "✓ Agent downloaded and copied"
             fi
