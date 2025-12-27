@@ -208,7 +208,10 @@ echo ""
         usermod -aG docker iotistic
         echo "✓ User created and added to docker group"
     else
+        echo ""
         echo "✓ User iotistic already exists"
+        # Ensure user is in docker group even if already exists
+        usermod -aG docker iotistic 2>/dev/null || true
     fi
 
     # Create directories
