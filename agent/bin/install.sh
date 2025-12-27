@@ -17,6 +17,7 @@ SCRIPT_VERSION="AGENT_VERSION_PLACEHOLDER"
 echo "=================================="
 echo "Iotistic Agent Installer"
 echo "Version: $SCRIPT_VERSION"
+echo "Build: 2025-12-27-systemd-fix"
 echo "=================================="
 echo ""
 
