@@ -414,15 +414,21 @@ echo ""
             exit 1
         fi
         
-        # Rebuild native modules for target architecture
-        echo ""
-        echo "Rebuilding native modules for $(uname -m) architecture..."
-        chown -R iotistic:iotistic /opt/iotistic/agent
-        su - iotistic -c "cd /opt/iotistic/agent && npm rebuild" || {
-            echo "✗ Warning: Native module rebuild failed, trying as root..."
-            npm rebuild
-        }
-        echo "✓ Native modules rebuilt"
+        # Rebuild native modules only on ARM (Raspberry Pi)
+        ARCH=$(uname -m)
+        if [[ "$ARCH" == "aarch64" || "$ARCH" == "armv7l" || "$ARCH" == "arm"* ]]; then
+            echo ""
+            echo "ARM architecture detected ($ARCH) - rebuilding native modules..."
+            chown -R iotistic:iotistic /opt/iotistic/agent
+            su - iotistic -c "cd /opt/iotistic/agent && npm rebuild" || {
+                echo "✗ Warning: Native module rebuild failed, trying as root..."
+                npm rebuild
+            }
+            echo "✓ Native modules rebuilt for ARM"
+        else
+            echo ""
+            echo "x86_64 architecture detected ($ARCH) - using pre-built binaries"
+        fi
         
         echo "✓ Pre-built agent verified"
     fi
