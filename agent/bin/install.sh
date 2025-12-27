@@ -210,7 +210,7 @@ echo ""
     else
         echo ""
         echo "✓ User iotistic already exists"
-        # Ensure user is in docker group even if already exists
+        # Ensure user is in docker group even if already existsgg
         usermod -aG docker iotistic 2>/dev/null || true
     fi
 
