@@ -66,7 +66,7 @@ export function AddEditDeviceDialog({
   });
 
   // Install command
-  const installCommand = `curl -sfL https://apps.iotistic.ca/agent/install | sh`;
+  const installCommand = `curl -sfL https://apps.iotistica.com/agent/install | sh`;
 
   // Load tag definitions
   const loadTagDefinitions = async () => {

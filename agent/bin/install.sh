@@ -4,7 +4,7 @@ set -e
 # Iotistic Agent - Unified Installation Script
 # Version: AGENT_VERSION_PLACEHOLDER
 # This script installs the Iotistic agent using either Docker or Systemd
-# Usage: curl -sfL https://apps.iotistic.ca/agent/install | sh
+# Usage: curl -sfL https://apps.iotistica.com/agent/install | sh
 #
 # Environment Variables (CI/Non-interactive mode):
 #   IOTISTIC_INSTALL_METHOD       - Installation method: 'docker' or 'systemd' (auto-detect if not set)
