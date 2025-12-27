@@ -244,24 +244,47 @@ jobs:
           docker run --rm --platform linux/arm64 arm64v8/alpine uname -m
           echo "✓ QEMU ARM64 emulation working"
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: agent/package-lock.json
+
+      - name: Cache ARM64 node_modules
+        id: cache-arm64-modules
+        uses: actions/cache@v4
+        with:
+          path: agent/node_modules
+          key: ${{ runner.os }}-arm64-node-modules-${{ hashFiles('agent/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-arm64-node-modules-
+
       - name: Build agent (ARM64)
         run: |
           echo "Building agent for ARM64..."
           cd agent
           
-          # Install dependencies and build (architecture-neutral)
-          npm ci --legacy-peer-deps
-          npm run build
+          if [ "${{ steps.cache-arm64-modules.outputs.cache-hit }}" == "true" ]; then
+            # Using cached ARM64 node_modules - skip npm ci
+            echo "✓ Using cached ARM64 node_modules"
+            npm run build
+          else
+            # No cache - fresh build
+            echo "No cache - building from scratch"
+            npm ci --legacy-peer-deps
+            npm run build
+            
+            # Rebuild sqlite3 for ARM64 using Docker with QEMU
+            echo "Rebuilding native modules for ARM64..."
+            docker run --rm -v "$(pwd)":/app -w /app --platform linux/arm64 \
+              node:20-slim bash -c "
+                apt-get update && apt-get install -y build-essential python3 libsqlite3-dev
+                npm rebuild sqlite3 --build-from-source
+              "
+          fi
           
           mkdir -p /tmp/iotistic-artifacts
-          
-          # Rebuild sqlite3 for ARM64 using Docker with QEMU
-          echo "Rebuilding native modules for ARM64..."
-          docker run --rm -v "$(pwd)":/app -w /app --platform linux/arm64 \
-            node:20-slim bash -c "
-              apt-get update && apt-get install -y build-essential python3 libsqlite3-dev
-              npm rebuild sqlite3 --build-from-source
-            "
           
           # Create ARM64 tarball
           echo "Creating ARM64 tarball..."
@@ -595,93 +618,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✓ Unified installation script uploaded with SHA256 checksum" >> $GITHUB_STEP_SUMMARY
 
-  report:
-    name: Generate Reports
-    needs: [version,  test-agent-systemd, upload-install-scripts]
-    runs-on: [iotistic-lab-sc]
-    if: success() && needs.version.outputs.package_version != ''
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Generate changelog
-        id: changelog
-        run: |
-          # Get the previous tag
-          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          
-          if [ -z "$PREV_TAG" ]; then
-            echo "No previous tag found, using all commits"
-            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges)
-          else
-            echo "Generating changelog from $PREV_TAG to HEAD"
-            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
-          fi
-          
-          # Save to file
-          echo "$COMMITS" > changelog.txt
-          
-          # Save first 20 lines for summary
-          echo "$COMMITS" | head -20 > changelog_summary.txt
-
-      - name: Get Docker image size
-        id: image_size
-        run: |
-          # Login to Docker Hub to pull the image
-          echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-          
-          # Pull the image
-          docker pull iotistic/agent:${{ needs.version.outputs.package_version }}
-          
-          # Get image size
-          SIZE_BYTES=$(docker image inspect iotistic/agent:${{ needs.version.outputs.package_version }} --format='{{.Size}}')
-          SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
-          
-          echo "size_mb=$SIZE_MB" >> $GITHUB_OUTPUT
-          echo "size_bytes=$SIZE_BYTES" >> $GITHUB_OUTPUT
-          
-          # Get layer count
-          LAYERS=$(docker image inspect iotistic/agent:${{ needs.version.outputs.package_version }} --format='{{len .RootFS.Layers}}')
-          echo "layers=$LAYERS" >> $GITHUB_OUTPUT
-
-      - name: Generate Summary Report
-        run: |
-          echo "# Build & Release Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "## Version Information" >> $GITHUB_STEP_SUMMARY
-          echo "**$Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Platform:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "## Docker Image" >> $GITHUB_STEP_SUMMARY
-          echo "**Size:** ${{ steps.image_size.outputs.size_mb }} MB" >> $GITHUB_STEP_SUMMARY
-          echo "**Layers:** ${{ steps.image_size.outputs.layers }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/agent:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/agent:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/agent:${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "## Changelog" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          cat changelog_summary.txt >> $GITHUB_STEP_SUMMARY
-          
-          TOTAL_COMMITS=$(wc -l < changelog.txt)
-          SHOWN_COMMITS=$(wc -l < changelog_summary.txt)
-          if [ $TOTAL_COMMITS -gt $SHOWN_COMMITS ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "_...and $((TOTAL_COMMITS - SHOWN_COMMITS)) more commits_" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "## Workflow Status" >> $GITHUB_STEP_SUMMARY
-          echo "All jobs completed successfully! 🎉" >> $GITHUB_STEP_SUMMARY
 
   upload-tarballs:
     name: Upload Agent Tarballs to Azure
@@ -873,6 +810,68 @@ jobs:
           echo "- [agent-latest.tar.gz](https://apps.iotistica.com/agent/agent-latest.tar.gz) - [checksum](https://apps.iotistica.com/agent/agent-latest.tar.gz.sha256)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Note:** Install script auto-detects architecture and downloads the appropriate tarball." >> $GITHUB_STEP_SUMMARY
+
+  report:
+    name: Generate Changelog
+    needs: [version, upload-install-scripts, upload-tarballs]
+    runs-on: [iotistic-lab-sc]
+    if: success() && needs.version.outputs.package_version != ''
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag found, using all commits"
+            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges)
+          else
+            echo "Generating changelog from $PREV_TAG to HEAD"
+            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          fi
+          
+          # Save to file
+          echo "$COMMITS" > changelog.txt
+          
+          # Save first 20 lines for summary
+          echo "$COMMITS" | head -20 > changelog_summary.txt
+
+      - name: Generate Summary Report
+        run: |
+          echo "# Build & Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Version Information" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Agent Tarballs" >> $GITHUB_STEP_SUMMARY
+          echo "- **x86_64:** [agent-latest-x86_64.tar.gz](https://apps.iotistica.com/agent/agent-latest-x86_64.tar.gz)" >> $GITHUB_STEP_SUMMARY
+          echo "- **ARM64:** [agent-latest-arm64.tar.gz](https://apps.iotistica.com/agent/agent-latest-arm64.tar.gz)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Changelog" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          cat changelog_summary.txt >> $GITHUB_STEP_SUMMARY
+          
+          TOTAL_COMMITS=$(wc -l < changelog.txt)
+          SHOWN_COMMITS=$(wc -l < changelog_summary.txt)
+          if [ $TOTAL_COMMITS -gt $SHOWN_COMMITS ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_...and $((TOTAL_COMMITS - SHOWN_COMMITS)) more commits_" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Workflow Status" >> $GITHUB_STEP_SUMMARY
+          echo "All jobs completed successfully! 🎉" >> $GITHUB_STEP_SUMMARY
 
   trigger-integration-tests:
     name: Trigger Integration Tests
