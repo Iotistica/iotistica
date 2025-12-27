@@ -350,9 +350,6 @@ echo ""
             exit 1
         }
         
-        # Debug: Show extracted contents
-        echo "Extracted contents:"
-        ls -la iotistic-agent-download/
         
         # Clean up ALL existing installation files to ensure fresh install
         echo "Cleaning up existing installation files..."
@@ -367,9 +364,6 @@ echo ""
             exit 1
         }
         
-        # Debug: Show installed contents
-        echo "Installed contents:"
-        ls -la /opt/iotistic/agent/
         
         # Cleanup
         rm -rf iotistic-agent-download agent.tar.gz
