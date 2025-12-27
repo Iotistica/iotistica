@@ -442,13 +442,7 @@ jobs:
         run: |
           az storage blob upload \
             --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --contaArtifacts Uploaded" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Agent Tarball" >> $GITHUB_STEP_SUMMARY
-          echo "- [agent-latest.tar.gz](https://apps.iotistica.com/agent/agent-latest.tar.gz) ([checksum](https://apps.iotistica.com/agent/agent-latest.tar.gz.sha256))" >> $GITHUB_STEP_SUMMARY
-          echo "- [agent-${{ needs.version.outputs.package_version }}.tar.gz](https://apps.iotistica.com/agent/versions/agent-${{ needs.version.outputs.package_version }}.tar.gz) ([checksum](https://apps.iotistica.com/agent/versions/agent-${{ needs.version.outputs.package_version }}.tar.gz.sha256))" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## iner-name scripts \
+            --container-name scripts \
             --name agent/agent-latest.tar.gz \
             --file /tmp/iotistic-artifacts/agent-latest.tar.gz \
             --overwrite true \
@@ -499,6 +493,12 @@ jobs:
       - name: Generate upload summary
         run: |
           echo "# Installation Script Uploaded (Unified)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Artifacts Uploaded" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Agent Tarball" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-latest.tar.gz](https://apps.iotistica.com/agent/agent-latest.tar.gz) - [checksum](https://apps.iotistica.com/agent/agent-latest.tar.gz.sha256)" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-${{ needs.version.outputs.package_version }}.tar.gz](https://apps.iotistica.com/agent/versions/agent-${{ needs.version.outputs.package_version }}.tar.gz) - [checksum](https://apps.iotistica.com/agent/versions/agent-${{ needs.version.outputs.package_version }}.tar.gz.sha256)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Quick Install (Recommended)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
