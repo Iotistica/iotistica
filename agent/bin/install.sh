@@ -345,11 +345,12 @@ echo ""
         echo "Extracted contents:"
         ls -la iotistic-agent-download/
         
-        # Remove existing node_modules to prevent corruption from persisting
-        if [ -d /opt/iotistic/agent/node_modules ]; then
-            echo "Removing existing node_modules..."
-            rm -rf /opt/iotistic/agent/node_modules
-        fi
+        # Clean up ALL existing installation files to ensure fresh install
+        echo "Cleaning up existing installation files..."
+        rm -rf /opt/iotistic/agent/node_modules
+        rm -f /opt/iotistic/agent/package-lock.json
+        rm -f /opt/iotistic/agent/package.json
+        echo "✓ Cleanup complete"
         
         # Copy extracted files to installation directory
         cp -r iotistic-agent-download/* /opt/iotistic/agent/ || {
