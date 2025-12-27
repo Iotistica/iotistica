@@ -369,8 +369,10 @@ jobs:
             package.json \
             package-lock.json \
             node_modules/ \
-            bin/ \
-            src/db/migrations/
+            bin/
+          
+          # Note: dist/ already contains migrations from npm run build (which runs copy:migrations)
+          # So we don't need to include src/db/migrations/ separately
           
           # Also create a 'latest' version
           cp /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}.tar.gz \
