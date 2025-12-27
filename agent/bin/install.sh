@@ -574,6 +574,30 @@ EOFJOURNALD
     fi
     echo "✓ Configuration file permissions verified (600)"
 
+    # Debug: Show service file contents
+    echo ""
+    echo "[DEBUG] Systemd service file contents:"
+    echo "========================================"
+    cat /etc/systemd/system/iotistic-agent.service
+    echo "========================================"
+    
+    # Debug: Verify dist directory exists
+    echo ""
+    echo "[DEBUG] Checking dist directory:"
+    if [ -d /opt/iotistic/agent/dist ]; then
+        echo "✓ dist/ exists"
+        ls -la /opt/iotistic/agent/dist/
+        if [ -f /opt/iotistic/agent/dist/src/app.js ]; then
+            echo "✓ dist/src/app.js exists"
+        else
+            echo "✗ dist/src/app.js NOT FOUND"
+            echo "Available .js files:"
+            find /opt/iotistic/agent/dist -name "*.js" | head -20
+        fi
+    else
+        echo "✗ dist/ directory NOT FOUND"
+    fi
+    
     # Start service
     systemctl daemon-reload
     echo ""
