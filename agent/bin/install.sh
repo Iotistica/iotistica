@@ -7,7 +7,6 @@ set -e
 # Usage: curl -sfL https://apps.iotistica.com/agent/install | sh
 #
 # Environment Variables (CI/Non-interactive mode):
-#   IOTISTIC_INSTALL_METHOD       - Installation method: 'docker' or 'systemd' (auto-detect if not set)
 #   IOTISTIC_AGENT_VERSION        - Agent version to install (default: latest for Docker, dev for Systemd)
 #   IOTISTIC_DEVICE_PORT          - Device API port (default: 48484)
 #   IOTISTIC_CLOUD_API_ENDPOINT   - Cloud API endpoint (e.g., https://api.iotistic.ca)
@@ -129,13 +128,26 @@ echo ""
     # Remove foreign architectures that may cause conflicts
     if [ "$ARCH_NAME" = "arm64" ]; then
         echo "Cleaning up multiarch configuration for arm64..."
-        dpkg --remove-architecture armhf 2>/dev/null || true
+        # Remove armhf architecture if present
+        if dpkg --print-foreign-architectures | grep -q armhf; then
+            # First try to remove conflicting packages
+            apt-get remove --purge -y '*:armhf' 2>/dev/null || true
+            dpkg --remove-architecture armhf 2>/dev/null || true
+        fi
         dpkg --remove-architecture i386 2>/dev/null || true
     elif [ "$ARCH_NAME" = "armhf" ]; then
         echo "Cleaning up multiarch configuration for armhf..."
-        dpkg --remove-architecture arm64 2>/dev/null || true
+        if dpkg --print-foreign-architectures | grep -q arm64; then
+            apt-get remove --purge -y '*:arm64' 2>/dev/null || true
+            dpkg --remove-architecture arm64 2>/dev/null || true
+        fi
         dpkg --remove-architecture i386 2>/dev/null || true
     fi
+    
+    # Clean up package cache and fix broken dependencies
+    apt-get clean
+    apt-get autoclean
+    dpkg --configure -a 2>/dev/null || true
     
     # Update package lists
     apt-get update || {
@@ -168,15 +180,24 @@ echo ""
     echo ""
     install_docker_if_needed "yes"
 
-    # Install Node.js 20
-    if ! command -v node &> /dev/null || [ "$(node -v | cut -d'v' -f2 | cut -d'.' -f1)" -lt 20 ]; then
+    # Install Node.js 20 (or accept existing Node 18+)
+    if ! command -v node &> /dev/null; then
         echo ""
         echo "Installing Node.js 20..."
         curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
         apt-get install -y nodejs
         echo "✓ Node.js installed successfully"
     else
-        echo "✓ Node.js is already installed ($(node --version))"
+        NODE_MAJOR_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
+        if [ "$NODE_MAJOR_VERSION" -lt 18 ]; then
+            echo ""
+            echo "Upgrading Node.js to version 20..."
+            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+            apt-get install -y nodejs
+            echo "✓ Node.js upgraded successfully"
+        else
+            echo "✓ Node.js is already installed ($(node --version)) - version 18+ is compatible"
+        fi
     fi
 
     # Create iotistic user
@@ -226,16 +247,31 @@ echo ""
             
             echo "✓ Repository code copied to /opt/iotistic/agent"
         else
-            echo "No local repository found, cloning agent from GitHub..."
+            echo "No local repository found, downloading agent from GitHub..."
             cd /tmp
-            rm -rf iotistic-clone-temp
-            git clone --depth 1 --filter=blob:none --sparse https://github.com/Iotistica/iotistic.git iotistic-clone-temp
-            cd iotistic-clone-temp
-            git sparse-checkout set agent
-            cd ..
-            cp -r iotistic-clone-temp/agent/* /opt/iotistic/agent/
-            rm -rf iotistic-clone-temp
-            echo "✓ Agent cloned and copied"
+            rm -rf iotistic-clone-temp iotistic-agent-temp
+            
+            # Try git clone first (faster with sparse checkout)
+            if GIT_TERMINAL_PROMPT=0 git clone --depth 1 --filter=blob:none --sparse https://github.com/Iotistica/iotistic.git iotistic-clone-temp 2>/dev/null; then
+                echo "Cloning repository..."
+                cd iotistic-clone-temp
+                git sparse-checkout set agent 2>/dev/null || true
+                cd ..
+                cp -r iotistic-clone-temp/agent/* /opt/iotistic/agent/
+                rm -rf iotistic-clone-temp
+                echo "✓ Agent cloned and copied"
+            else
+                # Fallback to tarball download (works without git credentials)
+                echo "Git clone failed, downloading tarball instead..."
+                wget -q https://github.com/Iotistica/iotistic/archive/refs/heads/master.tar.gz -O master.tar.gz || {
+                    echo "Error: Failed to download agent from GitHub"
+                    exit 1
+                }
+                tar -xzf master.tar.gz
+                cp -r iotistic-master/agent/* /opt/iotistic/agent/
+                rm -rf iotistic-master master.tar.gz
+                echo "✓ Agent downloaded and copied"
+            fi
         fi
     else
         # Interactive mode
