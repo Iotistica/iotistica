@@ -235,13 +235,10 @@ echo ""
         # No CI and no env vars set = assume interactive mode
         echo "Running in interactive mode"
         
-        # Redirect input from /dev/tty to allow prompts even when piped
-        exec < /dev/tty
-        
-        # Prompt for configuration
-        read -p "Enter cloud API endpoint (leave empty for local mode): " CLOUD_API_ENDPOINT
-        read -p "Enter provisioning API key (leave empty for local mode): " PROVISIONING_KEY
-        read -p "Enter device API port [48484]: " DEVICE_API_PORT
+        # Prompt for configuration (read directly from /dev/tty to work when piped)
+        read -p "Enter cloud API endpoint (leave empty for local mode): " CLOUD_API_ENDPOINT < /dev/tty
+        read -p "Enter provisioning API key (leave empty for local mode): " PROVISIONING_KEY < /dev/tty
+        read -p "Enter device API port [48484]: " DEVICE_API_PORT < /dev/tty
         DEVICE_API_PORT=${DEVICE_API_PORT:-48484}
         AGENT_VERSION="dev"
     else
