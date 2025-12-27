@@ -115,7 +115,7 @@ echo ""
     echo ""
 
     # Check if systemd is available
-    if ! command -v systemctl &> /dev/null; then
+    if ! command -v systemctl &> /dev/null && ! [ -x /usr/bin/systemctl ] && ! [ -x /bin/systemctl ]; then
         echo "Error: systemd is not available on this system"
         echo "Please use the Docker installation method instead"
         exit 1
