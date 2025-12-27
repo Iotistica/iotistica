@@ -194,9 +194,14 @@ jobs:
           
           mkdir -p /tmp/iotistic-artifacts
           
-          # Create x86_64 tarball
+          # Create x86_64 tarball (exclude source files, only include dist)
           echo "Creating x86_64 tarball..."
           tar -czf /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
+            --exclude='src' \
+            --exclude='cli' \
+            --exclude='test' \
+            --exclude='*.ts' \
+            --exclude='tsconfig*.json' \
             dist/ \
             package.json \
             package-lock.json \
@@ -286,9 +291,14 @@ jobs:
           
           mkdir -p /tmp/iotistic-artifacts
           
-          # Create ARM64 tarball
+          # Create ARM64 tarball (exclude source files, only include dist)
           echo "Creating ARM64 tarball..."
           tar -czf /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
+            --exclude='src' \
+            --exclude='cli' \
+            --exclude='test' \
+            --exclude='*.ts' \
+            --exclude='tsconfig*.json' \
             dist/ \
             package.json \
             package-lock.json \
