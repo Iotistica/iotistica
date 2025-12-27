@@ -342,6 +342,12 @@ echo ""
         echo "Extracted contents:"
         ls -la iotistic-agent-download/
         
+        # Remove existing node_modules to prevent corruption from persisting
+        if [ -d /opt/iotistic/agent/node_modules ]; then
+            echo "Removing existing node_modules..."
+            rm -rf /opt/iotistic/agent/node_modules
+        fi
+        
         # Copy extracted files to installation directory
         cp -r iotistic-agent-download/* /opt/iotistic/agent/ || {
             echo "Error: Failed to copy agent files"
