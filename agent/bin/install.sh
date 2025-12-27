@@ -318,11 +318,19 @@ echo ""
             exit 1
         }
         
+        # Debug: Show extracted contents
+        echo "Extracted contents:"
+        ls -la iotistic-agent-download/
+        
         # Copy extracted files to installation directory
         cp -r iotistic-agent-download/* /opt/iotistic/agent/ || {
             echo "Error: Failed to copy agent files"
             exit 1
         }
+        
+        # Debug: Show installed contents
+        echo "Installed contents:"
+        ls -la /opt/iotistic/agent/
         
         # Cleanup
         rm -rf iotistic-agent-download agent.tar.gz
