@@ -4,13 +4,18 @@ set -e
 # Iotistic Agent - Unified Installation Script
 # Version: AGENT_VERSION_PLACEHOLDER
 # This script installs the Iotistic agent using either Docker or Systemd
-# Usage: curl -sfL https://apps.iotistica.com/agent/install | sh
+# Usage: curl -sfL https://apps.iotistica.com/agent/install | bash
 #
 # Environment Variables (CI/Non-interactive mode):
 #   IOTISTIC_AGENT_VERSION        - Agent version to install (default: latest for Docker, dev for Systemd)
 #   IOTISTIC_DEVICE_PORT          - Device API port (default: 48484)
 #   IOTISTIC_CLOUD_API_ENDPOINT   - Cloud API endpoint (e.g., https://api.iotistic.ca)
 #   IOTISTIC_PROVISIONING_KEY     - Provisioning API key (leave empty for local mode)
+
+# Re-exec with bash if running under sh
+if [ -z "$BASH_VERSION" ]; then
+    exec bash "$0" "$@"
+fi
 
 SCRIPT_VERSION="AGENT_VERSION_PLACEHOLDER"
 
