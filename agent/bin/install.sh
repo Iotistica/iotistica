@@ -297,16 +297,33 @@ echo ""
         # Download pre-built agent from Azure Blob Storage
         echo "Downloading agent from distribution server..."
         
+        # Detect architecture for platform-specific tarball
+        DETECTED_ARCH=$(uname -m)
+        case "$DETECTED_ARCH" in
+            aarch64|arm64)
+                TARBALL_SUFFIX="-arm64"
+                echo "Detected ARM64 architecture - will download ARM-optimized tarball"
+                ;;
+            x86_64|amd64)
+                TARBALL_SUFFIX="-x86_64"
+                echo "Detected x86_64 architecture"
+                ;;
+            *)
+                TARBALL_SUFFIX=""
+                echo "Unknown architecture ($DETECTED_ARCH) - using generic tarball"
+                ;;
+        esac
+        
         # Determine download URL
         if [ -n "$IOTISTIC_DOWNLOAD_URL" ]; then
             # Custom URL provided
             DOWNLOAD_URL="$IOTISTIC_DOWNLOAD_URL"
         elif [ "$AGENT_VERSION" = "dev" ] || [ "$AGENT_VERSION" = "latest" ]; then
-            # Use latest version
-            DOWNLOAD_URL="https://iotistic.blob.core.windows.net/scripts/agent/agent-latest.tar.gz"
+            # Use latest version with architecture suffix
+            DOWNLOAD_URL="https://iotistic.blob.core.windows.net/scripts/agent/agent-latest${TARBALL_SUFFIX}.tar.gz"
         else
-            # Use specific version
-            DOWNLOAD_URL="https://iotistic.blob.core.windows.net/scripts/agent/versions/agent-${AGENT_VERSION}.tar.gz"
+            # Use specific version with architecture suffix
+            DOWNLOAD_URL="https://iotistic.blob.core.windows.net/scripts/agent/versions/agent-${AGENT_VERSION}${TARBALL_SUFFIX}.tar.gz"
         fi
         
         cd /tmp
@@ -427,23 +444,7 @@ echo ""
             exit 1
         fi
         
-        # Rebuild native modules only on ARM (Raspberry Pi)
-        ARCH=$(uname -m)
-        if [[ "$ARCH" == "aarch64" || "$ARCH" == "armv7l" || "$ARCH" == "arm"* ]]; then
-            echo ""
-            echo "ARM architecture detected ($ARCH) - rebuilding native modules..."
-            chown -R iotistic:iotistic /opt/iotistic/agent
-            su - iotistic -c "cd /opt/iotistic/agent && npm rebuild sqlite3 --build-from-source" || {
-                echo "✗ Warning: Native module rebuild failed, trying as root..."
-                npm rebuild sqlite3 --build-from-source
-            }
-            echo "✓ Native modules rebuilt for ARM"
-        else
-            echo ""
-            echo "x86_64 architecture detected ($ARCH) - using pre-built binaries"
-        fi
-        
-        echo "✓ Pre-built agent verified"
+        echo "✓ Pre-built agent verified (architecture-specific native modules included)"
     fi
 
     # Install update script

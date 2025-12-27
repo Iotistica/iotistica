@@ -355,27 +355,50 @@ jobs:
 
       - name: Prepare agent tarball
         run: |
-          echo "Building agent tarball for distribution..."
+          echo "Building agent tarballs for multiple architectures..."
           cd agent
           
-          # Install dependencies and build
+          # Install dependencies and build (architecture-neutral)
           npm ci --legacy-peer-deps
           npm run build
           
-          # Create tarball with necessary files
           mkdir -p /tmp/iotistic-artifacts
-          tar -czf /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}.tar.gz \
+          
+          # Create x86_64 tarball (with pre-built native modules from npm ci)
+          echo "Creating x86_64 tarball..."
+          tar -czf /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
             dist/ \
             package.json \
             package-lock.json \
             node_modules/ \
             bin/
           
-          # Note: dist/ already contains migrations from npm run build (which runs copy:migrations)
-          # So we don't need to include src/db/migrations/ separately
+          # Create ARM64 tarball (rebuild sqlite3 for ARM in Docker)
+          echo "Creating ARM64 tarball with rebuilt native modules..."
+          docker run --rm -v "$(pwd)":/app -w /app --platform linux/arm64 \
+            node:20-slim bash -c "
+              apt-get update && apt-get install -y build-essential python3 libsqlite3-dev
+              npm rebuild sqlite3 --build-from-source
+            "
           
-          # Also create a 'latest' version
-          cp /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}.tar.gz \
+          tar -czf /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
+            dist/ \
+            package.json \
+            package-lock.json \
+            node_modules/ \
+            bin/
+          
+          # Restore x86_64 node_modules for subsequent steps
+          npm ci --legacy-peer-deps
+          
+          # Create universal 'latest' versions
+          cp /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
+             /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz
+          cp /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
+             /tmp/iotistic-artifacts/agent-latest-arm64.tar.gz
+          
+          # Also create generic 'latest' (x86_64 for backwards compatibility)
+          cp /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz \
              /tmp/iotistic-artifacts/agent-latest.tar.gz
           
           echo "✓ Created agent tarballs:"
