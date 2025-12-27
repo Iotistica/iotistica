@@ -87,96 +87,96 @@ jobs:
           git commit -m "chore: bump agent version to ${{ steps.bump.outputs.package_version }} [skip ci]"
           git push origin HEAD
 
-  buildx:
-    name: Build & Push to Docker
-    needs: version
-    runs-on: [iotistic-lab-sc]
-    permissions:
-      contents: write
+  # buildx:
+  #   name: Build & Push to Docker
+  #   needs: version
+  #   runs-on: [iotistic-lab-sc]
+  #   permissions:
+  #     contents: write
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: master
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v4
+  #       with:
+  #         ref: master
 
-      - name: Display Version Update
-        run: |
-          echo "## Building Version ${{ needs.version.outputs.package_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Platforms:** \`linux/amd64, linux/arm/v7\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Docker Images:" >> $GITHUB_STEP_SUMMARY
-          echo "- [\`iotistic/agent:latest\`](https://hub.docker.com/r/iotistic/agent/tags?name=latest)" >> $GITHUB_STEP_SUMMARY
-          echo "- [\`iotistic/agent:${{ needs.version.outputs.sha_short }}\`](https://hub.docker.com/r/iotistic/agent/tags?name=${{ needs.version.outputs.sha_short }})" >> $GITHUB_STEP_SUMMARY
-          echo "- [\`iotistic/agent:${{ needs.version.outputs.package_version }}\`](https://hub.docker.com/r/iotistic/agent/tags?name=${{ needs.version.outputs.package_version }})" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Installation Scripts:" >> $GITHUB_STEP_SUMMARY
-          echo "- [install-docker.sh](https://apps.iotistic.ca/agent/install-docker.sh) ([checksum](https://apps.iotistic.ca/agent/install-docker.sh.sha256))" >> $GITHUB_STEP_SUMMARY
-          echo "- [install-systemd.sh](https://apps.iotistic.ca/agent/install-systemd.sh) ([checksum](https://apps.iotistic.ca/agent/install-systemd.sh.sha256))" >> $GITHUB_STEP_SUMMARY
-          echo "- [install-docker-${{ needs.version.outputs.package_version }}.sh](https://apps.iotistic.ca/agent/versions/install-docker-${{ needs.version.outputs.package_version }}.sh) ([checksum](https://apps.iotistic.ca/agent/versions/install-docker-${{ needs.version.outputs.package_version }}.sh.sha256))" >> $GITHUB_STEP_SUMMARY
-          echo "- [install-systemd-${{ needs.version.outputs.package_version }}.sh](https://apps.iotistic.ca/agent/versions/install-systemd-${{ needs.version.outputs.package_version }}.sh) ([checksum](https://apps.iotistic.ca/agent/versions/install-systemd-${{ needs.version.outputs.package_version }}.sh.sha256))" >> $GITHUB_STEP_SUMMARY
+  #     - name: Display Version Update
+  #       run: |
+  #         echo "## Building Version ${{ needs.version.outputs.package_version }}" >> $GITHUB_STEP_SUMMARY
+  #         echo "" >> $GITHUB_STEP_SUMMARY
+  #         echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
+  #         echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+  #         echo "**Platforms:** \`linux/amd64, linux/arm/v7\`" >> $GITHUB_STEP_SUMMARY
+  #         echo "" >> $GITHUB_STEP_SUMMARY
+  #         echo "### Docker Images:" >> $GITHUB_STEP_SUMMARY
+  #         echo "- [\`iotistic/agent:latest\`](https://hub.docker.com/r/iotistic/agent/tags?name=latest)" >> $GITHUB_STEP_SUMMARY
+  #         echo "- [\`iotistic/agent:${{ needs.version.outputs.sha_short }}\`](https://hub.docker.com/r/iotistic/agent/tags?name=${{ needs.version.outputs.sha_short }})" >> $GITHUB_STEP_SUMMARY
+  #         echo "- [\`iotistic/agent:${{ needs.version.outputs.package_version }}\`](https://hub.docker.com/r/iotistic/agent/tags?name=${{ needs.version.outputs.package_version }})" >> $GITHUB_STEP_SUMMARY
+  #         echo "" >> $GITHUB_STEP_SUMMARY
+  #         echo "### Installation Scripts:" >> $GITHUB_STEP_SUMMARY
+  #         echo "- [install-docker.sh](https://apps.iotistic.ca/agent/install-docker.sh) ([checksum](https://apps.iotistic.ca/agent/install-docker.sh.sha256))" >> $GITHUB_STEP_SUMMARY
+  #         echo "- [install-systemd.sh](https://apps.iotistic.ca/agent/install-systemd.sh) ([checksum](https://apps.iotistic.ca/agent/install-systemd.sh.sha256))" >> $GITHUB_STEP_SUMMARY
+  #         echo "- [install-docker-${{ needs.version.outputs.package_version }}.sh](https://apps.iotistic.ca/agent/versions/install-docker-${{ needs.version.outputs.package_version }}.sh) ([checksum](https://apps.iotistic.ca/agent/versions/install-docker-${{ needs.version.outputs.package_version }}.sh.sha256))" >> $GITHUB_STEP_SUMMARY
+  #         echo "- [install-systemd-${{ needs.version.outputs.package_version }}.sh](https://apps.iotistic.ca/agent/versions/install-systemd-${{ needs.version.outputs.package_version }}.sh) ([checksum](https://apps.iotistic.ca/agent/versions/install-systemd-${{ needs.version.outputs.package_version }}.sh.sha256))" >> $GITHUB_STEP_SUMMARY
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+  #     - name: Set up QEMU
+  #       uses: docker/setup-qemu-action@v3
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: |
-            image=moby/buildkit:buildx-stable-1
-            network=host
+  #     - name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v3
+  #       with:
+  #         driver-opts: |
+  #           image=moby/buildkit:buildx-stable-1
+  #           network=host
 
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-agent-${{ hashFiles('agent/package-lock.json', 'agent/Dockerfile') }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-agent-
+  #     - name: Cache Docker layers
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: /tmp/.buildx-cache
+  #         key: ${{ runner.os }}-buildx-agent-${{ hashFiles('agent/package-lock.json', 'agent/Dockerfile') }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-buildx-agent-
 
-      # Login to Docker Hub (only if tests passed)
-      - name: Login to Docker Hub
-        if: success()
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+  #     # Login to Docker Hub (only if tests passed)
+  #     - name: Login to Docker Hub
+  #       if: success()
+  #       uses: docker/login-action@v3
+  #       with:
+  #         username: ${{ secrets.DOCKERHUB_USERNAME }}
+  #         password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      # Build and push to registry1
-      - name: Build & Push final image
-        id: docker_build
-        if: success()
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./agent/Dockerfile
-          push: true
+  #     # Build and push to registry1
+  #     - name: Build & Push final image
+  #       id: docker_build
+  #       if: success()
+  #       uses: docker/build-push-action@v5
+  #       with:
+  #         context: .
+  #         file: ./agent/Dockerfile
+  #         push: true
           
-          platforms: linux/amd64 
-          cache-from: |
-            type=local,src=/tmp/.buildx-cache
-            type=registry,ref=iotistic/agent:buildcache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-          tags: |
-            iotistic/agent:latest
-            iotistic/agent:${{ needs.version.outputs.sha_short }}
-            iotistic/agent:${{ needs.version.outputs.package_version }}
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
+  #         platforms: linux/amd64 
+  #         cache-from: |
+  #           type=local,src=/tmp/.buildx-cache
+  #           type=registry,ref=iotistic/agent:buildcache
+  #         cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+  #         tags: |
+  #           iotistic/agent:latest
+  #           iotistic/agent:${{ needs.version.outputs.sha_short }}
+  #           iotistic/agent:${{ needs.version.outputs.package_version }}
+  #         build-args: |
+  #           BUILDKIT_INLINE_CACHE=1
 
-      # Move cache to prevent unlimited growthe
-      - name: Move cache
-        if: always()
-        run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+  #     # Move cache to prevent unlimited growthe
+  #     - name: Move cache
+  #       if: always()
+  #       run: |
+  #         rm -rf /tmp/.buildx-cache
+  #         mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
 
   test-agent-systemd:
     name: Test Systemd Installation (via install.sh)
-    needs: [version, buildx]
+    needs: [version]
     runs-on: [iotistic-lab-sc]
     
     steps:
@@ -301,7 +301,7 @@ jobs:
 
   upload-install-scripts:
     name: Upload Installation Scripts
-    needs: [version, buildx,  test-agent-systemd]
+    needs: [version,  test-agent-systemd]
     runs-on: [iotistic-lab-sc]
     if: success()
     
@@ -568,7 +568,7 @@ jobs:
 
   report:
     name: Generate Reports
-    needs: [version, buildx,  test-agent-systemd, upload-install-scripts]
+    needs: [version,  test-agent-systemd, upload-install-scripts]
     runs-on: [iotistic-lab-sc]
     if: success() && needs.version.outputs.package_version != ''
     
@@ -656,7 +656,7 @@ jobs:
 
   trigger-integration-tests:
     name: Trigger Integration Tests
-    needs: [version, buildx,  test-agent-systemd, upload-install-scripts]
+    needs: [version,  test-agent-systemd, upload-install-scripts]
     runs-on: [iotistic-lab-sc]
     permissions:
       actions: write
