@@ -177,7 +177,7 @@ jobs:
   build-x86:
     name: Build x86_64 Tarball
     needs: [version]
-    runs-on: [iotistic-lab-sc]
+    runs-on: ubuntu-latest
     
     steps:
       - name: Checkout repository
@@ -445,10 +445,10 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Agent running with systemd validated successfully!" >> $GITHUB_STEP_SUMMARY
 
-  upload-install-scripts:
-    name: Upload Installation Scripts
-    needs: [version, test-agent-systemd]
-    runs-on: [iotistic-lab-sc]
+  upload-artifacts:
+    name: Upload Scripts & Tarballs to Azure
+    needs: [version, test-agent-systemd, build-x86, build-arm64]
+    runs-on: ubuntu-latest
     if: success()
     
     steps:
@@ -620,13 +620,6 @@ jobs:
 
 
 
-  upload-tarballs:
-    name: Upload Agent Tarballs to Azure
-    needs: [version, build-x86, build-arm64]
-    runs-on: [iotistic-lab-sc]
-    if: success()
-    
-    steps:
       - name: Download x86_64 artifacts
         uses: actions/download-artifact@v4
         with:
@@ -813,8 +806,8 @@ jobs:
 
   report:
     name: Generate Changelog
-    needs: [version, upload-install-scripts, upload-tarballs]
-    runs-on: [iotistic-lab-sc]
+    needs: [version, upload-artifacts]
+    runs-on: ubuntu-latest
     if: success() && needs.version.outputs.package_version != ''
     
     steps:
