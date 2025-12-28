@@ -1,6 +1,6 @@
 import * as net from 'net';
 import { EventEmitter } from 'events';
-import { createJsonPayload, createMsgpackPayload, serializePayload, logCompressionStats } from '../../mqtt/manager.js';
+import { createJsonPayload, createMsgpackPayload, serializePayload, logCompressionStats, MqttManager } from '../../mqtt/manager.js';
 import type { AnomalyDetectionService } from '../../ai/anomaly/index.js';
 import {
   SensorConfig,
@@ -733,22 +733,40 @@ export class Sensor extends EventEmitter {
     }
     
     try {
-      // Use msgId for HA deduplication
-      const msgIdGen = this.mqttConnection.getMessageIdGenerator?.();
+      // Check if dictionary compaction is enabled (takes precedence over msgpack)
+      // MqttConnection is actually MqttManager instance with dictionary support
+      const mqttManager = this.mqttConnection as any as MqttManager;
+      const dictionaryManager = mqttManager.getDictionaryManager?.();
       
-      // POC: Use msgpack if enabled, otherwise JSON
-      const mqttPayload = USE_MSGPACK_POC 
-        ? createMsgpackPayload(data, msgIdGen)
-        : createJsonPayload(data, msgIdGen);
+      // Debug: Check if dictionary manager is available
+      const useCompaction = process.env.USE_KEY_COMPACTION_POC === 'true';
+      this.logger?.info(
+        `Dictionary compaction check: enabled=${useCompaction}, manager=${dictionaryManager ? 'available' : 'missing'}`
+      );
       
-      // Log compression stats for POC
-      if (USE_MSGPACK_POC) {
-        logCompressionStats(data, 'msgpack', this.logger, topic);
+      if (dictionaryManager && useCompaction) {
+        // Use dictionary compaction (handles publishing internally)
+        const endpoint = this.config.mqttTopic; // e.g., "modbus", "opcua"
+        await dictionaryManager.compactAndPublish(data, endpoint);
+      } else {
+        // Fallback to msgpack or JSON
+        // Use msgId for HA deduplication
+        const msgIdGen = this.mqttConnection.getMessageIdGenerator?.();
+        
+        // POC: Use msgpack if enabled, otherwise JSON
+        const mqttPayload = USE_MSGPACK_POC 
+          ? createMsgpackPayload(data, msgIdGen)
+          : createJsonPayload(data, msgIdGen);
+        
+        // Log compression stats for POC
+        if (USE_MSGPACK_POC) {
+          logCompressionStats(data, 'msgpack', this.logger, topic);
+        }
+        
+        const serialized = serializePayload(mqttPayload);
+        
+        await this.mqttConnection.publish(topic, serialized, { qos: 1 });
       }
-      
-      const serialized = serializePayload(mqttPayload);
-      
-      await this.mqttConnection.publish(topic, serialized, { qos: 1 });
       
       this.stats.messagesPublished += this.messageBatch.messages.length;
       this.stats.bytesPublished += this.messageBatch.totalBytes;

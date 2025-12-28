@@ -111,7 +111,7 @@ export const REVERSE_FIELD_MAP_V1: Record<string, string> = {
   ct: 'cpuTemp',
   cp: 'cpuPercent',
   mp: 'memoryPercent',
-  du: 'diskUsage',
+  dsk: 'diskUsage',
   up: 'uptime',
   
   sen: 'sensor',

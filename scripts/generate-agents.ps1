@@ -70,6 +70,7 @@ param(
     [string]$AnomalyDetectionEnabled = "true",
     [string]$FirewallEnabled = "false",
     [string]$UseMsgpackPoc = "true",
+    [string]$UseKeyCompactionPoc = "true",
     
     # Protocol Adapter Configuration
     [string]$EnableProtocolAdapters = "true",
@@ -396,6 +397,7 @@ $networkConfig
       - SIMULATION_CONFIG=$($simConfig.config)
       - SIMULATE_MEMORY_LEAK=$SimulateMemoryLeak
       - USE_MSGPACK_POC=$UseMsgpackPoc
+      - USE_KEY_COMPACTION_POC=$UseKeyCompactionPoc
 "@
     
     $services += $service

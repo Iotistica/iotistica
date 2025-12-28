@@ -8,14 +8,21 @@
  * 
  * Exports:
  * - MqttManager: Singleton MQTT connection manager
+ * - DictionaryManager: MQTT message key compaction with auto-discovery
  * 
  * Usage:
  * ```typescript
- * import { MqttManager } from './mqtt';
+ * import { MqttManager, DictionaryManager } from './mqtt';
  * 
  * const mqttManager = MqttManager.getInstance();
  * await mqttManager.publish(topic, payload, { qos: 1 });
+ * 
+ * const dictManager = new DictionaryManager(mqttManager, logger, deviceUuid);
+ * await dictManager.initialize();
+ * await dictManager.compactAndPublish(message, 'modbus');
  * ```
  */
 
 export { MqttManager } from './manager';
+export { DictionaryManager } from './dictionary-manager';
+export type { DictionaryMetrics } from './dictionary-manager';

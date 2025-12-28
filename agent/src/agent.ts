@@ -653,6 +653,9 @@ export default class DeviceAgent {
         debugMode: process.env.MQTT_DEBUG === "true",
         totalLogBackends: this.agentLogger.getBackends().length,
       });
+
+      // Initialize dictionary manager (handled by MqttManager)
+      await mqttManager.initDictionaryManager(this.deviceInfo.uuid);
     } catch (error) {
       this.agentLogger.errorSync(
         "Failed to initialize MQTT Manager",
@@ -1293,6 +1296,7 @@ export default class DeviceAgent {
       });
 
       // Stop MQTT Manager (shared singleton - do this after all MQTT-dependent features)
+      // Dictionary manager is automatically shutdown by MqttManager.disconnect()
       const mqttManager = MqttManager.getInstance();
       if (mqttManager.isConnected()) {
         await mqttManager.disconnect();
