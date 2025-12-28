@@ -17,6 +17,10 @@ STATUS_FILE="/var/lib/iotistic/agent/update-status.json"
 cleanup() {
     local exit_code=$?
     
+    # Cleanup temp files
+    cd /tmp
+    rm -rf iotistic-agent-update agent-update.tar.gz
+    
     # Remove lock file
     if [ -f "$LOCK_FILE" ]; then
         rm -f "$LOCK_FILE"
@@ -50,38 +54,42 @@ EOF
 # Register cleanup on script exit (success or failure)
 trap cleanup EXIT INT TERM
 
-# Detect architecture
-ARCH=$(uname -m)
-case $ARCH in
-    x86_64) ARCH_NAME="amd64" ;;
-    aarch64) ARCH_NAME="arm64" ;;
-    armv7l) ARCH_NAME="armv7" ;;
+# Detect architecture for platform-specific tarball
+DETECTED_ARCH=$(uname -m)
+case "$DETECTED_ARCH" in
+    aarch64|arm64)
+        TARBALL_SUFFIX="-arm64"
+        echo "Detected ARM64 architecture - will download ARM-optimized tarball"
+        ;;
+    x86_64|amd64)
+        TARBALL_SUFFIX="-x86_64"
+        echo "Detected x86_64 architecture"
+        ;;
     *)
-        echo "❌ Unsupported architecture: $ARCH"
-        exit 1
+        TARBALL_SUFFIX=""
+        echo "Unknown architecture ($DETECTED_ARCH) - using generic tarball"
         ;;
 esac
 
-# Get current version
-CURRENT_VERSION=$(iotistic-agent --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
-echo "Current version: $CURRENT_VERSION"
-echo "Architecture: $ARCH ($ARCH_NAME)"
-
-# Resolve latest if needed
-if [ "$TARGET_VERSION" = "latest" ]; then
-    echo "Fetching latest version from GitHub..."
-    LATEST_VERSION=$(curl -s https://api.github.com/repos/Iotistica/iotistic/releases/latest \
-        | jq -r '.tag_name' | sed 's/^v//')
-    
-    if [ -z "$LATEST_VERSION" ] || [ "$LATEST_VERSION" = "null" ]; then
-        echo "❌ Failed to fetch latest version from GitHub"
-        exit 1
-    fi
-    
-    TARGET_VERSION="$LATEST_VERSION"
+# Get current version from package.json if available
+CURRENT_VERSION="unknown"
+if [ -f /opt/iotistic/agent/package.json ]; then
+    CURRENT_VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' /opt/iotistic/agent/package.json | sed 's/.*"\([^"]*\)".*/\1/' || echo "unknown")
 fi
 
-echo "Target version: $TARGET_VERSION"
+echo "Current version: $CURRENT_VERSION"
+echo "Architecture: $DETECTED_ARCH ($TARBALL_SUFFIX)"
+
+# Determine download URL
+if [ "$TARGET_VERSION" = "latest" ]; then
+    # Use latest version with architecture suffix
+    DOWNLOAD_URL="https://iotistic.blob.core.windows.net/scripts/agent/agent-latest${TARBALL_SUFFIX}.tar.gz"
+    echo "Target version: latest"
+else
+    # Use specific version with architecture suffix
+    DOWNLOAD_URL="https://iotistic.blob.core.windows.net/scripts/agent/versions/agent-${TARGET_VERSION}${TARBALL_SUFFIX}.tar.gz"
+    echo "Target version: $TARGET_VERSION"
+fi
 
 # Check if update needed
 if [ "$CURRENT_VERSION" = "$TARGET_VERSION" ] && [ "$FORCE" != "true" ]; then
@@ -94,63 +102,109 @@ BACKUP_DIR="/var/lib/iotistic/backups"
 sudo mkdir -p "$BACKUP_DIR"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 
-# Download new binary
+# Backup current installation
 echo ""
-echo "📥 Downloading agent binary..."
-DOWNLOAD_URL="https://github.com/Iotistica/iotistic/releases/download/v${TARGET_VERSION}/iotistic-agent-linux-${ARCH_NAME}"
+echo "💾 Backing up current installation..."
+if [ -d /opt/iotistic/agent ]; then
+    sudo tar -czf "$BACKUP_DIR/agent-backup-${CURRENT_VERSION}-${TIMESTAMP}.tar.gz" \
+        -C /opt/iotistic agent 2>/dev/null || true
+    echo "✓ Backup saved to $BACKUP_DIR/agent-backup-${CURRENT_VERSION}-${TIMESTAMP}.tar.gz"
+fi
 
-if ! curl -L "$DOWNLOAD_URL" -o "/tmp/iotistic-agent-${TARGET_VERSION}"; then
-    echo "❌ Failed to download binary from $DOWNLOAD_URL"
+# Download new tarball
+echo ""
+echo "📥 Downloading agent tarball..."
+cd /tmp
+rm -rf iotistic-agent-update agent-update.tar.gz
+
+echo "Downloading from: $DOWNLOAD_URL"
+
+# Try to download with curl or wget
+DOWNLOAD_FAILED=0
+if command -v curl &> /dev/null; then
+    curl -fSL -o agent-update.tar.gz "$DOWNLOAD_URL" || DOWNLOAD_FAILED=1
+elif command -v wget &> /dev/null; then
+    wget -O agent-update.tar.gz "$DOWNLOAD_URL" || DOWNLOAD_FAILED=1
+else
+    echo "❌ Neither curl nor wget is available"
     exit 1
 fi
 
-# Verify download
-if [ ! -s "/tmp/iotistic-agent-${TARGET_VERSION}" ]; then
-    echo "❌ Downloaded file is empty"
+if [ "$DOWNLOAD_FAILED" = "1" ]; then
+    echo ""
+    echo "❌ Failed to download agent from distribution server"
+    echo ""
+    echo "Troubleshooting:"
+    echo "  1. Check your internet connection"
+    echo "  2. Verify the download URL: $DOWNLOAD_URL"
+    echo "  3. Verify the agent version exists: $TARGET_VERSION"
     exit 1
 fi
 
-chmod +x "/tmp/iotistic-agent-${TARGET_VERSION}"
+# Extract tarball
+echo "Extracting agent..."
+mkdir -p iotistic-agent-update
+tar -xzf agent-update.tar.gz -C iotistic-agent-update || {
+    echo "❌ Failed to extract agent tarball"
+    exit 1
+}
 
-# Test new binary
-echo ""
-echo "🧪 Testing new binary..."
-if ! "/tmp/iotistic-agent-${TARGET_VERSION}" --version &>/dev/null; then
-    echo "❌ New binary failed version check"
-    rm -f "/tmp/iotistic-agent-${TARGET_VERSION}"
+# Verify extraction
+if [ ! -f iotistic-agent-update/package.json ]; then
+    echo "❌ Tarball extraction failed - package.json not found"
     exit 1
 fi
 
-# Backup old binary (before replacement)
-echo ""
-echo "💾 Backing up current binary..."
-if [ -f /usr/local/bin/iotistic-agent ]; then
-    sudo cp /usr/local/bin/iotistic-agent "$BACKUP_DIR/iotistic-agent-${CURRENT_VERSION}-${TIMESTAMP}"
-fi
+# Extract actual version from downloaded package.json
+EXTRACTED_VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' iotistic-agent-update/package.json | sed 's/.*"\([^"]*\)".*/\1/' || echo "unknown")
+echo "✓ Downloaded version: $EXTRACTED_VERSION"
 
-# Install new binary (agent still running at this point)
+# Stop agent service
 echo ""
-echo "📦 Installing new binary..."
-sudo mv "/tmp/iotistic-agent-${TARGET_VERSION}" /usr/local/bin/iotistic-agent
-sudo chmod +x /usr/local/bin/iotistic-agent
-sudo chown root:root /usr/local/bin/iotistic-agent
+echo "🛑 Stopping agent service..."
+sudo systemctl stop iotistic-agent
 
-# At this point:
-# - Agent process has already exited cleanly (called process.exit(0))
-# - systemd's Restart=always policy will restart the service automatically
-# - New binary is in place, restart will use updated version
-# - No manual systemctl stop/start needed - let systemd handle it
+# Replace installation files
+echo ""
+echo "📦 Installing new version..."
 
+# Clean up existing installation (except config and data)
+sudo rm -rf /opt/iotistic/agent/node_modules
+sudo rm -rf /opt/iotistic/agent/dist
+sudo rm -f /opt/iotistic/agent/package*.json
+
+# Copy new files
+sudo cp -r iotistic-agent-update/* /opt/iotistic/agent/ || {
+    echo "❌ Failed to copy agent files"
+    
+    # Attempt rollback
+    if [ -f "$BACKUP_DIR/agent-backup-${CURRENT_VERSION}-${TIMESTAMP}.tar.gz" ]; then
+        echo "⏮️  Rolling back to previous version..."
+        sudo tar -xzf "$BACKUP_DIR/agent-backup-${CURRENT_VERSION}-${TIMESTAMP}.tar.gz" -C /opt/iotistic
+    fi
+    
+    sudo systemctl start iotistic-agent
+    exit 1
+}
+
+echo "✓ Files installed"
+
+# Start agent service
 echo ""
-echo "✅ Binary replaced successfully"
-echo "   systemd will restart agent automatically (Restart=always)"
-echo ""
-echo "⏳ Waiting for systemd restart (30 seconds)..."
-sleep 30
+echo "▶️  Starting agent service..."
+sudo systemctl start iotistic-agent
+
+# Wait for service to stabilize
+echo "⏳ Waiting for service to start (15 seconds)..."
+sleep 15
 
 # Verify service is running with new version
 if sudo systemctl is-active --quiet iotistic-agent; then
-    NEW_VERSION=$(iotistic-agent --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+    # Get updated version from package.json
+    NEW_VERSION="unknown"
+    if [ -f /opt/iotistic/agent/package.json ]; then
+        NEW_VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' /opt/iotistic/agent/package.json | sed 's/.*"\([^"]*\)".*/\1/' || echo "unknown")
+    fi
     
     echo ""
     echo "✅ Agent updated successfully!"
@@ -163,28 +217,36 @@ if sudo systemctl is-active --quiet iotistic-agent; then
     # Cleanup old backups (keep last 3)
     echo ""
     echo "🧹 Cleaning up old backups..."
-    sudo find "$BACKUP_DIR" -name "iotistic-agent-*" -type f | sort -r | tail -n +4 | xargs sudo rm -f 2>/dev/null || true
+    sudo find "$BACKUP_DIR" -name "agent-backup-*" -type f | sort -r | tail -n +4 | xargs sudo rm -f 2>/dev/null || true
     
     echo ""
     echo "✅ Update complete!"
     
 else
-    echo "❌ Service failed to start, rolling back..."
+    echo "❌ Service failed to start, attempting rollback..."
     
-    # Restore old binary
-    if [ -f "$BACKUP_DIR/iotistic-agent-${CURRENT_VERSION}-${TIMESTAMP}" ]; then
-        sudo cp "$BACKUP_DIR/iotistic-agent-${CURRENT_VERSION}-${TIMESTAMP}" /usr/local/bin/iotistic-agent
-        sudo chmod +x /usr/local/bin/iotistic-agent
-    fi
+    # Stop failed service
+    sudo systemctl stop iotistic-agent
     
-    # systemd will restart service automatically with old binary
-    echo "⏳ Waiting for systemd to restart with old binary..."
-    sleep 10
-    
-    if sudo systemctl is-active --quiet iotistic-agent; then
-        echo "⚠️  Rollback complete, agent restored to version $CURRENT_VERSION"
+    # Restore from backup
+    if [ -f "$BACKUP_DIR/agent-backup-${CURRENT_VERSION}-${TIMESTAMP}.tar.gz" ]; then
+        echo "⏮️  Restoring backup..."
+        sudo rm -rf /opt/iotistic/agent
+        sudo mkdir -p /opt/iotistic
+        sudo tar -xzf "$BACKUP_DIR/agent-backup-${CURRENT_VERSION}-${TIMESTAMP}.tar.gz" -C /opt/iotistic
+        
+        # Restart service
+        sudo systemctl start iotistic-agent
+        sleep 10
+        
+        if sudo systemctl is-active --quiet iotistic-agent; then
+            echo "⚠️  Rollback complete, agent restored to version $CURRENT_VERSION"
+        else
+            echo "❌ CRITICAL: Service failed to start after rollback"
+            echo "   Manual intervention required: sudo systemctl status iotistic-agent"
+        fi
     else
-        echo "❌ CRITICAL: Service failed to start after rollback"
+        echo "❌ CRITICAL: No backup found for rollback"
         echo "   Manual intervention required: sudo systemctl status iotistic-agent"
     fi
     

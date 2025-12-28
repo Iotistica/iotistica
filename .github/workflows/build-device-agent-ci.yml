@@ -566,19 +566,19 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Force Docker Installation" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "curl -sfL https://apps.iotistic.ca/agent/install | IOTISTIC_INSTALL_METHOD=docker sh" >> $GITHUB_STEP_SUMMARY
+          echo "curl -sfL https://apps.iotistica.com/agent/install | IOTISTIC_INSTALL_METHOD=docker sh" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Force Systemd Installation" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "curl -sfL https://apps.iotistic.ca/agent/install | IOTISTIC_INSTALL_METHOD=systemd sh" >> $GITHUB_STEP_SUMMARY
+          echo "curl -sfL https://apps.iotistica.com/agent/install | IOTISTIC_INSTALL_METHOD=systemd sh" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Verified Install (with SHA256 checksum)" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
           echo "# Download script and checksum" >> $GITHUB_STEP_SUMMARY
-          echo "curl -sfL https://apps.iotistic.ca/agent/install -o install.sh" >> $GITHUB_STEP_SUMMARY
-          echo "curl -sfL https://apps.iotistic.ca/agent/install.sha256 -o install.sha256" >> $GITHUB_STEP_SUMMARY
+          echo "curl -sfL https://apps.iotistica.com/agent/install -o install.sh" >> $GITHUB_STEP_SUMMARY
+          echo "curl -sfL https://apps.iotistica.com/agent/install.sha256 -o install.sha256" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "# Verify checksum" >> $GITHUB_STEP_SUMMARY
           echo "sha256sum -c install.sha256" >> $GITHUB_STEP_SUMMARY
@@ -593,7 +593,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Version ${{ needs.version.outputs.package_version }} Script" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "curl -sfL https://apps.iotistic.ca/agent/versions/install-${{ needs.version.outputs.package_version }}.sh | sh" >> $GITHUB_STEP_SUMMARY
+          echo "curl -sfL https://apps.iotistica.com/agent/versions/install-${{ needs.version.outputs.package_version }}.sh | sh" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Environment Variables" >> $GITHUB_STEP_SUMMARY
