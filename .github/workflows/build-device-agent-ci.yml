@@ -265,9 +265,18 @@ jobs:
           echo "Building agent for ARM64..."
           cd agent
           
+          # Store current package files before cache operations
+          cp package.json /tmp/package.json.current
+          cp package-lock.json /tmp/package-lock.json.current
+          
           if [ "${{ steps.cache-arm64-modules.outputs.cache-hit }}" == "true" ]; then
             # Using cached ARM64 node_modules - skip npm ci
             echo "✓ Using cached ARM64 node_modules"
+            
+            # Restore current package files (cache may have old versions)
+            cp /tmp/package.json.current package.json
+            cp /tmp/package-lock.json.current package-lock.json
+            
             npm run build
           else
             # No cache - fresh build
