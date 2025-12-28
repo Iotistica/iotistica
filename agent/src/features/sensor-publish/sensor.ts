@@ -738,13 +738,7 @@ export class Sensor extends EventEmitter {
       const mqttManager = this.mqttConnection as any as MqttManager;
       const dictionaryManager = mqttManager.getDictionaryManager?.();
       
-      // Debug: Check if dictionary manager is available
-      const useCompaction = process.env.USE_KEY_COMPACTION_POC === 'true';
-      this.logger?.info(
-        `Dictionary compaction check: enabled=${useCompaction}, manager=${dictionaryManager ? 'available' : 'missing'}`
-      );
-      
-      if (dictionaryManager && useCompaction) {
+      if (dictionaryManager && process.env.USE_KEY_COMPACTION_POC === 'true') {
         // Use dictionary compaction (handles publishing internally)
         const endpoint = this.config.mqttTopic; // e.g., "modbus", "opcua"
         await dictionaryManager.compactAndPublish(data, endpoint);

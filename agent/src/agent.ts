@@ -654,6 +654,9 @@ export default class DeviceAgent {
         totalLogBackends: this.agentLogger.getBackends().length,
       });
 
+      // Set logger on MQTT manager
+      mqttManager.setLogger(this.agentLogger);
+
       // Initialize dictionary manager (handled by MqttManager)
       await mqttManager.initDictionaryManager(this.deviceInfo.uuid);
     } catch (error) {

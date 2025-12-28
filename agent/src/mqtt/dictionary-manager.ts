@@ -303,13 +303,6 @@ export class DictionaryManager {
     message: any,
     endpoint: string
   ): Promise<{ originalSize: number; compactedSize: number; compressionRatio: number }> {
-    // Debug log to confirm method is called
-    console.log('[DictionaryManager] compactAndPublish called:', { 
-      enabled: this.enabled, 
-      endpoint,
-      hasLogger: !!this.logger 
-    });
-    
     if (!this.enabled) {
       // Passthrough mode - publish without compaction
       const payload = Buffer.from(JSON.stringify(message), 'utf-8');

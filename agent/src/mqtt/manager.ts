@@ -233,6 +233,11 @@ export class MqttManager extends EventEmitter {
    */
   public setLogger(logger: AgentLogger | undefined): void {
     this.logger = logger;
+    
+    // Also update dictionary manager's logger if it exists
+    if (this.dictionaryManager) {
+      (this.dictionaryManager as any).logger = logger;
+    }
   }
 
   /**
