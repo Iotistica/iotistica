@@ -175,7 +175,7 @@ jobs:
   #         mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
 
   build-x86:
-    name: Build x86_64 Tarball
+    name: Build x86_64
     needs: [version]
     runs-on: ubuntu-latest
     
@@ -222,7 +222,7 @@ jobs:
           retention-days: 1
 
   build-arm64:
-    name: Build ARM64 Tarball
+    name: Build ARM64
     needs: [version]
     runs-on: ubuntu-latest
     
@@ -251,6 +251,13 @@ jobs:
           cache: 'npm'
           cache-dependency-path: agent/package-lock.json
 
+      - name: Backup current package files
+        run: |
+          # Store current package files BEFORE cache restore
+          cp agent/package.json /tmp/package.json.current
+          cp agent/package-lock.json /tmp/package-lock.json.current
+          echo "✓ Backed up current package files"
+
       - name: Cache ARM64 node_modules
         id: cache-arm64-modules
         uses: actions/cache@v4
@@ -260,23 +267,21 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-arm64-node-modules-
 
+      - name: Restore current package files
+        run: |
+          # Always restore current package files after cache (cache may have old versions)
+          cp /tmp/package.json.current agent/package.json
+          cp /tmp/package-lock.json.current agent/package-lock.json
+          echo "✓ Restored current package files"
+
       - name: Build agent (ARM64)
         run: |
           echo "Building agent for ARM64..."
           cd agent
           
-          # Store current package files before cache operations
-          cp package.json /tmp/package.json.current
-          cp package-lock.json /tmp/package-lock.json.current
-          
           if [ "${{ steps.cache-arm64-modules.outputs.cache-hit }}" == "true" ]; then
             # Using cached ARM64 node_modules - skip npm ci
             echo "✓ Using cached ARM64 node_modules"
-            
-            # Restore current package files (cache may have old versions)
-            cp /tmp/package.json.current package.json
-            cp /tmp/package-lock.json.current package-lock.json
-            
             npm run build
           else
             # No cache - fresh build
@@ -561,7 +566,7 @@ jobs:
           echo "ARM64 tarball structure validated successfully!" >> $GITHUB_STEP_SUMMARY
 
   upload-artifacts:
-    name: Upload Scripts & Tarballs to Azure
+    name: Upload artifacts to Azure
     needs: [version, test-agent-systemd, test-arm64-tarball, build-x86, build-arm64]
     runs-on: ubuntu-latest
     if: success()
