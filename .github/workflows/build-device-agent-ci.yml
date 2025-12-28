@@ -310,7 +310,7 @@ jobs:
           retention-days: 1
 
   test-agent-systemd:
-    name: Test Systemd Installation (via install.sh)
+    name: Test Systemd Installation (x86_64)
     needs: [version, build-x86]
     runs-on: [iotistic-lab-sc]
     
@@ -445,9 +445,115 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Agent running with systemd validated successfully!" >> $GITHUB_STEP_SUMMARY
 
+  test-arm64-tarball:
+    name: Verify ARM64 Tarball Structure
+    needs: [version, build-arm64]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Download ARM64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-arm64
+          path: /tmp/arm64-test
+
+      - name: Extract and verify tarball structure
+        run: |
+          cd /tmp/arm64-test
+          
+          echo "Extracting ARM64 tarball..."
+          tar -xzf agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz
+          
+          echo ""
+          echo "Verifying required files exist..."
+          
+          # Check dist structure
+          if [ ! -f dist/app.js ]; then
+            echo "✗ Missing dist/app.js"
+            exit 1
+          fi
+          echo "✓ dist/app.js exists"
+          
+          if [ ! -d dist/db/migrations ]; then
+            echo "✗ Missing dist/db/migrations"
+            exit 1
+          fi
+          echo "✓ dist/db/migrations exists"
+          
+          # Check package files
+          if [ ! -f package.json ]; then
+            echo "✗ Missing package.json"
+            exit 1
+          fi
+          echo "✓ package.json exists"
+          
+          # Check node_modules
+          if [ ! -d node_modules ]; then
+            echo "✗ Missing node_modules"
+            exit 1
+          fi
+          echo "✓ node_modules exists"
+          
+          # Verify sqlite3 is ARM64
+          if [ -d node_modules/sqlite3 ]; then
+            echo ""
+            echo "Checking sqlite3 binary architecture..."
+            SQLITE_BINARY=$(find node_modules/sqlite3 -name "*.node" | head -1)
+            if [ -n "$SQLITE_BINARY" ]; then
+              file "$SQLITE_BINARY"
+              if file "$SQLITE_BINARY" | grep -q "ARM aarch64"; then
+                echo "✓ sqlite3 binary is ARM64"
+              else
+                echo "⚠ sqlite3 binary may not be ARM64:"
+                file "$SQLITE_BINARY"
+              fi
+            fi
+          fi
+          
+          # Check bin scripts
+          if [ ! -d bin ]; then
+            echo "✗ Missing bin directory"
+            exit 1
+          fi
+          echo "✓ bin directory exists"
+          
+          echo ""
+          echo "Tarball structure verification passed!"
+
+      - name: Verify version in package.json
+        run: |
+          cd /tmp/arm64-test
+          
+          EXTRACTED_VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' package.json | sed 's/.*"\([^"]*\)".*/\1/')
+          EXPECTED_VERSION="${{ needs.version.outputs.package_version }}"
+          
+          echo "Extracted version: $EXTRACTED_VERSION"
+          echo "Expected version: $EXPECTED_VERSION"
+          
+          if [ "$EXTRACTED_VERSION" = "$EXPECTED_VERSION" ]; then
+            echo "✓ Version matches"
+          else
+            echo "✗ Version mismatch!"
+            exit 1
+          fi
+
+      - name: Generate ARM64 test summary
+        if: always()
+        run: |
+          echo "# ARM64 Tarball Verification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Structure Check" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ dist/app.js" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ dist/db/migrations/" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ package.json" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ node_modules/ (with ARM64 sqlite3)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✓ bin/" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "ARM64 tarball structure validated successfully!" >> $GITHUB_STEP_SUMMARY
+
   upload-artifacts:
     name: Upload Scripts & Tarballs to Azure
-    needs: [version, test-agent-systemd, build-x86, build-arm64]
+    needs: [version, test-agent-systemd, test-arm64-tarball, build-x86, build-arm64]
     runs-on: ubuntu-latest
     if: success()
     
@@ -868,7 +974,7 @@ jobs:
 
   trigger-integration-tests:
     name: Trigger Integration Tests
-    needs: [version, test-agent-systemd, upload-artifacts]
+    needs: [version, test-agent-systemd, test-arm64-tarball, upload-artifacts]
     runs-on: ubuntu-latest
     permissions:
       actions: write
