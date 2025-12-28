@@ -69,6 +69,7 @@ param(
     [string]$SimulateMemoryLeak = "false",
     [string]$AnomalyDetectionEnabled = "true",
     [string]$FirewallEnabled = "false",
+    [string]$UseMsgpackPoc = "true",
     
     # Protocol Adapter Configuration
     [string]$EnableProtocolAdapters = "true",
@@ -394,6 +395,7 @@ $networkConfig
       - SIMULATION_MODE=$($simConfig.enabled)
       - SIMULATION_CONFIG=$($simConfig.config)
       - SIMULATE_MEMORY_LEAK=$SimulateMemoryLeak
+      - USE_MSGPACK_POC=$UseMsgpackPoc
 "@
     
     $services += $service

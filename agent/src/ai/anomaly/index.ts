@@ -10,6 +10,7 @@ import type { Knex } from 'knex';
 import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import type { MqttManager } from '../../mqtt/manager';
+import { createJsonPayload } from '../../mqtt/manager';
 import type {
 	DataPoint,
 	AnomalyConfig,
@@ -373,7 +374,10 @@ export class AnomalyDetectionService {
 		}
 		
 		const topic = `iot/device/${this.deviceUuid}/events/anomaly`;
-		this.mqttManager.publish(topic, JSON.stringify(event), { qos: 1, retain: false })
+		const msgIdGen = this.mqttManager.getMessageIdGenerator();
+		const payload = createJsonPayload(event, msgIdGen);
+		
+		this.mqttManager.publish(topic, payload, { qos: 1, retain: false })
 			.then(() => {
 				this.logger?.infoSync('Published anomaly event to MQTT', {
 					component: LogComponents.metrics,

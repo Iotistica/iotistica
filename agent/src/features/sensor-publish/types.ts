@@ -48,6 +48,7 @@ export type SensorPublishConfig = z.infer<typeof SensorPublishConfigSchema> & {
 export interface MqttConnection {
   publish(topic: string, payload: string | Buffer, options?: { qos?: 0 | 1 | 2 }): Promise<void>;
   isConnected(): boolean;
+  getMessageIdGenerator?(): any; // Optional for HA deduplication (returns MessageIdGenerator if available)
 }
 
 /**

@@ -205,7 +205,7 @@ export function generateDefaultTargetStateConfigV2(
         profile: 'COMAP',
         bufferCapacity: 128 * 1024, // 128KB - Standard Modbus responses
         connection: {
-          host: 'localhost',
+          host: '10.0.0.60',
           port: 502,
           timeoutMs: 2000,
         },

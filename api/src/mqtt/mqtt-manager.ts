@@ -12,8 +12,42 @@
 
 import mqtt from 'mqtt';
 import { EventEmitter } from 'events';
+import msgpack from 'msgpack-lite';
 import logger, { logOperation } from '../utils/logger';
 import { isDuplicateMessage } from '../utils/mqtt-deduplication';
+
+/**
+ * Deserialize MQTT payload - auto-detects msgpack or JSON format
+ * @param message - Buffer or string payload
+ * @returns Deserialized data object
+ */
+function deserializePayload(message: Buffer | string): any {
+  const buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
+  
+  // Try MessagePack first (binary marker detection)
+  if (buffer.length > 0) {
+    const firstByte = buffer[0];
+    // MessagePack markers: fixarray (0x90-0x9f), array16/32 (0xdc-0xdd), fixmap (0x80-0x8f)
+    if ((firstByte >= 0x90 && firstByte <= 0x9f) || 
+        firstByte === 0xdc || firstByte === 0xdd ||
+        (firstByte >= 0x80 && firstByte <= 0x8f)) {
+      try {
+        return msgpack.decode(buffer);
+      } catch {
+        // Fall through to JSON if msgpack decode fails
+      }
+    }
+  }
+  
+  // Try JSON parsing
+  try {
+    const str = buffer.toString('utf-8');
+    return JSON.parse(str);
+  } catch {
+    // Return raw message if both msgpack and JSON fail
+    return message;
+  }
+}
 
 export interface MqttConfig {
   brokerUrl: string;
@@ -656,14 +690,8 @@ export class MqttManager extends EventEmitter {
       const { deviceUuid, messageType, subTopic, rest } = parsed;
       
 
-      // Parse JSON payload
-      let data: any;
-      try {
-        data = JSON.parse(message);
-      } catch {
-        // Non-JSON payload (e.g., raw log messages)
-        data = message;
-      }
+      // Parse payload (auto-detects msgpack or JSON)
+      const data: any = deserializePayload(message);
 
       // HA Deduplication: Check if message has msgId and if we've seen it before
       if (data && typeof data === 'object' && data.msgId) {

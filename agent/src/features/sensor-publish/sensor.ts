@@ -1,5 +1,6 @@
 import * as net from 'net';
 import { EventEmitter } from 'events';
+import { createJsonPayload, createMsgpackPayload, serializePayload, logCompressionStats } from '../../mqtt/manager.js';
 import type { AnomalyDetectionService } from '../../ai/anomaly/index.js';
 import {
   SensorConfig,
@@ -9,6 +10,16 @@ import {
   SensorStats,
   MessageBatch
 } from './types';
+
+// ============================================================================
+// MESSAGEPACK POC CONFIGURATION
+// ============================================================================
+
+/**
+ * Enable MessagePack POC mode via environment variable
+ * Set USE_MSGPACK_POC=true to test msgpack compression with logging
+ */
+const USE_MSGPACK_POC = process.env.USE_MSGPACK_POC === 'true';
 
 // ============================================================================
 // EDGE AI ANOMALY DETECTION CONFIGURATION
@@ -683,11 +694,11 @@ export class Sensor extends EventEmitter {
     // Publish as JSON array with enriched data
     // Messages are objects for MQTT Explorer pretty-printing
     // API handler will accept both objects and JSON strings
-    const payload = JSON.stringify({
+    const data = {
       sensor: this.getSensorName(),
       timestamp: new Date().toISOString(),
       messages: enrichedMessages
-    });
+    };
     
     // If MQTT not connected, buffer to local database
     if (!isConnected) {
@@ -696,12 +707,14 @@ export class Sensor extends EventEmitter {
       try {
         const { MessageBufferModel } = await import('../../db/models/index.js');
         
+        // Buffer as JSON string (will be re-parsed on flush)
+        const jsonPayload = JSON.stringify(data);
         await MessageBufferModel.enqueue({
           endpoint_name: this.getSensorName(),
           topic,
           qos: 1,
-          payload,
-          payload_bytes: Buffer.byteLength(payload, 'utf8')
+          payload: jsonPayload,
+          payload_bytes: Buffer.byteLength(jsonPayload, 'utf8')
         });
         
         this.logger?.debug(`Buffered ${this.messageBatch.messages.length} messages to local database`);
@@ -720,7 +733,22 @@ export class Sensor extends EventEmitter {
     }
     
     try {
-      await this.mqttConnection.publish(topic, payload, { qos: 1 });
+      // Use msgId for HA deduplication
+      const msgIdGen = this.mqttConnection.getMessageIdGenerator?.();
+      
+      // POC: Use msgpack if enabled, otherwise JSON
+      const mqttPayload = USE_MSGPACK_POC 
+        ? createMsgpackPayload(data, msgIdGen)
+        : createJsonPayload(data, msgIdGen);
+      
+      // Log compression stats for POC
+      if (USE_MSGPACK_POC) {
+        logCompressionStats(data, 'msgpack', this.logger, topic);
+      }
+      
+      const serialized = serializePayload(mqttPayload);
+      
+      await this.mqttConnection.publish(topic, serialized, { qos: 1 });
       
       this.stats.messagesPublished += this.messageBatch.messages.length;
       this.stats.bytesPublished += this.messageBatch.totalBytes;
@@ -855,12 +883,17 @@ export class Sensor extends EventEmitter {
     
     try {
       const topic = `iot/device/${this.deviceUuid}/endpoints/${this.config.mqttHeartbeatTopic}`;
-      const payload = JSON.stringify({
-        sensor: this.getSensorName(),
+      const data = {
+        endpoint: this.getSensorName(),
         timestamp: new Date().toISOString(),
         state: this.state,
         stats: this.stats
-      });
+      };
+      
+      // Use msgId for HA deduplication even for heartbeats (QoS 0)
+      const msgIdGen = this.mqttConnection.getMessageIdGenerator?.();
+      const mqttPayload = createJsonPayload(data, msgIdGen);
+      const payload = serializePayload(mqttPayload);
       
       await this.mqttConnection.publish(topic, payload, { qos: 0 });
       

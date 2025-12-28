@@ -14,6 +14,7 @@
  */
 
 import { MqttManager } from '../mqtt';
+import { createJsonPayload, serializePayload } from '../mqtt/manager';
 import { MessageBufferModel } from '../db/models';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
@@ -208,9 +209,20 @@ export class MessageBufferSync {
         // Publish each message
         for (const record of records) {
           try {
+            // Try to parse as JSON and inject msgId for deduplication
+            let payload: Buffer | string = record.payload;
+            try {
+              const json = JSON.parse(record.payload);
+              const msgIdGen = this.mqttManager.getMessageIdGenerator();
+              const mqttPayload = createJsonPayload(json, msgIdGen);
+              payload = serializePayload(mqttPayload);
+            } catch {
+              // Not JSON - use as-is (Buffer or string)
+            }
+            
             await this.mqttManager.publish(
               record.topic,
-              record.payload,
+              payload,
               { qos: record.qos as 0 | 1 | 2 }
             );
             

@@ -9,6 +9,7 @@ import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import type { AnomalyDetectionService } from '../../ai/anomaly';
 import type { MqttManager } from '../../mqtt/manager';
+import { createJsonPayload } from '../../mqtt/manager';
 import type {
 	SimulationScenario,
 	SimulationScenarioStatus,
@@ -157,7 +158,7 @@ export class SensorDataSimulation implements SimulationScenario {
 			if (this.mqttManager && this.deviceUuid && this.mqttManager.isConnected()) {
 				try {
 					const topic = `iot/device/${this.deviceUuid}/endpoints/${sensor.metric}`;
-					const payload = JSON.stringify({
+					const data = {
 						sensor: sensor.metric,
 						timestamp: new Date().toISOString(),
 						messages: [
@@ -168,7 +169,11 @@ export class SensorDataSimulation implements SimulationScenario {
 								simulation: true
 							})
 						]
-					});
+					};
+					
+					// Use msgId for HA deduplication
+					const msgIdGen = this.mqttManager.getMessageIdGenerator();
+					const payload = createJsonPayload(data, msgIdGen);
 					
 					await this.mqttManager.publish(topic, payload, { qos: 1 });
 					

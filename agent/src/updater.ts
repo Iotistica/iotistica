@@ -12,7 +12,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { join } from 'path';
 import { AgentLogger } from './logging/agent-logger.js';
 import { LogComponents } from './logging/types.js';
-import { MqttManager } from './mqtt/manager.js';
+import { MqttManager, createJsonPayload } from './mqtt/manager.js';
 import { notifySystemd } from './system/systemd-watchdog.js';
 
 const execAsync = promisify(exec);
@@ -829,9 +829,12 @@ export class AgentUpdater {
     try {
       // QoS 1: At least once delivery (survives network drops)
       // Retain: Backend can retrieve last status even if it was offline during update
+      const msgIdGen = mqttManager.getMessageIdGenerator();
+      const mqttPayload = createJsonPayload(payload, msgIdGen);
+      
       await mqttManager.publish(
         this.statusTopic, 
-        JSON.stringify(payload),
+        mqttPayload,
         { qos: 1, retain: true }
       );
     } catch (error) {
