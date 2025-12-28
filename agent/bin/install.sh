@@ -227,6 +227,12 @@ echo ""
     mkdir -p /etc/iotistic
     mkdir -p /var/lib/iotistic/agent
     mkdir -p /var/log/iotistic
+    
+    # Create OPC UA PKI directory (for certificate storage)
+    mkdir -p /opt/iotistic/.config/node-opcua-default-nodejs/PKI
+    chown -R iotistic:iotistic /opt/iotistic/.config
+    chmod -R 755 /opt/iotistic/.config
+    echo "✓ Created OPC UA certificate directory"
 
     # Configuration
     echo ""

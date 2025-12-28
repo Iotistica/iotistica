@@ -47,25 +47,6 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
       phase: 'discovery'
     });
 
-    // Ensure PKI directory exists for certificate storage
-    try {
-      const fs = await import('fs/promises');
-      const path = await import('path');
-      const pkiDir = path.join('/opt/iotistic/.config/node-opcua-default-nodejs/PKI');
-      await fs.mkdir(pkiDir, { recursive: true });
-      this.logger?.debugSync('Ensured OPC UA PKI directory exists', {
-        component: LogComponents.discovery,
-        protocol: this.protocol,
-        path: pkiDir
-      });
-    } catch (error) {
-      this.logger?.warnSync('Failed to create OPC UA PKI directory, proceeding anyway', {
-        component: LogComponents.discovery,
-        protocol: this.protocol,
-        error: error instanceof Error ? error.message : String(error)
-      });
-    }
-
     for (const url of discoveryUrls) {
       try {
         const { OPCUAClient } = await import('node-opcua-client');
