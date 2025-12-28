@@ -279,6 +279,16 @@ jobs:
           echo "Building agent for ARM64..."
           cd agent
           
+          # Verify we have the correct current version
+          CURRENT_VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' package.json | sed 's/.*"\([^"]*\)".*/\1/')
+          echo "Current package.json version: $CURRENT_VERSION"
+          echo "Expected version: ${{ needs.version.outputs.package_version }}"
+          
+          if [ "$CURRENT_VERSION" != "${{ needs.version.outputs.package_version }}" ]; then
+            echo "ERROR: Version mismatch before build!"
+            exit 1
+          fi
+          
           if [ "${{ steps.cache-arm64-modules.outputs.cache-hit }}" == "true" ]; then
             # Using cached ARM64 node_modules - skip npm ci
             echo "✓ Using cached ARM64 node_modules"
@@ -298,7 +308,13 @@ jobs:
               "
           fi
           
+          # Clean and create artifacts directory
+          rm -rf /tmp/iotistic-artifacts
           mkdir -p /tmp/iotistic-artifacts
+          
+          # Verify version one more time before creating tarball
+          FINAL_VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' package.json | sed 's/.*"\([^"]*\)".*/\1/')
+          echo "Final package.json version before tarball: $FINAL_VERSION"
           
           # Create ARM64 tarball
           echo "Creating ARM64 tarball..."
