@@ -28,8 +28,8 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 
     // Default discovery URLs (empty array = skip discovery)
     const discoveryUrls = options?.discoveryUrls || [
-      'opc.tcp://localhost:4840',
-      'opc.tcp://localhost:48010'
+      'opc.tcp://10.0.0.60:4840',
+      'opc.tcp://10.0.0.60:48010'
     ];
 
     // Skip if no URLs configured
