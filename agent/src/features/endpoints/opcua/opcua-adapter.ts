@@ -274,6 +274,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
             unit: dp.unit || '',
             quality,
             qualityCode,
+            nodeType: (dp as OPCUADataPoint).nodeType || 'metric', // Add node type
           };
 
           // Emit immediately (real-time streaming)
@@ -1137,6 +1138,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
           unit: dp.unit || '',
           quality,
           qualityCode,
+          nodeType: (dp as OPCUADataPoint).nodeType || 'metric',
         });
         continue;
       }
@@ -1161,6 +1163,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
         value,
         unit: dp.unit || '',
         quality: 'GOOD' as const,
+        nodeType: (dp as OPCUADataPoint).nodeType || 'metric',
       });
     }
 

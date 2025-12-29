@@ -122,6 +122,12 @@ app.use((req, res, next) => {
   
   res.on('finish', () => {
     const duration = Date.now() - startTime;
+    
+    // Skip logging 200 OK responses
+    if (res.statusCode === 200) {
+      return;
+    }
+    
     const logLevel = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : isMqttAuth ? 'debug' : 'info';
     
     // Log only the message without metadata object

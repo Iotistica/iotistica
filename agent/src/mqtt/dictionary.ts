@@ -16,6 +16,15 @@ import msgpack from 'msgpack-lite';
  * - Metrics tracking: Compression stats, anomaly detection
  * - Zero maintenance: Adapts to config changes (Modbus, OPC UA) automatically
  * 
+ * ⚠️ CRITICAL INVARIANTS (must never be violated):
+ * 1. APPEND-ONLY: Dictionary can only grow, never shrink or reorder
+ * 2. MONOTONIC VERSION: Version increments on each field addition, never decrements
+ * 3. NO RESET: Dictionary persists for device lifetime (except manual reset())
+ * 4. INDEX STABILITY: Once assigned, an index→field mapping never changes
+ * 
+ * These invariants enable delta sync without full state reconciliation.
+ * Violating them will cause silent data corruption in cloud expansion.
+ * 
  * Topic Structure:
  * - iot/device/{uuid}/meta/dictionary - Full dictionary sync
  * - iot/device/{uuid}/meta/dictionary/delta - Delta updates
@@ -42,6 +51,9 @@ import msgpack from 'msgpack-lite';
  * 
  * Environment Variables:
  * - USE_KEY_COMPACTION_POC=true - Enable dictionary compaction
+ * - DICTIONARY_ARRAY_MODE=opaque|indexed - Array indexing mode (default: opaque)
+ *   - opaque: Use generic [] for arrays (messages[].timestamp) - keeps dictionary small
+ *   - indexed: Use specific indices (messages[0].timestamp, messages[1].timestamp) - legacy mode
  * - DICTIONARY_SYNC_INTERVAL_MS=300000 - Full sync interval (default: 5 minutes)
  * - DICTIONARY_DELTA_THRESHOLD=5 - Trigger delta after N new fields (default: 5)
  * - DICTIONARY_DELTA_DEBOUNCE_MS=200 - Debounce window for batching delta updates (default: 200ms)
@@ -103,6 +115,7 @@ export class DictionaryManager {
   private readonly deltaSyncDebounceMs: number;
   private readonly deviceUuid: string;
   private readonly enabled: boolean;
+  private readonly arrayMode: 'opaque' | 'indexed';
   
   private syncTimer?: NodeJS.Timeout;
   private deltaSyncDebounceTimer?: NodeJS.Timeout;
@@ -114,6 +127,7 @@ export class DictionaryManager {
   ) {
     this.deviceUuid = deviceUuid || process.env.DEVICE_UUID || 'unknown';
     this.enabled = process.env.USE_KEY_COMPACTION_POC === 'true';
+    this.arrayMode = (process.env.DICTIONARY_ARRAY_MODE as 'opaque' | 'indexed') || 'opaque';
     this.syncIntervalMs = parseInt(process.env.DICTIONARY_SYNC_INTERVAL_MS || '300000', 10);
     this.deltaThreshold = parseInt(process.env.DICTIONARY_DELTA_THRESHOLD || '5', 10);
     this.deltaSyncDebounceMs = parseInt(process.env.DICTIONARY_DELTA_DEBOUNCE_MS || '200', 10);
@@ -134,6 +148,7 @@ export class DictionaryManager {
     this.logger?.infoSync('Initializing dictionary manager', {
       component: LogComponents.mqtt,
       operation: 'initialize',
+      arrayMode: this.arrayMode,
       syncIntervalMs: this.syncIntervalMs,
       deltaThreshold: this.deltaThreshold,
       deviceUuid: this.deviceUuid,
@@ -181,6 +196,7 @@ export class DictionaryManager {
 
   /**
    * Get or assign index for a field name (auto-discovery)
+   * ✅ FIX: Increment version immediately when new field is added
    */
   private getIndex(fieldName: string): number {
     let index = this.dictionary.get(fieldName);
@@ -192,9 +208,19 @@ export class DictionaryManager {
       this.updateCount++;
       this.fieldAdditionTimes.push(Date.now());
       
+      // ✅ FIX: Bump version immediately so compacted messages reference valid dictionary
+      this.version++;
+      
       // Keep only last hour of addition times for rate calculation
       const oneHourAgo = Date.now() - 3600000;
       this.fieldAdditionTimes = this.fieldAdditionTimes.filter((t) => t > oneHourAgo);
+      
+      // ✅ FIX: Update metrics to prevent drift (critical for dashboards)
+      this.metrics.dictionarySize = this.dictionary.size;
+      this.metrics.version = this.version;
+      this.metrics.fieldAdditionRate = this.fieldAdditionTimes.length;
+      this.metrics.updateCount = this.updateCount;
+      this.metrics.lastUpdateTime = Date.now();
       
       // Trigger debounced delta sync if threshold reached
       // This batches rapid field additions to avoid flooding MQTT
@@ -230,44 +256,61 @@ export class DictionaryManager {
 
   /**
    * Compact message using dictionary (recursive for nested objects and arrays)
+   * ✅ FIX: Use tuple-based encoding [[index, value], ...] for structure preservation
+   * ✅ FIX: Add array framing to preserve boundaries
    */
   private compactWithDictionary(
     data: any,
     prefix = ''
-  ): [number[], any[]] {
-    const indices: number[] = [];
-    const values: any[] = [];
+  ): Array<[number, any]> {
+    const pairs: Array<[number, any]> = [];
 
     // Handle null or primitives
     if (data === null || typeof data !== 'object') {
-      return [[], []];
+      return [];
     }
 
-    // Handle arrays
+    // ✅ FIX: Explicit root array handling (when prefix is empty)
     if (Array.isArray(data)) {
-      // Iterate over all array elements and assign indices
-      // This handles both primitive arrays and object arrays consistently
-      data.forEach((item, idx) => {
-        const indexedKey = `${prefix}[${idx}]`;
+      if (!prefix) {
+        // Root-level array - handle explicitly without indexing empty key
+        const arrayPairs: Array<Array<[number, any]>> = [];
         
-        if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
-          // Object in array - recurse with indexed key
-          const [nestedIndices, nestedValues] = this.compactWithDictionary(item, indexedKey);
-          indices.push(...nestedIndices);
-          values.push(...nestedValues);
-        } else if (Array.isArray(item)) {
-          // Nested array - recurse
-          const [nestedIndices, nestedValues] = this.compactWithDictionary(item, indexedKey);
-          indices.push(...nestedIndices);
-          values.push(...nestedValues);
+        if (this.arrayMode === 'opaque') {
+          data.forEach((item) => {
+            if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+              const itemPairs = this.compactWithDictionary(item, '[]');
+              arrayPairs.push(itemPairs);
+            } else if (Array.isArray(item)) {
+              const nestedPairs = this.compactWithDictionary(item, '[]');
+              arrayPairs.push(nestedPairs);
+            } else {
+              const index = this.getIndex('[]');
+              arrayPairs.push([[index, item]]);
+            }
+          });
         } else {
-          // Primitive in array - store with indexed key
-          const index = this.getIndex(indexedKey);
-          indices.push(index);
-          values.push(item);
+          data.forEach((item, idx) => {
+            const indexedKey = `[${idx}]`;
+            if (typeof item === 'object' && item !== null) {
+              const itemPairs = this.compactWithDictionary(item, indexedKey);
+              arrayPairs.push(itemPairs);
+            } else {
+              const index = this.getIndex(indexedKey);
+              arrayPairs.push([[index, item]]);
+            }
+          });
         }
-      });
-      return [indices, values];
+        
+        // ✅ FIX: Use special '$root' key for root-level arrays
+        // Decoder will unwrap this automatically
+        pairs.push(['a', '$root', arrayPairs] as any);
+        return pairs;
+      } else {
+        // Non-root array called recursively - this should never happen
+        // Arrays should only be processed from the object field handler
+        throw new Error('Array handling should be done in parent object context, not recursively');
+      }
     }
 
     // Handle objects
@@ -275,28 +318,61 @@ export class DictionaryManager {
       const fullKey = prefix ? `${prefix}.${key}` : key;
 
       if (Array.isArray(value)) {
-        // Handle array values (will recurse into compactWithDictionary)
-        const [nestedIndices, nestedValues] = this.compactWithDictionary(value, fullKey);
-        indices.push(...nestedIndices);
-        values.push(...nestedValues);
+        // ✅ FIX: Handle arrays inline - no dictionary entry for array container
+        // Only element fields (e.g., "alarms[].code") get indices
+        const arrayPairs: Array<Array<[number, any]>> = [];
+        
+        if (this.arrayMode === 'opaque') {
+          value.forEach((item) => {
+            if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+              // Object in array - compact with [] notation
+              const itemPairs = this.compactWithDictionary(item, `${fullKey}[]`);
+              arrayPairs.push(itemPairs);
+            } else if (Array.isArray(item)) {
+              // Nested array
+              const nestedPairs = this.compactWithDictionary(item, `${fullKey}[]`);
+              arrayPairs.push(nestedPairs);
+            } else {
+              // Primitive in array
+              const index = this.getIndex(`${fullKey}[]`);
+              arrayPairs.push([[index, item]]);
+            }
+          });
+        } else {
+          // Indexed mode (legacy)
+          value.forEach((item, idx) => {
+            const indexedKey = `${fullKey}[${idx}]`;
+            if (typeof item === 'object' && item !== null) {
+              const itemPairs = this.compactWithDictionary(item, indexedKey);
+              arrayPairs.push(itemPairs);
+            } else {
+              const index = this.getIndex(indexedKey);
+              arrayPairs.push([[index, item]]);
+            }
+          });
+        }
+        
+        // ✅ FIX: Include array key explicitly in frame (no inference needed)
+        // Format: ["a", "alarms", [[pairs], [pairs]]]
+        pairs.push(['a', key, arrayPairs] as any);
       } else if (typeof value === 'object' && value !== null) {
         // Nested object - recurse
-        const [nestedIndices, nestedValues] = this.compactWithDictionary(value, fullKey);
-        indices.push(...nestedIndices);
-        values.push(...nestedValues);
+        const nestedPairs = this.compactWithDictionary(value, fullKey);
+        pairs.push(...nestedPairs);
       } else {
-        // Leaf value - add to dictionary
+        // Leaf value - add as tuple [index, value]
         const index = this.getIndex(fullKey);
-        indices.push(index);
-        values.push(value);
+        pairs.push([index, value]);
       }
     }
 
-    return [indices, values];
+    return pairs;
   }
 
   /**
    * Compact message and publish to MQTT
+   * ✅ FIX: Use tuple-based payload format with array framing
+   * ✅ FIX: Send raw MessagePack buffer to avoid double-encoding
    * Returns compression stats for logging
    */
   public async compactAndPublish(
@@ -314,12 +390,11 @@ export class DictionaryManager {
       return { originalSize: payload.length, compactedSize: payload.length, compressionRatio: 0 };
     }
 
-    // Compact message (dictionary compaction: field names → indices)
-    const [indices, values] = this.compactWithDictionary(message);
+    // Compact message using tuple-based encoding
+    const pairs = this.compactWithDictionary(message);
     const compacted = {
       v: this.version,
-      i: indices,
-      d: values,
+      p: pairs,  // ✅ FIX: Use 'p' for pairs instead of separate 'i' and 'd'
     };
 
     // Calculate sizes for different compression stages
@@ -332,15 +407,16 @@ export class DictionaryManager {
     let format: 'json' | 'msgpack';
     
     if (useMsgpack) {
-      // MessagePack on top of dictionary compaction (best compression)
+      // ✅ FIX: Encode to MessagePack buffer and send directly
       const msgpackBuffer = msgpack.encode(compacted);
       compactedSize = msgpackBuffer.length;
       format = 'msgpack';
       
-      // Publish with msgpack format
+      // ✅ FIX: Publish raw buffer, not wrapped object
+      // The MQTT manager should send this buffer directly without re-encoding
       await this.mqttManager.publish(
         `iot/device/${this.deviceUuid}/endpoints/${endpoint}`,
-        { format: 'msgpack', data: compacted },
+        msgpackBuffer,  // Send buffer directly
         { qos: 1, retain: false }
       );
     } else {
@@ -445,6 +521,7 @@ export class DictionaryManager {
 
   /**
    * Sync delta dictionary updates (new fields only)
+   * ✅ FIX: Version already bumped in getIndex(), no need to increment here
    */
   private async syncDeltaDictionary(): Promise<void> {
     const newFieldsSinceLastSync = this.updateCount - this.lastDeltaSync;
@@ -453,9 +530,8 @@ export class DictionaryManager {
       return; // No new fields
     }
 
-    // Increment version when dictionary schema changes (new fields added)
-    // This ensures cloud can validate message compatibility
-    this.version++;
+    // ✅ FIX: Version already incremented when field was added (see getIndex)
+    // No need to increment here - version matches the compacted messages already sent
 
     const allEntries = Array.from(this.dictionary.entries()).sort((a, b) => a[1] - b[1]);
     const newFields = allEntries.slice(-newFieldsSinceLastSync).map(([field]) => field);

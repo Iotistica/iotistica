@@ -5,30 +5,55 @@
  * - Stores dictionaries in Redis (30-day TTL)
  * - Expands compacted messages using stored dictionaries
  * - Handles full sync and delta updates
+ * - Supports both indexed arrays (messages[0]) and opaque arrays (messages[])
  * 
  * POC Note: Redis-only for simplicity. Add PostgreSQL backup in production.
  */
 
 import msgpack from 'msgpack-lite';
+import { createHash } from 'crypto';
 
 interface DictionaryPayload {
   version: number;
   fields: Array<{ name: string; index: number }> | string[];
 }
 
-interface CompactedMessage {
+interface DictionaryDelta {
+  version: number;
+  newFields: string[];  // New fields to append (agent may send as 'fields' for backwards compat)
+}
+
+// ✅ Clean typed payload contract (no shape guessing)
+type Pair = 
+  | [number, any]                                      // Leaf value: [index, primitive]
+  | ['a', string, Array<Array<Pair>>];                 // Array frame: ["a", arrayKey, [[pairs], [pairs]]]
+
+// Tuple-based compaction format (new format)
+interface CompactedMessageTuples {
+  v: number;                        // Dictionary version
+  p: Array<Pair>;                   // Typed pairs (leaf or array frame)
+  h?: string;                       // Optional: SHA-256 hash of dictionary content (integrity check)
+}
+
+// Legacy parallel array format (backwards compatibility)
+interface CompactedMessageLegacy {
   v: number;      // Dictionary version
   i: number[];    // Field indices
   d: any[];       // Field values
+  h?: string;     // Optional: SHA-256 hash of dictionary content (integrity check)
 }
+
+type CompactedMessage = CompactedMessageTuples | CompactedMessageLegacy;
 
 export class CloudDictionaryManager {
   private redis: any; // RedisClient type
   private logger?: any; // Winston logger
+  private strictVersioning: boolean; // Reject version mismatches by default
 
-  constructor(redis: any, logger?: any) {
+  constructor(redis: any, logger?: any, options?: { strictVersioning?: boolean }) {
     this.redis = redis;
     this.logger = logger;
+    this.strictVersioning = options?.strictVersioning ?? true; // Default: strict mode
   }
 
   /**
@@ -56,12 +81,17 @@ export class CloudDictionaryManager {
         }
       }
 
+      // Calculate dictionary hash (SHA-256 of sorted field names)
+      const sortedFields = Object.values(fieldMap).sort();
+      const dictHash = createHash('sha256').update(JSON.stringify(sortedFields)).digest('hex');
+
       // Store in Redis with 30-day TTL
       const key = `dict:${deviceUuid}`;
       await this.redis.setex(key, 30 * 24 * 60 * 60, JSON.stringify(fieldMap));
       
-      // Store version separately for quick lookup
+      // Store version and hash separately for quick lookup
       await this.redis.setex(`${key}:version`, 30 * 24 * 60 * 60, dict.version.toString());
+      await this.redis.setex(`${key}:hash`, 30 * 24 * 60 * 60, dictHash);
 
       this.logger?.info(`Dictionary stored: ${deviceUuid} v${dict.version} (${dict.fields.length} fields)`, {
         operation: 'storeDictionary',
@@ -81,8 +111,18 @@ export class CloudDictionaryManager {
 
   /**
    * Apply delta update to existing dictionary
+   * 
+   * ⚠️ CRITICAL ASSUMPTION: Dictionary is append-only
+   * This method assumes:
+   * - No dictionary resets between deltas
+   * - No rollback of versions
+   * - No missing deltas (all deltas applied in order)
+   * - Agent enforces monotonic growth (version only increments)
+   * 
+   * If any delta is missed or dictionary is reset, cloud state becomes corrupt.
+   * Recovery: Device must send full dictionary sync (not delta).
    */
-  async applyDelta(deviceUuid: string, delta: any): Promise<void> {
+  async applyDelta(deviceUuid: string, delta: DictionaryDelta): Promise<void> {
     try {
       const currentDict = await this.getDictionary(deviceUuid);
       
@@ -97,20 +137,37 @@ export class CloudDictionaryManager {
         return;
       }
 
-      // Agent sends delta with newFields: string[] (array of field names)
-      // New fields are appended to end of dictionary, so index = current length + position in array
-      const newFields = delta.newFields || delta.fields || [];
+      // ✅ APPEND-ONLY INVARIANT: New fields are always appended to end
+      // Index = current dictionary length + offset in newFields array
+      const newFields = delta.newFields;
       const baseIndex = Object.keys(currentDict).length;
+      
+      // ✅ INVARIANT CHECK: Validate version monotonicity
+      const currentVersion = await this.getDictionaryVersion(deviceUuid);
+      if (currentVersion !== null && delta.version <= currentVersion) {
+        this.logger?.error(`Delta version violation: delta v${delta.version} <= current v${currentVersion}`, {
+          operation: 'applyDelta',
+          deviceUuid,
+          deltaVersion: delta.version,
+          currentVersion
+        });
+        throw new Error(`Delta version must be > current version (got ${delta.version}, expected > ${currentVersion}). Dictionary may have been reset - device should send full sync.`);
+      }
       
       newFields.forEach((name: string, offset: number) => {
         const index = baseIndex + offset;
         currentDict[index] = name;
       });
 
+      // Calculate updated dictionary hash
+      const sortedFields = Object.values(currentDict).sort();
+      const dictHash = createHash('sha256').update(JSON.stringify(sortedFields)).digest('hex');
+
       // Store updated dictionary
       const key = `dict:${deviceUuid}`;
       await this.redis.setex(key, 30 * 24 * 60 * 60, JSON.stringify(currentDict));
       await this.redis.setex(`${key}:version`, 30 * 24 * 60 * 60, delta.version.toString());
+      await this.redis.setex(`${key}:hash`, 30 * 24 * 60 * 60, dictHash);
 
       this.logger?.info(`Delta applied: ${deviceUuid} v${delta.version} (+${newFields.length} fields)`, {
         operation: 'applyDelta',
@@ -174,7 +231,25 @@ export class CloudDictionaryManager {
   }
 
   /**
+   * Get dictionary content hash (SHA-256)
+   */
+  async getDictionaryHash(deviceUuid: string): Promise<string | null> {
+    try {
+      const hash = await this.redis.get(`dict:${deviceUuid}:hash`);
+      return hash || null;
+    } catch (error) {
+      this.logger?.error(`Failed to get dictionary hash: ${deviceUuid}`, {
+        operation: 'getDictionaryHash',
+        error: error instanceof Error ? error.message : String(error),
+        deviceUuid
+      });
+      return null;
+    }
+  }
+
+  /**
    * Expand compacted message to original format
+   * Supports both tuple-based (new) and parallel array (legacy) formats
    */
   async expandMessage(deviceUuid: string, compacted: CompactedMessage): Promise<Record<string, any>> {
     const dictionary = await this.getDictionary(deviceUuid);
@@ -183,44 +258,189 @@ export class CloudDictionaryManager {
       throw new Error(`Cannot expand message: no dictionary for ${deviceUuid} (dictionary may have been lost on Redis restart)`);
     }
 
+    // ✅ Refresh TTL on decode to keep active dictionaries alive
+    // Without this, dictionaries expire after 30 days even if device is actively publishing
+    const key = `dict:${deviceUuid}`;
+    await this.redis.expire(key, 30 * 24 * 60 * 60);
+    await this.redis.expire(`${key}:version`, 30 * 24 * 60 * 60);
+    await this.redis.expire(`${key}:hash`, 30 * 24 * 60 * 60);
+
+    // ✅ Hash validation (if message includes hash)
+    // Protects against: device bugs, UUID collisions, Redis corruption
+    if (compacted.h) {
+      const cachedHash = await this.getDictionaryHash(deviceUuid);
+      if (cachedHash && cachedHash !== compacted.h) {
+        const errorMsg = `Dictionary hash mismatch: content differs despite version match (cached: ${cachedHash.substring(0, 8)}..., message: ${compacted.h.substring(0, 8)}...)`;
+        this.logger?.error(errorMsg, {
+          operation: 'expandMessage',
+          deviceUuid,
+          messageVersion: compacted.v,
+          cachedHash: cachedHash.substring(0, 16),
+          messageHash: compacted.h.substring(0, 16)
+        });
+        throw new Error(`${errorMsg}. Dictionary content corruption detected - device must resync (send full sync to iot/device/${deviceUuid}/meta/dictionary)`);
+      }
+    }
+
     // Version check (warn if mismatch)
     const cachedVersion = await this.getDictionaryVersion(deviceUuid);
     if (cachedVersion !== null && cachedVersion !== compacted.v) {
-      this.logger?.warn(`Version mismatch: message v${compacted.v}, cached v${cachedVersion}`, {
-        operation: 'expandMessage',
-        deviceUuid,
-        messageVersion: compacted.v,
-        cachedVersion
-      });
+      const errorMsg = `Dictionary version mismatch: message v${compacted.v}, cached v${cachedVersion}`;
+      
+      if (this.strictVersioning) {
+        // ✅ STRICT MODE (default): Reject mismatched versions to prevent silent corruption
+        this.logger?.error(errorMsg, {
+          operation: 'expandMessage',
+          deviceUuid,
+          messageVersion: compacted.v,
+          cachedVersion,
+          action: 'rejected'
+        });
+        throw new Error(`${errorMsg}. Device should resync dictionary (send full sync to iot/device/${deviceUuid}/meta/dictionary)`);
+      } else {
+        // ⚠️ LENIENT MODE: Allow decoding but log warning (may cause corruption!)
+        this.logger?.warn(`${errorMsg} (lenient mode - decoding anyway)`, {
+          operation: 'expandMessage',
+          deviceUuid,
+          messageVersion: compacted.v,
+          cachedVersion,
+          action: 'continuing'
+        });
+      }
     }
 
-    return this.expandObject(compacted.i, compacted.d, dictionary);
+    // Detect format: new tuple-based ('p' field) vs legacy parallel arrays ('i'/'d' fields)
+    if ('p' in compacted) {
+      // ✅ New tuple-based format with array framing
+      const pairs = compacted.p;
+      
+      // ✅ FIX: Explicit root array handling
+      // If entire payload is a single array frame with '$root' key, unwrap it
+      if (pairs.length === 1 && pairs[0][0] === 'a') {
+        const [_marker, arrayKey, arrayElements] = pairs[0] as ['a', string, Array<Array<Pair>>];
+        if (arrayKey === '$root') {
+          // Root-level array - expand and unwrap
+          return arrayElements.map((elementPairs: Array<Pair>) => {
+            return this.expandTuples(elementPairs, dictionary);
+          });
+        }
+      }
+      
+      // Regular object expansion
+      return this.expandTuples(pairs, dictionary);
+    } else if ('i' in compacted && 'd' in compacted) {
+      // ⚠️ Legacy parallel array format (backwards compatibility)
+      this.logger?.debug('Using legacy expansion for parallel array format', {
+        operation: 'expandMessage',
+        deviceUuid
+      });
+      return this.expandLegacy(compacted.i, compacted.d, dictionary);
+    } else {
+      throw new Error('Invalid compacted message format: missing both "p" (tuples) and "i"/"d" (legacy) fields');
+    }
   }
 
   /**
-   * Recursively expand compacted object
+   * ✅ NEW: Expand tuple-based compacted message with array framing
+   * Format: {v, p: [[index, value], ...]}
+   * Arrays are marked with typed frames ['a', arrayKey, [...]] (explicit, no inference!)
    */
-  private expandObject(indices: number[], values: any[], dictionary: Record<number, string>): Record<string, any> {
+  private expandTuples(pairs: Array<Pair>, dictionary: Record<number, string>): Record<string, any> {
+    const expanded: Record<string, any> = {};
+
+    for (const pair of pairs) {
+      // ✅ Type-based dispatch (no shape guessing!)
+      if (pair[0] === 'a') {
+        // Array frame: ['a', arrayKey, arrayElements]
+        const [_marker, arrayKey, arrayElements] = pair as ['a', string, Array<Array<Pair>>];
+        
+        if (arrayElements.length === 0) {
+          expanded[arrayKey] = [];
+          continue;
+        }
+        
+        // ✅ Simple recursion - no prefix tracking needed
+        expanded[arrayKey] = arrayElements.map((elementPairs: Array<Pair>) => {
+          return this.expandTuples(elementPairs, dictionary);
+        });
+      } else {
+        // Leaf value: [index, value]
+        const [index, value] = pair as [number, any];
+        const fieldName = dictionary[index];
+        
+        if (!fieldName) {
+          this.logger?.warn('Unknown field index in compacted message', {
+            operation: 'expandTuples',
+            index
+          });
+          continue;
+        }
+
+        // ✅ Strip array markers from field path to get relative name
+        // "alarms[].code" → "code", "metrics[].values[].min" → "min"
+        const lastArrayMarker = fieldName.lastIndexOf('[].');
+        const relativeFieldName = lastArrayMarker >= 0 
+          ? fieldName.substring(lastArrayMarker + 3)  // Skip "[]."
+          : fieldName;
+
+        // Set the leaf value using relative field name
+        this.setNestedValue(expanded, relativeFieldName, value);
+      }
+    }
+
+    return expanded;
+  }
+
+  /**
+   * Set nested value using dot-notation path (e.g., "messages[0].timestamp" or "sensor.temperature")
+   */
+  private setNestedValue(obj: any, path: string, value: any): void {
+    const parts = path.split(/\.|\[|\]/).filter(p => p);
+    let current = obj;
+    
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const isLast = i === parts.length - 1;
+      
+      if (isLast) {
+        current[part] = value;
+      } else {
+        if (!current[part]) {
+          // Look ahead to see if next part is a number (array index)
+          const nextPart = parts[i + 1];
+          const nextIsIndex = nextPart && /^\d+$/.test(nextPart);
+          current[part] = nextIsIndex ? [] : {};
+        }
+        current = current[part];
+      }
+    }
+  }
+
+  /**
+   * ⚠️ LEGACY: Expand parallel array format (backwards compatibility)
+   * Old format: {v, i: [indices], d: [values]}
+   * This format has known issues with nested arrays - kept for migration period only
+   */
+  private expandLegacy(indices: number[], values: any[], dictionary: Record<number, string>): Record<string, any> {
     const expanded: Record<string, any> = {};
 
     indices.forEach((index, pos) => {
       const fieldName = dictionary[index];
       if (!fieldName) {
-        // Skip unknown indices silently - version mismatch warning already logged at top level
         return;
       }
       
       const value = values[pos];
       
-      // Handle nested compacted objects
+      // Handle nested compacted objects (legacy)
       if (value && typeof value === 'object' && 'i' in value && 'd' in value) {
-        expanded[fieldName] = this.expandObject(value.i, value.d, dictionary);
+        expanded[fieldName] = this.expandLegacy(value.i, value.d, dictionary);
       } 
-      // Handle arrays of compacted objects
+      // Handle arrays of compacted objects (legacy indexed mode)
       else if (Array.isArray(value)) {
         expanded[fieldName] = value.map(item =>
           item && typeof item === 'object' && 'i' in item && 'd' in item
-            ? this.expandObject(item.i, item.d, dictionary)
+            ? this.expandLegacy(item.i, item.d, dictionary)
             : item
         );
       } 
@@ -235,16 +455,17 @@ export class CloudDictionaryManager {
 
   /**
    * Check if message is compacted (has dictionary encoding)
+   * Supports both tuple-based (new) and parallel array (legacy) formats
    */
   isCompactedMessage(payload: any): payload is CompactedMessage {
     return (
       payload &&
       typeof payload === 'object' &&
-      'v' in payload &&
-      'i' in payload &&
-      'd' in payload &&
-      Array.isArray(payload.i) &&
-      Array.isArray(payload.d)
+      typeof payload.v === 'number' &&
+      (
+        Array.isArray(payload.p) ||
+        (Array.isArray(payload.i) && Array.isArray(payload.d))
+      )
     );
   }
 
@@ -254,6 +475,7 @@ export class CloudDictionaryManager {
   async deleteDictionary(deviceUuid: string): Promise<void> {
     await this.redis.del(`dict:${deviceUuid}`);
     await this.redis.del(`dict:${deviceUuid}:version`);
+    await this.redis.del(`dict:${deviceUuid}:hash`);
     
     this.logger?.info(`Dictionary deleted: ${deviceUuid}`, {
       operation: 'deleteDictionary',

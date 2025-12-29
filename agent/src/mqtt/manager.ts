@@ -4,7 +4,7 @@ import msgpack from 'msgpack-lite';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import { MessageIdGenerator } from './message-id';
-import type { DictionaryManager } from './dictionary-manager';
+import type { DictionaryManager } from './dictionary';
 
 /**
  * Explicit payload contract - callers must specify format
@@ -271,7 +271,7 @@ export class MqttManager extends EventEmitter {
 
     if (!this.dictionaryManager) {
       // Lazy import to avoid circular dependency
-      const { DictionaryManager } = await import('./dictionary-manager.js');
+      const { DictionaryManager } = await import('./dictionary.js');
       
       this.dictionaryManager = new DictionaryManager(this, this.logger, deviceUuid);
       await this.dictionaryManager.initialize();

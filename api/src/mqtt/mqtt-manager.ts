@@ -748,7 +748,8 @@ export class MqttManager extends EventEmitter {
               error: error instanceof Error ? error.message : String(error),
               topic
             });
-            // Continue with original data (fallback)
+            // Drop this message (cannot process without dictionary)
+            return;
           }
         } else {
           // Message is not compacted (legacy format or compaction disabled)
@@ -923,12 +924,14 @@ export class MqttManager extends EventEmitter {
    * Handle endpoint data message
    */
   private handleEndpointsData(deviceUuid: string, sensorName: string | undefined, data: any, rest: string[] = []): void {
+    let actualData = data.data || data;
+    const timestamp = data.timestamp || new Date().toISOString();
 
     const endpointData: SensorData = {
       deviceUuid,
       sensorName: sensorName || 'unknown',
-      timestamp: data.timestamp || new Date().toISOString(),
-      data: data.data || data,
+      timestamp,
+      data: actualData,
       metadata: data.metadata
     };
 

@@ -328,8 +328,79 @@ class RedisSensorQueue {
           protocol = 'can';
         }
 
-        // Check if this is a batch message (Modbus/OPC UA can send multiple readings)
-        if (entry.data && Array.isArray(entry.data.readings)) {
+        // Check if this is a batch message with messages wrapper (OPC UA/Modbus compacted format)
+        if (entry.data?.messages && Array.isArray(entry.data.messages)) {
+          // Iterate through messages, each containing readings
+          entry.data.messages.forEach((message: any) => {
+            if (message.readings && Array.isArray(message.readings)) {
+              message.readings.forEach((reading: any) => {
+                // ✅ Skip metadata nodes (server info, diagnostics) - store separately
+                if (reading.nodeType === 'metadata') {
+                  logger.debug('Skipping metadata node (not stored in readings table)', {
+                    metric: reading.registerName || reading.nodeName || reading.name,
+                    deviceUuid: entry.deviceUuid.substring(0, 8),
+                    value: reading.value
+                  });
+                  // TODO: Store metadata in device_metadata table or extra column
+                  return;
+                }
+                
+                const extra: Record<string, any> = {
+                  sensor_name: entry.sensorName,
+                };
+                
+                // Add device name if present
+                if (reading.deviceName) {
+                  extra.deviceName = reading.deviceName;
+                }
+                
+                // Extract anomaly fields (if present from edge AI)
+                const anomaly_score = typeof reading.anomaly_score === 'number' ? reading.anomaly_score : undefined;
+                const anomaly_threshold = typeof reading.anomaly_threshold === 'number' ? reading.anomaly_threshold : undefined;
+                const baseline_samples = typeof reading.baseline_samples === 'number' ? reading.baseline_samples : undefined;
+                const detection_methods = reading.detection_methods || undefined;
+                
+                // Add any additional fields to extra (excluding anomaly fields now in dedicated columns)
+                Object.entries(reading).forEach(([key, val]) => {
+                  if (!['value', 'quality', 'unit', 'timestamp', 'registerName', 'deviceName', 'nodeName',
+                        'anomaly_score', 'anomaly_threshold', 'baseline_samples', 'detection_methods'].includes(key)) {
+                    extra[key] = val;
+                  }
+                });
+                
+                // Handle value: numbers go in value column, non-numeric go in extra
+                const numericValue = typeof reading.value === 'number' ? reading.value : null;
+                if (numericValue === null && reading.value !== undefined && reading.value !== null) {
+                  // Non-numeric value - store in extra field
+                  extra.non_numeric_value = reading.value;
+                  logger.debug('Non-numeric reading value stored in extra', {
+                    metric: reading.registerName || reading.nodeName || reading.name,
+                    valueType: typeof reading.value,
+                    value: String(reading.value).substring(0, 50)
+                  });
+                }
+                
+                readings.push({
+                  device_uuid: entry.deviceUuid,
+                  metric_name: reading.registerName || reading.nodeName || reading.name || entry.sensorName,
+                  value: numericValue,
+                  quality: reading.quality?.toLowerCase() || 'good',
+                  unit: reading.unit || null,
+                  protocol,
+                  extra,
+                  time: new Date(reading.timestamp || message.timestamp || entry.timestamp),
+                  // Add anomaly fields
+                  ...(anomaly_score !== undefined && { anomaly_score }),
+                  ...(anomaly_threshold !== undefined && { anomaly_threshold }),
+                  ...(baseline_samples !== undefined && { baseline_samples }),
+                  ...(detection_methods !== undefined && { detection_methods })
+                });
+              });
+            }
+          });
+        }
+        // Check if this is a batch message (Modbus/OPC UA can send multiple readings directly)
+        else if (entry.data && Array.isArray(entry.data.readings)) {
           // Expand batch into individual readings
           entry.data.readings.forEach((reading: any) => {
             const extra: Record<string, any> = {
@@ -357,7 +428,7 @@ class RedisSensorQueue {
             
             readings.push({
               device_uuid: entry.deviceUuid,
-              metric_name: reading.registerName || reading.nodeName || entry.sensorName,
+              metric_name: reading.registerName || reading.nodeName || reading.name || entry.sensorName,
               value: typeof reading.value === 'number' ? reading.value : null,
               quality: reading.quality?.toLowerCase() || 'good',
               unit: reading.unit || null,

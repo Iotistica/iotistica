@@ -82,6 +82,9 @@ export const OPCUADataPointSchema = z.object({
   /** OPC-UA Node ID (e.g., ns=2;s=Temperature or ns=3;i=1001) */
   nodeId: z.string(),
   
+  /** Node classification: 'metric' (sensor data) or 'metadata' (server info, diagnostics) */
+  nodeType: z.enum(['metric', 'metadata']).default('metric'),
+  
   /** Data type (inferred from OPC-UA, but can be specified) */
   dataType: z.enum(['number', 'string', 'boolean', 'object']).optional(),
   
