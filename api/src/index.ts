@@ -109,6 +109,9 @@ app.use(trafficLogger);
 app.use((req, res, next) => {
   const startTime = Date.now();
   
+  // MQTT auth endpoints logged at debug level only (less noisy)
+  const isMqttAuth = req.path === '/superuser' || req.path === '/acl';
+  
   // Log incoming request at debug level (less noisy)
   logger.debug(`${req.method} ${req.path}`, {
     method: req.method,
@@ -119,7 +122,7 @@ app.use((req, res, next) => {
   
   res.on('finish', () => {
     const duration = Date.now() - startTime;
-    const logLevel = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+    const logLevel = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : isMqttAuth ? 'debug' : 'info';
     
     // Log only the message without metadata object
     logger[logLevel](`${res.statusCode} ${req.method} ${req.path} - ${duration}ms`);

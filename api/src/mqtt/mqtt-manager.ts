@@ -15,6 +15,7 @@ import { EventEmitter } from 'events';
 import msgpack from 'msgpack-lite';
 import logger, { logOperation } from '../utils/logger';
 import { isDuplicateMessage } from '../utils/mqtt-deduplication';
+import { CloudDictionaryManager } from './dictionary-manager';
 
 /**
  * Deserialize MQTT payload - auto-detects msgpack or JSON format
@@ -170,8 +171,11 @@ export class MqttManager extends EventEmitter {
   private readonly MAX_PENDING_PUBLISHES = 1000;
   private readonly MAX_PUBLISH_RETRIES = 3;
 
+  // Dictionary manager for key compaction (POC)
+  private cloudDictionaryManager: CloudDictionaryManager | null = null;
+
   // Message type handlers dispatch map
-  private readonly messageHandlers: Record<string, (deviceUuid: string, subTopic: string | undefined, data: any) => void>;
+  private readonly messageHandlers: Record<string, (deviceUuid: string, subTopic: string | undefined, data: any, rest?: string[]) => void>;
 
   /**
    * Type-safe event emitter
@@ -202,8 +206,26 @@ export class MqttManager extends EventEmitter {
       logs: this.handleLogMessage.bind(this),
       metrics: this.handleMetricsMessage.bind(this),
       status: this.handleStatusMessage.bind(this),
-      events: this.handleEventsMessage.bind(this)
+      events: this.handleEventsMessage.bind(this),
+      meta: this.handleMetaMessage.bind(this)
     };
+  }
+
+  /**
+   * Initialize dictionary manager (call after constructor, before connect)
+   */
+  initDictionaryManager(redisClient: any): void {
+    if (!this.cloudDictionaryManager) {
+      this.cloudDictionaryManager = new CloudDictionaryManager(redisClient, logger);
+      logger.info('Cloud dictionary manager initialized');
+    }
+  }
+
+  /**
+   * Get dictionary manager instance
+   */
+  getDictionaryManager(): CloudDictionaryManager | null {
+    return this.cloudDictionaryManager;
   }
 
   /**
@@ -414,6 +436,8 @@ export class MqttManager extends EventEmitter {
           return `iot/device/${mqttDevicePattern}/status`;
         case 'events':
           return `iot/device/${mqttDevicePattern}/events/+`;
+        case 'meta':
+          return `iot/device/${mqttDevicePattern}/meta/+`;
         default:
           logger.warn(`Unknown topic type: ${type}`);
           return null;
@@ -672,8 +696,6 @@ export class MqttManager extends EventEmitter {
    * Handle incoming MQTT messages
    */
   private async handleMessage(topic: string, payload: Buffer): Promise<void> {
-    const message = payload.toString();
-    
     // Update last message timestamp for health monitoring
     this.lastMessageTimestamp = Date.now();
     
@@ -690,8 +712,64 @@ export class MqttManager extends EventEmitter {
       const { deviceUuid, messageType, subTopic, rest } = parsed;
       
 
-      // Parse payload (auto-detects msgpack or JSON)
-      const data: any = deserializePayload(message);
+      // Parse payload (auto-detects msgpack or JSON) - pass Buffer directly
+      let data: any = deserializePayload(payload);
+
+      // Dictionary expansion: Check if message is compacted and expand it
+      if (messageType === 'endpoints' && this.cloudDictionaryManager) {
+        const isCompacted = this.cloudDictionaryManager.isCompactedMessage(data);
+        
+        if (isCompacted) {
+          try {
+            // Log compacted message structure
+            logger.info('Compacted message received', {
+              deviceUuid: deviceUuid.substring(0, 8),
+              version: data.v,
+              indicesCount: data.i?.length,
+              valuesCount: data.d?.length,
+              compactedPayload: JSON.stringify(data).substring(0, 500)
+            });
+
+            const expanded = await this.cloudDictionaryManager.expandMessage(deviceUuid, data);
+            
+            // Log expanded message
+            logger.info('Message expanded using dictionary', {
+              deviceUuid: deviceUuid.substring(0, 8),
+              version: data.v,
+              compactedSize: payload.length,
+              expandedFields: Object.keys(expanded).length,
+              expandedPayload: JSON.stringify(expanded).substring(0, 500)
+            });
+            
+            data = expanded;
+          } catch (error) {
+            logger.error('Failed to expand compacted message', {
+              deviceUuid: deviceUuid.substring(0, 8),
+              error: error instanceof Error ? error.message : String(error),
+              topic
+            });
+            // Continue with original data (fallback)
+          }
+        } else {
+          // Message is not compacted (legacy format or compaction disabled)
+          logger.info('Uncompacted message received', {
+            deviceUuid: deviceUuid.substring(0, 8),
+            messageType,
+            subTopic,
+            payloadSize: payload.length,
+            uncompactedPayload: JSON.stringify(data).substring(0, 500)
+          });
+        }
+      } else if (messageType === 'endpoints') {
+        // Dictionary manager not initialized, log original message
+        logger.info('Message received (dictionary manager disabled)', {
+          deviceUuid: deviceUuid.substring(0, 8),
+          messageType,
+          subTopic,
+          payloadSize: payload.length,
+          payload: JSON.stringify(data).substring(0, 500)
+        });
+      }
 
       // HA Deduplication: Check if message has msgId and if we've seen it before
       if (data && typeof data === 'object' && data.msgId) {
@@ -713,9 +791,10 @@ export class MqttManager extends EventEmitter {
           messageType,
           deviceUuid: deviceUuid.substring(0, 8) + '...',
           subTopic,
+          rest: rest.join('/'),
           hasData: !!data
         });
-        handler(deviceUuid, subTopic, data);
+        handler(deviceUuid, subTopic, data, rest);
       } else {
         logger.warn('Unknown message type', {
           operation: 'mqtt-message',
@@ -733,35 +812,76 @@ export class MqttManager extends EventEmitter {
   /**
    * Handle state message
    */
-  private handleStateMessage(deviceUuid: string, subTopic: string | undefined, data: any): void {
+  private handleStateMessage(deviceUuid: string, subTopic: string | undefined, data: any, rest: string[] = []): void {
     this.emitTyped('state', { deviceUuid, data });
   }
 
   /**
    * Handle agent message
    */
-  private handleAgentMessage(deviceUuid: string, subTopic: string | undefined, data: any): void {
+  private handleAgentMessage(deviceUuid: string, subTopic: string | undefined, data: any, rest: string[] = []): void {
     this.emitTyped('agent', { deviceUuid, subTopic: subTopic || 'unknown', message: data });
   }
 
   /**
    * Handle metrics message wrapper
    */
-  private handleMetricsMessage(deviceUuid: string, subTopic: string | undefined, data: any): void {
+  private handleMetricsMessage(deviceUuid: string, subTopic: string | undefined, data: any, rest: string[] = []): void {
     this.handleMetrics(deviceUuid, data);
   }
 
   /**
    * Handle status message wrapper
    */
-  private handleStatusMessage(deviceUuid: string, subTopic: string | undefined, data: any): void {
+  private handleStatusMessage(deviceUuid: string, subTopic: string | undefined, data: any, rest: string[] = []): void {
     this.handleStatus(deviceUuid, data);
+  }
+
+  /**
+   * Handle meta message (dictionary sync)
+   */
+  private async handleMetaMessage(deviceUuid: string, subTopic: string | undefined, data: any, rest: string[] = []): Promise<void> {
+    if (!this.cloudDictionaryManager) {
+      logger.warn('Dictionary manager not initialized, ignoring meta message', { deviceUuid, subTopic });
+      return;
+    }
+
+    try {
+      // Check if this is a delta update: /meta/dictionary/delta
+      const isDelta = subTopic === 'dictionary' && rest[0] === 'delta';
+      
+      if (isDelta) {
+        // Delta update
+        await this.cloudDictionaryManager.applyDelta(deviceUuid, data);
+        logger.info('Dictionary delta applied', {
+          deviceUuid: deviceUuid.substring(0, 8),
+          version: data.version,
+          newFields: data.fields?.length
+        });
+      } else if (subTopic === 'dictionary') {
+        // Full dictionary sync
+        await this.cloudDictionaryManager.storeDictionary(deviceUuid, data);
+        logger.info('Dictionary synchronized from device', {
+          deviceUuid: deviceUuid.substring(0, 8),
+          version: data.version,
+          fieldCount: data.fields?.length
+        });
+      } else {
+        logger.warn('Unknown meta subTopic', { subTopic, rest, deviceUuid });
+      }
+    } catch (error) {
+      logger.error('Failed to handle meta message', {
+        error: error instanceof Error ? error.message : String(error),
+        deviceUuid,
+        subTopic
+      });
+    }
   }
 
   /**
    * Handle events message (anomalies, alerts, etc.)
    */
-  private handleEventsMessage(deviceUuid: string, subTopic: string | undefined, data: any): void {
+  private handleEventsMessage(deviceUuid: string, subTopic: string | undefined, data: any, rest: string[] = []): void {
     logger.info('handleEventsMessage called', {
       deviceUuid: deviceUuid.substring(0, 8) + '...',
       subTopic: subTopic || 'unknown',
@@ -802,13 +922,7 @@ export class MqttManager extends EventEmitter {
   /**
    * Handle endpoint data message
    */
-  private handleEndpointsData(deviceUuid: string, sensorName: string | undefined, data: any): void {
-    logger.info('handleEndpointsData called', {
-      deviceUuid: deviceUuid.substring(0, 8) + '...',
-      sensorName: sensorName || 'unknown',
-      hasData: !!data,
-      dataKeys: data ? Object.keys(data).join(',') : 'none'
-    });
+  private handleEndpointsData(deviceUuid: string, sensorName: string | undefined, data: any, rest: string[] = []): void {
 
     const endpointData: SensorData = {
       deviceUuid,
@@ -818,12 +932,6 @@ export class MqttManager extends EventEmitter {
       metadata: data.metadata
     };
 
-    logger.info('Emitting endpoints event', { 
-      deviceUuid: deviceUuid.substring(0, 8) + '...', 
-      sensorName: endpointData.sensorName,
-      timestamp: endpointData.timestamp,
-      hasMetadata: !!endpointData.metadata
-    });
     this.emitTyped('endpoints', endpointData);
     logger.info('Endpoints event emitted successfully');
   }
@@ -831,7 +939,7 @@ export class MqttManager extends EventEmitter {
   /**
    * Handle log message
    */
-  private handleLogMessage(deviceUuid: string, containerId: string | undefined, data: any): void {
+  private handleLogMessage(deviceUuid: string, containerId: string | undefined, data: any, rest: string[] = []): void {
     const logMessage: LogMessage = {
       deviceUuid,
       containerId: containerId || 'unknown',

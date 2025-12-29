@@ -163,7 +163,6 @@ router.post('/superuser', async (req: Request, res: Response) => {
     if (isSuperuser) {
       return res.status(200).json({ success: true });
     } else {
-      authLogger.info('User is NOT a superuser', { username, isSuperuser: false });
       return res.status(403).json({ error: 'Not a superuser' });
     }
 

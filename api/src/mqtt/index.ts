@@ -40,6 +40,17 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
       qos: (parseInt(process.env.MQTT_QOS || '1') as 0 | 1 | 2)
     });
 
+    // Initialize dictionary manager if key compaction enabled
+    const useKeyCompaction = process.env.USE_KEY_COMPACTION_POC === 'true';
+    if (useKeyCompaction) {
+      logger.info('Initializing dictionary manager for key compaction POC...');
+      const { redisClient } = await import('../redis/client');
+      await mqttManager.initDictionaryManager(redisClient.getClient());
+      logger.info('Dictionary manager initialized');
+    } else {
+      logger.info('Key compaction POC disabled (USE_KEY_COMPACTION_POC not set)');
+    }
+
     // Connect to broker
     await mqttManager.connect();
 
@@ -91,12 +102,16 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
     
     if (subscribeToAll) {
       logger.info('Subscribing to all device topics...');
-      mqttManager.subscribeToAll([
-        'endpoints',
-        'state',
-        'agent',
-        'events'
-      ]);
+      
+      const topics = ['endpoints', 'state', 'agent', 'events'];
+      
+      // Add meta topic if dictionary manager enabled
+      if (useKeyCompaction) {
+        topics.push('meta');
+        logger.info('Added meta topic subscription for dictionary sync');
+      }
+      
+      mqttManager.subscribeToAll(topics);
     } else {
       logger.warn('MQTT subscription disabled. Set MQTT_SUBSCRIBE_ALL=true to enable.');
     }
