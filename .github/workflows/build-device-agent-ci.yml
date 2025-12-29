@@ -177,7 +177,7 @@ jobs:
   build-x86:
     name: Build x86_64
     needs: [version]
-    runs-on: ubuntu-latest
+    runs-on: [iotistic-lab-sc]
     
     steps:
       - name: Checkout repository
