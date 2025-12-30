@@ -433,7 +433,7 @@ jobs:
           echo "✓ Uploaded ARM64 checksums"
 
   deploy-to-pi:
-    name: Deploy to Raspberry Pi (Home Network)
+    name: Deploy to Raspberry Pi 
     needs: [version, build-arm64, upload-artifacts]
     runs-on: [pi-deploy]
     if: github.ref == 'refs/heads/master'  # Only deploy from master branch
@@ -462,7 +462,7 @@ jobs:
           # Connect and deploy
           $session = New-SSHSession -ComputerName $env:PI_HOST -Credential $credential -AcceptKey
           
-          $installCmd = "curl -sfL https://iotistic.blob.core.windows.net/scripts/agent/install | IOTISTIC_AGENT_VERSION=$env:AGENT_VERSION sudo bash"
+          $installCmd = "curl -sfL https://iotistic.blob.core.windows.net/scripts/agent/install | IOTISTIC_AGENT_VERSION=$env:AGENT_VERSION IOTISTIC_NON_INTERACTIVE=true sudo -E bash"
           
           $result = Invoke-SSHCommand -SessionId $session.SessionId -Command "echo 'Installing agent on Raspberry Pi...'; $installCmd"
           
