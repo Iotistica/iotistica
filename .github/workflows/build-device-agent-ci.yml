@@ -909,7 +909,7 @@ jobs:
 
   cleanup:
       name: Clean up
-      runs-on: ubuntu-latest
+      runs-on: [iotistic-lab-sc]
       needs: [upload-artifacts]
       if: always()
       steps:
