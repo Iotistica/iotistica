@@ -126,13 +126,98 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
    * @param devices - Array of OPC-UA device configurations
    */
   constructor(devices: OPCUADeviceConfig[]) {
-    const logger = new ConsoleLogger('info');
+    const logger = new ConsoleLogger('debug'); // Enable debug logging
     super(devices as GenericDeviceConfig[], logger);
   }
   
   /**
+   * Classify node as metric or metadata using hierarchy of authority:
+   * 
+   * 1. Explicit semantic config (HIGHEST - user intent overrides everything)
+   * 2. Well-known semantic prefixes (STRONG - serverinfo_*, deviceinfo_*, metadata_*)
+   * 3. OPC UA metadata heuristics (WEAK - NodeClass, DataType)
+   * 4. Data type (LAST RESORT - numeric = metric, non-numeric = metadata)
+   * 
+   * Why this hierarchy?
+   * - Semantics cannot be inferred from data type alone
+   * - firmware_version (UInt32) is metadata, not metric
+   * - line1_speed_rpm (Int32) is metric, not metadata
+   * - Only user knows semantic intent
+   * 
+   * @param nodeClass - OPC UA NodeClass value
+   * @param dataTypeNodeId - OPC UA DataType NodeId
+   * @param key - Node key/name for pattern matching
+   * @param explicitSemantic - Explicit user-provided classification (highest authority)
+   * @returns Node type classification
+   */
+  private classifyNodeByMetadata(
+    nodeClass: any, 
+    dataTypeNodeId: any, 
+    key: string,
+    explicitSemantic?: 'metric' | 'metadata'
+  ): 'metric' | 'metadata' | 'ignore' {
+    // Only process Variable nodes (not Object, Method, etc.)
+    // OPC UA NodeClass: Object=1, Variable=2, Method=4, ObjectType=8, VariableType=64
+    if (nodeClass !== 2) { // NodeClass.Variable = 2
+      return 'ignore';
+    }
+
+    // 1. EXPLICIT SEMANTIC CONFIG (highest authority - user intent)
+    // User explicitly marked this node as metric or metadata
+    // This overrides all heuristics - use it when semantics cannot be inferred
+    if (explicitSemantic) {
+      return explicitSemantic;
+    }
+
+    // 2. WELL-KNOWN SEMANTIC PREFIXES (strong hint)
+    // serverinfo_*, deviceinfo_*, metadata_* are always metadata
+    // This handles common patterns but can be overridden by explicit config (#1)
+    if (key.startsWith('serverinfo_') || key.startsWith('deviceinfo_') || key.startsWith('metadata_')) {
+      return 'metadata';
+    }
+
+    // 3. OPC UA METADATA HEURISTICS (weak hint - extract DataType from NodeId)
+    // Extract numeric identifier from NodeId (handle both numeric and object forms)
+    let dataType: number;
+    if (typeof dataTypeNodeId === 'number') {
+      dataType = dataTypeNodeId;
+    } else if (dataTypeNodeId && typeof dataTypeNodeId === 'object') {
+      // NodeId object - extract value/identifier
+      dataType = dataTypeNodeId.value || dataTypeNodeId.identifier;
+    } else {
+      // Unknown format - default to metadata
+      return 'metadata';
+    }
+
+    // 4. DATA TYPE (last resort - technical type, not semantic meaning)
+    // Numeric data types = metrics (time-series telemetry)
+    // Non-numeric = metadata (configuration, diagnostics, info)
+    // OPC UA standard numeric types in namespace 0
+    const numericDataTypes = [
+      2,  // SByte
+      3,  // Byte
+      4,  // Int16
+      5,  // UInt16
+      6,  // Int32
+      7,  // UInt32
+      8,  // Int64
+      9,  // UInt64
+      10, // Float
+      11, // Double
+    ];
+
+    if (numericDataTypes.includes(dataType)) {
+      return 'metric';
+    }
+
+    // Non-numeric = metadata (strings, booleans, etc.)
+    return 'metadata';
+  }
+
+  /**
    * Validate that NodeIDs exist and are accessible
    * Prevents runtime errors from misconfigured or missing nodes
+   * Also auto-classifies nodes based on OPC UA metadata (NodeClass, DataType)
    * 
    * @param session - Active OPC-UA session
    * @param dataPoints - Data points to validate
@@ -151,23 +236,83 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 
     for (const dp of dataPoints) {
       try {
-        // Attempt to read the node to verify it exists and is accessible
-        const dataValue = await session.readVariableValue(dp.nodeId);
-        
-        // Check if read was successful
-        if (dataValue.statusCode.isGood()) {
-          valid.push(dp);
-          this.logger.debug(`✓ NodeID validated: ${dp.nodeId} (${dp.name})`, {
-            deviceName,
-            value: dataValue.value?.value,
-            dataType: dataValue.value?.dataType
-          });
-        } else {
+        // Read node value, class, data type, and description in parallel
+        // Note: EngineeringUnits is a property, not an attribute, so we read Description instead
+        const [valueResult, nodeClassResult, dataTypeResult, descriptionResult] = await Promise.all([
+          session.read({ nodeId: dp.nodeId, attributeId: AttributeIds.Value }),
+          session.read({ nodeId: dp.nodeId, attributeId: AttributeIds.NodeClass }),
+          session.read({ nodeId: dp.nodeId, attributeId: AttributeIds.DataType }),
+          session.read({ nodeId: dp.nodeId, attributeId: AttributeIds.Description }),
+        ]);
+
+        // Check if reads were successful
+        if (!valueResult.statusCode.isGood()) {
           invalid.push(dp.nodeId);
           this.logger.warn(`✗ NodeID validation failed: ${dp.nodeId} (${dp.name})`, {
             deviceName,
-            statusCode: dataValue.statusCode.name,
-            description: dataValue.statusCode.description
+            statusCode: valueResult.statusCode.name,
+            description: valueResult.statusCode.description
+          });
+          continue;
+        }
+
+        // Extract metadata
+        const nodeClass = nodeClassResult.value?.value;
+        const dataTypeNodeId = dataTypeResult.value?.value;
+
+        // Auto-populate unit from Description if not already set
+        // OPC UA Description often contains unit info (e.g., "Temperature in °C")
+        if (!dp.unit && descriptionResult.statusCode.isGood()) {
+          const description = descriptionResult.value?.value?.text || descriptionResult.value?.value;
+          if (description && typeof description === 'string') {
+            // Extract unit from description - supports both simple and composite units
+            // Pattern matches: "in {unit}" or "{unit}" at end of string
+            // Examples: "Temperature in °C", "Flow in L/min", "Vibration in mm/s"
+            const inUnitMatch = description.match(/\bin\s+([^\s,]+(?:\/[^\s,]+)?)/i);
+            if (inUnitMatch) {
+              (dp as any).unit = inUnitMatch[1];
+              this.logger.debug(`Auto-extracted unit from description: ${inUnitMatch[1]}`, {
+                deviceName,
+                nodeId: dp.nodeId,
+                description
+              });
+            }
+          }
+        }
+
+        // Classify using hierarchy of authority: semantic > prefixes > OPC UA metadata > datatype
+        const explicitSemantic = (dp as any).semantic; // User-provided semantic intent
+        const classified = this.classifyNodeByMetadata(nodeClass, dataTypeNodeId, dp.name, explicitSemantic);
+
+        // Skip nodes that should be ignored (non-Variable nodes)
+        if (classified === 'ignore') {
+          this.logger.debug(`⊘ Skipping non-Variable node: ${dp.nodeId} (${dp.name})`, {
+            deviceName,
+            nodeClass
+          });
+          continue;
+        }
+
+        // Set computed nodeType (result of classification)
+        (dp as any).nodeType = classified;
+
+        // Only include metrics in validated nodes (metadata excluded from polling/subscription)
+        if (classified === 'metric') {
+          valid.push(dp);
+          this.logger.debug(`✓ Metric node validated: ${dp.nodeId} (${dp.name})`, {
+            deviceName,
+            nodeType: classified,
+            nodeClass,
+            dataType: dataTypeNodeId,
+            value: valueResult.value?.value
+          });
+        } else {
+          this.logger.debug(`⊘ Metadata node excluded: ${dp.nodeId} (${dp.name})`, {
+            deviceName,
+            nodeType: classified,
+            nodeClass,
+            dataType: dataTypeNodeId,
+            value: valueResult.value?.value
           });
         }
       } catch (error) {
@@ -180,17 +325,81 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
     }
 
     // Log summary
-    if (invalid.length > 0) {
-      this.logger.warn(`NodeID validation complete: ${valid.length} valid, ${invalid.length} invalid`, {
-        deviceName,
-        validNodes: valid.map(dp => dp.nodeId),
-        invalidNodes: invalid
-      });
-    } else {
-      this.logger.debug(`✓ All ${valid.length} NodeIDs validated successfully for ${deviceName}`);
-    }
+    this.logger.debug(`NodeID validation complete: ${valid.length} metrics, ${invalid.length} invalid`, {
+      deviceName,
+      validNodes: valid.map(dp => dp.nodeId),
+      invalidNodes: invalid
+    });
 
     return { valid, invalid };
+  }
+
+  /**
+   * Read metadata nodes once and emit on separate channel
+   * Metadata is read on connect/reconnect, not part of time-series polling
+   * 
+   * @param session - Active OPC-UA session
+   * @param dataPoints - All data points (will filter for metadata)
+   * @param deviceName - Device name (for logging)
+   */
+  private async readMetadata(
+    session: ClientSession,
+    dataPoints: OPCUADataPoint[],
+    deviceName: string
+  ): Promise<void> {
+    // Filter to only metadata nodes
+    const metadataNodes = dataPoints.filter(dp => 
+      (dp as OPCUADataPoint).nodeType === 'metadata'
+    );
+
+    if (metadataNodes.length === 0) {
+      this.logger.debug(`No metadata nodes to read for ${deviceName}`);
+      return;
+    }
+
+    this.logger.debug(`Reading ${metadataNodes.length} metadata nodes for ${deviceName}...`);
+
+    const timestamp = new Date().toISOString();
+    const metadataRecords: any[] = [];
+
+    for (const dp of metadataNodes) {
+      try {
+        const dataValue = await session.readVariableValue(dp.nodeId);
+
+        if (dataValue.statusCode.isGood()) {
+          metadataRecords.push({
+            deviceName,
+            key: dp.name,
+            value: dataValue.value?.value,
+            nodeId: dp.nodeId,
+            updatedAt: timestamp,
+          });
+
+          this.logger.debug(`✓ Metadata read: ${dp.name} = ${dataValue.value?.value}`, {
+            deviceName,
+            nodeId: dp.nodeId,
+          });
+        } else {
+          this.logger.warn(`Failed to read metadata: ${dp.name}`, {
+            deviceName,
+            nodeId: dp.nodeId,
+            statusCode: dataValue.statusCode.name,
+          });
+        }
+      } catch (error) {
+        this.logger.error(`Error reading metadata: ${dp.name}`, {
+          deviceName,
+          nodeId: dp.nodeId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    // Emit metadata on separate channel (not 'data')
+    if (metadataRecords.length > 0) {
+      this.emit('metadata', metadataRecords);
+      this.logger.debug(`Emitted ${metadataRecords.length} metadata records for ${deviceName}`);
+    }
   }
 
   /**
@@ -214,8 +423,11 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
     const { session } = sessionWrapper;
     const { connection, dataPoints } = device;
 
-    // Filter to only validated nodes
-    const validDataPoints = dataPoints.filter(dp => sessionWrapper.validatedNodes.has(dp.nodeId));
+    // Filter to only validated metric nodes (exclude metadata)
+    const validDataPoints = dataPoints.filter(dp => 
+      sessionWrapper.validatedNodes.has(dp.nodeId) && 
+      (dp as OPCUADataPoint).nodeType === 'metric'
+    );
 
     if (validDataPoints.length === 0) {
       this.logger.warn(`No valid NodeIDs to subscribe for ${deviceName}`);
@@ -263,6 +475,12 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 
         // Handle data changes (real-time streaming)
         monitoredItem.on('changed', (dataValue: DataValue) => {
+          // Hard gate: Never emit metadata nodes
+          if ((dp as OPCUADataPoint).nodeType !== 'metric') {
+            this.logger.warn(`Blocked metadata node emission: ${dp.name}`, { deviceName });
+            return;
+          }
+
           const quality = this.determineQuality(dataValue.statusCode);
           const qualityCode = this.extractQualityCode(dataValue.statusCode);
 
@@ -274,7 +492,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
             unit: dp.unit || '',
             quality,
             qualityCode,
-            nodeType: (dp as OPCUADataPoint).nodeType || 'metric', // Add node type
+            nodeType: 'metric', // Always 'metric' at this point (metadata filtered)
           };
 
           // Emit immediately (real-time streaming)
@@ -783,7 +1001,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
         device.name
       );
 
-      // Cache validated NodeIDs
+      // Cache validated NodeIDs (only metrics)
       validDataPoints.forEach(dp => sessionWrapper.validatedNodes.add(dp.nodeId));
 
       // Warn if some nodes are invalid
@@ -796,10 +1014,25 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
         });
       }
 
-      // If all nodes are invalid, don't create subscription
-      if (validDataPoints.length === 0) {
+      // Log classification summary
+      const metadataCount = device.dataPoints.filter(dp => 
+        (dp as OPCUADataPoint).nodeType === 'metadata'
+      ).length;
+      
+      this.logger.debug(`Node classification summary for ${device.name}`, {
+        total: device.dataPoints.length,
+        metrics: validDataPoints.length,
+        metadata: metadataCount,
+        invalid: invalidNodeIds.length
+      });
+
+      // If all metric nodes are invalid but we have metadata, that's ok (metadata-only device)
+      if (validDataPoints.length === 0 && metadataCount === 0) {
         throw new Error(`All NodeIDs failed validation for device ${device.name}`);
       }
+
+      // Read metadata nodes once on connect (separate from time-series)
+      await this.readMetadata(session, device.dataPoints, device.name);
 
       // Create subscription if enabled (real-time streaming)
       if (device.connection.useSubscription && validDataPoints.length > 0) {
@@ -1089,8 +1322,11 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
     const { session } = sessionWrapper;
     const { dataPoints } = device;
 
-    // Filter to only validated nodes
-    const validDataPoints = dataPoints.filter(dp => sessionWrapper.validatedNodes.has(dp.nodeId));
+    // Filter to only validated metric nodes (exclude metadata)
+    const validDataPoints = dataPoints.filter(dp => 
+      sessionWrapper.validatedNodes.has(dp.nodeId) && 
+      (dp as OPCUADataPoint).nodeType === 'metric'
+    );
 
     if (validDataPoints.length === 0) {
       this.logger.warn(`No valid NodeIDs to read for ${deviceName}`);
@@ -1116,6 +1352,12 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       const dp = validDataPoints[i];
       const dataValue = dataValues[i];
 
+      // Hard gate: Never process metadata nodes
+      if ((dp as OPCUADataPoint).nodeType !== 'metric') {
+        this.logger.warn(`Blocked metadata node read: ${dp.name}`, { deviceName });
+        continue;
+      }
+
       // Check if read was successful
       if (!dataValue.statusCode.isGood()) {
         const quality = this.determineQuality(dataValue.statusCode);
@@ -1138,7 +1380,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
           unit: dp.unit || '',
           quality,
           qualityCode,
-          nodeType: (dp as OPCUADataPoint).nodeType || 'metric',
+          nodeType: 'metric',
         });
         continue;
       }
@@ -1163,7 +1405,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
         value,
         unit: dp.unit || '',
         quality: 'GOOD' as const,
-        nodeType: (dp as OPCUADataPoint).nodeType || 'metric',
+        nodeType: 'metric',
       });
     }
 

@@ -26,6 +26,12 @@ class NodeManager:
         my_variable = await objects.add_variable(my_variable_nodeid, "MyVariable", 42.0)
         await my_variable.set_writable()
         
+        # Set Description attribute (for discovery and unit extraction)
+        try:
+            await my_variable.write_attribute(ua.AttributeIds.Description, ua.DataValue(ua.LocalizedText("Example oscillating variable")))
+        except Exception as e:
+            logger.debug(f"Could not set description: {e}")
+        
         # Create sensor object for example node
         example_sensor = Sensor(
             node=my_variable,
@@ -120,6 +126,16 @@ class NodeManager:
                 node_name = f"{prefix}_{i+1}"
                 node = await current_folder.add_variable(2, node_name, 0.0)
                 await node.set_writable()
+                
+                # Set Description attribute with unit information (if available)
+                try:
+                    if unit:
+                        description = f"{sensor_group.get('description', model_type.replace('_', ' ').title())} in {unit}"
+                    else:
+                        description = sensor_group.get('description', model_type.replace('_', ' ').title())
+                    await node.write_attribute(ua.AttributeIds.Description, ua.DataValue(ua.LocalizedText(description)))
+                except Exception as e:
+                    logger.debug(f"Could not set description for {node_name}: {e}")
                 
                 # Create structured sensor object
                 sensor = Sensor(

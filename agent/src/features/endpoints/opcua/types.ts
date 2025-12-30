@@ -82,6 +82,23 @@ export const OPCUADataPointSchema = z.object({
   /** OPC-UA Node ID (e.g., ns=2;s=Temperature or ns=3;i=1001) */
   nodeId: z.string(),
   
+  /** 
+   * Explicit semantic classification (HIGHEST AUTHORITY - user intent)
+   * Use this to override auto-classification when semantics cannot be inferred from type.
+   * 
+   * Examples where explicit classification is needed:
+   * - firmware_version (UInt32) → semantic: 'metadata' (numeric but not telemetry)
+   * - line1_speed_rpm (Int32) → semantic: 'metric' (numeric telemetry)
+   * - alarm_active_count (UInt16) → semantic: 'metric' (numeric telemetry)
+   * - max_supported_channels (UInt16) → semantic: 'metadata' (numeric config)
+   * 
+   * If not specified, classification uses hierarchy:
+   * 1. Well-known prefixes (serverinfo_*, deviceinfo_*, metadata_*)
+   * 2. OPC UA metadata (NodeClass, DataType)
+   * 3. Data type (numeric = metric, non-numeric = metadata)
+   */
+  semantic: z.enum(['metric', 'metadata']).optional(),
+  
   /** Node classification: 'metric' (sensor data) or 'metadata' (server info, diagnostics) */
   nodeType: z.enum(['metric', 'metadata']).default('metric'),
   

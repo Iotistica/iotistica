@@ -13,6 +13,7 @@
 import mqtt from 'mqtt';
 import { EventEmitter } from 'events';
 import msgpack from 'msgpack-lite';
+import pLimit from 'p-limit';
 import logger, { logOperation } from '../utils/logger';
 import { isDuplicateMessage } from '../utils/mqtt-deduplication';
 import { CloudDictionaryManager } from './dictionary-manager';
@@ -157,6 +158,8 @@ export class MqttManager extends EventEmitter {
   private errorLogThrottle: number = 30000; // Log errors max once per 30 seconds
   private readonly BASE_RECONNECT_DELAY_MS = 1000; // 1 second
   private readonly MAX_RECONNECT_DELAY_MS = 8000; // 8 seconds max
+  private readonly MAX_RECONNECT_ATTEMPTS = 20; // Max reconnect attempts before fatal
+  private fatalReconnectErrorEmitted = false; // Track if fatal error already emitted
   
   // Health monitoring
   private lastMessageTimestamp: number = 0;
@@ -173,6 +176,8 @@ export class MqttManager extends EventEmitter {
 
   // Dictionary manager for key compaction (POC)
   private cloudDictionaryManager: CloudDictionaryManager | null = null;
+  private redisClient: any = null; // For buffering pending messages
+  private expansionLimit = pLimit(10); // Max 10 concurrent dictionary expansions
 
   // Message type handlers dispatch map
   private readonly messageHandlers: Record<string, (deviceUuid: string, subTopic: string | undefined, data: any, rest?: string[]) => void>;
@@ -216,8 +221,11 @@ export class MqttManager extends EventEmitter {
    */
   initDictionaryManager(redisClient: any): void {
     if (!this.cloudDictionaryManager) {
-      this.cloudDictionaryManager = new CloudDictionaryManager(redisClient, logger);
-      logger.info('Cloud dictionary manager initialized');
+      this.cloudDictionaryManager = new CloudDictionaryManager(redisClient, logger, {
+        mqttPublish: (topic: string, payload: any) => this.publish(topic, payload)
+      });
+      this.redisClient = redisClient; // Store for message buffering
+      logger.info('Cloud dictionary manager initialized with resync capability');
     }
   }
 
@@ -226,6 +234,147 @@ export class MqttManager extends EventEmitter {
    */
   getDictionaryManager(): CloudDictionaryManager | null {
     return this.cloudDictionaryManager;
+  }
+
+  /**
+   * Register a custom message type handler
+   * Allows extending message handling without modifying core class
+   * 
+   * @param messageType - The message type to handle (e.g., 'custom', 'telemetry')
+   * @param handler - Handler function (deviceUuid, subTopic, data, rest) => void
+   * @example
+   * mqttManager.registerHandler('telemetry', (deviceUuid, subTopic, data) => {
+   *   console.log('Telemetry data:', data);
+   * });
+   */
+  registerHandler(
+    messageType: string,
+    handler: (deviceUuid: string, subTopic: string | undefined, data: any, rest?: string[]) => void
+  ): void {
+    const normalizedType = messageType.toLowerCase();
+    this.messageHandlers[normalizedType] = handler;
+    logger.info('Registered custom message handler', { messageType: normalizedType });
+  }
+
+  /**
+   * Unregister a message type handler
+   * 
+   * @param messageType - The message type to remove
+   */
+  unregisterHandler(messageType: string): void {
+    const normalizedType = messageType.toLowerCase();
+    delete this.messageHandlers[normalizedType];
+    logger.info('Unregistered message handler', { messageType: normalizedType });
+  }
+
+  /**
+   * Check if a handler is registered for a message type
+   * 
+   * @param messageType - The message type to check
+   */
+  hasHandler(messageType: string): boolean {
+    const normalizedType = messageType.toLowerCase();
+    return normalizedType in this.messageHandlers;
+  }
+
+  /**
+   * Buffer compacted message in Redis until dictionary becomes available
+   * Uses Redis sorted set with timestamp score for TTL cleanup
+   * Optimized with Redis pipeline for atomic operations
+   */
+  private async bufferPendingMessage(deviceUuid: string, topic: string, payload: Buffer, version: number): Promise<void> {
+    if (!this.redisClient) return;
+    
+    try {
+      const key = `pending_messages:${deviceUuid}`;
+      const timestamp = Date.now();
+      const messageData = {
+        topic,
+        payload: payload.toString('base64'), // Store as base64 string
+        version,
+        timestamp
+      };
+      
+      // Use Redis pipeline for atomic operations (better performance)
+      const pipeline = this.redisClient.pipeline();
+      pipeline.zadd(key, timestamp, JSON.stringify(messageData));
+      pipeline.expire(key, 60); // 60 second TTL
+      await pipeline.exec();
+      
+      logger.debug('Message buffered in Redis', {
+        deviceUuid: deviceUuid.substring(0, 8),
+        version,
+        timestamp
+      });
+    } catch (error) {
+      logger.error('Failed to buffer message in Redis', {
+        deviceUuid: deviceUuid.substring(0, 8),
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  /**
+   * Process all pending messages for a device after dictionary becomes available
+   * Uses parallel processing with concurrency limit to avoid backpressure
+   */
+  private async processPendingMessages(deviceUuid: string): Promise<void> {
+    if (!this.redisClient || !this.cloudDictionaryManager) return;
+    
+    try {
+      const key = `pending_messages:${deviceUuid}`;
+      
+      // Get all pending messages (sorted by timestamp)
+      const messages = await this.redisClient.zrange(key, 0, -1);
+      
+      if (!messages || messages.length === 0) {
+        return; // No pending messages
+      }
+      
+      logger.info(`Processing ${messages.length} buffered messages`, {
+        deviceUuid: deviceUuid.substring(0, 8)
+      });
+      
+      // Process messages in parallel with concurrency limit (10 concurrent max)
+      const processingTasks = messages.map((msgStr: string) => 
+        this.expansionLimit(async () => {
+          try {
+            const msgData = JSON.parse(msgStr);
+            const payload = Buffer.from(msgData.payload, 'base64');
+            
+            // Re-process through message handler (will expand with now-available dictionary)
+            await this.handleMessage(msgData.topic, payload);
+            
+            logger.debug('Buffered message reprocessed', {
+              deviceUuid: deviceUuid.substring(0, 8),
+              version: msgData.version,
+              age: Date.now() - msgData.timestamp
+            });
+          } catch (error) {
+            logger.error('Failed to reprocess buffered message', {
+              deviceUuid: deviceUuid.substring(0, 8),
+              error: error instanceof Error ? error.message : String(error)
+            });
+          }
+        })
+      );
+      
+      // Wait for all messages to be processed
+      await Promise.all(processingTasks);
+      
+      // Clear processed messages
+      await this.redisClient.del(key);
+      
+      logger.info('Buffered messages processed and cleared', {
+        deviceUuid: deviceUuid.substring(0, 8),
+        count: messages.length
+      });
+    } catch (error) {
+      logger.error('Failed to process pending messages', {
+        deviceUuid: deviceUuid.substring(0, 8),
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
 
   /**
@@ -276,6 +425,7 @@ export class MqttManager extends EventEmitter {
         this.reconnecting = false;
         this.reconnectCount = 0; // Reset counter on successful connection
         this.reconnectAttempts = 0; // Reset backoff
+        this.fatalReconnectErrorEmitted = false; // Reset fatal error flag
         if (this.reconnectTimer) {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
@@ -373,10 +523,50 @@ export class MqttManager extends EventEmitter {
   /**
    * Schedule reconnection with exponential backoff
    * Delays: 1s → 2s → 4s → 8s (max)
+   * 
+   * Improvements:
+   * - Cancels and reschedules if multiple errors arrive in quick succession
+   * - Emits fatal event after max retry attempts
+   * - Logs detailed reconnection metrics
    */
   private scheduleReconnect(): void {
-    if (this.reconnecting || this.reconnectTimer) {
-      return; // Already scheduled
+    // If already scheduled, cancel and reschedule (handles rapid error bursts)
+    if (this.reconnectTimer) {
+      logger.debug('Canceling existing reconnect timer due to new error');
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    // Check if max retry limit reached
+    if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
+      // Emit fatal event for upstream monitoring (only once)
+      if (!this.fatalReconnectErrorEmitted) {
+        this.fatalReconnectErrorEmitted = true;
+        const fatalError = new Error(
+          `MQTT reconnection failed after ${this.MAX_RECONNECT_ATTEMPTS} attempts. Broker may be permanently unreachable.`
+        );
+        
+        logger.error('FATAL: MQTT reconnection attempts exhausted', {
+          maxAttempts: this.MAX_RECONNECT_ATTEMPTS,
+          totalAttempts: this.reconnectAttempts,
+          brokerUrl: this.config.brokerUrl,
+          lastConnectionAge: this.lastConnectionTimestamp > 0 
+            ? Date.now() - this.lastConnectionTimestamp 
+            : -1
+        });
+        
+        // Emit fatal event for monitoring systems
+        this.emit('reconnect:fatal', {
+          error: fatalError,
+          attempts: this.reconnectAttempts,
+          brokerUrl: this.config.brokerUrl,
+          lastConnectionTimestamp: this.lastConnectionTimestamp
+        });
+      }
+      
+      // Stop scheduling further reconnects (requires manual restart or intervention)
+      this.reconnecting = false;
+      return;
     }
 
     this.reconnecting = true;
@@ -389,6 +579,18 @@ export class MqttManager extends EventEmitter {
 
     logger.info('Scheduling MQTT reconnect', {
       attempt: this.reconnectAttempts,
+      maxAttempts: this.MAX_RECONNECT_ATTEMPTS,
+      delayMs: delay,
+      nextDelay: Math.min(
+        this.MAX_RECONNECT_DELAY_MS,
+        this.BASE_RECONNECT_DELAY_MS * Math.pow(2, this.reconnectAttempts)
+      )
+    });
+
+    // Emit reconnect attempt event for monitoring
+    this.emit('reconnect:attempt', {
+      attempt: this.reconnectAttempts,
+      maxAttempts: this.MAX_RECONNECT_ATTEMPTS,
       delayMs: delay
     });
 
@@ -399,7 +601,10 @@ export class MqttManager extends EventEmitter {
         if (this.client.options) {
           this.client.options.clean = this.config.clean;
         }
-        logger.debug('Attempting MQTT reconnect', { clean: this.config.clean });
+        logger.debug('Attempting MQTT reconnect', { 
+          clean: this.config.clean,
+          attempt: this.reconnectAttempts
+        });
         this.client.reconnect();
       }
     }, delay);
@@ -670,7 +875,7 @@ export class MqttManager extends EventEmitter {
     }
     
     const deviceUuid = parts[2];
-    const messageType = parts[3];
+    const messageType = parts[3].toLowerCase(); // Normalize to lowercase for case-insensitive matching
     const rest = parts.slice(4);
     const subTopic = rest.length > 0 ? rest[0] : undefined;
     
@@ -730,7 +935,10 @@ export class MqttManager extends EventEmitter {
               compactedPayload: JSON.stringify(data).substring(0, 500)
             });
 
-            const expanded = await this.cloudDictionaryManager.expandMessage(deviceUuid, data);
+            // Use concurrency limiter to prevent event loop backpressure during bursts
+            const expanded = await this.expansionLimit(() => 
+              this.cloudDictionaryManager!.expandMessage(deviceUuid, data)
+            );
             
             // Log expanded message
             logger.info('Message expanded using dictionary', {
@@ -743,12 +951,22 @@ export class MqttManager extends EventEmitter {
             
             data = expanded;
           } catch (error) {
+            // Dictionary not available yet - buffer in Redis for retry
+            if (error instanceof Error && error.message.includes('no dictionary')) {
+              await this.bufferPendingMessage(deviceUuid, topic, payload, data.v);
+              logger.warn('Message buffered - waiting for dictionary', {
+                deviceUuid: deviceUuid.substring(0, 8),
+                version: data.v,
+                topic
+              });
+              return; // Don't process yet, will retry when dictionary arrives
+            }
+            
             logger.error('Failed to expand compacted message', {
               deviceUuid: deviceUuid.substring(0, 8),
               error: error instanceof Error ? error.message : String(error),
               topic
             });
-            // Drop this message (cannot process without dictionary)
             return;
           }
         } else {
@@ -859,6 +1077,9 @@ export class MqttManager extends EventEmitter {
           version: data.version,
           newFields: data.fields?.length
         });
+        
+        // Process any buffered messages waiting for this dictionary
+        await this.processPendingMessages(deviceUuid);
       } else if (subTopic === 'dictionary') {
         // Full dictionary sync
         await this.cloudDictionaryManager.storeDictionary(deviceUuid, data);
@@ -867,6 +1088,9 @@ export class MqttManager extends EventEmitter {
           version: data.version,
           fieldCount: data.fields?.length
         });
+        
+        // Process any buffered messages waiting for this dictionary
+        await this.processPendingMessages(deviceUuid);
       } else {
         logger.warn('Unknown meta subTopic', { subTopic, rest, deviceUuid });
       }
@@ -1037,6 +1261,9 @@ export class MqttManager extends EventEmitter {
     timeSinceLastConnection: number;
     pendingPublishes: number;
     activeSubscriptions: number;
+    reconnectAttempts: number;
+    maxReconnectAttempts: number;
+    isFatal: boolean;
   } {
     const now = Date.now();
     return {
@@ -1047,7 +1274,10 @@ export class MqttManager extends EventEmitter {
       timeSinceLastMessage: this.lastMessageTimestamp > 0 ? now - this.lastMessageTimestamp : -1,
       timeSinceLastConnection: this.lastConnectionTimestamp > 0 ? now - this.lastConnectionTimestamp : -1,
       pendingPublishes: this.pendingPublishes.length,
-      activeSubscriptions: this.subscriptions.size
+      activeSubscriptions: this.subscriptions.size,
+      reconnectAttempts: this.reconnectAttempts,
+      maxReconnectAttempts: this.MAX_RECONNECT_ATTEMPTS,
+      isFatal: this.fatalReconnectErrorEmitted
     };
   }
 
@@ -1088,6 +1318,42 @@ export class MqttManager extends EventEmitter {
    */
   getSubscriptions(): string[] {
     return Array.from(this.subscriptions);
+  }
+
+  /**
+   * Manually reset reconnection state after fatal error
+   * Useful for recovery after external intervention (e.g., broker restart, network fix)
+   * 
+   * @example
+   * mqttManager.on('reconnect:fatal', () => {
+   *   // Alert ops team, wait for fix, then:
+   *   setTimeout(() => mqttManager.resetReconnectState(), 60000);
+   * });
+   */
+  resetReconnectState(): void {
+    logger.info('Manually resetting MQTT reconnection state', {
+      previousAttempts: this.reconnectAttempts,
+      wasFatal: this.fatalReconnectErrorEmitted
+    });
+
+    this.reconnectAttempts = 0;
+    this.fatalReconnectErrorEmitted = false;
+    this.reconnecting = false;
+    
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    // Attempt immediate reconnection
+    if (this.client && !this.isConnected()) {
+      logger.info('Attempting immediate reconnection after reset');
+      this.client.reconnect();
+    }
+
+    this.emit('reconnect:reset', {
+      timestamp: Date.now()
+    });
   }
 
   /**

@@ -35,12 +35,38 @@ export interface DedupConfig {
   keyPrefix?: string;
   /** Whether to fail gracefully if Redis unavailable (default: true) */
   gracefulFallback?: boolean;
+  /** Use Bloom filter for probabilistic dedup (memory-efficient for high volume) */
+  useBloomFilter?: boolean;
+  /** Bloom filter false positive rate (default: 0.01 = 1%) */
+  bloomFalsePositiveRate?: number;
+  /** Expected number of unique messages (used for Bloom filter sizing) */
+  expectedUniqueMessages?: number;
 }
 
 const DEFAULT_CONFIG: Required<DedupConfig> = {
   ttlSeconds: 24 * 60 * 60, // 24 hours
   keyPrefix: 'mqtt:dedup',
-  gracefulFallback: true
+  gracefulFallback: true,
+  useBloomFilter: false,
+  bloomFalsePositiveRate: 0.01,
+  expectedUniqueMessages: 1000000 // 1M messages
+};
+
+/**
+ * Deduplication statistics
+ */
+interface DedupStats {
+  totalChecks: number;
+  duplicatesFound: number;
+  redisErrors: number;
+  lastReset: number;
+}
+
+const stats: DedupStats = {
+  totalChecks: 0,
+  duplicatesFound: 0,
+  redisErrors: 0,
+  lastReset: Date.now()
 };
 
 /**
@@ -67,6 +93,8 @@ export async function isDuplicateMessage(
   const cfg = { ...DEFAULT_CONFIG, ...config };
   const key = `${cfg.keyPrefix}:${msgId}`;
 
+  stats.totalChecks++;
+
   try {
     // Check if Redis is available
     if (!redisClient.isReady()) {
@@ -76,6 +104,12 @@ export async function isDuplicateMessage(
 
     const client = redisClient.getClient();
 
+    // Use Bloom filter if enabled and Redis Bloom module is available
+    if (cfg.useBloomFilter) {
+      return await checkWithBloomFilter(client, msgId, cfg);
+    }
+
+    // Standard Redis SETNX approach
     // SETNX returns 1 if key was set (first time), 0 if already exists (duplicate)
     const result = await client.set(key, '1', 'EX', cfg.ttlSeconds, 'NX');
 
@@ -85,10 +119,12 @@ export async function isDuplicateMessage(
       return false;
     } else {
       // Key already exists - duplicate message
+      stats.duplicatesFound++;
       logger.debug('Duplicate message detected', { msgId });
       return true;
     }
   } catch (error) {
+    stats.redisErrors++;
     logger.error('Error checking message duplication', { 
       msgId, 
       error: error instanceof Error ? error.message : String(error)
@@ -96,6 +132,44 @@ export async function isDuplicateMessage(
     
     // Graceful degradation: if Redis fails, decide whether to process or skip
     return cfg.gracefulFallback ? false : true;
+  }
+}
+
+/**
+ * Check duplication using Redis Bloom filter (memory-efficient for high volume)
+ * Falls back to standard dedup if Bloom module not available
+ */
+async function checkWithBloomFilter(
+  client: Redis,
+  msgId: string,
+  cfg: Required<DedupConfig>
+): Promise<boolean> {
+  const bloomKey = `${cfg.keyPrefix}:bloom`;
+  
+  try {
+    // Try to add to Bloom filter (BF.ADD returns 1 if new, 0 if already exists)
+    // If Redis Bloom not available, this will throw and we'll fallback
+    const result = await client.call('BF.ADD', bloomKey, msgId);
+    
+    if (result === 1) {
+      // New message (first time)
+      logger.debug('Message added to Bloom filter', { msgId });
+      return false;
+    } else {
+      // Likely duplicate (Bloom filter says it exists)
+      stats.duplicatesFound++;
+      logger.debug('Bloom filter detected probable duplicate', { msgId });
+      return true;
+    }
+  } catch (error) {
+    // Redis Bloom module not available - fallback to standard dedup
+    logger.warn('Bloom filter not available, using standard deduplication', {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    
+    const key = `${cfg.keyPrefix}:${msgId}`;
+    const result = await client.set(key, '1', 'EX', cfg.ttlSeconds, 'NX');
+    return result !== 'OK';
   }
 }
 
@@ -196,6 +270,80 @@ export async function checkBatchDuplicates(
 }
 
 /**
+ * Get deduplication statistics
+ * Useful for monitoring and tuning dedup effectiveness
+ */
+export function getDedupStats(): DedupStats & { duplicationRate: number } {
+  const duplicationRate = stats.totalChecks > 0 
+    ? (stats.duplicatesFound / stats.totalChecks) * 100 
+    : 0;
+  
+  return {
+    ...stats,
+    duplicationRate: parseFloat(duplicationRate.toFixed(2))
+  };
+}
+
+/**
+ * Reset deduplication statistics
+ */
+export function resetDedupStats(): void {
+  stats.totalChecks = 0;
+  stats.duplicatesFound = 0;
+  stats.redisErrors = 0;
+  stats.lastReset = Date.now();
+  logger.info('Deduplication statistics reset');
+}
+
+/**
+ * Calculate adaptive TTL based on message frequency
+ * Higher frequency = shorter TTL (memory optimization)
+ * Lower frequency = longer TTL (better dedup coverage)
+ * 
+ * @param deviceUuid - Device identifier
+ * @param defaultTtl - Default TTL in seconds
+ * @returns Recommended TTL in seconds
+ */
+export async function calculateAdaptiveTtl(
+  deviceUuid: string,
+  defaultTtl: number = 24 * 60 * 60
+): Promise<number> {
+  try {
+    if (!redisClient.isReady()) {
+      return defaultTtl;
+    }
+
+    const client = redisClient.getClient();
+    const counterKey = `mqtt:freq:${deviceUuid}`;
+    
+    // Increment message counter with 1-hour sliding window
+    await client.incr(counterKey);
+    await client.expire(counterKey, 3600);
+    
+    // Get current frequency (messages per hour)
+    const count = parseInt(await client.get(counterKey) || '0', 10);
+    
+    // Adaptive TTL calculation:
+    // High frequency (>1000/hr): 1 hour TTL
+    // Medium frequency (100-1000/hr): 6 hours TTL
+    // Low frequency (<100/hr): 24 hours TTL
+    if (count > 1000) {
+      return 3600; // 1 hour
+    } else if (count > 100) {
+      return 6 * 3600; // 6 hours
+    } else {
+      return defaultTtl; // 24 hours (default)
+    }
+  } catch (error) {
+    logger.error('Error calculating adaptive TTL', {
+      deviceUuid,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return defaultTtl;
+  }
+}
+
+/**
  * Clear deduplication entry for a message (for testing/recovery)
  * 
  * @param msgId - Message identifier to clear
@@ -226,12 +374,12 @@ export async function clearDedupEntry(
 }
 
 /**
- * Get deduplication statistics
+ * Get Redis storage statistics for deduplication entries
  * 
  * @param config - Deduplication configuration
- * @returns Stats about dedup entries
+ * @returns Stats about stored dedup entries in Redis
  */
-export async function getDedupStats(
+export async function getDedupStorageStats(
   config: DedupConfig = {}
 ): Promise<{ totalEntries: number; keyPrefix: string }> {
   const cfg = { ...DEFAULT_CONFIG, ...config };
@@ -259,7 +407,7 @@ export async function getDedupStats(
       keyPrefix: cfg.keyPrefix
     };
   } catch (error) {
-    logger.error('Error getting dedup stats', { 
+    logger.error('Error getting dedup storage stats', { 
       error: error instanceof Error ? error.message : String(error)
     });
     return { totalEntries: 0, keyPrefix: cfg.keyPrefix };

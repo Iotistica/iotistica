@@ -49,11 +49,21 @@ export class CloudDictionaryManager {
   private redis: any; // RedisClient type
   private logger?: any; // Winston logger
   private strictVersioning: boolean; // Reject version mismatches by default
+  private mqttPublish?: (topic: string, payload: any) => Promise<void>; // For resync requests
+  private resyncRequested: Set<string> = new Set(); // Track devices we've requested resync from
 
-  constructor(redis: any, logger?: any, options?: { strictVersioning?: boolean }) {
+  constructor(
+    redis: any, 
+    logger?: any, 
+    options?: { 
+      strictVersioning?: boolean;
+      mqttPublish?: (topic: string, payload: any) => Promise<void>;
+    }
+  ) {
     this.redis = redis;
     this.logger = logger;
     this.strictVersioning = options?.strictVersioning ?? true; // Default: strict mode
+    this.mqttPublish = options?.mqttPublish;
   }
 
   /**
@@ -99,6 +109,9 @@ export class CloudDictionaryManager {
         version: dict.version,
         fieldCount: dict.fields.length
       });
+
+      // Clear resync request tracking (dictionary received successfully)
+      this.clearResyncRequest(deviceUuid);
     } catch (error) {
       this.logger?.error(`Failed to store dictionary: ${deviceUuid}`, {
         operation: 'storeDictionary',
@@ -255,6 +268,9 @@ export class CloudDictionaryManager {
     const dictionary = await this.getDictionary(deviceUuid);
     
     if (!dictionary) {
+      // Dictionary missing (likely Redis restart) - request resync from agent
+      await this.requestDictionaryResync(deviceUuid, compacted.v);
+      
       throw new Error(`Cannot expand message: no dictionary for ${deviceUuid} (dictionary may have been lost on Redis restart)`);
     }
 
@@ -520,6 +536,78 @@ export class CloudDictionaryManager {
       });
       
       return { totalDictionaries: 0, dictionaries: [] };
+    }
+  }
+
+  /**
+   * Request dictionary resync from agent when dictionary is missing
+   * Publishes MQTT message to agent requesting full dictionary sync
+   * 
+   * @param deviceUuid - Device UUID
+   * @param expectedVersion - Version the device is using (from compacted message)
+   */
+  private async requestDictionaryResync(deviceUuid: string, expectedVersion: number): Promise<void> {
+    // Prevent duplicate resync requests (only request once per device until received)
+    if (this.resyncRequested.has(deviceUuid)) {
+      this.logger?.debug('Dictionary resync already requested', {
+        deviceUuid,
+        expectedVersion
+      });
+      return;
+    }
+
+    this.resyncRequested.add(deviceUuid);
+
+    this.logger?.warn('Dictionary missing - requesting resync from agent', {
+      deviceUuid,
+      expectedVersion,
+      reason: 'Dictionary not found in Redis (likely restart or eviction)'
+    });
+
+    // Publish MQTT request to agent to resend full dictionary
+    if (this.mqttPublish) {
+      try {
+        const topic = `iot/device/${deviceUuid}/agent/dictionary/resync`;
+        const payload = {
+          action: 'resync',
+          reason: 'dictionary_missing',
+          expectedVersion,
+          timestamp: new Date().toISOString()
+        };
+
+        await this.mqttPublish(topic, payload);
+
+        this.logger?.info('Dictionary resync request sent to agent', {
+          deviceUuid,
+          topic,
+          expectedVersion
+        });
+      } catch (error) {
+        this.logger?.error('Failed to send dictionary resync request', {
+          deviceUuid,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    } else {
+      this.logger?.warn('Cannot request dictionary resync - MQTT publish not configured', {
+        deviceUuid
+      });
+    }
+
+    // Auto-remove from resync tracking after 5 minutes (allow retry if agent didn't respond)
+    setTimeout(() => {
+      this.resyncRequested.delete(deviceUuid);
+      this.logger?.debug('Resync request timeout - allowing retry', { deviceUuid });
+    }, 5 * 60 * 1000);
+  }
+
+  /**
+   * Clear resync request tracking when dictionary is received
+   * Call this from storeDictionary to allow future resyncs
+   */
+  clearResyncRequest(deviceUuid: string): void {
+    if (this.resyncRequested.delete(deviceUuid)) {
+      this.logger?.debug('Cleared resync request tracking', { deviceUuid });
     }
   }
 }
