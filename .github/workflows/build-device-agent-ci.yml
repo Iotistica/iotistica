@@ -224,7 +224,7 @@ jobs:
   build-arm64:
     name: Build ARM64
     needs: [version]
-    runs-on: [iotistic-lab-sc]
+    runs-on: ubuntu-latest
     
     steps:
       - name: Checkout repository
@@ -462,7 +462,7 @@ jobs:
   upload-artifacts:
     name: Upload artifacts to Azure
     needs: [version, test-agent-systemd, build-x86, build-arm64]
-    runs-on: [iotistic-lab-sc]
+    runs-on: ubuntu-latest
     if: success()
     
     steps:
@@ -821,7 +821,7 @@ jobs:
   report:
     name: Generate Changelog
     needs: [version, upload-artifacts]
-    runs-on: [iotistic-lab-sc]
+    runs-on: ubuntu-latest
     if: success() && needs.version.outputs.package_version != ''
     
     steps:
@@ -883,7 +883,7 @@ jobs:
   trigger-integration-tests:
     name: Trigger Integration Tests
     needs: [version, test-agent-systemd, upload-artifacts]
-    runs-on: [iotistic-lab-sc]
+    runs-on: ubuntu-latest
     permissions:
       actions: write
       contents: read
@@ -909,7 +909,7 @@ jobs:
 
   cleanup:
       name: Clean up
-      runs-on: [iotistic-lab-sc]
+      runs-on: ubuntu-latest
       needs: [upload-artifacts]
       if: always()
       steps:
