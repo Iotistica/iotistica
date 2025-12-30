@@ -493,10 +493,9 @@ jobs:
           $session = New-SSHSession -ComputerName $env:PI_HOST -Credential $credential -AcceptKey
           
           # Check service status
-          $result = Invoke-SSHCommand -SessionId $session.SessionId -Command @"
-            sudo systemctl status iotistic-agent --no-pager || true
-            curl -f http://localhost:48484/v1/healthy 2>/dev/null || curl -f http://localhost:48484/ping 2>/dev/null || echo '⚠ Agent API not responding yet'
-"@
+          $verifyCmd = "sudo systemctl status iotistic-agent --no-pager || true; curl -f http://localhost:48484/v1/healthy 2>/dev/null || curl -f http://localhost:48484/ping 2>/dev/null || echo 'Agent API not responding yet'"
+          
+          $result = Invoke-SSHCommand -SessionId $session.SessionId -Command $verifyCmd
           
           Write-Host $result.Output
           
