@@ -435,7 +435,7 @@ jobs:
   deploy-to-pi:
     name: Deploy to Raspberry Pi 
     needs: [version, build-arm64, upload-artifacts]
-    runs-on: [pi-deploy]
+    runs-on: [pi]
     if: github.ref == 'refs/heads/master'  # Only deploy from master branch
     
     steps:
