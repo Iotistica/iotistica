@@ -214,12 +214,75 @@ jobs:
           echo "✓ Created x86_64 tarballs:"
           ls -lh /tmp/iotistic-artifacts/
 
-      - name: Upload x86_64 artifacts
-        uses: actions/upload-artifact@v4
+      - name: Azure login
+        uses: azure/login@v2
         with:
-          name: agent-x86_64
-          path: /tmp/iotistic-artifacts/*
-          retention-days: 1
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Generate checksums
+        run: |
+          cd /tmp/iotistic-artifacts
+          sha256sum agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz > agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256
+          sha256sum agent-latest-x86_64.tar.gz > agent-latest-x86_64.tar.gz.sha256
+          sha256sum agent-latest.tar.gz > agent-latest.tar.gz.sha256
+          echo "✓ Generated checksums"
+
+      - name: Upload to Azure (versioned)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
+            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
+            --overwrite true \
+            --content-type application/gzip
+          echo "✓ Uploaded versioned x86_64 tarball"
+
+      - name: Upload to Azure (latest)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest-x86_64.tar.gz \
+            --file /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz \
+            --overwrite true \
+            --content-type application/gzip
+          
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest.tar.gz \
+            --file /tmp/iotistic-artifacts/agent-latest.tar.gz \
+            --overwrite true \
+            --content-type application/gzip
+          echo "✓ Uploaded latest x86_64 tarballs"
+
+      - name: Upload checksums to Azure
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256 \
+            --overwrite true \
+            --content-type text/plain
+          
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest-x86_64.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz.sha256 \
+            --overwrite true \
+            --content-type text/plain
+          
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/agent-latest.tar.gz.sha256 \
+            --overwrite true \
+            --content-type text/plain
+          echo "✓ Uploaded x86_64 checksums"
 
   build-arm64:
     name: Build ARM64
@@ -316,12 +379,58 @@ jobs:
           echo "✓ Created ARM64 tarballs:"
           ls -lh /tmp/iotistic-artifacts/
 
-      - name: Upload ARM64 artifacts
-        uses: actions/upload-artifact@v4
+      - name: Azure login
+        uses: azure/login@v2
         with:
-          name: agent-arm64
-          path: /tmp/iotistic-artifacts/*
-          retention-days: 1
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Generate checksums
+        run: |
+          cd /tmp/iotistic-artifacts
+          sha256sum agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz > agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256
+          sha256sum agent-latest-arm64.tar.gz > agent-latest-arm64.tar.gz.sha256
+          echo "✓ Generated checksums"
+
+      - name: Upload to Azure (versioned)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
+            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
+            --overwrite true \
+            --content-type application/gzip
+          echo "✓ Uploaded versioned ARM64 tarball"
+
+      - name: Upload to Azure (latest)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest-arm64.tar.gz \
+            --file /tmp/iotistic-artifacts/agent-latest-arm64.tar.gz \
+            --overwrite true \
+            --content-type application/gzip
+          echo "✓ Uploaded latest ARM64 tarball"
+
+      - name: Upload checksums to Azure
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256 \
+            --overwrite true \
+            --content-type text/plain
+          
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest-arm64.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/agent-latest-arm64.tar.gz.sha256 \
+            --overwrite true \
+            --content-type text/plain
+          echo "✓ Uploaded ARM64 checksums"
 
   test-agent-systemd:
     name: Test Systemd Installation (x86_64)
@@ -460,8 +569,8 @@ jobs:
           echo "Agent running with systemd validated successfully!" >> $GITHUB_STEP_SUMMARY
 
   upload-artifacts:
-    name: Upload artifacts to Azure
-    needs: [version, test-agent-systemd, build-x86, build-arm64]
+    name: Upload install scripts to Azure
+    needs: [version, test-agent-systemd]
     runs-on: ubuntu-latest
     if: success()
     
@@ -634,170 +743,8 @@ jobs:
 
 
 
-      - name: Download x86_64 artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: agent-x86_64
-          path: /tmp/iotistic-artifacts
+          echo " Agent binaries uploaded directly to Azure from build jobs" >> $GITHUB_STEP_SUMMARY
 
-      - name: Download ARM64 artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: agent-arm64
-          path: /tmp/iotistic-artifacts
-
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Generate checksums
-        run: |
-          cd /tmp/iotistic-artifacts
-          
-          # x86_64 checksums
-          sha256sum agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz > agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256
-          sha256sum agent-latest-x86_64.tar.gz > agent-latest-x86_64.tar.gz.sha256
-          
-          # ARM64 checksums
-          sha256sum agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz > agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256
-          sha256sum agent-latest-arm64.tar.gz > agent-latest-arm64.tar.gz.sha256
-          
-          # Generic latest checksum
-          sha256sum agent-latest.tar.gz > agent-latest.tar.gz.sha256
-          
-          echo "✓ Generated checksums:"
-          ls -lh *.sha256
-
-      - name: Upload x86_64 tarball (latest)
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest-x86_64.tar.gz \
-            --file /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz \
-            --overwrite true \
-            --content-type application/gzip \
-            --content-disposition "attachment; filename=agent-latest-x86_64.tar.gz"
-          
-          echo "✓ Uploaded agent/agent-latest-x86_64.tar.gz"
-
-      - name: Upload x86_64 tarball checksum (latest)
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest-x86_64.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz.sha256 \
-            --overwrite true \
-            --content-type text/plain \
-            --content-disposition "inline; filename=agent-latest-x86_64.tar.gz.sha256"
-          
-          echo "✓ Uploaded agent/agent-latest-x86_64.tar.gz.sha256"
-
-      - name: Upload ARM64 tarball (latest)
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest-arm64.tar.gz \
-            --file /tmp/iotistic-artifacts/agent-latest-arm64.tar.gz \
-            --overwrite true \
-            --content-type application/gzip \
-            --content-disposition "attachment; filename=agent-latest-arm64.tar.gz"
-          
-          echo "✓ Uploaded agent/agent-latest-arm64.tar.gz"
-
-      - name: Upload ARM64 tarball checksum (latest)
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest-arm64.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/agent-latest-arm64.tar.gz.sha256 \
-            --overwrite true \
-            --content-type text/plain \
-            --content-disposition "inline; filename=agent-latest-arm64.tar.gz.sha256"
-          
-          echo "✓ Uploaded agent/agent-latest-arm64.tar.gz.sha256"
-
-      - name: Upload generic latest tarball (x86_64 for backwards compatibility)
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest.tar.gz \
-            --file /tmp/iotistic-artifacts/agent-latest.tar.gz \
-            --overwrite true \
-            --content-type application/gzip \
-            --content-disposition "attachment; filename=agent-latest.tar.gz"
-          
-          echo "✓ Uploaded agent/agent-latest.tar.gz (x86_64)"
-
-      - name: Upload generic latest tarball checksum
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/agent-latest.tar.gz.sha256 \
-            --overwrite true \
-            --content-type text/plain \
-            --content-disposition "inline; filename=agent-latest.tar.gz.sha256"
-          
-          echo "✓ Uploaded agent/agent-latest.tar.gz.sha256"
-
-      - name: Upload x86_64 tarball (versioned)
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
-            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
-            --overwrite true \
-            --content-type application/gzip \
-            --content-disposition "attachment; filename=agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz"
-          
-          echo "✓ Uploaded agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz"
-
-      - name: Upload x86_64 tarball checksum (versioned)
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256 \
-            --overwrite true \
-            --content-type text/plain \
-            --content-disposition "inline; filename=agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256"
-          
-          echo "✓ Uploaded agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256"
-
-      - name: Upload ARM64 tarball (versioned)
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
-            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
-            --overwrite true \
-            --content-type application/gzip \
-            --content-disposition "attachment; filename=agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz"
-          
-          echo "✓ Uploaded agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz"
-
-      - name: Upload ARM64 tarball checksum (versioned)
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256 \
-            --overwrite true \
-            --content-type text/plain \
-            --content-disposition "inline; filename=agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256"
-          
-          echo "✓ Uploaded agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256"
 
       - name: Generate upload summary
         run: |
