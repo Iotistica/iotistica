@@ -276,7 +276,7 @@ jobs:
 
       - name: Build agent (ARM64)
         run: |
-          echo "Building agent for ARM64..."
+          echo "Building agent for ARM64...."
           cd agent
           
           if [ "${{ steps.cache-arm64-modules.outputs.cache-hit }}" == "true" ]; then
