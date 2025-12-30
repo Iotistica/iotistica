@@ -462,7 +462,7 @@ jobs:
           # Connect and deploy
           $session = New-SSHSession -ComputerName $env:PI_HOST -Credential $credential -AcceptKey
           
-          $installCmd = "curl -sfL https://iotistic.blob.core.windows.net/scripts/agent/install | IOTISTIC_AGENT_VERSION=$env:AGENT_VERSION IOTISTIC_NON_INTERACTIVE=true sudo -E bash"
+          $installCmd = "curl -sfL https://iotistic.blob.core.windows.net/scripts/agent/install | IOTISTIC_AGENT_VERSION=$env:AGENT_VERSION IOTISTIC_NON_INTERACTIVE=true CLOUD_API_ENDPOINT='${{ secrets.CLOUD_API_ENDPOINT }}' PROVISIONING_KEY='${{ secrets.PROVISIONING_KEY }}' sudo -E bash"
           
           $result = Invoke-SSHCommand -SessionId $session.SessionId -Command "echo 'Installing agent on Raspberry Pi...'; $installCmd"
           
