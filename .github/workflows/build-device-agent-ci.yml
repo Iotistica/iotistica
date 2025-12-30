@@ -440,49 +440,68 @@ jobs:
     
     steps:
       - name: Deploy to Pi via SSH (password auth)
-        shell: bash
+        shell: pwsh
         env:
           PI_HOST: ${{ secrets.PI_HOST }}
           PI_USER: ${{ secrets.PI_USER }}
           PI_PASSWORD: ${{ secrets.PI_PASSWORD }}
           AGENT_VERSION: ${{ needs.version.outputs.package_version }}
         run: |
-          echo "Deploying agent $AGENT_VERSION to Raspberry Pi..."
+          Write-Host "Deploying agent $env:AGENT_VERSION to Raspberry Pi..."
           
-          # Install sshpass if not available
-          if ! command -v sshpass &> /dev/null; then
-            sudo apt-get update -qq
-            sudo apt-get install -y sshpass
-          fi
+          # Install Posh-SSH module if not available
+          if (-not (Get-Module -ListAvailable -Name Posh-SSH)) {
+            Install-Module -Name Posh-SSH -Force -Scope CurrentUser
+          }
+          Import-Module Posh-SSH
           
-          # Deploy using install script (pulls from Azure)
-          sshpass -p "$PI_PASSWORD" ssh -o StrictHostKeyChecking=no $PI_USER@$PI_HOST << 'EOF'
-            echo "Installing agent on Raspberry Pi..."
-            curl -sfL https://iotistic.blob.core.windows.net/scripts/agent/install | sudo bash
-          EOF
+          # Create secure password
+          $securePassword = ConvertTo-SecureString $env:PI_PASSWORD -AsPlainText -Force
+          $credential = New-Object System.Management.Automation.PSCredential ($env:PI_USER, $securePassword)
           
-          echo "✓ Agent deployed to Raspberry Pi"
+          # Connect and deploy
+          $session = New-SSHSession -ComputerName $env:PI_HOST -Credential $credential -AcceptKey
+          
+          $installCmd = "curl -sfL https://iotistic.blob.core.windows.net/scripts/agent/install | IOTISTIC_AGENT_VERSION=$env:AGENT_VERSION sudo bash"
+          
+          $result = Invoke-SSHCommand -SessionId $session.SessionId -Command "echo 'Installing agent on Raspberry Pi...'; $installCmd"
+          
+          Write-Host $result.Output
+          if ($result.ExitStatus -ne 0) {
+            Write-Host "Error: $($result.Error)" -ForegroundColor Red
+            Remove-SSHSession -SessionId $session.SessionId
+            exit 1
+          }
+          
+          Remove-SSHSession -SessionId $session.SessionId
+          Write-Host "✓ Agent deployed to Raspberry Pi"
           
       - name: Verify Pi deployment
-        shell: bash
+        shell: pwsh
         env:
           PI_HOST: ${{ secrets.PI_HOST }}
           PI_USER: ${{ secrets.PI_USER }}
           PI_PASSWORD: ${{ secrets.PI_PASSWORD }}
         run: |
-          echo "Verifying deployment..."
+          Write-Host "Verifying deployment..."
           
-          sshpass -p "$PI_PASSWORD" ssh -o StrictHostKeyChecking=no $PI_USER@$PI_HOST << 'EOF'
-            # Check service status
+          Import-Module Posh-SSH
+          
+          $securePassword = ConvertTo-SecureString $env:PI_PASSWORD -AsPlainText -Force
+          $credential = New-Object System.Management.Automation.PSCredential ($env:PI_USER, $securePassword)
+          
+          $session = New-SSHSession -ComputerName $env:PI_HOST -Credential $credential -AcceptKey
+          
+          # Check service status
+          $result = Invoke-SSHCommand -SessionId $session.SessionId -Command @"
             sudo systemctl status iotistic-agent --no-pager || true
-            
-            # Check agent version
-            curl -f http://localhost:48484/v1/healthy 2>/dev/null || \
-              curl -f http://localhost:48484/ping 2>/dev/null || \
-              echo "⚠ Agent API not responding yet (may still be starting)"
-          EOF
+            curl -f http://localhost:48484/v1/healthy 2>/dev/null || curl -f http://localhost:48484/ping 2>/dev/null || echo '⚠ Agent API not responding yet'
+"@
           
-          echo "✓ Deployment verification complete"
+          Write-Host $result.Output
+          
+          Remove-SSHSession -SessionId $session.SessionId
+          Write-Host "✓ Deployment verification complete"
 
   test-agent-systemd:
     name: Test Systemd Installation (x86_64)
