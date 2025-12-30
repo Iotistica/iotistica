@@ -17,6 +17,9 @@ import os
 EXCEL_FILE = "profiles/PM556x_PublicModbusRegisterList_10th_August-23.xlsx"
 OUTPUT_FILE = "profiles/PM556x.json"
 
+# Filter to specific categories (empty list = all categories)
+INCLUDE_CATEGORIES = ["Meter Data (Basic)"]  # Only include these categories
+
 def parse_excel_to_profile():
     """Parse Excel file and convert to Modbus simulator profile format"""
     
@@ -151,9 +154,11 @@ def parse_excel_to_profile():
             continue
     
     # Flatten to single dataPoints array (simulator expects this format)
+    # Apply category filter if specified
     all_data_points = []
     for cat_name, cat_points in categories.items():
-        all_data_points.extend(cat_points)
+        if not INCLUDE_CATEGORIES or cat_name in INCLUDE_CATEGORIES:
+            all_data_points.extend(cat_points)
     
     # Create profile
     profile = {
@@ -185,18 +190,7 @@ def parse_excel_to_profile():
     print(f"\nSample registers (first 5):")
     for dp in first_cat[:5]:
         cat_short = dp['category'].split(' > ')[-1][:20]
-        print(f"  {dp['address']:5d} | {dp['type']:8s} | {dp['name'][:30]:30s} | {dp['unit']:6s} | {cat_short
-    os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
-    with open(OUTPUT_FILE, 'w') as f:
-        json.dump(profile, f, indent=2)
-    
-    print(f"\n✓ Created profile with {len(data_points)} data points")
-    print(f"✓ Saved to: {OUTPUT_FILE}")
-    
-    # Show sample
-    print(f"\nFirst 5 data points:")
-    for dp in data_points[:5]:
-        print(f"  {dp['address']:4d} | {dp['type']:8s} | {dp['name']:30s} | {dp['unit']:6s} | base={dp['base']}")
+        print(f"  {dp['address']:5d} | {dp['type']:8s} | {dp['name'][:30]:30s} | {dp['unit']:6s} | {cat_short}")
 
 if __name__ == "__main__":
     if not os.path.exists(EXCEL_FILE):
