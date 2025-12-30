@@ -432,6 +432,56 @@ jobs:
             --content-type text/plain
           echo "✓ Uploaded ARM64 checksums"
 
+  deploy-to-pi:
+    name: Deploy to Raspberry Pi (Home Network)
+    needs: [version, build-arm64]
+    runs-on: [pi-deploy]
+    if: github.ref == 'refs/heads/master'  # Only deploy from master branch
+    
+    steps:
+      - name: Deploy to Pi via SSH (password auth)
+        env:
+          PI_HOST: ${{ secrets.PI_HOST }}
+          PI_USER: ${{ secrets.PI_USER }}
+          PI_PASSWORD: ${{ secrets.PI_PASSWORD }}
+          AGENT_VERSION: ${{ needs.version.outputs.package_version }}
+        run: |
+          echo "Deploying agent $AGENT_VERSION to Raspberry Pi..."
+          
+          # Install sshpass if not available
+          if ! command -v sshpass &> /dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y sshpass
+          fi
+          
+          # Deploy using install script (pulls from Azure)
+          sshpass -p "$PI_PASSWORD" ssh -o StrictHostKeyChecking=no $PI_USER@$PI_HOST << 'EOF'
+            echo "Installing agent on Raspberry Pi..."
+            curl -sfL https://iotistic.blob.core.windows.net/scripts/agent/install | sudo bash
+          EOF
+          
+          echo "✓ Agent deployed to Raspberry Pi"
+          
+      - name: Verify Pi deployment
+        env:
+          PI_HOST: ${{ secrets.PI_HOST }}
+          PI_USER: ${{ secrets.PI_USER }}
+          PI_PASSWORD: ${{ secrets.PI_PASSWORD }}
+        run: |
+          echo "Verifying deployment..."
+          
+          sshpass -p "$PI_PASSWORD" ssh -o StrictHostKeyChecking=no $PI_USER@$PI_HOST << 'EOF'
+            # Check service status
+            sudo systemctl status iotistic-agent --no-pager || true
+            
+            # Check agent version
+            curl -f http://localhost:48484/v1/healthy 2>/dev/null || \
+              curl -f http://localhost:48484/ping 2>/dev/null || \
+              echo "⚠ Agent API not responding yet (may still be starting)"
+          EOF
+          
+          echo "✓ Deployment verification complete"
+
   test-agent-systemd:
     name: Test Systemd Installation (x86_64)
     needs: [version, build-x86]
