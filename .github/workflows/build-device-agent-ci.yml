@@ -440,6 +440,7 @@ jobs:
     
     steps:
       - name: Deploy to Pi via SSH (password auth)
+        shell: bash
         env:
           PI_HOST: ${{ secrets.PI_HOST }}
           PI_USER: ${{ secrets.PI_USER }}
@@ -463,6 +464,7 @@ jobs:
           echo "✓ Agent deployed to Raspberry Pi"
           
       - name: Verify Pi deployment
+        shell: bash
         env:
           PI_HOST: ${{ secrets.PI_HOST }}
           PI_USER: ${{ secrets.PI_USER }}
