@@ -28,27 +28,35 @@ export class ZScoreDetector implements AnomalyDetector {
 			};
 		}
 		
+		// If expectedRange configured, use it as absolute bounds (hard detector)
+		// This prevents false positives from statistical detectors on stable metrics (e.g., grid frequency)
+		if (config.expectedRange && config.expectedRange.length === 2) {
+			const [min, max] = config.expectedRange;
+			if (value >= min && value <= max) {
+				return {
+					method: this.method,
+					isAnomaly: false,
+					confidence: 0,
+					deviation: 0,
+					expectedRange: [min, max],
+					message: `Value within expected range [${min.toFixed(2)}, ${max.toFixed(2)}]`,
+				};
+			}
+		}
+		
 		// Prefer database baseline if available (more samples = more stable)
 		const useDbBaseline = dbBaseline && dbBaseline.sample_count >= 100;
 		const mean = useDbBaseline ? dbBaseline.mean : buffer.mean;
 		const stdDev = useDbBaseline ? dbBaseline.std_dev : buffer.stdDev;
 		const baselineSource = useDbBaseline ? 'database' as const : 'buffer' as const;
 		
-		// Handle zero stdDev (constant values)
-		if (stdDev === 0) {
-			const isAnomaly = value !== mean;
-			return {
-				method: this.method,
-				isAnomaly,
-				confidence: isAnomaly ? 1.0 : 0,
-				deviation: isAnomaly ? Infinity : 0,
-				expectedRange: [mean, mean],
-				message: isAnomaly ? 'Value differs from constant baseline' : 'Value matches constant baseline',
-			};
-		}
+		// Use epsilon floor to prevent division blow-ups on flatlined signals
+		// Avoids treating tiny deviations as critical anomalies when stdDev ≈ 0
+		const STDDEV_EPSILON = config.stdDevEpsilon ?? 0.05;
+		const effectiveStdDev = Math.max(stdDev, STDDEV_EPSILON);
 		
 		const threshold = config.threshold || 3.0;
-		const zScore = Math.abs((value - mean) / stdDev);
+		const zScore = Math.abs((value - mean) / effectiveStdDev);
 		const isAnomaly = zScore > threshold;
 		
 		// Normalized confidence using sigmoid function
@@ -57,8 +65,8 @@ export class ZScoreDetector implements AnomalyDetector {
 		const confidence = sigmoid(zScore, threshold);
 		
 		const expectedRange: [number, number] = [
-			mean - threshold * stdDev,
-			mean + threshold * stdDev,
+			mean - threshold * effectiveStdDev,
+			mean + threshold * effectiveStdDev,
 		];
 		
 		return {
@@ -94,6 +102,22 @@ export class MADDetector implements AnomalyDetector {
 			};
 		}
 		
+		// If expectedRange configured, use it as absolute bounds (hard detector)
+		// This prevents false positives from statistical detectors on stable metrics (e.g., grid frequency)
+		if (config.expectedRange && config.expectedRange.length === 2) {
+			const [min, max] = config.expectedRange;
+			if (value >= min && value <= max) {
+				return {
+					method: this.method,
+					isAnomaly: false,
+					confidence: 0,
+					deviation: 0,
+					expectedRange: [min, max],
+					message: `Value within expected range [${min.toFixed(2)}, ${max.toFixed(2)}]`,
+				};
+			}
+		}
+		
 		// Prefer database baseline if available (more samples = more stable)
 		const useDbBaseline = dbBaseline && dbBaseline.sample_count >= 100 &&
 			dbBaseline.median !== null && dbBaseline.median !== undefined &&
@@ -102,29 +126,26 @@ export class MADDetector implements AnomalyDetector {
 		const median = useDbBaseline ? dbBaseline.median! : buffer.values.slice(0, buffer.size).sort((a, b) => a - b)[Math.floor(buffer.size / 2)];
 		const baselineSource = useDbBaseline ? 'database' as const : 'buffer' as const;
 		
-		// Handle zero MAD (constant values)
-		if (mad === 0) {
-			const isAnomaly = value !== median;
-			return {
-				method: this.method,
-				isAnomaly,
-				confidence: isAnomaly ? 1.0 : 0,
-				deviation: isAnomaly ? Infinity : 0,
-				expectedRange: [median, median],
-				message: isAnomaly ? 'Value differs from constant median' : 'Value matches constant median',
-			};
-		}
+		// Use epsilon floor to prevent division blow-ups on flatlined signals
+		// Avoids treating tiny deviations as critical anomalies when MAD ≈ 0
+		const MAD_EPSILON = config.madEpsilon ?? 0.05;
+		const effectiveMAD = Math.max(mad, MAD_EPSILON);
+		
+		// Scale MAD to make it comparable to standard deviation (1.4826 ≈ 1/Φ⁻¹(3/4))
+		// This makes threshold = 3 behave like 3σ (Z-score) but with robust statistics
+		const MAD_SCALE = 1.4826;
+		const scaledMAD = effectiveMAD * MAD_SCALE;
 		
 		const threshold = config.threshold || 3.0;
-		const madScore = Math.abs((value - median) / mad);
+		const madScore = Math.abs((value - median) / scaledMAD);
 		const isAnomaly = madScore > threshold;
 		
 		// Normalized confidence using sigmoid function
 		const confidence = sigmoid(madScore, threshold);
 		
 		const expectedRange: [number, number] = [
-			median - threshold * mad,
-			median + threshold * mad,
+			median - threshold * scaledMAD,
+			median + threshold * scaledMAD,
 		];
 		
 		return {
@@ -218,7 +239,8 @@ export class ExpectedRangeDetector implements AnomalyDetector {
 		}
 		
 		// Require minimum baseline samples before alerting to avoid false positives during initial collection
-		const MIN_SAMPLES_FOR_RANGE_DETECTION = 30;
+		// Use same threshold as MAD (10) so expected_range can protect against MAD false positives
+		const MIN_SAMPLES_FOR_RANGE_DETECTION = 10;
 		if (buffer.size < MIN_SAMPLES_FOR_RANGE_DETECTION) {
 			return {
 				method: this.method,

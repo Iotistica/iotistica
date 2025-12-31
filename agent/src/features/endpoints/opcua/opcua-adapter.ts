@@ -299,21 +299,21 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
         // Only include metrics in validated nodes (metadata excluded from polling/subscription)
         if (classified === 'metric') {
           valid.push(dp);
-          this.logger.debug(`✓ Metric node validated: ${dp.nodeId} (${dp.name})`, {
-            deviceName,
-            nodeType: classified,
-            nodeClass,
-            dataType: dataTypeNodeId,
-            value: valueResult.value?.value
-          });
+          // this.logger.debug(`✓ Metric node validated: ${dp.nodeId} (${dp.name})`, {
+          //   deviceName,
+          //   nodeType: classified,
+          //   nodeClass,
+          //   dataType: dataTypeNodeId,
+          //   value: valueResult.value?.value
+          // });
         } else {
-          this.logger.debug(`⊘ Metadata node excluded: ${dp.nodeId} (${dp.name})`, {
-            deviceName,
-            nodeType: classified,
-            nodeClass,
-            dataType: dataTypeNodeId,
-            value: valueResult.value?.value
-          });
+          // this.logger.debug(`⊘ Metadata node excluded: ${dp.nodeId} (${dp.name})`, {
+          //   deviceName,
+          //   nodeType: classified,
+          //   nodeClass,
+          //   dataType: dataTypeNodeId,
+          //   value: valueResult.value?.value
+          // });
         }
       } catch (error) {
         invalid.push(dp.nodeId);

@@ -280,16 +280,16 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
                     override = REGISTER_OVERRIDES[addr]
                     base = override.get("base", 100)
                     noise_pct = override.get("noise_pct", 0.05)
-                    self.values[idx] = int(base * (1 + random.uniform(-noise_pct, noise_pct)))
+                    calculated = base * (1 + random.uniform(-noise_pct, noise_pct))
+                    self.values[idx] = int(calculated)
+                    if addr == 129:
+                        logger.info(f"[OVERRIDE] addr=129 base={base} noise={noise_pct} calculated={calculated:.2f} final={self.values[idx]} OVERRIDES_len={len(REGISTER_OVERRIDES)}")
                 else:
                     # Use vendor config
                     base = dp.get("base", 100)
                     noise_pct = dp.get("noise_pct", 0.05)
                     new_value = int(base * (1 + random.uniform(-noise_pct, noise_pct)))
                     self.values[idx] = new_value
-                    # DEBUG: Log specific problematic addresses
-                    if addr in [99, 129, 139, 149, 159] and self.unit_id == 1:
-                        logger.info(f"[DEBUG] Updated holding[{addr}] idx={idx} value={new_value} (base={base})")
             
             elif self.register_type == 'input':
                 # Input Registers: Read-only sensor readings (no GUI overrides)

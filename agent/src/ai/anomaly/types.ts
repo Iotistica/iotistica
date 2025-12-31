@@ -141,6 +141,10 @@ export interface MetricConfig {
 	minConfidence?: number;          // Minimum confidence to alert (default: 0.7)
 	cooldownMs?: number;             // Min time between alerts (default: 5 min)
 	
+	// Epsilon floors to prevent division blow-ups on flatlined signals
+	madEpsilon?: number;             // MAD epsilon floor (default: 0.05)
+	stdDevEpsilon?: number;          // StdDev epsilon floor (default: 0.05)
+	
 	// Seasonality configuration (for non-stationary metrics)
 	seasonality?: SeasonalityPattern; // Baseline bucketing pattern (default: 'none')
 	

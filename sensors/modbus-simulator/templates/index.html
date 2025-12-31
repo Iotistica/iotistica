@@ -11,21 +11,22 @@
         <header>
             <h1>Modbus Simulator Control Panel</h1>
             <div class="status-bar">
-                <span id="profile-status">Profile: {{ current_profile }}</span>
+                <span id="profile-status" class="active-profile-badge">🟢 Active: {{ current_profile }}</span>
                 <span id="slaves-status">Slaves: -</span>
-                <span id="overrides-status">Active Overrides: 0</span>
+                <span id="overrides-status">Overrides: 0</span>
             </div>
         </header>
 
         <div class="controls-section">
             <div class="control-group">
                 <label for="profile-select">Profile:</label>
-                <select id="profile-select">
+                <select id="profile-select" onchange="onProfileChange()">
                     {% for profile in profiles %}
                     <option value="{{ profile }}" {% if profile == current_profile %}selected{% endif %}>{{ profile }}</option>
                     {% endfor %}
                 </select>
-                <button onclick="loadProfileDataPoints()">Load Data Points</button>
+                <button onclick="loadProfileDataPoints()">📋 Load Profile</button>
+                <button onclick="applyAllChanges()" class="apply-all-btn">✅ Apply Manual Changes</button>
             </div>
             
             <div class="control-group control-group-slaves">
@@ -37,11 +38,10 @@
 
             <div class="control-group">
                 <label>Scenarios:</label>
-                <button id="scenario-normal" onclick="applyScenario('normal')">Normal</button>
-                <button id="scenario-high_load" onclick="applyScenario('high_load')">High Load</button>
-                <button id="scenario-fault" onclick="applyScenario('fault')">Fault Condition</button>
-                <button id="scenario-unstable" onclick="applyScenario('unstable')">Unstable</button>
-                <button onclick="clearAllOverrides()" class="danger">Clear All</button>
+                <div id="scenario-buttons">
+                    <button onclick="loadScenarios()">🔄 Load Scenarios</button>
+                </div>
+                
             </div>
             
             <div class="control-group">
@@ -113,15 +113,19 @@
             try {
                 const response = await fetch('/api/status');
                 const status = await response.json();
-                document.getElementById('profile-status').textContent = `Profile: ${status.profile}`;
+                document.getElementById('profile-status').textContent = `🟢 Active: ${status.profile}`;
                 document.getElementById('slaves-status').textContent = `Slaves: ${status.slaves}`;
-                document.getElementById('overrides-status').textContent = `Active Overrides: ${status.active_overrides}`;
+                document.getElementById('overrides-status').textContent = `Overrides: ${status.active_overrides}`;
                 
                 // Update slave controls
                 renderSlaveControls(status.slave_states);
                 
-                // Update slider values if overrides exist
+                // Update slider values from server overrides, but skip staged changes
                 Object.keys(status.overrides).forEach(address => {
+                    // Don't overwrite staged changes with server values
+                    if (stagedOverrides[address]) {
+                        return;
+                    }
                     const override = status.overrides[address];
                     const baseSlider = document.getElementById(`base-${address}`);
                     const noiseSlider = document.getElementById(`noise-${address}`);
@@ -135,34 +139,169 @@
         }
 
         // Load data points for current profile
-        async function loadProfileDataPoints() {
+        let stagedOverrides = {};  // Local staging for changes
+        let stagedProfile = null;
+
+        // Auto-refresh scenarios when profile dropdown changes
+        async function onProfileChange() {
             const profile = document.getElementById('profile-select').value;
-            currentProfile = profile;
+            
+            // Temporarily update staged profile for scenario preview
+            const tempStagedProfile = stagedProfile;
+            stagedProfile = profile;
+            
+            // Reload scenarios for the new profile
+            await loadScenariosForProfile(profile);
+            
+            // Restore staged profile (only changes when Load Profile is clicked)
+            if (!tempStagedProfile || tempStagedProfile === currentProfile) {
+                stagedProfile = null;
+            } else {
+                stagedProfile = tempStagedProfile;
+            }
+        }
+
+        async function loadScenariosForProfile(profileName) {
+            const container = document.getElementById('scenario-buttons');
+            container.innerHTML = '<button disabled>Loading...</button>';
             
             try {
-                // Switch profile in Modbus simulator
-                const switchResponse = await fetch(`/api/profile/switch/${profile}`, {method: 'POST'});
-                const switchResult = await switchResponse.json();
+                // Temporarily override the state to get scenarios for selected profile
+                const response = await fetch(`/api/scenarios/for-profile/${profileName}`);
+                const data = await response.json();
                 
-                if (switchResult.success) {
-                    console.log(`Switched Modbus server to ${profile}`);
-                    // Show success notification
-                    showNotification(`Modbus server now simulating: ${profile}`, 'success');
-                } else {
-                    console.error('Failed to switch profile:', switchResult.error);
-                    showNotification(`Failed to switch: ${switchResult.error}`, 'error');
+                if (!data.scenarios || Object.keys(data.scenarios).length === 0) {
+                    container.innerHTML = '<span class="help-text">No scenarios for this profile</span>';
+                    return;
                 }
                 
-                // Load data points for UI
+                let html = '';
+                for (const [scenarioName, scenarioInfo] of Object.entries(data.scenarios)) {
+                    const buttonClass = scenarioName === 'normal' ? 'scenario-btn normal-btn' : 'scenario-btn';
+                    const tooltip = `${scenarioInfo.description}\\nRegisters: ${scenarioInfo.registers.length || 'none'}`;
+                    
+                    html += `
+                        <button id="scenario-${scenarioName}" 
+                                class="${buttonClass}" 
+                                onclick="applyScenario('${scenarioName}')" 
+                                title="${tooltip}">
+                            ${scenarioInfo.description}
+                        </button>
+                    `;
+                }
+                
+                container.innerHTML = html;
+            } catch (error) {
+                console.error('Failed to load scenarios:', error);
+                container.innerHTML = '<button onclick="loadScenarios()">🔄 Retry</button>';
+            }
+        }
+
+        async function loadProfileDataPoints() {
+            const profile = document.getElementById('profile-select').value || currentProfile;
+            if (!profile) {
+                showNotification('Please select a profile first', 'error');
+                return;
+            }
+            stagedProfile = profile;
+            
+            try {
+                // Load data points for UI display only (no profile switch)
                 const response = await fetch(`/api/datapoints/${profile}`);
                 const data = await response.json();
                 dataPoints = data.dataPoints;
                 renderDataPoints(dataPoints);
                 
-                loadStatus();
+                // Load scenarios for this profile
+                await loadScenarios();
+                
+                showNotification(`📋 Loaded ${dataPoints.length} data points from ${profile} (preview mode)`, 'info');
             } catch (error) {
                 console.error('Failed to load data points:', error);
                 document.getElementById('datapoints-container').innerHTML = '<p class="error">Failed to load data points</p>';
+                showNotification('Failed to load data points', 'error');
+            }
+        }
+
+        async function applyAllChanges() {
+            const profile = stagedProfile || document.getElementById('profile-select').value;
+            
+            try {
+                // 1. Switch profile if changed
+                if (profile !== currentProfile) {
+                    const switchResponse = await fetch(`/api/profile/switch/${profile}`, {method: 'POST'});
+                    const switchResult = await switchResponse.json();
+                    
+                    if (!switchResult.success) {
+                        showNotification(`Failed to switch profile: ${switchResult.error}`, 'error');
+                        return;
+                    }
+                    currentProfile = profile;
+                }
+                
+                // 2. Apply all staged overrides
+                const overrideCount = Object.keys(stagedOverrides).length;
+                if (overrideCount > 0) {
+                    for (const [address, override] of Object.entries(stagedOverrides)) {
+                        await fetch(`/api/overrides/${address}`, {
+                            method: 'PUT',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify(override)
+                        });
+                    }
+                }
+                
+                // 3. Reload UI
+                await loadStatus();
+                
+                // Clear staging
+                stagedProfile = null;
+                stagedOverrides = {};
+                
+                const msg = `✅ Applied ${overrideCount || 'profile'} changes to ${profile}`;
+                showNotification(msg, 'success');
+                
+            } catch (error) {
+                console.error('Failed to apply changes:', error);
+                showNotification(`Failed to apply changes: ${error.message}`, 'error');
+            }
+        }
+
+        function clearStagedOverrides() {
+            stagedOverrides = {};
+            showNotification('Cleared staged overrides', 'info');
+        }
+
+        async function applyProfile() {
+            const profile = document.getElementById('profile-select').value;
+            currentProfile = profile;
+            
+            try {
+                // Switch profile in Modbus simulator (starts sending live data)
+                const switchResponse = await fetch(`/api/profile/switch/${profile}`, {method: 'POST'});
+                const switchResult = await switchResponse.json();
+                
+                if (switchResult.success) {
+                    console.log(`Activated Modbus profile: ${profile}`);
+                    showNotification(`🚀 Now sending live data from: ${profile}`, 'success');
+                    
+                    // Auto-load data points for the applied profile
+                    const response = await fetch(`/api/datapoints/${profile}`);
+                    const data = await response.json();
+                    dataPoints = data.dataPoints;
+                    renderDataPoints(dataPoints);
+                    
+                    // Reload scenarios for new profile
+                    loadScenarios();
+                    
+                    loadStatus();
+                } else {
+                    console.error('Failed to switch profile:', switchResult.error);
+                    showNotification(`Failed to apply profile: ${switchResult.error}`, 'error');
+                }
+            } catch (error) {
+                console.error('Failed to apply profile:', error);
+                showNotification(`Failed to apply profile: ${error.message}`, 'error');
             }
         }
 
@@ -225,34 +364,21 @@
             }
         }
 
-        // Set override for a register
-        async function setOverride(address) {
+        // Stage override for a register (local only)
+        function setOverride(address) {
             const base = parseInt(document.getElementById(`base-${address}`).value);
             const noise_pct = parseInt(document.getElementById(`noise-${address}`).value) / 100;
             
-            try {
-                await fetch(`/api/overrides/${address}`, {
-                    method: 'PUT',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({base, noise_pct})
-                });
-                loadStatus();
-            } catch (error) {
-                console.error('Failed to set override:', error);
-            }
+            // Stage locally
+            stagedOverrides[address] = {base, noise_pct};
         }
 
-        // Reset override for a register
-        async function resetOverride(address) {
-            try {
-                await fetch(`/api/overrides/${address}`, {method: 'DELETE'});
-                document.getElementById(`base-${address}`).value = 100;
-                document.getElementById(`noise-${address}`).value = 5;
-                updateDisplay(address);
-                loadStatus();
-            } catch (error) {
-                console.error('Failed to reset override:', error);
-            }
+        // Remove staged override for a register
+        function resetOverride(address) {
+            delete stagedOverrides[address];
+            document.getElementById(`base-${address}`).value = 100;
+            document.getElementById(`noise-${address}`).value = 5;
+            updateDisplay(address);
         }
 
         // Clear all overrides
@@ -273,36 +399,82 @@
             }
         }
 
-        // Apply scenario
+        // Load available scenarios for current profile
+        async function loadScenarios() {
+            // Use the selected profile from dropdown, or fall back to currentProfile
+            const profile = document.getElementById('profile-select').value || currentProfile;
+            if (!profile) {
+                console.log('No profile available, skipping scenario load');
+                return;
+            }
+            await loadScenariosForProfile(profile);
+        }
+
+        // Stage scenario and update UI sliders (doesn't apply to simulator yet)
         async function applyScenario(scenarioName) {
             try {
-                const response = await fetch(`/api/scenario/${scenarioName}`, {method: 'POST'});
-                const result = await response.json();
+                if (scenarioName === 'normal') {
+                    stagedOverrides = {};
+                    updateScenarioButtons(scenarioName);
+                    // Reset all sliders to defaults
+                    dataPoints.forEach(point => {
+                        const baseSlider = document.getElementById(`base-${point.address}`);
+                        const noiseSlider = document.getElementById(`noise-${point.address}`);
+                        if (baseSlider) baseSlider.value = point.base || 100;
+                        if (noiseSlider) noiseSlider.value = (point.noise_pct || 0.05) * 100;
+                        updateDisplay(point.address);
+                    });
+                    showNotification('Reset to profile defaults', 'info');
+                    return;
+                }
                 
-                if (result.success) {
+                // Get scenario definition from API
+                const response = await fetch('/api/scenarios');
+                const data = await response.json();
+                const scenarios = data.scenarios;
+                
+                if (!scenarios[scenarioName]) {
+                    showNotification('Scenario not available for this profile', 'error');
+                    return;
+                }
+                
+                // Resolve scenario to addresses
+                const profile = stagedProfile || currentProfile;
+                const resolveResponse = await fetch(`/api/scenario/${scenarioName}/resolve?profile=${profile}`);
+                const resolveResult = await resolveResponse.json();
+                
+                if (resolveResult.success) {
+                    // Stage the overrides locally
+                    stagedOverrides = {...stagedOverrides, ...resolveResult.overrides};
+                    
+                    // Update UI sliders to show scenario values
+                    for (const [address, override] of Object.entries(resolveResult.overrides)) {
+                        const baseSlider = document.getElementById(`base-${address}`);
+                        const noiseSlider = document.getElementById(`noise-${address}`);
+                        if (baseSlider) baseSlider.value = override.base;
+                        if (noiseSlider) noiseSlider.value = override.noise_pct * 100;
+                        updateDisplay(address);
+                    }
+                    
                     // Update button states
                     updateScenarioButtons(scenarioName);
                     
-                    // Reload to update UI with scenario values
-                    loadStatus();
-                    
-                    showNotification(`Applied scenario: ${scenarioName}`, 'success');
+                    const msg = `📝 Loaded scenario: ${scenarioName} (${Object.keys(resolveResult.overrides).length} registers). Adjust if needed, then click Apply.`;
+                    showNotification(msg, 'info');
+                } else {
+                    showNotification(resolveResult.error || 'Failed to load scenario', 'error');
                 }
             } catch (error) {
-                console.error('Failed to apply scenario:', error);
-                showNotification(`Failed to apply scenario: ${error.message}`, 'error');
+                console.error('Failed to load scenario:', error);
+                showNotification(`Failed to load scenario: ${error.message}`, 'error');
             }
         }
 
         // Update scenario button states
         function updateScenarioButtons(activeScenario) {
             // Remove active class from all scenario buttons
-            const scenarioButtons = ['normal', 'high_load', 'fault', 'unstable'];
-            scenarioButtons.forEach(scenario => {
-                const button = document.getElementById(`scenario-${scenario}`);
-                if (button) {
-                    button.classList.remove('active');
-                }
+            document.querySelectorAll('.scenario-btn').forEach(button => {
+                button.classList.remove('active');
             });
             
             // Add active class to selected button
@@ -673,7 +845,8 @@
         // Load on page load
         window.addEventListener('load', () => {
             loadProfileDataPoints();
-            loadStatus();
+            loadStatus();  // Loads slave controls via renderSlaveControls()
+            loadScenarios();  // Auto-load scenarios for current profile
         });
     </script>
 </body>

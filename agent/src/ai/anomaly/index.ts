@@ -403,7 +403,7 @@ export class AnomalyDetectionService {
 		metricConfig: MetricConfig,
 		result: any
 	): AnomalyAlert {
-		const severity = this.calculateSeverity(result.confidence, result.deviation);
+		const severity = this.calculateSeverity(result.confidence, result.deviation, result.method);
 		
 		return {
 			id: randomUUID(),
@@ -432,9 +432,23 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Calculate severity based on confidence and deviation
+	 * Calculate severity based on confidence, deviation, and detection method
+	 * 
+	 * MAD detector is downgraded to 'warning' max severity for slow-moving signals
+	 * ExpectedRange and RateChange remain 'critical' for hard threshold violations
 	 */
-	private calculateSeverity(confidence: number, deviation: number): AnomalySeverity {
+	private calculateSeverity(confidence: number, deviation: number, method?: string): AnomalySeverity {
+		// MAD detector: Downgrade to warning max (frequency deviations not critical unless persistent)
+		if (method === 'mad') {
+			if (confidence >= 0.7 || deviation >= 3.0) {
+				return 'warning';
+			} else {
+				return 'info';
+			}
+		}
+		
+		// ExpectedRange and RateChange: Keep critical severity (hard violations)
+		// ZScore, IQR, EWMA: Use standard thresholds
 		if (confidence >= 0.85 || deviation >= 5.0) {
 			return 'critical';
 		} else if (confidence >= 0.7 || deviation >= 3.0) {

@@ -17,7 +17,7 @@ services:
     postgres:
         image: timescale/timescaledb:latest-pg16
         container_name: iotistic-postgres
-        # restart: unless-stopped
+        restart: unless-stopped
         environment:
             - POSTGRES_DB=${POSTGRES_DB:-iotistic}
             - POSTGRES_USER=${POSTGRES_USER:-postgres}
@@ -225,8 +225,6 @@ services:
             - "5001:5000"  # Web GUI: http://localhost:5001
         networks:
             - iotistic-net
-        depends_on:
-            - api
         logging:
             driver: "json-file"
             options:
@@ -265,8 +263,7 @@ services:
             - "5002:5002"     # Web GUI
         networks:
             - iotistic-net
-        depends_on:
-            - api
+
         logging:
             driver: "json-file"
             options:

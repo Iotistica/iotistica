@@ -123,6 +123,97 @@ button.active:hover {
     background: #218838;
 }
 
+/* Scenario buttons */
+#scenario-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.scenario-btn {
+    padding: 10px 20px;
+    border: 2px solid #667eea;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    background: white;
+    color: #667eea;
+    transition: all 0.2s;
+}
+
+.scenario-btn:hover {
+    background: #667eea;
+    color: white;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.scenario-btn.active {
+    background: #28a745;
+    border-color: #28a745;
+    color: white;
+    box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.2);
+}
+
+.scenario-btn.active:hover {
+    background: #218838;
+    border-color: #218838;
+}
+
+.scenario-btn.normal-btn {
+    border-color: #6c757d;
+    color: #6c757d;
+}
+
+.scenario-btn.normal-btn:hover {
+    background: #6c757d;
+    color: white;
+}
+
+/* Apply all changes button */
+.apply-all-btn {
+    background: #28a745;
+    border: 2px solid #28a745;
+    font-weight: 700;
+    font-size: 15px;
+    padding: 12px 24px;
+}
+
+.apply-all-btn:hover {
+    background: #218838;
+    border-color: #218838;
+    box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
+}
+
+.apply-all-btn.has-changes {
+    animation: pulse 2s infinite;
+    box-shadow: 0 0 0 4px rgba(40, 167, 69, 0.3);
+}
+
+@keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 4px rgba(40, 167, 69, 0.3); }
+    50% { box-shadow: 0 0 0 8px rgba(40, 167, 69, 0.2); }
+}
+
+/* Help text */
+.help-text {
+    font-size: 12px;
+    color: #6c757d;
+    font-style: italic;
+    margin-left: 10px;
+}
+
+#staging-status {
+    font-weight: 600;
+}
+
+/* Active profile badge */
+.active-profile-badge {
+    font-weight: 700;
+    color: #28a745;
+}
+
 #datapoints-container {
     padding: 30px;
 }

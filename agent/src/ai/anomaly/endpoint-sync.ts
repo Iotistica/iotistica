@@ -98,18 +98,31 @@ export async function discoverEndpointMetrics(
 					const upperBound = Math.ceil(dp.base * (1 + dp.noise_pct * marginMultiplier));
 					expectedRange = [lowerBound, upperBound];
 				}
+				
+				logger?.debugSync(`Calculated expectedRange for ${metricName}`, {
+					component: LogComponents.metrics,
+					base: dp.base,
+					noise_pct: dp.noise_pct,
+					expectedRange,
+				});
+			} else {
+				logger?.debugSync(`No base/noise_pct for ${metricName}`, {
+					component: LogComponents.metrics,
+					dataPoint: dp,
+				});
 			}
-			
-			// Choose detection methods based on data point type
-			// Only use statistical methods - no expected_range (user must configure via cloud)
-			const methods: DetectionMethod[] = ['zscore', 'mad'];
+			// This prevents false positives on stable values like frequency
+			const methods: DetectionMethod[] = expectedRange 
+				? ['expected_range', 'mad']  // Prefer expected_range for configured metrics
+				: ['mad'];  // Fallback to MAD only for unconfigured metrics
+				
 				metrics.push({
 					name: metricName,
 				enabled: true, // Auto-enabled for discovered metrics (can be disabled via cloud config)
 					methods,
-					threshold: 3.0,
+					threshold: 5.0,  // Higher threshold (5σ/MAD) to reduce false positives on stable values
 					windowSize: 100,
-					expectedRange: undefined, // User must specify via cloud config
+					expectedRange, // Use calculated range from base ± 4× noise_pct
 					minConfidence: 0.7,
 				});
 			}

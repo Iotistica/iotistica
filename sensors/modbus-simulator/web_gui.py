@@ -147,42 +147,268 @@ def clear_overrides():
     logger.info("All overrides cleared")
     return jsonify({"success": True})
 
+def get_scenario_definitions():
+    """Define scenarios using register names (profile-agnostic)"""
+    return {
+        # Universal scenarios (work across profiles)
+        "normal": {},  # Clear all overrides
+        
+        # COMAP Generator scenarios
+        "comap_normal_operation": {
+            "engine_rpm": {"base": 1500, "noise_pct": 0.02},
+            "power_kw": {"base": 100, "noise_pct": 0.05},
+            "engine_temp": {"base": 85, "noise_pct": 0.03},
+            "gen_current_a": {"base": 50, "noise_pct": 0.05},
+            "gen_current_b": {"base": 50, "noise_pct": 0.05},
+            "gen_current_c": {"base": 50, "noise_pct": 0.05},
+            "gen_voltage_a": {"base": 230, "noise_pct": 0.02},
+            "gen_voltage_b": {"base": 230, "noise_pct": 0.02},
+            "gen_voltage_c": {"base": 230, "noise_pct": 0.02},
+            "frequency": {"base": 50, "noise_pct": 0.01},
+            "fuel_level": {"base": 75, "noise_pct": 0.02},
+        },
+        "comap_high_load": {
+            "engine_rpm": {"base": 1800, "noise_pct": 0.15},
+            "power_kw": {"base": 150, "noise_pct": 0.20},
+            "engine_temp": {"base": 95, "noise_pct": 0.10},
+            "gen_current_a": {"base": 70, "noise_pct": 0.15},
+            "gen_current_b": {"base": 70, "noise_pct": 0.15},
+            "gen_current_c": {"base": 70, "noise_pct": 0.15},
+        },
+        "comap_fault": {
+            "engine_temp": {"base": 110, "noise_pct": 0.30},  # CRITICAL temp
+            "fuel_level": {"base": 10, "noise_pct": 0.50},    # LOW fuel
+            "engine_rpm": {"base": 2100, "noise_pct": 0.25},  # Overspeed
+        },
+        "comap_unstable": {
+            "engine_rpm": {"base": 1500, "noise_pct": 0.50},
+            "frequency": {"base": 50, "noise_pct": 0.30},
+            "gen_voltage_a": {"base": 230, "noise_pct": 0.25},
+            "gen_voltage_b": {"base": 230, "noise_pct": 0.25},
+            "gen_voltage_c": {"base": 230, "noise_pct": 0.25},
+        },
+        
+        # PM556x Power Meter scenarios
+        "pm556x_normal_load": {
+            "Current L1": {"base": 10, "noise_pct": 0.05},
+            "Current L2": {"base": 10, "noise_pct": 0.05},
+            "Current L3": {"base": 10, "noise_pct": 0.05},
+            "Voltage L1-N": {"base": 230, "noise_pct": 0.02},
+            "Voltage L2-N": {"base": 230, "noise_pct": 0.02},
+            "Voltage L3-N": {"base": 230, "noise_pct": 0.02},
+            "Active Power": {"base": 7000, "noise_pct": 0.10},
+            "Frequency": {"base": 50, "noise_pct": 0.005},
+        },
+        "pm556x_overload": {
+            "Current L1": {"base": 45, "noise_pct": 0.15},  # Near max current
+            "Current L2": {"base": 45, "noise_pct": 0.15},
+            "Current L3": {"base": 45, "noise_pct": 0.15},
+            "Active Power": {"base": 28000, "noise_pct": 0.20},  # High power
+            "Power Factor": {"base": 0.75, "noise_pct": 0.10},  # Poor PF
+        },
+        "pm556x_voltage_sag": {
+            "Voltage L1-N": {"base": 190, "noise_pct": 0.08},  # Low voltage
+            "Voltage L2-N": {"base": 195, "noise_pct": 0.08},
+            "Voltage L3-N": {"base": 188, "noise_pct": 0.08},
+            "Frequency": {"base": 49.5, "noise_pct": 0.02},
+        },
+        "pm556x_imbalance": {
+            "Current L1": {"base": 25, "noise_pct": 0.05},
+            "Current L2": {"base": 15, "noise_pct": 0.05},  # Imbalanced
+            "Current L3": {"base": 30, "noise_pct": 0.05},  # Imbalanced
+            "Voltage L1-N": {"base": 235, "noise_pct": 0.03},
+            "Voltage L2-N": {"base": 225, "noise_pct": 0.03},  # Imbalanced
+            "Voltage L3-N": {"base": 232, "noise_pct": 0.03},
+        },
+    }
+
+def resolve_scenario_to_addresses(scenario_name, scenario_def, profile_name):
+    """Convert scenario register names to addresses based on active profile"""
+    profile_data = get_profile_data()
+    
+    if profile_name not in profile_data:
+        logger.error(f"Profile '{profile_name}' not found in profile data")
+        return {}
+    
+    # Build name->address mapping for current profile
+    name_to_address = {}
+    for dp in profile_data[profile_name].get('dataPoints', []):
+        name_to_address[dp['name']] = dp['address']
+    
+    # Resolve scenario register names to addresses
+    resolved = {}
+    for reg_name, override in scenario_def.items():
+        if reg_name in name_to_address:
+            addr = name_to_address[reg_name]
+            resolved[addr] = override
+            logger.debug(f"Scenario '{scenario_name}': {reg_name} -> address {addr}")
+        else:
+            logger.warning(f"Scenario '{scenario_name}': Register '{reg_name}' not found in profile '{profile_name}'")
+    
+    return resolved
+
 @app.route('/api/scenario/<scenario_name>', methods=['POST'])
 def apply_scenario(scenario_name):
-    """Apply predefined scenario"""
-    scenarios = {
-        "normal": {},  # Clear all overrides
-        "high_load": {
-            # COMAP High load scenario (updated addresses for modbus-serial +1 offset)
-            99: {"base": 1800, "noise_pct": 0.15},   # engine_rpm: High RPM (1800)
-            139: {"base": 150, "noise_pct": 0.20},   # power_kw: High power (150kW)
-            149: {"base": 95, "noise_pct": 0.10},    # engine_temp: Elevated temp (95°C)
-        },
-        "fault": {
-            # COMAP Fault condition scenario
-            149: {"base": 110, "noise_pct": 0.30},   # engine_temp: CRITICAL temp (110°C)
-            159: {"base": 10, "noise_pct": 0.50},    # fuel_level: LOW fuel (10%)
-            99: {"base": 2100, "noise_pct": 0.25},   # engine_rpm: Overspeed (2100 RPM)
-        },
-        "unstable": {
-            # COMAP Unstable readings scenario
-            99: {"base": 1500, "noise_pct": 0.50},   # engine_rpm: Erratic RPM (±50%)
-            129: {"base": 50, "noise_pct": 0.30},    # frequency: Unstable frequency (±30%)
-            109: {"base": 230, "noise_pct": 0.25},   # gen_voltage_a: Voltage fluctuation (±25%)
-            110: {"base": 230, "noise_pct": 0.25},   # gen_voltage_b: Voltage fluctuation
-            111: {"base": 230, "noise_pct": 0.25},   # gen_voltage_c: Voltage fluctuation
-        }
-    }
+    """Apply predefined scenario (profile-aware)"""
+    # Get current profile from state
+    state = read_state()
+    current_profile = state.get('profile', os.environ.get('MODBUS_PROFILE', 'Generic'))
+    
+    # Get scenario definitions
+    scenarios = get_scenario_definitions()
     
     if scenario_name == "normal":
         REGISTER_OVERRIDES.clear()
-    elif scenario_name in scenarios:
-        REGISTER_OVERRIDES.update(scenarios[scenario_name])
-    else:
-        return jsonify({"success": False, "error": "Unknown scenario"}), 400
+        logger.info("Cleared all scenario overrides")
+        return jsonify({"success": True, "scenario": scenario_name, "overrides": {}})
     
-    logger.info(f"Applied scenario: {scenario_name}")
-    return jsonify({"success": True, "scenario": scenario_name, "overrides": REGISTER_OVERRIDES})
+    if scenario_name not in scenarios:
+        return jsonify({
+            "success": False, 
+            "error": f"Unknown scenario: {scenario_name}",
+            "available": list(scenarios.keys())
+        }), 400
+    
+    # Resolve register names to addresses for current profile
+    scenario_def = scenarios[scenario_name]
+    resolved_overrides = resolve_scenario_to_addresses(scenario_name, scenario_def, current_profile)
+    
+    if not resolved_overrides:
+        return jsonify({
+            "success": False,
+            "error": f"Scenario '{scenario_name}' has no matching registers in profile '{current_profile}'",
+            "profile": current_profile
+        }), 400
+    
+    # Apply resolved overrides
+    REGISTER_OVERRIDES.update(resolved_overrides)
+    
+    logger.info(f"Applied scenario '{scenario_name}' to profile '{current_profile}' ({len(resolved_overrides)} registers)")
+    return jsonify({
+        "success": True, 
+        "scenario": scenario_name,
+        "profile": current_profile,
+        "registers_affected": len(resolved_overrides),
+        "overrides": REGISTER_OVERRIDES
+    })
+
+@app.route('/api/scenario/<scenario_name>/resolve', methods=['GET'])
+def resolve_scenario(scenario_name):
+    """Resolve scenario to addresses without applying (for staging)"""
+    profile_name = request.args.get('profile', os.environ.get('MODBUS_PROFILE', 'Generic'))
+    
+    scenarios = get_scenario_definitions()
+    
+    if scenario_name not in scenarios:
+        return jsonify({
+            "success": False,
+            "error": f"Unknown scenario: {scenario_name}"
+        }), 400
+    
+    scenario_def = scenarios[scenario_name]
+    resolved_overrides = resolve_scenario_to_addresses(scenario_name, scenario_def, profile_name)
+    
+    if not resolved_overrides:
+        return jsonify({
+            "success": False,
+            "error": f"Scenario '{scenario_name}' has no matching registers in profile '{profile_name}'"
+        }), 400
+    
+    return jsonify({
+        "success": True,
+        "scenario": scenario_name,
+        "profile": profile_name,
+        "overrides": resolved_overrides
+    })
+
+@app.route('/api/scenarios/for-profile/<profile_name>', methods=['GET'])
+def get_scenarios_for_profile(profile_name):
+    """Get scenarios available for a specific profile (for preview)"""
+    all_scenarios = get_scenario_definitions()
+    profile_data = get_profile_data()
+    
+    # Filter scenarios that have at least one matching register in specified profile
+    available_scenarios = {}
+    
+    if profile_name in profile_data:
+        # Build set of register names in specified profile
+        profile_registers = set(dp['name'] for dp in profile_data[profile_name].get('dataPoints', []))
+        
+        for scenario_name, scenario_def in all_scenarios.items():
+            if scenario_name == "normal":
+                # Always include "normal" (clears all)
+                available_scenarios[scenario_name] = {
+                    "description": "Clear all overrides",
+                    "registers": []
+                }
+                continue
+            
+            # Check if scenario has any matching registers
+            matching_registers = [reg for reg in scenario_def.keys() if reg in profile_registers]
+            
+            if matching_registers:
+                # Determine description based on scenario name
+                description = scenario_name.replace('_', ' ').title()
+                if 'comap' in scenario_name.lower():
+                    description = description.replace('Comap', 'COMAP')
+                elif 'pm556x' in scenario_name.lower():
+                    description = description.replace('Pm556x', 'PM556x')
+                
+                available_scenarios[scenario_name] = {
+                    "description": description,
+                    "registers": matching_registers
+                }
+    
+    return jsonify({
+        "profile": profile_name,
+        "scenarios": available_scenarios
+    })
+
+@app.route('/api/scenarios', methods=['GET'])
+def get_available_scenarios():
+    """Get scenarios available for current profile"""
+    state = read_state()
+    current_profile = state.get('profile', os.environ.get('MODBUS_PROFILE', 'Generic'))
+    
+    all_scenarios = get_scenario_definitions()
+    profile_data = get_profile_data()
+    
+    # Filter scenarios that have at least one matching register in current profile
+    available_scenarios = {}
+    
+    if current_profile in profile_data:
+        # Build set of register names in current profile
+        profile_registers = set(dp['name'] for dp in profile_data[current_profile].get('dataPoints', []))
+        
+        for scenario_name, scenario_def in all_scenarios.items():
+            if scenario_name == "normal":
+                # Always include "normal" (clears all)
+                available_scenarios[scenario_name] = {
+                    "description": "Clear all overrides",
+                    "registers": []
+                }
+                continue
+            
+            # Check if scenario has any matching registers
+            matching_registers = [reg for reg in scenario_def.keys() if reg in profile_registers]
+            
+            if matching_registers:
+                # Determine description based on scenario name
+                description = scenario_name.replace('_', ' ').title()
+                if 'comap' in scenario_name.lower():
+                    description = description.replace('Comap', 'COMAP')
+                elif 'pm556x' in scenario_name.lower():
+                    description = description.replace('Pm556x', 'PM556x')
+                
+                available_scenarios[scenario_name] = {
+                    "description": description,
+                    "registers": matching_registers
+                }
+    
+    return jsonify({
+        "profile": current_profile,
+        "scenarios": available_scenarios
+    })
 
 @app.route('/api/profile/switch/<profile_name>', methods=['POST'])
 def switch_profile(profile_name):
@@ -518,4 +744,9 @@ if __name__ == '__main__':
     port = int(os.environ.get("GUI_PORT", 5000))
     host = os.environ.get("GUI_HOST", "0.0.0.0")
     logger.info(f"Starting Modbus Simulator GUI on {host}:{port}")
+    # Disable werkzeug request logging
+    import logging
+    log = logging.getLogger('werkzeug')
+    log.setLevel(logging.ERROR)
+    
     app.run(host=host, port=port, debug=True)
