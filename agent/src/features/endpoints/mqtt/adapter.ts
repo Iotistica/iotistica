@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import * as mqtt from 'mqtt';
+import * as mqttPattern from 'mqtt-pattern';
 import { SensorDataPoint, DeviceStatus, Logger } from '../types.js';
 import { MqttAdapterConfig, MqttDevice } from './types.js';
 
@@ -23,6 +24,8 @@ import { MqttAdapterConfig, MqttDevice } from './types.js';
  * - 'device-error': Emitted when an error occurs
  */
 export class MqttAdapter extends EventEmitter {
+  private static readonly MAX_QUEUE_DEPTH = 1000; // Backpressure threshold
+  
   private config: MqttAdapterConfig;
   private logger: Logger;
   private client: mqtt.MqttClient | null = null;
@@ -30,6 +33,8 @@ export class MqttAdapter extends EventEmitter {
   private deviceStatuses: Map<string, DeviceStatus> = new Map();
   private running = false;
   private connected = false;
+  private emitQueueDepth = 0;
+  private droppedMessageCount = 0;
 
   constructor(config: MqttAdapterConfig, logger: Logger) {
     super();
@@ -121,14 +126,24 @@ export class MqttAdapter extends EventEmitter {
   private async connect(): Promise<void> {
     const brokerUrl = `mqtt://${this.config.broker.host}:${this.config.broker.port}`;
     
-    this.logger.info(`Connecting to MQTT broker endpoint: ${brokerUrl}`);
+    // Generate stable clientId for persistent sessions (critical for edge agents)
+    const stableClientId = this.config.broker.clientId || `iotistic-agent-${process.env.DEVICE_UUID || 'unknown'}`;
+    
+    this.logger.info(`Connecting to MQTT broker endpoint: ${brokerUrl}`, { clientId: stableClientId });
 
     this.client = mqtt.connect(brokerUrl, {
-      clientId: this.config.broker.clientId || `iotistic-agent-${Date.now()}`,
+      clientId: stableClientId,
       username: this.config.broker.username,
       password: this.config.broker.password,
       reconnectPeriod: this.config.reconnect.period,
-      clean: true
+      clean: false, // Persistent session: survive reconnects, keep subscriptions, replay QoS 1 messages
+      keepalive: 60,
+      will: {
+        topic: `device/${stableClientId}/status`,
+        payload: Buffer.from('offline'),
+        qos: 1,
+        retain: true
+      }
     });
 
     return new Promise((resolve, reject) => {
@@ -162,8 +177,9 @@ export class MqttAdapter extends EventEmitter {
       });
 
       // Handle incoming messages
-      this.client!.on('message', (topic, payload) => {
-        this.handleMessage(topic, payload);
+      // Note: MQTT callback signature includes packet metadata (retain flag, qos, etc.)
+      this.client!.on('message', (topic, payload, packet) => {
+        this.handleMessage(topic, payload, packet.retain);
       });
     });
   }
@@ -196,10 +212,40 @@ export class MqttAdapter extends EventEmitter {
   }
 
   /**
-   * Handle incoming MQTT message
+   * Find device config for incoming topic (supports MQTT wildcards: +, #)
+   * Uses mqtt-pattern library for proper wildcard matching
    */
-  private handleMessage(topic: string, payload: Buffer): void {
-    const device = this.subscriptions.get(topic);
+  private findDeviceForTopic(topic: string): MqttDevice | undefined {
+    for (const [filter, device] of this.subscriptions.entries()) {
+      if (mqttPattern.matches(filter, topic)) {
+        return device;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Handle incoming MQTT message
+   * 
+   * @param topic - MQTT topic
+   * @param payload - Message payload
+   * @param retain - Retained message flag (true = stale/historical data)
+   */
+  private handleMessage(topic: string, payload: Buffer, retain: boolean = false): void {
+    // Backpressure guard: Drop messages if downstream can't keep up
+    if (this.emitQueueDepth > MqttAdapter.MAX_QUEUE_DEPTH) {
+      this.droppedMessageCount++;
+      if (this.droppedMessageCount % 100 === 1) {
+        this.logger.warn('Dropping MQTT messages due to backpressure', {
+          queueDepth: this.emitQueueDepth,
+          droppedTotal: this.droppedMessageCount,
+          topic
+        });
+      }
+      return;
+    }
+
+    const device = this.findDeviceForTopic(topic);
     if (!device) {
       this.logger.debug(`Received message for untracked topic: ${topic}`);
       return;
@@ -216,14 +262,25 @@ export class MqttAdapter extends EventEmitter {
         value,
         unit: device.unit || '',
         timestamp: now,
-        quality: 'GOOD'
+        // Retained messages are stale - mark as UNCERTAIN (age unknown)
+        quality: retain ? 'UNCERTAIN' : 'GOOD',
+        ...(retain && { qualityCode: 'RETAINED_MESSAGE' })
       };
 
-      // Emit data event
+      // Emit data event with backpressure tracking
+      this.emitQueueDepth++;
       this.emit('data', [dataPoint]);
+      setImmediate(() => this.emitQueueDepth--);
 
-      // Update device status
-      this.updateDeviceStatus(device.name, true);
+      // Only track message activity for fresh (non-retained) messages
+      if (!retain) {
+        this.trackMessageActivity(device.name);
+      } else {
+        this.logger.debug(`Retained message ignored for device health tracking`, {
+          topic,
+          deviceName: device.name
+        });
+      }
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -241,7 +298,7 @@ export class MqttAdapter extends EventEmitter {
       };
       
       this.emit('data', [dataPoint]);
-      this.updateDeviceStatus(device.name, false, errorMessage);
+      // Note: Don't mark as "disconnected" - parsing errors don't mean device is offline
     }
   }
 
@@ -303,12 +360,18 @@ export class MqttAdapter extends EventEmitter {
 
   /**
    * Initialize device statuses
+   * 
+   * Note: MQTT devices don't have persistent connections like Modbus/OPC-UA.
+   * Connection state should be inferred from:
+   * - lastSeen timestamp (message recency)
+   * - Last Will and Testament (LWT) messages
+   * - Application-specific staleness thresholds
    */
   private initializeDeviceStatuses(): void {
     for (const device of this.config.devices) {
       this.deviceStatuses.set(device.name, {
         deviceName: device.name,
-        connected: false,
+        connected: false, // MQTT: Use LWT or staleness logic to determine this
         lastPoll: null,
         lastSeen: null,
         errorCount: 0,
@@ -322,31 +385,29 @@ export class MqttAdapter extends EventEmitter {
   }
 
   /**
-   * Update device status
+   * Track message activity (not connection state)
+   * 
+   * For MQTT devices:
+   * - Message arrival ≠ device connected
+   * - Devices may publish once per hour and sleep
+   * - "Connected" state should be inferred from lastSeen + staleness threshold
+   * - Use Last Will and Testament (LWT) for definitive offline detection
    */
-  private updateDeviceStatus(deviceName: string, success: boolean, error?: string): void {
+  private trackMessageActivity(deviceName: string): void {
     const status = this.deviceStatuses.get(deviceName);
     if (!status) {
       return;
     }
 
     const now = new Date();
+    status.lastSeen = now;
     status.lastPoll = now;
-
-    if (success) {
-      status.lastSeen = now;
-      status.errorCount = 0;
-      status.lastError = null;
-      status.connected = true;
-      status.communicationQuality = 'good';
-      status.registersUpdated = 1;
-      status.pollSuccessRate = 1.0;
-    } else {
-      status.errorCount++;
-      status.lastError = error || 'Unknown error';
-      status.connected = false;
-      status.communicationQuality = 'poor';
-      status.pollSuccessRate = 0;
-    }
+    status.registersUpdated = (status.registersUpdated || 0) + 1;
+    
+    // Note: Don't set connected=true here
+    // Let higher-level logic decide connectivity based on:
+    // - Time since lastSeen (staleness)
+    // - LWT messages
+    // - Application requirements
   }
 }

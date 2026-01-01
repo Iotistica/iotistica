@@ -64,6 +64,7 @@
     "memoizee": "^0.4.17",
     "modbus-serial": "^8.0.17",
     "mqtt": "^5.14.1",
+    "mqtt-pattern": "^2.0.0",
     "msgpack-lite": "^0.1.26",
     "net-snmp": "^3.26.0",
     "network-checker": "^1.0.6",

@@ -63,6 +63,8 @@ export interface ContainerService {
 		networkMode?: string;
 		restart?: string;
 		labels?: Record<string, string>;
+		command?: string[];          // override container CMD
+		entrypoint?: string[];       // override container ENTRYPOINT
 		
 		// Container runtime options
 		stopSignal?: string;         // e.g., 'SIGTERM', 'SIGINT', 'SIGKILL'

@@ -54,6 +54,9 @@ export interface ServiceConfig {
 		user?: string;
 		hostname?: string;
 		domainname?: string;
+		stopSignal?: string;
+		stopTimeout?: number;
+		readonlyRootfs?: boolean;
 		
 		// Resource limits (K8s-style)
 		resources?: {

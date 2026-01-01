@@ -688,6 +688,7 @@ export class DockerManager extends EventEmitter {
 			const createOptions: Docker.ContainerCreateOptions = {
 				name: containerName,
 				Image: service.imageName,
+				Cmd: service.config.command,
 				User: service.config.user,
 				StopSignal: service.config.stopSignal,
 				StopTimeout: service.config.stopTimeout,
@@ -1137,6 +1138,7 @@ export class DockerManager extends EventEmitter {
 			const createOptions: Docker.ContainerCreateOptions = {
 				name: tempName,
 				Image: service.imageName,
+				Cmd: service.config.command,
 				User: service.config.user,
 				StopSignal: service.config.stopSignal,
 				StopTimeout: service.config.stopTimeout,
