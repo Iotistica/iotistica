@@ -5,6 +5,21 @@ import { SensorDataPoint, DeviceStatus, Logger } from '../types.js';
 import { MqttAdapterConfig, MqttDevice } from './types.js';
 
 /**
+ * Lightweight topic observer for continuous discovery suggestions
+ * Tracks topics seen during normal operation (bounded memory)
+ */
+export interface ObservedTopic {
+  topic: string;
+  firstSeen: Date;
+  lastSeen: Date;
+  messageCount: number;
+  hasLiveMessages: boolean;
+  retainedCount: number;
+  liveCount: number;
+  samplePayload?: string; // Single sample for type inference
+}
+
+/**
  * MQTT Adapter
  * 
  * Architecture: This adapter is socket-agnostic. It subscribes to MQTT topics
@@ -25,6 +40,8 @@ import { MqttAdapterConfig, MqttDevice } from './types.js';
  */
 export class MqttAdapter extends EventEmitter {
   private static readonly MAX_QUEUE_DEPTH = 1000; // Backpressure threshold
+  private static readonly MAX_OBSERVED_TOPICS = 2000; // Memory bound for observer
+  private static readonly OBSERVER_ENABLED = true; // Enable topic observation
   
   private config: MqttAdapterConfig;
   private logger: Logger;
@@ -35,6 +52,10 @@ export class MqttAdapter extends EventEmitter {
   private connected = false;
   private emitQueueDepth = 0;
   private droppedMessageCount = 0;
+  
+  // Topic observer: Continuous awareness for discovery suggestions
+  private observedTopics: Map<string, ObservedTopic> = new Map();
+  private topicAccessOrder: string[] = []; // LRU tracking
 
   constructor(config: MqttAdapterConfig, logger: Logger) {
     super();
@@ -232,6 +253,12 @@ export class MqttAdapter extends EventEmitter {
    * @param retain - Retained message flag (true = stale/historical data)
    */
   private handleMessage(topic: string, payload: Buffer, retain: boolean = false): void {
+    const payloadString = payload.toString();
+    
+    // Track ALL observed topics for continuous discovery awareness
+    // This happens BEFORE device matching - we want to observe everything
+    this.trackObservedTopic(topic, payloadString, retain);
+    
     // Backpressure guard: Drop messages if downstream can't keep up
     if (this.emitQueueDepth > MqttAdapter.MAX_QUEUE_DEPTH) {
       this.droppedMessageCount++;
@@ -247,6 +274,7 @@ export class MqttAdapter extends EventEmitter {
 
     const device = this.findDeviceForTopic(topic);
     if (!device) {
+      // This is normal - observer tracks unmatched topics for discovery
       this.logger.debug(`Received message for untracked topic: ${topic}`);
       return;
     }
@@ -409,5 +437,123 @@ export class MqttAdapter extends EventEmitter {
     // - Time since lastSeen (staleness)
     // - LWT messages
     // - Application requirements
+  }
+
+  /**
+   * Track observed topic for continuous discovery awareness
+   * 
+   * This provides "free" discovery suggestions from normal runtime operation:
+   * - Bounded memory (MAX_OBSERVED_TOPICS limit with LRU eviction)
+   * - Minimal payload storage (single sample)
+   * - Separates retained vs live messages
+   * - Does NOT auto-create devices
+   * 
+   * Used by discovery to suggest recently-seen topics to users
+   */
+  private trackObservedTopic(topic: string, payload: string, retain: boolean): void {
+    if (!MqttAdapter.OBSERVER_ENABLED) {
+      return;
+    }
+
+    // Skip system topics
+    if (topic.startsWith('$SYS/')) {
+      return;
+    }
+
+    const now = new Date();
+    const existing = this.observedTopics.get(topic);
+
+    if (existing) {
+      // Update existing observation
+      existing.lastSeen = now;
+      existing.messageCount++;
+      
+      if (retain) {
+        existing.retainedCount++;
+      } else {
+        existing.liveCount++;
+        existing.hasLiveMessages = true;
+      }
+      
+      // Update LRU order
+      const idx = this.topicAccessOrder.indexOf(topic);
+      if (idx > -1) {
+        this.topicAccessOrder.splice(idx, 1);
+      }
+      this.topicAccessOrder.push(topic);
+    } else {
+      // New topic observation
+      
+      // Enforce memory bound with LRU eviction
+      if (this.observedTopics.size >= MqttAdapter.MAX_OBSERVED_TOPICS) {
+        const evictTopic = this.topicAccessOrder.shift();
+        if (evictTopic) {
+          this.observedTopics.delete(evictTopic);
+          this.logger.debug(`Evicted LRU observed topic: ${evictTopic}`, {
+            reason: 'MAX_OBSERVED_TOPICS reached'
+          });
+        }
+      }
+      
+      this.observedTopics.set(topic, {
+        topic,
+        firstSeen: now,
+        lastSeen: now,
+        messageCount: 1,
+        hasLiveMessages: !retain,
+        retainedCount: retain ? 1 : 0,
+        liveCount: retain ? 0 : 1,
+        samplePayload: payload.slice(0, 200) // Truncate to 200 chars
+      });
+      
+      this.topicAccessOrder.push(topic);
+      
+      this.logger.debug(`New observed topic tracked: ${topic}`, {
+        retain,
+        totalObserved: this.observedTopics.size
+      });
+    }
+  }
+
+  /**
+   * Get recently observed topics (for discovery suggestions)
+   * 
+   * @param maxAgeMinutes - Only return topics seen in last N minutes (default: 60)
+   * @param minLiveMessages - Minimum live (non-retained) messages (default: 1)
+   * @returns Array of observed topics sorted by last seen (newest first)
+   */
+  public getRecentlyObservedTopics(maxAgeMinutes: number = 60, minLiveMessages: number = 1): ObservedTopic[] {
+    const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
+    
+    return Array.from(this.observedTopics.values())
+      .filter(t => t.lastSeen >= cutoff && t.liveCount >= minLiveMessages)
+      .sort((a, b) => b.lastSeen.getTime() - a.lastSeen.getTime());
+  }
+
+  /**
+   * Get all observed topics (for debugging)
+   */
+  public getAllObservedTopics(): ObservedTopic[] {
+    return Array.from(this.observedTopics.values());
+  }
+
+  /**
+   * Clear observed topics (useful for testing or memory management)
+   */
+  public clearObservedTopics(): void {
+    this.observedTopics.clear();
+    this.topicAccessOrder = [];
+    this.logger.info('Cleared all observed topics');
+  }
+
+  /**
+   * Get observer statistics
+   */
+  public getObserverStats(): { totalObserved: number; maxCapacity: number; utilizationPercent: number } {
+    return {
+      totalObserved: this.observedTopics.size,
+      maxCapacity: MqttAdapter.MAX_OBSERVED_TOPICS,
+      utilizationPercent: (this.observedTopics.size / MqttAdapter.MAX_OBSERVED_TOPICS) * 100
+    };
   }
 }

@@ -4,6 +4,35 @@
  * Discovers active MQTT topics by subscribing to wildcard patterns
  * Unique pattern: Push-based (vs pull-based Modbus/OPC-UA)
  * 
+ * 🔀 HYBRID DISCOVERY ARCHITECTURE:
+ * 
+ * This plugin implements ACTIVE discovery (user-triggered snapshots),
+ * complemented by PASSIVE observation in the runtime MQTT adapter.
+ * 
+ * 1️⃣ Passive Observation (Always-On, Bounded)
+ *    - Runtime adapter tracks topics during normal operation
+ *    - Bounded memory (2000 topics max, LRU eviction)
+ *    - Tracks: firstSeen, lastSeen, liveCount, retainedCount
+ *    - Does NOT auto-create devices (only awareness)
+ *    - See: agent/src/features/endpoints/mqtt/adapter.ts
+ * 
+ * 2️⃣ Active Discovery (This Plugin - User Triggered)
+ *    - Explicit discoveryRoots (e.g., ['edge/+', 'sensor/+/data'])
+ *    - Time-bounded sampling (default 30s)
+ *    - Strong validation (pattern matching, safety checks)
+ *    - Emits candidate endpoints
+ *    - 30s window is about SAMPLING, not COMPLETENESS
+ * 
+ * 3️⃣ Deferred Validation (Per-Topic, Flexible)
+ *    - Accepts slow publishers (1+ messages OK)
+ *    - Computes publish rate, separates retained vs live
+ *    - Establishes truth (not discovery)
+ * 
+ * Why This Pattern?
+ * ❌ Pure 30s windows: Miss low-frequency/battery-powered sensors
+ * ❌ Pure continuous: Memory growth, topic explosion, no user intent
+ * ✅ Hybrid: Continuous awareness + discrete snapshots + user control
+ * 
  * Discovery Strategy:
  * - Subscribe to wildcard topics (e.g., '#' or 'device/#')
  * - Monitor for configurable duration (default 30s)

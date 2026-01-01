@@ -329,6 +329,11 @@ export class DiscoveryService extends EventEmitter {
           continue;
         }
         
+        // MQTT-specific: Log observer suggestions if available
+        if (protocol === 'mqtt') {
+          this.logMqttObserverSuggestions();
+        }
+        
         const discovered = await plugin.discover(pluginOptions);
         
         this.logger?.infoSync(`${protocol} plugin returned ${discovered.length} devices`, {
@@ -1234,6 +1239,52 @@ export class DiscoveryService extends EventEmitter {
       this.logger?.debugSync('Failed to check stale devices', {
         component: LogComponents.discovery,
         traceId,
+        error: (error as Error).message
+      });
+    }
+  }
+
+  /**
+   * Log MQTT observer suggestions (hybrid discovery pattern)
+   * 
+   * The MQTT adapter continuously tracks observed topics during normal operation.
+   * This provides "free" discovery suggestions without dedicated 30s scan windows.
+   * 
+   * Hybrid Pattern:
+   * 1. Runtime observation: Adapter tracks all topics seen (bounded, LRU)
+   * 2. Active discovery: User-triggered 30s sampling window
+   * 3. Deferred validation: Per-topic validation after discovery
+   * 
+   * This bridges continuous awareness with discrete discovery snapshots.
+   */
+  private logMqttObserverSuggestions(): void {
+    try {
+      // Try to get MQTT adapter from sensors feature
+      // Note: This requires SensorsFeature to be started
+      // For now, just log that observer suggestions are available
+      this.logger?.infoSync('MQTT Observer: Continuous topic tracking enabled', {
+        component: LogComponents.discovery,
+        note: 'Runtime adapter tracks observed topics between discovery runs',
+        hybrid: 'Active 30s discovery + passive continuous observation'
+      });
+      
+      // TODO: Access adapter instance and log recent topics
+      // This requires passing SensorsFeature reference or using event bus
+      // Example:
+      // const adapter = this.sensorsFeature?.getMqttAdapter();
+      // if (adapter) {
+      //   const recent = adapter.getRecentlyObservedTopics(60, 1);
+      //   if (recent.length > 0) {
+      //     this.logger?.infoSync(`Found ${recent.length} topics observed in last 60 minutes`, {
+      //       topics: recent.map(t => t.topic)
+      //     });
+      //   }
+      // }
+      
+    } catch (error) {
+      // Non-fatal - observer is optional enhancement
+      this.logger?.debugSync('Could not access MQTT observer', {
+        component: LogComponents.discovery,
         error: (error as Error).message
       });
     }
