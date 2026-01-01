@@ -46,8 +46,38 @@ export interface OPCUAConfig {
 
 export interface SNMPConfig {
   enabled?: boolean;
+  /**
+   * IP ranges for SNMP discovery
+   * 
+   * IMPORTANT: Always specify explicit IP ranges to prevent network flooding
+   * 
+   * Supported formats:
+   * - Single IP: '192.168.1.100'
+   * - CIDR notation: '192.168.1.0/24' (scans 254 IPs - use with caution!)
+   * - IP range: '192.168.1.100-192.168.1.110'
+   * - Hostname: 'snmp-device.local' (resolved via DNS)
+   * - Multiple: ['192.168.1.100', '192.168.1.101', 'device.local']
+   * 
+   * Examples:
+   * - Small network: ['192.168.1.100', '192.168.1.101']
+   * - Subnet scan: ['192.168.1.0/24'] (WARNING: scans 254 IPs)
+   * - Docker container: ['snmp-simulator-1', 'snmp-simulator-2']
+   * 
+   * Default: [] (empty - SNMP discovery disabled)
+   * Environment variable: SNMP_IP_RANGES (comma-separated)
+   */
   ipRanges?: string[];
   port?: number;
+}
+
+export interface MQTTConfig {
+  enabled?: boolean;
+  brokerUrl?: string;
+  username?: string;
+  password?: string;
+  discoveryRoots?: string[];
+  monitorDurationMs?: number;
+  qos?: 0 | 1 | 2;
 }
 
 export interface PerformanceConfig {
@@ -209,6 +239,25 @@ export class AgentConfig extends EventEmitter {
       enabled: cloudProtocol?.enabled ?? false,
       ipRanges: cloudProtocol?.ipRanges ?? [],
       port: cloudProtocol?.port ?? 161,
+    };
+  }
+
+  /**
+   * Get MQTT protocol adapter configuration
+   * 
+   * Fallback: Cloud config.protocols.mqtt → env vars → hardcoded defaults
+   */
+  getMqttConfig(): MQTTConfig {
+    const cloudProtocol = this.getTargetConfig().protocols?.mqtt;
+
+    return {
+      enabled: cloudProtocol?.enabled ?? false,
+      brokerUrl: cloudProtocol?.connection?.brokerUrl ?? process.env.MQTT_BROKER_URL ?? 'mqtt://mosquitto:1883',
+      username: cloudProtocol?.connection?.username ?? process.env.MQTT_USERNAME,
+      password: cloudProtocol?.connection?.password ?? process.env.MQTT_PASSWORD,
+      discoveryRoots: cloudProtocol?.discoveryRoots ?? [],
+      monitorDurationMs: cloudProtocol?.monitorDurationMs ?? 30000,
+      qos: (cloudProtocol?.qos ?? 0) as 0 | 1 | 2,
     };
   }
 

@@ -18,7 +18,6 @@ export class ModbusClient {
   private logger: Logger;
   private connected = false;
   private reconnectTimer?: NodeJS.Timeout;
-  private keepAliveTimer?: NodeJS.Timeout;
   
   // Concurrency control: modbus-serial does NOT support concurrent requests
   // Multiple simultaneous reads will corrupt frames and return bad data
@@ -33,9 +32,6 @@ export class ModbusClient {
   // Health tracking
   private lastSuccessfulRead = Date.now(); // Last successful register read
   private lastConnectionSuccess = Date.now(); // Last successful connection
-  
-  // Keep-alive settings (TCP only)
-  private readonly KEEP_ALIVE_INTERVAL = 30000; // 30 seconds
 
   constructor(device: ModbusDevice, logger: Logger) {
     this.device = device;
@@ -80,11 +76,42 @@ export class ModbusClient {
   }
 
   /**
+   * Force reset the Modbus client instance
+   * CRITICAL: modbus-serial does not recover cleanly on the same client instance
+   * after connection failures. We must destroy and recreate the client completely.
+   */
+  private async forceResetClient(): Promise<void> {
+    this.logger.debug(`Force resetting Modbus client for device ${this.device.name}`);
+    
+    try {
+      if (this.client.isOpen) {
+        this.logger.debug(`Closing existing client connection for ${this.device.name}`);
+        await new Promise<void>(resolve => {
+          this.client.close(() => resolve());
+        });
+      }
+    } catch (error) {
+      // Ignore close errors - client may already be in bad state
+      this.logger.debug(`Error closing client during reset: ${error}`);
+    }
+
+    // CRITICAL: discard client instance completely
+    // This removes poisoned socket state, broken serial port handles, and accumulated event listeners
+    // Note: modbus-serial may not expose removeAllListeners, so we just create a new instance
+    this.logger.debug(`Creating new ModbusRTU instance for ${this.device.name}`);
+    this.client = new ModbusRTU();
+    this.setupErrorHandlers();
+    this.logger.debug(`Client reset complete for ${this.device.name}`);
+  }
+
+  /**
    * Connect to the Modbus device
    */
   async connect(): Promise<void> {
     try {
-      this.logger.debug(`Connecting to Modbus device: ${this.device.name}`);
+      this.logger.debug(
+        `Connecting to Modbus device: ${this.device.name} (${this.device.connection.type}://${this.device.connection.host || this.device.connection.serialPort})`
+      );
       
       const { connection } = this.device;
       
@@ -127,8 +154,9 @@ export class ModbusClient {
       // Set slave ID
       this.client.setID(this.device.slaveId);
       
-      // Set timeout
-      this.client.setTimeout(connection.timeout);
+      // Set timeout (default 5000ms if not specified)
+      const timeout = connection.timeout ?? 5000;
+      this.client.setTimeout(timeout);
       
       this.connected = true;
       
@@ -137,12 +165,9 @@ export class ModbusClient {
       this.consecutiveFailures = 0;
       this.lastConnectionSuccess = Date.now();
       
-      // Start keep-alive for TCP connections
-      if (this.device.connection.type === ModbusConnectionType.TCP) {
-        this.startKeepAlive();
-      }
-      
-      this.logger.info(`Connected to Modbus device: ${this.device.name}`);
+      this.logger.debug(
+        `Socket connected to ${this.device.name} (slave ${this.device.slaveId}, timeout ${timeout}ms) - slave response will be verified on next read`
+      );
       
     } catch (error) {
       this.connected = false;
@@ -160,11 +185,6 @@ export class ModbusClient {
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = undefined;
-      }
-      
-      if (this.keepAliveTimer) {
-        clearInterval(this.keepAliveTimer);
-        this.keepAliveTimer = undefined;
       }
       
       if (this.client.isOpen) {
@@ -213,6 +233,7 @@ export class ModbusClient {
             
             // Track successful read
             this.lastSuccessfulRead = Date.now();
+            this.consecutiveFailures = 0; // Reset failure counter on success
             
             dataPoints.push({
               deviceName: this.device.name,
@@ -232,6 +253,7 @@ export class ModbusClient {
             
             // Track successful batch read
             this.lastSuccessfulRead = Date.now();
+            this.consecutiveFailures = 0; // Reset failure counter on success
             
             for (const result of batchResults) {
               dataPoints.push({
@@ -253,6 +275,7 @@ export class ModbusClient {
                 
                 // Track successful fallback read
                 this.lastSuccessfulRead = Date.now();
+                this.consecutiveFailures = 0; // Reset failure counter on success
                 
                 dataPoints.push({
                   deviceName: this.device.name,
@@ -461,6 +484,10 @@ export class ModbusClient {
         return this.readRegisterWithRetry(register, retryCount + 1);
       }
       
+      // Track read failure - may trigger reconnect if too many consecutive failures
+      // This catches timeouts (ETIMEDOUT) that don't close sockets
+      await this.onReadFailure(errorMessage);
+      
       // Not retryable or max retries exceeded
       throw error;
     }
@@ -478,6 +505,32 @@ export class ModbusClient {
       errorMessage.includes('Port is not open') ||
       errorMessage.includes('Port is opening')
     );
+  }
+
+  /**
+   * Handle read failure and escalate to reconnect if too many consecutive failures
+   * CRITICAL: Modbus timeouts (ETIMEDOUT) don't close sockets or emit error events,
+   * so we must track consecutive failures and force reconnect after threshold
+   */
+  private async onReadFailure(errorMessage: string): Promise<void> {
+    this.consecutiveFailures++;
+    
+    this.logger.debug(
+      `Read failure #${this.consecutiveFailures} for ${this.device.name}: ${errorMessage.substring(0, 100)}`
+    );
+
+    // After 3 consecutive failures, assume device is offline and force reconnect
+    // This catches timeouts that don't trigger socket close events
+    if (this.consecutiveFailures >= 3) {
+      this.logger.warn(
+        `Too many consecutive read failures (${this.consecutiveFailures}) for device ${this.device.name}, forcing reconnect`
+      );
+      this.logger.debug(`Setting connected=false, calling forceResetClient`);
+      this.connected = false;
+      await this.forceResetClient();
+      // Don't increment consecutiveFailures in scheduleReconnect since we already did it here
+      this.scheduleReconnectInternal(false);
+    }
   }
 
   /**
@@ -590,7 +643,7 @@ export class ModbusClient {
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        this.logger.error(`[MODBUS READ EXCEPTION] Device ${this.device.name} slave=${this.device.slaveId} ${register.name}: ${errorMessage}`);
+        this.logger.error(`Device ${this.device.name} slave=${this.device.slaveId} ${register.name}: ${errorMessage}`);
         throw error;
       }
     });
@@ -736,53 +789,28 @@ export class ModbusClient {
   }
 
   /**
-   * Start keep-alive timer for TCP connections
-   * Prevents gateway/firewall from dropping idle connections
-   * Only enabled for TCP (RTU/serial doesn't need this)
-   */
-  private startKeepAlive(): void {
-    // Clear existing timer if any
-    if (this.keepAliveTimer) {
-      clearInterval(this.keepAliveTimer);
-    }
-    
-    this.keepAliveTimer = setInterval(async () => {
-      if (!this.connected || !this.client.isOpen) {
-        return;
-      }
-      
-      try {
-        // Send dummy read to keep connection alive
-        // Read 1 register from address 0 (most devices support this)
-        await this.lock(() => this.client.readHoldingRegisters(0, 1));
-        
-        this.logger.debug(`Keep-alive ping successful for device ${this.device.name}`);
-      } catch (error) {
-        // Silent failure - keep-alive is best-effort
-        // Real errors will be caught during actual polling
-        this.logger.debug(`Keep-alive ping failed for device ${this.device.name} (non-critical)`);
-      }
-    }, this.KEEP_ALIVE_INTERVAL);
-    
-    // Don't prevent process exit
-    this.keepAliveTimer.unref();
-    
-    this.logger.debug(`Keep-alive enabled for TCP device ${this.device.name} (interval: ${this.KEEP_ALIVE_INTERVAL}ms)`);
-  }
-
-  /**
    * Setup error handlers
    */
   private setupErrorHandlers(): void {
     this.client.on('error', (error: unknown) => {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Modbus client error for device ${this.device.name}: ${errorMessage}`);
+      this.logger.error(
+        `Modbus client error for device ${this.device.name}: ${errorMessage}`
+      );
+      this.logger.debug(
+        `Setting connected=false, scheduling reconnect (failures: ${this.consecutiveFailures})`
+      );
       this.connected = false;
       this.scheduleReconnect();
     });
 
     this.client.on('close', () => {
-      this.logger.warn(`Modbus connection closed for device ${this.device.name}`);
+      this.logger.warn(
+        `Modbus connection closed for device ${this.device.name}`
+      );
+      this.logger.debug(
+        `Setting connected=false, scheduling reconnect (failures: ${this.consecutiveFailures})`
+      );
       this.connected = false;
       this.scheduleReconnect();
     });
@@ -793,9 +821,23 @@ export class ModbusClient {
    * Prevents log spam and CPU spikes when device is offline for extended periods
    */
   private scheduleReconnect(): void {
-    if (this.reconnectTimer) return;
+    this.scheduleReconnectInternal(true);
+  }
 
-    this.consecutiveFailures++;
+  /**
+   * Internal reconnect scheduling with control over failure counting
+   */
+  private scheduleReconnectInternal(incrementFailures: boolean): void {
+    if (this.reconnectTimer) {
+      this.logger.debug(
+        `Reconnect timer already exists for ${this.device.name}, skipping duplicate scheduling`
+      );
+      return;
+    }
+
+    if (incrementFailures) {
+      this.consecutiveFailures++;
+    }
     
     // Exponential backoff: 5s → 10s → 20s → 40s → 60s (max)
     this.currentRetryDelay = Math.min(
@@ -803,19 +845,47 @@ export class ModbusClient {
       this.MAX_RETRY_DELAY
     );
     
-    this.logger.info(
-      `Scheduling reconnect for device ${this.device.name} in ${this.currentRetryDelay / 1000}s ` +
-      `(attempt ${this.consecutiveFailures})`
+    this.logger.debug(
+      `⏱️  Scheduling reconnect for device ${this.device.name} in ${this.currentRetryDelay / 1000}s ` +
+      `(failure count: ${this.consecutiveFailures}, connected=${this.connected}, client.isOpen=${this.client.isOpen})`
     );
     
-    this.reconnectTimer = setTimeout(async () => {
+    this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
-      try {
-        await this.connect();
-      } catch (error) {
-        this.logger.error(`Reconnection failed for device ${this.device.name}`);
+      this.logger.debug(`Reconnect timer fired for ${this.device.name}`);
+      
+      // Execute reconnection attempt
+      (async () => {
+        try {
+          this.logger.debug(`🔄 Attempting reconnection for device ${this.device.name}...`);
+          
+          // CRITICAL: Must fully reset client before reconnecting
+          // Reusing the same ModbusRTU instance after failures leads to corrupted state
+          await this.forceResetClient();
+          await this.connect();
+          
+          // Note: connect() already logs success. We don't log here because TCP connection
+          // doesn't guarantee the slave will respond - that's verified on the next read attempt.
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            `❌ Reconnection attempt failed for device ${this.device.name}: ${errorMessage}`
+          );
+          this.logger.debug(`Will reschedule another reconnection attempt`);
+          
+          // CRITICAL: Always reschedule on failure for indefinite reconnection
+          this.scheduleReconnect();
+        }
+      })().catch(err => {
+        // Safety net: catch any unhandled promise rejections
+        this.logger.error(
+          `⚠️  Unhandled error in reconnection callback for device ${this.device.name}: ${err}`
+        );
+        this.logger.debug(`Rescheduling reconnect after unhandled error`);
         this.scheduleReconnect();
-      }
+      });
     }, this.currentRetryDelay);
+    
+    this.logger.debug(`Reconnect timer created (delay: ${this.currentRetryDelay}ms)`);
   }
 }

@@ -28,6 +28,13 @@ services:
             - SSH_KEY_PATH=${SSH_KEY_PATH:-/app/data/ssh/id_rsa}
             - SSH_AUTO_RECONNECT=${SSH_AUTO_RECONNECT:-true}
             - SSH_RECONNECT_DELAY=${SSH_RECONNECT_DELAY:-5000}
+            # SNMP Discovery Configuration
+            - SNMP_IP_RANGES=10.0.0.60
+            - SNMP_PORT=161
+            - SNMP_COMMUNITY=public
+            - SNMP_VERSION=v2c
+            - SNMP_TIMEOUT=2000
+            - SNMP_RETRIES=1
 
     ml-service:
         build:

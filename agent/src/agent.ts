@@ -1339,6 +1339,14 @@ export default class DeviceAgent {
       // AgentConfig handles its own cleanup (event listeners)
       // No manual removal needed since AgentConfig is garbage collected
 
+      // **CRITICAL: Database shutdown LAST** (after all features stopped)
+      // Import here to avoid circular dependencies
+      const { gracefulShutdown: shutdownDatabase } = await import('./db/connection.js');
+      await shutdownDatabase();
+      this.agentLogger?.infoSync("Database connection closed", {
+        component: LogComponents.agent,
+      });
+
       this.agentLogger?.infoSync("Device Agent stopped successfully", {
         component: LogComponents.agent,
       });

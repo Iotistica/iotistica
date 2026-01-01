@@ -107,7 +107,9 @@ export interface MqttDiscoveryOptions {
   brokerUrl?: string;          // e.g., 'mqtt://mosquitto:1883' (default: env MQTT_BROKER_URL)
   username?: string;           // MQTT username (optional)
   password?: string;           // MQTT password (optional)
-  wildcardPattern?: string;    // Topic wildcard to subscribe (default: '#')
+  discoveryRoots?: string[];   // REQUIRED: Explicit topic roots (e.g., ['edge/+', 'devices/+/telemetry'])
+                               // 🚨 NEVER use '#' - causes OOM on production brokers with 100k+ topics
+                               // ✅ Use targeted patterns: 'device/+', 'sensor/+/data', 'iot/+/telemetry'
   monitorDurationMs?: number;  // How long to listen for topics (default: 30000)
   topicPatterns?: RegExp[];    // Expected topic patterns for metadata extraction
   qos?: 0 | 1 | 2;             // QoS for discovery subscription (default: 0)
@@ -316,6 +318,17 @@ export class DiscoveryService extends EventEmitter {
         // Phase 1: Discovery
         // Build protocol-specific options from environment variables
         const pluginOptions = this.getPluginOptions(protocol);
+        
+        // Skip protocol if no configuration provided (prevents unwanted network scans)
+        if (pluginOptions === undefined) {
+          this.logger?.debugSync(`No configuration for ${protocol}, skipping discovery`, {
+            component: LogComponents.discovery,
+            protocol,
+            traceId
+          });
+          continue;
+        }
+        
         const discovered = await plugin.discover(pluginOptions);
         
         this.logger?.infoSync(`${protocol} plugin returned ${discovered.length} devices`, {
@@ -444,22 +457,19 @@ export class DiscoveryService extends EventEmitter {
    * Check if discovery should run based on trigger and last run time
    */
   private shouldRunDiscovery(trigger: DiscoveryTrigger): boolean {
-    // Always run on first boot or manual trigger
-    if (trigger === 'first_boot' || trigger === 'manual') {
+    // Always run on first boot, manual trigger, or scheduled discovery
+    // Scheduled discoveries have their own timers, so trust them
+    if (trigger === 'first_boot' || trigger === 'manual' || trigger === 'scheduled') {
       return true;
     }
 
-    // For scheduled discovery, check interval
-    if (trigger === 'scheduled') {
-      if (!this.metadata.lastDiscoveryAt) {
-        return true; // Never run before
-      }
-
-      const timeSinceLastDiscovery = Date.now() - this.metadata.lastDiscoveryAt.getTime();
-      return timeSinceLastDiscovery >= this.MIN_DISCOVERY_INTERVAL_MS;
+    // For other triggers (if any), check interval
+    if (!this.metadata.lastDiscoveryAt) {
+      return true; // Never run before
     }
 
-    return false;
+    const timeSinceLastDiscovery = Date.now() - this.metadata.lastDiscoveryAt.getTime();
+    return timeSinceLastDiscovery >= this.MIN_DISCOVERY_INTERVAL_MS;
   }
 
   /**
@@ -639,6 +649,17 @@ export class DiscoveryService extends EventEmitter {
    * Uses AgentConfig if available, otherwise falls back to direct env reads
    */
   private getOPCUAOptions(): OPCUADiscoveryOptions | undefined {
+    // Helper to format URL (convert bare IP to opc.tcp://IP:4840)
+    const formatOpcuaUrl = (url: string): string => {
+      const trimmed = url.trim();
+      // Already a full URL
+      if (trimmed.startsWith('opc.tcp://') || trimmed.startsWith('opc.https://')) {
+        return trimmed;
+      }
+      // Bare IP or hostname - add protocol and default port
+      return `opc.tcp://${trimmed}:4840`;
+    };
+
     // Use config accessor if available (cloud → env fallback)
     if (this.agentConfig) {
       const config = this.agentConfig.getOPCUAConfig();
@@ -648,7 +669,7 @@ export class DiscoveryService extends EventEmitter {
       }
 
       return {
-        discoveryUrls: config.discoveryUrls
+        discoveryUrls: config.discoveryUrls.map(formatOpcuaUrl)
       };
     }
 
@@ -660,7 +681,7 @@ export class DiscoveryService extends EventEmitter {
     }
 
     return {
-      discoveryUrls: urls.split(',').map(url => url.trim())
+      discoveryUrls: urls.split(',').map(url => formatOpcuaUrl(url))
     };
   }
 
@@ -796,13 +817,58 @@ export class DiscoveryService extends EventEmitter {
   }
 
   /**
-   * Get MQTT discovery options from environment variables
+   * Get MQTT discovery options from configuration
+   * Uses AgentConfig if available, otherwise falls back to direct env reads
    */
   private getMqttOptions(): MqttDiscoveryOptions | undefined {
-    // MQTT discovery is enabled if MQTT_BROKER_URL is set or defaults to mosquitto
-    const options: MqttDiscoveryOptions = {
-      brokerUrl: process.env.MQTT_BROKER_URL || 'mqtt://mosquitto:1883'
-    };
+    // Use config accessor if available (cloud → env fallback)
+    if (this.agentConfig) {
+      const config = this.agentConfig.getMqttConfig();
+      
+      // MQTT not enabled or no broker URL
+      if (!config.enabled || !config.brokerUrl) {
+        return undefined;
+      }
+
+      const options: MqttDiscoveryOptions = {
+        brokerUrl: config.brokerUrl
+      };
+
+      // Optional authentication
+      if (config.username) {
+        options.username = config.username;
+      }
+
+      if (config.password) {
+        options.password = config.password;
+      }
+
+      // Discovery roots
+      if (config.discoveryRoots && config.discoveryRoots.length > 0) {
+        options.discoveryRoots = config.discoveryRoots;
+      }
+
+      // Monitor duration
+      if (config.monitorDurationMs) {
+        options.monitorDurationMs = config.monitorDurationMs;
+      }
+
+      // QoS
+      if (config.qos !== undefined) {
+        options.qos = config.qos;
+      }
+
+      return options;
+    }
+
+    // Legacy: Direct env var reads (backward compatibility)
+    const brokerUrl = process.env.MQTT_BROKER_URL;
+    
+    if (!brokerUrl) {
+      return undefined; // Use plugin defaults
+    }
+
+    const options: MqttDiscoveryOptions = { brokerUrl };
 
     // Optional authentication
     if (process.env.MQTT_USERNAME) {
@@ -813,9 +879,17 @@ export class DiscoveryService extends EventEmitter {
       options.password = process.env.MQTT_PASSWORD;
     }
 
-    // Optional discovery settings
-    if (process.env.MQTT_DISCOVERY_WILDCARD) {
-      options.wildcardPattern = process.env.MQTT_DISCOVERY_WILDCARD;
+    // Optional discovery roots (JSON array)
+    // Example: MQTT_DISCOVERY_ROOTS='["edge/+","devices/+/telemetry"]'
+    if (process.env.MQTT_DISCOVERY_ROOTS) {
+      try {
+        options.discoveryRoots = JSON.parse(process.env.MQTT_DISCOVERY_ROOTS);
+      } catch (err) {
+        this.logger?.warnSync(
+          `Failed to parse MQTT_DISCOVERY_ROOTS - expected JSON array (e.g., ["edge/+"]): ${(err as Error).message}`,
+          { component: LogComponents.discovery }
+        );
+      }
     }
 
     if (process.env.MQTT_DISCOVERY_DURATION_MS) {

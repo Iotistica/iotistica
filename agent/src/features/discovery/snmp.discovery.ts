@@ -68,7 +68,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
     });
 
     // Default options
-    const ipRanges = options?.ipRanges || this.getDefaultIPRanges();
+    const ipRanges = options?.ipRanges || [];
     const port = options?.port || 161;
     const community = options?.community || 'public';
     const version = options?.version || 'v2c';
@@ -77,8 +77,9 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
     const concurrency = options?.concurrency || 10;
 
     if (ipRanges.length === 0) {
-      this.logger?.warnSync('No IP ranges specified for SNMP discovery', {
-        component: LogComponents.discovery
+      this.logger?.warnSync('No IP ranges specified for SNMP discovery - skipping to prevent network flooding', {
+        component: LogComponents.discovery,
+        note: 'Configure SNMP IP ranges via dashboard or set SNMP_IP_RANGES env var'
       });
       return [];
     }
@@ -403,6 +404,10 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
 
   /**
    * Get default IP ranges from environment or local network
+   * 
+   * @deprecated This method is dangerous and should not be used
+   * It defaults to scanning entire subnets which floods the network
+   * Always explicitly configure IP ranges via SNMP_IP_RANGES env var
    */
   private getDefaultIPRanges(): string[] {
     const envRanges = process.env.SNMP_IP_RANGES;
@@ -410,9 +415,13 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
       return envRanges.split(',').map(r => r.trim());
     }
 
-    // Auto-detect local network (192.168.x.0/24)
-    // In production, this should be more sophisticated
-    return ['192.168.1.0/24'];
+    // DO NOT auto-detect networks - this causes network flooding
+    // Return empty array instead
+    this.logger?.warnSync('getDefaultIPRanges() called but SNMP_IP_RANGES not set - network scan prevented', {
+      component: LogComponents.discovery,
+      note: 'Set SNMP_IP_RANGES env var to enable SNMP discovery'
+    });
+    return [];
   }
 
   /**

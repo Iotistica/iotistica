@@ -269,9 +269,16 @@ export class MqttAdapter extends EventEmitter {
 
   /**
    * Coerce value to expected dataType
+   * 
+   * Supports both:
+   * - Broad types from discovery: 'number', 'boolean', 'string', 'json'
+   * - Specific types from manual config: 'int32', 'float32', 'uint32'
+   * 
+   * Note: Discovery returns broad types for safety. Users confirm specific types manually.
    */
   private coerceType(value: any, dataType: string): number | boolean | string {
     switch (dataType) {
+      case 'number':  // Broad category from discovery
       case 'float':
       case 'float32':
       case 'double':
@@ -286,6 +293,7 @@ export class MqttAdapter extends EventEmitter {
         return Math.abs(parseInt(value, 10));
       case 'boolean':
         return value === 'true' || value === '1' || value === 1 || value === true;
+      case 'json':    // Broad category from discovery
       case 'string':
         return String(value);
       default:

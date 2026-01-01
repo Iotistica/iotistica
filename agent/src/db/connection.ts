@@ -270,29 +270,34 @@ export async function close(): Promise<void> {
 	await db.destroy();
 }
 
-// Graceful shutdown handlers for edge devices
+// Graceful shutdown function (called by main app shutdown coordinator)
 // Edge devices can be killed hard (docker stop, systemctl stop, power loss recovery)
-// SIGTERM: Clean shutdown (docker stop, systemctl stop)
-// SIGINT: User interrupt (Ctrl+C during development)
 let shuttingDown = false;
 
-async function gracefulShutdown(signal: string): Promise<void> {
+export async function gracefulShutdown(signal?: string): Promise<void> {
 	if (shuttingDown) return;
 	shuttingDown = true;
 	
-	console.log(`\n[${signal}] Gracefully shutting down database...`);
+	if (signal) {
+		console.log(`\n[${signal}] Gracefully shutting down database...`);
+	}
 	
 	try {
+		// Give pending queries a chance to complete (200ms grace period)
+		// This prevents "aborted" errors for queries in-flight during shutdown
+		await new Promise(resolve => setTimeout(resolve, 200));
+		
 		await db.destroy();
-		console.log(`[${signal}] Database connection closed`);
-		process.exit(0);
+		if (signal) {
+			console.log(`[${signal}] Database connection closed`);
+		}
 	} catch (err: any) {
-		console.error(`[${signal}] Error during database shutdown:`, err.message);
-		process.exit(1);
+		console.error(`Database shutdown error:`, err.message);
+		throw err;
 	}
 }
 
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+// NOTE: Signal handlers removed - database shutdown is now coordinated by main app
+// This prevents race conditions where DB shuts down before features stop querying
 
 export default db;

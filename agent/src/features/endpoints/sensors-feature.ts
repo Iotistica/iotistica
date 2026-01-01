@@ -302,7 +302,7 @@ export class SensorsFeature extends BaseFeature {
       const { OPCUAAdapter } = await import('./opcua/opcua-adapter.js');
       
       // Create OPC-UA adapter (constructor takes device array, not config object)
-      this.opcuaAdapter = new OPCUAAdapter(opcuaDevices);
+      this.opcuaAdapter = new OPCUAAdapter(opcuaDevices, this.logger);
 
       // Wire up event handlers
       this.opcuaAdapter.on('started', () => {

@@ -195,6 +195,19 @@ export function generateDefaultTargetStateConfigV2(
         ipRanges: [],
         bufferCapacity: 128 * 1024, // 128KB - SNMP trap messages
       },
+      mqtt: {
+        enabled: true,
+        connection: {
+          brokerUrl: 'mqtt://10.0.0.60:1883',  // Default broker (can be overridden)
+        },
+        discoveryRoots: [
+          'edge/+',
+          'sensor/+/data'
+        ],
+        monitorDurationMs: 30000,  // 30 seconds
+        qos: 0,
+        bufferCapacity: 512 * 1024, // 512KB - MQTT discovery messages
+      },
       opcua: {
         enabled: true,
         discoveryUrls: [],
@@ -288,6 +301,7 @@ export async function generateDefaultTargetStateV2(licenseData: LicenseData | nu
                 "mosquitto-config:/mosquitto/config",
                 "mosquitto-log:/mosquitto/log"
               ],
+              command: ["mosquitto", "-c", "/mosquitto-no-auth.conf"],
               restart: "unless-stopped",
               networks: ["default"]
             }

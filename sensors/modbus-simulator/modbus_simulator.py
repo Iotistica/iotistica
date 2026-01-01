@@ -111,12 +111,12 @@ STATE_FILE = "/tmp/modbus_simulator_state.json"
 def get_active_profile():
     """Read active profile from state file (shared with GUI)"""
     try:
-        if os.path.exists(STATE_FILE):
+        if os.path.exists(STATE_FILE) and os.path.getsize(STATE_FILE) > 0:
             with open(STATE_FILE, "r") as f:
                 state = json.load(f)
                 return state.get("profile", PROFILE)
     except Exception as e:
-        logger.warning(f"Failed to read state file: {e}")
+        logger.debug(f"Could not read state file: {e}")
     return PROFILE
 
 def get_data_points():
@@ -231,11 +231,25 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
     
     def _update_registers(self):
         """Update register values with realistic drift (called periodically)"""
+        global REGISTER_OVERRIDES
         active_profile = get_active_profile()
+        
+        # Load overrides from state file (shared with GUI process)
+        try:
+            if os.path.exists(STATE_FILE):
+                with open(STATE_FILE, "r") as f:
+                    state = json.load(f)
+                    new_overrides = state.get("overrides", {})
+                    # Convert string keys back to integers
+                    REGISTER_OVERRIDES = {int(k): v for k, v in new_overrides.items()}
+        except Exception as e:
+            logger.debug(f"Could not load overrides from state file: {e}")
         
         # Rebuild global cache if profile changed (hot-swap support)
         if active_profile != self.last_profile:
-            logger.info(f"Profile switched: {self.last_profile} → {active_profile}")
+            # Only log if this is an actual profile change (not initial startup)
+            if self.last_profile is not None:
+                logger.info(f"Profile switched: {self.last_profile} → {active_profile}")
             
             # Rebuild profile index in global cache if missing
             if active_profile not in PROFILE_INDEX:
@@ -245,7 +259,10 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
             # Update instance to use new profile's index
             self._dp_index = PROFILE_INDEX[active_profile]
             self.last_profile = active_profile
-            logger.info(f"Switched to {active_profile} index ({len(self._dp_index)} data points)")
+            
+            # Only log index switch on actual profile changes
+            if self.last_profile is not None:
+                logger.info(f"Switched to {active_profile} index ({len(self._dp_index)} data points)")
         
         updates_count = 0
         for addr in range(self.address, self.address + len(self.values)):
@@ -282,8 +299,6 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
                     noise_pct = override.get("noise_pct", 0.05)
                     calculated = base * (1 + random.uniform(-noise_pct, noise_pct))
                     self.values[idx] = int(calculated)
-                    if addr == 129:
-                        logger.info(f"[OVERRIDE] addr=129 base={base} noise={noise_pct} calculated={calculated:.2f} final={self.values[idx]} OVERRIDES_len={len(REGISTER_OVERRIDES)}")
                 else:
                     # Use vendor config
                     base = dp.get("base", 100)

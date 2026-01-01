@@ -193,24 +193,19 @@ function Remove-AgentResources {
     }
     Write-Host "  ✅ Removed $removedNetworkCount networks" -ForegroundColor Yellow
     
-    # Remove images
-    Write-Host "`n🖼️  Removing images..." -ForegroundColor Cyan
+    # Remove agent images only (not dangling images from other services)
+    Write-Host "`n🖼️  Removing agent images..." -ForegroundColor Cyan
     $removedCount = 0
     foreach ($image in $imageNames) {
-        try {
-            $output = docker rmi $image 2>&1
-            if ($LASTEXITCODE -eq 0) {
-                $removedCount++
-                if ($removedCount % 10 -eq 0) {
-                    Write-Host "  Removed $removedCount images..." -ForegroundColor Gray
-                }
+        $result = docker rmi $image 2>&1
+        if ($?) {
+            $removedCount++
+            if ($removedCount % 10 -eq 0) {
+                Write-Host "  Removed $removedCount images..." -ForegroundColor Gray
             }
         }
-        catch {
-            # Image may not exist, continue
-        }
     }
-    Write-Host "  ✅ Removed $removedCount images" -ForegroundColor Green
+    Write-Host "  ✅ Removed $removedCount agent images" -ForegroundColor Green
     
     Write-Host "`n✅ Cleanup complete!" -ForegroundColor Green
     Write-Host "  Agents cleaned: $StartIndex to $endIndex" -ForegroundColor Gray

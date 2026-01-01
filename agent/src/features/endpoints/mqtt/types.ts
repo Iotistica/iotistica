@@ -20,7 +20,9 @@ export interface MqttDevice {
   enabled: boolean;
   topic: string;  // MQTT topic to subscribe to
   qos?: 0 | 1 | 2;
-  dataType: string;  // float32, int32, string, boolean, etc.
+  dataType: string;  // Broad: 'number', 'boolean', 'string', 'json' (from discovery)
+                     // Specific: 'int32', 'float32', 'uint32' (manual configuration only)
+                     // ⚠️ Discovery MUST NOT auto-assign specific types - devices change formats
   unit?: string;
   metric?: string;  // Metric name (defaults to topic if not specified)
   deviceId?: string;  // Optional device identifier

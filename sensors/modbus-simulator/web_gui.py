@@ -36,20 +36,35 @@ EXCEPTION_CODES = {
 def write_state(profile):
     """Write state to file for Modbus process to read"""
     try:
+        state_data = {"profile": profile}
+        # Include overrides if any exist
+        if REGISTER_OVERRIDES:
+            state_data["overrides"] = REGISTER_OVERRIDES
         with open(STATE_FILE, "w") as f:
-            json.dump({"profile": profile}, f)
-        logger.info(f"Wrote profile state: {profile}")
+            json.dump(state_data, f)
+        logger.info(f"Wrote profile state: {profile} (with {len(REGISTER_OVERRIDES)} overrides)")
     except Exception as e:
         logger.error(f"Failed to write state file: {e}")
+
+def write_overrides():
+    """Write only overrides to state file (preserve profile)"""
+    try:
+        state = read_state()
+        state["overrides"] = REGISTER_OVERRIDES
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f)
+        logger.info(f"Wrote {len(REGISTER_OVERRIDES)} register overrides to state file")
+    except Exception as e:
+        logger.error(f"Failed to write overrides to state file: {e}")
 
 def read_state():
     """Read current state from file"""
     try:
-        if os.path.exists(STATE_FILE):
+        if os.path.exists(STATE_FILE) and os.path.getsize(STATE_FILE) > 0:
             with open(STATE_FILE, "r") as f:
                 return json.load(f)
     except Exception as e:
-        logger.error(f"Failed to read state file: {e}")
+        logger.debug(f"Could not read state file: {e}")
     return {"profile": os.environ.get("MODBUS_PROFILE", "Generic")}
 
 # Load profile data (same function as simulator)
@@ -129,6 +144,7 @@ def set_override(address):
         "base": data.get("base", 100),
         "noise_pct": data.get("noise_pct", 0.05)
     }
+    write_overrides()  # Persist override to file
     logger.info(f"Override set for address {address}: {REGISTER_OVERRIDES[address]}")
     return jsonify({"success": True, "address": address, "override": REGISTER_OVERRIDES[address]})
 
@@ -137,6 +153,7 @@ def delete_override(address):
     """Remove override for a specific register"""
     if address in REGISTER_OVERRIDES:
         del REGISTER_OVERRIDES[address]
+        write_overrides()  # Persist cleared override
         logger.info(f"Override removed for address {address}")
     return jsonify({"success": True, "address": address})
 
@@ -144,6 +161,7 @@ def delete_override(address):
 def clear_overrides():
     """Clear all overrides"""
     REGISTER_OVERRIDES.clear()
+    write_overrides()  # Persist cleared state
     logger.info("All overrides cleared")
     return jsonify({"success": True})
 
@@ -259,6 +277,7 @@ def apply_scenario(scenario_name):
     
     if scenario_name == "normal":
         REGISTER_OVERRIDES.clear()
+        write_overrides()  # Persist cleared overrides
         logger.info("Cleared all scenario overrides")
         return jsonify({"success": True, "scenario": scenario_name, "overrides": {}})
     
@@ -282,6 +301,7 @@ def apply_scenario(scenario_name):
     
     # Apply resolved overrides
     REGISTER_OVERRIDES.update(resolved_overrides)
+    write_overrides()  # Persist overrides to file for Modbus process
     
     logger.info(f"Applied scenario '{scenario_name}' to profile '{current_profile}' ({len(resolved_overrides)} registers)")
     return jsonify({

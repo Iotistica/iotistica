@@ -124,10 +124,10 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
    * Creates a new OPC-UA adapter instance
    * 
    * @param devices - Array of OPC-UA device configurations
+   * @param logger - Logger instance (optional, defaults to ConsoleLogger)
    */
-  constructor(devices: OPCUADeviceConfig[]) {
-    const logger = new ConsoleLogger('debug'); // Enable debug logging
-    super(devices as GenericDeviceConfig[], logger);
+  constructor(devices: OPCUADeviceConfig[], logger?: Logger) {
+    super(devices as GenericDeviceConfig[], logger || new ConsoleLogger('debug'));
   }
   
   /**
@@ -271,11 +271,11 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
             const inUnitMatch = description.match(/\bin\s+([^\s,]+(?:\/[^\s,]+)?)/i);
             if (inUnitMatch) {
               (dp as any).unit = inUnitMatch[1];
-              this.logger.debug(`Auto-extracted unit from description: ${inUnitMatch[1]}`, {
-                deviceName,
-                nodeId: dp.nodeId,
-                description
-              });
+              // this.logger.debug(`Auto-extracted unit from description: ${inUnitMatch[1]}`, {
+              //   deviceName,
+              //   nodeId: dp.nodeId,
+              //   description
+              // });
             }
           }
         }

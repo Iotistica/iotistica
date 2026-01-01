@@ -105,11 +105,6 @@ export async function discoverEndpointMetrics(
 					noise_pct: dp.noise_pct,
 					expectedRange,
 				});
-			} else {
-				logger?.debugSync(`No base/noise_pct for ${metricName}`, {
-					component: LogComponents.metrics,
-					dataPoint: dp,
-				});
 			}
 			// This prevents false positives on stable values like frequency
 			const methods: DetectionMethod[] = expectedRange 

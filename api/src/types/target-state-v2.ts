@@ -174,11 +174,27 @@ export interface ModbusProtocolConfig {
   points: Record<string, ModbusDataPoint>;  // Object keyed by point name (e.g., "temperature", "humidity")
 }
 
+export interface MQTTConnection {
+  brokerUrl: string;  // e.g., 'mqtt://mosquitto:1883'
+  username?: string;  // Optional authentication
+  password?: string;  // Optional authentication
+}
+
+export interface MQTTProtocolConfig {
+  enabled: boolean;
+  connection: MQTTConnection;
+  discoveryRoots?: string[];   // REQUIRED: Explicit topic roots (e.g., ['edge/+', 'devices/+/telemetry'])
+  monitorDurationMs?: number;  // How long to listen for topics during discovery (default: 30000)
+  qos?: 0 | 1 | 2;             // QoS for discovery subscription (default: 0)
+  bufferCapacity?: number;     // Buffer size in bytes for MQTT messages
+}
+
 export interface ProtocolsConfig {
   can: CANProtocolConfig;
   snmp: SNMPProtocolConfig;
   opcua: OPCUAProtocolConfig;
   modbus: ModbusProtocolConfig;
+  mqtt: MQTTProtocolConfig;
 }
 
 // ============================================================================
