@@ -125,12 +125,15 @@ export class ModbusClient {
           // CRITICAL: Enable TCP keepalive to detect half-open connections
           // Without this, device reboots leave socket in limbo (no close/error events)
           const socket = (this.client as any)._client?.socket;
+
           if (socket) {
-            socket.setKeepAlive(true, 10_000); // 10s keepalive probes
-            socket.setNoDelay(true); // Disable Nagle for low-latency
+            socket.setKeepAlive(true, 10_000); // 10s idle → keepalive probes
+            socket.setNoDelay(true);          // disable Nagle
+
             this.logger.debug(
               `TCP socket options configured for ${this.device.name}: ` +
-              `keepAlive=true (10s), noDelay=true, localAddress=${socket.localAddress}:${socket.localPort}`
+              `keepAlive=true (10s), noDelay=true, ` +
+              `localAddress=${socket.localAddress}:${socket.localPort}`
             );
           } else {
             this.logger.warn(
@@ -138,6 +141,7 @@ export class ModbusClient {
               `This may cause issues detecting device reboots.`
             );
           }
+
           break;
           
         case ModbusConnectionType.RTU:
@@ -187,7 +191,7 @@ export class ModbusClient {
         : ` [client.isOpen=${this.client.isOpen}]`;
       
       this.logger.debug(
-        `[RECOVERY] ✅ Connected to ${this.device.name} (slave ${this.device.slaveId}, timeout ${timeout}ms)${keepaliveStatus}`
+        `[RECOVERY] Connected to ${this.device.name} (slave ${this.device.slaveId}, timeout ${timeout}ms)${keepaliveStatus}`
       );
       
     } catch (error) {
@@ -265,7 +269,7 @@ export class ModbusClient {
             this.lastSuccessfulRead = Date.now();
             if (this.consecutiveFailures > 0) {
               this.logger.debug(
-                `[RECOVERY] ✅ Device ${this.device.name} recovered! Read succeeded after ${this.consecutiveFailures} failures`
+                `[RECOVERY] Device ${this.device.name} recovered! Read succeeded after ${this.consecutiveFailures} failures`
               );
             }
             this.consecutiveFailures = 0; // Reset failure counter on success

@@ -891,12 +891,12 @@ export class DiscoveryService extends EventEmitter {
       // HYBRID: Include observer data if available
       if (this.mqttObserverData && this.mqttObserverData.length > 0) {
         options.observedTopics = this.mqttObserverData;
-        this.logger?.infoSync(`📦 DISCOVERY: Including ${this.mqttObserverData.length} observer topics in MQTT discovery options`, {
+        this.logger?.infoSync(`Including ${this.mqttObserverData.length} observer topics in MQTT discovery options`, {
           component: LogComponents.discovery,
           observedTopics: this.mqttObserverData.map(t => t.topic)
         });
       } else {
-        this.logger?.warnSync(`⚠️  DISCOVERY: No observer data available for MQTT discovery`, {
+        this.logger?.warnSync(`No observer data available for MQTT discovery`, {
           component: LogComponents.discovery,
           hint: 'Call setMqttObserverData() before discovery or ensure MQTT adapter is running'
         });

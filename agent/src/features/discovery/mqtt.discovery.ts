@@ -230,7 +230,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
     // HYBRID: Pre-populate with observer-tracked topics (from runtime adapter)
     // This solves "no data during 30s window" problem for low-frequency publishers
     if (observedTopics && observedTopics.length > 0) {
-      this.logger?.infoSync(`🔀 MQTT DISCOVERY: Pre-populating with ${observedTopics.length} observer-tracked topics`, {
+      this.logger?.infoSync(`Pre-populating with ${observedTopics.length} observer-tracked topics`, {
         component: LogComponents.discovery,
         protocol: this.protocol,
         observedCount: observedTopics.length,
@@ -254,7 +254,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
         
         this.discoveredTopics.set(observed.topic, topicData);
         
-        this.logger?.infoSync(`  ✓ Imported observer topic: ${observed.topic}`, {
+        this.logger?.infoSync(`Imported observer topic: ${observed.topic}`, {
           component: LogComponents.discovery,
           liveCount: observed.liveCount,
           retainedCount: observed.retainedCount,
@@ -263,12 +263,12 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
         });
       }
       
-      this.logger?.infoSync(`✅ Observer topics imported - now running 30s window to update/validate`, {
+      this.logger?.infoSync(`Observer topics imported - now running 30s window to update/validate`, {
         component: LogComponents.discovery,
         prePopulated: this.discoveredTopics.size
       });
     } else {
-      this.logger?.warnSync(`⚠️  MQTT DISCOVERY: No observer topics provided - relying on 30s window only`, {
+      this.logger?.warnSync(`No observer topics provided - relying on 30s window only`, {
         component: LogComponents.discovery,
         hint: 'Low-frequency publishers may be missed'
       });
