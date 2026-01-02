@@ -1091,21 +1091,8 @@ export class CloudSync extends EventEmitter {
 				const vpnHealth = await tailscale.getHealth();
 				(stateReport[deviceInfo.uuid] as any).vpn_health = vpnHealth;
 				
-				// Log VPN issues for ops visibility
-				if (vpnHealth.installed && vpnHealth.daemonRunning && !vpnHealth.connected) {
-					this.logger?.warnSync('VPN daemon running but not connected - device may be isolated', {
-						component: LogComponents.cloudSync,
-						operation: 'vpn-health-check',
-						backendState: vpnHealth.backendState,
-						note: 'Cloud can trigger reprovisioning or alert user'
-					});
-				} else if (vpnHealth.installed && !vpnHealth.daemonRunning) {
-					this.logger?.warnSync('VPN installed but daemon not running', {
-						component: LogComponents.cloudSync,
-						operation: 'vpn-health-check',
-						note: 'Device may need restart or daemon crashed'
-					});
-				}
+				// Log VPN issues with state-aware classification
+				tailscale.logHealthIssues(vpnHealth);
 			} catch (error) {
 				this.logger?.warnSync('Failed to collect VPN health stats', {
 					component: LogComponents.cloudSync,

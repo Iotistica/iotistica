@@ -11,6 +11,16 @@
  * - Connection status monitoring
  * - Graceful shutdown and cleanup
  * 
+ * Container Requirements:
+ * - Volume mount required for state persistence: /var/lib/tailscale
+ *   Example (docker-compose.yml):
+ *   ```yaml
+ *   volumes:
+ *     - tailscale-state:/var/lib/tailscale
+ *   ```
+ *   Without this volume, authentication state will be lost on container restart
+ *   and devices will need to re-authenticate with a new auth key.
+ * 
  * Documentation: https://tailscale.com/kb/1080/cli
  */
 
@@ -61,7 +71,7 @@ function spawnAsync(command: string, args: string[]): Promise<{ stdout: string; 
 
 export interface TailscaleConfig {
 	authKey: string;
-	tailnetName: string;
+	tailnetName: string; // For logging/diagnostics only - not used in Tailscale CLI commands
 	hostname?: string;
 	advertiseRoutes?: string[];  // CIDR ranges to advertise (use for routers/gateways only)
 	acceptRoutes?: boolean;      // DANGEROUS: Accept subnet routes from other nodes (false unless device is router/gateway/site-to-site bridge)
@@ -81,8 +91,9 @@ export interface TailscaleStatus {
 
 export class TailscaleManager {
 	private logger?: AgentLogger;
-	private configDir: string;
+	private configDir: string; // Reserved for future use (e.g., storing tailscale config files)
 	private isInstalled: boolean = false;
+	private daemonStarting: boolean = false; // Mutex to prevent parallel daemon spawns
 
 	constructor(logger?: AgentLogger, configDir: string = '/etc/iotistic/tailscale') {
 		this.logger = logger;
@@ -113,25 +124,40 @@ export class TailscaleManager {
 	 * Ensure tailscaled daemon is enabled and running
 	 * Detects if running in Docker container and uses appropriate method
 	 * PUBLIC: Called during auto-reconnection on agent startup
+	 * IDEMPOTENT: Safe to call multiple times - mutex prevents parallel daemon spawns
 	 */
 	async ensureDaemonRunning(): Promise<void> {
+		// Mutex: Prevent parallel daemon spawns during startup storms
+		if (this.daemonStarting) {
+			this.logger?.debugSync('Daemon already starting, waiting for completion', {
+				component: LogComponents.tailscaleManager,
+			});
+			// Wait for other caller to finish (simple spin-wait with backoff)
+			while (this.daemonStarting) {
+				await new Promise(resolve => setTimeout(resolve, 100));
+			}
+			return;
+		}
+		
 		const isContainer = await this.isRunningInContainer();
 
 		if (isContainer) {
 			// In container: Start tailscaled directly (no systemd)
+			this.daemonStarting = true; // Acquire mutex
 			try {
-				// Check if tailscaled is already running (pgrep returns exit 1 if not found)
-				try {
-					const { stdout } = await execAsync('pgrep tailscaled');
-					if (stdout.trim()) {
-						this.logger?.infoSync('Tailscaled daemon already running', {
-							component: LogComponents.tailscaleManager,
-							pid: stdout.trim(),
-						});
-						return;
-					}
-				} catch {
-					// Not running, will start it below
+// Check if tailscaled is already running (socket-level health check)
+			try {
+				const { stdout } = await execAsync('tailscale status --json');
+				const status = JSON.parse(stdout);
+				if (status.BackendState) {
+					this.logger?.infoSync('Tailscaled daemon already running', {
+						component: LogComponents.tailscaleManager,
+						backendState: status.BackendState,
+					});
+					return;
+				}
+			} catch {
+				// Not running or socket not ready, will start it below
 				}
 
 				this.logger?.infoSync('Starting tailscaled daemon in container mode...', {
@@ -184,31 +210,34 @@ export class TailscaleManager {
 					
 					await new Promise(resolve => setTimeout(resolve, delay));
 
-					// Verify daemon started (pgrep returns exit 1 if not found)
+					// Verify daemon started (socket-level health check - more reliable than pgrep)
 					try {
-						const { stdout } = await execAsync('pgrep tailscaled');
-						if (stdout.trim()) {
+						const { stdout } = await execAsync('tailscale status --json');
+						const status = JSON.parse(stdout);
+						if (status.BackendState) {
 							this.logger?.infoSync('Tailscaled daemon started successfully (container mode)', {
 								component: LogComponents.tailscaleManager,
-								pid: stdout.trim(),
+								backendState: status.BackendState,
 								attempt: attempt + 1,
 								delayMs: Math.round(delay),
 							});
+							this.daemonStarting = false; // Release mutex
 							return;
 						}
 					} catch {
-						// Not running yet, continue retrying
+						// Socket not ready yet, continue retrying
 						if (attempt === maxAttempts - 1) {
 							// Final attempt failed
 							this.logger?.errorSync('Tailscaled spawn output', new Error(daemonOutput || 'No output captured'), {
 								component: LogComponents.tailscaleManager,
 								maxAttempts,
 							});
-							throw new Error('Tailscaled daemon failed to start (process not found)');
+							throw new Error('Tailscaled daemon failed to start (socket not ready)');
 						}
 					}
 				}
 			} catch (error: any) {
+				this.daemonStarting = false; // Release mutex on error
 				const err = error instanceof Error ? error : new Error(String(error));
 				this.logger?.errorSync('Failed to start tailscaled daemon (container mode)', err, {
 					component: LogComponents.tailscaleManager,
@@ -337,34 +366,108 @@ export class TailscaleManager {
 			const currentStatus = await this.getStatus();
 			
 			if (currentStatus.connected) {
-				this.logger?.infoSync('Tailscale already connected, skipping re-authentication', {
+			// Detect config drift by checking if current config matches desired config
+			let configDrift = false;
+			const driftReasons: string[] = [];
+			
+			try {
+				// Fetch full status with preferences
+				const { stdout } = await execAsync('tailscale status --json');
+				const fullStatus = JSON.parse(stdout);
+				
+				// Check hostname drift
+				if (config.hostname && fullStatus.Self?.HostName !== config.hostname) {
+					configDrift = true;
+					driftReasons.push(`hostname: ${fullStatus.Self?.HostName} → ${config.hostname}`);
+				}
+				
+				// Check shields-up drift (Prefs.ShieldsUp)
+				const currentShieldsUp = fullStatus.Self?.ShieldsUp === true;
+				const desiredShieldsUp = config.shieldsUp === true;
+				if (currentShieldsUp !== desiredShieldsUp) {
+					configDrift = true;
+					driftReasons.push(`shieldsUp: ${currentShieldsUp} → ${desiredShieldsUp}`);
+				}
+				
+				// Check advertise routes drift
+				if (config.advertiseRoutes && config.advertiseRoutes.length > 0) {
+					const currentRoutes = fullStatus.Self?.AllowedIPs || [];
+					const desiredRoutes = config.advertiseRoutes;
+					const routesDiffer = JSON.stringify(currentRoutes.sort()) !== JSON.stringify(desiredRoutes.sort());
+					if (routesDiffer) {
+						configDrift = true;
+						driftReasons.push(`advertiseRoutes: ${currentRoutes.join(',')} → ${desiredRoutes.join(',')}`);
+					}
+				}
+				
+				// Check accept-routes drift (Prefs.RouteAll)
+				const currentAcceptRoutes = fullStatus.Self?.RouteAll === true;
+				const desiredAcceptRoutes = config.acceptRoutes === true;
+				if (currentAcceptRoutes !== desiredAcceptRoutes) {
+					configDrift = true;
+					driftReasons.push(`acceptRoutes: ${currentAcceptRoutes} → ${desiredAcceptRoutes}`);
+				}
+				
+				// Check accept-dns drift (Prefs.CorpDNS)
+				const currentAcceptDNS = fullStatus.Self?.CorpDNS === true;
+				const desiredAcceptDNS = config.acceptDNS === true;
+				if (currentAcceptDNS !== desiredAcceptDNS) {
+					configDrift = true;
+					driftReasons.push(`acceptDNS: ${currentAcceptDNS} → ${desiredAcceptDNS}`);
+				}
+				
+			} catch (error: any) {
+				this.logger?.warnSync('Failed to detect config drift, assuming no drift', {
+					component: LogComponents.tailscaleManager,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+			
+			if (!configDrift) {
+				this.logger?.infoSync('Tailscale already connected with correct config', {
 					component: LogComponents.tailscaleManager,
 					tailnet: config.tailnetName,
 					tailscaleIP: currentStatus.tailnetIP,
 					hostname: currentStatus.hostname,
 				});
-				
-				// Note: We could add flag comparison here in the future to detect config changes
-				// For now, trust that if connected, the existing config is correct
 				return;
 			}
+			
+			// Config drift detected - re-run tailscale up to apply changes
+			this.logger?.infoSync('Config drift detected, re-applying configuration', {
+				component: LogComponents.tailscaleManager,
+				driftReasons,
+			});
+			// Continue to tailscale up below (don't return early)
+		}
 
-			// Ensure config directory exists
-			if (!existsSync(this.configDir)) {
-				await mkdir(this.configDir, { recursive: true });
-			}
-
-			// SECURITY: Enforce ephemeral auth keys only
-			// Ephemeral keys auto-expire and cannot be reused
-			// This prevents accidental use of reusable keys and human error in provisioning
-			if (!config.authKey.startsWith('tskey-auth-') && !config.authKey.startsWith('tskey-ephemeral-')) {
-				this.logger?.errorSync('Invalid Tailscale auth key format', new Error('Auth key must be ephemeral'), {
+		// SECURITY: Validate auth key format
+		// All Tailscale auth keys start with tskey-auth- (both ephemeral and reusable)
+		// The ephemeral flag is a server-side property, not part of the key prefix
+		// Allow override for dev/test via TAILSCALE_DEV_MODE environment variable
+		const isDevMode = process.env.TAILSCALE_DEV_MODE === 'true';
+		
+		if (!config.authKey.startsWith('tskey-auth-')) {
+			if (isDevMode) {
+				this.logger?.warnSync('Dev mode: Accepting non-standard auth key format', {
 					component: LogComponents.tailscaleManager,
 					keyPrefix: config.authKey.substring(0, 10),
-					note: 'Only ephemeral or standard auth keys are allowed on edge devices',
+					note: 'TAILSCALE_DEV_MODE=true allows test keys',
 				});
-				throw new Error('Invalid Tailscale auth key format - must start with tskey-auth- or tskey-ephemeral-');
+			} else {
+				this.logger?.errorSync('Invalid Tailscale auth key format', new Error('Auth key must start with tskey-auth-'), {
+					component: LogComponents.tailscaleManager,
+					keyPrefix: config.authKey.substring(0, 10),
+					note: 'All Tailscale auth keys start with tskey-auth-',
+					recommendation: 'Generate auth keys at https://login.tailscale.com/admin/settings/keys',
+				});
+				throw new Error('Invalid Tailscale auth key format - must start with tskey-auth-');
 			}
+		}
+		
+		// NOTE: Ephemeral enforcement must be done via provisioning policy
+		// There is no client-side way to validate if a tskey-auth-* key is ephemeral
+		// Best practice: Generate ephemeral-only keys in your provisioning system
 
 			// SECURITY: Do NOT persist auth keys to disk
 			// Auth keys are credentials that should never be stored
@@ -432,17 +535,29 @@ export class TailscaleManager {
 			const { stdout } = await spawnAsync('tailscale', args);
 
 			// Parse JSON response for structured validation
-			const result = JSON.parse(stdout);
-
+		// NOTE: tailscale up --json output is undocumented and can change
+		// Warnings printed to stdout will break JSON parsing
+		// Defensive: Try to parse, fall back to polling if it fails
+		let result: any;
+		try {
+			result = JSON.parse(stdout);
+			
 			this.logger?.infoSync('Tailscale authentication initiated', {
 				component: LogComponents.tailscaleManager,
 				backendState: result.BackendState,
 				online: result.Self?.Online,
 			});
-
-			// Wait for connection to fully establish with exponential backoff
-			// BackendState goes: NeedsLogin → Starting → Running
-			// Self.Online goes: undefined → true when fully connected
+		} catch (parseError) {
+			// JSON parsing failed - likely due to warnings or format change
+			this.logger?.warnSync('Failed to parse tailscale up JSON output, falling back to status polling', {
+				component: LogComponents.tailscaleManager,
+				parseError: parseError instanceof Error ? parseError.message : String(parseError),
+				rawOutput: stdout.substring(0, 200), // Log first 200 chars for debugging
+			});
+			
+			// Fall back to polling tailscale status (no need for result object)
+			result = null;
+		}
 			// Max attempts: 10 (delays: ~1s, ~2s, ~4s, ~8s, ~16s, ~32s, ~60s, ~60s, ~60s, ~60s = ~303s total)
 			const maxAttempts = 10;
 			let totalWaitMs = 0;
@@ -501,6 +616,11 @@ export class TailscaleManager {
 	 * Get Tailscale status
 	 */
 	async getStatus(): Promise<TailscaleStatus> {
+		// Lazy check: Tailscale might be installed but agent restarted
+		if (!this.isInstalled) {
+			await this.checkInstallation();
+		}
+		
 		if (!this.isInstalled) {
 			return { connected: false };
 		}
@@ -519,6 +639,7 @@ export class TailscaleManager {
 
 			return {
 				connected,
+				backendState: status.BackendState,
 				tailnetIP: selfNode?.TailscaleIPs?.[0],
 				hostname: selfNode?.HostName,
 				online: selfNode?.Online,
@@ -536,7 +657,15 @@ export class TailscaleManager {
 	/**
 	 * Disconnect from Tailscale (but keep client installed)
 	 */
+	/**
+	 * Disconnect from Tailscale (but keep client installed)
+	 */
 	async disconnect(): Promise<void> {
+		// Lazy check: Tailscale might be installed but agent restarted
+		if (!this.isInstalled) {
+			await this.checkInstallation();
+		}
+		
 		if (!this.isInstalled) {
 			return;
 		}
@@ -546,7 +675,22 @@ export class TailscaleManager {
 				component: LogComponents.tailscaleManager,
 			});
 
-			await execAsync('tailscale down');
+			// Use --accept-risk=all on newer versions to suppress warnings
+			// when shields-up or routes were enabled (prevents interactive prompts)
+			// Falls back to plain 'tailscale down' on older versions that don't support the flag
+			try {
+				await execAsync('tailscale down --accept-risk=all');
+			} catch (error: any) {
+				// Fallback for older Tailscale versions that don't support --accept-risk
+				if (error.message?.includes('unknown flag') || error.message?.includes('accept-risk')) {
+					this.logger?.debugSync('Falling back to tailscale down without --accept-risk flag', {
+						component: LogComponents.tailscaleManager,
+					});
+					await execAsync('tailscale down');
+				} else {
+					throw error;
+				}
+			}
 
 			this.logger?.infoSync('Disconnected from Tailscale', {
 				component: LogComponents.tailscaleManager,
@@ -572,6 +716,11 @@ export class TailscaleManager {
 	 * Logout from Tailscale (removes device from network)
 	 */
 	async logout(): Promise<void> {
+		// Lazy check: Tailscale might be installed but agent restarted
+		if (!this.isInstalled) {
+			await this.checkInstallation();
+		}
+		
 		if (!this.isInstalled) {
 			return;
 		}
@@ -599,6 +748,11 @@ export class TailscaleManager {
 	 * Ping another node in the Tailnet
 	 */
 	async ping(hostname: string, count: number = 3): Promise<boolean> {
+		// Lazy check: Tailscale might be installed but agent restarted
+		if (!this.isInstalled) {
+			await this.checkInstallation();
+		}
+		
 		if (!this.isInstalled) {
 			return false;
 		}
@@ -652,13 +806,14 @@ export class TailscaleManager {
 			};
 		}
 
-		// Check if daemon is running (non-blocking check)
+		// Check if daemon is running (socket-level health check - more reliable than pgrep)
 		let daemonRunning = false;
 		try {
-			const { stdout } = await execAsync('pgrep tailscaled');
-			daemonRunning = !!stdout.trim();
+			const { stdout } = await execAsync('tailscale status --json');
+			const status = JSON.parse(stdout);
+			daemonRunning = !!status.BackendState;
 		} catch {
-			// pgrep returns exit 1 if not found
+			// Socket not reachable or daemon not running
 			daemonRunning = false;
 		}
 
@@ -684,5 +839,66 @@ export class TailscaleManager {
 			online: status.online,
 			lastSeen: status.lastSeen,
 		};
+	}
+
+	/**
+	 * Log VPN health issues with state-aware classification
+	 * Reduces alert noise by distinguishing transient states from actual failures
+	 * 
+	 * @param vpnHealth - Health status from getHealth()
+	 */
+	logHealthIssues(vpnHealth: {
+		installed: boolean;
+		daemonRunning: boolean;
+		connected: boolean;
+		backendState?: string;
+	}): void {
+		// State-aware classification reduces alert noise
+		if (!vpnHealth.installed) {
+			// Not installed - provisioning issue, ignore
+		} else if (!vpnHealth.daemonRunning) {
+			this.logger?.warnSync('VPN installed but daemon not running', {
+				component: LogComponents.tailscaleManager,
+				operation: 'vpn-health-check',
+				action: 'restart-daemon'
+			});
+		} else if (!vpnHealth.connected) {
+			// Daemon running but not connected - distinguish failure modes
+			switch (vpnHealth.backendState) {
+				case 'NeedsLogin':
+					this.logger?.errorSync('VPN requires re-authentication', undefined, {
+						component: LogComponents.tailscaleManager,
+						operation: 'vpn-health-check',
+						action: 'reprovision',
+						note: 'Auth key expired or revoked'
+					});
+					break;
+				
+				case 'Starting':
+					// Normal transient - do not alert
+					this.logger?.debugSync('VPN starting (transient)', {
+						component: LogComponents.tailscaleManager,
+						operation: 'vpn-health-check'
+					});
+					break;
+				
+				case 'Stopped':
+					this.logger?.warnSync('VPN backend stopped unexpectedly', {
+						component: LogComponents.tailscaleManager,
+						operation: 'vpn-health-check',
+						action: 'restart-daemon',
+						note: 'Daemon state lost'
+					});
+					break;
+				
+				default:
+					this.logger?.warnSync('VPN daemon running but not connected', {
+						component: LogComponents.tailscaleManager,
+						operation: 'vpn-health-check',
+						backendState: vpnHealth.backendState,
+						note: 'Likely network isolation or blocked UDP'
+					});
+			}
+		}
 	}
 }

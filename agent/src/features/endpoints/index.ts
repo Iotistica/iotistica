@@ -421,25 +421,22 @@ export class SensorsFeature extends BaseFeature {
    * Start MQTT adapter
    */
   private async startMQTTAdapter(): Promise<void> {
-    this.logger.info('🔵 MQTT ADAPTER: Starting MQTT adapter initialization...');
     try {
       let mqttConfig: MqttAdapterConfig;
       let outputConfig: SocketOutput;
 
       // Load config from provided config object or database
       if (this.config.mqtt!.config) {
-        this.logger.info('🔵 MQTT ADAPTER: Using provided config');
         mqttConfig = this.config.mqtt!.config;
       } else {
-        this.logger.info('🔵 MQTT ADAPTER: Loading devices from database...');
         // Load devices from database
         const dbDevices = await DeviceEndpointModel.getEnabled('mqtt');
         
         // Start adapter even with no devices (needed for observer + discovery)
         if (dbDevices.length === 0) {
-          this.logger.info('🔵 MQTT ADAPTER: No MQTT devices found in database - starting adapter for discovery/observation');
+          this.logger.info('MQTT ADAPTER: No MQTT devices found in database - starting adapter for discovery/observation');
         } else {
-          this.logger.info(`🔵 MQTT ADAPTER: Found ${dbDevices.length} MQTT devices in database`);
+          this.logger.info(`MQTT ADAPTER: Found ${dbDevices.length} MQTT devices in database`);
         }
         
         // Parse broker URL from target state config (e.g., "mqtt://10.0.0.60:1883")
@@ -454,7 +451,7 @@ export class SensorsFeature extends BaseFeature {
           const url = new URL(this.config.mqtt!.connection.brokerUrl);
           brokerHost = url.hostname;
           brokerPort = parseInt(url.port) || 1883;
-          this.logger.info(`🔵 MQTT ADAPTER: Using broker from target state: ${brokerHost}:${brokerPort}`);
+          this.logger.info(`MQTT ADAPTER: Using broker from target state: ${brokerHost}:${brokerPort}`);
         } catch (error) {
           throw new Error(`Failed to parse MQTT brokerUrl: ${error}`);
         }
@@ -494,23 +491,15 @@ export class SensorsFeature extends BaseFeature {
       // Load output config from database
       const dbOutput = await EndpointOutputModel.getOutput('mqtt');
       if (!dbOutput) {
-        this.logger.warn('No MQTT output configuration found - adapter will run for observation/discovery only');
-        outputConfig = {
-          socketPath: '/tmp/mqtt.sock',
-          dataFormat: 'json',
-          delimiter: ',',
-          includeTimestamp: true,
-          includeDeviceName: true
-        };
-      } else {
-        outputConfig = {
-          socketPath: dbOutput.socket_path,
-          dataFormat: dbOutput.data_format as 'json' | 'csv',
-          delimiter: dbOutput.delimiter,
-          includeTimestamp: dbOutput.include_timestamp,
-          includeDeviceName: dbOutput.include_device_name
-        };
+        throw new Error('Modbus output configuration not found in database');
       }
+      outputConfig = {
+        socketPath: dbOutput.socket_path,
+        dataFormat: dbOutput.data_format as 'json' | 'csv',
+        delimiter: dbOutput.delimiter,
+        includeTimestamp: dbOutput.include_timestamp,
+        includeDeviceName: dbOutput.include_device_name
+      };
 
       // Create socket server for MQTT protocol
       const mqttSocket = new SocketServer(outputConfig, this.logger);

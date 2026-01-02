@@ -465,7 +465,7 @@ export class DiscoveryService extends EventEmitter {
     });
 
     // Save to database
-    await this.saveToDatabase(allDiscovered, traceId);
+    const saveResults = await this.saveToDatabase(allDiscovered, traceId);
 
     // Update metadata
     this.updateMetadata(trigger, validate);
@@ -475,6 +475,8 @@ export class DiscoveryService extends EventEmitter {
       trigger,
       validate,
       deviceCount: allDiscovered.length,
+      savedCount: saveResults.saved,
+      skippedCount: saveResults.skipped,
       traceId
     });
 

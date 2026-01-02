@@ -591,18 +591,22 @@ export class FeatureInitializer {
 
     // Listen for discovery-complete events (batch reload after full discovery)
     this.features.discoveryService.on('discovery-complete', async (data: any) => {
-      logger.infoSync('Discovery completed, checking for reload', {
+      logger.infoSync('Discovery completed, checking if adapters need to be reloaded', {
         component: LogComponents.agent,
         trigger: data.trigger,
-        deviceCount: data.deviceCount
+        deviceCount: data.deviceCount,
+        savedCount: data.savedCount,
+        skippedCount: data.skippedCount
       });
 
-      // Only reload protocol adapters if devices were discovered
-      if (data.deviceCount > 0) {
+      // Only reload protocol adapters if NEW devices were discovered
+      // Skip reload if all devices were skipped (already exist)
+      if (data.savedCount > 0) {
         try {
           logger.infoSync('Reloading protocol adapters after discovery', {
             component: LogComponents.agent,
-            deviceCount: data.deviceCount
+            savedCount: data.savedCount,
+            skippedCount: data.skippedCount
           });
 
           // Stop protocol adapters

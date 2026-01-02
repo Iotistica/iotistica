@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2026-01-01 19:49:02
+# Generated: 2026-01-02 14:45:36
 # Agents: 27 to 27
 # Ports: 48507 to 48507
 
@@ -14,6 +14,7 @@ services:
     mem_reservation: 256m
     cap_add:
       - NET_ADMIN
+      - SYS_MODULE
     devices:
       - /dev/net/tun:/dev/net/tun
     network_mode: host
@@ -27,7 +28,7 @@ services:
       - NODE_ENV=development
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=3178c64783e2918c48779255bcc9948eb540cb45ea10384da651252a73960119
+      - PROVISIONING_KEY=b78f460a2b5795f295c632392ea5b8e0c3d7504e75cf01ce78c7796c818fe656
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)

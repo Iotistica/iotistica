@@ -275,47 +275,60 @@ export class ModbusAdapter extends EventEmitter {
     const pollDevice = async () => {
       const startTime = Date.now();
       
+      this.logger.debug(
+        `[RECOVERY] Poll cycle starting for ${deviceConfig.name}`
+      );
+      
       try {
         const client = this.clients.get(deviceConfig.name);
-        if (!client || !client.isConnected()) {
-          this.logger.warn(`Device ${deviceConfig.name} is not connected, skipping poll`);
+        if (!client) {
+          this.logger.error(`[RECOVERY] No client found for ${deviceConfig.name}`);
+          // Don't return - schedule next poll
+        } else {
+          const isConnected = client.isConnected();
+          this.logger.debug(
+            `[RECOVERY] Device ${deviceConfig.name} isConnected()=${isConnected}`
+          );
           
-          // Record failed poll
-          this.recordPollResult(deviceConfig.name, false);
-          
-          // ✅ Still send BAD quality data points to indicate device is offline
-          const timestamp = new Date().toISOString();
-          const badDataPoints = deviceConfig.registers.map(register => ({
-            deviceName: deviceConfig.name,
-            registerName: register.name,
-            value: null,
-            unit: register.unit || '',
-            timestamp: timestamp,
-            quality: 'BAD' as const,
-            qualityCode: 'DEVICE_OFFLINE'
-          }));
-          
-          if (badDataPoints.length > 0) {
-            this.emit('data', badDataPoints);
+          if (!isConnected) {
+            this.logger.debug(`[RECOVERY] Device ${deviceConfig.name} offline, attempting read (will auto-reconnect)`);
+            
+            // Record failed poll
+            this.recordPollResult(deviceConfig.name, false);
+            
+            // CRITICAL: Call readAllRegisters even when disconnected
+            // This triggers tryEnsureConnected() which schedules reconnection
+            const dataPoints = await client.readAllRegisters();
+            
+            if (dataPoints.length > 0) {
+              this.emit('data', dataPoints);
+            }
+            
+            // Don't return - schedule next poll
+          } else {
+            // Read all registers (measure time)
+            this.logger.debug(
+              `[RECOVERY] Device ${deviceConfig.name} connected, calling readAllRegisters()`
+            );
+            const dataPoints = await client.readAllRegisters();
+            const responseTime = Date.now() - startTime;
+
+            this.logger.debug(
+              `[RECOVERY] ✅ Device ${deviceConfig.name} read succeeded! Got ${dataPoints.length} data points in ${responseTime}ms`
+            );
+
+            // Track register changes
+            const registersUpdated = this.trackRegisterChanges(deviceConfig.name, dataPoints);
+            
+            // Record successful poll with metrics
+            this.recordPollResult(deviceConfig.name, true, responseTime, registersUpdated);
+
+            // Emit data event with sensor readings
+            if (dataPoints.length > 0) {
+              this.emit('data', dataPoints);
+              this.emit('data-received', deviceConfig.name, dataPoints);
+            }
           }
-          
-          return;
-        }
-
-        // Read all registers (measure time)
-        const dataPoints = await client.readAllRegisters();
-        const responseTime = Date.now() - startTime;
-
-        // Track register changes
-        const registersUpdated = this.trackRegisterChanges(deviceConfig.name, dataPoints);
-        
-        // Record successful poll with metrics
-        this.recordPollResult(deviceConfig.name, true, responseTime, registersUpdated);
-
-        // Emit data event with sensor readings
-        if (dataPoints.length > 0) {
-          this.emit('data', dataPoints);
-          this.emit('data-received', deviceConfig.name, dataPoints);
         }
 
       } catch (error) {
@@ -349,10 +362,10 @@ export class ModbusAdapter extends EventEmitter {
         
         // Try to reconnect
         this.scheduleDeviceRetry(deviceConfig);
-        return;
       }
 
-      // Schedule next poll
+      // CRITICAL: Always schedule next poll, even after errors
+      // This ensures continuous BAD quality data emission and auto-recovery when device comes back
       const timer = setTimeout(pollDevice, deviceConfig.pollInterval);
       this.pollTimers.set(deviceConfig.name, timer);
     };

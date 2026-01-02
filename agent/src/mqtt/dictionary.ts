@@ -460,7 +460,7 @@ export class DictionaryManager {
     const useMsgpack = process.env.USE_MSGPACK_POC === 'true';
     const method = useMsgpack ? 'dictionary+msgpack' : 'dictionary';
     
-    this.logger?.infoSync(`Message compacted (${method})`, {
+    this.logger?.debugSync(`Message compacted (${method})`, {
       component: LogComponents.sensorPublish,
       operation: 'compactAndPublish',
       topic: `iot/device/${this.deviceUuid}/endpoints/${endpoint}`,

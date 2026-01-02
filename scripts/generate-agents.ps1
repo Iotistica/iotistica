@@ -371,6 +371,7 @@ $buildOrImage
     mem_reservation: $MemReservation
     cap_add:
       - NET_ADMIN
+      - SYS_MODULE
     devices:
       - /dev/net/tun:/dev/net/tun
 $networkConfig
