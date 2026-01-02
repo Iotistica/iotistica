@@ -428,6 +428,11 @@ export class FeatureInitializer {
         comap: {
           enabled: protocols.comap?.enabled ?? legacyAdapters.comap?.enabled ?? false,
           ...(protocols.comap || {})
+        },
+        mqtt: {
+          enabled: protocols.mqtt?.enabled ?? legacyAdapters.mqtt?.enabled ?? false,
+          ...(legacyAdapters.mqtt || {}),
+          ...(protocols.mqtt || {})
         }
       };
 
@@ -456,7 +461,8 @@ export class FeatureInitializer {
       const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
       const dbProtocolsWithDevices: string[] = [];
       
-      for (const protocol of ['modbus', 'opcua', 'snmp', 'can']) {
+      // ✅ Include 'mqtt' in protocol check
+      for (const protocol of ['modbus', 'opcua', 'snmp', 'can', 'mqtt']) {
         const devices = await DeviceEndpointModel.getEnabled(protocol);
         if (devices.length > 0) {
           dbProtocolsWithDevices.push(protocol);
@@ -480,10 +486,6 @@ export class FeatureInitializer {
         return;
       }
 
-      logger.debugSync('Initializing Protocol Adapters', {
-        component: LogComponents.agent,
-        enabledProtocols
-      });
 
       this.features.sensors = new SensorsFeature(
         sensorsConfig,

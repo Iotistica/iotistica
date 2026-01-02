@@ -35,7 +35,7 @@ import { ModbusDiscoveryPlugin } from './modbus.discovery';
 import { OPCUADiscoveryPlugin } from './opcua.discovery';
 import { CANDiscoveryPlugin } from './can.discovery';
 import { SNMPDiscoveryPlugin } from './snmp.discovery';
-import { MqttDiscoveryPlugin } from './mqtt.discovery';
+import { MqttDiscoveryPlugin, MqttDiscoveryOptions } from './mqtt.discovery';
 import { autoDetectLocalSubnets } from '../../utils/network';
 import type { AgentConfig } from '../../config/agent-config.js';
 
@@ -103,20 +103,6 @@ export interface SNMPDiscoveryOptions {
   v3PrivKey?: string;
 }
 
-export interface MqttDiscoveryOptions {
-  brokerUrl?: string;          // e.g., 'mqtt://mosquitto:1883' (default: env MQTT_BROKER_URL)
-  username?: string;           // MQTT username (optional)
-  password?: string;           // MQTT password (optional)
-  discoveryRoots?: string[];   // REQUIRED: Explicit topic roots (e.g., ['edge/+', 'devices/+/telemetry'])
-                               // 🚨 NEVER use '#' - causes OOM on production brokers with 100k+ topics
-                               // ✅ Use targeted patterns: 'device/+', 'sensor/+/data', 'iot/+/telemetry'
-  monitorDurationMs?: number;  // How long to listen for topics (default: 30000)
-  topicPatterns?: RegExp[];    // Expected topic patterns for metadata extraction
-  qos?: 0 | 1 | 2;             // QoS for discovery subscription (default: 0)
-  validate?: boolean;          // Run validation phase (collect more messages, verify consistency)
-  validationTimeout?: number;  // ms per topic validation (default: 15000)
-}
-
 /**
  * Discovery Service
  * Coordinates protocol-specific discovery plugins
@@ -136,6 +122,16 @@ export class DiscoveryService extends EventEmitter {
   private plugins: Map<string, BaseDiscoveryPlugin>;
   private lightTimer?: NodeJS.Timeout;
   private fullTimer?: NodeJS.Timeout;
+  private mqttObserverData?: Array<{
+    topic: string;
+    firstSeen: Date;
+    lastSeen: Date;
+    messageCount: number;
+    hasLiveMessages: boolean;
+    retainedCount: number;
+    liveCount: number;
+    samplePayload?: string;
+  }>; // HYBRID: Observer data from runtime MQTT adapter
 
   /**
    * Create discovery service
@@ -150,6 +146,33 @@ export class DiscoveryService extends EventEmitter {
     this.agentConfig = agentConfig;
     this.metadata = this.loadMetadata();
     this.plugins = this.initializePlugins();
+  }
+
+  /**
+   * Inject MQTT observer data (hybrid discovery pattern)
+   * 
+   * Call this before runDiscovery() to provide recently observed topics
+   * from the runtime MQTT adapter. This solves the "no data during 30s window"
+   * problem for low-frequency publishers.
+   * 
+   * @param observedTopics - Topics tracked by MQTT adapter during normal operation
+   */
+  public setMqttObserverData(observedTopics: Array<{
+    topic: string;
+    firstSeen: Date;
+    lastSeen: Date;
+    messageCount: number;
+    hasLiveMessages: boolean;
+    retainedCount: number;
+    liveCount: number;
+    samplePayload?: string;
+  }>): void {
+    this.mqttObserverData = observedTopics;
+    this.logger?.infoSync(`🔄 DISCOVERY: Injected ${observedTopics.length} observer topics for next MQTT discovery`, {
+      component: LogComponents.discovery,
+      observerTopics: observedTopics.length,
+      topics: observedTopics.map(t => ({ topic: t.topic, liveCount: t.liveCount, lastSeen: t.lastSeen }))
+    });
   }
 
   /**
@@ -862,6 +885,20 @@ export class DiscoveryService extends EventEmitter {
       if (config.qos !== undefined) {
         options.qos = config.qos;
       }
+      
+      // HYBRID: Include observer data if available
+      if (this.mqttObserverData && this.mqttObserverData.length > 0) {
+        options.observedTopics = this.mqttObserverData;
+        this.logger?.infoSync(`📦 DISCOVERY: Including ${this.mqttObserverData.length} observer topics in MQTT discovery options`, {
+          component: LogComponents.discovery,
+          observedTopics: this.mqttObserverData.map(t => t.topic)
+        });
+      } else {
+        this.logger?.warnSync(`⚠️  DISCOVERY: No observer data available for MQTT discovery`, {
+          component: LogComponents.discovery,
+          hint: 'Call setMqttObserverData() before discovery or ensure MQTT adapter is running'
+        });
+      }
 
       return options;
     }
@@ -903,6 +940,14 @@ export class DiscoveryService extends EventEmitter {
 
     if (process.env.MQTT_DISCOVERY_QOS) {
       options.qos = parseInt(process.env.MQTT_DISCOVERY_QOS, 10) as 0 | 1 | 2;
+    }
+    
+    // HYBRID: Include observer data if available (same for legacy path)
+    if (this.mqttObserverData && this.mqttObserverData.length > 0) {
+      options.observedTopics = this.mqttObserverData;
+      this.logger?.debugSync(`Including ${this.mqttObserverData.length} observer topics in MQTT discovery`, {
+        component: LogComponents.discovery
+      });
     }
 
     return options;
@@ -1258,34 +1303,26 @@ export class DiscoveryService extends EventEmitter {
    * This bridges continuous awareness with discrete discovery snapshots.
    */
   private logMqttObserverSuggestions(): void {
-    try {
-      // Try to get MQTT adapter from sensors feature
-      // Note: This requires SensorsFeature to be started
-      // For now, just log that observer suggestions are available
-      this.logger?.infoSync('MQTT Observer: Continuous topic tracking enabled', {
+    // Log observer stats if data was injected
+    if (this.mqttObserverData && this.mqttObserverData.length > 0) {
+      const liveTopics = this.mqttObserverData.filter(t => t.hasLiveMessages).length;
+      const retainedOnly = this.mqttObserverData.length - liveTopics;
+      
+      this.logger?.infoSync(`MQTT Observer: ${this.mqttObserverData.length} topics tracked (${liveTopics} with live messages)`, {
         component: LogComponents.discovery,
-        note: 'Runtime adapter tracks observed topics between discovery runs',
-        hybrid: 'Active 30s discovery + passive continuous observation'
+        totalObserved: this.mqttObserverData.length,
+        liveTopics,
+        retainedOnlyTopics: retainedOnly,
+        recentTopics: this.mqttObserverData.slice(0, 10).map(t => ({
+          topic: t.topic,
+          lastSeen: t.lastSeen,
+          liveCount: t.liveCount
+        }))
       });
-      
-      // TODO: Access adapter instance and log recent topics
-      // This requires passing SensorsFeature reference or using event bus
-      // Example:
-      // const adapter = this.sensorsFeature?.getMqttAdapter();
-      // if (adapter) {
-      //   const recent = adapter.getRecentlyObservedTopics(60, 1);
-      //   if (recent.length > 0) {
-      //     this.logger?.infoSync(`Found ${recent.length} topics observed in last 60 minutes`, {
-      //       topics: recent.map(t => t.topic)
-      //     });
-      //   }
-      // }
-      
-    } catch (error) {
-      // Non-fatal - observer is optional enhancement
-      this.logger?.debugSync('Could not access MQTT observer', {
+    } else {
+      this.logger?.infoSync('MQTT Observer: No observer data available (adapter may not be started yet)', {
         component: LogComponents.discovery,
-        error: (error as Error).message
+        note: 'Observer tracks topics during runtime - run discovery after MQTT adapter starts'
       });
     }
   }

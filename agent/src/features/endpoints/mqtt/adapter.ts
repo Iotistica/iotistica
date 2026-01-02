@@ -20,6 +20,50 @@ export interface ObservedTopic {
 }
 
 /**
+ * Global registry for MQTT adapters
+ * Allows discovery to access observer data without dependency injection
+ */
+class MqttAdapterRegistry {
+  private static instance: MqttAdapterRegistry;
+  private adapters: Map<string, MqttAdapter> = new Map();
+  
+  static getInstance(): MqttAdapterRegistry {
+    if (!MqttAdapterRegistry.instance) {
+      MqttAdapterRegistry.instance = new MqttAdapterRegistry();
+    }
+    return MqttAdapterRegistry.instance;
+  }
+  
+  register(id: string, adapter: MqttAdapter): void {
+    this.adapters.set(id, adapter);
+  }
+  
+  unregister(id: string): void {
+    this.adapters.delete(id);
+  }
+  
+  getAdapter(id?: string): MqttAdapter | undefined {
+    // If no ID, return first adapter (common case: single broker)
+    if (!id && this.adapters.size > 0) {
+      return Array.from(this.adapters.values())[0];
+    }
+    return id ? this.adapters.get(id) : undefined;
+  }
+  
+  getAllAdapters(): MqttAdapter[] {
+    return Array.from(this.adapters.values());
+  }
+}
+
+/**
+ * Get global MQTT adapter registry
+ * Discovery plugin can use this to access observer data
+ */
+export function getMqttAdapterRegistry(): MqttAdapterRegistry {
+  return MqttAdapterRegistry.getInstance();
+}
+
+/**
  * MQTT Adapter
  * 
  * Architecture: This adapter is socket-agnostic. It subscribes to MQTT topics
@@ -76,17 +120,31 @@ export class MqttAdapter extends EventEmitter {
     try {
       this.logger.debug('Starting MQTT Adapter...');
 
-      // Connect to broker (endpoint)
-      await this.connect();
+      // Connect to broker (endpoint) - DON'T AWAIT - let it connect async
+      // Adapter should register even if broker offline (auto-reconnect)
+      this.connect().catch(err => {
+        this.logger.warn(`Initial MQTT connection failed (will auto-reconnect): ${err.message}`);
+      });
 
-      // Subscribe to all enabled devices/topics
+      // Subscribe to all enabled devices/topics (will subscribe when connected)
       for (const device of this.config.devices) {
         if (device.enabled) {
-          await this.subscribeToDevice(device);
+          // Don't await - will subscribe once connected
+          this.subscribeToDevice(device).catch(err => {
+            this.logger.debug(`Will subscribe to ${device.topic} once connected`);
+          });
         }
       }
 
       this.running = true;
+      
+      // Register in global registry for discovery access
+      const registryId = this.config.broker 
+        ? `${this.config.broker.host}:${this.config.broker.port}` 
+        : 'default';
+      getMqttAdapterRegistry().register(registryId, this);
+      this.logger.info(`MQTT Adapter registered globally: ${registryId}`);
+      
       this.emit('started');
       this.logger.info('MQTT Adapter started successfully');
 
@@ -117,6 +175,13 @@ export class MqttAdapter extends EventEmitter {
 
       this.subscriptions.clear();
       this.running = false;
+      
+      // Unregister from global registry
+      const registryId = this.config.broker 
+        ? `${this.config.broker.host}:${this.config.broker.port}` 
+        : 'default';
+      getMqttAdapterRegistry().unregister(registryId);
+      this.logger.debug(`MQTT Adapter unregistered: ${registryId}`);
       
       this.logger.debug('MQTT Adapter stopped successfully');
       this.emit('stopped');
@@ -158,7 +223,7 @@ export class MqttAdapter extends EventEmitter {
       password: this.config.broker.password,
       reconnectPeriod: this.config.reconnect.period,
       clean: false, // Persistent session: survive reconnects, keep subscriptions, replay QoS 1 messages
-      keepalive: 60,
+      keepalive: 30, // Send pings every 30s (well before mosquitto's 60s idle timeout)
       will: {
         topic: `device/${stableClientId}/status`,
         payload: Buffer.from('offline'),
@@ -508,9 +573,11 @@ export class MqttAdapter extends EventEmitter {
       
       this.topicAccessOrder.push(topic);
       
-      this.logger.debug(`New observed topic tracked: ${topic}`, {
+      this.logger.info(`✅ OBSERVER: New topic tracked: ${topic}`, {
         retain,
-        totalObserved: this.observedTopics.size
+        hasLiveMessages: !retain,
+        totalObserved: this.observedTopics.size,
+        payload: payload.slice(0, 50)
       });
     }
   }
@@ -525,9 +592,19 @@ export class MqttAdapter extends EventEmitter {
   public getRecentlyObservedTopics(maxAgeMinutes: number = 60, minLiveMessages: number = 1): ObservedTopic[] {
     const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
     
-    return Array.from(this.observedTopics.values())
+    const recent = Array.from(this.observedTopics.values())
       .filter(t => t.lastSeen >= cutoff && t.liveCount >= minLiveMessages)
       .sort((a, b) => b.lastSeen.getTime() - a.lastSeen.getTime());
+    
+    this.logger.info(`📊 OBSERVER: getRecentlyObservedTopics() called`, {
+      maxAgeMinutes,
+      minLiveMessages,
+      totalObserved: this.observedTopics.size,
+      recentCount: recent.length,
+      recentTopics: recent.map(t => ({ topic: t.topic, liveCount: t.liveCount, lastSeen: t.lastSeen }))
+    });
+    
+    return recent;
   }
 
   /**

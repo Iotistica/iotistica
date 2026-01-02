@@ -17,6 +17,8 @@ import { BaseFeature, FeatureConfig } from '../index.js';
 import { AgentLogger } from '../../logging/agent-logger.js';
 import { ModbusAdapter } from './modbus/adapter.js';
 import { ModbusAdapterConfig } from './modbus/types.js';
+import { MqttAdapter } from './mqtt/adapter.js';
+import { MqttAdapterConfig } from './mqtt/types.js';
 import { SocketServer } from './common/socket-server.js';
 import { SensorDataPoint, SocketOutput } from './types.js';
 import { EndpointOutputModel } from '../../db/models/endpoint-outputs.model.js';
@@ -43,6 +45,10 @@ export interface SensorConfig extends FeatureConfig {
   };
   snmp?: {
     enabled: boolean;
+  };
+  mqtt?: {
+    enabled: boolean;
+    config?: MqttAdapterConfig; // Optional: provide config directly, otherwise load from database
   };
 }
 
@@ -82,6 +88,11 @@ export class SensorsFeature extends BaseFeature {
     // Start SNMP adapter if enabled
     if ((this.config as SensorConfig).snmp?.enabled) {
       await this.startSNMPAdapter();
+    }
+
+     // Start MQTT adapter if enabled
+    if ((this.config as SensorConfig).mqtt?.enabled) {
+      await this.startMQTTAdapter();
     }
 
     // TODO: Start CAN adapter when implemented
@@ -407,6 +418,143 @@ export class SensorsFeature extends BaseFeature {
   }
 
   /**
+   * Start MQTT adapter
+   */
+  private async startMQTTAdapter(): Promise<void> {
+    this.logger.info('🔵 MQTT ADAPTER: Starting MQTT adapter initialization...');
+    try {
+      let mqttConfig: MqttAdapterConfig;
+      let outputConfig: SocketOutput;
+
+      // Load config from provided config object or database
+      if (this.config.mqtt!.config) {
+        this.logger.info('🔵 MQTT ADAPTER: Using provided config');
+        mqttConfig = this.config.mqtt!.config;
+      } else {
+        this.logger.info('🔵 MQTT ADAPTER: Loading devices from database...');
+        // Load devices from database
+        const dbDevices = await DeviceEndpointModel.getEnabled('mqtt');
+        
+        // Start adapter even with no devices (needed for observer + discovery)
+        if (dbDevices.length === 0) {
+          this.logger.info('🔵 MQTT ADAPTER: No MQTT devices found in database - starting adapter for discovery/observation');
+        } else {
+          this.logger.info(`🔵 MQTT ADAPTER: Found ${dbDevices.length} MQTT devices in database`);
+        }
+        
+        // Parse broker URL from target state config (e.g., "mqtt://10.0.0.60:1883")
+        if (!this.config.mqtt!.connection?.brokerUrl) {
+          throw new Error('MQTT brokerUrl not found in target state configuration');
+        }
+        
+        let brokerHost: string;
+        let brokerPort: number;
+        
+        try {
+          const url = new URL(this.config.mqtt!.connection.brokerUrl);
+          brokerHost = url.hostname;
+          brokerPort = parseInt(url.port) || 1883;
+          this.logger.info(`🔵 MQTT ADAPTER: Using broker from target state: ${brokerHost}:${brokerPort}`);
+        } catch (error) {
+          throw new Error(`Failed to parse MQTT brokerUrl: ${error}`);
+        }
+        
+        // Convert database format to MqttAdapterConfig
+        mqttConfig = {
+          broker: {
+            host: brokerHost,
+            port: brokerPort,
+            username: (this.config.mqtt as any)?.connection?.username,
+            password: (this.config.mqtt as any)?.connection?.password,
+            clientId: (this.config.mqtt as any)?.connection?.clientId
+          },
+          qos: (this.config.mqtt as any)?.qos || 1,
+          reconnect: {
+            period: 1000,
+            maxAttempts: 10
+          },
+          devices: dbDevices.map(d => ({
+            name: d.name,
+            enabled: d.enabled,
+            topic: d.connection.topic || d.name,
+            qos: d.connection.qos || 1,
+            dataType: d.connection.dataType || 'float32',
+            unit: d.connection.unit,
+            metric: d.connection.metric,
+            deviceId: d.connection.deviceId
+          })),
+          logging: {
+            level: 'info',
+            enableConsole: false,
+            enableFile: false
+          }
+        };
+      }
+
+      // Load output config from database
+      const dbOutput = await EndpointOutputModel.getOutput('mqtt');
+      if (!dbOutput) {
+        this.logger.warn('No MQTT output configuration found - adapter will run for observation/discovery only');
+        outputConfig = {
+          socketPath: '/tmp/mqtt.sock',
+          dataFormat: 'json',
+          delimiter: ',',
+          includeTimestamp: true,
+          includeDeviceName: true
+        };
+      } else {
+        outputConfig = {
+          socketPath: dbOutput.socket_path,
+          dataFormat: dbOutput.data_format as 'json' | 'csv',
+          delimiter: dbOutput.delimiter,
+          includeTimestamp: dbOutput.include_timestamp,
+          includeDeviceName: dbOutput.include_device_name
+        };
+      }
+
+      // Create socket server for MQTT protocol
+      const mqttSocket = new SocketServer(outputConfig, this.logger);
+      await mqttSocket.start();
+      this.socketServers.set('mqtt', mqttSocket);
+      this.logger.info(`MQTT socket server started at: ${outputConfig.socketPath}`);
+
+      // Create MQTT adapter (socket-agnostic)
+      const mqttAdapter = new MqttAdapter(mqttConfig, this.logger);
+      this.adapters.set('mqtt', mqttAdapter);
+
+      // Wire up event handlers
+      mqttAdapter.on('started', () => {
+        this.logger.info('MQTT adapter started');
+      });
+
+      mqttAdapter.on('data', (dataPoints: SensorDataPoint[]) => {
+        // Route data from adapter to socket server
+        mqttSocket.sendData(dataPoints);
+      });
+
+      mqttAdapter.on('device-connected', (deviceName: string) => {
+        this.logger.info(`MQTT broker connected: ${deviceName}`);
+      });
+
+      mqttAdapter.on('device-disconnected', (deviceName: string) => {
+        this.logger.warn(`MQTT broker disconnected: ${deviceName}`);
+      });
+
+      mqttAdapter.on('device-error', (deviceName: string, error: Error) => {
+        this.logger.error(`MQTT error [${deviceName}]: ${error.message}`);
+      });
+
+      // Start adapter
+      await mqttAdapter.start();
+      
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to start MQTT adapter: ${errorMessage}`);
+      throw error;
+    }
+  }
+
+  /**
    * Get Modbus adapter instance (for testing/debugging)
    */
   getModbusAdapter(): ModbusAdapter | undefined {
@@ -425,6 +573,13 @@ export class SensorsFeature extends BaseFeature {
    */
   getSNMPAdapter(): SNMPAdapter | undefined {
     return this.adapters.get('snmp') as SNMPAdapter | undefined;
+  }
+
+  /**
+   * Get MQTT adapter instance (for testing/debugging)
+   */
+  getMQTTAdapter(): MqttAdapter | undefined {
+    return this.adapters.get('mqtt') as MqttAdapter | undefined;
   }
 
   /**

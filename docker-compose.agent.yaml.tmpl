@@ -20,6 +20,7 @@ $template = @'
                 - USE_KEY_COMPACTION_POC=true
                 - REQUIRE_PROVISIONING=false
                 - PROVISIONING_API_KEY={PROVISIONING_API_KEY}
+                - ENABLE_FIRST_BOOT_DISCOVERY=false
             depends_on:
                 api:
                     condition: service_healthy
