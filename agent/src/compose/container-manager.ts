@@ -1348,8 +1348,9 @@ export class ContainerManager extends EventEmitter {
 				
 				// Check if configuration changed (ports, environment, volumes, networks, etc.)
 				// Normalize undefined/null to empty arrays/objects for consistent comparison
-				const currentPorts = JSON.stringify(currentSvc.config.ports || []);
-				const targetPorts = JSON.stringify(targetSvc.config.ports || []);
+				// Sort arrays to make comparison order-independent
+				const currentPorts = JSON.stringify((currentSvc.config.ports || []).sort());
+				const targetPorts = JSON.stringify((targetSvc.config.ports || []).sort());
 				const portsChanged = currentPorts !== targetPorts;
 				
 				// For environment, only compare variables that are defined in target state
@@ -1365,12 +1366,12 @@ export class ContainerManager extends EventEmitter {
 				const targetEnv = JSON.stringify(targetSvc.config.environment || {});
 				const envChanged = currentEnv !== targetEnv;
 				
-				const currentVolumes = JSON.stringify(currentSvc.config.volumes || []);
-				const targetVolumes = JSON.stringify(targetSvc.config.volumes || []);
+				const currentVolumes = JSON.stringify((currentSvc.config.volumes || []).sort());
+				const targetVolumes = JSON.stringify((targetSvc.config.volumes || []).sort());
 				const volumesChanged = currentVolumes !== targetVolumes;
 				
-				const currentNetworks = JSON.stringify(currentSvc.config.networks || []);
-				const targetNetworks = JSON.stringify(targetSvc.config.networks || []);
+				const currentNetworks = JSON.stringify((currentSvc.config.networks || []).sort());
+				const targetNetworks = JSON.stringify((targetSvc.config.networks || []).sort());
 				const networksChanged = currentNetworks !== targetNetworks;
 				
 				// Compare restart policy (only if defined in target)
@@ -1393,14 +1394,15 @@ export class ContainerManager extends EventEmitter {
 				
 				const needsUpdate = imageChanged || configChanged || containerStopped;
 				
-				// DEBUG: Log comparison details for debugging
 				if (needsUpdate) {
 					const changes: string[] = [];
 					if (imageChanged) changes.push(`image: ${currentSvc.imageName} → ${targetSvc.imageName}`);
 					if (portsChanged) changes.push(`ports: ${currentPorts} → ${targetPorts}`);
-					if (envChanged) changes.push(`environment: ${currentEnv} → ${targetEnv}`);
+					if (envChanged) changes.push(`environment changed`);
 					if (volumesChanged) changes.push(`volumes: ${currentVolumes} → ${targetVolumes}`);
 					if (networksChanged) changes.push(`networks: ${currentNetworks} → ${targetNetworks}`);
+					if (restartChanged) changes.push(`restart: ${currentRestart} → ${targetRestart}`);
+					if (networkModeChanged) changes.push(`networkMode: ${currentNetworkMode} → ${targetNetworkMode}`);
 					if (containerStopped) changes.push(`container stopped: ${currentSvc.status}`);
 					
 					this.logger?.infoSync('Service needs update', {
