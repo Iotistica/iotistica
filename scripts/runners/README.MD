@@ -15,10 +15,10 @@ Execute:
 
 Windows (Powershell): 
 
-.\onboard_github_runner_windows.ps1 <TOKEN> <URL>
+- .\onboard_github_runner_windows.ps1 <TOKEN> <URL>
 
 Linux (Shell):
 
-nano run.sh
-chmod +x run.sh
-sudo ./run.sh --token <TOKEN> --password <PASSWORD>
+- nano run.sh
+- chmod +x run.sh
+- sudo ./run.sh --token <TOKEN> --password <PASSWORD>
