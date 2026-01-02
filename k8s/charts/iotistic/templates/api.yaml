@@ -69,6 +69,10 @@ spec:
               value: {{ .Values.postgres.password | quote }}
             - name: DB_POOL_SIZE
               value: {{ .Values.api.env.DB_POOL_SIZE | quote }}
+            - name: DB_SSL
+              value: {{ .Values.api.env.DB_SSL | quote }}
+            - name: DB_SSL_REJECT_UNAUTHORIZED
+              value: {{ .Values.api.env.DB_SSL_REJECT_UNAUTHORIZED | quote }}
             # MQTT Broker Configuration (supports local Mosquitto or cloud HiveMQ)
             {{- if eq .Values.mqttBroker.type "cloud" }}
             # Cloud broker configuration (HiveMQ, AWS IoT Core, etc.)
