@@ -330,7 +330,10 @@ export class DeviceManager {
 				deviceName: this.deviceInfo.deviceName,
 				mqttUsername: this.deviceInfo.mqttBrokerConfig?.username,
 				mqttBrokerUrl: this.deviceInfo.mqttBrokerConfig ? `${this.deviceInfo.mqttBrokerConfig.protocol}://${this.deviceInfo.mqttBrokerConfig.host}:${this.deviceInfo.mqttBrokerConfig.port}` : undefined,
-				mqttBrokerConfig: this.deviceInfo.mqttBrokerConfig,
+				mqttBrokerConfig: this.deviceInfo.mqttBrokerConfig ? {
+					...this.deviceInfo.mqttBrokerConfig,
+					password: '***REDACTED***'
+				} : undefined,
 			});
 
 			// Phase 4: Setup Tailscale VPN if provided in response
