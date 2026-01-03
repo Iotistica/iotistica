@@ -1103,12 +1103,12 @@ export class CloudSync extends EventEmitter {
 		}
 		
 		// Log complete metrics report if metrics were collected
-	   if (includeMetrics) {
-			this.logger?.debugSync('Metrics Report', {
-				component: LogComponents.metrics,
-				report: stateReport[deviceInfo.uuid],
-			});
-	}
+	//    if (includeMetrics) {
+	// 		this.logger?.debugSync('Metrics Report', {
+	// 			component: LogComponents.metrics,
+	// 			report: stateReport[deviceInfo.uuid],
+	// 		});
+	//}
 
 	}	// Build state-only report for diff comparison (without metrics)
 	// This represents the CURRENT state that should be compared for changes
@@ -1311,17 +1311,6 @@ export class CloudSync extends EventEmitter {
 				const topic = `iot/device/${deviceInfo.uuid}/state`;
 				const payload = JSON.stringify(report);
 				const payloadSize = Buffer.byteLength(payload, 'utf8');
-				
-			// DEBUG: Log payload structure to verify version is included
-			this.logger?.debugSync('Sending state report via MQTT', {
-				component: LogComponents.cloudSync,
-				operation: 'mqtt-publish',
-				topic,
-				bytes: payloadSize,
-				transport: 'mqtt',
-				hasVersion: report[deviceInfo.uuid]?.version !== undefined,
-				versionValue: report[deviceInfo.uuid]?.version
-			});
 			
 			// QoS 1 is better - will help for small network blips
 			await this.mqttManager!.publishNoQueue(topic, payload, { qos: 1 });

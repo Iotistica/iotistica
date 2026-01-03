@@ -21,6 +21,16 @@ import {
  */
 const USE_MSGPACK_POC = process.env.USE_MSGPACK_POC === 'true';
 
+/**
+ * Compression information for logging and metrics
+ */
+interface CompressionInfo {
+  method: 'json' | 'msgpack' | 'dictionary' | 'dictionary+msgpack';
+  originalSize: number;
+  compressedSize: number;
+  ratio: number; // Percentage saved (0-100)
+}
+
 // ============================================================================
 // EDGE AI ANOMALY DETECTION CONFIGURATION
 // ============================================================================
@@ -70,6 +80,11 @@ export class Sensor extends EventEmitter {
   
   private delimiterRegex: RegExp;
   private needStop = false;
+  private dictionaryManager?: any; // Dictionary manager for MQTT message key compaction
+  
+  // Compression configuration (set at initialization)
+  private readonly useMsgpackPoc: boolean;
+  private readonly useKeyCompactionPoc: boolean;
   
   // Exponential backoff for initial connection attempts
   private readonly INITIAL_RETRY_DELAY_MS = 500;  // Start fast for startup race conditions
@@ -81,13 +96,19 @@ export class Sensor extends EventEmitter {
     config: SensorConfig,
     mqttConnection: MqttConnection,
     logger: Logger | undefined,
-    deviceUuid: string
+    deviceUuid: string,
+    dictionaryManager?: any, // Optional dictionary manager for key compaction
+    useMsgpackPoc: boolean = false, // Enable MessagePack compression POC
+    useKeyCompactionPoc: boolean = false // Enable dictionary key compaction POC
   ) {
     super();
     this.config = config;
     this.mqttConnection = mqttConnection;
     this.logger = logger;
     this.deviceUuid = deviceUuid;
+    this.dictionaryManager = dictionaryManager;
+    this.useMsgpackPoc = useMsgpackPoc;
+    this.useKeyCompactionPoc = useKeyCompactionPoc;
     this.currentRetryDelay = this.INITIAL_RETRY_DELAY_MS;
     
     // Compile delimiter regex
@@ -676,113 +697,222 @@ export class Sensor extends EventEmitter {
       return;
     }
     
-    const isConnected = this.mqttConnection.isConnected();
-    this.logger?.debug(`MQTT connection status: ${isConnected}`);
-    
-    // Build topic with device UUID (no leading $ - reserved for broker system topics)
     const topic = `iot/device/${this.deviceUuid}/endpoints/${this.config.mqttTopic}`;
+    const messageCount = this.messageBatch.messages.length;
+    const batchBytes = this.messageBatch.totalBytes;
     
-    // Feed to edge AI anomaly detection FIRST (before publishing)
-    // This ensures scores are available for enrichment
-    if (anomalyService) {
-      this.feedMessagesToAnomaly(this.messageBatch.messages);
-    }
+    // Prepare data with anomaly enrichment
+    const data = this.preparePublishData();
     
-    // Enrich messages with anomaly scores from edge AI
-    const enrichedMessages = this.enrichMessagesWithAnomalyScores(this.messageBatch.messages);
-    
-    // Publish as JSON array with enriched data
-    // Messages are objects for MQTT Explorer pretty-printing
-    // API handler will accept both objects and JSON strings
-    const data = {
-      sensor: this.getSensorName(),
-      timestamp: new Date().toISOString(),
-      messages: enrichedMessages
-    };
-    
-    // If MQTT not connected, buffer to local database
-    if (!isConnected) {
-      this.logger?.warn(`MQTT not connected, buffering ${this.messageBatch.messages.length} messages from endpoint '${this.getSensorName()}'`);
-      
-      try {
-        const { MessageBufferModel } = await import('../../db/models/index.js');
-        
-        // Buffer as JSON string (will be re-parsed on flush)
-        const jsonPayload = JSON.stringify(data);
-        await MessageBufferModel.enqueue({
-          endpoint_name: this.getSensorName(),
-          topic,
-          qos: 1,
-          payload: jsonPayload,
-          payload_bytes: Buffer.byteLength(jsonPayload, 'utf8')
-        });
-        
-        this.logger?.debug(`Buffered ${this.messageBatch.messages.length} messages to local database`);
-        
-        // Reset batch (data is safely buffered)
-        this.messageBatch = {
-          messages: [],
-          totalBytes: 0,
-          firstMessageTime: new Date()
-        };
-      } catch (error) {
-        this.logger?.error(`Failed to buffer messages from endpoint '${this.getSensorName()}'`, error);
-      }
-      
+    // Handle offline MQTT - buffer to local database
+    if (!this.mqttConnection.isConnected()) {
+      await this.bufferOfflineMessages(topic, data, messageCount);
       return;
     }
     
     try {
-      // Check if dictionary compaction is enabled (takes precedence over msgpack)
-      // MqttConnection is actually MqttManager instance with dictionary support
-      const mqttManager = this.mqttConnection as any as MqttManager;
-      const dictionaryManager = mqttManager.getDictionaryManager?.();
+      // Choose compression strategy and serialize payload
+      const { payload, compressionInfo } = this.compressPayload(data);
       
-      if (dictionaryManager && process.env.USE_KEY_COMPACTION_POC === 'true') {
-        // Use dictionary compaction (handles publishing internally)
-        const endpoint = this.config.mqttTopic; // e.g., "modbus", "opcua"
-        await dictionaryManager.compactAndPublish(data, endpoint);
-      } else {
-        // Fallback to msgpack or JSON
-        // Use msgId for HA deduplication
-        const msgIdGen = this.mqttConnection.getMessageIdGenerator?.();
-        
-        // POC: Use msgpack if enabled, otherwise JSON
-        const mqttPayload = USE_MSGPACK_POC 
-          ? createMsgpackPayload(data, msgIdGen)
-          : createJsonPayload(data, msgIdGen);
-        
-        // Log compression stats for POC
-        if (USE_MSGPACK_POC) {
-          logCompressionStats(data, 'msgpack', this.logger, topic);
-        }
-        
-        const serialized = serializePayload(mqttPayload);
-        
-        await this.mqttConnection.publish(topic, serialized, { qos: 1 });
-      }
+      // Publish to MQTT (single call)
+      await this.mqttConnection.publish(topic, payload, { qos: 1 });
       
-      this.stats.messagesPublished += this.messageBatch.messages.length;
-      this.stats.bytesPublished += this.messageBatch.totalBytes;
-      this.stats.lastPublishTime = new Date();
+      // Update statistics
+      this.updatePublishStats(messageCount, batchBytes);
       
-      // Only log when messages were actually published
-      if (this.messageBatch.messages.length > 0) {
-        this.logger?.info(
-          `Published ${this.messageBatch.messages.length} messages (${this.messageBatch.totalBytes} bytes) from '${this.getSensorName()}'`
-        );
-      }
+      // Log publish success with compression details
+      this.logPublishSuccess(messageCount, batchBytes, compressionInfo);
       
       // Reset batch
-      this.messageBatch = {
-        messages: [],
-        totalBytes: 0,
-        firstMessageTime: new Date()
-      };
+      this.resetBatch();
       
     } catch (error) {
       this.logger?.error(`Failed to publish batch from endpoint '${this.getSensorName()}'`, error);
     }
+  }
+
+  /**
+   * Prepare data for publishing with anomaly detection enrichment
+   */
+  private preparePublishData(): any {
+    // Feed to edge AI anomaly detection FIRST (before enrichment)
+    if (anomalyService) {
+      this.feedMessagesToAnomaly(this.messageBatch.messages);
+    }
+    
+    // Enrich messages with anomaly scores
+    const enrichedMessages = this.enrichMessagesWithAnomalyScores(this.messageBatch.messages);
+    
+    return {
+      sensor: this.getSensorName(),
+      timestamp: new Date().toISOString(),
+      messages: enrichedMessages
+    };
+  }
+
+  /**
+   * Buffer messages to local database when MQTT is offline
+   */
+  private async bufferOfflineMessages(topic: string, data: any, messageCount: number): Promise<void> {
+    this.logger?.warn(`MQTT not connected, buffering ${messageCount} messages from endpoint '${this.getSensorName()}'`);
+    
+    try {
+      const { MessageBufferModel } = await import('../../db/models/index.js');
+      
+      const jsonPayload = JSON.stringify(data);
+      await MessageBufferModel.enqueue({
+        endpoint_name: this.getSensorName(),
+        topic,
+        qos: 1,
+        payload: jsonPayload,
+        payload_bytes: Buffer.byteLength(jsonPayload, 'utf8')
+      });
+      
+      this.logger?.debug(`Buffered ${messageCount} messages to local database`);
+      this.resetBatch();
+    } catch (error) {
+      this.logger?.error(`Failed to buffer messages from endpoint '${this.getSensorName()}'`, error);
+    }
+  }
+
+  /**
+   * Compress payload using best available strategy:
+   * 1. Dictionary compression (with optional MessagePack stacking)
+   * 2. MessagePack compression
+   * 3. JSON (no compression)
+   */
+  private compressPayload(data: any): { payload: Buffer | string; compressionInfo: CompressionInfo } {
+    // Strategy 1: Dictionary compression (enabled and builds dictionary on first use)
+    if (this.dictionaryManager && this.useKeyCompactionPoc) {
+      this.logger?.debug(`Using dictionary compression (size: ${this.dictionaryManager.getDictionarySize()})`, {
+        endpoint: this.getSensorName(),
+        dictionarySize: this.dictionaryManager.getDictionarySize()
+      });
+      return this.applyDictionaryCompression(data);
+    }
+    
+    // Strategy 2 & 3: MessagePack or JSON (fallback when dictionary disabled)
+    this.logger?.debug(`Dictionary disabled, using fallback compression`, {
+      endpoint: this.getSensorName(),
+      useMsgpack: this.useMsgpackPoc
+    });
+    return this.applyMsgpackOrJson(data);
+  }
+
+  /**
+   * Apply dictionary compression with optional MessagePack stacking
+   */
+  private applyDictionaryCompression(data: any): { payload: Buffer | string; compressionInfo: CompressionInfo } {
+    this.logger?.debug('Compacting message with dictionary', {
+      endpoint: this.getSensorName(),
+      dictionarySize: this.dictionaryManager.getDictionarySize()
+    });
+    
+    const { compacted, originalSize, compactedSize, compressionRatio } = 
+      this.dictionaryManager.compact(data);
+    
+    this.logger?.debug('Dictionary compaction complete', {
+      endpoint: this.getSensorName(),
+      originalSize,
+      compactedSize,
+      ratio: `${compressionRatio.toFixed(1)}%`,
+      newDictionarySize: this.dictionaryManager.getDictionarySize()
+    });
+    
+    // Stack MessagePack on top of dictionary compression if enabled
+    const payload = this.useMsgpackPoc
+      ? require('msgpack-lite').encode(compacted)
+      : JSON.stringify(compacted);
+    
+    return {
+      payload,
+      compressionInfo: {
+        method: this.useMsgpackPoc ? 'dictionary+msgpack' : 'dictionary',
+        originalSize,
+        compressedSize: compactedSize,
+        ratio: compressionRatio
+      }
+    };
+  }
+
+  /**
+   * Apply MessagePack or JSON serialization (fallback when dictionary disabled)
+   */
+  private applyMsgpackOrJson(data: any): { payload: Buffer | string; compressionInfo: CompressionInfo } {
+    const msgIdGen = this.mqttConnection.getMessageIdGenerator?.();
+    
+    if (this.useMsgpackPoc) {
+      // MessagePack compression (handled by createMsgpackPayload + serializePayload)
+      const mqttPayload = createMsgpackPayload(data, msgIdGen);
+      const payload = serializePayload(mqttPayload);
+      
+      // Calculate compression stats
+      const originalSize = Buffer.from(JSON.stringify(data), 'utf-8').length;
+      const compressedSize = payload.length;
+      const ratio = ((originalSize - compressedSize) / originalSize) * 100;
+      
+      return {
+        payload,
+        compressionInfo: {
+          method: 'msgpack',
+          originalSize,
+          compressedSize,
+          ratio
+        }
+      };
+    } else {
+      // JSON (no compression)
+      const mqttPayload = createJsonPayload(data, msgIdGen);
+      const payload = serializePayload(mqttPayload);
+      
+      return {
+        payload,
+        compressionInfo: {
+          method: 'json',
+          originalSize: payload.length,
+          compressedSize: payload.length,
+          ratio: 0
+        }
+      };
+    }
+  }
+
+  /**
+   * Update publish statistics
+   */
+  private updatePublishStats(messageCount: number, batchBytes: number): void {
+    this.stats.messagesPublished += messageCount;
+    this.stats.bytesPublished += batchBytes;
+    this.stats.lastPublishTime = new Date();
+  }
+
+  /**
+   * Log successful publish with compression details
+   */
+  private logPublishSuccess(messageCount: number, batchBytes: number, info: CompressionInfo): void {
+    this.logger?.info(`Published ${messageCount} messages from '${this.getSensorName()}'`, {
+      endpoint: this.getSensorName(),
+      messages: messageCount,
+      batchBytes,
+      compression: {
+        method: info.method,
+        originalSize: info.originalSize,
+        compressedSize: info.compressedSize,
+        savedBytes: info.originalSize - info.compressedSize,
+        savedPercent: `${info.ratio.toFixed(1)}%`
+      }
+    });
+  }
+
+  /**
+   * Reset message batch
+   */
+  private resetBatch(): void {
+    this.messageBatch = {
+      messages: [],
+      totalBytes: 0,
+      firstMessageTime: new Date()
+    };
   }
 
   /**

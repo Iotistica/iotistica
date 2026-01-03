@@ -83,6 +83,7 @@ export default class DeviceAgent {
   private simulationOrchestrator?: SimulationOrchestrator; // Simulation framework for testing
   private discoveryService?: DiscoveryService; // Protocol discovery (Modbus, OPC-UA, CAN, etc.)
   private agentConfig!: AgentConfig; // Configuration accessor (cloud → hardcoded fallback)
+  private dictionaryManager?: import('./dictionary/manager').DictionaryManager; // MQTT message key compaction (top-level service)
 
   // System settings (config-driven with env var defaults)
   // Note: All settings now accessed via agentConfig getters (intervals, endpoints, ports, etc.)
@@ -184,7 +185,8 @@ export default class DeviceAgent {
         configProtocols: targetState?.config?.protocols || {},
         cloudApiEndpoint: this.agentConfig.getCloudApiEndpoint(),
         deviceApiPort: this.agentConfig.getDeviceApiPort(),
-        anomalyService: this.anomalyService
+        anomalyService: this.anomalyService,
+        dictionaryManager: this.dictionaryManager
       };
 
       // Memory checkpoint: After creating featureContext
@@ -657,8 +659,8 @@ export default class DeviceAgent {
       // Set logger on MQTT manager
       mqttManager.setLogger(this.agentLogger);
 
-      // Initialize dictionary manager (handled by MqttManager)
-      await mqttManager.initDictionaryManager(this.deviceInfo.uuid);
+      // Initialize dictionary manager as top-level service (decoupled from MqttManager)
+      await this.initializeDictionaryManager();
     } catch (error) {
       this.agentLogger.errorSync(
         "Failed to initialize MQTT Manager",
@@ -669,6 +671,43 @@ export default class DeviceAgent {
         }
       );
       // Don't throw - allow agent to continue without MQTT
+    }
+  }
+
+  /**
+   * Initialize Dictionary Manager for MQTT message key compaction
+   * Decoupled from MqttManager - initialized as top-level service
+   */
+  private async initializeDictionaryManager(): Promise<void> {
+    // Only initialize if enabled via environment variable
+    if (process.env.USE_KEY_COMPACTION_POC !== 'true') {
+      this.agentLogger?.debugSync('Dictionary compaction disabled (USE_KEY_COMPACTION_POC != true)', {
+        component: LogComponents.mqtt,
+      });
+      return;
+    }
+
+    try {
+      const { DictionaryManager } = await import('./dictionary/manager.js');
+      const mqttManager = MqttManager.getInstance();
+      
+      this.dictionaryManager = new DictionaryManager(mqttManager, this.agentLogger, this.deviceInfo.uuid);
+      await this.dictionaryManager.initialize();
+      
+      this.agentLogger?.infoSync('Dictionary Manager initialized', {
+        component: LogComponents.mqtt,
+        deviceUuid: this.deviceInfo.uuid,
+      });
+    } catch (error) {
+      this.agentLogger?.errorSync(
+        'Failed to initialize Dictionary Manager',
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          component: LogComponents.agent,
+          note: 'Dictionary compaction will be unavailable',
+        }
+      );
+      // Don't throw - allow agent to continue without dictionary compaction
     }
   }
 
@@ -1298,8 +1337,16 @@ export default class DeviceAgent {
         component: LogComponents.agent,
       });
 
+      // Shutdown dictionary manager before disconnecting MQTT (it needs MQTT for final sync)
+      if (this.dictionaryManager) {
+        await this.dictionaryManager.shutdown();
+        this.agentLogger?.infoSync('Dictionary Manager shutdown', {
+          component: LogComponents.mqtt,
+        });
+        this.dictionaryManager = undefined;
+      }
+
       // Stop MQTT Manager (shared singleton - do this after all MQTT-dependent features)
-      // Dictionary manager is automatically shutdown by MqttManager.disconnect()
       const mqttManager = MqttManager.getInstance();
       if (mqttManager.isConnected()) {
         await mqttManager.disconnect();

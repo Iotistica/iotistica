@@ -85,7 +85,11 @@ profile_data = load_profile_data()
 # Built once at startup, shared by all ProfileDataBlock instances
 # Reduces 4x redundant indexing (HR, IR, CO, DI) to 1x per profile
 def build_profile_index(profile_name: str) -> dict:
-    """Build O(1) lookup index for a profile's data points"""
+    """Build O(1) lookup index for a profile's data points
+    
+    CRITICAL: Uses addresses from JSON as-is (already adjusted for pymodbus +1 behavior).
+    JSON has addresses that match what getValues() will receive after pymodbus adds 1 and we subtract 1.
+    """
     profile_obj = profile_data.get(profile_name, {})
     logger.debug(f"[DEBUG] build_profile_index('{profile_name}'): profile_obj type={type(profile_obj)}, keys={list(profile_obj.keys()) if isinstance(profile_obj, dict) else 'N/A'}")
     data_points = profile_obj.get("dataPoints", [])
@@ -94,8 +98,9 @@ def build_profile_index(profile_name: str) -> dict:
     for dp in data_points:
         addr = dp.get("address")
         dp_type = dp.get("type", "holding")
-        key = (dp_type, addr)
-        index[key] = dp
+        if addr is not None:
+            key = (dp_type, addr)
+            index[key] = dp
     return index
 
 # Preload indexes for all profiles
@@ -104,6 +109,12 @@ PROFILE_INDEX = {
     for profile in profile_data.keys()
 }
 logger.info(f"Preloaded profile indexes: {list(PROFILE_INDEX.keys())}")
+
+# Log sample of indexed addresses for verification
+for profile_name, index in PROFILE_INDEX.items():
+    sample_addrs = sorted(set(addr for reg_type, addr in index.keys() if reg_type == 'holding'))[:10]
+    if sample_addrs:
+        logger.info(f"  {profile_name} holding register addresses (0-based, first 10): {sample_addrs}")
 
 # State file for inter-process communication
 STATE_FILE = "/tmp/modbus_simulator_state.json"
@@ -401,9 +412,14 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
                 val = self.values[idx]
                 values.append(val)
                 
-                # DEBUG: Log problematic addresses
-                if addr in [99, 129, 139, 149, 159] and self.unit_id == 1 and self.register_type == 'holding':
-                    logger.info(f"[DEBUG] getValues() reading addr={addr} idx={idx} value={val} (self.address={self.address})")
+                # DEBUG: Log critical register reads to verify data lookup is working
+                # These addresses (0-based: 99, 129, 139, 149, 159) correspond to common COMAP registers
+                if addr in [99, 129, 139, 149, 159] and self.unit_id in [1, 2] and self.register_type == 'holding':
+                    # Log both the lookup and the index content
+                    key = (self.register_type, addr)
+                    dp = self._dp_index.get(key)
+                    dp_name = dp.get("name", "NOT_FOUND") if dp else "NO_DP_IN_INDEX"
+                    logger.info(f"[DEBUG] CRITICAL READ: addr={addr} idx={idx} value={val} dp_name={dp_name} (self.address={self.address}, key_in_index={key in self._dp_index})")
                 
                 # Log with data point name if available (O(1) lookup)
                 key = (self.register_type, addr)

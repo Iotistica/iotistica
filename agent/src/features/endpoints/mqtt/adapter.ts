@@ -5,65 +5,6 @@ import { SensorDataPoint, DeviceStatus, Logger } from '../types.js';
 import { MqttAdapterConfig, MqttDevice } from './types.js';
 
 /**
- * Lightweight topic observer for continuous discovery suggestions
- * Tracks topics seen during normal operation (bounded memory)
- */
-export interface ObservedTopic {
-  topic: string;
-  firstSeen: Date;
-  lastSeen: Date;
-  messageCount: number;
-  hasLiveMessages: boolean;
-  retainedCount: number;
-  liveCount: number;
-  samplePayload?: string; // Single sample for type inference
-}
-
-/**
- * Global registry for MQTT adapters
- * Allows discovery to access observer data without dependency injection
- */
-class MqttAdapterRegistry {
-  private static instance: MqttAdapterRegistry;
-  private adapters: Map<string, MqttAdapter> = new Map();
-  
-  static getInstance(): MqttAdapterRegistry {
-    if (!MqttAdapterRegistry.instance) {
-      MqttAdapterRegistry.instance = new MqttAdapterRegistry();
-    }
-    return MqttAdapterRegistry.instance;
-  }
-  
-  register(id: string, adapter: MqttAdapter): void {
-    this.adapters.set(id, adapter);
-  }
-  
-  unregister(id: string): void {
-    this.adapters.delete(id);
-  }
-  
-  getAdapter(id?: string): MqttAdapter | undefined {
-    // If no ID, return first adapter (common case: single broker)
-    if (!id && this.adapters.size > 0) {
-      return Array.from(this.adapters.values())[0];
-    }
-    return id ? this.adapters.get(id) : undefined;
-  }
-  
-  getAllAdapters(): MqttAdapter[] {
-    return Array.from(this.adapters.values());
-  }
-}
-
-/**
- * Get global MQTT adapter registry
- * Discovery plugin can use this to access observer data
- */
-export function getMqttAdapterRegistry(): MqttAdapterRegistry {
-  return MqttAdapterRegistry.getInstance();
-}
-
-/**
  * MQTT Adapter
  * 
  * Architecture: This adapter is socket-agnostic. It subscribes to MQTT topics
@@ -84,8 +25,6 @@ export function getMqttAdapterRegistry(): MqttAdapterRegistry {
  */
 export class MqttAdapter extends EventEmitter {
   private static readonly MAX_QUEUE_DEPTH = 1000; // Backpressure threshold
-  private static readonly MAX_OBSERVED_TOPICS = 2000; // Memory bound for observer
-  private static readonly OBSERVER_ENABLED = true; // Enable topic observation
   
   private config: MqttAdapterConfig;
   private logger: Logger;
@@ -96,10 +35,6 @@ export class MqttAdapter extends EventEmitter {
   private connected = false;
   private emitQueueDepth = 0;
   private droppedMessageCount = 0;
-  
-  // Topic observer: Continuous awareness for discovery suggestions
-  private observedTopics: Map<string, ObservedTopic> = new Map();
-  private topicAccessOrder: string[] = []; // LRU tracking
 
   constructor(config: MqttAdapterConfig, logger: Logger) {
     super();
@@ -120,30 +55,10 @@ export class MqttAdapter extends EventEmitter {
     try {
       this.logger.debug('Starting MQTT Adapter...');
 
-      // Connect to broker (endpoint) - DON'T AWAIT - let it connect async
-      // Adapter should register even if broker offline (auto-reconnect)
-      this.connect().catch(err => {
-        this.logger.warn(`Initial MQTT connection failed (will auto-reconnect): ${err.message}`);
-      });
-
-      // Subscribe to all enabled devices/topics (will subscribe when connected)
-      for (const device of this.config.devices) {
-        if (device.enabled) {
-          // Don't await - will subscribe once connected
-          this.subscribeToDevice(device).catch(err => {
-            this.logger.debug(`Will subscribe to ${device.topic} once connected`);
-          });
-        }
-      }
+      // Connect to broker (endpoint) - subscriptions happen in connect event
+      await this.connect();
 
       this.running = true;
-      
-      // Register in global registry for discovery access
-      const registryId = this.config.broker 
-        ? `${this.config.broker.host}:${this.config.broker.port}` 
-        : 'default';
-      getMqttAdapterRegistry().register(registryId, this);
-      this.logger.info(`MQTT Adapter registered globally: ${registryId}`);
       
       this.emit('started');
       this.logger.info('MQTT Adapter started successfully');
@@ -175,13 +90,6 @@ export class MqttAdapter extends EventEmitter {
 
       this.subscriptions.clear();
       this.running = false;
-      
-      // Unregister from global registry
-      const registryId = this.config.broker 
-        ? `${this.config.broker.host}:${this.config.broker.port}` 
-        : 'default';
-      getMqttAdapterRegistry().unregister(registryId);
-      this.logger.debug(`MQTT Adapter unregistered: ${registryId}`);
       
       this.logger.debug('MQTT Adapter stopped successfully');
       this.emit('stopped');
@@ -244,6 +152,28 @@ export class MqttAdapter extends EventEmitter {
         this.logger.info(`MQTT broker connected: ${brokerUrl}`);
         this.emit('device-connected', 'mqtt-broker');
         
+        // Subscribe to discoveryRoots for forwarding
+        if (this.config.observerRoots && this.config.observerRoots.length > 0) {
+          this.logger.info(`[MQTT] Subscribing to ${this.config.observerRoots.length} discoveryRoot pattern(s): ${JSON.stringify(this.config.observerRoots)}`);
+          
+          // Subscribe to observer roots
+          for (const root of this.config.observerRoots) {
+            this.logger.info(`[MQTT] Subscribing to discoveryRoot: ${root}`);
+            this.subscribeToObserverRoot(root).catch(err => {
+              this.logger.error(`[MQTT] Failed to subscribe to discoveryRoot ${root}: ${err.message}`);
+            });
+          }
+        }
+        
+        // Subscribe to configured devices
+        for (const device of this.config.devices) {
+          if (device.enabled) {
+            this.subscribeToDevice(device).catch(err => {
+              this.logger.error(`Failed to subscribe to device topic ${device.topic}: ${err.message}`);
+            });
+          }
+        }
+        
         resolve();
       });
 
@@ -298,6 +228,31 @@ export class MqttAdapter extends EventEmitter {
   }
 
   /**
+   * Subscribe to observer root (wildcard pattern for continuous discovery)
+   * Messages on these topics are tracked by observer but NOT emitted as data
+   */
+  private async subscribeToObserverRoot(root: string): Promise<void> {
+    if (!this.client || !this.connected) {
+      throw new Error('MQTT client not connected');
+    }
+
+    const qos = this.config.qos;
+
+    return new Promise((resolve, reject) => {
+      this.client!.subscribe(root, { qos }, (err) => {
+        if (err) {
+          this.logger.error(`[OBSERVER] Failed to subscribe to observer root: ${root} - ${err.message}`);
+          reject(err);
+          return;
+        }
+        
+        this.logger.info(`[OBSERVER] ✓ Subscribed to observer root: ${root} (QoS ${qos}) - now tracking all messages`);
+        resolve();
+      });
+    });
+  }
+
+  /**
    * Find device config for incoming topic (supports MQTT wildcards: +, #)
    * Uses mqtt-pattern library for proper wildcard matching
    */
@@ -320,9 +275,7 @@ export class MqttAdapter extends EventEmitter {
   private handleMessage(topic: string, payload: Buffer, retain: boolean = false): void {
     const payloadString = payload.toString();
     
-    // Track ALL observed topics for continuous discovery awareness
-    // This happens BEFORE device matching - we want to observe everything
-    this.trackObservedTopic(topic, payloadString, retain);
+    this.logger.debug(`[MQTT] handleMessage: topic=${topic}, retain=${retain}, payloadSize=${payload.length}`);
     
     // Backpressure guard: Drop messages if downstream can't keep up
     if (this.emitQueueDepth > MqttAdapter.MAX_QUEUE_DEPTH) {
@@ -337,10 +290,30 @@ export class MqttAdapter extends EventEmitter {
       return;
     }
 
+    // Check if topic matches any configured device
     const device = this.findDeviceForTopic(topic);
+    
+    // If no specific device, check if it matches observerRoots (subscribe & forward)
+    if (!device && this.config.observerRoots) {
+      const matchesObserverRoot = this.config.observerRoots.some(root => {
+        return this.topicMatches(root, topic);
+      });
+      
+      if (matchesObserverRoot) {
+        // Auto-save to database + forward message immediately
+        this.logger.debug(`[MQTT] Topic matches discoveryRoots: ${topic}`);
+        this.handleDiscoveryRootMessage(topic, payload, retain);
+        return;
+      }
+      
+      // Topic doesn't match any device or observerRoot - ignore
+      this.logger.debug(`Ignoring message for unmatched topic: ${topic}`);
+      return;
+    }
+    
+    // If still no device, ignore
     if (!device) {
-      // This is normal - observer tracks unmatched topics for discovery
-      this.logger.debug(`Received message for untracked topic: ${topic}`);
+      this.logger.debug(`Ignoring message for unconfigured topic: ${topic}`);
       return;
     }
 
@@ -505,125 +478,49 @@ export class MqttAdapter extends EventEmitter {
   }
 
   /**
-   * Track observed topic for continuous discovery awareness
-   * 
-   * This provides "free" discovery suggestions from normal runtime operation:
-   * - Bounded memory (MAX_OBSERVED_TOPICS limit with LRU eviction)
-   * - Minimal payload storage (single sample)
-   * - Separates retained vs live messages
-   * - Does NOT auto-create devices
-   * 
-   * Used by discovery to suggest recently-seen topics to users
+   * Handle message from discoveryRoots subscription
+   * Forwards all messages matching the wildcard patterns
    */
-  private trackObservedTopic(topic: string, payload: string, retain: boolean): void {
-    if (!MqttAdapter.OBSERVER_ENABLED) {
-      return;
-    }
-
-    // Skip system topics
-    if (topic.startsWith('$SYS/')) {
-      return;
-    }
-
-    const now = new Date();
-    const existing = this.observedTopics.get(topic);
-
-    if (existing) {
-      // Update existing observation
-      existing.lastSeen = now;
-      existing.messageCount++;
-      
-      if (retain) {
-        existing.retainedCount++;
-      } else {
-        existing.liveCount++;
-        existing.hasLiveMessages = true;
+  private handleDiscoveryRootMessage(topic: string, payload: Buffer, retain: boolean): void {
+    try {
+      // Parse payload
+      let value: any;
+      try {
+        value = JSON.parse(payload.toString());
+      } catch {
+        value = payload.toString();
       }
       
-      // Update LRU order
-      const idx = this.topicAccessOrder.indexOf(topic);
-      if (idx > -1) {
-        this.topicAccessOrder.splice(idx, 1);
-      }
-      this.topicAccessOrder.push(topic);
-    } else {
-      // New topic observation
+      // Create data point
+      const dataPoint: SensorDataPoint = {
+        deviceName: `mqtt_${topic.replace(/\//g, '_')}`,
+        registerName: topic,
+        value,
+        unit: '',
+        timestamp: new Date().toISOString(),
+        quality: retain ? 'UNCERTAIN' : 'GOOD'
+      };
       
-      // Enforce memory bound with LRU eviction
-      if (this.observedTopics.size >= MqttAdapter.MAX_OBSERVED_TOPICS) {
-        const evictTopic = this.topicAccessOrder.shift();
-        if (evictTopic) {
-          this.observedTopics.delete(evictTopic);
-          this.logger.debug(`Evicted LRU observed topic: ${evictTopic}`, {
-            reason: 'MAX_OBSERVED_TOPICS reached'
-          });
-        }
-      }
+      // Emit with backpressure tracking
+      this.emitQueueDepth++;
+      this.emit('data', [dataPoint]);
+      setImmediate(() => this.emitQueueDepth--);
       
-      this.observedTopics.set(topic, {
-        topic,
-        firstSeen: now,
-        lastSeen: now,
-        messageCount: 1,
-        hasLiveMessages: !retain,
-        retainedCount: retain ? 1 : 0,
-        liveCount: retain ? 0 : 1,
-        samplePayload: payload.slice(0, 200) // Truncate to 200 chars
-      });
+      this.logger.debug(`[MQTT] Forwarded message from discoveryRoot: ${topic}`);
       
-      this.topicAccessOrder.push(topic);
-      
-      this.logger.info(`OBSERVER: New topic tracked: ${topic}`, {
-        retain,
-        hasLiveMessages: !retain,
-        totalObserved: this.observedTopics.size,
-        payload: payload.slice(0, 50)
-      });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Failed to handle discoveryRoot message for ${topic}: ${errorMessage}`);
     }
   }
 
   /**
-   * Get recently observed topics (for discovery suggestions)
-   * 
-   * @param maxAgeMinutes - Only return topics seen in last N minutes (default: 60)
-   * @param minLiveMessages - Minimum live (non-retained) messages (default: 1)
-   * @returns Array of observed topics sorted by last seen (newest first)
+   * Check if topic matches MQTT wildcard pattern
+   * Supports + (single level) and # (multi level)
    */
-  public getRecentlyObservedTopics(maxAgeMinutes: number = 60, minLiveMessages: number = 1): ObservedTopic[] {
-    const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
-    
-    const recent = Array.from(this.observedTopics.values())
-      .filter(t => t.lastSeen >= cutoff && t.liveCount >= minLiveMessages)
-      .sort((a, b) => b.lastSeen.getTime() - a.lastSeen.getTime());
-  
-    
-    return recent;
-  }
-
-  /**
-   * Get all observed topics (for debugging)
-   */
-  public getAllObservedTopics(): ObservedTopic[] {
-    return Array.from(this.observedTopics.values());
-  }
-
-  /**
-   * Clear observed topics (useful for testing or memory management)
-   */
-  public clearObservedTopics(): void {
-    this.observedTopics.clear();
-    this.topicAccessOrder = [];
-    this.logger.info('Cleared all observed topics');
-  }
-
-  /**
-   * Get observer statistics
-   */
-  public getObserverStats(): { totalObserved: number; maxCapacity: number; utilizationPercent: number } {
-    return {
-      totalObserved: this.observedTopics.size,
-      maxCapacity: MqttAdapter.MAX_OBSERVED_TOPICS,
-      utilizationPercent: (this.observedTopics.size / MqttAdapter.MAX_OBSERVED_TOPICS) * 100
-    };
+  private topicMatches(pattern: string, topic: string): boolean {
+    const mqttPattern = require('mqtt-pattern');
+    return mqttPattern.matches(pattern, topic);
   }
 }
+

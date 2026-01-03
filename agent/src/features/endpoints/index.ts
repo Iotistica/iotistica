@@ -432,7 +432,7 @@ export class SensorsFeature extends BaseFeature {
         
         // Start adapter even with no devices (needed for observer + discovery)
         if (dbDevices.length === 0) {
-          this.logger.info('MQTT ADAPTER: No MQTT devices found in database - starting adapter for discovery/observation');
+          this.logger.info('MQTT ADAPTER: No MQTT devices in database - relying on observerRoots for continuous discovery');
         } else {
           this.logger.info(`MQTT ADAPTER: Found ${dbDevices.length} MQTT devices in database`);
         }
@@ -478,6 +478,8 @@ export class SensorsFeature extends BaseFeature {
             metric: d.connection.metric,
             deviceId: d.connection.deviceId
           })),
+          observerRoots: (this.config.mqtt as any)?.discoveryRoots, // Wildcard topics for observation
+
           logging: {
             level: 'info',
             enableConsole: false,

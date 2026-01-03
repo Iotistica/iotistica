@@ -16,11 +16,17 @@ export class SensorPublishFeature extends BaseFeature {
   
   private sensors: Sensor[] = [];
   private agentLogger: AgentLogger;
+  private dictionaryManager?: any; // Dictionary manager for MQTT message key compaction
+  private readonly useMsgpackPoc: boolean;
+  private readonly useKeyCompactionPoc: boolean;
 
   constructor(
     config: SensorPublishConfig & { enabled: boolean },
     agentLogger: AgentLogger,
-    deviceUuid: string
+    deviceUuid: string,
+    dictionaryManager?: any, // Optional dictionary manager
+    useMsgpackPoc: boolean = false, // Enable MessagePack compression POC
+    useKeyCompactionPoc: boolean = false // Enable dictionary key compaction POC
   ) {
     super(
       config,
@@ -31,6 +37,9 @@ export class SensorPublishFeature extends BaseFeature {
       'SENSOR_PUBLISH_DEBUG'
     );
     this.agentLogger = agentLogger;
+    this.dictionaryManager = dictionaryManager;
+    this.useMsgpackPoc = useMsgpackPoc;
+    this.useKeyCompactionPoc = useKeyCompactionPoc;
   }
 
   /**
@@ -139,7 +148,10 @@ export class SensorPublishFeature extends BaseFeature {
           config,
           this.mqttConnection,
           protocolLogger,
-          this.deviceUuid
+          this.deviceUuid,
+          this.dictionaryManager, // Pass dictionary manager
+          this.useMsgpackPoc, // Pass msgpack flag
+          this.useKeyCompactionPoc // Pass key compaction flag
         );
         
         // Set up event handlers

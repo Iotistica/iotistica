@@ -4,7 +4,7 @@ import msgpack from 'msgpack-lite';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import { MessageIdGenerator } from './message-id';
-import type { DictionaryManager } from './dictionary';
+import type { DictionaryManager } from '../dictionary/manager';
 
 /**
  * Explicit payload contract - callers must specify format
@@ -214,7 +214,6 @@ export class MqttManager extends EventEmitter {
   private lastBrokerUrl?: string;
   private lastOptions?: IClientOptions;
   private messageIdGenerator?: MessageIdGenerator; // For HA deduplication
-  private dictionaryManager?: DictionaryManager; // MQTT message key compaction
   private isReconnecting: boolean = false; // Prevent overlapping reconnection chains
 
   private constructor() {
@@ -233,11 +232,6 @@ export class MqttManager extends EventEmitter {
    */
   public setLogger(logger: AgentLogger | undefined): void {
     this.logger = logger;
-    
-    // Also update dictionary manager's logger if it exists
-    if (this.dictionaryManager) {
-      (this.dictionaryManager as any).logger = logger;
-    }
   }
 
   /**
@@ -255,40 +249,8 @@ export class MqttManager extends EventEmitter {
     }
   }
 
-  /**
-   * Initialize dictionary manager for MQTT message key compaction
-   * 
-   * @param deviceUuid - Device UUID
-   */
-  public async initDictionaryManager(deviceUuid: string): Promise<void> {
-    // Only initialize if enabled via environment variable
-    if (process.env.USE_KEY_COMPACTION_POC !== 'true') {
-      this.logger?.debugSync('Dictionary compaction disabled (USE_KEY_COMPACTION_POC != true)', {
-        component: LogComponents.mqtt,
-      });
-      return;
-    }
-
-    if (!this.dictionaryManager) {
-      // Lazy import to avoid circular dependency
-      const { DictionaryManager } = await import('./dictionary.js');
-      
-      this.dictionaryManager = new DictionaryManager(this, this.logger, deviceUuid);
-      await this.dictionaryManager.initialize();
-      
-      this.logger?.infoSync('Dictionary Manager initialized', {
-        component: LogComponents.mqtt,
-        deviceUuid,
-      });
-    }
-  }
-
-  /**
-   * Get dictionary manager instance (if initialized)
-   */
-  public getDictionaryManager(): DictionaryManager | undefined {
-    return this.dictionaryManager;
-  }
+  // Dictionary Manager now initialized in agent.ts as top-level service
+  // Consumers receive it via dependency injection (FeatureContext)
 
   /**
    * Connect to MQTT broker (idempotent - can be called multiple times)
@@ -656,15 +618,6 @@ export class MqttManager extends EventEmitter {
    */
   public async disconnect(): Promise<void> {
     if (!this.client) return;
-
-    // Shutdown dictionary manager first
-    if (this.dictionaryManager) {
-      await this.dictionaryManager.shutdown();
-      this.logger?.infoSync('Dictionary Manager shutdown', {
-        component: LogComponents.mqtt,
-      });
-      this.dictionaryManager = undefined;
-    }
 
     return new Promise((resolve) => {
       this.client!.end(false, {}, () => {

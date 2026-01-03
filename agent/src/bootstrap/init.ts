@@ -32,6 +32,7 @@ export interface FeatureContext {
   deviceApiPort: number;
   anomalyService?: any;
   discoveryService?: any; // Discovery service for endpoint auto-reload
+  dictionaryManager?: any; // Dictionary manager for MQTT message key compaction
 }
 
 export interface InitializedFeatures {
@@ -257,10 +258,17 @@ export class FeatureInitializer {
         endpoints,
       };
 
+      // Read compression flags from environment (configured at agent startup)
+      const useMsgpackPoc = process.env.USE_MSGPACK_POC === 'true';
+      const useKeyCompactionPoc = process.env.USE_KEY_COMPACTION_POC === 'true';
+
       this.features.sensorPublish = new SensorPublishFeature(
         sensorConfig as any,
         logger,
-        deviceInfo.uuid
+        deviceInfo.uuid,
+        this.context.dictionaryManager, // Pass dictionary manager for message compression
+        useMsgpackPoc, // Pass msgpack compression flag
+        useKeyCompactionPoc // Pass key compaction flag
       );
 
       // Configure edge AI anomaly detection if enabled
@@ -347,11 +355,6 @@ export class FeatureInitializer {
         if (bufferCapacity !== undefined) {
           // Memory checkpoint 4: Before getOutput
           const mem4 = process.memoryUsage();
-          logger.debugSync(`Memory before getOutput for ${protocol}`, {
-            component: LogComponents.agent,
-            protocol,
-            heapUsed: `${(mem4.heapUsed / 1024 / 1024).toFixed(0)}MB`
-          });
 
           // CRITICAL FIX: Only select needed columns to avoid loading massive logging field
           const output = await models('endpoint_outputs')
@@ -361,13 +364,7 @@ export class FeatureInitializer {
           
           // Memory checkpoint 5: After getOutput
           const mem5 = process.memoryUsage();
-          logger.debugSync(`Memory after getOutput for ${protocol}`, {
-            component: LogComponents.agent,
-            protocol,
-            heapUsed: `${(mem5.heapUsed / 1024 / 1024).toFixed(0)}MB`,
-            hasOutput: !!output
-          });
-
+       
           if (output) {
             await models('endpoint_outputs')
               .where('protocol', protocol)

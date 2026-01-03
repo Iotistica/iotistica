@@ -1,4 +1,5 @@
 import msgpack from 'msgpack-lite';
+import { DictionaryModel } from '../db/models/index.js';
 
 /**
  * MQTT Message Dictionary Manager
@@ -41,9 +42,12 @@ import msgpack from 'msgpack-lite';
  *   const manager = new DictionaryManager(mqttManager, logger, deviceUuid);
  *   await manager.initialize();
  *   
- *   // Compact and publish
+ *   // Compact message (decoupled from publishing)
  *   const original = { temperature: 21.5, timestamp: Date.now(), status: "active" };
- *   const compacted = await manager.compactAndPublish(original, "endpoints/modbus");
+ *   const { compacted, compressionRatio } = manager.compact(original);
+ *   
+ *   // Publish separately (via MqttManager or sensor-publish)
+ *   await mqttManager.publish(topic, compacted, options);
  *   
  *   // Check metrics
  *   const stats = manager.getMetrics();
@@ -61,7 +65,7 @@ import msgpack from 'msgpack-lite';
  * See: docs/MQTT-KEY-COMPACTION-STRATEGY.md (Alternative 6)
  */
 
-import type { MqttManager } from './manager';
+import type { MqttManager } from '../mqtt/manager';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 
@@ -139,26 +143,45 @@ export class DictionaryManager {
   public async initialize(): Promise<void> {
     if (!this.enabled) {
       this.logger?.debugSync('Dictionary compaction disabled (USE_KEY_COMPACTION_POC=false)', {
-        component: LogComponents.mqtt,
+        component: LogComponents.dictionary,
         operation: 'initialize',
       });
       return;
     }
 
-    this.logger?.infoSync('Initializing dictionary manager', {
-      component: LogComponents.mqtt,
-      operation: 'initialize',
-      arrayMode: this.arrayMode,
-      syncIntervalMs: this.syncIntervalMs,
-      deltaThreshold: this.deltaThreshold,
-      deviceUuid: this.deviceUuid,
-    });
+    // Load existing dictionary from database
+    try {
+      this.dictionary = await DictionaryModel.loadDictionary();
+      this.version = await DictionaryModel.getCurrentVersion();
+      
+      this.logger?.infoSync('Dictionary loaded from database', {
+        component: LogComponents.dictionary,
+        operation: 'initialize',
+        dictionarySize: this.dictionary.size,
+        version: this.version,
+        arrayMode: this.arrayMode,
+        syncIntervalMs: this.syncIntervalMs,
+        deltaThreshold: this.deltaThreshold,
+        deviceUuid: this.deviceUuid,
+      });
+
+      // Update metrics to match loaded state
+      this.metrics.dictionarySize = this.dictionary.size;
+      this.metrics.version = this.version;
+      this.updateCount = this.dictionary.size; // Approximate - each field is an update
+    } catch (error) {
+      this.logger?.warnSync('Failed to load dictionary from database, starting fresh', {
+        component: LogComponents.dictionary,
+        operation: 'initialize',
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
 
     // Start periodic full sync
     this.syncTimer = setInterval(() => {
       this.syncFullDictionary().catch((err) => {
         this.logger?.errorSync('Failed to sync dictionary', err, {
-          component: LogComponents.mqtt,
+          component: LogComponents.dictionary,
           operation: 'syncFullDictionary',
         });
       });
@@ -197,6 +220,7 @@ export class DictionaryManager {
   /**
    * Get or assign index for a field name (auto-discovery)
    * ✅ FIX: Increment version immediately when new field is added
+   * ✅ PERSISTENCE: Save new fields to database immediately
    */
   private getIndex(fieldName: string): number {
     let index = this.dictionary.get(fieldName);
@@ -210,6 +234,25 @@ export class DictionaryManager {
       
       // ✅ FIX: Bump version immediately so compacted messages reference valid dictionary
       this.version++;
+      
+      this.logger?.infoSync('New field discovered and indexed', {
+        component: LogComponents.dictionary,
+        operation: 'getIndex',
+        fieldName,
+        fieldIndex: index,
+        version: this.version,
+        dictionarySize: this.dictionary.size
+      });
+      
+      // ✅ PERSISTENCE: Save to database immediately (async but fire-and-forget)
+      this.persistNewField(fieldName, index, this.version).catch((err) => {
+        this.logger?.errorSync('Failed to persist dictionary field to database', err, {
+          component: LogComponents.dictionary,
+          operation: 'persistNewField',
+          fieldName,
+          fieldIndex: index
+        });
+      });
       
       // Keep only last hour of addition times for rate calculation
       const oneHourAgo = Date.now() - 3600000;
@@ -233,6 +276,68 @@ export class DictionaryManager {
   }
 
   /**
+   * Persist new field to database
+   */
+  private async persistNewField(fieldName: string, fieldIndex: number, version: number): Promise<void> {
+    this.logger?.infoSync('Persisting field to database', {
+      component: LogComponents.dictionary,
+      operation: 'persistNewField',
+      fieldName,
+      fieldIndex,
+      version
+    });
+    
+    try {
+      // Save entry
+      await DictionaryModel.saveEntry(fieldName, fieldIndex, version);
+      this.logger?.debugSync('Dictionary entry saved to database', {
+        component: LogComponents.dictionary,
+        operation: 'saveEntry',
+        fieldName,
+        fieldIndex
+      });
+      
+      // Record delta for sync tracking
+      const deltaId = await DictionaryModel.saveDelta(fieldName, fieldIndex, version);
+      this.logger?.debugSync('Delta record created', {
+        component: LogComponents.dictionary,
+        operation: 'saveDelta',
+        deltaId,
+        fieldName,
+        fieldIndex,
+        version
+      });
+      
+      // Update version in metadata
+      await DictionaryModel.setCurrentVersion(version);
+      this.logger?.debugSync('Dictionary version updated in metadata', {
+        component: LogComponents.dictionary,
+        operation: 'setCurrentVersion',
+        version
+      });
+      
+      this.logger?.infoSync('Dictionary field successfully persisted to database', {
+        component: LogComponents.dictionary,
+        operation: 'persistNewField',
+        fieldName,
+        fieldIndex,
+        version,
+        deltaId
+      });
+    } catch (error) {
+      this.logger?.errorSync('Failed to persist field to database', error as Error, {
+        component: LogComponents.dictionary,
+        operation: 'persistNewField',
+        fieldName,
+        fieldIndex,
+        version
+      });
+      // Re-throw to be caught by caller
+      throw error;
+    }
+  }
+
+  /**
    * Schedule a debounced delta sync
    * Batches rapid field additions within a short time window
    */
@@ -246,7 +351,7 @@ export class DictionaryManager {
     this.deltaSyncDebounceTimer = setTimeout(() => {
       this.syncDeltaDictionary().catch((err) => {
         this.logger?.errorSync('Failed to sync delta dictionary', err, {
-          component: LogComponents.mqtt,
+          component: LogComponents.dictionary,
           operation: 'syncDeltaDictionary',
         });
       });
@@ -370,68 +475,44 @@ export class DictionaryManager {
   }
 
   /**
-   * Compact message and publish to MQTT
-   * ✅ FIX: Use tuple-based payload format with array framing
-   * ✅ FIX: Send raw MessagePack buffer to avoid double-encoding
-   * Returns compression stats for logging
+   * Compact message using dictionary compression
+   * Returns compacted data without publishing (decoupled from MQTT)
    */
-  public async compactAndPublish(
-    message: any,
-    endpoint: string
-  ): Promise<{ originalSize: number; compactedSize: number; compressionRatio: number }> {
+  public compact(
+    message: any
+  ): { compacted: any; originalSize: number; compactedSize: number; compressionRatio: number } {
     if (!this.enabled) {
-      // Passthrough mode - publish without compaction
+      // Passthrough mode - return original message
       const payload = Buffer.from(JSON.stringify(message), 'utf-8');
-      await this.mqttManager.publish(
-        `iot/device/${this.deviceUuid}/endpoints/${endpoint}`,
-        { format: 'json', data: message },
-        { qos: 1, retain: false }
-      );
-      return { originalSize: payload.length, compactedSize: payload.length, compressionRatio: 0 };
+      return { 
+        compacted: message, 
+        originalSize: payload.length, 
+        compactedSize: payload.length, 
+        compressionRatio: 0 
+      };
     }
+
+    this.logger?.debugSync('Starting dictionary compaction', {
+      component: LogComponents.dictionary,
+      operation: 'compact',
+      dictionarySize: this.dictionary.size,
+      version: this.version
+    });
 
     // Compact message using tuple-based encoding
     const pairs = this.compactWithDictionary(message);
     const compacted = {
       v: this.version,
-      p: pairs,  // ✅ FIX: Use 'p' for pairs instead of separate 'i' and 'd'
+      p: pairs,  // Use 'p' for pairs instead of separate 'i' and 'd'
     };
 
     // Calculate sizes for different compression stages
     const originalJson = JSON.stringify(message);
     const originalSize = Buffer.byteLength(originalJson, 'utf-8');
     
-    // Use MessagePack if enabled (stacks with dictionary compression)
-    const useMsgpack = process.env.USE_MSGPACK_POC === 'true';
-    let compactedSize: number;
-    let format: 'json' | 'msgpack';
-    
-    if (useMsgpack) {
-      // ✅ FIX: Encode to MessagePack buffer and send directly
-      const msgpackBuffer = msgpack.encode(compacted);
-      compactedSize = msgpackBuffer.length;
-      format = 'msgpack';
-      
-      // ✅ FIX: Publish raw buffer, not wrapped object
-      // The MQTT manager should send this buffer directly without re-encoding
-      await this.mqttManager.publish(
-        `iot/device/${this.deviceUuid}/endpoints/${endpoint}`,
-        msgpackBuffer,  // Send buffer directly
-        { qos: 1, retain: false }
-      );
-    } else {
-      // JSON with dictionary compaction only
-      const compactedJson = JSON.stringify(compacted);
-      compactedSize = Buffer.byteLength(compactedJson, 'utf-8');
-      format = 'json';
-      
-      // Publish with JSON format
-      await this.mqttManager.publish(
-        `iot/device/${this.deviceUuid}/endpoints/${endpoint}`,
-        { format: 'json', data: compacted },
-        { qos: 1, retain: false }
-      );
-    }
+    // Calculate compacted size (JSON format)
+    const compactedJson = JSON.stringify(compacted);
+    const compactedSize = Buffer.byteLength(compactedJson, 'utf-8');
 
     const compressionRatio = ((originalSize - compactedSize) / originalSize) * 100;
 
@@ -442,28 +523,26 @@ export class DictionaryManager {
     this.totalCompactedBytes += compactedSize;
     this.metrics.avgCompressionRatio = ((this.totalOriginalBytes - this.totalCompactedBytes) / this.totalOriginalBytes) * 100;
 
-    // Log compression stats (shows dictionary + msgpack if enabled)
-    this.logCompressionStats(originalSize, compactedSize, compressionRatio, endpoint);
-
-    return { originalSize, compactedSize, compressionRatio };
+    return { compacted, originalSize, compactedSize, compressionRatio };
   }
 
   /**
-   * Log compression statistics (matches MessagePack POC format)
+   * Log compression statistics
+   * Called externally after publishing (decoupled from compaction)
    */
-  private logCompressionStats(
+  public logCompressionStats(
     originalSize: number,
     compactedSize: number,
     compressionRatio: number,
-    endpoint: string
+    topic: string
   ): void {
     const useMsgpack = process.env.USE_MSGPACK_POC === 'true';
     const method = useMsgpack ? 'dictionary+msgpack' : 'dictionary';
     
     this.logger?.debugSync(`Message compacted (${method})`, {
       component: LogComponents.sensorPublish,
-      operation: 'compactAndPublish',
-      topic: `iot/device/${this.deviceUuid}/endpoints/${endpoint}`,
+      operation: 'compact',
+      topic,
       sizes: {
         json: originalSize,
         compacted: compactedSize,
@@ -510,6 +589,17 @@ export class DictionaryManager {
     );
 
     this.lastSyncTime = Date.now();
+    
+    // Update metadata
+    try {
+      await DictionaryModel.setMetadata('last_full_sync', Date.now().toString());
+    } catch (error) {
+      this.logger?.warnSync('Failed to update last_full_sync metadata', {
+        component: LogComponents.dictionary,
+        operation: 'syncFullDictionary',
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
 
     this.logger?.infoSync('Dictionary synced', {
       component: LogComponents.mqtt,
@@ -522,41 +612,89 @@ export class DictionaryManager {
   /**
    * Sync delta dictionary updates (new fields only)
    * ✅ FIX: Version already bumped in getIndex(), no need to increment here
+   * ✅ PERSISTENCE: Uses database to track unsynced deltas
    */
   private async syncDeltaDictionary(): Promise<void> {
-    const newFieldsSinceLastSync = this.updateCount - this.lastDeltaSync;
-    
-    if (newFieldsSinceLastSync === 0) {
-      return; // No new fields
+    if (!this.enabled || this.dictionary.size === 0) {
+      return;
     }
 
-    // ✅ FIX: Version already incremented when field was added (see getIndex)
-    // No need to increment here - version matches the compacted messages already sent
+    try {
+      // Get unsynced deltas from database
+      this.logger?.debugSync('Querying unsynced deltas from database', {
+        component: LogComponents.dictionary,
+        operation: 'syncDeltaDictionary'
+      });
+      
+      const unsyncedDeltas = await DictionaryModel.getUnsyncedDeltas();
+      
+      this.logger?.infoSync('Retrieved unsynced deltas from database', {
+        component: LogComponents.dictionary,
+        operation: 'getUnsyncedDeltas',
+        count: unsyncedDeltas.length,
+        deltaIds: unsyncedDeltas.map(d => d.id)
+      });
+      
+      if (unsyncedDeltas.length === 0) {
+        this.logger?.debugSync('No unsynced deltas found, skipping sync', {
+          component: LogComponents.dictionary,
+          operation: 'syncDeltaDictionary'
+        });
+        return; // No new fields to sync
+      }
 
-    const allEntries = Array.from(this.dictionary.entries()).sort((a, b) => a[1] - b[1]);
-    const newFields = allEntries.slice(-newFieldsSinceLastSync).map(([field]) => field);
+      // Build payload with new fields
+      const newFields = unsyncedDeltas.map(d => d.field_name);
+      const payload = {
+        version: this.version,
+        newFields,
+        deviceUuid: this.deviceUuid,
+        timestamp: Date.now(),
+      };
 
-    const payload = {
-      version: this.version,
-      newFields,
-      deviceUuid: this.deviceUuid,
-      timestamp: Date.now(),
-    };
+      // Publish to MQTT
+      this.logger?.infoSync('Publishing delta dictionary to MQTT', {
+        component: LogComponents.dictionary,
+        operation: 'syncDeltaDictionary',
+        fieldCount: newFields.length,
+        fields: newFields
+      });
+      
+      await this.mqttManager.publish(
+        `iot/device/${this.deviceUuid}/meta/dictionary/delta`,
+        { format: 'json', data: payload },
+        { qos: 1, retain: false }
+      );
 
-    await this.mqttManager.publish(
-      `iot/device/${this.deviceUuid}/meta/dictionary/delta`,
-      { format: 'json', data: payload },
-      { qos: 1, retain: false }
-    );
+      // Mark deltas as synced in database
+      const deltaIds = unsyncedDeltas.map(d => d.id!).filter(id => id !== undefined);
+      this.logger?.debugSync('Marking deltas as synced in database', {
+        component: LogComponents.dictionary,
+        operation: 'markDeltasSynced',
+        deltaIds
+      });
+      
+      await DictionaryModel.markDeltasSynced(deltaIds);
+      
+      // Update metadata
+      await DictionaryModel.setMetadata('last_delta_sync', Date.now().toString());
 
-    this.lastDeltaSync = this.updateCount;
+      this.lastDeltaSync = this.updateCount;
 
-    this.logger?.debugSync('Delta dictionary synced', {
-      component: LogComponents.mqtt,
-      operation: 'syncDeltaDictionary',
-      version: this.version,
-      newFields: newFields.length,
-    });
+      this.logger?.infoSync('Delta dictionary synced successfully', {
+        component: LogComponents.dictionary,
+        operation: 'syncDeltaDictionary',
+        version: this.version,
+        newFields: newFields.length,
+        syncedDeltaIds: deltaIds
+      });
+    } catch (error) {
+      this.logger?.errorSync('Failed to sync delta dictionary', error as Error, {
+        component: LogComponents.dictionary,
+        operation: 'syncDeltaDictionary'
+      });
+      throw error;
+    }
   }
 
   /**
@@ -564,6 +702,13 @@ export class DictionaryManager {
    */
   public getMetrics(): DictionaryMetrics {
     return { ...this.metrics };
+  }
+
+  /**
+   * Get dictionary size (number of indexed fields)
+   */
+  public getDictionarySize(): number {
+    return this.dictionary.size;
   }
 
   /**
@@ -587,10 +732,11 @@ export class DictionaryManager {
 
   /**
    * Reset dictionary (for testing or manual reset)
+   * ✅ PERSISTENCE: Clears database tables
    */
-  public reset(): void {
+  public async reset(): Promise<void> {
     this.dictionary.clear();
-    this.version++;
+    this.version = 1;
     this.updateCount = 0;
     this.lastDeltaSync = 0;
     this.fieldAdditionTimes = [];
@@ -599,10 +745,21 @@ export class DictionaryManager {
     this.totalOriginalBytes = 0;
     this.totalCompactedBytes = 0;
 
-    this.logger?.warnSync('Dictionary reset', {
-      component: LogComponents.mqtt,
-      operation: 'reset',
-      version: this.version,
-    });
+    // Clear database
+    try {
+      await DictionaryModel.clearAll();
+      
+      this.logger?.warnSync('Dictionary reset (in-memory and database)', {
+        component: LogComponents.dictionary,
+        operation: 'reset',
+        version: this.version,
+      });
+    } catch (error) {
+      this.logger?.errorSync('Failed to reset dictionary in database', error as Error, {
+        component: LogComponents.dictionary,
+        operation: 'reset'
+      });
+      throw error;
+    }
   }
 }

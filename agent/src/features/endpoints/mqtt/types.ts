@@ -33,6 +33,7 @@ export interface MqttAdapterConfig {
   qos: 0 | 1 | 2;
   reconnect: MqttReconnectConfig;
   devices: MqttDevice[];
+  observerRoots?: string[]; // Wildcard topics to subscribe for observation (e.g., ['edge/+', 'sensor/+/data'])
   logging?: {
     level: string;
     enableConsole: boolean;

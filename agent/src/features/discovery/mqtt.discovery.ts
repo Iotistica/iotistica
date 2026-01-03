@@ -46,7 +46,6 @@ import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, DiscoveredDevice, ValidationResult } from './base.discovery';
 import * as mqtt from 'mqtt';
 import crypto from 'crypto';
-import { getMqttAdapterRegistry, type ObservedTopic } from '../endpoints/mqtt/adapter.js';
 
 export interface MqttDiscoveryOptions {
   brokerUrl?: string;          // e.g., 'mqtt://mosquitto:1883'
@@ -58,16 +57,6 @@ export interface MqttDiscoveryOptions {
   monitorDurationMs?: number;  // Default: 30000 (30s)
   topicPatterns?: RegExp[];    // Expected topic patterns to parse
   qos?: 0 | 1 | 2;             // QoS for discovery subscription (default: 0)
-  observedTopics?: Array<{     // HYBRID: Topics observed by runtime adapter (outside 30s window)
-    topic: string;
-    firstSeen: Date;
-    lastSeen: Date;
-    messageCount: number;
-    hasLiveMessages: boolean;
-    retainedCount: number;
-    liveCount: number;
-    samplePayload?: string;
-  }>;
 }
 
 interface TopicData {
@@ -183,94 +172,8 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
     const monitorDurationMs = options?.monitorDurationMs || 30000;
     const qos = options?.qos ?? 0;
     
-    // HYBRID AUTO-DISCOVERY: If no observer data provided, try to get it from registry
-    // This matches Modbus/OPC-UA pattern - discovery is self-sufficient
-    let observedTopics = options?.observedTopics;
-    
-    if (!observedTopics) {
-      try {
-        const registry = getMqttAdapterRegistry();
-        const allAdapters = registry.getAllAdapters();
-        
-        this.logger?.infoSync(`Found ${allAdapters.length} MQTT adapter(s) in registry`, {
-          component: LogComponents.discovery + "] [" + this.protocol as any,
-          adapterCount: allAdapters.length
-        });
-        
-        const adapter = registry.getAdapter();
-        if (adapter) {
-          observedTopics = adapter.getRecentlyObservedTopics(60, 1);
-          this.logger?.infoSync(`Retrieved ${observedTopics.length} observed topics from running MQTT adapter`, {
-            component: LogComponents.discovery + "] [" + this.protocol as any,
-            observedCount: observedTopics.length,
-            topics: observedTopics.map(t => t.topic)
-          });
-        } else {
-          this.logger?.warnSync('No running MQTT adapter found in registry', {
-            component: LogComponents.discovery + "] [" + this.protocol as any,
-            protocol: this.protocol,
-            possibleCauses: [
-              'MQTT protocol not enabled in target state',
-              'MQTT adapter failed to start',
-              'Discovery running before adapter initialized',
-              'No MQTT endpoints configured'
-            ],
-            hint: 'Check for "MQTT Adapter started successfully" log or enable MQTT in protocols config'
-          });
-        }
-      } catch (error) {
-        this.logger?.errorSync('Failed to retrieve observer data from adapter', error as Error, {
-          component: LogComponents.discovery + "] [" + this.protocol as any
-        });
-      }
-    }
-    
-    // HYBRID: Pre-populate with observer-tracked topics (from runtime adapter)
-    // This solves "no data during 30s window" problem for low-frequency publishers
-    if (observedTopics && observedTopics.length > 0) {
-      this.logger?.infoSync(`Pre-populating with ${observedTopics.length} observer-tracked topics`, {
-        component: LogComponents.discovery + "] [" + this.protocol as any,
-        protocol: this.protocol,
-        observedCount: observedTopics.length,
-        topics: observedTopics.map(t => t.topic)
-      });
-      
-      for (const observed of observedTopics) {
-        // Convert observer format to discovery TopicData format
-        const topicData = {
-          topic: observed.topic,
-          payloads: observed.samplePayload ? [observed.samplePayload] : [],
-          messageCount: observed.messageCount,
-          liveMessageCount: observed.liveCount,
-          retainedMessageCount: observed.retainedCount,
-          hasLiveMessages: observed.hasLiveMessages,
-          firstSeen: observed.firstSeen,
-          lastSeen: observed.lastSeen,
-          parsedMetadata: this.parseTopicMetadata(observed.topic, options?.topicPatterns),
-          inferredDataType: observed.samplePayload ? this.inferDataType(observed.samplePayload) : 'string'
-        };
-        
-        this.discoveredTopics.set(observed.topic, topicData);
-        
-        this.logger?.infoSync(`Imported observer topic: ${observed.topic}`, {
-          component: LogComponents.discovery + "] [" + this.protocol as any,
-          liveCount: observed.liveCount,
-          retainedCount: observed.retainedCount,
-          lastSeen: observed.lastSeen,
-          dataType: topicData.inferredDataType
-        });
-      }
-      
-      this.logger?.infoSync(`Observer topics imported - now running 30s window to update/validate`, {
-        component: LogComponents.discovery + "] [" + this.protocol as any,
-        prePopulated: this.discoveredTopics.size
-      });
-    } else {
-      this.logger?.warnSync(`No observer topics provided - relying on 30s window only`, {
-        component: LogComponents.discovery + "] [" + this.protocol as any,
-        hint: 'Low-frequency publishers may be missed'
-      });
-    }
+    // No observer logic needed - discovery now handled by subscribing to discoveryRoots
+    // directly in the adapter (see adapter.ts saveDiscoveryRootsToDatabase)
 
     // 🚨 CRITICAL: Validate discovery roots for dangerous patterns
     const validation = validateDiscoveryRoots(discoveryRoots);

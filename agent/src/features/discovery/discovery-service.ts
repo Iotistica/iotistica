@@ -294,7 +294,7 @@ export class DiscoveryService extends EventEmitter {
 
     // Log special message for first boot discovery
     if (trigger === 'first_boot') {
-      this.logger?.infoSync('FIRST BOOT DISCOVERY: Running comprehensive device discovery scan with full validation', {
+      this.logger?.infoSync('Running device discovery scan with full validation', {
         component: LogComponents.discovery,
         traceId,
         validate,
@@ -898,19 +898,7 @@ export class DiscoveryService extends EventEmitter {
         options.qos = config.qos;
       }
       
-      // HYBRID: Include observer data if available
-      if (this.mqttObserverData && this.mqttObserverData.length > 0) {
-        options.observedTopics = this.mqttObserverData;
-        this.logger?.infoSync(`Including ${this.mqttObserverData.length} observer topics in MQTT discovery options`, {
-          component: LogComponents.discovery,
-          observedTopics: this.mqttObserverData.map(t => t.topic)
-        });
-      } else {
-        this.logger?.warnSync(`No observer data available for MQTT discovery`, {
-          component: LogComponents.discovery,
-          hint: 'Call setMqttObserverData() before discovery or ensure MQTT adapter is running'
-        });
-      }
+      // Observer data no longer used - discoveryRoots handle subscriptions
 
       return options;
     }
@@ -954,13 +942,7 @@ export class DiscoveryService extends EventEmitter {
       options.qos = parseInt(process.env.MQTT_DISCOVERY_QOS, 10) as 0 | 1 | 2;
     }
     
-    // HYBRID: Include observer data if available (same for legacy path)
-    if (this.mqttObserverData && this.mqttObserverData.length > 0) {
-      options.observedTopics = this.mqttObserverData;
-      this.logger?.debugSync(`Including ${this.mqttObserverData.length} observer topics in MQTT discovery`, {
-        component: LogComponents.discovery
-      });
-    }
+    // Observer data no longer used - discoveryRoots handle subscriptions
 
     return options;
   }

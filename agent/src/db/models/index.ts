@@ -23,3 +23,7 @@ export { MetadataModel } from './metadata.model';
 // Message buffer (offline queue for MQTT)
 export { MessageBufferModel } from './message-buffer.model';
 export type { MessageBufferRecord, BufferStats } from './message-buffer.model';
+
+// Dictionary persistence (MQTT key compression)
+export { DictionaryModel } from './dictionary.model';
+export type { DictionaryEntry, DictionaryDelta, DictionaryMetadata } from './dictionary.model';
