@@ -638,7 +638,7 @@ export class CloudLogBackend implements LogBackend {
 					
 					this.consecutiveSuccesses = 0;
 					
-					console.log(`[CloudLogBackend] Adaptive growth: ${Math.floor(oldSize)}→${Math.floor(this.adaptiveBatchSize)} logs, ${(oldBytes/1024/1024).toFixed(1)}→${(this.adaptiveMaxBytes/1024/1024).toFixed(1)}MB`);
+					// console.log(`[CloudLogBackend] Adaptive growth: ${Math.floor(oldSize)}→${Math.floor(this.adaptiveBatchSize)} logs, ${(oldBytes/1024/1024).toFixed(1)}→${(this.adaptiveMaxBytes/1024/1024).toFixed(1)}MB`);
 				}
 				
 				// Reset retry counters on success

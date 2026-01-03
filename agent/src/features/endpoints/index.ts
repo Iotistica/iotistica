@@ -109,7 +109,6 @@ export class SensorsFeature extends BaseFeature {
   protected async onStop(): Promise<void> {
     // Stop all adapters
     for (const [protocol, adapter] of this.adapters) {
-      this.logger.info(`Stopping ${protocol} adapter`);
       if (adapter && typeof adapter.stop === 'function') {
         await adapter.stop();
       }
@@ -118,7 +117,6 @@ export class SensorsFeature extends BaseFeature {
 
     // Stop all socket servers
     for (const [protocol, server] of this.socketServers) {
-      this.logger.info(`Stopping ${protocol} socket server`);
       await server.stop();
     }
     this.socketServers.clear();

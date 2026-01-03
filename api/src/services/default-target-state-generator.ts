@@ -190,15 +190,15 @@ export function generateDefaultTargetStateConfigV2(
         bufferCapacity: 64 * 1024, // 64KB - CAN bus messages
       },
       snmp: {
-        enabled: false,
+        enabled: true,
         port: 161,
-        ipRanges: [],
+        ipRanges: ["10.0.0.60"],
         bufferCapacity: 128 * 1024, // 128KB - SNMP trap messages
       },
       mqtt: {
         enabled: true,
         connection: {
-          brokerUrl: 'mqtt://10.0.0.60:1883',  // Default broker (can be overridden)
+          brokerUrl: 'mqtt://10.0.0.60:1883',
         },
         discoveryRoots: [
           'edge/+',
@@ -210,7 +210,7 @@ export function generateDefaultTargetStateConfigV2(
       },
       opcua: {
         enabled: true,
-        discoveryUrls: [],
+        discoveryUrls: ["opc.tcp://10.0.0.60:4840"],
         bufferCapacity: 1024 * 1024, // 1MB - Large OPC UA discovery messages
       },
       modbus: {

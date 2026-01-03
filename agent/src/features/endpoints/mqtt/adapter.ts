@@ -573,7 +573,7 @@ export class MqttAdapter extends EventEmitter {
       
       this.topicAccessOrder.push(topic);
       
-      this.logger.info(`✅ OBSERVER: New topic tracked: ${topic}`, {
+      this.logger.info(`OBSERVER: New topic tracked: ${topic}`, {
         retain,
         hasLiveMessages: !retain,
         totalObserved: this.observedTopics.size,
@@ -595,14 +595,7 @@ export class MqttAdapter extends EventEmitter {
     const recent = Array.from(this.observedTopics.values())
       .filter(t => t.lastSeen >= cutoff && t.liveCount >= minLiveMessages)
       .sort((a, b) => b.lastSeen.getTime() - a.lastSeen.getTime());
-    
-    this.logger.info(`📊 OBSERVER: getRecentlyObservedTopics() called`, {
-      maxAgeMinutes,
-      minLiveMessages,
-      totalObserved: this.observedTopics.size,
-      recentCount: recent.length,
-      recentTopics: recent.map(t => ({ topic: t.topic, liveCount: t.liveCount, lastSeen: t.lastSeen }))
-    });
+  
     
     return recent;
   }

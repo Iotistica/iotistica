@@ -15,6 +15,7 @@ export class SensorPublishFeature extends BaseFeature {
   private static readonly MAX_SENSORS = 10;
   
   private sensors: Sensor[] = [];
+  private agentLogger: AgentLogger;
 
   constructor(
     config: SensorPublishConfig & { enabled: boolean },
@@ -29,6 +30,7 @@ export class SensorPublishFeature extends BaseFeature {
       true, // Requires MQTT
       'SENSOR_PUBLISH_DEBUG'
     );
+    this.agentLogger = agentLogger;
   }
 
   /**
@@ -101,11 +103,42 @@ export class SensorPublishFeature extends BaseFeature {
       try {
         this.logger.debug(`Creating sensor '${config.name}' (${i + 1}/${sensorConfig.endpoints.length})`);
         
+        // Extract protocol from sensor name (e.g., 'modbus-pipe' -> 'modbus')
+        const protocol = config.name?.split('-')[0] || 'unknown';
+        
+        // Create protocol-aware logger wrapper
+        const protocolLogger = {
+          debug: (message: string, ...args: any[]) => {
+            this.agentLogger.debugSync(message, {
+              component: LogComponents.sensorPublish + "] [" + protocol as any,
+              ...args[0]
+            });
+          },
+          info: (message: string, ...args: any[]) => {
+            this.agentLogger.infoSync(message, {
+              component: LogComponents.sensorPublish + "] [" + protocol as any,
+              ...args[0]
+            });
+          },
+          warn: (message: string, ...args: any[]) => {
+            this.agentLogger.warnSync(message, {
+              component: LogComponents.sensorPublish + "] [" + protocol as any,
+              ...args[0]
+            });
+          },
+          error: (message: string, ...args: any[]) => {
+            this.agentLogger.errorSync(message, args[0] instanceof Error ? args[0] : undefined, {
+              component: LogComponents.sensorPublish + "] [" + protocol as any,
+              ...(args[0] instanceof Error ? args[1] : args[0])
+            });
+          }
+        };
+        
         // Create sensor
         const sensor = new Sensor(
           config,
           this.mqttConnection,
-          this.logger,
+          protocolLogger,
           this.deviceUuid
         );
         

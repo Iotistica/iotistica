@@ -358,14 +358,7 @@ export class DiscoveryService extends EventEmitter {
         }
         
         const discovered = await plugin.discover(pluginOptions);
-        
-        this.logger?.infoSync(`${protocol} plugin returned ${discovered.length} devices`, {
-          component: LogComponents.discovery,
-          traceId,
-          protocol,
-          deviceCount: discovered.length
-        });
-        
+     
         allDiscovered.push(...discovered);
 
         // Phase 2: Validation (optional)
@@ -682,11 +675,28 @@ export class DiscoveryService extends EventEmitter {
     // Helper to format URL (convert bare IP to opc.tcp://IP:4840)
     const formatOpcuaUrl = (url: string): string => {
       const trimmed = url.trim();
-      // Already a full URL
-      if (trimmed.startsWith('opc.tcp://') || trimmed.startsWith('opc.https://')) {
+      
+      // Already a full URL with port (e.g., opc.tcp://10.0.0.60:4840)
+      if ((trimmed.startsWith('opc.tcp://') || trimmed.startsWith('opc.https://')) && trimmed.includes(':', 10)) {
         return trimmed;
       }
-      // Bare IP or hostname - add protocol and default port
+      
+      // Has protocol but missing port (e.g., opc.tcp://10.0.0.60) - add default
+      if (trimmed.startsWith('opc.tcp://')) {
+        const host = trimmed.substring(10); // Remove 'opc.tcp://'
+        return `opc.tcp://${host}:4840`;
+      }
+      if (trimmed.startsWith('opc.https://')) {
+        const host = trimmed.substring(12); // Remove 'opc.https://'
+        return `opc.https://${host}:4840`;
+      }
+      
+      // Bare IP/hostname with port (e.g., 10.0.0.60:4840) - add protocol only
+      if (trimmed.includes(':')) {
+        return `opc.tcp://${trimmed}`;
+      }
+      
+      // Bare IP/hostname without port (e.g., 10.0.0.60) - add protocol and default port
       return `opc.tcp://${trimmed}:4840`;
     };
 

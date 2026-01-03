@@ -67,18 +67,18 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     
     if (dataPoints.length === 0) {
       this.logger?.warnSync(`No profile data points in config (profile: ${modbusConfig?.profile || 'unknown'})`, {
-        component: LogComponents.discovery
+        component: LogComponents.discovery + "] [" + this.protocol as any
       });
     } else {
       this.logger?.infoSync(`Using ${dataPoints.length} data points from profile '${modbusConfig?.profile}'`, {
-        component: LogComponents.discovery
+        component: LogComponents.discovery + "] [" + this.protocol as any
       });
     }
 
     const discovered: DiscoveredDevice[] = [];
 
     this.logger?.infoSync('Starting Modbus discovery', {
-      component: LogComponents.discovery,
+      component: LogComponents.discovery + "] [" + this.protocol as any,
       protocol: this.protocol,
       phase: 'discovery'
     });
@@ -93,7 +93,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 
     if (!isSerial && !isTCP) {
       this.logger?.warnSync('No Modbus connection specified', {
-        component: LogComponents.discovery
+        component: LogComponents.discovery + "] [" + this.protocol as any
       });
       return [];
     }
@@ -104,13 +104,13 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 
       if (!this.connection?.isOpen) {
         this.logger?.warnSync('Failed to open Modbus connection', {
-          component: LogComponents.discovery
+          component: LogComponents.discovery + "] [" + this.protocol as any
         });
         return [];
       }
 
-      this.logger?.infoSync('Modbus connection established, scanning slave IDs', {
-        component: LogComponents.discovery,
+      this.logger?.debugSync('Modbus connection established, scanning slave IDs', {
+        component: LogComponents.discovery + "] [" + this.protocol as any,
         range: slaveIdRange,
         type: this.connection.type
       });
@@ -153,16 +153,16 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
               }
             });
 
-            this.logger?.infoSync(`Discovered Modbus slave ${slaveId}`, {
-              component: LogComponents.discovery,
+            this.logger?.debugSync(`Discovered Modbus slave ${slaveId}`, {
+              component: LogComponents.discovery + "] [" + this.protocol as any,
               phase: 'discovery',
               method: deviceInfo.method
             });
           }
         } catch (error) {
           // Use infoSync for visibility - important to know which slaves are offline
-          this.logger?.infoSync(`No response from slave ${slaveId} (offline or not configured)`, {
-            component: LogComponents.discovery,
+          this.logger?.warnSync(`No response from slave ${slaveId} (offline or not configured)`, {
+            component: LogComponents.discovery + "] [" + this.protocol as any,
             slaveId,
             error: (error as Error).message
           });
@@ -174,7 +174,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     }
 
     this.logger?.infoSync(`Modbus discovery complete: ${discovered.length} devices`, {
-      component: LogComponents.discovery,
+      component: LogComponents.discovery + "] [" + this.protocol as any,
       phase: 'discovery',
       deviceCount: discovered.length
     });
@@ -188,7 +188,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
    */
   async validate(device: DiscoveredDevice, timeout = 2000): Promise<ValidationResult> {
     this.logger?.infoSync('Validating Modbus device and profile config', {
-      component: LogComponents.discovery,
+      component: LogComponents.discovery + "] [" + this.protocol as any,
       slaveId: device.metadata?.slaveId,
       phase: 'validation',
       dataPointsCount: device.dataPoints?.length || 0
@@ -227,7 +227,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     
     if (safePoints.length === 0) {
       this.logger?.warnSync('No safe data points to validate', {
-        component: LogComponents.discovery,
+        component: LogComponents.discovery + "] [" + this.protocol as any,
         slaveId: device.metadata?.slaveId,
         totalPoints: total,
         note: 'All data points marked unsafe or no safe flag set'
@@ -287,7 +287,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
           } catch (error) {
             errorCount++;
             this.logger?.debugSync(`Failed to read ${point.name} at address ${point.address}`, {
-              component: LogComponents.discovery,
+              component: LogComponents.discovery + "] [" + this.protocol as any,
               error: (error as Error).message
             });
           }
@@ -377,7 +377,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     }
 
     this.logger?.infoSync('Profile validation complete', {
-      component: LogComponents.discovery,
+      component: LogComponents.discovery + "] [" + this.protocol as any,
       slaveId: device.metadata?.slaveId,
       result,
       state,  // idle | active | unknown
@@ -465,7 +465,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
         client.close();
       } catch (closeError) {
         this.logger?.debugSync('Error closing validation client', {
-          component: LogComponents.discovery,
+          component: LogComponents.discovery + "] [" + this.protocol as any,
           error: (closeError as Error).message
         });
       }
@@ -527,7 +527,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
         };
 
         this.logger?.debugSync('Opened Modbus RTU connection', {
-          component: LogComponents.discovery,
+          component: LogComponents.discovery + "] [" + this.protocol as any,
           phase: 'discovery',
           port: options!.serialPort,
           baudRate: options?.baudRate || 9600
@@ -566,14 +566,14 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
       try {
         this.connection.client.close(() => {
           this.logger?.debugSync('Closed Modbus connection', {
-            component: LogComponents.discovery,
+            component: LogComponents.discovery + "] [" + this.protocol as any,
             phase: 'discovery',
             type: this.connection?.type
           });
         });
       } catch (error) {
         this.logger?.warnSync('Error closing Modbus connection', {
-          component: LogComponents.discovery,
+          component: LogComponents.discovery + "] [" + this.protocol as any,
           error: (error as Error).message
         });
       } finally {
@@ -610,7 +610,7 @@ private async testSlaveId(
   ]).catch(err => {
     this.logger?.debugSync(
       `Slave ${slaveId}: MEI failed or timed out: ${String(err?.message || err)}`,
-      { component: LogComponents.discovery }
+      { component: LogComponents.discovery + "] [" + this.protocol as any }
     );
     return null;
   });
@@ -644,10 +644,11 @@ private async testSlaveId(
   } catch (err: any) {
     this.logger?.debugSync(
       `Slave ${slaveId}: no response on fallback read: ${String(err?.message || err)}`,
-      { component: LogComponents.discovery }
+      { component: LogComponents.discovery + "] [" + this.protocol as any }
     );
     return null;
   }
 }
 
 }
+

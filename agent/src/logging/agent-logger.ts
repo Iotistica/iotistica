@@ -34,6 +34,7 @@ const COLORS = {
 	
 	// Component colors
 	component: '\x1b[35m', // Magenta
+	protocol: '\x1b[96m',  // Bright Cyan
 	timestamp: '\x1b[90m', // Gray
 };
 
@@ -197,7 +198,20 @@ export class AgentLogger {
 		const levelColor = COLORS[level];
 		const levelText = level.toUpperCase().padEnd(5); // Pad to align columns
 		
-		const prefix = `${COLORS.timestamp}${timestamp}${COLORS.reset} ${levelColor}[${levelText}]${COLORS.reset} ${COLORS.component}[${component}]${COLORS.reset}`;
+		// Check if component has protocol suffix (e.g., "EndpointsDiscovery] [mqtt")
+		let componentFormatted: string;
+		const protocolMatch = component.match(/^(.+)\] \[(.+)$/);
+		if (protocolMatch) {
+			// Component has protocol suffix - color them separately
+			const baseComponent = protocolMatch[1];
+			const protocol = protocolMatch[2];
+			componentFormatted = `${COLORS.component}[${baseComponent}]${COLORS.reset} ${COLORS.protocol}[${protocol}]${COLORS.reset}`;
+		} else {
+			// Regular component - single color
+			componentFormatted = `${COLORS.component}[${component}]${COLORS.reset}`;
+		}
+		
+		const prefix = `${COLORS.timestamp}${timestamp}${COLORS.reset} ${levelColor}[${levelText}]${COLORS.reset} ${componentFormatted}`;
 
 		// Format message
 		let output = `${prefix} ${message}`;

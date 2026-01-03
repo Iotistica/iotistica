@@ -192,24 +192,22 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
         const registry = getMqttAdapterRegistry();
         const allAdapters = registry.getAllAdapters();
         
-        this.logger?.infoSync(`🔍 REGISTRY CHECK: Found ${allAdapters.length} MQTT adapter(s) in registry`, {
-          component: LogComponents.discovery,
-          protocol: this.protocol,
+        this.logger?.infoSync(`Found ${allAdapters.length} MQTT adapter(s) in registry`, {
+          component: LogComponents.discovery + "] [" + this.protocol as any,
           adapterCount: allAdapters.length
         });
         
         const adapter = registry.getAdapter();
         if (adapter) {
           observedTopics = adapter.getRecentlyObservedTopics(60, 1);
-          this.logger?.infoSync(`📡 AUTO: Retrieved ${observedTopics.length} observed topics from running MQTT adapter`, {
-            component: LogComponents.discovery,
-            protocol: this.protocol,
+          this.logger?.infoSync(`Retrieved ${observedTopics.length} observed topics from running MQTT adapter`, {
+            component: LogComponents.discovery + "] [" + this.protocol as any,
             observedCount: observedTopics.length,
             topics: observedTopics.map(t => t.topic)
           });
         } else {
-          this.logger?.warnSync('❌ No running MQTT adapter found in registry', {
-            component: LogComponents.discovery,
+          this.logger?.warnSync('No running MQTT adapter found in registry', {
+            component: LogComponents.discovery + "] [" + this.protocol as any,
             protocol: this.protocol,
             possibleCauses: [
               'MQTT protocol not enabled in target state',
@@ -222,7 +220,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
         }
       } catch (error) {
         this.logger?.errorSync('Failed to retrieve observer data from adapter', error as Error, {
-          component: LogComponents.discovery
+          component: LogComponents.discovery + "] [" + this.protocol as any
         });
       }
     }
@@ -231,7 +229,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
     // This solves "no data during 30s window" problem for low-frequency publishers
     if (observedTopics && observedTopics.length > 0) {
       this.logger?.infoSync(`Pre-populating with ${observedTopics.length} observer-tracked topics`, {
-        component: LogComponents.discovery,
+        component: LogComponents.discovery + "] [" + this.protocol as any,
         protocol: this.protocol,
         observedCount: observedTopics.length,
         topics: observedTopics.map(t => t.topic)
@@ -255,7 +253,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
         this.discoveredTopics.set(observed.topic, topicData);
         
         this.logger?.infoSync(`Imported observer topic: ${observed.topic}`, {
-          component: LogComponents.discovery,
+          component: LogComponents.discovery + "] [" + this.protocol as any,
           liveCount: observed.liveCount,
           retainedCount: observed.retainedCount,
           lastSeen: observed.lastSeen,
@@ -264,12 +262,12 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
       }
       
       this.logger?.infoSync(`Observer topics imported - now running 30s window to update/validate`, {
-        component: LogComponents.discovery,
+        component: LogComponents.discovery + "] [" + this.protocol as any,
         prePopulated: this.discoveredTopics.size
       });
     } else {
       this.logger?.warnSync(`No observer topics provided - relying on 30s window only`, {
-        component: LogComponents.discovery,
+        component: LogComponents.discovery + "] [" + this.protocol as any,
         hint: 'Low-frequency publishers may be missed'
       });
     }
@@ -280,7 +278,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
     if (!validation.valid) {
       const errorMsg = `Invalid MQTT discovery configuration:\n${validation.errors.join('\n')}`;
       this.logger?.errorSync(errorMsg, undefined, {
-        component: LogComponents.discovery
+        component: LogComponents.discovery + "] [" + this.protocol as any
       });
       throw new Error(errorMsg);
     }
@@ -289,13 +287,13 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
     if (validation.warnings.length > 0) {
       for (const warning of validation.warnings) {
         this.logger?.warnSync(warning, {
-          component: LogComponents.discovery
+          component: LogComponents.discovery + "] [" + this.protocol as any
         });
       }
     }
 
     this.logger?.infoSync('Starting MQTT discovery', {
-      component: LogComponents.discovery,
+      component: LogComponents.discovery + "] [" + this.protocol as any,
       protocol: this.protocol,
       phase: 'discovery',
       brokerUrl,
@@ -317,7 +315,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           this.logger?.errorSync('MQTT connection timeout - broker unreachable', undefined, {
-            component: LogComponents.discovery,
+            component: LogComponents.discovery + "] [" + this.protocol as any,
             brokerUrl,
             timeout: '5000ms',
             hint: 'Check if broker is running and accessible from agent container'
@@ -328,7 +326,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
         this.client!.on('connect', () => {
           clearTimeout(timeout);
           this.logger?.infoSync('Connected to MQTT broker for discovery', {
-            component: LogComponents.discovery,
+            component: LogComponents.discovery + "] [" + this.protocol as any,
             brokerUrl
           });
           resolve();
@@ -337,7 +335,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
         this.client!.on('error', (err) => {
           clearTimeout(timeout);
           this.logger?.errorSync('MQTT connection error', err, {
-            component: LogComponents.discovery,
+            component: LogComponents.discovery + "] [" + this.protocol as any,
             brokerUrl,
             error: err.message
           });
@@ -352,12 +350,12 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
           this.client!.subscribe(root, { qos }, (err) => {
             if (err) {
               this.logger?.errorSync(`Failed to subscribe to ${root}`, err, {
-                component: LogComponents.discovery
+                component: LogComponents.discovery + "] [" + this.protocol as any
               });
               reject(err);
             } else {
-              this.logger?.infoSync(`✓ Subscribed to discovery root: ${root}`, {
-                component: LogComponents.discovery
+              this.logger?.infoSync(`Subscribed to discovery root: ${root}`, {
+                component: LogComponents.discovery + "] [" + this.protocol as any
               });
               resolve();
             }
@@ -366,7 +364,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
       }
 
       this.logger?.infoSync(`Monitoring ${discoveryRoots.length} discovery roots for ${monitorDurationMs}ms`, {
-        component: LogComponents.discovery,
+        component: LogComponents.discovery + "] [" + this.protocol as any,
         rootCount: discoveryRoots.length
       });
 
@@ -387,7 +385,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
       const retainedOnlyCount = retainedOnlyTopics.length;
 
       this.logger?.infoSync(`Discovery complete - found ${totalTopics} active topics`, {
-        component: LogComponents.discovery,
+        component: LogComponents.discovery + "] [" + this.protocol as any,
         topicCount: totalTopics,
         liveTopics: totalTopics - retainedOnlyCount,
         retainedOnlyTopics: retainedOnlyCount
@@ -398,7 +396,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
         this.logger?.warnSync(
           `Found ${retainedOnlyCount} topic(s) with only retained messages - publishers may be offline`,
           {
-            component: LogComponents.discovery,
+            component: LogComponents.discovery + "] [" + this.protocol as any,
             retainedOnlyTopics: retainedOnlyTopics.map(t => t.topic).slice(0, 10), // First 10
             recommendation: 'Verify publishers are active before enabling these endpoints'
           }
@@ -412,7 +410,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
       this.logger?.errorSync(
         'MQTT discovery failed',
         error as Error,
-        { component: LogComponents.discovery }
+        { component: LogComponents.discovery + "] [" + this.protocol as any }
       );
 
       if (this.client) {
@@ -497,7 +495,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
       this.discoveredTopics.set(topic, topicData);
 
       this.logger?.debugSync(`New topic discovered: ${topic} (retained: ${isRetained})`, {
-        component: LogComponents.discovery,
+        component: LogComponents.discovery + "] [" + this.protocol as any,
         metadata: topicData.parsedMetadata,
         dataType: topicData.inferredDataType,
         isCompound: topicData.isCompoundTopic,
@@ -751,7 +749,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
     const topic = (device.connection as any).topic;
 
     this.logger?.infoSync(`Validating MQTT topic: ${topic}`, {
-      component: LogComponents.discovery,
+      component: LogComponents.discovery + "] [" + this.protocol as any,
       protocol: this.protocol,
       phase: 'validation'
     });
@@ -791,7 +789,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
           // ❌ Don't fail healthy devices that publish every 60s or on-change
           if (messages.length >= minMessages) {
             this.logger?.debugSync(`Validation timeout reached with ${messages.length} messages (acceptable for low-rate publisher)`, {
-              component: LogComponents.discovery,
+              component: LogComponents.discovery + "] [" + this.protocol as any,
               topic
             });
             resolve(); // Partial validation OK
@@ -864,7 +862,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
       }
 
       this.logger?.infoSync(`Validation complete for ${topic}`, {
-        component: LogComponents.discovery,
+        component: LogComponents.discovery + "] [" + this.protocol as any,
         messageCount: messages.length,
         liveCount,
         retainedCount,
@@ -902,7 +900,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
       this.logger?.errorSync(
         `Validation failed for ${topic}`,
         error as Error,
-        { component: LogComponents.discovery }
+        { component: LogComponents.discovery + "] [" + this.protocol as any }
       );
 
       return {
@@ -937,3 +935,10 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
     }
   }
 }
+
+
+
+
+
+
+

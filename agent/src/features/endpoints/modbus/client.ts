@@ -121,26 +121,6 @@ export class ModbusClient {
             throw new Error('TCP connection requires host');
           }
           await this.client.connectTCP(connection.host, { port: connection.port });
-          
-          // CRITICAL: Enable TCP keepalive to detect half-open connections
-          // Without this, device reboots leave socket in limbo (no close/error events)
-          const socket = (this.client as any)._client?.socket;
-
-          if (socket) {
-            socket.setKeepAlive(true, 10_000); // 10s idle → keepalive probes
-            socket.setNoDelay(true);          // disable Nagle
-
-            this.logger.debug(
-              `TCP socket options configured for ${this.device.name}: ` +
-              `keepAlive=true (10s), noDelay=true, ` +
-              `localAddress=${socket.localAddress}:${socket.localPort}`
-            );
-          } else {
-            this.logger.warn(
-              `Failed to access TCP socket for ${this.device.name} - keepalive NOT configured! ` +
-              `This may cause issues detecting device reboots.`
-            );
-          }
 
           break;
           
@@ -186,12 +166,8 @@ export class ModbusClient {
       this.consecutiveFailures = 0;
       this.lastConnectionSuccess = Date.now();
       
-      const keepaliveStatus = connection.type === ModbusConnectionType.TCP 
-        ? ` [TCP keepalive enabled, client.isOpen=${this.client.isOpen}]`
-        : ` [client.isOpen=${this.client.isOpen}]`;
-      
       this.logger.debug(
-        `[RECOVERY] Connected to ${this.device.name} (slave ${this.device.slaveId}, timeout ${timeout}ms)${keepaliveStatus}`
+        `[RECOVERY] Connected to ${this.device.name} (slave ${this.device.slaveId}, timeout ${timeout}ms, client.isOpen=${this.client.isOpen})`
       );
       
     } catch (error) {

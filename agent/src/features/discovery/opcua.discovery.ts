@@ -35,14 +35,14 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
     // Skip if no URLs configured
     if (discoveryUrls.length === 0) {
       this.logger?.debugSync('OPC-UA discovery skipped - no URLs configured', {
-        component: LogComponents.discovery,
+        component: LogComponents.discovery + "] [" + this.protocol as any,
         protocol: this.protocol
       });
       return [];
     }
 
     this.logger?.infoSync('Starting OPC-UA discovery', {
-      component: LogComponents.discovery,
+      component: LogComponents.discovery + "] [" + this.protocol as any,
       protocol: this.protocol,
       phase: 'discovery'
     });
@@ -80,7 +80,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
             // Protection against infinite loops
             if (depth > maxDepth) {
               this.logger?.warnSync(`Max depth ${maxDepth} reached, stopping recursion`, {
-                component: LogComponents.discovery,
+                component: LogComponents.discovery + "] [" + this.protocol as any,
                 path: pathSegments.join('/')
               });
               return;
@@ -119,14 +119,14 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
                     });
                     
                     this.logger?.debugSync(`Discovered variable: ${currentPath.join('/')}`, {
-                      component: LogComponents.discovery,
+                      component: LogComponents.discovery + "] [" + this.protocol as any,
                       nodeId: childNodeId,
                       depth
                     });
                   } else if (actualNodeClass === 1) {
                     // Verified folder - recurse into it
                     this.logger?.debugSync(`Browsing into folder: ${currentPath.join('/')}`, {
-                      component: LogComponents.discovery,
+                      component: LogComponents.discovery + "] [" + this.protocol as any,
                       nodeId: childNodeId,
                       depth
                     });
@@ -136,7 +136,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
                 } catch (readError) {
                   // If we can't read NodeClass, skip this node
                   this.logger?.debugSync(`Skipping node (cannot read NodeClass): ${currentPath.join('/')}`, {
-                    component: LogComponents.discovery,
+                    component: LogComponents.discovery + "] [" + this.protocol as any,
                     nodeId: childNodeId,
                     error: readError instanceof Error ? readError.message : String(readError)
                   });
@@ -144,7 +144,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
               }
             } catch (browseError) {
               this.logger?.debugSync(`Failed to browse node: ${pathSegments.join('/')}`, {
-                component: LogComponents.discovery,
+                component: LogComponents.discovery + "] [" + this.protocol as any,
                 error: browseError instanceof Error ? browseError.message : String(browseError),
                 depth
               });
@@ -156,7 +156,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
           await browseRecursive(ObjectsNodeId, [], 0);
         } catch (browseError) {
           this.logger?.warnSync('Failed to browse OPC UA tree recursively, using default node', {
-            component: LogComponents.discovery,
+            component: LogComponents.discovery + "] [" + this.protocol as any,
             error: browseError instanceof Error ? browseError.message : String(browseError)
           });
           
@@ -172,7 +172,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
         }
         
         this.logger?.infoSync(`OPC UA recursive tree browsing complete: discovered ${dataPoints.length} nodes`, {
-          component: LogComponents.discovery,
+          component: LogComponents.discovery + "] [" + this.protocol as any,
           url,
           dataPointCount: dataPoints.length
         });
@@ -218,14 +218,14 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
           });
 
           this.logger?.infoSync(`Discovered OPC-UA endpoint at ${url}`, {
-            component: LogComponents.discovery,
+            component: LogComponents.discovery + "] [" + this.protocol as any,
             endpoints: endpoints.length,
             phase: 'discovery'
           });
         }
       } catch (error) {
         this.logger?.debugSync(`No OPC-UA server at ${url}`, {
-          component: LogComponents.discovery
+          component: LogComponents.discovery + "] [" + this.protocol as any
         });
       }
     }
@@ -238,7 +238,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
    */
   async validate(device: DiscoveredDevice, timeout = 5000): Promise<any> {
     this.logger?.infoSync('Validating OPC-UA server', {
-      component: LogComponents.discovery,
+      component: LogComponents.discovery + "] [" + this.protocol as any,
       endpoint: device.connection.endpointUrl,
       phase: 'validation'
     });
@@ -263,3 +263,4 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
     }
   }
 }
+

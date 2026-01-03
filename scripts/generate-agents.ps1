@@ -111,28 +111,29 @@ function Remove-AgentResources {
     $imageNames = @()
     $networkNames = @()
     
+    # Core service containers (shared, add once)
+    $containerNames += "core-services_mosquitto_1"
+    $containerNames += "core-services_nodered_2"
+    
+    # Core service volumes (shared, add once)
+    $volumeNames += "1000_mosquitto-data"
+    $volumeNames += "1000_mosquitto-config"
+    $volumeNames += "1000_mosquitto-log"
+    $volumeNames += "1000_nodered-data"
+    
+    # Core service networks (shared, add once)
+    $networkNames += "1000_default"
+    
     for ($i = $StartIndex; $i -le $endIndex; $i++) {
         # Agent container
         $containerNames += "agent-$i"
         
-        # Core service containers (mosquitto, nodered)
-        $containerNames += "core-services_mosquitto_1"
-        $containerNames += "core-services_nodered_2"
-        
         # Agent volumes
         $volumeNames += "zemfyre-sensor_agent-$i-data"
         
-        # Core service volumes (app ID 1000)
-        $volumeNames += "1000_mosquitto-data"
-        $volumeNames += "1000_mosquitto-config"
-        $volumeNames += "1000_mosquitto-log"
-        $volumeNames += "1000_nodered-data"
-        
-        # Agent images
-        $imageNames += "zemfyre-sensor-agent-$i:latest"
-        
-        # Core service networks (app ID 1000)
-        $networkNames += "1000_default"
+        # Agent images - use explicit string formatting to ensure proper expansion
+        $imageName = "zemfyre-sensor-agent-{0}:latest" -f $i
+        $imageNames += $imageName
     }
     
     # Stop and remove containers
@@ -197,12 +198,21 @@ function Remove-AgentResources {
     Write-Host "`n🖼️  Removing agent images..." -ForegroundColor Cyan
     $removedCount = 0
     foreach ($image in $imageNames) {
-        $result = docker rmi $image 2>&1
-        if ($?) {
-            $removedCount++
-            if ($removedCount % 10 -eq 0) {
-                Write-Host "  Removed $removedCount images..." -ForegroundColor Gray
+        try {
+            # Force remove image (even if containers exist)
+            $result = docker rmi -f $image 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                $removedCount++
+                if ($removedCount % 10 -eq 0) {
+                    Write-Host "  Removed $removedCount images..." -ForegroundColor Gray
+                }
+            } else {
+                Write-Host "  ⚠️  Failed to remove image: $image" -ForegroundColor Yellow
+                Write-Host "     Error: $result" -ForegroundColor Gray
             }
+        }
+        catch {
+            Write-Host "  ⚠️  Error removing image $image : $_" -ForegroundColor Yellow
         }
     }
     Write-Host "  ✅ Removed $removedCount agent images" -ForegroundColor Green
