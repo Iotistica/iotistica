@@ -570,7 +570,8 @@ Requires=docker.service
 Wants=network-online.target
 
 [Service]
-Type=simple
+# CRITICAL: Type=notify enables watchdog integration
+Type=notify
 User=iotistic
 Group=iotistic
 WorkingDirectory=/opt/iotistic/agent
@@ -580,21 +581,25 @@ Environment=DEPLOYMENT_TYPE=systemd
 
 ExecStart=$NODE_PATH $APP_JS_PATH
 
+# Restart policy (automatic recovery from failures)
 Restart=always
-RestartSec=10
-WatchdogSec=30
+RestartSec=5
 
-# Systemd notifications (watchdog, ready signals)
-NotifyAccess=all
+# Watchdog configuration (health-gated automatic restart)
+WatchdogSec=30
+NotifyAccess=main
+
+# Graceful shutdown timeout (kill misbehaving services)
+TimeoutStopSec=20
 
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=iotistic-agent
 
-# Security hardening
+# Security hardening (production recommended)
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
+ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/iotistic /var/log/iotistic /opt/iotistic/agent /var/run/docker.sock
 CapabilityBoundingSet=
@@ -602,11 +607,12 @@ LockPersonality=true
 MemoryAccounting=true
 CPUAccounting=true
 
-# Resource limits
+# Resource limits (prevent memory leaks from killing device)
 LimitNOFILE=65536
 LimitNPROC=65536
-MemoryMax=1G
-TasksMax=infinity
+MemoryMax=300M
+TasksMax=512
+CPUQuota=80%
 
 [Install]
 WantedBy=multi-user.target

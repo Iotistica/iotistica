@@ -349,6 +349,28 @@ function getAdaptiveSurvivorThreshold(): number {
 }
 
 /**
+ * Calculate adaptive survivor monotonic tolerance
+ * Small heaps: 3% (stricter - less noise)
+ * Large heaps: 7% (more lenient - more measurement variance)
+ */
+function getSurvivorMonotonicTolerance(): number {
+	const baselineHeapMB = baselineHeap / (1024 * 1024);
+	
+	// Small heaps (< 100 MB): 3% tolerance
+	if (baselineHeapMB < 100) {
+		return 0.97; // 3% dip allowed
+	}
+	
+	// Large heaps (> 200 MB): 7% tolerance
+	if (baselineHeapMB > 200) {
+		return 0.93; // 7% dip allowed
+	}
+	
+	// Medium heaps: 5% tolerance (default)
+	return 0.95;
+}
+
+/**
  * Calculate heap growth trend (MB per minute) using linear regression
  * Returns slope of best-fit line through all samples
  * 
@@ -529,10 +551,11 @@ function calculateSurvivorGrowthRate(): { rate: number; isMonotonic: boolean; re
 	if (windows.length < 2) return null;
 	
 	// Check if floor is rising monotonically (true leak signal)
-	// Allow small dips (5% tolerance) to handle measurement noise
+	// Adaptive tolerance: 3% (small heaps), 5% (medium), 7% (large)
+	const tolerance = getSurvivorMonotonicTolerance();
 	let isMonotonic = true;
 	for (let i = 1; i < windows.length; i++) {
-		if (windows[i].minHeap < windows[i - 1].minHeap * 0.95) {
+		if (windows[i].minHeap < windows[i - 1].minHeap * tolerance) {
 			isMonotonic = false;
 			break;
 		}
@@ -615,6 +638,7 @@ function updateSurvivorBaseline(currentHeap: number): void {
 
 /**
  * Check if heap has been stable (no significant growth) recently
+ * Netflix pattern: Requires BOTH low variance AND near-zero slope
  */
 function isHeapStable(): boolean {
 	if (heapSamples.length < 5) return false;
@@ -634,7 +658,14 @@ function isHeapStable(): boolean {
 	
 	// Stable if std deviation < 2MB
 	const stableMB = 2 * 1024 * 1024;
-	return stdDev < stableMB;
+	if (stdDev >= stableMB) return false;
+	
+	// CRITICAL: Also require near-zero slope (Netflix pattern)
+	// Low variance alone can mask slow linear leaks (0.3 MB/min = consistent = low variance ❌)
+	const growthRate = calculateHeapGrowthRate();
+	if (growthRate !== null && growthRate > 0.1) return false;
+	
+	return true;
 }
 
 /**

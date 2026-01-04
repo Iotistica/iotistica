@@ -75,7 +75,7 @@ export default class DeviceAgent {
   private cloudSync?: CloudSync;
   private bufferSync?: import('./sync/buffer-sync').MessageBufferSync; // Local message data queue for offline MQTT
   private logMonitor?: ContainerLogMonitor;
-  private agentLogger!: AgentLogger; // Structured logging for agent-level events
+  public agentLogger!: AgentLogger; // Structured logging for agent-level events (public for external access)
   private firewall?: AgentFirewall; // Network firewall protection
   private updater?: AgentUpdater; // Agent self-update handler
   private featureInitializer?: FeatureInitializer;

@@ -50,18 +50,15 @@ export class DictionaryModel {
   static async loadDictionary(): Promise<Map<string, number>> {
     const knex = getKnex();
     
-    console.log('[DictionaryModel] Loading dictionary from database...');
-    
+  
     const entries = await knex(this.ENTRIES_TABLE)
       .select('field_name', 'field_index')
       .orderBy('field_index', 'asc');
     
-    console.log(`[DictionaryModel] Loaded ${entries.length} dictionary entries`);
-    
+
     const dictionary = new Map<string, number>();
     for (const entry of entries) {
       dictionary.set(entry.field_name, entry.field_index);
-      console.log(`[DictionaryModel]   ${entry.field_name} -> ${entry.field_index}`);
     }
     
     return dictionary;
