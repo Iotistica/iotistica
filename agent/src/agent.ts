@@ -1489,4 +1489,44 @@ export default class DeviceAgent {
   public getDeviceAPI(): DeviceAPI {
     return this.deviceAPI;
   }
+
+  /**
+   * Check if agent is fully operational and ready for systemd READY=1
+   * 
+   * This is a strict readiness check - all critical subsystems must be initialized
+   * and operational before systemd considers the service "ready".
+   * 
+   * READY=1 semantics: "Restarting me after this point is meaningful"
+   * 
+   * @returns true if all critical components are operational
+   */
+  public isFullyOperational(): boolean {
+    // Critical components that MUST be operational for READY=1
+    const checks = {
+      database: !!this.stateReconciler,
+      logging: !!this.agentLogger,
+      deviceInfo: !!this.deviceInfo,
+      deviceAPI: !!this.deviceAPI,
+      containerManager: !!this.containerManager,
+      // MQTT is critical only if device is provisioned
+      mqtt: !this.deviceInfo?.provisioned || !!MqttManager.getInstance()?.isConnected(),
+      // CloudSync is critical only if device is provisioned
+      cloudSync: !this.deviceInfo?.provisioned || !!this.cloudSync
+    };
+
+    // Check all critical components
+    for (const [component, operational] of Object.entries(checks)) {
+      if (!operational) {
+        this.agentLogger?.warnSync('Agent not fully operational - missing critical component', {
+          component: LogComponents.agent,
+          operation: 'isFullyOperational',
+          missingComponent: component,
+          checks
+        });
+        return false;
+      }
+    }
+
+    return true;
+  }
 }

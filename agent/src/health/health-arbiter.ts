@@ -49,6 +49,12 @@ export interface SubsystemOptions {
   description?: string;
   /** Check interval in milliseconds (default: 30s) */
   checkIntervalMs?: number;
+  /** 
+   * Cooldown period (ms) before allowing recovery after failure
+   * Prevents flapping subsystems from masking failures
+   * Default: 30s for critical, 0 for non-critical
+   */
+  recoveryCooldownMs?: number;
 }
 
 /**
@@ -64,6 +70,9 @@ interface SubsystemHealth {
   lastError?: string;
   consecutiveFailures: number;
   checkIntervalMs: number;
+  recoveryCooldownMs: number;
+  lastFailureTime: number; // Timestamp of last failure (for cooldown enforcement)
+  latched: boolean; // If true, subsystem is permanently failed until restart
 }
 
 /**
@@ -89,11 +98,18 @@ export interface HealthReport {
  * 
  * Manages health state for all agent subsystems.
  * Single source of truth for watchdog and telemetry.
+ * 
+ * Edge semantics (fail-fast over limp mode):
+ * - Critical subsystem failures are latched permanently
+ * - Cooldown periods prevent flapping
+ * - Explicit markFatal() for unrecoverable errors
  */
 export class HealthArbiter {
   private subsystems = new Map<string, SubsystemHealth>();
   private checkInterval: NodeJS.Timeout | null = null;
   private readonly DEFAULT_CHECK_INTERVAL_MS = 30000; // 30 seconds
+  private readonly DEFAULT_CRITICAL_COOLDOWN_MS = 30000; // 30s cooldown for critical subsystems
+  private fatalError: string | null = null; // Tracks fatal errors (unhandled rejections, etc.)
   
   constructor(private logger?: AgentLogger) {}
   
@@ -117,7 +133,12 @@ export class HealthArbiter {
     checkFn: SubsystemCheckFn,
     options: SubsystemOptions = {}
   ): void {
-    const { critical = false, description, checkIntervalMs = this.DEFAULT_CHECK_INTERVAL_MS } = options;
+    const { 
+      critical = false, 
+      description, 
+      checkIntervalMs = this.DEFAULT_CHECK_INTERVAL_MS,
+      recoveryCooldownMs = critical ? this.DEFAULT_CRITICAL_COOLDOWN_MS : 0
+    } = options;
     
     if (this.subsystems.has(name)) {
       this.logger?.warnSync('Subsystem already registered - replacing', {
@@ -135,7 +156,10 @@ export class HealthArbiter {
       healthy: false, // Start as unhealthy until first check
       lastCheck: 0,
       consecutiveFailures: 0,
-      checkIntervalMs
+      checkIntervalMs,
+      recoveryCooldownMs,
+      lastFailureTime: 0,
+      latched: false
     });
     
     this.logger?.infoSync('Subsystem registered', {
@@ -143,6 +167,7 @@ export class HealthArbiter {
       operation: 'registerSubsystem',
       subsystem: name,
       critical,
+      recoveryCooldownMs,
       description
     });
     
@@ -167,6 +192,11 @@ export class HealthArbiter {
   /**
    * Check health of a specific subsystem
    * 
+   * Edge semantics:
+   * - Critical subsystem failures are latched (permanent until restart)
+   * - Recovery cooldown prevents flapping
+   * - Fail-fast over limp mode
+   * 
    * @param name - Subsystem name
    * @returns true if healthy, false otherwise
    */
@@ -181,12 +211,41 @@ export class HealthArbiter {
       return false;
     }
     
+    // If subsystem is latched, it's permanently failed
+    if (subsystem.latched) {
+      this.logger?.debugSync('Subsystem check skipped - permanently latched', {
+        component: LogComponents.agent,
+        operation: 'checkSubsystem',
+        subsystem: name,
+        critical: subsystem.critical
+      });
+      return false;
+    }
+    
     try {
       const healthy = await subsystem.checkFn();
       const now = Date.now();
       
       // State transition: unhealthy → healthy
       if (healthy && !subsystem.healthy) {
+        // Enforce cooldown period for critical subsystems (prevents flapping)
+        if (subsystem.critical && subsystem.lastFailureTime > 0) {
+          const timeSinceFailure = now - subsystem.lastFailureTime;
+          if (timeSinceFailure < subsystem.recoveryCooldownMs) {
+            this.logger?.debugSync('Subsystem recovery suppressed - cooldown period active', {
+              component: LogComponents.agent,
+              operation: 'checkSubsystem',
+              subsystem: name,
+              timeSinceFailureMs: timeSinceFailure,
+              cooldownRemainingMs: subsystem.recoveryCooldownMs - timeSinceFailure,
+              reason: 'prevent_flapping'
+            });
+            // Keep unhealthy during cooldown
+            subsystem.lastCheck = now;
+            return false;
+          }
+        }
+        
         this.logger?.infoSync('Subsystem recovered', {
           component: LogComponents.agent,
           operation: 'checkSubsystem',
@@ -197,27 +256,34 @@ export class HealthArbiter {
       }
       
       // State transition: healthy → unhealthy
-      if (!healthy && subsystem.healthy) {
+      if (!healthy) {
         subsystem.consecutiveFailures++;
+        subsystem.lastFailureTime = now;
+        subsystem.lastError = 'health_check_failed';
+
+        // Latch critical subsystems permanently until restart (edge fail-fast)
+        if (subsystem.critical) {
+          subsystem.latched = true;
+        }
+
         this.logger?.errorSync('Subsystem health check failed', undefined, {
           component: LogComponents.agent,
           operation: 'checkSubsystem',
           subsystem: name,
           critical: subsystem.critical,
           consecutiveFailures: subsystem.consecutiveFailures,
-          description: subsystem.description
+          description: subsystem.description,
+          latched: subsystem.latched
         });
-      } else if (!healthy) {
-        subsystem.consecutiveFailures++;
       } else {
         subsystem.consecutiveFailures = 0;
       }
       
-      subsystem.healthy = healthy;
+      subsystem.healthy = healthy && !subsystem.latched; // Latched failures stay unhealthy
       subsystem.lastCheck = now;
-      subsystem.lastError = undefined;
+      subsystem.lastError = healthy ? undefined : subsystem.lastError;
       
-      return healthy;
+      return subsystem.healthy;
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       subsystem.healthy = false;
@@ -240,12 +306,22 @@ export class HealthArbiter {
   /**
    * Check overall system health
    * 
-   * Returns false if ANY critical subsystem is unhealthy.
+   * Returns false if ANY critical subsystem is unhealthy OR if fatal error marked.
    * This is the function watchdog should call.
    * 
    * @returns true if all critical subsystems healthy, false otherwise
    */
   async isHealthy(): Promise<boolean> {
+    // Fail immediately if fatal error marked (unhandled rejection, uncaught exception)
+    if (this.fatalError) {
+      this.logger?.debugSync('Overall health check failed - fatal error marked', {
+        component: LogComponents.agent,
+        operation: 'isHealthy',
+        fatalError: this.fatalError
+      });
+      return false;
+    }
+    
     // Check all subsystems on-demand
     for (const name of this.subsystems.keys()) {
       await this.checkSubsystem(name);
@@ -265,6 +341,34 @@ export class HealthArbiter {
     }
     
     return true;
+  }
+  
+  /**
+   * Mark agent as fatally unhealthy
+   * 
+   * This causes isHealthy() to return false, which withholds watchdog pings,
+   * triggering systemd restart. Use for unrecoverable errors like:
+   * - Unhandled promise rejections
+   * - Uncaught exceptions
+   * - Critical resource exhaustion
+   * 
+   * This is SAFER than calling process.exit() because:
+   * - systemd handles the restart cleanly
+   * - Avoids racing shutdown logic
+   * - Restart reason is observable
+   * - No risk of half-alive process
+   * 
+   * @param reason - Fatal error description (for observability)
+   */
+  markFatal(reason: string): void {
+    this.fatalError = reason;
+    
+    this.logger?.errorSync('Agent marked as fatally unhealthy - systemd will restart', undefined, {
+      component: LogComponents.agent,
+      operation: 'markFatal',
+      reason,
+      consequence: 'watchdog_withheld_systemd_restart'
+    });
   }
   
   /**

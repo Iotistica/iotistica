@@ -134,7 +134,29 @@ export function startMemoryMonitoring(
 			const externalGrowthFromInitial = currentExternal - initialExternal;
 			const leakPattern = detectLeakPattern(currentHeap, currentRSS, currentExternal);
 			
-			logger?.errorSync('🚨 Memory threshold BREACHED - sustained growth detected', undefined, {
+			// Log specific leak pattern with accurate message
+			let leakMessage: string;
+			if (leakPattern.pattern === 'survivor-leak') {
+				leakMessage = '🚨 Survivor space leak detected - long-lived objects accumulating';
+			} else if (leakPattern.pattern === 'buffer-crypto-native-leak') {
+				leakMessage = '🚨 Buffer/Crypto/Native leak detected - all metrics growing';
+			} else if (leakPattern.pattern === 'external-cache-leak') {
+				leakMessage = '🚨 External memory leak detected - cache or native structures growing';
+			} else if (leakPattern.pattern === 'js-object-retention') {
+				leakMessage = '🚨 JavaScript object retention detected - heap growing';
+			} else if (leakPattern.pattern === 'gc-pressure') {
+				leakMessage = '🚨 GC pressure detected - heap and RSS growing';
+			} else if (leakPattern.pattern === 'mixed-leak-jemalloc') {
+				leakMessage = '🚨 Mixed leak detected - heap and RSS divergence (jemalloc)';
+			} else if (leakPattern.pattern === 'external-leak') {
+				leakMessage = '🚨 External memory threshold breached - sustained growth';
+			} else if (leakPattern.pattern === 'rss-leak') {
+				leakMessage = '🚨 RSS leak detected - resident set growing';
+			} else {
+				leakMessage = '🚨 Memory anomaly detected - investigation required';
+			}
+			
+			logger?.errorSync(leakMessage, undefined, {
 				component: LogComponents.metrics,
 				// Heap metrics
 				currentHeapMB: bytesToMB(currentHeap),
