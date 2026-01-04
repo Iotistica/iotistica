@@ -74,8 +74,8 @@ jobs:
         run: |
           set -e
           CLIENT_NAME="${{ inputs.client_name || '' }}"
-          CHART_PATH=./k8s
-          VALUES_FILE="./k8s/values/${CLIENT_NAME}/values.yaml"
+          CHART_PATH=./charts
+          VALUES_FILE="./charts/values/${CLIENT_NAME}/values.yaml"
           RELEASE_VERSION="${{ inputs.release_version || 'latest' }}"
 
           kubectx "${{ inputs.cluster_name || 'k3scl01' }}"
