@@ -281,11 +281,11 @@ export class Sensor extends EventEmitter {
       if (
         !Array.isArray(data) &&
         data.deviceName &&
-        (data.registerName || data.name) &&
+        (data.metric || data.name) &&
         data.value !== undefined
       ) {
         const deviceName = data.deviceName;
-        const fieldName = data.registerName || data.name;
+        const fieldName = data.metric || data.name;
         const value = data.value;
         const quality = data.quality || 'GOOD';
         
@@ -315,8 +315,8 @@ export class Sensor extends EventEmitter {
         for (const reading of data) {
           if (typeof reading === 'object' && reading !== null) {
             const deviceName = reading.deviceName || sensorName;
-            // Support both Modbus (registerName) and OPC-UA (name) formats
-            const fieldName = reading.registerName || reading.name;
+            // Support metric field (standard) or name field (legacy OPC-UA)
+            const fieldName = reading.metric || reading.name;
             const value = reading.value;
             const quality = reading.quality || 'GOOD';
             
@@ -824,13 +824,17 @@ export class Sensor extends EventEmitter {
       ? require('msgpack-lite').encode(compacted)
       : JSON.stringify(compacted);
     
+    // Calculate final compression ratio (dictionary + optional msgpack)
+    const finalSize = typeof payload === 'string' ? Buffer.byteLength(payload, 'utf-8') : payload.length;
+    const finalRatio = ((originalSize - finalSize) / originalSize) * 100;
+    
     return {
       payload,
       compressionInfo: {
         method: this.useMsgpackPoc ? 'dictionary+msgpack' : 'dictionary',
         originalSize,
-        compressedSize: compactedSize,
-        ratio: compressionRatio
+        compressedSize: finalSize,
+        ratio: finalRatio
       }
     };
   }

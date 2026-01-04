@@ -65,7 +65,7 @@ export class SNMPAdapter extends BaseProtocolAdapter {
 
         dataPoints.push({
           deviceName,
-          registerName: oid.name,
+          metric: oid.name,
           value: numericValue,
           unit: oid.unit || '',
           timestamp,
@@ -78,7 +78,7 @@ export class SNMPAdapter extends BaseProtocolAdapter {
         // Send BAD quality for failed OID reads
         dataPoints.push({
           deviceName,
-          registerName: oid.name,
+          metric: oid.name,
           value: null,
           unit: oid.unit || '',
           timestamp,

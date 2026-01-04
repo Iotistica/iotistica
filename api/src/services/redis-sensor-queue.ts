@@ -337,7 +337,7 @@ class RedisSensorQueue {
                 // ✅ Skip metadata nodes (server info, diagnostics) - store separately
                 if (reading.nodeType === 'metadata') {
                   logger.debug('Skipping metadata node (not stored in readings table)', {
-                    metric: reading.registerName || reading.nodeName || reading.name,
+                    metric: reading.metric || reading.nodeName || reading.name,
                     deviceUuid: entry.deviceUuid.substring(0, 8),
                     value: reading.value
                   });
@@ -362,7 +362,7 @@ class RedisSensorQueue {
                 
                 // Add any additional fields to extra (excluding anomaly fields now in dedicated columns)
                 Object.entries(reading).forEach(([key, val]) => {
-                  if (!['value', 'quality', 'unit', 'timestamp', 'registerName', 'deviceName', 'nodeName',
+                  if (!['value', 'quality', 'unit', 'timestamp', 'metric', 'deviceName', 'nodeName',
                         'anomaly_score', 'anomaly_threshold', 'baseline_samples', 'detection_methods'].includes(key)) {
                     extra[key] = val;
                   }
@@ -382,7 +382,7 @@ class RedisSensorQueue {
                 
                 readings.push({
                   device_uuid: entry.deviceUuid,
-                  metric_name: reading.registerName || reading.nodeName || reading.name || entry.sensorName,
+                  metric_name: reading.metric || reading.nodeName || reading.name || entry.sensorName,
                   value: numericValue,
                   quality: reading.quality?.toLowerCase() || 'good',
                   unit: reading.unit || null,
@@ -420,7 +420,7 @@ class RedisSensorQueue {
             
             // Add any additional fields to extra (excluding anomaly fields now in dedicated columns)
             Object.entries(reading).forEach(([key, val]) => {
-              if (!['value', 'quality', 'unit', 'timestamp', 'registerName', 'deviceName', 
+              if (!['value', 'quality', 'unit', 'timestamp', 'metric', 'deviceName', 
                     'anomaly_score', 'anomaly_threshold', 'baseline_samples', 'detection_methods'].includes(key)) {
                 extra[key] = val;
               }
@@ -428,7 +428,7 @@ class RedisSensorQueue {
             
             readings.push({
               device_uuid: entry.deviceUuid,
-              metric_name: reading.registerName || reading.nodeName || reading.name || entry.sensorName,
+              metric_name: reading.metric || reading.nodeName || reading.name || entry.sensorName,
               value: typeof reading.value === 'number' ? reading.value : null,
               quality: reading.quality?.toLowerCase() || 'good',
               unit: reading.unit || null,

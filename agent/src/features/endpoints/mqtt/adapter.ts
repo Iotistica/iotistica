@@ -324,7 +324,7 @@ export class MqttAdapter extends EventEmitter {
       // Create sensor data point
       const dataPoint: SensorDataPoint = {
         deviceName: device.name,
-        registerName: device.metric || topic,
+        metric: device.metric || topic,
         value,
         unit: device.unit || '',
         timestamp: now,
@@ -355,7 +355,7 @@ export class MqttAdapter extends EventEmitter {
       // Emit BAD quality data point
       const dataPoint: SensorDataPoint = {
         deviceName: device.name,
-        registerName: device.metric || topic,
+        metric: device.metric || topic,
         value: null,
         unit: device.unit || '',
         timestamp: new Date().toISOString(),
@@ -494,7 +494,7 @@ export class MqttAdapter extends EventEmitter {
       // Create data point
       const dataPoint: SensorDataPoint = {
         deviceName: `mqtt_${topic.replace(/\//g, '_')}`,
-        registerName: topic,
+        metric: topic,
         value,
         unit: '',
         timestamp: new Date().toISOString(),

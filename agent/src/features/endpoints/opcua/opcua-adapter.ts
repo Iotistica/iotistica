@@ -487,7 +487,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
           const dataPoint: SensorDataPoint = {
             timestamp: new Date().toISOString(),
             deviceName,
-            registerName: dp.name,
+            metric: dp.name,
             value: dataValue.value?.value ?? null,
             unit: dp.unit || '',
             quality,
@@ -1375,7 +1375,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
         results.push({
           timestamp,
           deviceName,
-          registerName: dp.name,
+          metric: dp.name,
           value: null,
           unit: dp.unit || '',
           quality,
@@ -1401,7 +1401,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       results.push({
         timestamp,
         deviceName,
-        registerName: dp.name,
+        metric: dp.name,
         value,
         unit: dp.unit || '',
         quality: 'GOOD' as const,

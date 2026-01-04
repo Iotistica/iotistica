@@ -16,18 +16,44 @@
  * 4. Allows normal plateau (heap stable for 5 minutes = healthy)
  */
 
-import { memoryUsage } from 'process';
-import type { AgentLogger } from '../logging/agent-logger';
+import { memoryUsage } from 'process';import { getHeapStatistics } from 'v8';import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 
 // Heap tracking (more accurate than RSS)
 let initialHeap: number = 0;
 let baselineHeap: number = 0; // Sliding baseline (updates when stable)
 let lastBaselineUpdate: number = 0;
-let heapSamples: Array<{ timestamp: number; heapUsed: number }> = [];
+let heapSamples: Array<{ 
+	timestamp: number; 
+	heapUsed: number; 
+	external: number;
+	totalHeapSize: number;
+	heapSizeLimit: number;
+	mallocedMemory: number;
+}> = [];
 const MAX_SAMPLES = 20; // 10 minutes of history at 30s intervals
 const SAMPLE_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 const BASELINE_UPDATE_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes minimum between baseline updates
+
+// External memory tracking (Buffers, ArrayBuffers, native bindings, crypto)
+let initialExternal: number = 0;
+let baselineExternal: number = 0;
+
+// Malloced memory tracking (GC allocation pressure signal)
+// ⚠️ DIAGNOSTICS ONLY - Never use as hard threshold!
+// - V8-internal metric, not strict allocation counter
+// - Can jump due to allocator behavior
+// - Use for context/investigation, not leak detection triggers
+let initialMalloced: number = 0;
+let baselineMalloced: number = 0;
+
+// Survivor tracking (long-lived objects that survive GC cycles)
+// NOTE: survivorBaseline is for DIAGNOSTICS/LOGGING only
+// Actual leak detection uses calculateSurvivorGrowthRate() (windowed regression + monotonic check)
+// This simple baseline tracker remains for visibility and debugging
+let survivorBaseline: number = 0; // Minimum heap usage (post-GC baseline)
+let lastSurvivorUpdate: number = 0;
+const SURVIVOR_UPDATE_INTERVAL_MS = 2 * 60 * 1000; // Update survivor baseline every 2 minutes
 
 // Legacy RSS tracking (for comparison only)
 export let initialMemory: number = 0;
@@ -93,81 +119,110 @@ export function startMemoryMonitoring(
 				const mem = memoryUsage();
 				const currentHeap = mem.heapUsed;
 				const currentRSS = mem.rss;
-				const growthRate = calculateHeapGrowthRate();
-				const heapGrowthFromBaseline = currentHeap - baselineHeap;
-				const heapGrowthFromInitial = currentHeap - initialHeap;
-				const rssGrowthFromBaseline = currentRSS - baselineRSS;
-				const rssGrowthFromInitial = currentRSS - initialMemory;
-				const leakPattern = detectLeakPattern(currentHeap, currentRSS);
-				
-				logger?.errorSync('Sustained heap growth detected - likely memory leak', undefined, {
-					component: LogComponents.metrics,
-					currentHeapMB: bytesToMB(currentHeap),
-					baselineHeapMB: bytesToMB(baselineHeap),
-					initialHeapMB: bytesToMB(initialHeap),
-					growthFromBaselineMB: (heapGrowthFromBaseline / (1024 * 1024)).toFixed(2),
-					growthFromInitialMB: (heapGrowthFromInitial / (1024 * 1024)).toFixed(2),
-					// RSS metrics (sliding baseline)
-					currentRSSMB: bytesToMB(currentRSS),
-					baselineRSSMB: bytesToMB(baselineRSS),
-					rssGrowthFromBaselineMB: (rssGrowthFromBaseline / (1024 * 1024)).toFixed(2),
-					rssGrowthFromInitialMB: (rssGrowthFromInitial / (1024 * 1024)).toFixed(2),
-					growthRateMBperMin: growthRate?.toFixed(2) || 'null',
-					thresholdMBperMin: HEAP_GROWTH_RATE_MB_PER_MIN,
-					recoveryThresholdMBperMin: HEAP_GROWTH_RATE_RECOVERY_MB_PER_MIN,
-					// Leak pattern analysis
-					leakPattern: leakPattern.pattern,
-					leakDescription: leakPattern.description,
-					uptimeSeconds: processUptime(),
-					samples: heapSamples.length
-				});
-				
-				if (onThresholdBreached) {
-					// Check restart policy before invoking callback
-					const eligibility = canAttemptRestart();
-					
-					if (eligibility.allowed) {
-						logger?.warnSync('Restart policy allows restart - invoking callback', {
-							component: LogComponents.metrics,
-							attemptNumber: restartAttemptsSinceStartup + 1,
-							maxAttempts: MAX_RESTART_ATTEMPTS
-						});
-						
-						// Record attempt before callback (in case callback restarts immediately)
-						recordRestartAttempt();
-						
-						onThresholdBreached();
-					} else {
-						logger?.errorSync('Restart blocked by policy - memory leak persists', undefined, {
-							component: LogComponents.metrics,
-							reason: eligibility.reason,
-							attemptsSinceStartup: restartAttemptsSinceStartup,
-							maxAttempts: MAX_RESTART_ATTEMPTS,
-							lastRestartAgo: lastRestartAttempt > 0 
-								? `${Math.floor((Date.now() - lastRestartAttempt) / (60 * 1000))} minutes ago`
-								: 'never'
-						});
-					}
-				}
-			}
+			const currentExternal = mem.external;
+			const heapStats = getHeapStatistics();
+			const heapGrowthRate = calculateHeapGrowthRate();
+			const externalGrowthRate = calculateExternalGrowthRate();
+			const mallocedGrowthRate = calculateMallocedGrowthRate();
+			const heapTotalGrowthRate = calculateHeapTotalGrowthRate();
+			const survivorGrowth = calculateSurvivorGrowthRate();
+			const heapGrowthFromBaseline = currentHeap - baselineHeap;
+			const heapGrowthFromInitial = currentHeap - initialHeap;
+			const rssGrowthFromBaseline = currentRSS - baselineRSS;
+			const rssGrowthFromInitial = currentRSS - initialMemory;
+			const externalGrowthFromBaseline = currentExternal - baselineExternal;
+			const externalGrowthFromInitial = currentExternal - initialExternal;
+			const leakPattern = detectLeakPattern(currentHeap, currentRSS, currentExternal);
 			
-			// Reset flag if memory returns to normal
-			if (isHealthy && memoryThresholdBreached) {
-				memoryThresholdBreached = false;
-				logger?.infoSync('Memory returned to normal levels', {
-					component: LogComponents.metrics
-				});
-			}
-		} catch (error) {
-			logger?.errorSync(
-				'Memory monitoring check failed',
-				error instanceof Error ? error : new Error(String(error)),
-				{
-					component: LogComponents.metrics
+			logger?.errorSync('🚨 Memory threshold BREACHED - sustained growth detected', undefined, {
+				component: LogComponents.metrics,
+				// Heap metrics
+				currentHeapMB: bytesToMB(currentHeap),
+				baselineHeapMB: bytesToMB(baselineHeap),
+				initialHeapMB: bytesToMB(initialHeap),
+				heapGrowthFromBaselineMB: (heapGrowthFromBaseline / (1024 * 1024)).toFixed(2),
+				heapGrowthFromInitialMB: (heapGrowthFromInitial / (1024 * 1024)).toFixed(2),
+				heapGrowthRateMBperMin: heapGrowthRate?.toFixed(2) || 'null',
+				heapThresholdMBperMin: getAdaptiveHeapThreshold(false).toFixed(2),
+				heapThresholdBase: HEAP_GROWTH_RATE_MB_PER_MIN,
+				heapThresholdAdaptive: (baselineHeap / (1024 * 1024) * ADAPTIVE_THRESHOLD_PERCENTAGE).toFixed(2),
+				// Heap utilization (heapUsed vs heapTotal ratio)
+				heapUtilization: ((heapStats.used_heap_size / heapStats.total_heap_size) * 100).toFixed(1) + '%',
+				heapTotalGrowthRateMBperMin: heapTotalGrowthRate?.toFixed(2) || 'null',
+				// RSS metrics
+				currentRSSMB: bytesToMB(currentRSS),
+				baselineRSSMB: bytesToMB(baselineRSS),
+				rssGrowthFromBaselineMB: (rssGrowthFromBaseline / (1024 * 1024)).toFixed(2),
+				rssGrowthFromInitialMB: (rssGrowthFromInitial / (1024 * 1024)).toFixed(2),
+				// External memory metrics (Buffers, crypto, native)
+				currentExternalMB: bytesToMB(currentExternal),
+				baselineExternalMB: bytesToMB(baselineExternal),
+				externalGrowthFromBaselineMB: (externalGrowthFromBaseline / (1024 * 1024)).toFixed(2),
+				externalGrowthFromInitialMB: (externalGrowthFromInitial / (1024 * 1024)).toFixed(2),
+				externalGrowthRateMBperMin: externalGrowthRate?.toFixed(2) || 'null',
+				externalThresholdMBperMin: EXTERNAL_GROWTH_RATE_MB_PER_MIN,
+				// GC signals (allocation pressure)
+				totalHeapSizeMB: bytesToMB(heapStats.total_heap_size),
+				heapSizeLimitMB: bytesToMB(heapStats.heap_size_limit),
+				heapFragmentationMB: bytesToMB(heapStats.total_heap_size - heapStats.used_heap_size),
+				heapLimitPressure: ((heapStats.used_heap_size / heapStats.heap_size_limit) * 100).toFixed(1) + '%',
+				mallocedMemoryMB: bytesToMB(heapStats.malloced_memory),
+				mallocedGrowthRateMBperMin: mallocedGrowthRate?.toFixed(2) || 'null',
+				// Survivor tracking (long-lived objects)
+				survivorBaselineMB: bytesToMB(survivorBaseline),
+				survivorGrowthRateMBperMin: survivorGrowth?.rate.toFixed(2) || 'null',
+				survivorFloorMonotonic: survivorGrowth?.isMonotonic ?? 'unknown',
+				survivorRetainedMB: survivorGrowth?.retainedGrowth.toFixed(1) || 'null',
+				// Leak pattern analysis
+				leakPattern: leakPattern.pattern,
+				leakDescription: leakPattern.description,
+				uptimeSeconds: processUptime(),
+				samples: heapSamples.length
+			});
+			
+			if (onThresholdBreached) {
+				// Check restart policy before invoking callback
+				const eligibility = canAttemptRestart();
+				
+				if (eligibility.allowed) {
+					logger?.warnSync('Restart policy allows restart - invoking callback', {
+						component: LogComponents.metrics,
+						attemptNumber: restartAttemptsSinceStartup + 1,
+						maxAttempts: MAX_RESTART_ATTEMPTS
+					});
+					
+					// Record attempt before callback (in case callback restarts immediately)
+					recordRestartAttempt();
+					
+					onThresholdBreached();
+				} else {
+					logger?.errorSync('Restart blocked by policy - memory leak persists', undefined, {
+						component: LogComponents.metrics,
+						reason: eligibility.reason,
+						attemptsSinceStartup: restartAttemptsSinceStartup,
+						maxAttempts: MAX_RESTART_ATTEMPTS,
+						lastRestartAgo: lastRestartAttempt > 0 
+							? `${Math.floor((Date.now() - lastRestartAttempt) / (60 * 1000))} minutes ago`
+							: 'never'
+					});
 				}
-			);
+			}
 		}
-	}, intervalMs);
+		
+		// Reset flag if memory returns to normal
+		if (isHealthy && memoryThresholdBreached) {
+			memoryThresholdBreached = false;
+			logger?.infoSync('Memory returned to normal levels', {
+				component: LogComponents.metrics
+			});
+		}
+	} catch (error) {
+		logger?.errorSync(
+			'Memory monitoring check failed',
+			error instanceof Error ? error : new Error(String(error))
+		);
+	}
+}, intervalMs);
 }
 
 /**
@@ -177,27 +232,17 @@ export function stopMemoryMonitoring(): void {
 	if (monitoringInterval) {
 		clearInterval(monitoringInterval);
 		monitoringInterval = undefined;
-		memoryThresholdBreached = false;
-		logger?.infoSync('Stopped active memory monitoring', {
+		logger?.infoSync('Memory monitoring stopped', {
 			component: LogComponents.metrics
 		});
 	}
 }
 
 /**
- * Check if memory monitoring is running
+ * Check if restart attempt is allowed based on cooldown and max attempts
  */
-export function isMemoryMonitoringActive(): boolean {
-	return monitoringInterval !== undefined;
-}
-
-/**
- * Check if restart is allowed based on cooldown and attempt limits
- * Prevents restart loops by enforcing cooldown period and max attempts
- */
-export function canAttemptRestart(): { allowed: boolean; reason?: string } {
+function canAttemptRestart(): { allowed: boolean; reason?: string } {
 	const now = Date.now();
-	
 	// Check cooldown (must wait 1 hour since last restart)
 	if (lastRestartAttempt > 0 && now - lastRestartAttempt < RESTART_COOLDOWN_MS) {
 		const remainingMs = RESTART_COOLDOWN_MS - (now - lastRestartAttempt);
@@ -258,9 +303,50 @@ export function getRestartPolicyStatus() {
 const bytesToMB = (bytes: number) => (bytes / (1024 * 1024)).toFixed(2);
 
 // Heap-based leak detection (more accurate than RSS)
-const HEAP_GROWTH_RATE_MB_PER_MIN = 1; // 1MB/min sustained growth = leak
-const HEAP_GROWTH_RATE_RECOVERY_MB_PER_MIN = 0.7; // Recovery threshold (hysteresis prevents flapping)
+const HEAP_GROWTH_RATE_MB_PER_MIN = 1.0; // Base threshold: 1 MB/min
+const HEAP_GROWTH_RATE_RECOVERY_MB_PER_MIN = 0.75; // Recovery threshold (hysteresis prevents flapping)
 const HEAP_STABILIZATION_TIME_MS = 5 * 60 * 1000; // 5 minutes stable = healthy
+
+// External memory leak detection (Buffers, crypto, native)
+const EXTERNAL_GROWTH_RATE_MB_PER_MIN = 0.5; // Base threshold: 0.5 MB/min
+const EXTERNAL_GROWTH_RATE_RECOVERY_MB_PER_MIN = 0.3; // Recovery threshold
+
+// Adaptive threshold scaling
+const ADAPTIVE_THRESHOLD_PERCENTAGE = 0.005; // 0.5% of baseline heap per minute
+
+/**
+ * Calculate adaptive heap growth threshold
+ * Scales with baseline heap size: small agents leak slower than large ones
+ * Formula: max(1 MB/min, baselineHeap * 0.5% per min)
+ */
+function getAdaptiveHeapThreshold(recovering: boolean = false): number {
+	const baseThreshold = recovering ? HEAP_GROWTH_RATE_RECOVERY_MB_PER_MIN : HEAP_GROWTH_RATE_MB_PER_MIN;
+	const baselineHeapMB = baselineHeap / (1024 * 1024);
+	const adaptiveThreshold = baselineHeapMB * ADAPTIVE_THRESHOLD_PERCENTAGE;
+	return Math.max(baseThreshold, adaptiveThreshold);
+}
+
+/**
+ * Calculate adaptive external memory growth threshold
+ * Scales with baseline external memory
+ */
+function getAdaptiveExternalThreshold(recovering: boolean = false): number {
+	const baseThreshold = recovering ? EXTERNAL_GROWTH_RATE_RECOVERY_MB_PER_MIN : EXTERNAL_GROWTH_RATE_MB_PER_MIN;
+	const baselineExternalMB = baselineExternal / (1024 * 1024);
+	const adaptiveThreshold = baselineExternalMB * ADAPTIVE_THRESHOLD_PERCENTAGE;
+	return Math.max(baseThreshold, adaptiveThreshold);
+}
+
+/**
+ * Calculate adaptive survivor growth threshold
+ * Uses heap baseline since survivors are V8 heap objects
+ */
+function getAdaptiveSurvivorThreshold(): number {
+	const baseThreshold = 0.3; // MB/min base threshold
+	const baselineHeapMB = baselineHeap / (1024 * 1024);
+	const adaptiveThreshold = baselineHeapMB * ADAPTIVE_THRESHOLD_PERCENTAGE;
+	return Math.max(baseThreshold, adaptiveThreshold);
+}
 
 /**
  * Calculate heap growth trend (MB per minute) using linear regression
@@ -306,6 +392,228 @@ function calculateHeapGrowthRate(): number | null {
 }
 
 /**
+ * Calculate external memory growth trend (Buffers, crypto, native)
+ * Same regression algorithm as heap, but for external allocations
+ */
+function calculateExternalGrowthRate(): number | null {
+	if (heapSamples.length < 5) return null;
+	
+	const n = heapSamples.length;
+	let sumX = 0;
+	let sumY = 0;
+	let sumXY = 0;
+	let sumX2 = 0;
+	
+	const t0 = heapSamples[0].timestamp;
+	
+	for (const sample of heapSamples) {
+		const x = (sample.timestamp - t0) / (60 * 1000);
+		const y = sample.external / (1024 * 1024); // MB
+		
+		sumX += x;
+		sumY += y;
+		sumXY += x * y;
+		sumX2 += x * x;
+	}
+	
+	const denominator = n * sumX2 - sumX * sumX;
+	if (Math.abs(denominator) < 1e-10) return null;
+	
+	const slope = (n * sumXY - sumX * sumY) / denominator;
+	return slope;
+}
+
+/**
+ * Calculate malloced memory growth rate using linear regression
+ * Returns MB per minute growth rate (GC allocation pressure signal)
+ * Same regression algorithm as heap, but for malloced memory
+ * 
+ * ⚠️ DIAGNOSTIC USE ONLY - DO NOT use as hard threshold!
+ * - malloced_memory is V8-internal, can jump due to allocator behavior
+ * - Useful for context/investigation, NOT for leak detection triggers
+ * - Use heap/external/survivor metrics for actual leak detection
+ */
+function calculateMallocedGrowthRate(): number | null {
+	if (heapSamples.length < 5) return null;
+	
+	const n = heapSamples.length;
+	let sumX = 0;
+	let sumY = 0;
+	let sumXY = 0;
+	let sumX2 = 0;
+	
+	const t0 = heapSamples[0].timestamp;
+	
+	for (const sample of heapSamples) {
+		const x = (sample.timestamp - t0) / (60 * 1000);
+		const y = sample.mallocedMemory / (1024 * 1024); // MB
+		
+		sumX += x;
+		sumY += y;
+		sumXY += x * y;
+		sumX2 += x * x;
+	}
+	
+	const denominator = n * sumX2 - sumX * sumX;
+	if (Math.abs(denominator) < 1e-10) return null;
+	
+	const slope = (n * sumXY - sumX * sumY) / denominator;
+	return slope;
+}
+
+/**
+ * Calculate heap total growth rate using linear regression
+ * Returns MB per minute growth rate
+ * Indicates V8 expanding heap size (retention signal)
+ */
+function calculateHeapTotalGrowthRate(): number | null {
+	if (heapSamples.length < 5) return null;
+	
+	const n = heapSamples.length;
+	let sumX = 0;
+	let sumY = 0;
+	let sumXY = 0;
+	let sumX2 = 0;
+	
+	const t0 = heapSamples[0].timestamp;
+	
+	for (const sample of heapSamples) {
+		const x = (sample.timestamp - t0) / (60 * 1000); // minutes
+		const y = sample.totalHeapSize / (1024 * 1024); // MB
+		
+		sumX += x;
+		sumY += y;
+		sumXY += x * y;
+		sumX2 += x * x;
+	}
+	
+	const denominator = n * sumX2 - sumX * sumX;
+	if (Math.abs(denominator) < 1e-10) return null;
+	
+	const slope = (n * sumXY - sumX * sumY) / denominator;
+	return slope; // MB/min heapTotal growth
+}
+
+/**
+ * Calculate survivor growth rate (long-lived objects that survive GC)
+ * Tracks growth of minimum heap usage over time - the post-GC baseline
+ * This is the key leak indicator: survivors should stay stable or shrink
+ * 
+ * Enhanced with retained growth heuristic:
+ * - Tracks if heap floor is rising monotonically
+ * - Avoids false positives under bursty workloads
+ * - True leak: floor keeps rising even if GC runs
+ */
+function calculateSurvivorGrowthRate(): { rate: number; isMonotonic: boolean; retainedGrowth: number } | null {
+	if (heapSamples.length < 5) return null;
+	
+	// Find minimum heap usage in each time window (approximates post-GC state)
+	// Group samples into 2-minute windows and find min of each window
+	const windowSize = 2 * 60 * 1000; // 2 minutes
+	const windows: Array<{ timestamp: number; minHeap: number }> = [];
+	
+	const startTime = heapSamples[0].timestamp;
+	const endTime = heapSamples[heapSamples.length - 1].timestamp;
+	
+	for (let t = startTime; t <= endTime; t += windowSize) {
+		const windowSamples = heapSamples.filter(s => 
+			s.timestamp >= t && s.timestamp < t + windowSize
+		);
+		
+		if (windowSamples.length > 0) {
+			const minHeap = Math.min(...windowSamples.map(s => s.heapUsed));
+			windows.push({ timestamp: t + windowSize / 2, minHeap });
+		}
+	}
+	
+	if (windows.length < 2) return null;
+	
+	// Check if floor is rising monotonically (true leak signal)
+	// Allow small dips (5% tolerance) to handle measurement noise
+	let isMonotonic = true;
+	for (let i = 1; i < windows.length; i++) {
+		if (windows[i].minHeap < windows[i - 1].minHeap * 0.95) {
+			isMonotonic = false;
+			break;
+		}
+	}
+	
+	// Calculate retained growth: current heap - minimum in entire window
+	const currentHeap = heapSamples[heapSamples.length - 1].heapUsed;
+	const minHeapInWindow = Math.min(...windows.map(w => w.minHeap));
+	const retainedGrowth = (currentHeap - minHeapInWindow) / (1024 * 1024); // MB
+	
+	// Linear regression on minimum heap values (survivor baseline)
+	const n = windows.length;
+	let sumX = 0;
+	let sumY = 0;
+	let sumXY = 0;
+	let sumX2 = 0;
+	
+	const t0 = windows[0].timestamp;
+	
+	for (const window of windows) {
+		const x = (window.timestamp - t0) / (60 * 1000); // minutes
+		const y = window.minHeap / (1024 * 1024); // MB
+		
+		sumX += x;
+		sumY += y;
+		sumXY += x * y;
+		sumX2 += x * x;
+	}
+	
+	const denominator = n * sumX2 - sumX * sumX;
+	if (Math.abs(denominator) < 1e-10) return null;
+	
+	const slope = (n * sumXY - sumX * sumY) / denominator;
+	
+	return {
+		rate: slope, // MB/min survivor growth
+		isMonotonic, // true if floor rising consistently
+		retainedGrowth // MB retained above minimum
+	};
+}
+
+/**
+ * Update survivor baseline (minimum heap usage)
+ * Should be called periodically to track post-GC baseline
+ * 
+ * NOTE: This is for DIAGNOSTICS/LOGGING only (provides simple minimum tracking).
+ * Actual leak detection uses calculateSurvivorGrowthRate() which is stronger:
+ * - Windowed regression (2-min buckets)
+ * - Monotonic floor check (5% tolerance)
+ * - Retained growth calculation
+ * 
+ * This simple tracker remains for visibility in logs and debugging.
+ */
+function updateSurvivorBaseline(currentHeap: number): void {
+	const now = Date.now();
+	
+	// Initialize on first call
+	if (survivorBaseline === 0) {
+		survivorBaseline = currentHeap;
+		lastSurvivorUpdate = now;
+		return;
+	}
+	
+	// Update if current heap is lower (likely post-GC)
+	if (currentHeap < survivorBaseline) {
+		survivorBaseline = currentHeap;
+		lastSurvivorUpdate = now;
+	}
+	
+	// Periodic update: if heap has been consistently lower, update baseline
+	if (now - lastSurvivorUpdate > SURVIVOR_UPDATE_INTERVAL_MS) {
+		// Find minimum heap in recent samples
+		const recentMin = Math.min(...heapSamples.slice(-10).map(s => s.heapUsed));
+		if (recentMin < survivorBaseline * 1.05) { // Within 5% tolerance
+			survivorBaseline = recentMin;
+		}
+		lastSurvivorUpdate = now;
+	}
+}
+
+/**
  * Check if heap has been stable (no significant growth) recently
  */
 function isHeapStable(): boolean {
@@ -330,44 +638,132 @@ function isHeapStable(): boolean {
 }
 
 /**
- * Detect memory leak pattern based on RSS and heap correlation
+ * Detect memory leak pattern using correlation matrix analysis
+ * Classifies leaks based on which metrics are growing together
+ * 
+ * Correlation Matrix:
+ * Heap  External  RSS   Likely Cause
+ * ↑     ↑         ↑     Buffer / crypto / native leak
+ * →     ↑         →     External cache leak (Buffers not freed)
+ * ↑     →         →     JS object retention (heap objects)
+ * ↑     →         ↑     GC pressure (heap growing, allocator struggling)
+ * ↑     ↑         →     Mixed leak (heap + external, RSS stable via jemalloc)
+ * →     ↑         ↑     External leak (native allocations)
+ * →     →         ↑     RSS leak (OS page retention)
+ * 
+ * Heap Utilization Patterns:
+ * heapUsed ↑, heapTotal → (high utilization) → GC pressure (can't reclaim)
+ * heapTotal ↑ steadily → V8 expanding heap (retention detected)
  * 
  * Patterns:
- * - JS leak: Both RSS and heap growing (typical object/closure leaks)
- * - Native leak: RSS growing, heap stable (Buffer, addon, external memory)
- * - GC pressure: Heap growing, RSS stable (GC can't keep up)
+ * - Survivor leak: Long-lived objects surviving GC (most accurate)
+ * - Buffer/crypto/native leak: All metrics growing
+ * - External cache leak: Only external growing
+ * - JS object retention: Heap growing, external stable
+ * - GC pressure: Heap + RSS growing, external stable
  */
-function detectLeakPattern(currentHeap: number, currentRSS: number): {
-	pattern: 'js-leak' | 'native-leak' | 'gc-pressure' | 'unknown';
+function detectLeakPattern(currentHeap: number, currentRSS: number, currentExternal: number): {
+	pattern: 'survivor-leak' | 'buffer-crypto-native-leak' | 'external-cache-leak' | 'js-object-retention' | 'gc-pressure' | 'mixed-leak-jemalloc' | 'external-leak' | 'rss-leak' | 'stable' | 'unknown';
 	description: string;
 } {
-	const heapGrowthMB = (currentHeap - baselineHeap) / (1024 * 1024);
-	const rssGrowthMB = (currentRSS - baselineRSS) / (1024 * 1024);
+	// Get growth rates (trend-based, not absolute delta)
+	const heapGrowthRate = calculateHeapGrowthRate();
+	const externalGrowthRate = calculateExternalGrowthRate();
+	const survivorGrowth = calculateSurvivorGrowthRate();
 	
-	const heapGrowing = heapGrowthMB > 5; // 5MB threshold
-	const rssGrowing = rssGrowthMB > 10; // 10MB threshold
+	// Define adaptive thresholds (scale with baseline heap size)
+	const HEAP_THRESHOLD = getAdaptiveHeapThreshold(false);
+	const EXTERNAL_THRESHOLD = getAdaptiveExternalThreshold(false);
+	const SURVIVOR_THRESHOLD = getAdaptiveSurvivorThreshold();
+	const RSS_GROWTH_THRESHOLD = 5 * 1024 * 1024; // 5MB absolute growth from baseline
 	
-	if (heapGrowing && rssGrowing) {
+	// Determine growth state for each metric (↑ = growing, → = stable)
+	const heapGrowing = heapGrowthRate !== null && heapGrowthRate > HEAP_THRESHOLD;
+	const externalGrowing = externalGrowthRate !== null && externalGrowthRate > EXTERNAL_THRESHOLD;
+	const survivorGrowing = survivorGrowth !== null && survivorGrowth.rate > SURVIVOR_THRESHOLD && survivorGrowth.isMonotonic;
+	const rssGrowing = (currentRSS - baselineRSS) > RSS_GROWTH_THRESHOLD;
+	
+	// Priority 1: Survivor leak (most accurate - long-lived objects)
+	// Only trigger if floor is rising monotonically (avoids false positives from bursty workloads)
+	if (survivorGrowing) {
 		return {
-			pattern: 'js-leak',
-			description: 'JavaScript object leak (closures, event listeners, caches)'
-		};
-	} else if (!heapGrowing && rssGrowing) {
-		return {
-			pattern: 'native-leak',
-			description: 'Native memory leak (Buffers, addons, external memory)'
-		};
-	} else if (heapGrowing && !rssGrowing) {
-		return {
-			pattern: 'gc-pressure',
-			description: 'GC pressure (heap growing faster than RSS, possible fragmentation)'
-		};
-	} else {
-		return {
-			pattern: 'unknown',
-			description: 'Unusual pattern - investigate manually'
+			pattern: 'survivor-leak',
+			description: `Long-lived objects growing at ${survivorGrowth.rate.toFixed(2)} MB/min - floor rising monotonically, retained: ${survivorGrowth.retainedGrowth.toFixed(1)} MB (real leak)`
 		};
 	}
+	
+	// Priority 2: Correlation matrix classification
+	
+	// Buffer / crypto / native leak: ↑ ↑ ↑ (all metrics growing)
+	if (heapGrowing && externalGrowing && rssGrowing) {
+		return {
+			pattern: 'buffer-crypto-native-leak',
+			description: `Buffer/crypto/native leak - heap: ${heapGrowthRate?.toFixed(2)} MB/min, external: ${externalGrowthRate?.toFixed(2)} MB/min, RSS growing (Buffer accumulation)`
+		};
+	}
+	
+	// External cache leak: → ↑ → (only external growing)
+	if (!heapGrowing && externalGrowing && !rssGrowing) {
+		return {
+			pattern: 'external-cache-leak',
+			description: `External cache leak - external: ${externalGrowthRate?.toFixed(2)} MB/min, heap stable (Buffers not freed, check caching logic)`
+		};
+	}
+	
+	// JS object retention: ↑ → → (heap growing, external stable)
+	if (heapGrowing && !externalGrowing && !rssGrowing) {
+		return {
+			pattern: 'js-object-retention',
+			description: `JS object retention - heap: ${heapGrowthRate?.toFixed(2)} MB/min, external stable (check closures/event listeners/caches)`
+		};
+	}
+	
+	// GC pressure: ↑ → ↑ (heap and RSS growing, external stable)
+	if (heapGrowing && !externalGrowing && rssGrowing) {
+		return {
+			pattern: 'gc-pressure',
+			description: `GC pressure - heap: ${heapGrowthRate?.toFixed(2)} MB/min, RSS growing, external stable (allocator fragmentation)`
+		};
+	}
+	
+	// Mixed leak: ↑ ↑ → (heap + external growing, RSS stable via jemalloc)
+	if (heapGrowing && externalGrowing && !rssGrowing) {
+		return {
+			pattern: 'mixed-leak-jemalloc',
+			description: `Mixed leak - heap: ${heapGrowthRate?.toFixed(2)} MB/min, external: ${externalGrowthRate?.toFixed(2)} MB/min, RSS stable (jemalloc reusing arena)`
+		};
+	}
+	
+	// External leak: → ↑ ↑ (only external and RSS growing)
+	if (!heapGrowing && externalGrowing && rssGrowing) {
+		return {
+			pattern: 'external-leak',
+			description: `External leak - external: ${externalGrowthRate?.toFixed(2)} MB/min, heap stable (native allocations outside V8)`
+		};
+	}
+	
+	// RSS leak: → → ↑ (only RSS growing)
+	if (!heapGrowing && !externalGrowing && rssGrowing) {
+		return {
+			pattern: 'rss-leak',
+			description: `RSS leak - heap/external stable but RSS growing (OS page retention or memory mapping issue)`
+		};
+	}
+	
+	// Heap stable (good state)
+	const heapStable = isHeapStable();
+	if (heapStable) {
+		return {
+			pattern: 'stable',
+			description: 'Memory stable - no leak detected'
+		};
+	}
+	
+	// Fallback: Unable to classify
+	return {
+		pattern: 'unknown',
+		description: 'Memory pattern unclear - insufficient data or transient spike'
+	};
 }
 
 /**
@@ -397,13 +793,77 @@ function updateBaselineIfStable(currentHeap: number, currentRSS: number): void {
 	
 	const avgHeap = recentSamples.reduce((sum, s) => sum + s.heapUsed, 0) / recentSamples.length;
 	
+	// ============================================================================
+	// CRITICAL: Prevent baseline creep (Netflix pattern)
+	// ============================================================================
+	// A slow leak (0.3 MB/min) can appear "stable" (consistent growth, low variance)
+	// but still be growing. Without these safeguards, baseline ratchets upward forever.
+	//
+	// Requirements for baseline update:
+	// 1. Max drift cap: <5% growth from current baseline (prevents large jumps)
+	// 2. Zero/negative slope: heap not actively growing (prevents masking leaks)
+	// 3. Very low growth rate: <0.1 MB/min (prevents slow leak masking)
+	// ============================================================================
+	
 	// Only update baseline upward (prevent masking sudden drops that recover)
 	if (avgHeap > baselineHeap) {
+		// 1. Check max drift cap (5% growth limit)
+		const driftPercentage = ((avgHeap - baselineHeap) / baselineHeap) * 100;
+		if (driftPercentage > 5) {
+			logger?.warnSync('Baseline update rejected - drift exceeds 5% cap', {
+				component: LogComponents.metrics,
+				currentBaselineMB: bytesToMB(baselineHeap),
+				proposedBaselineMB: bytesToMB(avgHeap),
+				driftPercentage: driftPercentage.toFixed(2),
+				reason: 'Possible slow leak - baseline would mask growth'
+			});
+			return;
+		}
+		
+		// 2. Check heap growth rate (must be near-zero or negative)
+		const heapGrowthRate = calculateHeapGrowthRate();
+		const MAX_GROWTH_FOR_BASELINE_UPDATE = 0.1; // MB/min
+		
+		if (heapGrowthRate !== null && heapGrowthRate > MAX_GROWTH_FOR_BASELINE_UPDATE) {
+			logger?.warnSync('Baseline update rejected - heap still growing', {
+				component: LogComponents.metrics,
+				currentBaselineMB: bytesToMB(baselineHeap),
+				proposedBaselineMB: bytesToMB(avgHeap),
+				heapGrowthRateMBperMin: heapGrowthRate.toFixed(2),
+				maxAllowedGrowthRate: MAX_GROWTH_FOR_BASELINE_UPDATE,
+				reason: 'Non-zero slope detected - not truly stable'
+			});
+			return;
+		}
+		
+		// All safeguards passed - safe to update baseline
 		const oldBaselineHeap = baselineHeap;
 		const oldBaselineRSS = baselineRSS;
+		const oldBaselineExternal = baselineExternal;
 		
 		baselineHeap = avgHeap;
 		baselineRSS = currentRSS; // Update RSS baseline alongside heap
+		
+		// ============================================================================
+		// CRITICAL: Update external baseline independently (Netflix pattern)
+		// ============================================================================
+		// External memory (Buffers, crypto, native) can stabilize at different times
+		// than heap. If never updated, external growth accumulates forever, causing
+		// false positives on long-running agents with Buffer/external workloads.
+		//
+		// Update external baseline if:
+		// - External growth rate is very low (<0.05 MB/min = nearly flat)
+		// - Prevents false positives on stable external memory usage
+		// ============================================================================
+		const mem = memoryUsage();
+		const externalGrowthRate = calculateExternalGrowthRate();
+		let externalBaselineUpdated = false;
+		
+		if (externalGrowthRate !== null && externalGrowthRate < 0.05) {
+			baselineExternal = mem.external;
+			externalBaselineUpdated = true;
+		}
+		
 		lastBaselineUpdate = now;
 		
 		logger?.infoSync('Baseline updated - heap stabilized at new level', {
@@ -412,6 +872,12 @@ function updateBaselineIfStable(currentHeap: number, currentRSS: number): void {
 			newBaselineHeapMB: bytesToMB(baselineHeap),
 			oldBaselineRSSMB: bytesToMB(oldBaselineRSS),
 			newBaselineRSSMB: bytesToMB(baselineRSS),
+			oldBaselineExternalMB: bytesToMB(oldBaselineExternal),
+			newBaselineExternalMB: bytesToMB(baselineExternal),
+			externalBaselineUpdated,
+			driftPercentage: driftPercentage.toFixed(2),
+			heapGrowthRateMBperMin: heapGrowthRate?.toFixed(2) || 'null',
+			externalGrowthRateMBperMin: externalGrowthRate?.toFixed(2) || 'null',
 			uptimeHours: (processUptime() / 3600).toFixed(1)
 		});
 	}
@@ -434,16 +900,28 @@ export async function healthcheck(
 		return true;
 	}
 
-	// Initialize baseline heap
+	// Initialize baseline heap and external
 	if (initialHeap === 0) {
+		const heapStats = getHeapStatistics();
 		initialHeap = currentHeap;
 		baselineHeap = currentHeap;
+		initialExternal = mem.external;
+		baselineExternal = mem.external;
+		initialMalloced = heapStats.malloced_memory;
+		baselineMalloced = heapStats.malloced_memory;
 		initialMemory = currentRSS; // Legacy
 		baselineRSS = currentRSS; // Sliding RSS baseline
 		lastBaselineUpdate = Date.now();
 		lastMemoryCheck = currentRSS; // Legacy
 		
-		heapSamples.push({ timestamp: Date.now(), heapUsed: currentHeap });
+		heapSamples.push({ 
+			timestamp: Date.now(), 
+			heapUsed: currentHeap, 
+			external: mem.external,
+			totalHeapSize: heapStats.total_heap_size,
+			heapSizeLimit: heapStats.heap_size_limit,
+			mallocedMemory: heapStats.malloced_memory
+		});
 		
 		logger?.infoSync('Memory baseline established (heap-based, sliding)', {
 			component: LogComponents.metrics,
@@ -454,8 +932,19 @@ export async function healthcheck(
 		return true;
 	}
 
-	// Add current heap sample
-	heapSamples.push({ timestamp: Date.now(), heapUsed: currentHeap });
+	// Add current heap and external sample with GC signals
+	const heapStats = getHeapStatistics();
+	heapSamples.push({ 
+		timestamp: Date.now(), 
+		heapUsed: currentHeap, 
+		external: mem.external,
+		totalHeapSize: heapStats.total_heap_size,
+		heapSizeLimit: heapStats.heap_size_limit,
+		mallocedMemory: heapStats.malloced_memory
+	});
+	
+	// Update survivor baseline (minimum heap - approximates post-GC state)
+	updateSurvivorBaseline(currentHeap);
 	
 	// Keep only recent samples (10-minute window)
 	const cutoffTime = Date.now() - SAMPLE_WINDOW_MS;
@@ -469,15 +958,16 @@ export async function healthcheck(
 	// Update sliding baseline if heap is stable
 	updateBaselineIfStable(currentHeap, currentRSS);
 	
-	// Calculate heap growth rate
-	const growthRate = calculateHeapGrowthRate();
+	// Calculate heap and external growth rates
+	const heapGrowthRate = calculateHeapGrowthRate();
+	const externalGrowthRate = calculateExternalGrowthRate();
 	const heapStable = isHeapStable();
 	
-	// Apply hysteresis to prevent flapping
-	// Use lower threshold for recovery than for initial breach
-	const threshold = memoryThresholdBreached 
-		? HEAP_GROWTH_RATE_RECOVERY_MB_PER_MIN  // Recovering: use lower threshold
-		: HEAP_GROWTH_RATE_MB_PER_MIN;           // Normal: use standard threshold
+	// Apply adaptive thresholds with hysteresis
+	// Small agents: use base threshold (1 MB/min)
+	// Large agents: scale to baseline (0.5% of heap per minute)
+	const heapThreshold = getAdaptiveHeapThreshold(memoryThresholdBreached);
+	const externalThreshold = getAdaptiveExternalThreshold(memoryThresholdBreached);
 	
 	// Pass if heap is stable (normal allocator behavior)
 	if (heapStable) {
@@ -486,15 +976,49 @@ export async function healthcheck(
 			heapMB: bytesToMB(currentHeap),
 			baselineMB: bytesToMB(baselineHeap),
 			rssMB: bytesToMB(currentRSS),
+			externalMB: bytesToMB(mem.external),
 			samples: heapSamples.length
 		});
 		return true;
 	}
 	
-	// Fail if sustained growth detected (compared to sliding baseline)
-	if (growthRate !== null && growthRate > threshold) {
+	// ============================================================================
+	// CRITICAL: Check survivor leak FIRST (strongest signal)
+	// ============================================================================
+	// Survivor leak = long-lived objects surviving GC, monotonic floor rising
+	// This is the most accurate leak indicator - catches leaks even with shallow slope
+	// 
+	// Scenario without this check:
+	// - Survivor floor rising at 0.4 MB/min (real leak!)
+	// - Overall heap slope only 0.3 MB/min (below threshold)
+	// - Healthcheck passes ❌ but leak exists
+	// 
+	// With this check:
+	// - Survivor monotonic + rate > threshold → FAIL ✅
+	// ============================================================================
+	const survivorGrowth = calculateSurvivorGrowthRate();
+	const survivorThreshold = getAdaptiveSurvivorThreshold();
+	
+	if (
+		survivorGrowth &&
+		survivorGrowth.isMonotonic &&
+		survivorGrowth.rate > survivorThreshold
+	) {
+		// Survivor leak detected - most reliable signal
+		// Don't log here - caller decides whether to alert
+		return false;
+	}
+	
+	// Fail if sustained heap growth detected (compared to sliding baseline)
+	if (heapGrowthRate !== null && heapGrowthRate > heapThreshold) {
 		// Don't log here - caller decides whether to alert
 		// (prevents log spam from repeated healthcheck calls)
+		return false;
+	}
+	
+	// Fail if sustained external memory growth detected (Buffers, crypto, native)
+	if (externalGrowthRate !== null && externalGrowthRate > externalThreshold) {
+		// Don't log here - caller decides whether to alert
 		return false;
 	}
 	
@@ -508,14 +1032,22 @@ export async function healthcheck(
  */
 export function getMemoryDiagnostics() {
 	const mem = memoryUsage();
+	const heapStats = getHeapStatistics();
 	const currentHeap = mem.heapUsed;
 	const currentRSS = mem.rss;
 	const growthRate = calculateHeapGrowthRate();
+	const mallocedGrowthRate = calculateMallocedGrowthRate();
+	const heapTotalGrowthRate = calculateHeapTotalGrowthRate();
+	const survivorGrowth = calculateSurvivorGrowthRate();
 	const heapGrowthFromBaseline = currentHeap - baselineHeap;
 	const heapGrowthFromInitial = currentHeap - initialHeap;
 	const rssGrowthFromBaseline = currentRSS - baselineRSS;
 	const rssGrowthFromInitial = currentRSS - initialMemory;
-	const leakPattern = detectLeakPattern(currentHeap, currentRSS);
+	const currentExternal = mem.external;
+	const externalGrowthFromBaseline = currentExternal - baselineExternal;
+	const externalGrowthFromInitial = currentExternal - initialExternal;
+	const leakPattern = detectLeakPattern(currentHeap, currentRSS, currentExternal);
+	const externalGrowthRate = calculateExternalGrowthRate();
 	
 	return {
 		currentHeapMB: bytesToMB(currentHeap),
@@ -529,9 +1061,39 @@ export function getMemoryDiagnostics() {
 		initialRSSMB: bytesToMB(initialMemory),
 		rssGrowthFromBaselineMB: (rssGrowthFromBaseline / (1024 * 1024)).toFixed(2),
 		rssGrowthFromInitialMB: (rssGrowthFromInitial / (1024 * 1024)).toFixed(2),
-		growthRateMBperMin: growthRate?.toFixed(2) || null,
-		thresholdMBperMin: HEAP_GROWTH_RATE_MB_PER_MIN,
-		recoveryThresholdMBperMin: HEAP_GROWTH_RATE_RECOVERY_MB_PER_MIN,
+		// External memory metrics (Buffers, crypto, native)
+		currentExternalMB: bytesToMB(currentExternal),
+		baselineExternalMB: bytesToMB(baselineExternal),
+		initialExternalMB: bytesToMB(initialExternal),
+		externalGrowthFromBaselineMB: (externalGrowthFromBaseline / (1024 * 1024)).toFixed(2),
+		externalGrowthFromInitialMB: (externalGrowthFromInitial / (1024 * 1024)).toFixed(2),
+		// Growth rates
+		heapGrowthRateMBperMin: growthRate?.toFixed(2) || null,
+		externalGrowthRateMBperMin: externalGrowthRate?.toFixed(2) || null,
+		// Heap utilization (heapUsed vs heapTotal)
+		heapUtilization: ((heapStats.used_heap_size / heapStats.total_heap_size) * 100).toFixed(1) + '%',
+		heapTotalMB: bytesToMB(heapStats.total_heap_size),
+		heapTotalGrowthRateMBperMin: heapTotalGrowthRate?.toFixed(2) || 'null',
+		// Thresholds (adaptive - scale with baseline heap)
+		heapThresholdMBperMin: getAdaptiveHeapThreshold(false).toFixed(2),
+		heapThresholdBase: HEAP_GROWTH_RATE_MB_PER_MIN,
+		heapThresholdAdaptive: (baselineHeap / (1024 * 1024) * ADAPTIVE_THRESHOLD_PERCENTAGE).toFixed(2),
+		heapRecoveryThresholdMBperMin: getAdaptiveHeapThreshold(true).toFixed(2),
+		externalThresholdMBperMin: getAdaptiveExternalThreshold(false).toFixed(2),
+		externalRecoveryThresholdMBperMin: getAdaptiveExternalThreshold(true).toFixed(2),
+		survivorThresholdMBperMin: getAdaptiveSurvivorThreshold().toFixed(2),
+		// GC signals (allocation pressure)
+		totalHeapSizeMB: bytesToMB(heapStats.total_heap_size),
+		heapSizeLimitMB: bytesToMB(heapStats.heap_size_limit),
+		heapFragmentationMB: bytesToMB(heapStats.total_heap_size - heapStats.used_heap_size),
+		heapLimitPressure: ((heapStats.used_heap_size / heapStats.heap_size_limit) * 100).toFixed(1) + '%',
+		mallocedMemoryMB: bytesToMB(heapStats.malloced_memory),
+		mallocedGrowthRateMBperMin: mallocedGrowthRate?.toFixed(2) || 'null',
+		// Survivor tracking (long-lived objects that survive GC)
+		survivorBaselineMB: bytesToMB(survivorBaseline),
+		survivorGrowthRateMBperMin: survivorGrowth?.rate.toFixed(2) || 'null',
+		survivorFloorMonotonic: survivorGrowth?.isMonotonic ?? false,
+		survivorRetainedMB: survivorGrowth?.retainedGrowth.toFixed(1) || 'null',
 		currentlyBreached: memoryThresholdBreached,
 		// Leak pattern analysis
 		leakPattern: leakPattern.pattern,

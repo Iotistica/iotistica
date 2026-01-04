@@ -252,7 +252,7 @@ export class ModbusClient {
             
             dataPoints.push({
               deviceName: this.device.name,
-              registerName: register.name,
+              metric: register.name,
               value: value,
               unit: register.unit || '',
               timestamp: timestamp,
@@ -273,7 +273,7 @@ export class ModbusClient {
             for (const result of batchResults) {
               dataPoints.push({
                 deviceName: this.device.name,
-                registerName: result.register.name,
+                metric: result.register.name,
                 value: result.value,
                 unit: result.register.unit || '',
                 timestamp: timestamp,
@@ -294,7 +294,7 @@ export class ModbusClient {
                 
                 dataPoints.push({
                   deviceName: this.device.name,
-                  registerName: register.name,
+                  metric: register.name,
                   value: value,
                   unit: register.unit || '',
                   timestamp: timestamp,
@@ -448,7 +448,7 @@ export class ModbusClient {
     
     return {
       deviceName: this.device.name,
-      registerName: register.name,
+      metric: register.name,
       value: null,
       unit: register.unit || '',
       timestamp: timestamp,
@@ -557,7 +557,7 @@ export class ModbusClient {
     const timestamp = new Date().toISOString();
     return this.device.registers.map(register => ({
       deviceName: this.device.name,
-      registerName: register.name,
+      metric: register.name,
       value: null,
       unit: register.unit || '',
       timestamp: timestamp,

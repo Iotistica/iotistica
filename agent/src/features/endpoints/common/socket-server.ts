@@ -216,7 +216,7 @@ export class SocketServer {
     const readings = dataPoints.map(point => ({
       timestamp: point.timestamp,
       deviceName: point.deviceName,
-      registerName: point.registerName,
+      metric: point.metric,
       value: point.value,
       unit: point.unit,
       quality: point.quality,
@@ -240,7 +240,7 @@ export class SocketServer {
     for (const point of dataPoints) {
       const row = [
         point.deviceName,
-        point.registerName,
+        point.metric,
         String(point.value),
         point.unit,
         point.quality,

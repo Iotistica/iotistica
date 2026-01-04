@@ -108,10 +108,21 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
       // Add meta topic if dictionary manager enabled
       if (useKeyCompaction) {
         topics.push('meta');
-        logger.info('Added meta topic subscription for dictionary sync');
+        logger.info('✅ Dictionary sync enabled - subscribing to meta topic', {
+          topic: 'iot/device/+/meta/#',
+          useKeyCompaction,
+          timestamp: new Date().toISOString()
+        });
       }
       
-      mqttManager.subscribeToAll(topics);
+      // ✅ FIX: Await subscription to ensure it completes before processing messages
+      await mqttManager.subscribeToAll(topics);
+      
+      logger.info('✅ Subscribed to MQTT topics', {
+        topics,
+        wildcardPattern: 'iot/device/+/{topic}/#',
+        timestamp: new Date().toISOString()
+      });
     } else {
       logger.warn('MQTT subscription disabled. Set MQTT_SUBSCRIBE_ALL=true to enable.');
     }

@@ -19,7 +19,7 @@ export type SocketOutput = z.infer<typeof SocketOutputSchema>;
  */
 export interface SensorDataPoint {
   deviceName: string;
-  registerName: string;
+  metric: string;  // Generic field name (Modbus register, OPC UA node, SNMP OID)
   value: number | boolean | string | null;  // null when quality is BAD
   unit: string;
   timestamp: string;

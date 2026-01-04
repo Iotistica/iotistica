@@ -132,7 +132,7 @@ export class DictionaryManager {
     this.deviceUuid = deviceUuid || process.env.DEVICE_UUID || 'unknown';
     this.enabled = process.env.USE_KEY_COMPACTION_POC === 'true';
     this.arrayMode = (process.env.DICTIONARY_ARRAY_MODE as 'opaque' | 'indexed') || 'opaque';
-    this.syncIntervalMs = parseInt(process.env.DICTIONARY_SYNC_INTERVAL_MS || '300000', 10);
+    this.syncIntervalMs = parseInt(process.env.DICTIONARY_SYNC_INTERVAL_MS || '30000', 10); // Default 30s (was 5min)
     this.deltaThreshold = parseInt(process.env.DICTIONARY_DELTA_THRESHOLD || '5', 10);
     this.deltaSyncDebounceMs = parseInt(process.env.DICTIONARY_DELTA_DEBOUNCE_MS || '200', 10);
   }
@@ -601,11 +601,15 @@ export class DictionaryManager {
       });
     }
 
-    this.logger?.infoSync('Dictionary synced', {
+    this.logger?.infoSync('Dictionary synced to cloud', {
       component: LogComponents.mqtt,
       operation: 'syncFullDictionary',
       version: this.version,
       fields: fields.length,
+      deviceUuid: this.deviceUuid,
+      topic: `iot/device/${this.deviceUuid}/meta/dictionary`,
+      qos: 1,
+      retain: true
     });
   }
 

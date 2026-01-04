@@ -353,7 +353,7 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
     
     return device.dataPoints.map((dataPoint: any) => ({
       deviceName: device.name,
-      registerName: dataPoint.name || dataPoint.signal || dataPoint.tag || 'unknown',
+      metric: dataPoint.name || dataPoint.signal || dataPoint.tag || 'unknown',
       value: null,
       unit: dataPoint.unit || '',
       timestamp,

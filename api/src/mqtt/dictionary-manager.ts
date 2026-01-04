@@ -1,17 +1,17 @@
 /**
- * Cloud Dictionary Manager (Redis-Only POC)
+ * Cloud Dictionary Manager (Redis + PostgreSQL)
  * 
  * Manages MQTT message dictionaries for key compaction.
- * - Stores dictionaries in Redis (30-day TTL)
+ * - Stores dictionaries in Redis (30-day TTL) for fast lookup
+ * - Persists dictionaries to PostgreSQL for durability
  * - Expands compacted messages using stored dictionaries
  * - Handles full sync and delta updates
  * - Supports both indexed arrays (messages[0]) and opaque arrays (messages[])
- * 
- * POC Note: Redis-only for simplicity. Add PostgreSQL backup in production.
  */
 
 import msgpack from 'msgpack-lite';
 import { createHash } from 'crypto';
+import { DeviceDictionaryService } from '../services/device-dictionary.service';
 
 interface DictionaryPayload {
   version: number;
@@ -95,7 +95,7 @@ export class CloudDictionaryManager {
       const sortedFields = Object.values(fieldMap).sort();
       const dictHash = createHash('sha256').update(JSON.stringify(sortedFields)).digest('hex');
 
-      // Store in Redis with 30-day TTL
+      // Store in Redis with 30-day TTL (fast lookup)
       const key = `dict:${deviceUuid}`;
       await this.redis.setex(key, 30 * 24 * 60 * 60, JSON.stringify(fieldMap));
       
@@ -103,11 +103,30 @@ export class CloudDictionaryManager {
       await this.redis.setex(`${key}:version`, 30 * 24 * 60 * 60, dict.version.toString());
       await this.redis.setex(`${key}:hash`, 30 * 24 * 60 * 60, dictHash);
 
-      this.logger?.info(`Dictionary stored: ${deviceUuid} v${dict.version} (${dict.fields.length} fields)`, {
+      this.logger?.info(`✅ Dictionary saved to Redis`, {
+        operation: 'storeDictionary',
+        deviceUuid,
+        version: dict.version,
+        fieldCount: dict.fields.length,
+        redisKey: key,
+        ttlDays: 30
+      });
+
+      // Persist to PostgreSQL for durability
+      await DeviceDictionaryService.storeDictionary(deviceUuid, fieldMap, dict.version);
+
+      this.logger?.info(`Dictionary received via MQTT and synchronized to PostgreSQL`, {
         operation: 'storeDictionary',
         deviceUuid,
         version: dict.version,
         fieldCount: dict.fields.length
+      });
+
+      this.logger?.info(`Dictionary stored: ${deviceUuid} v${dict.version} (${dict.fields.length} fields)`, {
+        deviceUuid,
+        version: dict.version,
+        fieldCount: dict.fields.length,
+        storage: 'redis+postgres'
       });
 
       // Clear resync request tracking (dictionary received successfully)
@@ -176,18 +195,26 @@ export class CloudDictionaryManager {
       const sortedFields = Object.values(currentDict).sort();
       const dictHash = createHash('sha256').update(JSON.stringify(sortedFields)).digest('hex');
 
-      // Store updated dictionary
+      // Store updated dictionary in Redis
       const key = `dict:${deviceUuid}`;
       await this.redis.setex(key, 30 * 24 * 60 * 60, JSON.stringify(currentDict));
       await this.redis.setex(`${key}:version`, 30 * 24 * 60 * 60, delta.version.toString());
       await this.redis.setex(`${key}:hash`, 30 * 24 * 60 * 60, dictHash);
+
+      // Persist delta to PostgreSQL
+      const deltaEntries = newFields.map((name: string, offset: number) => ({
+        name,
+        index: baseIndex + offset
+      }));
+      await DeviceDictionaryService.addDeltaFields(deviceUuid, deltaEntries, delta.version);
 
       this.logger?.info(`Delta applied: ${deviceUuid} v${delta.version} (+${newFields.length} fields)`, {
         operation: 'applyDelta',
         deviceUuid,
         version: delta.version,
         newFields: newFields.length,
-        totalFields: Object.keys(currentDict).length
+        totalFields: Object.keys(currentDict).length,
+        storage: 'redis+postgres'
       });
     } catch (error) {
       this.logger?.error(`Failed to apply delta: ${deviceUuid}`, {
@@ -200,14 +227,36 @@ export class CloudDictionaryManager {
   }
 
   /**
-   * Retrieve dictionary from Redis
+   * Retrieve dictionary (Redis first, PostgreSQL fallback)
    */
   async getDictionary(deviceUuid: string): Promise<Record<number, string> | null> {
     try {
+      // Try Redis first (fast path)
       const key = `dict:${deviceUuid}`;
       const dictionaryJson = await this.redis.get(key);
       
-      if (!dictionaryJson) {
+      if (dictionaryJson) {
+        const dictionary = JSON.parse(dictionaryJson);
+        this.logger?.debug(`✅ Dictionary loaded from Redis`, {
+          operation: 'getDictionary',
+          deviceUuid,
+          source: 'redis',
+          fieldCount: Object.keys(dictionary).length
+        });
+        return dictionary;
+      }
+
+      // Redis miss - load from PostgreSQL and warm cache
+      this.logger?.warn(`⚠️ Redis MISS - loading dictionary from PostgreSQL`, {
+        operation: 'getDictionary',
+        deviceUuid,
+        source: 'postgres',
+        redisKey: key
+      });
+
+      const fieldMap = await DeviceDictionaryService.loadDictionary(deviceUuid);
+      
+      if (Object.keys(fieldMap).length === 0) {
         this.logger?.warn(`No dictionary found for ${deviceUuid}`, {
           operation: 'getDictionary',
           deviceUuid
@@ -215,7 +264,24 @@ export class CloudDictionaryManager {
         return null;
       }
 
-      return JSON.parse(dictionaryJson);
+      // Warm Redis cache
+      const metadata = await DeviceDictionaryService.getMetadata(deviceUuid);
+      if (metadata) {
+        await this.redis.setex(key, 30 * 24 * 60 * 60, JSON.stringify(fieldMap));
+        await this.redis.setex(`${key}:version`, 30 * 24 * 60 * 60, metadata.current_version.toString());
+        if (metadata.dictionary_hash) {
+          await this.redis.setex(`${key}:hash`, 30 * 24 * 60 * 60, metadata.dictionary_hash);
+        }
+        
+        this.logger?.info(`✅ Redis cache warmed from PostgreSQL`, {
+          operation: 'getDictionary',
+          deviceUuid,
+          version: metadata.current_version,
+          fieldCount: Object.keys(fieldMap).length
+        });
+      }
+
+      return fieldMap;
     } catch (error) {
       this.logger?.error(`Failed to retrieve dictionary: ${deviceUuid}`, {
         operation: 'getDictionary',
@@ -274,12 +340,8 @@ export class CloudDictionaryManager {
       throw new Error(`Cannot expand message: no dictionary for ${deviceUuid} (dictionary may have been lost on Redis restart)`);
     }
 
-    // ✅ Refresh TTL on decode to keep active dictionaries alive
-    // Without this, dictionaries expire after 30 days even if device is actively publishing
-    const key = `dict:${deviceUuid}`;
-    await this.redis.expire(key, 30 * 24 * 60 * 60);
-    await this.redis.expire(`${key}:version`, 30 * 24 * 60 * 60);
-    await this.redis.expire(`${key}:hash`, 30 * 24 * 60 * 60);
+    // Note: TTL refresh skipped for performance - dictionaries are re-sent periodically by agent anyway
+    // If Redis restarts, agent will resend full dictionary on next sync interval
 
     // ✅ Hash validation (if message includes hash)
     // Protects against: device bugs, UUID collisions, Redis corruption

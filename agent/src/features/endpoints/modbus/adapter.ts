@@ -348,7 +348,7 @@ export class ModbusAdapter extends EventEmitter {
         const qualityCode = this.extractQualityCode(errorMessage);
         const badDataPoints = deviceConfig.registers.map(register => ({
           deviceName: deviceConfig.name,
-          registerName: register.name,
+          metric: register.name,
           value: null,
           unit: register.unit || '',
           timestamp: timestamp,
@@ -405,7 +405,7 @@ export class ModbusAdapter extends EventEmitter {
     for (const point of dataPoints) {
       if (point.quality !== 'GOOD') continue; // Only count good quality data
       
-      const key = point.registerName;
+      const key = point.metric;
       const lastValue = lastValues.get(key);
       
       // Check if value changed
