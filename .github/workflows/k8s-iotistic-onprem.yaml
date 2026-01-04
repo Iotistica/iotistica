@@ -1,9 +1,20 @@
-name: Kubernetes - Deploy Iotistic (Nodeport)
+name: Kubernetes - Deploy Iotistic (On-Prem)
 
 # Trigger manually or from release workflow
 on:
   workflow_dispatch:
     inputs:
+      client_name:
+        description: 'Client name to deploy (e.g., acme-corp).'
+        required: false
+        type: string
+
+      cluster_name:
+        description: 'Kubernetes cluster/context name to use (kubectx).'
+        required: false
+        type: string
+        default: 'k3scl01'
+
       destroy:
         description: 'If true will destroy the deployed Iotistic app'
         required: false
@@ -50,38 +61,28 @@ jobs:
         if: ${{ inputs.destroy == false && inputs.clean_before_deploy == true }}
         run: |
           set -e
-          NAMESPACE=iotistic-nodeport
+          CLIENT_NAME="${{ inputs.client_name || '' }}"
 
           echo "Deleting previous Helm release (if exists)..."
-          helm uninstall iotistic -n "${NAMESPACE}" || true
-
-          echo "Deleting namespace (if exists)..."
-          kubectl delete namespace "${NAMESPACE}" --ignore-not-found --wait
-
-          echo "Waiting for namespace finalizers to clear..."
-          for i in {1..10}; do
-            if ! kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1; then
-              echo "Namespace removed."; break
-            fi
-            echo "Namespace still terminating... waiting"
-            sleep 3
-          done
+          helm uninstall "${CLIENT_NAME}"-release -n "${CLIENT_NAME}" || true
 
       # ------------------------------------
       # DEPLOY
       # ------------------------------------
-      - name: Deploy Iotistic NodePort (helm)
+      - name: Deploy Iotistic (helm)
         if: ${{ inputs.destroy == false }}
         run: |
           set -e
-          CHART_PATH=./k8s/charts/iotistic
-          VALUES_FILE=./k8s/charts/iotistic/values.yaml
-          NAMESPACE=iotistic-nodeport
+          CLIENT_NAME="${{ inputs.client_name || '' }}"
+          CHART_PATH=./k8s/charts
+          VALUES_FILE="./k8s/charts/values/${CLIENT_NAME}/values.yaml"
           RELEASE_VERSION="${{ inputs.release_version || 'latest' }}"
 
+          kubectx "${{ inputs.cluster_name || 'k3scl01' }}"
+
           echo "Installing Helm chart with version: $RELEASE_VERSION"
-          helm upgrade --install iotistic "${CHART_PATH}" \
-            --namespace "${NAMESPACE}" \
+          helm upgrade --install "${CLIENT_NAME}"-release "${CHART_PATH}" \
+            --namespace "${CLIENT_NAME}" \
             --create-namespace \
             -f "${VALUES_FILE}" \
             --set api.image.tag="${RELEASE_VERSION}" \
@@ -89,32 +90,34 @@ jobs:
             --wait \
             --timeout 5m
 
-          kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-api --timeout=180s || true
-          kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-dashboard --timeout=180s || true
-          kubectl -n "${NAMESPACE}" get svc -o wide
-          kubectl -n "${NAMESPACE}" get pods -o wide
+          kubectl -n "${CLIENT_NAME}" rollout status deploy/iotistic-api --timeout=180s || true
+          kubectl -n "${CLIENT_NAME}" rollout status deploy/iotistic-dashboard --timeout=180s || true
+          kubectl -n "${CLIENT_NAME}" get svc -o wide
+          kubectl -n "${CLIENT_NAME}" get pods -o wide
 
       - name: Display Deployment Info
         if: ${{ inputs.destroy == false }}
         run: |
-          NAMESPACE=iotistic-nodeport
+          CLIENT_NAME="${{ inputs.client_name || '' }}"
           RELEASE_VERSION="${{ inputs.release_version || 'latest' }}"
+
+          kubectx "${{ inputs.cluster_name || 'k3scl01' }}"
           
           echo "## Kubernetes Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** \`$RELEASE_VERSION\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Namespace:** \`$NAMESPACE\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Namespace:** \`$CLIENT_NAME\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           echo "### Services" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          kubectl -n "$NAMESPACE" get svc >> $GITHUB_STEP_SUMMARY
+          kubectl -n "$CLIENT_NAME" get svc >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           echo "### Pods" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          kubectl -n "$NAMESPACE" get pods >> $GITHUB_STEP_SUMMARY
+          kubectl -n "$CLIENT_NAME" get pods >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
@@ -125,10 +128,10 @@ jobs:
       # ------------------------------------
       # DESTROY
       # ------------------------------------
-      - name: Destroy deployed Iotistic NodePort (helm)
+      - name: Destroy deployed Iotistic (helm)
         if: ${{ inputs.destroy == true }}
         run: |
           set -e
-          NAMESPACE=iotistic-nodeport
-          helm uninstall iotistic -n "${NAMESPACE}" || true
-          kubectl delete namespace "${NAMESPACE}" --wait --ignore-not-found
+          CLIENT_NAME="${{ inputs.client_name || '' }}"
+          helm uninstall "${CLIENT_NAME}"-release -n "${CLIENT_NAME}" || true
+          kubectl delete namespace "${CLIENT_NAME}" --wait --ignore-not-found
