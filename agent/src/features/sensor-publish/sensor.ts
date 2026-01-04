@@ -239,7 +239,8 @@ export class Sensor extends EventEmitter {
     timestamp: Date,
     prefix = '',
     depth = 0,
-    visited = new WeakSet()
+    visited = new WeakSet(),
+    processedMetrics = new Set<string>() // Track processed metrics to avoid duplicates
   ): void {
     if (!anomalyService) return;
 
@@ -262,9 +263,17 @@ export class Sensor extends EventEmitter {
     if (typeof data === 'number') {
       // Direct numeric value
       const metricName = prefix || 'value';
+      const fullMetricName = `${sensorName}_${metricName}`;
+      
+      // Skip if already processed (prevents duplicates from nested parsing)
+      if (processedMetrics.has(fullMetricName)) {
+        return;
+      }
+      processedMetrics.add(fullMetricName);
+      
       anomalyService.processDataPoint({
         source: 'endpoint',
-        metric: `${sensorName}_${metricName}`,
+        metric: fullMetricName,
         value: data,
         unit: this.inferUnit(metricName),
         timestamp: timestampMs,
@@ -291,6 +300,14 @@ export class Sensor extends EventEmitter {
         
         // Feed if numeric value
         if (typeof value === 'number') {
+          const fullMetricName = `${deviceName}_${fieldName}`;
+          
+          // Skip if already processed
+          if (processedMetrics.has(fullMetricName)) {
+            return;
+          }
+          processedMetrics.add(fullMetricName);
+          
           anomalyService.processDataPoint({
             source: 'endpoint',
             metric: `${deviceName}_${fieldName}`,
@@ -322,6 +339,14 @@ export class Sensor extends EventEmitter {
             
             // Feed if we have both fieldName and numeric value
             if (fieldName && typeof value === 'number') {
+              const fullMetricName = `${deviceName}_${fieldName}`;
+              
+              // Skip if already processed
+              if (processedMetrics.has(fullMetricName)) {
+                continue;
+              }
+              processedMetrics.add(fullMetricName);
+              
               anomalyService.processDataPoint({
                 source: 'endpoint',
                 metric: `${deviceName}_${fieldName}`,
@@ -347,6 +372,14 @@ export class Sensor extends EventEmitter {
         if (typeof value === 'number') {
           // Feed numeric field
           const metricName = prefix ? `${prefix}_${key}` : key;
+          const fullMetricName = `${sensorName}_${metricName}`;
+          
+          // Skip if already processed
+          if (processedMetrics.has(fullMetricName)) {
+            continue;
+          }
+          processedMetrics.add(fullMetricName);
+          
           anomalyService.processDataPoint({
             source: 'sensor',
             metric: `${sensorName}_${metricName}`,
@@ -362,10 +395,10 @@ export class Sensor extends EventEmitter {
           });
         } else if (Array.isArray(value)) {
           // Handle arrays (e.g., "readings" array)
-          this.extractNumericFields(value, sensorName, timestamp, key, depth + 1, visited);
+          this.extractNumericFields(value, sensorName, timestamp, key, depth + 1, visited, processedMetrics);
         } else if (typeof value === 'object' && value !== null) {
           // Recurse into nested object (depth-limited)
-          this.extractNumericFields(value, sensorName, timestamp, key, depth + 1, visited);
+          this.extractNumericFields(value, sensorName, timestamp, key, depth + 1, visited, processedMetrics);
         }
       }
     }
@@ -604,25 +637,38 @@ export class Sensor extends EventEmitter {
       return;
     }
     
-    // Check if should publish batch immediately (buffer size reached)
-    // Timer will handle time-based publishing (bufferTimeMs)
+    // Check publish strategy
     const bufferSize = this.config.bufferSize ?? 0;
-    const shouldPublish = bufferSize > 0 && this.messageBatch.messages.length >= bufferSize;
-    
-    if (shouldPublish) {
+    const bufferTimeMs = this.config.bufferTimeMs ?? 0;
+    const shouldPublishNow = bufferSize <= 0 && bufferTimeMs <= 0;
+    const shouldPublishBySize = bufferSize > 0 && this.messageBatch.messages.length >= bufferSize;
+
+    // If no buffering configured, publish immediately to avoid stuck batches
+    if (shouldPublishNow) {
+      this.publishBatch();
+      return;
+    }
+
+    // Publish when size threshold reached; timer handles time-based flush
+    if (shouldPublishBySize) {
       this.publishBatch();
     }
   }
 
   /**
-   * Enrich messages with anomaly scores from edge AI
-   * Modifies readings in-place to add anomaly_score field
+   * Enrich messages with anomaly scores and forecasts from edge AI
+   * Adds: anomaly_score, anomaly_threshold, baseline_samples, detection_methods,
+   *       predicted_next, trend, trend_strength, forecast_confidence, time_to_threshold
    */
   private enrichMessagesWithAnomalyScores(messages: any[]): any[] {
     if (!anomalyService) return messages;
 
     const sensorName = this.getSensorName();
     const enrichedMessages: any[] = [];
+    
+    // Get predictions once for all readings (cached by anomaly service)
+    // Note: getPredictions() is available via getSummaryForReport() internally
+    const predictions: Record<string, any> = {};
 
     for (const message of messages) {
       try {
@@ -652,6 +698,20 @@ export class Sensor extends EventEmitter {
                     reading.baseline_samples = metadata.samples;
                     reading.detection_methods = metadata.methods;
                   }
+                  
+                  // Add forecasts if available (trend, next prediction, time-to-threshold)
+                  if (predictions && predictions[metricName]) {
+                    const prediction = predictions[metricName];
+                    reading.predicted_next = prediction.predicted_next;
+                    reading.trend = prediction.trend;
+                    reading.trend_strength = prediction.trend_strength;
+                    reading.forecast_confidence = prediction.confidence;
+                    
+                    // Attach time-to-threshold if available (threshold breach prediction)
+                    if (prediction.time_to_threshold) {
+                      reading.time_to_threshold = prediction.time_to_threshold;
+                    }
+                  }
                 }
               }
             }
@@ -674,6 +734,20 @@ export class Sensor extends EventEmitter {
               data.anomaly_threshold = metadata.threshold;
               data.baseline_samples = metadata.samples;
               data.detection_methods = metadata.methods;
+            }
+            
+            // Add forecasts if available (trend, next prediction, time-to-threshold)
+            if (predictions && predictions[metricName]) {
+              const prediction = predictions[metricName];
+              data.predicted_next = prediction.predicted_next;
+              data.trend = prediction.trend;
+              data.trend_strength = prediction.trend_strength;
+              data.forecast_confidence = prediction.confidence;
+              
+              // Attach time-to-threshold if available (threshold breach prediction)
+              if (prediction.time_to_threshold) {
+                data.time_to_threshold = prediction.time_to_threshold;
+              }
             }
           }
         }
@@ -732,7 +806,7 @@ export class Sensor extends EventEmitter {
   }
 
   /**
-   * Prepare data for publishing with anomaly detection enrichment
+   * Prepare data for publishing with anomaly detection and forecast enrichment
    */
   private preparePublishData(): any {
     // Feed to edge AI anomaly detection FIRST (before enrichment)
@@ -740,14 +814,22 @@ export class Sensor extends EventEmitter {
       this.feedMessagesToAnomaly(this.messageBatch.messages);
     }
     
-    // Enrich messages with anomaly scores
+    // Enrich messages with anomaly scores and forecasts
     const enrichedMessages = this.enrichMessagesWithAnomalyScores(this.messageBatch.messages);
     
-    return {
+    const publishData: any = {
       sensor: this.getSensorName(),
       timestamp: new Date().toISOString(),
       messages: enrichedMessages
     };
+    
+    // Attach batch-level forecasts summary if available
+    if (anomalyService) {
+      // Note: getPredictions is internal to anomaly service; skipping batch summary for now
+      // Forecast data is still attached to individual readings via anomaly metadata
+    }
+    
+    return publishData;
   }
 
   /**

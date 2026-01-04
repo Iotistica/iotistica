@@ -12,6 +12,15 @@
 import type { StatisticalBuffer } from './types';
 import { getRecentValues } from './buffer';
 
+// Window sizes are intentionally different:
+// - Linear lookback balances smoothing with sensitivity for edge noise.
+// - Time-to-threshold uses a longer window for stability.
+// - EMA uses a short window for responsiveness.
+export const LINEAR_PREDICTOR_LOOKBACK = 20;
+export const TIME_TO_THRESHOLD_LOOKBACK = 30;
+export const EMA_PREDICTOR_LOOKBACK = 10;
+export const MAX_FORECAST_SECONDS = 24 * 60 * 60; // Cap at 24h to avoid unrealistic horizons
+
 export interface Prediction {
 	current: number;
 	predicted_next: number;
@@ -35,7 +44,7 @@ export class LinearPredictor {
 	 * @param buffer Statistical buffer with historical data
 	 * @param lookbackWindow Number of recent points to use (default: 20)
 	 */
-	predict(buffer: StatisticalBuffer, lookbackWindow: number = 20): Prediction | null {
+	predict(buffer: StatisticalBuffer, lookbackWindow: number = LINEAR_PREDICTOR_LOOKBACK): Prediction | null {
 		if (buffer.size < 5) {
 			return null; // Need minimum data
 		}
@@ -58,18 +67,22 @@ export class LinearPredictor {
 			sumX2 += x * x;
 		}
 		
-		const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+		const denom = (n * sumX2 - sumX * sumX);
+		if (denom === 0) {
+			return null;
+		}
+		const slope = (n * sumXY - sumX * sumY) / denom;
 		const intercept = (sumY - slope * sumX) / n;
 		
 		// Predict next value (time index = n)
 		const predictedNext = slope * n + intercept;
 		
 		// Calculate trend
-		const trend = this.calculateTrend(slope, buffer.stdDev);
-		const trendStrength = this.calculateTrendStrength(slope, buffer.stdDev);
+		const trend = this.calculateTrend(slope, buffer.stdDev, buffer.mean);
+		const trendStrength = this.calculateTrendStrength(slope, buffer.stdDev, buffer.mean);
 		
 		// Calculate confidence based on R-squared
-		const confidence = this.calculateConfidence(recentValues, slope, intercept);
+		const confidence = this.calculateConfidence(recentValues, slope, intercept, buffer.stdDev);
 		
 		return {
 			current: recentValues[recentValues.length - 1],
@@ -92,7 +105,7 @@ export class LinearPredictor {
 			return null;
 		}
 		
-		const recentValues = getRecentValues(buffer, 30);
+		const recentValues = getRecentValues(buffer, TIME_TO_THRESHOLD_LOOKBACK);
 		const n = recentValues.length;
 		
 		// Linear regression
@@ -104,7 +117,11 @@ export class LinearPredictor {
 			sumX2 += i * i;
 		}
 		
-		const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+		const denom = (n * sumX2 - sumX * sumX);
+		if (denom === 0) {
+			return null;
+		}
+		const slope = (n * sumXY - sumX * sumY) / denom;
 		const intercept = (sumY - slope * sumX) / n;
 		
 		// If not trending toward threshold, return null
@@ -121,10 +138,17 @@ export class LinearPredictor {
 		// threshold = slope * t + intercept
 		// t = (threshold - intercept) / slope
 		const stepsToThreshold = (threshold - intercept) / slope;
-		const estimatedSeconds = stepsToThreshold * (samplingIntervalMs / 1000);
+		if (!Number.isFinite(stepsToThreshold) || stepsToThreshold < 0) {
+			return null;
+		}
+
+		const estimatedSeconds = Math.min(
+			MAX_FORECAST_SECONDS,
+			stepsToThreshold * (samplingIntervalMs / 1000)
+		);
 		
 		// Confidence based on how linear the trend is
-		const confidence = this.calculateConfidence(recentValues, slope, intercept);
+		const confidence = this.calculateConfidence(recentValues, slope, intercept, buffer.stdDev);
 		
 		return {
 			estimated_seconds: Math.max(0, estimatedSeconds),
@@ -135,8 +159,12 @@ export class LinearPredictor {
 	/**
 	 * Calculate trend direction
 	 */
-	private calculateTrend(slope: number, stdDev: number): { direction: 'increasing' | 'decreasing' | 'stable' } {
-		const threshold = stdDev * 0.1; // 10% of standard deviation
+	private calculateTrend(slope: number, stdDev: number, mean: number): { direction: 'increasing' | 'decreasing' | 'stable' } {
+		const threshold = Math.max(
+			stdDev * 0.1,
+			Math.abs(mean) * 0.001,
+			1e-6
+		);
 		
 		if (slope > threshold) {
 			return { direction: 'increasing' };
@@ -150,20 +178,16 @@ export class LinearPredictor {
 	/**
 	 * Calculate trend strength (0-1)
 	 */
-	private calculateTrendStrength(slope: number, stdDev: number): number {
-		if (stdDev === 0) return 0;
-		
-		// Normalize slope by standard deviation
-		const normalizedSlope = Math.abs(slope) / stdDev;
-		
-		// Cap at 1.0
+	private calculateTrendStrength(slope: number, stdDev: number, mean: number): number {
+		const denom = Math.max(stdDev, Math.abs(mean) * 0.01, 1e-9);
+		const normalizedSlope = Math.abs(slope) / denom;
 		return Math.min(1.0, normalizedSlope);
 	}
 	
 	/**
 	 * Calculate prediction confidence using R-squared
 	 */
-	private calculateConfidence(values: number[], slope: number, intercept: number): number {
+	private calculateConfidence(values: number[], slope: number, intercept: number, stdDev: number): number {
 		const n = values.length;
 		
 		// Calculate mean
@@ -183,9 +207,9 @@ export class LinearPredictor {
 		if (ssTot === 0) return 0;
 		
 		const rSquared = 1 - (ssRes / ssTot);
-		
-		// Convert to 0-1 confidence (R-squared is already 0-1)
-		return Math.max(0, Math.min(1, rSquared));
+		const slopeSignal = Math.min(1, Math.abs(slope) / (stdDev + 1e-9));
+		const sizeFactor = Math.min(1, n / 20);
+		return Math.max(0, Math.min(1, rSquared * slopeSignal * sizeFactor));
 	}
 }
 
@@ -206,8 +230,8 @@ export class EMAPredictor {
 		if (buffer.size < 3) {
 			return null;
 		}
-		
-		const recentValues = getRecentValues(buffer, 10);
+
+		const recentValues = getRecentValues(buffer, EMA_PREDICTOR_LOOKBACK);
 		if (recentValues.length < 3) {
 			return null;
 		}
@@ -228,7 +252,8 @@ export class EMAPredictor {
 		
 		// Determine trend
 		let trend: 'increasing' | 'decreasing' | 'stable';
-		if (Math.abs(change) < buffer.stdDev * 0.1) {
+		const trendThreshold = Math.max(buffer.stdDev * 0.1, Math.abs(buffer.mean) * 0.001, 1e-6);
+		if (Math.abs(change) < trendThreshold) {
 			trend = 'stable';
 		} else if (change > 0) {
 			trend = 'increasing';
@@ -238,13 +263,16 @@ export class EMAPredictor {
 		
 		// Simple confidence based on recent variance
 		const recentVariance = this.calculateRecentVariance(recentValues);
-		const confidence = Math.max(0, 1 - (recentVariance / (buffer.stdDev * buffer.stdDev)));
+		const varianceDenom = Math.max(buffer.stdDev * buffer.stdDev, 1e-9);
+		const ratio = recentVariance / varianceDenom;
+		const confidence = Math.exp(-ratio);
 		
+		const trendDenom = Math.max(buffer.stdDev, Math.abs(buffer.mean) * 0.01, 1e-9);
 		return {
 			current,
 			predicted_next: predictedNext,
 			trend,
-			trend_strength: Math.min(1, Math.abs(change) / buffer.stdDev),
+			trend_strength: Math.min(1, Math.abs(change) / trendDenom),
 			confidence
 		};
 	}
@@ -253,5 +281,84 @@ export class EMAPredictor {
 		const mean = values.reduce((sum, val) => sum + val, 0) / values.length;
 		const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
 		return variance;
+	}
+}
+
+// Edge best practice: do not run forecasts on every sample.
+// Use cadence + change detection to limit work and noise on constrained devices.
+export interface ForecastCadenceConfig {
+	minIntervalMs?: number; // Minimum time between runs
+	minSamples?: number; // Minimum samples before running
+	minTrendChange?: number; // Minimum trend_strength delta to publish (0-1)
+	minConfidenceDelta?: number; // Minimum confidence delta to publish (0-1)
+	minPredictionDelta?: number; // Minimum relative predicted_next delta to publish (0-1 fraction)
+}
+
+export interface ForecastCadenceState {
+	lastRunAt?: number;
+	lastPublished?: Prediction;
+}
+
+// Minimum confidence required before attaching time-to-threshold details
+export const MIN_TIME_TO_THRESHOLD_CONFIDENCE = 0.5; // Never attach below 0.3
+
+export function shouldRunForecast(
+	buffer: StatisticalBuffer,
+	state: ForecastCadenceState,
+	config: ForecastCadenceConfig,
+	now: number = Date.now()
+): boolean {
+	const minSamples = config.minSamples ?? 10;
+	if (buffer.size < minSamples) {
+		return false;
+	}
+
+	const minInterval = config.minIntervalMs ?? 60000; // Default: 1 minute cadence
+	if (state.lastRunAt && now - state.lastRunAt < minInterval) {
+		return false;
+	}
+
+	return true;
+}
+
+export function shouldPublishForecast(
+	prediction: Prediction | null,
+	state: ForecastCadenceState,
+	config: ForecastCadenceConfig
+): boolean {
+	if (!prediction) {
+		return false;
+	}
+
+	const previous = state.lastPublished;
+	if (!previous) {
+		return true; // First result
+	}
+
+	const trendDelta = config.minTrendChange ?? 0.1;
+	const confidenceDelta = config.minConfidenceDelta ?? 0.1;
+	const predictionDelta = config.minPredictionDelta ?? 0.05; // 5% change
+
+	const trendChanged =
+		prediction.trend !== previous.trend ||
+		Math.abs(prediction.trend_strength - previous.trend_strength) >= trendDelta;
+
+	const confidenceChanged = Math.abs(prediction.confidence - previous.confidence) >= confidenceDelta;
+
+	const predictedChange = Math.abs(prediction.predicted_next - previous.predicted_next);
+	const predictedBaseline = Math.max(1, Math.abs(previous.predicted_next));
+	const predictionShifted = predictedChange / predictedBaseline >= predictionDelta;
+
+	return trendChanged || confidenceChanged || predictionShifted;
+}
+
+export function recordForecastResult(
+	state: ForecastCadenceState,
+	prediction: Prediction | null,
+	now: number = Date.now()
+): void {
+	state.lastRunAt = now;
+	if (prediction) {
+		state.lastPublished = prediction;
 	}
 }

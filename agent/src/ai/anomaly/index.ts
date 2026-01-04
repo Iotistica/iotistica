@@ -23,8 +23,8 @@ import type {
 import { createBuffer, addValue, getRecentValues, getTrend, getMedian } from './buffer';
 import { getDetector } from './detectors';
 import { AlertManager } from './alert-manager';
-import { LinearPredictor } from './forecaster';
-import type { Prediction } from './forecaster';
+import { LINEAR_PREDICTOR_LOOKBACK, LinearPredictor, MIN_TIME_TO_THRESHOLD_CONFIDENCE, recordForecastResult, shouldPublishForecast, shouldRunForecast } from './forecaster';
+import type { ForecastCadenceConfig, ForecastCadenceState, Prediction } from './forecaster';
 import { AnomalyStorageService } from './storage';
 import { getTimeSlot, getMinimumSamplesForSeasonalBaseline } from './seasonality';
 
@@ -37,6 +37,8 @@ export class AnomalyDetectionService {
 	private deviceUuid?: string;
 	private enabled: boolean = false;
 	private predictor: LinearPredictor;
+	private predictionCadence: ForecastCadenceConfig;
+	private predictionCadenceState = new Map<string, ForecastCadenceState>();
 	private storage?: AnomalyStorageService;
 	private baselineSaveTimer?: NodeJS.Timeout;
 	private baselineSaveIntervalMs: number = 300000; // 5 minutes
@@ -64,6 +66,14 @@ export class AnomalyDetectionService {
 		);
 		
 		this.predictor = new LinearPredictor();
+		this.predictionCadence = {
+			minIntervalMs: 60000,
+			minSamples: 15,
+			minTrendChange: 0.1,
+			minConfidenceDelta: 0.1,
+			minPredictionDelta: 0.05,
+			...(config.predictions?.cadence || {})
+		};
 		
 		// Initialize storage if database provided (use default 30 days if not configured)
 		if (db) {
@@ -159,6 +169,14 @@ export class AnomalyDetectionService {
 	 */
 	getAnomalyMetadata(metricName: string): { threshold: number; methods: string[]; samples: number } | undefined {
 		return this.anomalyMetadata.get(metricName);
+	}
+
+	/**
+	 * Get predictions for all tracked metrics
+	 * Returns forecast data including trend, predicted_next, confidence, and time_to_threshold
+	 */
+	getPredictions(): Record<string, Prediction> | undefined {
+		return this.generatePredictions();
 	}
 	
 	/**
@@ -631,17 +649,30 @@ export class AnomalyDetectionService {
 		}
 		
 		const predictions: Record<string, Prediction> = {};
+		const now = Date.now();
 		
 		for (const [metricName, buffer] of this.buffers.entries()) {
 			const metricConfig = this.getMetricConfig(metricName);
 			if (!metricConfig) continue;
+
+			const cadenceState: ForecastCadenceState = this.predictionCadenceState.get(metricName) || {};
+			this.predictionCadenceState.set(metricName, cadenceState);
+
+			if (!shouldRunForecast(buffer, cadenceState, this.predictionCadence, now)) {
+				continue;
+			}
 			
-			// Generate prediction using linear predictor
-			const prediction = this.predictor.predict(buffer, 20); // Use 20-sample lookback window
+			// Generate prediction using linear predictor (standardized lookback)
+			const prediction = this.predictor.predict(buffer, LINEAR_PREDICTOR_LOOKBACK);
+			recordForecastResult(cadenceState, null, now); // Track run even if no publish
 			if (!prediction) continue;
 			
-			// Add time-to-threshold if expected range is configured
-			if (metricConfig.expectedRange && metricConfig.expectedRange[1] !== undefined) {
+			// Add time-to-threshold only when prediction confidence is solid
+			if (
+				prediction.confidence >= MIN_TIME_TO_THRESHOLD_CONFIDENCE &&
+				metricConfig.expectedRange &&
+				metricConfig.expectedRange[1] !== undefined
+			) {
 				const threshold = metricConfig.expectedRange[1]; // Upper bound
 				const samplingIntervalMs = 20000; // Default 20s interval (matches METRICS_INTERVAL_MS)
 				
@@ -651,7 +682,7 @@ export class AnomalyDetectionService {
 					samplingIntervalMs
 				);
 				
-				if (timeToThreshold) {
+				if (timeToThreshold && timeToThreshold.confidence >= 0.3) { // Guard: never attach <0.3
 					prediction.time_to_threshold = {
 						threshold,
 						...timeToThreshold,
@@ -659,6 +690,12 @@ export class AnomalyDetectionService {
 				}
 			}
 			
+			const shouldPublish = shouldPublishForecast(prediction, cadenceState, this.predictionCadence);
+			if (!shouldPublish) {
+				continue;
+			}
+
+			recordForecastResult(cadenceState, prediction, now);
 			predictions[metricName] = prediction;
 		}
 		
@@ -712,6 +749,13 @@ export class AnomalyDetectionService {
 		// Update storage retention if changed (default to 30 if not specified)
 		if (this.storage && config.storage?.retention !== undefined) {
 			this.storage.updateRetention(config.storage.retention);
+		}
+
+		if (config.predictions?.cadence) {
+			this.predictionCadence = {
+				...this.predictionCadence,
+				...config.predictions.cadence,
+			};
 		}
 		
 		this.logger?.infoSync('Anomaly detection configuration updated', {

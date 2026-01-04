@@ -402,7 +402,14 @@ function getSurvivorMonotonicTolerance(): number {
  * - Regression: fits line through ALL points, ignores outliers
  */
 function calculateHeapGrowthRate(): number | null {
-	if (heapSamples.length < 5) return null; // Need enough samples for trend
+	// Require minimum 10 samples (5 minutes at 30s intervals) to avoid false positives
+	// - 5 samples (2.5 min) = too noisy, startup variance triggers false alerts
+	// - 10 samples (5 min) = stable baseline, reliable trend detection
+	if (heapSamples.length < 10) return null;
+	
+	// Also require minimum time window (5 minutes)
+	const timeWindowMs = Date.now() - heapSamples[0].timestamp;
+	if (timeWindowMs < 5 * 60 * 1000) return null;
 	
 	// Linear regression: y = mx + b
 	// where y = heapUsed (MB), x = time (minutes)
@@ -440,7 +447,11 @@ function calculateHeapGrowthRate(): number | null {
  * Same regression algorithm as heap, but for external allocations
  */
 function calculateExternalGrowthRate(): number | null {
-	if (heapSamples.length < 5) return null;
+	// Same minimum requirements as heap growth rate
+	if (heapSamples.length < 10) return null;
+	
+	const timeWindowMs = Date.now() - heapSamples[0].timestamp;
+	if (timeWindowMs < 5 * 60 * 1000) return null;
 	
 	const n = heapSamples.length;
 	let sumX = 0;
@@ -478,7 +489,11 @@ function calculateExternalGrowthRate(): number | null {
  * - Use heap/external/survivor metrics for actual leak detection
  */
 function calculateMallocedGrowthRate(): number | null {
-	if (heapSamples.length < 5) return null;
+	// Same minimum requirements as heap growth rate
+	if (heapSamples.length < 10) return null;
+	
+	const timeWindowMs = Date.now() - heapSamples[0].timestamp;
+	if (timeWindowMs < 5 * 60 * 1000) return null;
 	
 	const n = heapSamples.length;
 	let sumX = 0;
@@ -511,7 +526,11 @@ function calculateMallocedGrowthRate(): number | null {
  * Indicates V8 expanding heap size (retention signal)
  */
 function calculateHeapTotalGrowthRate(): number | null {
-	if (heapSamples.length < 5) return null;
+	// Same minimum requirements as heap growth rate
+	if (heapSamples.length < 10) return null;
+	
+	const timeWindowMs = Date.now() - heapSamples[0].timestamp;
+	if (timeWindowMs < 5 * 60 * 1000) return null;
 	
 	const n = heapSamples.length;
 	let sumX = 0;

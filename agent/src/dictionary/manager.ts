@@ -93,6 +93,7 @@ export class DictionaryManager {
   private version = 1;
   private updateCount = 0;
   private lastSyncTime = 0;
+  private lastSyncedVersion = 0; // Track last synced version to avoid redundant syncs
   private lastDeltaSync = 0;
   private fieldAdditionTimes: number[] = [];
   
@@ -571,6 +572,17 @@ export class DictionaryManager {
       return; // Nothing to sync
     }
 
+    // Skip sync if version hasn't changed since last sync
+    if (this.version === this.lastSyncedVersion) {
+      this.logger?.debugSync('Dictionary version unchanged, skipping sync', {
+        component: LogComponents.dictionary,
+        operation: 'syncFullDictionary',
+        version: this.version,
+        lastSyncedVersion: this.lastSyncedVersion
+      });
+      return;
+    }
+
     const fields = Array.from(this.dictionary.entries())
       .sort((a, b) => a[1] - b[1]) // Sort by index
       .map(([field]) => field);
@@ -589,6 +601,7 @@ export class DictionaryManager {
     );
 
     this.lastSyncTime = Date.now();
+    this.lastSyncedVersion = this.version; // Track synced version
     
     // Update metadata
     try {

@@ -22,6 +22,7 @@ import { LogComponents } from '../logging/types.js';
 import { ContainerManager } from '../compose/container-manager.js';
 import { ConfigManager } from './config.js';
 import type { DeviceConfig } from '../drivers/types.js';
+import semver from 'semver';
 
 /**
  * Simple state structure (compatible with existing code)
@@ -53,6 +54,9 @@ export class StateReconciler extends EventEmitter {
 	private lastSavedStateHash: string = '';
 	private logger?: AgentLogger;
 	private isReconciling = false;
+	private pendingReconcile = false;
+	private reconcileTimer?: NodeJS.Timeout;
+	private readonly reconcileDelayMs = 500; // Debounce to coalesce rapid updates from cloud
 
 	/**
 	 * Set logger (called after logger is initialized)
@@ -97,8 +101,7 @@ export class StateReconciler extends EventEmitter {
 	 * Initialize state reconciler
 	 */
 	public async init(): Promise<void> {
-		this.
-		logger?.infoSync('Initializing StateReconciler', {
+		this.logger?.infoSync('Initializing StateReconciler', {
 			component: LogComponents.stateReconciler,
 			operation: 'init',
 		});
@@ -147,9 +150,39 @@ export class StateReconciler extends EventEmitter {
 		// Emit generic event for backward compatibility
 		this.emit('target-state-changed', this.targetState);
 
-		// Trigger reconciliation
-		await this.reconcile();
+		// Debounced reconciliation to coalesce rapid updates from cloud
+		// Skip scheduling if reconciliation is already in progress
+		if (!this.isReconciling) {
+			this.scheduleReconcile();
+		} else {
+			// Mark that we need to reconcile again after current one finishes
+			this.pendingReconcile = true;
+		}
+	}
 
+	/**
+	 * Update target state quietly (without triggering reconciliation)
+	 * Use this for state updates that should not trigger a reconciliation cycle,
+	 * such as merging discovered metrics during initialization.
+	 */
+	public async updateTargetStateQuietly(state: DeviceState): Promise<void> {
+		this.logger?.debugSync('Updating target state quietly (no reconciliation)', {
+			component: LogComponents.stateReconciler,
+			operation: 'updateTargetStateQuietly',
+			appsCount: Object.keys(state.apps).length,
+			endpointCount: state.config?.endpoints?.length || 0,
+		});
+
+		// Update target state without triggering events or reconciliation
+		this.targetState = _.cloneDeep(state);
+		
+		// Ensure config field exists
+		if (!this.targetState.config) {
+			this.targetState.config = {};
+		}
+
+		// Persist to database only (no events, no reconciliation)
+		await this.saveTargetStateToDB();
 	}
 
 	/**
@@ -186,11 +219,12 @@ export class StateReconciler extends EventEmitter {
 	}
 
 	/**
-	 * Main reconciliation loop
+	 * Main reconciliation loop with pending flag to avoid lost updates
 	 */
 	public async reconcile(): Promise<void> {
 		if (this.isReconciling) {
-			this.logger?.warnSync('Already reconciling, skipping', {
+			this.pendingReconcile = true;
+			this.logger?.debugSync('Reconcile already in progress, marking pending', {
 				component: LogComponents.stateReconciler,
 				operation: 'reconcile',
 			});
@@ -198,13 +232,23 @@ export class StateReconciler extends EventEmitter {
 		}
 
 		this.isReconciling = true;
+		try {
+			do {
+				this.pendingReconcile = false;
+				await this.runReconcileOnce();
+			} while (this.pendingReconcile);
+		} finally {
+			this.isReconciling = false;
+		}
+	}
+
+	private async runReconcileOnce(): Promise<void> {
+		this.logger?.infoSync('Starting full state reconciliation', {
+			component: LogComponents.stateReconciler,
+			operation: 'reconcile',
+		});
 
 		try {
-			this.logger?.infoSync('Starting full state reconciliation', {
-				component: LogComponents.stateReconciler,
-				operation: 'reconcile',
-			});
-
 			// Step 1: Reconcile containers (protocol adapters must be running first)
 			this.logger?.debugSync('Step 1: Reconciling containers', {
 				component: LogComponents.stateReconciler,
@@ -225,12 +269,25 @@ export class StateReconciler extends EventEmitter {
 			this.logger?.debugSync('Step 3: Reconciling agent version', {
 				component: LogComponents.stateReconciler,
 			});
-			
-			await this.reconcileAgentVersion(this.targetState);
 
-			this.logger?.infoSync('Full state reconciliation complete', {
-				component: LogComponents.stateReconciler,
-				operation: 'reconcile',
+			const containerStatus = this.containerManager.getStatus();
+			if (containerStatus.isApplying) {
+				this.logger?.infoSync('Deferring agent update until containers are stable', {
+					component: LogComponents.stateReconciler,
+					operation: 'reconcile',
+					currentApps: containerStatus.currentApps,
+					targetApps: containerStatus.targetApps,
+				});
+			// Schedule retry instead of tight loop
+			this.scheduleReconcile(2000);
+			return;
+		}
+		
+		await this.reconcileAgentVersion(this.targetState);
+
+		this.logger?.infoSync('Full state reconciliation complete', {
+			component: LogComponents.stateReconciler,
+			operation: 'reconcile',
 			});
 
 			this.emit('reconciliation-complete');
@@ -244,9 +301,32 @@ export class StateReconciler extends EventEmitter {
 				}
 			);
 			throw error;
-		} finally {
-			this.isReconciling = false;
 		}
+	}
+
+	/**
+	 * Debounce reconciliation to coalesce rapid target updates
+	 */
+	private scheduleReconcile(delayMs: number = this.reconcileDelayMs): void {
+		if (this.reconcileTimer) {
+			clearTimeout(this.reconcileTimer);
+		}
+
+		this.reconcileTimer = setTimeout(async () => {
+			this.reconcileTimer = undefined;
+			try {
+				await this.reconcile();
+			} catch (error) {
+				this.logger?.errorSync(
+					'Debounced reconciliation failed',
+					error instanceof Error ? error : new Error(String(error)),
+					{
+						component: LogComponents.stateReconciler,
+						operation: 'scheduleReconcile',
+					}
+				);
+			}
+		}, delayMs);
 	}
 
 	/**
@@ -309,12 +389,14 @@ export class StateReconciler extends EventEmitter {
 		}
 		
 		// Delegate to AgentUpdater for reconciliation
+		const isDowngrade = semver.lt(agentConfig.version, currentVersion);
+
 		this.logger?.infoSync('Agent version mismatch detected, triggering reconciliation', {
 			component: LogComponents.stateReconciler,
 			operation: 'reconcileAgentVersion',
 			currentVersion,
 			targetVersion: agentConfig.version,
-			isDowngrade: currentVersion > agentConfig.version,
+			isDowngrade,
 			scheduledAt: agentConfig.update_scheduled_at,
 			force: agentConfig.update_force,
 		});
@@ -405,16 +487,24 @@ export class StateReconciler extends EventEmitter {
 
 			const stateJson = JSON.stringify(this.targetState);
 
-			// Delete old target snapshots and insert new
-			await db('stateSnapshot')
-				.where({ type: 'target' })
-				.delete();
-
+			// Insert new snapshot first, then trim to keep the most recent two
 			await db('stateSnapshot').insert({
 				type: 'target',
 				state: stateJson,
 				stateHash: stateHash,
 			});
+
+			// Keep only the latest 2 target snapshots to survive power loss without bloat
+			const oldSnapshots = await db('stateSnapshot')
+				.where({ type: 'target' })
+				.orderBy('createdAt', 'desc')
+				.offset(2);
+			if (oldSnapshots.length > 0) {
+				const oldIds = oldSnapshots.map((s: any) => s.id).filter(Boolean);
+				if (oldIds.length > 0) {
+					await db('stateSnapshot').whereIn('id', oldIds).delete();
+				}
+			}
 
 		} catch (error) {
 			this.logger?.errorSync(
@@ -432,8 +522,51 @@ export class StateReconciler extends EventEmitter {
 	 * Generate SHA-256 hash of state
 	 */
 	private getStateHash(state: DeviceState): string {
-		const stateJson = JSON.stringify(state);
+		const canonical = this.canonicalizeState(state);
+		const stateJson = stableStringify(canonical);
 		return crypto.createHash('sha256').update(stateJson).digest('hex');
+	}
+
+	private canonicalizeState(state: DeviceState): DeviceState {
+		const clone = _.cloneDeep(state);
+
+		// Sort apps by numeric key to stabilize hashing
+		if (clone.apps) {
+			const sortedApps: Record<number, any> = {} as Record<number, any>;
+			for (const key of Object.keys(clone.apps).sort((a, b) => Number(a) - Number(b))) {
+				sortedApps[Number(key)] = clone.apps[Number(key)];
+			}
+			clone.apps = sortedApps;
+		}
+
+		// Normalize config arrays if present to avoid order-induced hash flips
+		const cfg: any = clone.config;
+		if (cfg) {
+			if (Array.isArray(cfg.endpoints)) {
+				cfg.endpoints = this.sortArrayStably(cfg.endpoints);
+			}
+			if (Array.isArray(cfg.protocols)) {
+				cfg.protocols = this.sortArrayStably(cfg.protocols);
+			}
+		}
+
+		return clone;
+	}
+
+	private sortArrayStably(arr: any[]): any[] {
+		return [...arr].sort((a, b) => {
+			const aKey = this.getComparableKey(a);
+			const bKey = this.getComparableKey(b);
+			return aKey.localeCompare(bKey);
+		});
+	}
+
+	private getComparableKey(val: any): string {
+		if (val && typeof val === 'object') {
+			if (val.id !== undefined) return String(val.id);
+			if (val.name !== undefined) return String(val.name);
+		}
+		return stableStringify(val);
 	}
 
 	/**
@@ -562,4 +695,24 @@ export class StateReconciler extends EventEmitter {
 	): boolean {
 		return super.emit(event, ...args);
 	}
+}
+
+// Local stable stringify to avoid key-order drift in hashes (no external dependency)
+function stableStringify(value: any): string {
+	return JSON.stringify(normalizeValue(value));
+}
+
+function normalizeValue(value: any): any {
+	if (Array.isArray(value)) {
+		return value.map(normalizeValue);
+	}
+	if (value && typeof value === 'object') {
+		const sortedKeys = Object.keys(value).sort();
+		const result: Record<string, any> = {};
+		for (const key of sortedKeys) {
+			result[key] = normalizeValue(value[key]);
+		}
+		return result;
+	}
+	return value;
 }

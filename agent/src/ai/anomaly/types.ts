@@ -168,6 +168,14 @@ export interface MetricConfig {
 	};
 }
 
+export interface PredictionCadenceConfig {
+	minIntervalMs?: number;
+	minSamples?: number;
+	minTrendChange?: number;
+	minConfidenceDelta?: number;
+	minPredictionDelta?: number;
+}
+
 /**
  * Anomaly detection configuration
  */
@@ -190,6 +198,9 @@ export interface AnomalyConfig {
 		enabled: boolean;
 		trainingIntervalMs: number;
 		confidenceThreshold: number;
+	};
+	predictions?: {
+		cadence?: PredictionCadenceConfig;
 	};
 }
 

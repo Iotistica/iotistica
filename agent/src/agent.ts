@@ -889,8 +889,8 @@ export default class DeviceAgent {
           // Update target state with merged anomaly config
           currentTargetState.config.anomaly = config;
           
-          // Save to database (this will trigger config change detection and cloud report)
-          await this.stateReconciler.setTarget(currentTargetState);
+          // Save to database quietly (without triggering reconciliation loop)
+          await this.stateReconciler.updateTargetStateQuietly(currentTargetState);
           
           this.agentLogger?.infoSync("Saved merged anomaly config to target state", {
             component: LogComponents.agent,
