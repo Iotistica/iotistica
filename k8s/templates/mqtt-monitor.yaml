@@ -1,0 +1,115 @@
+{{- if .Values.mqttMonitor.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "iotistic.fullname" . }}-mqtt-monitor
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mqtt-monitor
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.mqttMonitor.port }}
+      targetPort: mqtt-monitor
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "iotistic.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: mqtt-monitor
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "iotistic.fullname" . }}-mqtt-monitor
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mqtt-monitor
+spec:
+  replicas: {{ .Values.mqttMonitor.replicas }}
+  selector:
+    matchLabels:
+      {{- include "iotistic.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mqtt-monitor
+  template:
+    metadata:
+      labels:
+        {{- include "iotistic.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mqtt-monitor
+    spec:
+      containers:
+        - name: mqtt-monitor
+          image: "{{ .Values.mqttMonitor.image.repository }}:{{ .Values.mqttMonitor.image.tag }}"
+          imagePullPolicy: {{ .Values.mqttMonitor.image.pullPolicy }}
+          ports:
+            - name: mqtt-monitor
+              containerPort: {{ .Values.mqttMonitor.port }}
+              protocol: TCP
+          env:
+            - name: PORT
+              value: {{ .Values.mqttMonitor.port | quote }}
+            - name: HOST
+              value: "0.0.0.0"
+            - name: NODE_ENV
+              value: {{ .Values.mqttMonitor.env.NODE_ENV | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.mqttMonitor.env.LOG_LEVEL | quote }}
+            - name: DB_HOST
+              value: timescaledb-cluster-rw.io-cluster-tsdb.svc #{{ include "iotistic.fullname" . }}-postgres
+            - name: DB_PORT
+              value: {{ .Values.postgres.port | quote }}
+            - name: DB_NAME
+              value: {{ .Values.postgres.database | quote }}
+            - name: DB_USER
+              value: {{ .Values.postgres.username | quote }}
+            - name: DB_PASSWORD
+              value: {{ .Values.postgres.password | quote }}
+            - name: DB_POOL_SIZE
+              value: {{ .Values.mqttMonitor.env.DB_POOL_SIZE | quote }}
+            - name: MQTT_BROKER_URL
+              value: {{ include "iotistic.mosquitto.url" . }}
+            {{- if .Values.mqttMonitor.mqtt.existingSecret }}
+            # Read MQTT credentials from existing Kubernetes Secret
+            - name: MQTT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mqttMonitor.mqtt.existingSecret }}
+                  key: username
+            - name: MQTT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mqttMonitor.mqtt.existingSecret }}
+                  key: password
+            {{- else }}
+            # Use credentials from values.yaml (not recommended for production)
+            - name: MQTT_USERNAME
+              value: {{ .Values.mqttMonitor.mqtt.username | quote }}
+            - name: MQTT_PASSWORD
+              value: {{ .Values.mqttMonitor.mqtt.password | quote }}
+            {{- end }}
+            - name: MQTT_PERSIST_DB
+              value: {{ .Values.mqttMonitor.env.MQTT_PERSIST_DB | quote }}
+            - name: MQTT_DB_SYNC_INTERVAL
+              value: {{ .Values.mqttMonitor.env.MQTT_DB_SYNC_INTERVAL | quote }}
+            - name: MQTT_METRICS_UPDATE_INTERVAL
+              value: {{ .Values.mqttMonitor.env.MQTT_METRICS_UPDATE_INTERVAL | quote }}
+            - name: MQTT_TOPIC_TREE_UPDATE_INTERVAL
+              value: {{ .Values.mqttMonitor.env.MQTT_TOPIC_TREE_UPDATE_INTERVAL | quote }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: mqtt-monitor
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: mqtt-monitor
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.mqttMonitor.resources | nindent 12 }}
+{{- end }}
