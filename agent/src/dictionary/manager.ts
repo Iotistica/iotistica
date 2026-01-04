@@ -5,38 +5,60 @@ import { DictionaryModel } from '../db/models/index.js';
  * MQTT Message Dictionary Manager
  * =================================
  * 
- * Fully Dynamic Runtime Dictionary (Schema-Free) - Pattern B with Metrics
+ * Domain-Partitioned Dynamic Dictionary (Schema-Free) - Pattern B with Metrics
  * 
  * Automatically compacts MQTT message keys into numeric indices, reducing bandwidth
- * by 45-70%. New fields are auto-discovered and added to dictionary without code changes.
+ * by 45-70%. New fields are auto-discovered and added to appropriate semantic domains
+ * without code changes. Prevents field collisions and enables type-safe cloud expansion.
  * 
  * Features:
  * - Auto-discovery: New fields automatically indexed on first appearance
+ * - Domain partitioning: Logical separation (key, metric, unit, quality, device)
  * - Versioning: Dictionary version in every payload prevents stale data
  * - Nested objects: Recursive compaction with dot-notation keys
- * - Metrics tracking: Compression stats, anomaly detection
+ * - Metrics tracking: Compression stats, anomaly detection, domain distribution
  * - Zero maintenance: Adapts to config changes (Modbus, OPC UA) automatically
  * 
  * ⚠️ CRITICAL INVARIANTS (must never be violated):
  * 1. APPEND-ONLY: Dictionary can only grow, never shrink or reorder
- * 2. MONOTONIC VERSION: Version increments on each field addition, never decrements
- * 3. NO RESET: Dictionary persists for device lifetime (except manual reset())
- * 4. INDEX STABILITY: Once assigned, an index→field mapping never changes
+ * 2. MONOTONIC VERSIONS: Both workingVersion and dictionaryVersion only increase, never decrease
+ * 3. VERSION ORDERING: dictionaryVersion <= workingVersion (always)
+ * 4. NO RESET: Dictionary persists for device lifetime (except manual reset())
+ * 5. INDEX STABILITY: Once assigned, an index→field mapping never changes
+ * 6. DOMAIN IMMUTABILITY: A field's domain never changes once assigned
+ * 7. PAYLOAD SAFETY: Payloads only reference dictionaryVersion (known to cloud)
  * 
  * These invariants enable delta sync without full state reconciliation.
  * Violating them will cause silent data corruption in cloud expansion.
  * 
  * Topic Structure:
- * - iot/device/{uuid}/meta/dictionary - Full dictionary sync
- * - iot/device/{uuid}/meta/dictionary/delta - Delta updates
+ * - iot/device/{uuid}/meta/dictionary - Full dictionary sync with domains
+ * - iot/device/{uuid}/meta/dictionary/delta - Delta updates with domains
  * - iot/device/{uuid}/endpoints/{sensor} - Original sensor topics (unchanged)
  * 
  * Message Format (Compacted):
  * {
- *   v: 5,                    // Dictionary version
- *   i: [0, 1, 2, 3],        // Field indices
- *   d: [21.5, 1735401234, "active", { temp: 23.1 }]  // Values
+ *   v: 5,                    // Dictionary version (dictionaryVersion - known to cloud)
+ *   p: [[0, 21.5], [5, "°C"], [3, "GOOD"]]  // Pairs [index, value]
  * }
+ * 
+ * Version Strategy:
+ * - workingVersion: Internal discovery counter, bumps immediately on new field
+ * - dictionaryVersion: Bumps only when full sync succeeds (safe for cloud)
+ * - Payloads use dictionaryVersion to avoid "unknown schema" crashes
+ * - Protects against noisy/malformed payloads exploding version numbers
+ * 
+ * Wire Format Compatibility:
+ * - Remains identical to previous version
+ * - No decoding changes needed on cloud API
+ * - Domains are internal detail for agent
+ * 
+ * Domain Reference:
+ * - key: Structural JSON paths ("temperature", "alarms[].code")
+ * - metric: Semantic metrics ("engine_rpm", "pressure_bar") - default domain
+ * - unit: Engineering units ("RPM", "bar", "°C", "mA", "V")
+ * - quality: OPC UA quality codes ("GOOD", "UNCERTAIN", "BAD")
+ * - device: Device references ("modbus_slave_3", "gateway_main")
  * 
  * Usage:
  *   const manager = new DictionaryManager(mqttManager, logger, deviceUuid);
@@ -52,6 +74,7 @@ import { DictionaryModel } from '../db/models/index.js';
  *   // Check metrics
  *   const stats = manager.getMetrics();
  *   console.log(`Compression: ${stats.avgCompressionRatio}%`);
+ *   console.log(`Domain distribution: ${stats.domainStats}`);
  * 
  * Environment Variables:
  * - USE_KEY_COMPACTION_POC=true - Enable dictionary compaction
@@ -70,10 +93,36 @@ import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 
 /**
+ * Domain types for semantic field partitioning
+ */
+export type DictionaryDomain = 'key' | 'metric' | 'unit' | 'quality' | 'device';
+
+/**
+ * Domain-partitioned dictionaries
+ */
+export interface DomainDictionaries {
+  key: Map<string, number>;       // Structural keys: "temperature", "alarms[].code"
+  metric: Map<string, number>;    // Semantic metrics: "engine_rpm", "pressure_bar"
+  unit: Map<string, number>;      // Engineering units: "RPM", "bar", "°C", "mA", "V"
+  quality: Map<string, number>;   // OPC UA qualities: "GOOD", "UNCERTAIN", "BAD"
+  device: Map<string, number>;    // Device references: "modbus_slave_3", "gateway_main"
+}
+
+/**
+ * Field classification with domain and index
+ */
+export interface FieldClassification {
+  fieldName: string;
+  domain: DictionaryDomain;
+  index: number;
+  isNew: boolean;
+}
+
+/**
  * Dictionary metrics for tracking compression effectiveness
  */
 export interface DictionaryMetrics {
-  dictionarySize: number;          // Total fields in dictionary
+  dictionarySize: number;          // Total fields across all domains
   version: number;                 // Current dictionary version
   updateCount: number;             // Number of dictionary updates
   fieldAdditionRate: number;       // Fields added per hour
@@ -82,20 +131,91 @@ export interface DictionaryMetrics {
   bytesSaved: number;              // Total bandwidth saved (bytes)
   avgCompressionRatio: number;     // Running average compression %
   lastUpdateTime: number;          // Timestamp of last update
+  domainStats: Record<DictionaryDomain, number>; // Fields per domain
 }
 
 /**
  * Dictionary Manager - Pattern B (Advanced)
- * Manages field-to-index mapping with automatic discovery and metrics
+ * Manages domain-partitioned field-to-index mapping with automatic discovery and metrics
  */
 export class DictionaryManager {
-  private dictionary: Map<string, number> = new Map();
-  private version = 1;
+  private domains: DomainDictionaries = {
+    key: new Map(),
+    metric: new Map(),
+    unit: new Map(),
+    quality: new Map(),
+    device: new Map(),
+  };
+
+  // ✅ OPTIMIZATION: Cache domain inference results (immutable by invariant #6)
+  private domainCache = new Map<string, DictionaryDomain>();
+
+  // ✅ VALUE ENUM COMPRESSION
+  // Frozen OPC UA quality enum (never changes - hardcoded for safety)
+  private readonly QUALITY_ENUM: Record<string, number> = {
+    'GOOD': 1,
+    'BAD': 2,
+    'UNCERTAIN': 3,
+    'NOT_CONNECTED': 4,
+  };
+
+  // Promoted engineering unit enum (learned from observations)
+  private unitEnum: Record<string, number> = {};
+  private unitEnumFrozen = false;  // Once frozen, no new values allowed
+
+  // Enum candidate observation (for unit domain only)
+  private unitStats: Map<string, { count: number; firstSeen: number }> = new Map();
+
+  // ✅ PROTOCOL-AWARE METADATA ENUMS (Phase 7: Extended Compression)
+  // Namespace metrics/devices by protocol to prevent semantic collisions
+  // Promotion thresholds:
+  // - qualityCode: 20 observations (bounded set, medium frequency)
+  // - metric: 100 observations (many possibilities, high frequency)
+  // - device: 10 observations (very stable per edge, high repetition)
+  
+  // QualityCode enum (global, not protocol-namespaced)
+  private qualityCodeEnum: Record<string, number> = {};
+  private qualityCodeStats: Map<string, { count: number; firstSeen: number }> = new Map();
+  private readonly QUALITY_CODE_THRESHOLD = 20;
+  
+  // Metric enums (protocol-namespaced: modbus.engine_rpm, snmp.sysUpTime)
+  private metricEnums: Record<string, Record<string, number>> = {}; // { modbus: { engine_rpm: 1 } }
+  private metricStats: Map<string, { count: number; firstSeen: number; protocol: string }> = new Map();
+  private readonly METRIC_THRESHOLD = 50;
+  
+  // Device enums (protocol-namespaced: modbus.modbus_slave_3, snmp.snmp_device_60)
+  private deviceEnums: Record<string, Record<string, number>> = {}; // { modbus: { modbus_slave_3: 5 } }
+  private deviceStats: Map<string, { count: number; firstSeen: number; protocol: string }> = new Map();
+  private readonly DEVICE_THRESHOLD = 10;
+
+  // ✅ OPTIMIZATION: Enum stability tracking (skip observation on mature systems)
+  private qualityCodeEnumStable = false;
+  private metricEnumStable = false;
+  private deviceEnumStable = false;
+  private lastQualityCodePromotion = 0;
+  private lastMetricPromotion = 0;
+  private lastDevicePromotion = 0;
+  
+  // Stability criteria:
+  // - Enum size exceeds threshold (5 for qualityCode, 20 for metric, 10 for device)
+  // - No new promotions for 5 minutes
+  private readonly STABILITY_TIME_MS = 5 * 60 * 1000; // 5 minutes
+  private readonly QUALITY_CODE_STABILITY_SIZE = 5;
+  private readonly METRIC_STABILITY_SIZE = 20;
+  private readonly DEVICE_STABILITY_SIZE = 10;
+
+  // Two-version system: protects against noisy payloads exploding version numbers
+  // - workingVersion: bumps immediately on discovery (local only, not sent to cloud)
+  // - dictionaryVersion: bumps only when full sync succeeds (safe for cloud payloads)
+  private workingVersion = 1;      // Internal discovery counter
+  private dictionaryVersion = 1;   // Cloud-safe version (dictionaryVersion <= workingVersion always)
+  
   private updateCount = 0;
   private lastSyncTime = 0;
-  private lastSyncedVersion = 0; // Track last synced version to avoid redundant syncs
+  private lastSyncedVersion = 0; // Track last synced dictionaryVersion to avoid redundant syncs
   private lastDeltaSync = 0;
   private fieldAdditionTimes: number[] = [];
+  private hasUnsyncedEnumPromotions = false; // Flag for unsynced enum promotions (Phase 7)
   
   // Metrics tracking
   private metrics: DictionaryMetrics = {
@@ -108,6 +228,13 @@ export class DictionaryManager {
     bytesSaved: 0,
     avgCompressionRatio: 0,
     lastUpdateTime: Date.now(),
+    domainStats: {
+      key: 0,
+      metric: 0,
+      unit: 0,
+      quality: 0,
+      device: 0,
+    },
   };
   
   // Running totals for average compression
@@ -139,6 +266,55 @@ export class DictionaryManager {
   }
 
   /**
+   * Load promoted enums and observation counts from database
+   */
+  private async loadEnumsFromDatabase(): Promise<void> {
+    try {
+      // Load promoted enums
+      const enums = await DictionaryModel.getPromotedEnums();
+      
+      // Reconstruct enum maps from database
+      this.qualityCodeEnum = enums.qualityCodes || {};
+      this.metricEnums = enums.metrics || {};
+      this.deviceEnums = enums.devices || {};
+      
+      // Load observation counts (stats)
+      const stats = await DictionaryModel.getEnumStats();
+      
+      // Reconstruct stats maps
+      this.qualityCodeStats = new Map(Object.entries(stats.qualityCodes || {}));
+      this.metricStats = new Map(Object.entries(stats.metrics || {}));
+      this.deviceStats = new Map(Object.entries(stats.devices || {}));
+      
+      const totalMetrics = this.getTotalPromotedMetrics();
+      const totalDevices = this.getTotalPromotedDevices();
+      const totalQualityCodes = Object.keys(this.qualityCodeEnum).length;
+      
+      this.logger?.infoSync('Enums loaded from database', {
+        component: LogComponents.dictionary,
+        operation: 'loadEnumsFromDatabase',
+        promoted: {
+          metrics: totalMetrics,
+          devices: totalDevices,
+          qualityCodes: totalQualityCodes,
+        },
+        observations: {
+          metrics: this.metricStats.size,
+          devices: this.deviceStats.size,
+          qualityCodes: this.qualityCodeStats.size,
+        },
+      });
+    } catch (error) {
+      this.logger?.warnSync('Failed to load enums from database, starting fresh', {
+        component: LogComponents.dictionary,
+        operation: 'loadEnumsFromDatabase',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Continue with empty enums - will rebuild through observations
+    }
+  }
+
+  /**
    * Initialize dictionary manager and start sync timer
    */
   public async initialize(): Promise<void> {
@@ -152,24 +328,42 @@ export class DictionaryManager {
 
     // Load existing dictionary from database
     try {
-      this.dictionary = await DictionaryModel.loadDictionary();
-      this.version = await DictionaryModel.getCurrentVersion();
+      this.domains = await DictionaryModel.loadDictionary();
+      this.dictionaryVersion = await DictionaryModel.getCurrentVersion();
+      this.workingVersion = this.dictionaryVersion; // Start in sync
+      
+      const totalSize = Object.values(this.domains).reduce((sum, map) => sum + map.size, 0);
       
       this.logger?.infoSync('Dictionary loaded from database', {
         component: LogComponents.dictionary,
         operation: 'initialize',
-        dictionarySize: this.dictionary.size,
-        version: this.version,
+        dictionarySize: totalSize,
+        dictionaryVersion: this.dictionaryVersion,
+        workingVersion: this.workingVersion,
         arrayMode: this.arrayMode,
         syncIntervalMs: this.syncIntervalMs,
         deltaThreshold: this.deltaThreshold,
         deviceUuid: this.deviceUuid,
+        domainBreakdown: {
+          key: this.domains.key.size,
+          metric: this.domains.metric.size,
+          unit: this.domains.unit.size,
+          quality: this.domains.quality.size,
+          device: this.domains.device.size,
+        },
       });
 
-      // Update metrics to match loaded state
-      this.metrics.dictionarySize = this.dictionary.size;
-      this.metrics.version = this.version;
-      this.updateCount = this.dictionary.size; // Approximate - each field is an update
+      // Update metrics to match loaded state (use dictionaryVersion for cloud safety)
+      this.metrics.dictionarySize = totalSize;
+      this.metrics.version = this.dictionaryVersion;
+      this.metrics.domainStats = {
+        key: this.domains.key.size,
+        metric: this.domains.metric.size,
+        unit: this.domains.unit.size,
+        quality: this.domains.quality.size,
+        device: this.domains.device.size,
+      };
+      this.updateCount = totalSize; // Approximate - each field is an update
     } catch (error) {
       this.logger?.warnSync('Failed to load dictionary from database, starting fresh', {
         component: LogComponents.dictionary,
@@ -213,44 +407,684 @@ export class DictionaryManager {
     }
 
     // Final sync
-    if (this.enabled && this.dictionary.size > 0) {
+    if (this.enabled && this.getTotalDictionarySize() > 0) {
       await this.syncFullDictionary();
     }
   }
 
   /**
-   * Get or assign index for a field name (auto-discovery)
+   * Check if field should be skipped during dictionary inference
+   */
+  private shouldSkipField(fieldName: string): boolean {
+    // Skip qualityCode fields - they're redundant with quality field
+    // qualityCode is now only included in payloads when quality != GOOD (error diagnostics)
+    // No need to track in dictionary since quality field is sufficient
+    return fieldName.includes('qualityCode');
+  }
+
+  /**
+   * Infer domain from field name using heuristics
+   * Order: Explicit prefixes → Semantic content → Structural markers → Default
+   * ✅ OPTIMIZED: Cached results (domain is immutable per invariant #6)
+   */
+  private inferDomain(fieldName: string): DictionaryDomain {
+    // Check cache first (BIG WIN - avoids all string parsing)
+    const cached = this.domainCache.get(fieldName);
+    if (cached) return cached;
+
+    // Step 1: Explicit domain prefixes (highest priority)
+    if (fieldName.startsWith('quality.')) {
+      this.domainCache.set(fieldName, 'quality');
+      return 'quality';
+    }
+    if (fieldName.startsWith('unit.')) {
+      this.domainCache.set(fieldName, 'unit');
+      return 'unit';
+    }
+    if (fieldName.startsWith('device.')) {
+      this.domainCache.set(fieldName, 'device');
+      return 'device';
+    }
+    if (fieldName.startsWith('metric.')) {
+      this.domainCache.set(fieldName, 'metric');
+      return 'metric';
+    }
+    if (fieldName.startsWith('key.')) {
+      this.domainCache.set(fieldName, 'key');
+      return 'key';
+    }
+
+    // Step 2: Semantic content (field name contains semantic meaning)
+    // Check if field name ends with quality indicators
+    const baseName = this.extractBaseName(fieldName);  // "quality" from "messages[].readings[].quality"
+    
+    if (this.isQualityField(baseName)) {
+      this.domainCache.set(fieldName, 'quality');
+      return 'quality';  // "quality", "qualityCode", "status", "state"
+    }
+
+    if (this.isUnitField(baseName)) {
+      this.domainCache.set(fieldName, 'unit');
+      return 'unit';  // "unit", "unitCode", "engineering_unit"
+    }
+
+    // Device references
+    if (fieldName.includes('_slave_') || fieldName.includes('_gateway_') || 
+        baseName.includes('device') || baseName.includes('gateway')) {
+      this.domainCache.set(fieldName, 'device');
+      return 'device';
+    }
+
+    // Step 3: Structural paths (arrays, nested objects) - lowest priority
+    if (fieldName.includes('[') || fieldName.includes(']')) {
+      this.domainCache.set(fieldName, 'key');
+      return 'key'; // Array notation: "messages[]", "readings[]"
+    }
+
+    // Step 4: Default semantic metric
+    const domain: DictionaryDomain = 'metric';
+    this.domainCache.set(fieldName, domain);
+    return domain;
+  }
+
+  /**
+   * Extract the final field name without array notation
+   * Examples: "messages[].readings[].quality" → "quality", "sensor" → "sensor"
+   */
+  private extractBaseName(fieldName: string): string {
+    // Remove everything before the last dot or bracket
+    const lastDot = fieldName.lastIndexOf('.');
+    const lastBracket = fieldName.lastIndexOf('[');
+    const lastIndex = Math.max(lastDot, lastBracket);
+    
+    if (lastIndex === -1) return fieldName;
+    
+    let baseName = fieldName.substring(lastIndex + 1);
+    // Remove trailing bracket notation
+    baseName = baseName.replace(/\[\]$/g, '');
+    return baseName;
+  }
+
+  /**
+   * Check if field name indicates a quality/status field
+   */
+  private isQualityField(fieldName: string): boolean {
+    const qualityKeywords = ['quality', 'qualityCode', 'code', 'status', 'state', 'condition'];
+    const lowerName = fieldName.toLowerCase();
+    return qualityKeywords.some(kw => lowerName === kw || lowerName.endsWith(`_${kw}`));
+  }
+
+  /**
+   * Check if field name indicates a unit field
+   */
+  private isUnitField(fieldName: string): boolean {
+    const unitKeywords = ['unit', 'unitCode', 'engineering_unit', 'unit_of_measure'];
+    const lowerName = fieldName.toLowerCase();
+    return unitKeywords.some(kw => lowerName === kw || lowerName.endsWith(`_${kw}`));
+  }
+
+  /**
+   * Check if value is an OPC UA quality code (for reference, not used in field inference)
+   */
+  private isOpcUaQuality(value: string): boolean {
+    const qualityCodes = ['GOOD', 'BAD', 'UNCERTAIN', 'NOT_CONNECTED'];
+    return qualityCodes.includes(value);
+  }
+
+  /**
+   * Check if value is an engineering unit
+   */
+  private isEngineeringUnit(value: string): boolean {
+    const units = [
+      'RPM', 'bar', 'Pa', 'kPa', 'MPa', '°C', '°F', 'K',
+      'V', 'mV', 'A', 'mA', 'W', 'kW', 'MW', 'Wh', 'kWh',
+      'Hz', 'kHz', 'MHz', 'L', 'mL', 'L/min', 'm3/h',
+      '%', 'ppm', 'ppb', 'dB', 'dBm',
+    ];
+    return units.includes(value);
+  }
+
+  /**
+   * Encode enum values for quality and unit domains
+   * Quality: hardcoded frozen enum (always safe)
+   * Unit: learned enum (promoted after observation)
+   */
+  private encodeEnumValue(fieldName: string, value: any): any {
+    // Only encode strings in enum-eligible domains
+    if (typeof value !== 'string') return value;
+    if (value.length > 16) return value;  // Skip free text
+
+    // Check which domain this field belongs to
+    const domain = this.inferDomain(fieldName);
+
+    // ✅ QUALITY DOMAIN: Use frozen enum (hardcoded OPC UA codes)
+    if (domain === 'quality') {
+      const enumIndex = this.QUALITY_ENUM[value];
+      if (enumIndex !== undefined) {
+        return enumIndex;  // Replace "GOOD" with 1
+      }
+      // Unknown quality code - return raw (safety)
+      this.logger?.warnSync(`Unknown quality code: ${value}`, {
+        component: LogComponents.dictionary,
+        operation: 'encodeEnumValue',
+        value
+      });
+      return value;
+    }
+
+    // ✅ UNIT DOMAIN: Use promoted enum (if frozen)
+    if (domain === 'unit') {
+      // Observe for promotion (if not frozen)
+      if (!this.unitEnumFrozen) {
+        this.observeUnitCandidate(value);
+      }
+
+      // If enum is frozen and value is known, encode it
+      if (this.unitEnumFrozen && this.unitEnum[value] !== undefined) {
+        return this.unitEnum[value];  // Replace "RPM" with 1
+      }
+
+      // Not frozen yet, or unknown value - return raw
+      return value;
+    }
+
+    // Other domains: no enum encoding
+    return value;
+  }
+
+  /**
+   * Observe unit value for enum promotion
+   */
+  private observeUnitCandidate(value: string): void {
+    const stats = this.unitStats.get(value) || { count: 0, firstSeen: Date.now() };
+    stats.count++;
+    this.unitStats.set(value, stats);
+
+    // Check if we should promote to enum
+    if (this.shouldPromoteUnitEnum()) {
+      this.promoteUnitEnum();
+    }
+  }
+
+  /**
+   * Check if unit values should be promoted to enum
+   * Criteria: low cardinality (≤5), high frequency (≥100 each), short strings
+   */
+  private shouldPromoteUnitEnum(): boolean {
+    if (this.unitEnumFrozen) return false;  // Already promoted
+
+    const values = Array.from(this.unitStats.keys());
+    if (values.length === 0 || values.length > 5) return false;  // Low cardinality check
+
+    // All values must be seen ≥100 times
+    return values.every(v => {
+      const stats = this.unitStats.get(v)!;
+      return stats.count >= 100;
+    });
+  }
+
+  /**
+   * Promote unit values to frozen enum
+   */
+  private promoteUnitEnum(): void {
+    const values = Array.from(this.unitStats.keys()).sort();  // Deterministic order
+    
+    values.forEach((value, index) => {
+      this.unitEnum[value] = index + 1;  // Start at 1 (0 reserved for null)
+    });
+
+    this.unitEnumFrozen = true;
+
+    this.logger?.infoSync('Unit enum promoted', {
+      component: LogComponents.dictionary,
+      operation: 'promoteUnitEnum',
+      values,
+      enum: this.unitEnum
+    });
+  }
+
+  // ========================================================================
+  // PROTOCOL-AWARE ENUM METHODS (Phase 7)
+  // ========================================================================
+
+  /**
+   * Observe and potentially promote qualityCode value to enum
+   * Threshold: 20 observations (bounded set, medium frequency)
+   * ✅ OPTIMIZED: Fast-path skip when enum is stable
+   */
+  private async observeQualityCode(value: string | undefined): Promise<void> {
+    if (!value || typeof value !== 'string') return;
+    
+    // ✅ FAST PATH: Skip observation if enum is stable
+    if (this.qualityCodeEnumStable) return;
+    
+    // Skip if already promoted (no need to continue counting)
+    if (this.qualityCodeEnum[value]) return;
+    
+    const stats = this.qualityCodeStats.get(value) || { count: 0, firstSeen: Date.now() };
+    stats.count++;
+    this.qualityCodeStats.set(value, stats);
+
+    // Persist stats every 10th count (reduce DB writes)
+    if (stats.count % 10 === 0) {
+      try {
+        await DictionaryModel.saveEnumStats('qualityCode', undefined, value, stats.count, stats.firstSeen);
+      } catch (error) {
+        // Silently fail - stats are in memory
+      }
+    }
+
+    // Log only at milestones: first, every 10th, and at threshold
+    if (stats.count === 1 || stats.count === this.QUALITY_CODE_THRESHOLD || stats.count % 10 === 0) {
+      this.logger?.infoSync('QualityCode observation', {
+        component: LogComponents.dictionary,
+        value,
+        count: stats.count,
+        threshold: this.QUALITY_CODE_THRESHOLD
+      });
+    }
+
+    // Check promotion threshold (use >= to handle race conditions)
+    if (stats.count >= this.QUALITY_CODE_THRESHOLD && !this.qualityCodeEnum[value]) {
+      await this.promoteQualityCode(value);
+    }
+  }
+
+  /**
+   * Promote qualityCode value to enum (immutable index assignment)
+   */
+  private async promoteQualityCode(value: string): Promise<void> {
+    const nextIndex = Object.keys(this.qualityCodeEnum).length + 1;
+    this.qualityCodeEnum[value] = nextIndex;
+    this.lastQualityCodePromotion = Date.now();
+
+    this.logger?.infoSync('QualityCode promoted to enum', {
+      component: LogComponents.dictionary,
+      operation: 'promoteQualityCode',
+      value,
+      index: nextIndex,
+      observations: this.qualityCodeStats.get(value)?.count
+    });
+
+    // Check if enum is now stable
+    this.checkQualityCodeStability();
+
+    // Persist to database
+    try {
+      await DictionaryModel.savePromotedEnum('qualityCode', undefined, value, nextIndex);
+    } catch (error) {
+      this.logger?.errorSync('Failed to persist qualityCode enum', error instanceof Error ? error : undefined, {
+        component: LogComponents.dictionary,
+        operation: 'promoteQualityCode',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Observe and potentially promote metric value to enum
+   * Threshold: 100 observations per protocol namespace
+   * ✅ OPTIMIZED: Fast-path skip when enum is stable
+   */
+  private async observeMetric(protocol: string | undefined, metric: string): Promise<void> {
+    if (!protocol) return;  // Skip if no protocol context
+    
+    // ✅ FAST PATH: Skip observation if enum is stable
+    if (this.metricEnumStable) return;
+    
+    // Skip if already promoted (no need to continue counting)
+    if (this.metricEnums[protocol]?.[metric]) return;
+    
+    const key = `${protocol}:${metric}`;
+    const stats = this.metricStats.get(key) || { count: 0, firstSeen: Date.now(), protocol };
+    stats.count++;
+    this.metricStats.set(key, stats);
+
+    // Persist stats every 10th count (reduce DB writes)
+    if (stats.count % 10 === 0) {
+      try {
+        await DictionaryModel.saveEnumStats('metric', protocol, metric, stats.count, stats.firstSeen);
+      } catch (error) {
+        // Silently fail - stats are in memory
+      }
+    }
+
+    // Log only at milestones: first, every 10th, and at threshold
+    if (stats.count === 1 || stats.count === this.METRIC_THRESHOLD || stats.count % 10 === 0) {
+      this.logger?.infoSync('Metric observation', {
+        component: LogComponents.dictionary,
+        protocol,
+        metric,
+        count: stats.count,
+        threshold: this.METRIC_THRESHOLD
+      });
+    }
+
+    // Check promotion threshold (use >= to handle race conditions)
+    if (stats.count >= this.METRIC_THRESHOLD && !this.metricEnums[protocol]?.[metric]) {
+      await this.promoteMetric(protocol, metric);
+    }
+  }
+
+  /**
+   * Promote metric to protocol-namespaced enum
+   */
+  private async promoteMetric(protocol: string, metric: string): Promise<void> {
+    if (!this.metricEnums[protocol]) {
+      this.metricEnums[protocol] = {};
+    }
+
+    // Check if already promoted (avoid duplicates)
+    if (this.metricEnums[protocol][metric]) return;
+
+    const nextIndex = Object.keys(this.metricEnums[protocol]).length + 1;
+    this.metricEnums[protocol][metric] = nextIndex;
+    this.lastMetricPromotion = Date.now();
+
+    // Mark that we have unsynced enum promotions
+    this.hasUnsyncedEnumPromotions = true;
+
+    this.logger?.infoSync('Metric promoted to enum', {
+      component: LogComponents.dictionary,
+      operation: 'promoteMetric',
+      protocol,
+      metric,
+      index: nextIndex,
+      observations: this.metricStats.get(`${protocol}:${metric}`)?.count
+    });
+
+    // Check if enum is now stable
+    this.checkMetricStability();
+
+    // Trigger delta sync to publish promoted enums
+    this.scheduleDeltaSync();
+
+    // Persist to database
+    try {
+      await DictionaryModel.savePromotedEnum('metric', protocol, metric, nextIndex);
+    } catch (error) {
+      this.logger?.errorSync('Failed to persist metric enum', error instanceof Error ? error : undefined, {
+        component: LogComponents.dictionary,
+        operation: 'promoteMetric',
+        protocol,
+        metric,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Observe and potentially promote device name to enum
+   * Threshold: 10 observations per protocol namespace (low threshold - very stable)
+   * ✅ OPTIMIZED: Fast-path skip when enum is stable
+   */
+  private async observeDevice(protocol: string | undefined, deviceName: string): Promise<void> {
+    if (!protocol) return;  // Skip if no protocol context
+    
+    // ✅ FAST PATH: Skip observation if enum is stable
+    if (this.deviceEnumStable) return;
+    
+    // Skip if already promoted (no need to continue counting)
+    if (this.deviceEnums[protocol]?.[deviceName]) {
+      this.logger?.debugSync('Device already promoted, skipping observation', {
+        component: LogComponents.dictionary,
+        protocol,
+        deviceName,
+        index: this.deviceEnums[protocol][deviceName]
+      });
+      return;
+    }
+    
+    const key = `${protocol}:${deviceName}`;
+    const stats = this.deviceStats.get(key) || { count: 0, firstSeen: Date.now(), protocol };
+    stats.count++;
+    this.deviceStats.set(key, stats);
+
+    // Persist stats every 10th count (reduce DB writes)
+    if (stats.count % 10 === 0) {
+      try {
+        await DictionaryModel.saveEnumStats('device', protocol, deviceName, stats.count, stats.firstSeen);
+      } catch (error) {
+        // Silently fail - stats are in memory
+      }
+    }
+
+    // Log only at milestones: first, every 10th, and at threshold
+    if (stats.count === 1 || stats.count === this.DEVICE_THRESHOLD || stats.count % 10 === 0) {
+      this.logger?.infoSync('Device observation', {
+        component: LogComponents.dictionary,
+        protocol,
+        deviceName,
+        count: stats.count,
+        threshold: this.DEVICE_THRESHOLD
+      });
+    }
+
+    // Check promotion threshold (use >= to handle race conditions)
+    if (stats.count >= this.DEVICE_THRESHOLD && !this.deviceEnums[protocol]?.[deviceName]) {
+      this.logger?.infoSync('⚠️ Device threshold reached, promoting...', {
+        component: LogComponents.dictionary,
+        protocol,
+        deviceName,
+        count: stats.count,
+        threshold: this.DEVICE_THRESHOLD
+      });
+      await this.promoteDevice(protocol, deviceName);
+      this.logger?.infoSync('✅ Device promotion complete', {
+        component: LogComponents.dictionary,
+        protocol,
+        deviceName,
+        index: this.deviceEnums[protocol]?.[deviceName]
+      });
+    }
+  }
+
+  /**
+   * Promote device to protocol-namespaced enum
+   */
+  private async promoteDevice(protocol: string, deviceName: string): Promise<void> {
+    if (!this.deviceEnums[protocol]) {
+      this.deviceEnums[protocol] = {};
+    }
+
+    // Check if already promoted
+    if (this.deviceEnums[protocol][deviceName]) return;
+
+    const nextIndex = Object.keys(this.deviceEnums[protocol]).length + 1;
+    this.deviceEnums[protocol][deviceName] = nextIndex;
+    this.lastDevicePromotion = Date.now();
+
+    // Mark that we have unsynced enum promotions
+    this.hasUnsyncedEnumPromotions = true;
+
+    this.logger?.infoSync('Device promoted to enum', {
+      component: LogComponents.dictionary,
+      operation: 'promoteDevice',
+      protocol,
+      deviceName,
+      index: nextIndex,
+      observations: this.deviceStats.get(`${protocol}:${deviceName}`)?.count
+    });
+
+    // Check if enum is now stable
+    this.checkDeviceStability();
+
+    // Trigger delta sync to publish promoted enums
+    this.scheduleDeltaSync();
+
+    // Persist to database
+    try {
+      await DictionaryModel.savePromotedEnum('device', protocol, deviceName, nextIndex);
+    } catch (error) {
+      this.logger?.errorSync('Failed to persist device enum', error instanceof Error ? error : undefined, {
+        component: LogComponents.dictionary,
+        operation: 'promoteDevice',
+        protocol,
+        deviceName,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Check if quality code enum has stabilized
+   * Stability criteria: size >= 5 AND no promotions for 5 minutes
+   * Once stable, observation is disabled for performance
+   */
+  private checkQualityCodeStability(): void {
+    if (this.qualityCodeEnumStable) return;
+    
+    const enumSize = Object.keys(this.qualityCodeEnum).length;
+    const timeSinceLastPromotion = Date.now() - this.lastQualityCodePromotion;
+    
+    if (enumSize >= this.QUALITY_CODE_STABILITY_SIZE && 
+        timeSinceLastPromotion >= this.STABILITY_TIME_MS) {
+      this.qualityCodeEnumStable = true;
+      this.logger?.infoSync('QualityCode enum marked as stable - observation disabled', {
+        component: LogComponents.dictionary,
+        operation: 'checkQualityCodeStability',
+        enumSize,
+        minutesSinceLastPromotion: Math.round(timeSinceLastPromotion / 60000)
+      });
+    }
+  }
+
+  /**
+   * Check if metric enums have stabilized across all protocols
+   * Stability criteria: total size >= 20 AND no promotions for 5 minutes
+   * Once stable, observation is disabled for performance
+   */
+  private checkMetricStability(): void {
+    if (this.metricEnumStable) return;
+    
+    // Count total metrics across all protocols
+    let totalMetrics = 0;
+    for (const protocolEnums of Object.values(this.metricEnums)) {
+      totalMetrics += Object.keys(protocolEnums).length;
+    }
+    
+    const timeSinceLastPromotion = Date.now() - this.lastMetricPromotion;
+    
+    if (totalMetrics >= this.METRIC_STABILITY_SIZE && 
+        timeSinceLastPromotion >= this.STABILITY_TIME_MS) {
+      this.metricEnumStable = true;
+      this.logger?.infoSync('Metric enum marked as stable - observation disabled', {
+        component: LogComponents.dictionary,
+        operation: 'checkMetricStability',
+        totalMetrics,
+        protocols: Object.keys(this.metricEnums).length,
+        minutesSinceLastPromotion: Math.round(timeSinceLastPromotion / 60000)
+      });
+    }
+  }
+
+  /**
+   * Check if device enums have stabilized across all protocols
+   * Stability criteria: total size >= 10 AND no promotions for 5 minutes
+   * Once stable, observation is disabled for performance
+   */
+  private checkDeviceStability(): void {
+    if (this.deviceEnumStable) return;
+    
+    // Count total devices across all protocols
+    let totalDevices = 0;
+    for (const protocolEnums of Object.values(this.deviceEnums)) {
+      totalDevices += Object.keys(protocolEnums).length;
+    }
+    
+    const timeSinceLastPromotion = Date.now() - this.lastDevicePromotion;
+    
+    if (totalDevices >= this.DEVICE_STABILITY_SIZE && 
+        timeSinceLastPromotion >= this.STABILITY_TIME_MS) {
+      this.deviceEnumStable = true;
+      this.logger?.infoSync('Device enum marked as stable - observation disabled', {
+        component: LogComponents.dictionary,
+        operation: 'checkDeviceStability',
+        totalDevices,
+        protocols: Object.keys(this.deviceEnums).length,
+        minutesSinceLastPromotion: Math.round(timeSinceLastPromotion / 60000)
+      });
+    }
+  }
+
+  /**
+   * Encode metadata field value using protocol-aware enums
+   * Returns enum index if promoted, otherwise raw value
+   */
+  private encodeMetadataValue(
+    fieldType: 'qualityCode' | 'metric' | 'device',
+    protocol: string | undefined,
+    value: string
+  ): string | number {
+    switch (fieldType) {
+      case 'qualityCode':
+        return this.qualityCodeEnum[value] ?? value;
+      
+      case 'metric':
+        if (!protocol) return value;
+        return this.metricEnums[protocol]?.[value] ?? value;
+      
+      case 'device':
+        if (!protocol) return value;
+        return this.deviceEnums[protocol]?.[value] ?? value;
+      
+      default:
+        return value;
+    }
+  }
+
+  /**
+   * Get total dictionary size across all domains
+   */
+  private getTotalDictionarySize(): number {
+    return Object.values(this.domains).reduce((sum, map) => sum + map.size, 0);
+  }
+
+  /**
+   * Get or assign index for a field name (auto-discovery with domain inference)
    * ✅ FIX: Increment version immediately when new field is added
-   * ✅ PERSISTENCE: Save new fields to database immediately
+   * ✅ PERSISTENCE: Save new fields to database immediately with domain
    */
   private getIndex(fieldName: string): number {
-    let index = this.dictionary.get(fieldName);
+    // Skip qualityCode fields - they're redundant with quality field
+    if (this.shouldSkipField(fieldName)) {
+      return -1;  // Signal to skip this field
+    }
+
+    const domain = this.inferDomain(fieldName);
+    let index = this.domains[domain].get(fieldName);
     
     if (index === undefined) {
-      // New field - assign next available index
-      index = this.dictionary.size;
-      this.dictionary.set(fieldName, index);
+      // New field - assign next available index within domain
+      index = this.domains[domain].size;
+      this.domains[domain].set(fieldName, index);
       this.updateCount++;
       this.fieldAdditionTimes.push(Date.now());
       
-      // ✅ FIX: Bump version immediately so compacted messages reference valid dictionary
-      this.version++;
+      // ✅ FIX (Risk #2): Bump workingVersion (internal), NOT dictionaryVersion
+      // dictionaryVersion only bumps on successful cloud sync
+      // This prevents noisy payloads from exploding version numbers on cloud
+      this.workingVersion++;
       
       this.logger?.infoSync('New field discovered and indexed', {
         component: LogComponents.dictionary,
         operation: 'getIndex',
         fieldName,
+        domain,
         fieldIndex: index,
-        version: this.version,
-        dictionarySize: this.dictionary.size
+        workingVersion: this.workingVersion,
+        dictionaryVersion: this.dictionaryVersion,
+        dictionaryVersionGap: this.workingVersion - this.dictionaryVersion,
+        totalSize: this.getTotalDictionarySize()
       });
       
       // ✅ PERSISTENCE: Save to database immediately (async but fire-and-forget)
-      this.persistNewField(fieldName, index, this.version).catch((err) => {
+      this.persistNewField(fieldName, index, this.workingVersion, domain).catch((err) => {
         this.logger?.errorSync('Failed to persist dictionary field to database', err, {
           component: LogComponents.dictionary,
           operation: 'persistNewField',
           fieldName,
+          domain,
           fieldIndex: index
         });
       });
@@ -259,12 +1093,20 @@ export class DictionaryManager {
       const oneHourAgo = Date.now() - 3600000;
       this.fieldAdditionTimes = this.fieldAdditionTimes.filter((t) => t > oneHourAgo);
       
-      // ✅ FIX: Update metrics to prevent drift (critical for dashboards)
-      this.metrics.dictionarySize = this.dictionary.size;
-      this.metrics.version = this.version;
+      // ✅ FIX: Update metrics to prevent drift (use dictionaryVersion for safety)
+      const totalSize = this.getTotalDictionarySize();
+      this.metrics.dictionarySize = totalSize;
+      this.metrics.version = this.dictionaryVersion; // Metrics use dictionaryVersion (cloud-safe)
       this.metrics.fieldAdditionRate = this.fieldAdditionTimes.length;
       this.metrics.updateCount = this.updateCount;
       this.metrics.lastUpdateTime = Date.now();
+      this.metrics.domainStats = {
+        key: this.domains.key.size,
+        metric: this.domains.metric.size,
+        unit: this.domains.unit.size,
+        quality: this.domains.quality.size,
+        device: this.domains.device.size,
+      };
       
       // Trigger debounced delta sync if threshold reached
       // This batches rapid field additions to avoid flooding MQTT
@@ -277,34 +1119,37 @@ export class DictionaryManager {
   }
 
   /**
-   * Persist new field to database
+   * Persist new field to database with domain
    */
-  private async persistNewField(fieldName: string, fieldIndex: number, version: number): Promise<void> {
+  private async persistNewField(fieldName: string, fieldIndex: number, version: number, domain: DictionaryDomain): Promise<void> {
     this.logger?.infoSync('Persisting field to database', {
       component: LogComponents.dictionary,
       operation: 'persistNewField',
       fieldName,
+      domain,
       fieldIndex,
       version
     });
     
     try {
-      // Save entry
-      await DictionaryModel.saveEntry(fieldName, fieldIndex, version);
+      // Save entry with domain
+      await DictionaryModel.saveEntry(fieldName, fieldIndex, version, domain);
       this.logger?.debugSync('Dictionary entry saved to database', {
         component: LogComponents.dictionary,
         operation: 'saveEntry',
         fieldName,
+        domain,
         fieldIndex
       });
       
-      // Record delta for sync tracking
-      const deltaId = await DictionaryModel.saveDelta(fieldName, fieldIndex, version);
+      // Record delta for sync tracking with domain
+      const deltaId = await DictionaryModel.saveDelta(fieldName, fieldIndex, version, domain);
       this.logger?.debugSync('Delta record created', {
         component: LogComponents.dictionary,
         operation: 'saveDelta',
         deltaId,
         fieldName,
+        domain,
         fieldIndex,
         version
       });
@@ -321,6 +1166,7 @@ export class DictionaryManager {
         component: LogComponents.dictionary,
         operation: 'persistNewField',
         fieldName,
+        domain,
         fieldIndex,
         version,
         deltaId
@@ -330,6 +1176,7 @@ export class DictionaryManager {
         component: LogComponents.dictionary,
         operation: 'persistNewField',
         fieldName,
+        domain,
         fieldIndex,
         version
       });
@@ -364,11 +1211,13 @@ export class DictionaryManager {
    * Compact message using dictionary (recursive for nested objects and arrays)
    * ✅ FIX: Use tuple-based encoding [[index, value], ...] for structure preservation
    * ✅ FIX: Add array framing to preserve boundaries
+   * ✅ OPTIMIZED: Merged metadata observation into compaction (single traversal)
    */
-  private compactWithDictionary(
+  private async compactWithDictionary(
     data: any,
-    prefix = ''
-  ): Array<[number, any]> {
+    prefix = '',
+    protocol?: string  // Protocol context for inline metadata observation
+  ): Promise<Array<[number, any]>> {
     const pairs: Array<[number, any]> = [];
 
     // Handle null or primitives
@@ -383,29 +1232,29 @@ export class DictionaryManager {
         const arrayPairs: Array<Array<[number, any]>> = [];
         
         if (this.arrayMode === 'opaque') {
-          data.forEach((item) => {
+          for (const item of data) {
             if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
-              const itemPairs = this.compactWithDictionary(item, '[]');
+              const itemPairs = await this.compactWithDictionary(item, '[]', protocol);
               arrayPairs.push(itemPairs);
             } else if (Array.isArray(item)) {
-              const nestedPairs = this.compactWithDictionary(item, '[]');
+              const nestedPairs = await this.compactWithDictionary(item, '[]', protocol);
               arrayPairs.push(nestedPairs);
             } else {
               const index = this.getIndex('[]');
               arrayPairs.push([[index, item]]);
             }
-          });
+          }
         } else {
-          data.forEach((item, idx) => {
+          for (const [idx, item] of data.entries()) {
             const indexedKey = `[${idx}]`;
             if (typeof item === 'object' && item !== null) {
-              const itemPairs = this.compactWithDictionary(item, indexedKey);
+              const itemPairs = await this.compactWithDictionary(item, indexedKey, protocol);
               arrayPairs.push(itemPairs);
             } else {
               const index = this.getIndex(indexedKey);
               arrayPairs.push([[index, item]]);
             }
-          });
+          }
         }
         
         // ✅ FIX: Use special '$root' key for root-level arrays
@@ -423,39 +1272,70 @@ export class DictionaryManager {
     for (const [key, value] of Object.entries(data)) {
       const fullKey = prefix ? `${prefix}.${key}` : key;
 
+      // ✅ OPTIMIZATION: Inline metadata observation (merged with compaction)
+      // Observe metadata fields during compaction to eliminate separate traversal
+      if (key === 'metric' && typeof value === 'string' && protocol) {
+        await this.observeMetric(protocol, value);
+        // Encode if promoted (replace string with index)
+        const encodedValue = this.encodeMetadataValue('metric', protocol, value);
+        const index = this.getIndex(fullKey);
+        if (index !== -1) {
+          pairs.push([index, encodedValue]);
+        }
+        continue; // Skip normal processing
+      } else if (key === 'deviceName' && typeof value === 'string' && protocol) {
+        await this.observeDevice(protocol, value);
+        // Encode if promoted (replace string with index)
+        const encodedValue = this.encodeMetadataValue('device', protocol, value);
+        const index = this.getIndex(fullKey);
+        if (index !== -1) {
+          pairs.push([index, encodedValue]);
+        }
+        continue; // Skip normal processing
+      } else if (key === 'qualityCode' && typeof value === 'string') {
+        await this.observeQualityCode(value);
+        // Encode if promoted (replace string with index)
+        const encodedValue = this.encodeMetadataValue('qualityCode', undefined, value);
+        const index = this.getIndex(fullKey);
+        if (index !== -1) {
+          pairs.push([index, encodedValue]);
+        }
+        continue; // Skip normal processing
+      }
+
       if (Array.isArray(value)) {
         // ✅ FIX: Handle arrays inline - no dictionary entry for array container
         // Only element fields (e.g., "alarms[].code") get indices
         const arrayPairs: Array<Array<[number, any]>> = [];
         
         if (this.arrayMode === 'opaque') {
-          value.forEach((item) => {
+          for (const item of value) {
             if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
               // Object in array - compact with [] notation
-              const itemPairs = this.compactWithDictionary(item, `${fullKey}[]`);
+              const itemPairs = await this.compactWithDictionary(item, `${fullKey}[]`, protocol);
               arrayPairs.push(itemPairs);
             } else if (Array.isArray(item)) {
               // Nested array
-              const nestedPairs = this.compactWithDictionary(item, `${fullKey}[]`);
+              const nestedPairs = await this.compactWithDictionary(item, `${fullKey}[]`, protocol);
               arrayPairs.push(nestedPairs);
             } else {
               // Primitive in array
               const index = this.getIndex(`${fullKey}[]`);
               arrayPairs.push([[index, item]]);
             }
-          });
+          }
         } else {
           // Indexed mode (legacy)
-          value.forEach((item, idx) => {
+          for (const [idx, item] of value.entries()) {
             const indexedKey = `${fullKey}[${idx}]`;
             if (typeof item === 'object' && item !== null) {
-              const itemPairs = this.compactWithDictionary(item, indexedKey);
+              const itemPairs = await this.compactWithDictionary(item, indexedKey, protocol);
               arrayPairs.push(itemPairs);
             } else {
               const index = this.getIndex(indexedKey);
               arrayPairs.push([[index, item]]);
             }
-          });
+          }
         }
         
         // ✅ FIX: Include array key explicitly in frame (no inference needed)
@@ -463,12 +1343,14 @@ export class DictionaryManager {
         pairs.push(['a', key, arrayPairs] as any);
       } else if (typeof value === 'object' && value !== null) {
         // Nested object - recurse
-        const nestedPairs = this.compactWithDictionary(value, fullKey);
+        const nestedPairs = await this.compactWithDictionary(value, fullKey, protocol);
         pairs.push(...nestedPairs);
       } else {
-        // Leaf value - add as tuple [index, value]
+        // Leaf value - encode with enum if applicable
         const index = this.getIndex(fullKey);
-        pairs.push([index, value]);
+        if (index === -1) continue;  // Skip qualityCode fields
+        const encodedValue = this.encodeEnumValue(fullKey, value);
+        pairs.push([index, encodedValue]);
       }
     }
 
@@ -479,11 +1361,66 @@ export class DictionaryManager {
    * Compact message using dictionary compression
    * Returns compacted data without publishing (decoupled from MQTT)
    */
-  public compact(
-    message: any
-  ): { compacted: any; originalSize: number; compactedSize: number; compressionRatio: number } {
+  /**
+   * Observe message metadata fields for frequency tracking and enum promotion
+   * Extracts protocol-specific metrics/devices and qualityCode values
+   */
+  private async observeMessageMetadata(message: any, protocol?: string): Promise<void> {
+    if (!message || typeof message !== 'object') return;
+
+    // Recursively extract metrics, devices, and qualityCodes from nested structure
+    await this.extractMetadataRecursive(message, protocol);
+  }
+
+  /**
+   * Recursively extract metadata fields for observation AND encode promoted values
+   */
+  private async extractMetadataRecursive(obj: any, protocol?: string, path: string = ''): Promise<void> {
+    if (!obj || typeof obj !== 'object') return;
+
+    if (Array.isArray(obj)) {
+      // Process array elements
+      for (const item of obj) {
+        await this.extractMetadataRecursive(item, protocol, `${path}[]`);
+      }
+      return;
+    }
+
+    // Process object properties
+    for (const [key, value] of Object.entries(obj)) {
+      const fullPath = path ? `${path}.${key}` : key;
+
+      // Check for metadata fields - observe AND encode
+      if (key === 'metric' && typeof value === 'string' && protocol) {
+        await this.observeMetric(protocol, value);
+        // Encode if promoted (replace string with index)
+        obj[key] = this.encodeMetadataValue('metric', protocol, value);
+      } else if (key === 'deviceName' && typeof value === 'string' && protocol) {
+        await this.observeDevice(protocol, value);
+        // Encode if promoted (replace string with index)
+        obj[key] = this.encodeMetadataValue('device', protocol, value);
+      } else if (key === 'qualityCode' && typeof value === 'string') {
+        await this.observeQualityCode(value);
+        // Encode if promoted (replace string with index)
+        obj[key] = this.encodeMetadataValue('qualityCode', undefined, value);
+      } else if (typeof value === 'object' && value !== null) {
+        // Recurse into nested objects/arrays
+        await this.extractMetadataRecursive(value, protocol, fullPath);
+      }
+    }
+  }
+
+  public async compact(
+    message: any,
+    protocol?: string  // Protocol context for enum namespacing
+  ): Promise<{ compacted: any; originalSize: number; compactedSize: number; compressionRatio: number }> {
     if (!this.enabled) {
       // Passthrough mode - return original message
+      this.logger?.warnSync('Dictionary compaction disabled - USE_KEY_COMPACTION_POC must be true', {
+        component: LogComponents.dictionary,
+        operation: 'compact',
+        enabled: this.enabled
+      });
       const payload = Buffer.from(JSON.stringify(message), 'utf-8');
       return { 
         compacted: message, 
@@ -496,14 +1433,17 @@ export class DictionaryManager {
     this.logger?.debugSync('Starting dictionary compaction', {
       component: LogComponents.dictionary,
       operation: 'compact',
-      dictionarySize: this.dictionary.size,
-      version: this.version
+      dictionarySize: this.getTotalDictionarySize(),
+      dictionaryVersion: this.dictionaryVersion,
+      protocol
     });
 
-    // Compact message using tuple-based encoding
-    const pairs = this.compactWithDictionary(message);
+    // ✅ OPTIMIZED: Metadata observation merged into compaction (single traversal)
+    // Compact message using tuple-based encoding (with inline metadata observation)
+    const pairs = await this.compactWithDictionary(message, '', protocol);
+    // ✅ SAFETY: Use dictionaryVersion (cloud-safe), not workingVersion
     const compacted = {
-      v: this.version,
+      v: this.dictionaryVersion,  // Cloud safe - cloud has this version
       p: pairs,  // Use 'p' for pairs instead of separate 'i' and 'd'
     };
 
@@ -558,8 +1498,9 @@ export class DictionaryManager {
         avg_compression: `${this.metrics.avgCompressionRatio.toFixed(1)}%`,
       },
       dictionary: {
-        version: this.version,
-        fields: this.dictionary.size,
+        dictionaryVersion: this.dictionaryVersion,
+        workingVersion: this.workingVersion,
+        fields: this.getTotalDictionarySize(),
       },
     });
   }
@@ -567,31 +1508,111 @@ export class DictionaryManager {
   /**
    * Sync full dictionary to cloud
    */
+  /**
+   * Save promoted enum to database
+   */
+  private async saveEnumToDatabase(
+    type: 'metric' | 'device' | 'qualityCode',
+    protocol: string | undefined,
+    value: string,
+    index: number
+  ): Promise<void> {
+    try {
+      await DictionaryModel.savePromotedEnum(type, protocol, value, index);
+    } catch (error) {
+      this.logger?.errorSync('Failed to save enum to database', error instanceof Error ? error : undefined, {
+        component: LogComponents.dictionary,
+        operation: 'saveEnumToDatabase',
+        type,
+        protocol,
+        value,
+        index,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Continue - enum is in memory, will sync via full dictionary if needed
+    }
+  }
+
+  /**
+   * Count total promoted metrics across all protocols
+   */
+  private getTotalPromotedMetrics(): number {
+    return Object.values(this.metricEnums)
+      .reduce((total, protocolMetrics) => total + Object.keys(protocolMetrics).length, 0);
+  }
+
+  /**
+   * Count total promoted devices across all protocols
+   */
+  private getTotalPromotedDevices(): number {
+    return Object.values(this.deviceEnums)
+      .reduce((total, protocolDevices) => total + Object.keys(protocolDevices).length, 0);
+  }
+
   private async syncFullDictionary(): Promise<void> {
-    if (this.dictionary.size === 0) {
+    const totalSize = this.getTotalDictionarySize();
+    if (totalSize === 0) {
       return; // Nothing to sync
     }
 
-    // Skip sync if version hasn't changed since last sync
-    if (this.version === this.lastSyncedVersion) {
+    // Skip sync if dictionaryVersion hasn't changed since last sync
+    if (this.dictionaryVersion === this.lastSyncedVersion) {
       this.logger?.debugSync('Dictionary version unchanged, skipping sync', {
         component: LogComponents.dictionary,
         operation: 'syncFullDictionary',
-        version: this.version,
+        dictionaryVersion: this.dictionaryVersion,
+        workingVersion: this.workingVersion,
         lastSyncedVersion: this.lastSyncedVersion
       });
       return;
     }
 
-    const fields = Array.from(this.dictionary.entries())
-      .sort((a, b) => a[1] - b[1]) // Sort by index
-      .map(([field]) => field);
+    // Build domain-aware field payload
+    const fieldsByDomain: Record<DictionaryDomain, Array<{ index: number; name: string }>> = {
+      key: [],
+      metric: [],
+      unit: [],
+      quality: [],
+      device: [],
+    };
 
+    for (const [domain, domainMap] of Object.entries(this.domains) as Array<[DictionaryDomain, Map<string, number>]>) {
+      const fields = Array.from(domainMap.entries())
+        .sort((a, b) => a[1] - b[1]) // Sort by index
+        .map(([name, index]) => ({ index, name }));
+      fieldsByDomain[domain] = fields;
+    }
+
+    // Create flattened fields list for compatibility
+    const fields = Object.values(fieldsByDomain)
+      .flatMap((domainFields) => domainFields.map((f) => f.name));
+
+    // ✅ Phase 7: Build protocol-aware enum payload
     const payload = {
-      version: this.version,
+      version: this.dictionaryVersion, // Cloud-safe version
       fields,
-      deviceUuid: this.deviceUuid,
-      timestamp: Date.now(),
+      fieldsByDomain, // Include domain breakdown for backward compatibility
+      
+      // ✅ PHASE 7 EXTENDED FORMAT: Protocol-aware compression
+      // Cloud API will prefer this over fieldsByDomain if present
+      format_version: 2,  // Signals new format
+      keys: fieldsByDomain.key,  // Structural keys only
+      enums: {
+        quality: this.QUALITY_ENUM,  // Frozen OPC UA codes
+        qualityCode: this.qualityCodeEnum,  // Frequency-learned (≥20 obs)
+        unit: this.unitEnumFrozen ? this.unitEnum : {},  // Only if promoted (≥50 obs)
+      },
+      metrics: this.metricEnums,  // { modbus: {...}, snmp: {...}, opcua: {...} }
+      devices: this.deviceEnums,  // { modbus: {...}, snmp: {...} }
+      
+      // Metadata for cloud analytics
+      metadata: {
+        timestamp: Date.now(),
+        deviceUuid: this.deviceUuid,
+        totalMetricsPromoted: this.getTotalPromotedMetrics(),
+        totalDevicesPromoted: this.getTotalPromotedDevices(),
+        totalQualityCodesPromoted: Object.keys(this.qualityCodeEnum).length,
+      },
     };
 
     await this.mqttManager.publish(
@@ -601,7 +1622,7 @@ export class DictionaryManager {
     );
 
     this.lastSyncTime = Date.now();
-    this.lastSyncedVersion = this.version; // Track synced version
+    this.lastSyncedVersion = this.dictionaryVersion; // Track synced dictionaryVersion
     
     // Update metadata
     try {
@@ -617,8 +1638,11 @@ export class DictionaryManager {
     this.logger?.infoSync('Dictionary synced to cloud', {
       component: LogComponents.mqtt,
       operation: 'syncFullDictionary',
-      version: this.version,
+      dictionaryVersion: this.dictionaryVersion,
+      workingVersion: this.workingVersion,
+      versionGap: this.workingVersion - this.dictionaryVersion,
       fields: fields.length,
+      domainBreakdown: this.metrics.domainStats,
       deviceUuid: this.deviceUuid,
       topic: `iot/device/${this.deviceUuid}/meta/dictionary`,
       qos: 1,
@@ -632,7 +1656,7 @@ export class DictionaryManager {
    * ✅ PERSISTENCE: Uses database to track unsynced deltas
    */
   private async syncDeltaDictionary(): Promise<void> {
-    if (!this.enabled || this.dictionary.size === 0) {
+    if (!this.enabled || this.getTotalDictionarySize() === 0) {
       return;
     }
 
@@ -649,10 +1673,11 @@ export class DictionaryManager {
         component: LogComponents.dictionary,
         operation: 'getUnsyncedDeltas',
         count: unsyncedDeltas.length,
-        deltaIds: unsyncedDeltas.map(d => d.id)
+        deltaIds: unsyncedDeltas.map(d => d.id),
+        hasUnsyncedEnumPromotions: this.hasUnsyncedEnumPromotions
       });
       
-      if (unsyncedDeltas.length === 0) {
+      if (unsyncedDeltas.length === 0 && !this.hasUnsyncedEnumPromotions) {
         this.logger?.debugSync('No unsynced deltas found, skipping sync', {
           component: LogComponents.dictionary,
           operation: 'syncDeltaDictionary'
@@ -660,11 +1685,32 @@ export class DictionaryManager {
         return; // No new fields to sync
       }
 
-      // Build payload with new fields
-      const newFields = unsyncedDeltas.map(d => d.field_name);
+      // Build payload with new fields and domains
+      const newFieldsWithDomains = unsyncedDeltas.map(d => ({
+        name: d.field_name,
+        domain: d.domain || 'metric', // Default to metric for backward compatibility
+        index: d.field_index,
+      }));
+      const newFields = newFieldsWithDomains.map(f => f.name);
       const payload = {
-        version: this.version,
+        version: this.dictionaryVersion, // Cloud-safe version
         newFields,
+        newFieldsWithDomains, // Include domain info for cloud API
+        format_version: 2,  // Phase 7 protocol-aware format
+        enums: {
+          quality: this.QUALITY_ENUM,  // Always include frozen quality enum
+          qualityCode: this.qualityCodeEnum,  // Phase 7: Quality code enum
+          unit: this.unitEnumFrozen ? this.unitEnum : {},  // Only if frozen, else empty
+        },
+        metrics: this.metricEnums,  // Phase 7: Protocol-namespaced metrics
+        devices: this.deviceEnums,  // Phase 7: Protocol-namespaced devices
+        metadata: {
+          timestamp: Date.now(),
+          deviceUuid: this.deviceUuid,
+          totalMetricsPromoted: this.getTotalPromotedMetrics(),
+          totalDevicesPromoted: this.getTotalPromotedDevices(),
+          totalQualityCodesPromoted: Object.keys(this.qualityCodeEnum).length,
+        },
         deviceUuid: this.deviceUuid,
         timestamp: Date.now(),
       };
@@ -673,6 +1719,8 @@ export class DictionaryManager {
       this.logger?.infoSync('Publishing delta dictionary to MQTT', {
         component: LogComponents.dictionary,
         operation: 'syncDeltaDictionary',
+        dictionaryVersion: this.dictionaryVersion,
+        workingVersion: this.workingVersion,
         fieldCount: newFields.length,
         fields: newFields
       });
@@ -697,11 +1745,13 @@ export class DictionaryManager {
       await DictionaryModel.setMetadata('last_delta_sync', Date.now().toString());
 
       this.lastDeltaSync = this.updateCount;
+      this.hasUnsyncedEnumPromotions = false; // Clear flag after successful sync
 
       this.logger?.infoSync('Delta dictionary synced successfully', {
         component: LogComponents.dictionary,
         operation: 'syncDeltaDictionary',
-        version: this.version,
+        dictionaryVersion: this.dictionaryVersion,
+        workingVersion: this.workingVersion,
         newFields: newFields.length,
         syncedDeltaIds: deltaIds
       });
@@ -722,10 +1772,10 @@ export class DictionaryManager {
   }
 
   /**
-   * Get dictionary size (number of indexed fields)
+   * Get dictionary size (number of indexed fields across all domains)
    */
   public getDictionarySize(): number {
-    return this.dictionary.size;
+    return this.getTotalDictionarySize();
   }
 
   /**
@@ -733,15 +1783,19 @@ export class DictionaryManager {
    */
   public getStatus(): {
     enabled: boolean;
-    version: number;
+    dictionaryVersion: number;
+    workingVersion: number;
+    versionGap: number;
     size: number;
     updateCount: number;
     lastSyncTime: number;
   } {
     return {
       enabled: this.enabled,
-      version: this.version,
-      size: this.dictionary.size,
+      dictionaryVersion: this.dictionaryVersion,
+      workingVersion: this.workingVersion,
+      versionGap: this.workingVersion - this.dictionaryVersion,
+      size: this.getTotalDictionarySize(),
       updateCount: this.updateCount,
       lastSyncTime: this.lastSyncTime,
     };
@@ -752,8 +1806,16 @@ export class DictionaryManager {
    * ✅ PERSISTENCE: Clears database tables
    */
   public async reset(): Promise<void> {
-    this.dictionary.clear();
-    this.version = 1;
+    this.domains = {
+      key: new Map(),
+      metric: new Map(),
+      unit: new Map(),
+      quality: new Map(),
+      device: new Map(),
+    };
+    this.domainCache.clear(); // Clear inference cache
+    this.workingVersion = 1;
+    this.dictionaryVersion = 1;
     this.updateCount = 0;
     this.lastDeltaSync = 0;
     this.fieldAdditionTimes = [];
@@ -761,6 +1823,13 @@ export class DictionaryManager {
     this.metrics.bytesSaved = 0;
     this.totalOriginalBytes = 0;
     this.totalCompactedBytes = 0;
+    this.metrics.domainStats = {
+      key: 0,
+      metric: 0,
+      unit: 0,
+      quality: 0,
+      device: 0,
+    };
 
     // Clear database
     try {
@@ -769,7 +1838,8 @@ export class DictionaryManager {
       this.logger?.warnSync('Dictionary reset (in-memory and database)', {
         component: LogComponents.dictionary,
         operation: 'reset',
-        version: this.version,
+        dictionaryVersion: this.dictionaryVersion,
+        workingVersion: this.workingVersion,
       });
     } catch (error) {
       this.logger?.errorSync('Failed to reset dictionary in database', error as Error, {

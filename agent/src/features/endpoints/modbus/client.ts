@@ -256,7 +256,8 @@ export class ModbusClient {
               value: value,
               unit: register.unit || '',
               timestamp: timestamp,
-              quality: 'GOOD'
+              quality: 'GOOD',
+              protocol: 'modbus'
             });
           } catch (error) {
             dataPoints.push(this.createBadDataPoint(register, timestamp, error));
@@ -277,7 +278,8 @@ export class ModbusClient {
                 value: result.value,
                 unit: result.register.unit || '',
                 timestamp: timestamp,
-                quality: 'GOOD'
+                quality: 'GOOD',
+                protocol: 'modbus'
               });
             }
           } catch (error) {
@@ -298,7 +300,8 @@ export class ModbusClient {
                   value: value,
                   unit: register.unit || '',
                   timestamp: timestamp,
-                  quality: 'GOOD'
+                  quality: 'GOOD',
+                  protocol: 'modbus'
                 });
               } catch (individualError) {
                 dataPoints.push(this.createBadDataPoint(register, timestamp, individualError));

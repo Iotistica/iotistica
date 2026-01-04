@@ -482,7 +482,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
           }
 
           const quality = this.determineQuality(dataValue.statusCode);
-          const qualityCode = this.extractQualityCode(dataValue.statusCode);
+          const qualityCode = quality !== 'GOOD' ? this.extractQualityCode(dataValue.statusCode) : undefined;
 
           const dataPoint: SensorDataPoint = {
             timestamp: new Date().toISOString(),
@@ -491,7 +491,8 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
             value: dataValue.value?.value ?? null,
             unit: dp.unit || '',
             quality,
-            qualityCode,
+            ...(qualityCode && { qualityCode }),  // Only include if quality != GOOD
+            protocol: 'opcua',  // For enum namespacing
             nodeType: 'metric', // Always 'metric' at this point (metadata filtered)
           };
 

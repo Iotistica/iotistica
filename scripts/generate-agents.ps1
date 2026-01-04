@@ -71,6 +71,7 @@ param(
     [string]$FirewallEnabled = "false",
     [string]$UseMsgpackPoc = "true",
     [string]$UseKeyCompactionPoc = "true",
+    [string]$UseDeflateCompression = "true",
     
     # Protocol Adapter Configuration
     [string]$EnableProtocolAdapters = "true",
@@ -404,6 +405,7 @@ $networkConfig
       - SIMULATE_MEMORY_LEAK=$SimulateMemoryLeak
       - USE_MSGPACK_POC=$UseMsgpackPoc
       - USE_KEY_COMPACTION_POC=$UseKeyCompactionPoc
+      - USE_DEFLATE_COMPRESSION=$UseDeflateCompression
 "@
     
     $services += $service

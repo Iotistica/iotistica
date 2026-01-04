@@ -261,6 +261,7 @@ export class FeatureInitializer {
       // Read compression flags from environment (configured at agent startup)
       const useMsgpackPoc = process.env.USE_MSGPACK_POC === 'true';
       const useKeyCompactionPoc = process.env.USE_KEY_COMPACTION_POC === 'true';
+      const useDeflatePoc = process.env.USE_DEFLATE_COMPRESSION === 'true';
 
       this.features.sensorPublish = new SensorPublishFeature(
         sensorConfig as any,
@@ -268,7 +269,8 @@ export class FeatureInitializer {
         deviceInfo.uuid,
         this.context.dictionaryManager, // Pass dictionary manager for message compression
         useMsgpackPoc, // Pass msgpack compression flag
-        useKeyCompactionPoc // Pass key compaction flag
+        useKeyCompactionPoc, // Pass key compaction flag
+        useDeflatePoc // Pass deflate compression flag
       );
 
       // Configure edge AI anomaly detection if enabled

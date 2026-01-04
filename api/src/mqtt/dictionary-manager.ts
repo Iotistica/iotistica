@@ -13,14 +13,52 @@ import msgpack from 'msgpack-lite';
 import { createHash } from 'crypto';
 import { DeviceDictionaryService } from '../services/device-dictionary.service';
 
+// Domain types from agent (must match agent's DictionaryDomain type)
+type DictionaryDomain = 'key' | 'metric' | 'unit' | 'quality' | 'device';
+
+// Phase 7: Protocol-aware enum maps
+interface EnumMaps {
+  quality?: Record<string, number>;      // Frozen OPC UA quality codes
+  qualityCode?: Record<string, number>;  // Learned quality codes (≥20 obs)
+  unit?: Record<string, number>;         // Learned engineering units (≥50 obs)
+}
+
+interface ProtocolEnumMaps {
+  [protocol: string]: Record<string, number>; // e.g., { modbus: { engine_rpm: 1 } }
+}
+
 interface DictionaryPayload {
   version: number;
   fields: Array<{ name: string; index: number }> | string[];
+  fieldsByDomain?: Record<DictionaryDomain, Array<{ index: number; name: string }>>;  // Domain-partitioned metadata
+  
+  // Phase 7: Extended format
+  format_version?: number;      // 2 = Phase 7
+  enums?: EnumMaps;             // Global enums
+  metrics?: ProtocolEnumMaps;   // Protocol-namespaced metrics
+  devices?: ProtocolEnumMaps;   // Protocol-namespaced devices
+  metadata?: {
+    totalMetricsPromoted?: number;
+    totalDevicesPromoted?: number;
+    totalQualityCodesPromoted?: number;
+  };
 }
 
 interface DictionaryDelta {
   version: number;
   newFields: string[];  // New fields to append (agent may send as 'fields' for backwards compat)
+  newFieldsWithDomains?: Array<{ name: string; domain: DictionaryDomain; index: number }>;  // Domain metadata for new fields
+  
+  // Phase 7: Extended format
+  format_version?: number;
+  enums?: EnumMaps;
+  metrics?: ProtocolEnumMaps;
+  devices?: ProtocolEnumMaps;
+  metadata?: {
+    totalMetricsPromoted?: number;
+    totalDevicesPromoted?: number;
+    totalQualityCodesPromoted?: number;
+  };
 }
 
 // ✅ Clean typed payload contract (no shape guessing)
@@ -103,11 +141,40 @@ export class CloudDictionaryManager {
       await this.redis.setex(`${key}:version`, 30 * 24 * 60 * 60, dict.version.toString());
       await this.redis.setex(`${key}:hash`, 30 * 24 * 60 * 60, dictHash);
 
+      // ✅ Phase 7: Store enum mappings
+      if (dict.format_version === 2) {
+        if (dict.enums) {
+          await this.redis.setex(`${key}:enums`, 30 * 24 * 60 * 60, JSON.stringify(dict.enums));
+        }
+        if (dict.metrics) {
+          await this.redis.setex(`${key}:metrics`, 30 * 24 * 60 * 60, JSON.stringify(dict.metrics));
+        }
+        if (dict.devices) {
+          await this.redis.setex(`${key}:devices`, 30 * 24 * 60 * 60, JSON.stringify(dict.devices));
+        }
+        
+        this.logger?.info('Phase 7 enums stored', {
+          operation: 'storeDictionary',
+          deviceUuid,
+          version: dict.version,
+          metricsPromoted: dict.metadata?.totalMetricsPromoted || 0,
+          devicesPromoted: dict.metadata?.totalDevicesPromoted || 0,
+          qualityCodesPromoted: dict.metadata?.totalQualityCodesPromoted || 0,
+        });
+      }
+
+      // Log domain distribution if provided
+      const domainStats = dict.fieldsByDomain ? 
+        Object.fromEntries(
+          Object.entries(dict.fieldsByDomain).map(([domain, fields]) => [domain, fields.length])
+        ) : undefined;
+
       this.logger?.info(`✅ Dictionary saved to Redis`, {
         operation: 'storeDictionary',
         deviceUuid,
         version: dict.version,
         fieldCount: dict.fields.length,
+        domainStats,  // Log domain breakdown
         redisKey: key,
         ttlDays: 30
       });
@@ -201,6 +268,28 @@ export class CloudDictionaryManager {
       await this.redis.setex(`${key}:version`, 30 * 24 * 60 * 60, delta.version.toString());
       await this.redis.setex(`${key}:hash`, 30 * 24 * 60 * 60, dictHash);
 
+      // ✅ Phase 7: Update enum mappings
+      if (delta.format_version === 2) {
+        if (delta.enums) {
+          await this.redis.setex(`${key}:enums`, 30 * 24 * 60 * 60, JSON.stringify(delta.enums));
+        }
+        if (delta.metrics) {
+          await this.redis.setex(`${key}:metrics`, 30 * 24 * 60 * 60, JSON.stringify(delta.metrics));
+        }
+        if (delta.devices) {
+          await this.redis.setex(`${key}:devices`, 30 * 24 * 60 * 60, JSON.stringify(delta.devices));
+        }
+        
+        this.logger?.info('Phase 7 enums updated via delta', {
+          operation: 'applyDelta',
+          deviceUuid,
+          version: delta.version,
+          metricsPromoted: delta.metadata?.totalMetricsPromoted || 0,
+          devicesPromoted: delta.metadata?.totalDevicesPromoted || 0,
+          qualityCodesPromoted: delta.metadata?.totalQualityCodesPromoted || 0,
+        });
+      }
+
       // Persist delta to PostgreSQL
       const deltaEntries = newFields.map((name: string, offset: number) => ({
         name,
@@ -208,11 +297,19 @@ export class CloudDictionaryManager {
       }));
       await DeviceDictionaryService.addDeltaFields(deviceUuid, deltaEntries, delta.version);
 
+      // Log domain distribution if provided
+      const domainStats = delta.newFieldsWithDomains ?
+        delta.newFieldsWithDomains.reduce((acc, field) => {
+          acc[field.domain] = (acc[field.domain] || 0) + 1;
+          return acc;
+        }, {} as Record<DictionaryDomain, number>) : undefined;
+
       this.logger?.info(`Delta applied: ${deviceUuid} v${delta.version} (+${newFields.length} fields)`, {
         operation: 'applyDelta',
         deviceUuid,
         version: delta.version,
         newFields: newFields.length,
+        domainStats,  // Log domain breakdown
         totalFields: Object.keys(currentDict).length,
         storage: 'redis+postgres'
       });
@@ -327,6 +424,38 @@ export class CloudDictionaryManager {
   }
 
   /**
+   * Get Phase 7 enum mappings for decoding
+   */
+  async getEnumMappings(deviceUuid: string): Promise<{
+    enums?: EnumMaps;
+    metrics?: ProtocolEnumMaps;
+    devices?: ProtocolEnumMaps;
+  } | null> {
+    try {
+      const key = `dict:${deviceUuid}`;
+      const [enumsJson, metricsJson, devicesJson] = await Promise.all([
+        this.redis.get(`${key}:enums`),
+        this.redis.get(`${key}:metrics`),
+        this.redis.get(`${key}:devices`)
+      ]);
+
+      const result: any = {};
+      if (enumsJson) result.enums = JSON.parse(enumsJson);
+      if (metricsJson) result.metrics = JSON.parse(metricsJson);
+      if (devicesJson) result.devices = JSON.parse(devicesJson);
+
+      return Object.keys(result).length > 0 ? result : null;
+    } catch (error) {
+      this.logger?.warn('Failed to load enum mappings', {
+        operation: 'getEnumMappings',
+        deviceUuid,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return null;
+    }
+  }
+
+  /**
    * Expand compacted message to original format
    * Supports both tuple-based (new) and parallel array (legacy) formats
    */
@@ -392,6 +521,9 @@ export class CloudDictionaryManager {
       // ✅ New tuple-based format with array framing
       const pairs = compacted.p;
       
+      // Load enum mappings for decoding
+      const enumMaps = await this.getEnumMappings(deviceUuid);
+      
       // ✅ FIX: Explicit root array handling
       // If entire payload is a single array frame with '$root' key, unwrap it
       if (pairs.length === 1 && pairs[0][0] === 'a') {
@@ -399,13 +531,13 @@ export class CloudDictionaryManager {
         if (arrayKey === '$root') {
           // Root-level array - expand and unwrap
           return arrayElements.map((elementPairs: Array<Pair>) => {
-            return this.expandTuples(elementPairs, dictionary);
+            return this.expandTuples(elementPairs, dictionary, enumMaps);
           });
         }
       }
       
       // Regular object expansion
-      return this.expandTuples(pairs, dictionary);
+      return this.expandTuples(pairs, dictionary, enumMaps);
     } else if ('i' in compacted && 'd' in compacted) {
       // ⚠️ Legacy parallel array format (backwards compatibility)
       this.logger?.debug('Using legacy expansion for parallel array format', {
@@ -423,7 +555,15 @@ export class CloudDictionaryManager {
    * Format: {v, p: [[index, value], ...]}
    * Arrays are marked with typed frames ['a', arrayKey, [...]] (explicit, no inference!)
    */
-  private expandTuples(pairs: Array<Pair>, dictionary: Record<number, string>): Record<string, any> {
+  private expandTuples(
+    pairs: Array<Pair>, 
+    dictionary: Record<number, string>,
+    enumMaps?: {
+      enums?: EnumMaps;
+      metrics?: ProtocolEnumMaps;
+      devices?: ProtocolEnumMaps;
+    } | null
+  ): Record<string, any> {
     const expanded: Record<string, any> = {};
 
     for (const pair of pairs) {
@@ -439,7 +579,7 @@ export class CloudDictionaryManager {
         
         // ✅ Simple recursion - no prefix tracking needed
         expanded[arrayKey] = arrayElements.map((elementPairs: Array<Pair>) => {
-          return this.expandTuples(elementPairs, dictionary);
+          return this.expandTuples(elementPairs, dictionary, enumMaps);
         });
       } else {
         // Leaf value: [index, value]
@@ -461,12 +601,76 @@ export class CloudDictionaryManager {
           ? fieldName.substring(lastArrayMarker + 3)  // Skip "[]."
           : fieldName;
 
+        // ✅ Phase 7: Decode enum values
+        const decodedValue = this.decodeEnumValue(relativeFieldName, value, enumMaps);
+        
         // Set the leaf value using relative field name
-        this.setNestedValue(expanded, relativeFieldName, value);
+        this.setNestedValue(expanded, relativeFieldName, decodedValue);
       }
     }
 
     return expanded;
+  }
+
+  /**
+   * Phase 7: Decode enum value if applicable
+   * Checks if value is a number and field is metric/deviceName/qualityCode
+   */
+  private decodeEnumValue(
+    fieldName: string,
+    value: any,
+    enumMaps?: {
+      enums?: EnumMaps;
+      metrics?: ProtocolEnumMaps;
+      devices?: ProtocolEnumMaps;
+    } | null
+  ): any {
+    // Only decode numeric values
+    if (typeof value !== 'number' || !enumMaps) {
+      return value;
+    }
+
+    // Check field type and decode
+    if (fieldName === 'metric' || fieldName.endsWith('.metric')) {
+      // Try all protocols (we don't have protocol context here)
+      if (enumMaps.metrics) {
+        for (const protocol of Object.keys(enumMaps.metrics)) {
+          const reverseMap = this.reverseEnumMap(enumMaps.metrics[protocol]);
+          if (reverseMap[value]) {
+            return reverseMap[value];
+          }
+        }
+      }
+    } else if (fieldName === 'deviceName' || fieldName.endsWith('.deviceName')) {
+      if (enumMaps.devices) {
+        for (const protocol of Object.keys(enumMaps.devices)) {
+          const reverseMap = this.reverseEnumMap(enumMaps.devices[protocol]);
+          if (reverseMap[value]) {
+            return reverseMap[value];
+          }
+        }
+      }
+    } else if (fieldName === 'qualityCode' || fieldName.endsWith('.qualityCode')) {
+      const reverseMap = this.reverseEnumMap(enumMaps.enums?.qualityCode);
+      if (reverseMap[value]) {
+        return reverseMap[value];
+      }
+    }
+
+    // No mapping found, return original value
+    return value;
+  }
+
+  /**
+   * Reverse an enum map: {"engine_rpm": 1} → {1: "engine_rpm"}
+   */
+  private reverseEnumMap(forward?: Record<string, number>): Record<number, string> {
+    if (!forward) return {};
+    const reversed: Record<number, string> = {};
+    for (const [key, value] of Object.entries(forward)) {
+      reversed[value] = key;
+    }
+    return reversed;
   }
 
   /**

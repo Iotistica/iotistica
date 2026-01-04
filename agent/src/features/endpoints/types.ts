@@ -25,6 +25,7 @@ export interface SensorDataPoint {
   timestamp: string;
   quality: 'GOOD' | 'BAD' | 'UNCERTAIN';  // OPC UA quality codes
   qualityCode?: string;  // Error code when quality is BAD (e.g., 'ETIMEDOUT', 'DEVICE_OFFLINE')
+  protocol?: string;  // Protocol context for enum namespacing (modbus, snmp, opcua, mqtt, bacnet)
   nodeType?: 'metric' | 'metadata';  // Node classification (OPC UA only)
   anomaly_score?: number;  // Edge AI anomaly score (0.0 = normal, 1.0 = max anomaly)
   anomaly_threshold?: number;  // Confidence threshold used for alerting (e.g., 0.7)

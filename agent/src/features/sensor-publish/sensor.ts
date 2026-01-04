@@ -22,13 +22,29 @@ import {
 const USE_MSGPACK_POC = process.env.USE_MSGPACK_POC === 'true';
 
 /**
+ * Enable DEFLATE compression as final compression layer
+ * Set USE_DEFLATE_COMPRESSION=true to enable zlib deflate compression
+ */
+const USE_DEFLATE_POC = process.env.USE_DEFLATE_COMPRESSION === 'true';
+
+/**
  * Compression information for logging and metrics
  */
 interface CompressionInfo {
-  method: 'json' | 'msgpack' | 'dictionary' | 'dictionary+msgpack';
+  method: 'json' | 'msgpack' | 'dictionary' | 'dictionary+msgpack' | 'dictionary+deflate' | 'dictionary+msgpack+deflate';
   originalSize: number;
   compressedSize: number;
   ratio: number; // Percentage saved (0-100)
+  compressionMs: number; // Wall-clock time taken for compression in milliseconds
+  cpuUsage?: {
+    // CPU time = actual CPU cycles consumed (can be < wall-clock time due to I/O waits)
+    // Values are in MICROSECONDS (1ms = 1000μs)
+    // user = time in user-mode code (your JavaScript), system = time in kernel (system calls, I/O)
+    dictionary?: { user: number; system: number }; // CPU μs for dictionary field compression
+    msgpack?: { user: number; system: number }; // CPU μs for msgpack binary serialization
+    deflate?: { user: number; system: number }; // CPU μs for zlib DEFLATE compression
+    total: { user: number; system: number }; // Total CPU μs (sum of all layers)
+  };
 }
 
 // ============================================================================
@@ -53,6 +69,7 @@ export class Sensor extends EventEmitter {
   private mqttConnection: MqttConnection;
   private logger?: Logger;
   private deviceUuid: string;
+  private protocol?: string; // Protocol context (modbus, snmp, opcua)
   
   private state: SensorState = SensorState.DISCONNECTED;
   private socket: net.Socket | null = null;
@@ -85,6 +102,7 @@ export class Sensor extends EventEmitter {
   // Compression configuration (set at initialization)
   private readonly useMsgpackPoc: boolean;
   private readonly useKeyCompactionPoc: boolean;
+  private readonly useDeflatePoc: boolean;
   
   // Exponential backoff for initial connection attempts
   private readonly INITIAL_RETRY_DELAY_MS = 500;  // Start fast for startup race conditions
@@ -99,16 +117,20 @@ export class Sensor extends EventEmitter {
     deviceUuid: string,
     dictionaryManager?: any, // Optional dictionary manager for key compaction
     useMsgpackPoc: boolean = false, // Enable MessagePack compression POC
-    useKeyCompactionPoc: boolean = false // Enable dictionary key compaction POC
+    useKeyCompactionPoc: boolean = false, // Enable dictionary key compaction POC
+    useDeflatePoc: boolean = false, // Enable DEFLATE compression POC
+    protocol?: string  // Protocol context (modbus, snmp, opcua, etc)
   ) {
     super();
     this.config = config;
     this.mqttConnection = mqttConnection;
     this.logger = logger;
     this.deviceUuid = deviceUuid;
+    this.protocol = protocol;
     this.dictionaryManager = dictionaryManager;
     this.useMsgpackPoc = useMsgpackPoc;
     this.useKeyCompactionPoc = useKeyCompactionPoc;
+    this.useDeflatePoc = useDeflatePoc;
     this.currentRetryDelay = this.INITIAL_RETRY_DELAY_MS;
     
     // Compile delimiter regex
@@ -786,7 +808,7 @@ export class Sensor extends EventEmitter {
     
     try {
       // Choose compression strategy and serialize payload
-      const { payload, compressionInfo } = this.compressPayload(data);
+      const { payload, compressionInfo } = await this.compressPayload(data);
       
       // Publish to MQTT (single call)
       await this.mqttConnection.publish(topic, payload, { qos: 1 });
@@ -863,14 +885,14 @@ export class Sensor extends EventEmitter {
    * 2. MessagePack compression
    * 3. JSON (no compression)
    */
-  private compressPayload(data: any): { payload: Buffer | string; compressionInfo: CompressionInfo } {
+  private async compressPayload(data: any): Promise<{ payload: Buffer | string; compressionInfo: CompressionInfo }> {
     // Strategy 1: Dictionary compression (enabled and builds dictionary on first use)
     if (this.dictionaryManager && this.useKeyCompactionPoc) {
       this.logger?.debug(`Using dictionary compression (size: ${this.dictionaryManager.getDictionarySize()})`, {
         endpoint: this.getSensorName(),
         dictionarySize: this.dictionaryManager.getDictionarySize()
       });
-      return this.applyDictionaryCompression(data);
+      return await this.applyDictionaryCompression(data);
     }
     
     // Strategy 2 & 3: MessagePack or JSON (fallback when dictionary disabled)
@@ -884,39 +906,76 @@ export class Sensor extends EventEmitter {
   /**
    * Apply dictionary compression with optional MessagePack stacking
    */
-  private applyDictionaryCompression(data: any): { payload: Buffer | string; compressionInfo: CompressionInfo } {
+  private async applyDictionaryCompression(data: any): Promise<{ payload: Buffer | string; compressionInfo: CompressionInfo }> {
+    const startTime = Date.now();
+    const startCpu = process.cpuUsage(); // Baseline CPU usage (cumulative since process start)
+    
     this.logger?.debug('Compacting message with dictionary', {
       endpoint: this.getSensorName(),
       dictionarySize: this.dictionaryManager.getDictionarySize()
     });
     
-    const { compacted, originalSize, compactedSize, compressionRatio } = 
-      this.dictionaryManager.compact(data);
+    // Track dictionary compression CPU (measures ONLY dictionary layer)
+    const dictStartCpu = process.cpuUsage();
+    const { compacted, originalSize, compactedSize, compressionRatio} = 
+      await this.dictionaryManager.compact(data, this.protocol);
+    const dictCpuUsage = process.cpuUsage(dictStartCpu); // Delta CPU: now - dictStartCpu
     
     this.logger?.debug('Dictionary compaction complete', {
       endpoint: this.getSensorName(),
+      protocol: this.protocol,
       originalSize,
       compactedSize,
       ratio: `${compressionRatio.toFixed(1)}%`,
       newDictionarySize: this.dictionaryManager.getDictionarySize()
     });
     
-    // Stack MessagePack on top of dictionary compression if enabled
-    const payload = this.useMsgpackPoc
-      ? require('msgpack-lite').encode(compacted)
-      : JSON.stringify(compacted);
+    // Track MessagePack compression CPU (measures ONLY msgpack layer)
+    let msgpackCpuUsage: { user: number; system: number } | undefined;
+    let payload: Buffer | string;
+    if (this.useMsgpackPoc) {
+      const msgpackStartCpu = process.cpuUsage();
+      payload = require('msgpack-lite').encode(compacted);
+      msgpackCpuUsage = process.cpuUsage(msgpackStartCpu); // Delta CPU: now - msgpackStartCpu
+    } else {
+      payload = JSON.stringify(compacted);
+    }
     
-    // Calculate final compression ratio (dictionary + optional msgpack)
-    const finalSize = typeof payload === 'string' ? Buffer.byteLength(payload, 'utf-8') : payload.length;
+    // Track DEFLATE compression CPU (measures ONLY deflate layer)
+    let deflateCpuUsage: { user: number; system: number } | undefined;
+    let finalPayload: Buffer | string;
+    if (this.useDeflatePoc) {
+      const deflateStartCpu = process.cpuUsage();
+      finalPayload = require('zlib').deflateSync(typeof payload === 'string' ? Buffer.from(payload, 'utf-8') : payload);
+      deflateCpuUsage = process.cpuUsage(deflateStartCpu); // Delta CPU: now - deflateStartCpu
+    } else {
+      finalPayload = payload;
+    }
+    
+    // Calculate final compression ratio (dictionary + optional msgpack + optional deflate)
+    const finalSize = typeof finalPayload === 'string' ? Buffer.byteLength(finalPayload, 'utf-8') : finalPayload.length;
     const finalRatio = ((originalSize - finalSize) / originalSize) * 100;
+    const compressionMs = Date.now() - startTime; // Wall-clock time (includes I/O waits)
+    const totalCpuUsage = process.cpuUsage(startCpu); // Delta CPU for entire compression pipeline
+    
+    const compressionMethod = this.useMsgpackPoc
+      ? (this.useDeflatePoc ? 'dictionary+msgpack+deflate' : 'dictionary+msgpack')
+      : (this.useDeflatePoc ? 'dictionary+deflate' : 'dictionary');
     
     return {
-      payload,
+      payload: finalPayload,
       compressionInfo: {
-        method: this.useMsgpackPoc ? 'dictionary+msgpack' : 'dictionary',
+        method: compressionMethod,
         originalSize,
         compressedSize: finalSize,
-        ratio: finalRatio
+        ratio: finalRatio,
+        compressionMs,
+        cpuUsage: {
+          dictionary: dictCpuUsage,
+          msgpack: msgpackCpuUsage,
+          deflate: deflateCpuUsage,
+          total: totalCpuUsage
+        }
       }
     };
   }
@@ -925,6 +984,7 @@ export class Sensor extends EventEmitter {
    * Apply MessagePack or JSON serialization (fallback when dictionary disabled)
    */
   private applyMsgpackOrJson(data: any): { payload: Buffer | string; compressionInfo: CompressionInfo } {
+    const startTime = Date.now();
     const msgIdGen = this.mqttConnection.getMessageIdGenerator?.();
     
     if (this.useMsgpackPoc) {
@@ -936,6 +996,7 @@ export class Sensor extends EventEmitter {
       const originalSize = Buffer.from(JSON.stringify(data), 'utf-8').length;
       const compressedSize = payload.length;
       const ratio = ((originalSize - compressedSize) / originalSize) * 100;
+      const compressionMs = Date.now() - startTime;
       
       return {
         payload,
@@ -943,13 +1004,15 @@ export class Sensor extends EventEmitter {
           method: 'msgpack',
           originalSize,
           compressedSize,
-          ratio
+          ratio,
+          compressionMs
         }
       };
     } else {
       // JSON (no compression)
       const mqttPayload = createJsonPayload(data, msgIdGen);
       const payload = serializePayload(mqttPayload);
+      const compressionMs = Date.now() - startTime;
       
       return {
         payload,
@@ -957,7 +1020,8 @@ export class Sensor extends EventEmitter {
           method: 'json',
           originalSize: payload.length,
           compressedSize: payload.length,
-          ratio: 0
+          ratio: 0,
+          compressionMs
         }
       };
     }
@@ -976,17 +1040,37 @@ export class Sensor extends EventEmitter {
    * Log successful publish with compression details
    */
   private logPublishSuccess(messageCount: number, batchBytes: number, info: CompressionInfo): void {
+    // Build compression log object
+    const compressionLog: any = {
+      method: info.method,
+      originalSize: info.originalSize,
+      compressedSize: info.compressedSize,
+      savedBytes: info.originalSize - info.compressedSize,
+      savedPercent: `${info.ratio.toFixed(1)}%`,
+      compressionMs: info.compressionMs
+    };
+
+    // Add CPU usage if available (in milliseconds for readability)
+    if (info.cpuUsage) {
+      compressionLog.cpuMs = {
+        dictionary: info.cpuUsage.dictionary 
+          ? ((info.cpuUsage.dictionary.user + info.cpuUsage.dictionary.system) / 1000).toFixed(2) 
+          : undefined,
+        msgpack: info.cpuUsage.msgpack 
+          ? ((info.cpuUsage.msgpack.user + info.cpuUsage.msgpack.system) / 1000).toFixed(2) 
+          : undefined,
+        deflate: info.cpuUsage.deflate 
+          ? ((info.cpuUsage.deflate.user + info.cpuUsage.deflate.system) / 1000).toFixed(2) 
+          : undefined,
+        total: ((info.cpuUsage.total.user + info.cpuUsage.total.system) / 1000).toFixed(2)
+      };
+    }
+
     this.logger?.info(`Published ${messageCount} messages from '${this.getSensorName()}'`, {
       endpoint: this.getSensorName(),
       messages: messageCount,
       batchBytes,
-      compression: {
-        method: info.method,
-        originalSize: info.originalSize,
-        compressedSize: info.compressedSize,
-        savedBytes: info.originalSize - info.compressedSize,
-        savedPercent: `${info.ratio.toFixed(1)}%`
-      }
+      compression: compressionLog
     });
   }
 

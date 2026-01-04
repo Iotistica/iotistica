@@ -19,6 +19,7 @@ export class SensorPublishFeature extends BaseFeature {
   private dictionaryManager?: any; // Dictionary manager for MQTT message key compaction
   private readonly useMsgpackPoc: boolean;
   private readonly useKeyCompactionPoc: boolean;
+  private readonly useDeflatePoc: boolean;
 
   constructor(
     config: SensorPublishConfig & { enabled: boolean },
@@ -26,7 +27,8 @@ export class SensorPublishFeature extends BaseFeature {
     deviceUuid: string,
     dictionaryManager?: any, // Optional dictionary manager
     useMsgpackPoc: boolean = false, // Enable MessagePack compression POC
-    useKeyCompactionPoc: boolean = false // Enable dictionary key compaction POC
+    useKeyCompactionPoc: boolean = false, // Enable dictionary key compaction POC
+    useDeflatePoc: boolean = false // Enable DEFLATE compression POC
   ) {
     super(
       config,
@@ -40,6 +42,7 @@ export class SensorPublishFeature extends BaseFeature {
     this.dictionaryManager = dictionaryManager;
     this.useMsgpackPoc = useMsgpackPoc;
     this.useKeyCompactionPoc = useKeyCompactionPoc;
+    this.useDeflatePoc = useDeflatePoc;
   }
 
   /**
@@ -151,7 +154,9 @@ export class SensorPublishFeature extends BaseFeature {
           this.deviceUuid,
           this.dictionaryManager, // Pass dictionary manager
           this.useMsgpackPoc, // Pass msgpack flag
-          this.useKeyCompactionPoc // Pass key compaction flag
+          this.useKeyCompactionPoc, // Pass key compaction flag
+          this.useDeflatePoc, // Pass deflate flag
+          protocol // Pass protocol context for enum namespacing
         );
         
         // Set up event handlers

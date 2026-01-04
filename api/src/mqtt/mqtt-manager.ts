@@ -13,18 +13,50 @@
 import mqtt from 'mqtt';
 import { EventEmitter } from 'events';
 import msgpack from 'msgpack-lite';
+import zlib from 'zlib';
 import pLimit from 'p-limit';
 import logger, { logOperation } from '../utils/logger';
 import { isDuplicateMessage } from '../utils/mqtt-deduplication';
 import { CloudDictionaryManager } from './dictionary-manager';
 
 /**
- * Deserialize MQTT payload - auto-detects msgpack or JSON format
+ * Deserialize MQTT payload - auto-detects DEFLATE, msgpack, or JSON format
  * @param message - Buffer or string payload
  * @returns Deserialized data object
  */
 function deserializePayload(message: Buffer | string): any {
-  const buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
+  let buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
+  
+  // Check for DEFLATE compression first (zlib header: 0x78 0x9C or 0x78 0x01 or 0x78 0xDA)
+  if (buffer.length >= 2) {
+    const firstByte = buffer[0];
+    const secondByte = buffer[1];
+    
+    // DEFLATE magic bytes: 0x78 followed by 0x01, 0x5E, 0x9C, 0xDA (different compression levels)
+    if (firstByte === 0x78 && (secondByte === 0x01 || secondByte === 0x5E || secondByte === 0x9C || secondByte === 0xDA)) {
+      try {
+        logger.debug('DEFLATE-compressed payload detected, decompressing', {
+          originalSize: buffer.length,
+          header: [firstByte, secondByte]
+        });
+        
+        // Decompress using zlib.inflateSync
+        buffer = zlib.inflateSync(buffer);
+        
+        logger.debug('DEFLATE decompression successful', {
+          compressedSize: message.length,
+          decompressedSize: buffer.length,
+          ratio: `${(((message.length - buffer.length) / message.length) * 100).toFixed(1)}%`
+        });
+      } catch (error) {
+        logger.warn('DEFLATE decompression failed, treating as raw payload', {
+          error: error instanceof Error ? error.message : String(error)
+        });
+        // Continue with original buffer if decompression fails
+        buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
+      }
+    }
+  }
   
   // Try MessagePack first (binary marker detection)
   if (buffer.length > 0) {

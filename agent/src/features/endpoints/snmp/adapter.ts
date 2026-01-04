@@ -70,7 +70,7 @@ export class SNMPAdapter extends BaseProtocolAdapter {
           unit: oid.unit || '',
           timestamp,
           quality: 'GOOD',
-          qualityCode: 'OK'
+          protocol: 'snmp'  // For enum namespacing
         });
       } catch (error) {
         this.logger.warn(`Failed to read OID ${oid.oid} from ${deviceName}: ${error}`);
@@ -83,7 +83,8 @@ export class SNMPAdapter extends BaseProtocolAdapter {
           unit: oid.unit || '',
           timestamp,
           quality: 'BAD',
-          qualityCode: 'READ_ERROR'
+          qualityCode: 'READ_ERROR',
+          protocol: 'snmp'
         });
       }
     }
