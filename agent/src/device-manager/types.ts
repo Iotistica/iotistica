@@ -3,6 +3,11 @@
  * Implements two-phase authentication similar to Balena Supervisor
  */
 
+/**
+ * Provisioning state machine
+ */
+export type ProvisioningState = 'new' | 'registering' | 'registered' | 'key-exchanging' | 'provisioned';
+
 export interface DeviceInfo {
 	uuid: string;
 	deviceId?: string;
@@ -19,6 +24,9 @@ export interface DeviceInfo {
 	apiEndpoint?: string;
 	registeredAt?: number;
 	provisioned: boolean;
+	
+	// Provisioning state machine
+	provisioningState?: ProvisioningState;
 	
 	// Additional metadata
 	applicationId?: number;
@@ -88,6 +96,7 @@ export interface ProvisionResponse {
 	deviceName: string;
 	deviceType: string;
 	applicationId?: number;
+	challenge?: string;            // Server nonce for proof-of-possession
 	mqtt: {
 		username: string,
 		password: string,
@@ -134,6 +143,8 @@ export interface ProvisionResponse {
 export interface KeyExchangeRequest {
 	uuid: string;
 	deviceApiKey: string;
+	challenge?: string;  // Server nonce for proof-of-possession
+	proof?: string;      // HMAC-SHA256 proof (computed from challenge)
 }
 
 export interface KeyExchangeResponse {

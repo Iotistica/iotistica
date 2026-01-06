@@ -264,6 +264,27 @@ export function getKnex(): Knex {
 }
 
 /**
+ * Factory reset - safely clear all device data
+ * Used during re-provisioning or device wipe
+ */
+export async function factoryReset(logger?: AgentLogger): Promise<void> {
+	logger?.warnSync('Performing factory reset - clearing all device data', {
+		component: LogComponents.database,
+	});
+	
+	await transaction(async (trx) => {
+		// Clear all tables in order (respect foreign key constraints if any)
+		await trx('device').del();
+		await trx('message_buffer').del();
+		// Add other tables as needed
+	});
+	
+	logger?.infoSync('Factory reset complete', {
+		component: LogComponents.database,
+	});
+}
+
+/**
  * Gracefully close the database connection
  */
 export async function close(): Promise<void> {

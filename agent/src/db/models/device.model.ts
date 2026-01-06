@@ -4,6 +4,13 @@
  */
 
 import { models } from '../connection';
+import { 
+  encryptData, 
+  decryptData, 
+  isEncrypted, 
+  MasterKeyManager,
+  ENCRYPTED_DEVICE_FIELDS 
+} from '../../security/encryption';
 
 export interface Device {
   id?: number;
@@ -17,6 +24,7 @@ export interface Device {
   apiEndpoint?: string | null;
   registeredAt?: number | null;
   provisioned: boolean;
+  provisioningState?: string | null;  // Provisioning state machine
   applicationId?: number | null;
   macAddress?: string | null;
   osVersion?: string | null;
@@ -32,6 +40,22 @@ export interface Device {
 
 export class DeviceModel {
   private static table = 'device';
+  private static encryptionEnabled = false;
+
+  /**
+   * Initialize encryption (must be called before first use)
+   * @param dataDir - Directory for master key storage (defaults to /app/data for Docker)
+   */
+  static initializeEncryption(dataDir?: string): void {
+    try {
+      MasterKeyManager.initialize(dataDir);
+      this.encryptionEnabled = true;
+      console.log('[DeviceModel] Encryption initialized successfully');
+    } catch (error) {
+      console.error('[DeviceModel] Failed to initialize encryption:', error);
+      this.encryptionEnabled = false;
+    }
+  }
 
   /**
    * Get device record (single device per agent)
@@ -48,10 +72,27 @@ export class DeviceModel {
     // Convert provisioned to boolean
     const provisioned = !!device.provisioned;
 
-    return {
+    // Decrypt sensitive fields if encryption is enabled
+    const decryptedDevice: Device = {
       ...device,
       provisioned,
     };
+
+    if (this.encryptionEnabled) {
+      for (const field of ENCRYPTED_DEVICE_FIELDS) {
+        const value = device[field];
+        if (value && typeof value === 'string' && isEncrypted(value)) {
+          try {
+            decryptedDevice[field] = decryptData(value);
+          } catch (error) {
+            console.error(`[DeviceModel] Failed to decrypt ${field}:`, error);
+            // Keep encrypted value if decryption fails (prevents data loss)
+          }
+        }
+      }
+    }
+
+    return decryptedDevice;
   }
 
   /**
@@ -79,6 +120,21 @@ export class DeviceModel {
 
     if (updates.provisioned !== undefined) {
       updateData.provisioned = updates.provisioned ? 1 : 0;
+    }
+
+    // Encrypt sensitive fields if encryption is enabled
+    if (this.encryptionEnabled) {
+      for (const field of ENCRYPTED_DEVICE_FIELDS) {
+        const value = updates[field];
+        if (value && typeof value === 'string' && !isEncrypted(value)) {
+          try {
+            updateData[field] = encryptData(value);
+          } catch (error) {
+            console.error(`[DeviceModel] Failed to encrypt ${field}:`, error);
+            // Keep plaintext if encryption fails (prevents data loss)
+          }
+        }
+      }
     }
 
     await models(this.table).update(updateData);

@@ -31,7 +31,7 @@ const USE_DEFLATE_POC = process.env.USE_DEFLATE_COMPRESSION === 'true';
  * Compression information for logging and metrics
  */
 interface CompressionInfo {
-  method: 'json' | 'msgpack' | 'dictionary' | 'dictionary+msgpack' | 'dictionary+deflate' | 'dictionary+msgpack+deflate';
+  method: 'json' | 'json+deflate' | 'msgpack' | 'msgpack+deflate' | 'dictionary' | 'dictionary+msgpack' | 'dictionary+deflate' | 'dictionary+msgpack+deflate';
   originalSize: number;
   compressedSize: number;
   ratio: number; // Percentage saved (0-100)
@@ -990,18 +990,28 @@ export class Sensor extends EventEmitter {
     if (this.useMsgpackPoc) {
       // MessagePack compression (handled by createMsgpackPayload + serializePayload)
       const mqttPayload = createMsgpackPayload(data, msgIdGen);
-      const payload = serializePayload(mqttPayload);
+      let payload = serializePayload(mqttPayload);
       
       // Calculate compression stats
       const originalSize = Buffer.from(JSON.stringify(data), 'utf-8').length;
-      const compressedSize = payload.length;
+      let compressedSize = payload.length;
+      
+      // Apply deflate if enabled
+      let finalPayload: Buffer | string;
+      if (this.useDeflatePoc) {
+        finalPayload = require('zlib').deflateSync(payload);
+        compressedSize = finalPayload.length;
+      } else {
+        finalPayload = payload;
+      }
+      
       const ratio = ((originalSize - compressedSize) / originalSize) * 100;
       const compressionMs = Date.now() - startTime;
       
       return {
-        payload,
+        payload: finalPayload,
         compressionInfo: {
-          method: 'msgpack',
+          method: this.useDeflatePoc ? 'msgpack+deflate' : 'msgpack',
           originalSize,
           compressedSize,
           ratio,
@@ -1011,16 +1021,30 @@ export class Sensor extends EventEmitter {
     } else {
       // JSON (no compression)
       const mqttPayload = createJsonPayload(data, msgIdGen);
-      const payload = serializePayload(mqttPayload);
+      let payload = serializePayload(mqttPayload);
+      const originalSize = payload.length;
+      
+      // Apply deflate if enabled
+      let finalPayload: Buffer | string;
+      let compressedSize: number;
+      if (this.useDeflatePoc) {
+        finalPayload = require('zlib').deflateSync(typeof payload === 'string' ? Buffer.from(payload, 'utf-8') : payload);
+        compressedSize = finalPayload.length;
+      } else {
+        finalPayload = payload;
+        compressedSize = originalSize;
+      }
+      
+      const ratio = this.useDeflatePoc ? ((originalSize - compressedSize) / originalSize) * 100 : 0;
       const compressionMs = Date.now() - startTime;
       
       return {
-        payload,
+        payload: finalPayload,
         compressionInfo: {
-          method: 'json',
-          originalSize: payload.length,
-          compressedSize: payload.length,
-          ratio: 0,
+          method: this.useDeflatePoc ? 'json+deflate' : 'json',
+          originalSize,
+          compressedSize,
+          ratio,
           compressionMs
         }
       };

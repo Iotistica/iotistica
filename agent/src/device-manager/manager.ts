@@ -26,6 +26,8 @@ import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import { HttpClient, FetchHttpClient } from '../lib/http-client';
 import { DatabaseClient, KnexDatabaseClient } from '../db/client';
+import { DeviceModel } from '../db/models/device.model';
+import * as path from 'path';
 
 export class DeviceManager {
 	private deviceInfo: DeviceInfo | null = null;
@@ -44,6 +46,20 @@ export class DeviceManager {
 		this.httpClient = httpClient || new FetchHttpClient();
 		this.dbClient = dbClient || new KnexDatabaseClient();
 		this.uuidGenerator = uuidGenerator || new DefaultUuidGenerator();
+		
+		// Initialize encryption with same path logic as database
+		// Docker: /app/data (volume mount), Local: ./data (project root)
+		// CRITICAL: Must match database path to keep key and DB together
+		const isDocker = process.env.DEPLOYMENT_TYPE === 'docker';
+		const dataDir = isDocker ? '/app/data' : path.join(process.cwd(), 'data');
+		
+		this.logger?.infoSync('Initializing encryption', {
+			component: LogComponents.deviceManager,
+			dataDir,
+			environment: isDocker ? 'docker' : 'local',
+		});
+		
+		DeviceModel.initializeEncryption(dataDir);
 	}
 
 	/**

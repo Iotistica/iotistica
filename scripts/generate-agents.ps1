@@ -70,7 +70,7 @@ param(
     [string]$AnomalyDetectionEnabled = "true",
     [string]$FirewallEnabled = "false",
     [string]$UseMsgpackPoc = "true",
-    [string]$UseKeyCompactionPoc = "true",
+    [string]$UseKeyCompactionPoc = "false",
     [string]$UseDeflateCompression = "true",
     
     # Protocol Adapter Configuration
