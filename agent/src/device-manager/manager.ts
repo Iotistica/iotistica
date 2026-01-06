@@ -18,16 +18,25 @@ import type {
 	DeviceInfo, 
 	ProvisioningConfig, 
 	ProvisionRequest, 
-	ProvisionResponse 
+	ProvisionResponse,
+	KeyExchangeRequest
 } from './types';
+import { DeviceModel } from '../db/models/device.model';
 import { buildApiEndpoint, getPackageVersion } from '../utils/api-utils';
-import { DefaultUuidGenerator, generateAPIKey, type UuidGenerator } from '../utils/crypto';
+import * as path from 'path';
+import { 
+	DefaultUuidGenerator, 
+	generateAPIKey, 
+	getAPIKeyFingerprint, 
+	parseAPIKey,
+	computeKeyExchangeProof,
+	type UuidGenerator 
+} from '../utils/crypto';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import { HttpClient, FetchHttpClient } from '../lib/http-client';
 import { DatabaseClient, KnexDatabaseClient } from '../db/client';
-import { DeviceModel } from '../db/models/device.model';
-import * as path from 'path';
+import { PopCryptoManager } from '../security/pop-crypto.js';
 
 export class DeviceManager {
 	private deviceInfo: DeviceInfo | null = null;
@@ -35,6 +44,13 @@ export class DeviceManager {
 	private httpClient: HttpClient;
 	private dbClient: DatabaseClient;
 	private uuidGenerator: UuidGenerator;
+	private popCrypto?: PopCryptoManager;
+
+	// Retry configuration for unreliable edge networks
+	private readonly PROVISIONING_TIMEOUT_MS = 30000; // 30s per attempt
+	private readonly MAX_RETRY_ATTEMPTS = 5; // Total attempts: 1 initial + 5 retries
+	private readonly INITIAL_RETRY_DELAY_MS = 1000; // Start at 1s
+	private readonly MAX_RETRY_DELAY_MS = 32000; // Cap at 32s
 
 	constructor(
 		logger?: AgentLogger,
@@ -46,42 +62,142 @@ export class DeviceManager {
 		this.httpClient = httpClient || new FetchHttpClient();
 		this.dbClient = dbClient || new KnexDatabaseClient();
 		this.uuidGenerator = uuidGenerator || new DefaultUuidGenerator();
-		
-		// Initialize encryption with same path logic as database
-		// Docker: /app/data (volume mount), Local: ./data (project root)
-		// CRITICAL: Must match database path to keep key and DB together
-		const isDocker = process.env.DEPLOYMENT_TYPE === 'docker';
-		const dataDir = isDocker ? '/app/data' : path.join(process.cwd(), 'data');
-		
-		this.logger?.infoSync('Initializing encryption', {
-			component: LogComponents.deviceManager,
-			dataDir,
-			environment: isDocker ? 'docker' : 'local',
+	}
+
+	/**
+	 * Retry wrapper with exponential backoff and timeout
+	 * Handles unreliable edge network connections
+	 * 
+	 * @param operation - Async operation to retry
+	 * @param operationName - Name for logging
+	 * @param timeout - Timeout per attempt (default: 30s)
+	 * @returns Result of successful operation
+	 */
+	private async retryWithBackoff<T>(
+		operation: () => Promise<T>,
+		operationName: string,
+		timeout: number = this.PROVISIONING_TIMEOUT_MS
+	): Promise<T> {
+		let lastError: Error | null = null;
+		let delay = this.INITIAL_RETRY_DELAY_MS;
+
+		for (let attempt = 0; attempt <= this.MAX_RETRY_ATTEMPTS; attempt++) {
+			try {
+				this.logger?.infoSync(`Attempting ${operationName}`, {
+					component: LogComponents.deviceManager,
+					operation: 'retryWithBackoff',
+					attempt: attempt + 1,
+					maxAttempts: this.MAX_RETRY_ATTEMPTS + 1,
+					timeoutMs: timeout,
+				});
+
+				// Execute operation with timeout
+				const result = await this.withTimeout(operation(), timeout, operationName);
+				
+				if (attempt > 0) {
+					this.logger?.infoSync(`${operationName} succeeded after retries`, {
+						component: LogComponents.deviceManager,
+						operation: 'retryWithBackoff',
+						attempt: attempt + 1,
+					});
+				}
+				
+				return result;
+			} catch (error: any) {
+				lastError = error instanceof Error ? error : new Error(String(error));
+				
+				if (attempt < this.MAX_RETRY_ATTEMPTS) {
+					this.logger?.warnSync(`${operationName} failed, retrying`, {
+						component: LogComponents.deviceManager,
+						operation: 'retryWithBackoff',
+						attempt: attempt + 1,
+						delayMs: delay,
+						error: lastError.message,
+					});
+					
+					// Exponential backoff with jitter
+					await this.sleep(delay);
+					delay = Math.min(delay * 2, this.MAX_RETRY_DELAY_MS);
+				} else {
+					this.logger?.errorSync(
+						`${operationName} failed after ${this.MAX_RETRY_ATTEMPTS + 1} attempts`,
+						lastError,
+						{
+							component: LogComponents.deviceManager,
+							operation: 'retryWithBackoff',
+						}
+					);
+				}
+			}
+		}
+
+		throw lastError || new Error(`${operationName} failed after all retries`);
+	}
+
+	/**
+	 * Execute operation with timeout
+	 * 
+	 * @param promise - Promise to execute
+	 * @param timeoutMs - Timeout in milliseconds
+	 * @param operationName - Name for error messages
+	 */
+	private async withTimeout<T>(
+		promise: Promise<T>,
+		timeoutMs: number,
+		operationName: string
+	): Promise<T> {
+		const timeoutPromise = new Promise<never>((_, reject) => {
+			setTimeout(() => {
+				reject(new Error(`${operationName} timed out after ${timeoutMs}ms`));
+			}, timeoutMs);
 		});
-		
-		DeviceModel.initializeEncryption(dataDir);
+
+		return Promise.race([promise, timeoutPromise]);
+	}
+
+	/**
+	 * Sleep for specified milliseconds
+	 */
+	private sleep(ms: number): Promise<void> {
+		return new Promise(resolve => setTimeout(resolve, ms));
 	}
 
 	/**
 	 * Initialize device manager and load device info from database
 	 */
 	async initialize(): Promise<void> {
+		// Initialize encryption for secure credential storage in persisted location
+		// CRITICAL: Use absolute path /app/data (Docker volume) so encryption key persists across rebuilds
+		// DO NOT use process.cwd() - it may vary across environments
+		
+		DeviceModel.initializeEncryption('/app/data');
+
+		// Initialize PoP crypto (generates keys if needed)
+		this.popCrypto = new PopCryptoManager('/app/data', this.logger);
+		await this.popCrypto.initialize();
+
 		await this.loadDeviceInfo();
 
 		if (!this.deviceInfo) {
 			// Create new device with generated UUID and deviceApiKey
+			const newApiKey = generateAPIKey('v2'); // Generate v2 versioned key
+			const keyMetadata = parseAPIKey(newApiKey);
+			
 			this.deviceInfo = {
 				uuid: this.uuidGenerator.generate(),
-				deviceApiKey: generateAPIKey(), // Pre-generate device key
+				deviceApiKey: newApiKey,
 				provisioned: false,
-				agentVersion: process.env.AGENT_VERSION || getPackageVersion(), // Set version on creation
+				provisioningState: 'new',
+				agentVersion: process.env.AGENT_VERSION || getPackageVersion(),
 			};
 			await this.saveDeviceInfo();
-			this.logger?.infoSync('New device created', {
+			this.logger?.infoSync('New device created with versioned API key', {
 				component: LogComponents.deviceManager,
 				operation: 'initialize',
 				uuid: this.deviceInfo.uuid,
-				deviceApiKeyPreview: `${this.deviceInfo.deviceApiKey?.substring(0, 8)}...`,
+				keyVersion: keyMetadata?.version,
+				keyFingerprint: getAPIKeyFingerprint(newApiKey),
+				keyId: keyMetadata?.kid,
 			});
 		} else {
 			// Update agent version on every startup (BEFORE logging)
@@ -98,18 +214,25 @@ export class DeviceManager {
 				});
 			}
 			
+			// Log device info with key metadata (safe fingerprint, no secrets)
+			const keyMetadata = this.deviceInfo.deviceApiKey 
+				? parseAPIKey(this.deviceInfo.deviceApiKey) 
+				: null;
+			
 			this.logger?.infoSync('Device loaded', {
 				component: LogComponents.deviceManager,
 				operation: 'initialize',
 				uuid: this.deviceInfo.uuid,
 				deviceId: this.deviceInfo.deviceId,
 				provisioned: this.deviceInfo.provisioned,
+				provisioningState: this.deviceInfo.provisioningState || 'unknown',
 				hasDeviceApiKey: !!this.deviceInfo.deviceApiKey,
-				deviceApiKeyPrefix: this.deviceInfo.deviceApiKey?.substring(0, 16) || 'none',
-				hasApiKey: !!this.deviceInfo.apiKey,
-				apiKeyPrefix: this.deviceInfo.apiKey?.substring(0, 16) || 'none',
+				keyVersion: keyMetadata?.version,
+				keyFingerprint: this.deviceInfo.deviceApiKey 
+					? getAPIKeyFingerprint(this.deviceInfo.deviceApiKey) 
+					: undefined,
 				hasProvisioningKey: !!this.deviceInfo.provisioningApiKey,
-				agentVersion: this.deviceInfo.agentVersion, // Add version to log
+				agentVersion: this.deviceInfo.agentVersion,
 			});
 		}
 	}
@@ -141,9 +264,10 @@ export class DeviceManager {
 				apiEndpoint: record.apiEndpoint || undefined,
 				registeredAt: record.registeredAt || undefined,
 				provisioned: !!record.provisioned,
-				applicationId: record.applicationId || undefined,
-				macAddress: record.macAddress || undefined,
-				osVersion: record.osVersion || undefined,
+				provisioningState: (record.provisioningState as any) || (record.provisioned ? 'provisioned' : 'new'),
+			applicationId: record.applicationId || undefined,
+			macAddress: record.macAddress || undefined,
+			osVersion: record.osVersion || undefined,
 			agentVersion: record.agentVersion || undefined,
 
 			mqttBrokerConfig: record.mqttBrokerConfig ? JSON.parse(record.mqttBrokerConfig) : undefined,
@@ -159,7 +283,8 @@ export class DeviceManager {
 			apiTlsConfigKeys: this.deviceInfo?.apiTlsConfig ? Object.keys(this.deviceInfo.apiTlsConfig) : []
 		});
 	}
-}	/**
+}
+	/**
 	 * Save device info to database
 	 */
 	private async saveDeviceInfo(): Promise<void> {
@@ -183,12 +308,13 @@ export class DeviceManager {
 			apiEndpoint: this.deviceInfo.apiEndpoint || null,
 			registeredAt: this.deviceInfo.registeredAt || null,
 			provisioned: this.deviceInfo.provisioned,
+			provisioningState: this.deviceInfo.provisioningState || 'new',
 			applicationId: this.deviceInfo.applicationId || null,
 			macAddress: this.deviceInfo.macAddress || null,
 			osVersion: this.deviceInfo.osVersion || null,
 			agentVersion: this.deviceInfo.agentVersion || null,
-		mqttBrokerConfig: this.deviceInfo.mqttBrokerConfig ? JSON.stringify(this.deviceInfo.mqttBrokerConfig) : null,
-		apiTlsConfig: this.deviceInfo.apiTlsConfig ? JSON.stringify(this.deviceInfo.apiTlsConfig) : null,
+			mqttBrokerConfig: this.deviceInfo.mqttBrokerConfig ? JSON.stringify(this.deviceInfo.mqttBrokerConfig) : null,
+			apiTlsConfig: this.deviceInfo.apiTlsConfig ? JSON.stringify(this.deviceInfo.apiTlsConfig) : null,
 			updatedAt: new Date().toISOString(),
 		};
 		
@@ -237,6 +363,7 @@ export class DeviceManager {
 		}
 
 		this.deviceInfo.provisioned = false; // Explicitly mark as NOT cloud-provisioned
+		this.deviceInfo.provisioningState = 'new';
 		this.deviceInfo.deviceName = this.deviceInfo.deviceName || `device-${this.deviceInfo.uuid.slice(0, 8)}`;
 		this.deviceInfo.deviceType = this.deviceInfo.deviceType || 'standalone';
 		this.deviceInfo.agentVersion = process.env.AGENT_VERSION || getPackageVersion(); // Update agent version
@@ -266,9 +393,17 @@ export class DeviceManager {
 			throw new Error('provisioningApiKey is required for device provisioning');
 		}
 
-		// Ensure device API key exists
+		// Ensure device API key exists (generate v2 if missing)
 		if (!this.deviceInfo.deviceApiKey) {
-			this.deviceInfo.deviceApiKey = generateAPIKey();
+			this.deviceInfo.deviceApiKey = generateAPIKey('v2');
+			const keyMetadata = parseAPIKey(this.deviceInfo.deviceApiKey);
+			this.logger?.infoSync('Generated new API key for provisioning', {
+				component: LogComponents.deviceManager,
+				operation: 'provision',
+				keyVersion: keyMetadata?.version,
+				keyId: keyMetadata?.kid,
+				keyFingerprint: getAPIKeyFingerprint(this.deviceInfo.deviceApiKey),
+			});
 		}
 
 			// Update device metadata
@@ -276,53 +411,181 @@ export class DeviceManager {
 		this.deviceInfo.deviceType = config.deviceType || this.deviceInfo.deviceType || 'generic';
 		this.deviceInfo.apiEndpoint = config.apiEndpoint || this.deviceInfo.apiEndpoint;
 		this.deviceInfo.provisioningApiKey = config.provisioningApiKey;
+		this.deviceInfo.applicationId = config.applicationId;
 		this.deviceInfo.macAddress = config.macAddress;
 		this.deviceInfo.osVersion = config.osVersion;
-		this.deviceInfo.agentVersion = config.agentVersion;		// If UUID is provided in config, use it (useful for pre-configured devices)
-			if (config.uuid && config.uuid !== this.deviceInfo.uuid) {
+		this.deviceInfo.agentVersion = config.agentVersion;
+
+		// UUID is immutable after cloud registration (prevents device identity hijacking)
+		// Only allow UUID override for new/unprovisioned devices
+		if (config.uuid && config.uuid !== this.deviceInfo.uuid) {
+			const currentState = this.deviceInfo.provisioningState || 'new';
+			const isRegistered = currentState !== 'new' && currentState !== 'registering';
+			
+			if (isRegistered) {
+				// Device already registered with cloud - UUID cannot be changed
+				this.logger?.errorSync(
+					'Attempt to change UUID after cloud registration (rejected)',
+					new Error('UUID is immutable after provisioning'),
+					{
+						component: LogComponents.deviceManager,
+						operation: 'provision',
+						currentUuid: this.deviceInfo.uuid,
+						attemptedUuid: config.uuid,
+						provisioningState: currentState,
+					}
+				);
+				throw new Error(
+					`UUID cannot be changed after cloud registration. ` +
+					`Current UUID: ${this.deviceInfo.uuid}, ` +
+					`Attempted UUID: ${config.uuid}. ` +
+					`Use factory reset to re-provision with a new UUID.`
+				);
+			} else {
+				// Device not yet registered - UUID change allowed
+				this.logger?.warnSync('Changing device UUID before registration', {
+					component: LogComponents.deviceManager,
+					operation: 'provision',
+					oldUuid: this.deviceInfo.uuid,
+					newUuid: config.uuid,
+					note: 'UUID override allowed only before cloud registration',
+				});
 				this.deviceInfo.uuid = config.uuid;
 			}
+		}
 
 		try {
-			// Phase 1: Register device with cloud API
-			this.logger?.infoSync('Phase 1: Registering device with provisioning key', {
-				component: LogComponents.deviceManager,
-				operation: 'provision',
-				uuid: this.deviceInfo.uuid,
-				deviceName: this.deviceInfo.deviceName,
-				deviceType: this.deviceInfo.deviceType,
-				hasDeviceApiKey: !!this.deviceInfo.deviceApiKey,
-				hasProvisioningApiKey: !!this.deviceInfo.provisioningApiKey,
-			});
-			const response = await this.registerWithAPI(
-				this.deviceInfo.apiEndpoint || 'http://localhost:3002',
-				{
-				uuid: this.deviceInfo.uuid,
-				deviceName: this.deviceInfo.deviceName!,
-				deviceType: this.deviceInfo.deviceType!,
-				deviceApiKey: this.deviceInfo.deviceApiKey!,
-				macAddress: this.deviceInfo.macAddress,
-				osVersion: this.deviceInfo.osVersion,
-				agentVersion: this.deviceInfo.agentVersion,
-			},
-				this.deviceInfo.provisioningApiKey!
-		);
+			const currentState = this.deviceInfo.provisioningState || 'new';
+			
+			// Check if we're resuming from a partial failure
+			if (currentState !== 'new' && currentState !== 'provisioned') {
+				this.logger?.warnSync('Resuming incomplete provisioning', {
+					component: LogComponents.deviceManager,
+					operation: 'provision',
+					currentState,
+					note: 'Previous provisioning attempt failed mid-flight - resuming from last checkpoint',
+				});
+			}
+			
+			// Phase 1: Register device with cloud API (idempotent)
+			let response: ProvisionResponse | undefined;
+			
+			if (currentState === 'new' || currentState === 'registering') {
+				this.logger?.infoSync('Phase 1: Registering device with provisioning key', {
+					component: LogComponents.deviceManager,
+					operation: 'provision',
+					state: 'registering',
+				});
+				
+				// Mark as registering before API call
+				this.deviceInfo.provisioningState = 'registering';
+				await this.saveDeviceInfo();
+				
+				// Capture values for closure (TypeScript can't track through await/closures)
+				const apiEndpoint = this.deviceInfo.apiEndpoint || 'http://localhost:3002';
+				const uuid = this.deviceInfo.uuid;
+				const deviceName = this.deviceInfo.deviceName!; // Guaranteed by line 401
+				const deviceType = this.deviceInfo.deviceType!; // Guaranteed by line 402
+				const deviceApiKey = this.deviceInfo.deviceApiKey!; // Guaranteed by line 387-396
+				const applicationId = this.deviceInfo.applicationId;
+				const macAddress = this.deviceInfo.macAddress;
+				const osVersion = this.deviceInfo.osVersion;
+				const agentVersion = this.deviceInfo.agentVersion;
+				const provisioningApiKey = this.deviceInfo.provisioningApiKey!; // Guaranteed by line 381
+				
+				// Get public key for PoP if crypto initialized
+				const devicePublicKey = this.popCrypto?.getPublicKey();
+				
+				if (devicePublicKey) {
+					this.logger?.infoSync('Registering with PoP public key', {
+						component: LogComponents.deviceManager,
+						operation: 'provision',
+						keyFingerprint: this.popCrypto?.getKeyFingerprint()
+					});
+				} else {
+					this.logger?.warnSync('⚠️ Registering without PoP (using legacy bcrypt)', {
+						component: LogComponents.deviceManager,
+						operation: 'provision',
+						reason: 'PoP crypto not initialized'
+					});
+				}
+				
+				// Wrap with retry logic for unreliable edge networks
+				response = await this.retryWithBackoff(
+					() => this.registerWithAPI(
+						apiEndpoint,
+						{
+							uuid,
+							deviceName,
+							deviceType,
+							deviceApiKey,
+							devicePublicKey,
+							applicationId,
+							macAddress,
+							osVersion,
+							agentVersion,
+						},
+						provisioningApiKey
+					),
+					'Device Registration'
+				);
 
-		// Save server-assigned device ID
-		this.deviceInfo.deviceId = response.id.toString();
-		this.deviceInfo.mqttBrokerConfig = response.mqtt.brokerConfig; // Save TLS config if provided
-		this.deviceInfo.apiTlsConfig = response.api?.tlsConfig; // Save API HTTPS TLS config if provided
+				// Save server-assigned device ID and credentials
+				this.deviceInfo.deviceId = response.id.toString();
+				this.deviceInfo.mqttBrokerConfig = response.mqtt.brokerConfig;
+				this.deviceInfo.apiTlsConfig = response.api?.tlsConfig;
 
-		// Phase 2: Exchange keys - verify device can authenticate with deviceApiKey
-			this.logger?.debugSync('Phase 2: Exchanging keys', {
-				component: LogComponents.deviceManager,
-				operation: 'provision',
-			});
-			await this.exchangeKeys(
-				this.deviceInfo.apiEndpoint || 'http://localhost:3002',
-				this.deviceInfo.uuid,
-				this.deviceInfo.deviceApiKey
-			);
+				
+				this.logger?.infoSync('Phase 1 complete: Device registered', {
+					component: LogComponents.deviceManager,
+					operation: 'provision',
+					state: 'registered',
+					deviceId: this.deviceInfo.deviceId,
+				});
+			} else {
+				// Resume from registered state - device already exists in cloud
+				this.logger?.infoSync('Phase 1: Skipping registration (already registered)', {
+					component: LogComponents.deviceManager,
+					operation: 'provision',
+					state: currentState,
+					deviceId: this.deviceInfo.deviceId,
+				});
+			}
+
+			// Phase 2: Exchange keys - verify device can authenticate with deviceApiKey
+			if (currentState !== 'provisioned') {
+				this.logger?.infoSync('Phase 2: Exchanging keys', {
+					component: LogComponents.deviceManager,
+					operation: 'provision',
+					state: 'key-exchanging',
+          });
+        
+        // Mark as key-exchanging before API call
+        this.deviceInfo.provisioningState = 'key-exchanging';
+        await this.saveDeviceInfo();
+        
+        // Capture values for closure (TypeScript can't track through await/closures)
+        const apiEndpoint = this.deviceInfo.apiEndpoint || 'http://localhost:3002';
+        const uuid = this.deviceInfo.uuid;
+        const deviceApiKey = this.deviceInfo.deviceApiKey!; // Guaranteed by line 387-396
+        const challenge = response?.challenge; // Server-provided nonce for PoP
+        
+        // Wrap with retry logic for unreliable edge networks
+        await this.retryWithBackoff(
+          () => this.exchangeKeys(
+            apiEndpoint,
+            uuid,
+            deviceApiKey,
+            challenge  // Pass challenge for proof-of-possession
+          ),
+          'Key Exchange'
+        );
+				
+				this.logger?.infoSync('Phase 2 complete: Key exchange successful', {
+					component: LogComponents.deviceManager,
+					operation: 'provision',
+				});
+			}
 
 			// Phase 3: Remove provisioning key (one-time use complete)
 			this.logger?.infoSync('Phase 3: Removing provisioning key', {
@@ -331,94 +594,106 @@ export class DeviceManager {
 			});
 			this.deviceInfo.provisioningApiKey = undefined;
 
-			// Mark as provisioned
+			// Mark as provisioned (all phases complete)
 			this.deviceInfo.provisioned = true;
+			this.deviceInfo.provisioningState = 'provisioned';
 			this.deviceInfo.registeredAt = Date.now();
 
 			// Save to database
 			await this.saveDeviceInfo();
 
+			const vpnConfig = response?.vpn; // May be undefined if resuming
 			this.logger?.infoSync('Device provisioned successfully', {
 				component: LogComponents.deviceManager,
 				operation: 'provision',
+				state: 'provisioned',
 				uuid: this.deviceInfo.uuid,
 				deviceId: this.deviceInfo.deviceId,
 				deviceName: this.deviceInfo.deviceName,
-				mqttUsername: this.deviceInfo.mqttBrokerConfig?.username,
-				mqttBrokerUrl: this.deviceInfo.mqttBrokerConfig ? `${this.deviceInfo.mqttBrokerConfig.protocol}://${this.deviceInfo.mqttBrokerConfig.host}:${this.deviceInfo.mqttBrokerConfig.port}` : undefined,
-				mqttBrokerConfig: this.deviceInfo.mqttBrokerConfig ? {
-					...this.deviceInfo.mqttBrokerConfig,
-					password: '***REDACTED***'
+				applicationId: this.deviceInfo.applicationId,
+				mqttBrokerHost: this.deviceInfo.mqttBrokerConfig?.host,
+				vpnEnabled: vpnConfig?.enabled ?? false,
+				vpnType: vpnConfig?.type,
+				vpnData: vpnConfig?.type === 'tailscale' ? {
+					tailnetName: vpnConfig.tailscale.tailnetName,
+					authKey: vpnConfig.tailscale.authKey ? `${vpnConfig.tailscale.authKey.substring(0, 20)}...` : undefined,
+					shieldsUp: vpnConfig.tailscale.shieldsUp,
+					acceptRoutes: vpnConfig.tailscale.acceptRoutes,
+					acceptDNS: vpnConfig.tailscale.acceptDNS,
+					expiresAt: vpnConfig.tailscale.expiresAt,
 				} : undefined,
 			});
 
-			// Phase 4: Setup Tailscale VPN if provided in response
-			if (response.vpn?.enabled && response.vpn.type === 'tailscale') {
-				this.logger?.infoSync('Setting up Tailscale VPN', {
-					component: LogComponents.deviceManager,
-					operation: 'provision',
-					tailnetName: response.vpn.tailscale.tailnetName,
+		// Phase 4: Setup Tailscale VPN if provided in response
+		if (vpnConfig?.enabled && vpnConfig.type === 'tailscale') {
+			this.logger?.infoSync('Setting up Tailscale VPN', {
+				component: LogComponents.deviceManager,
+				operation: 'provision',
+				tailnetName: vpnConfig.tailscale.tailnetName,
+			});
+
+			try {
+				const { TailscaleManager } = await import('../network/vpn/tailscale-manager.js');
+				const tailscaleManager = new TailscaleManager(this.logger);
+				
+				// Check if Tailscale is installed, install if needed
+				const isInstalled = await tailscaleManager.checkInstallation();
+				if (!isInstalled) {
+					await tailscaleManager.install();
+				}
+
+				// Configure and connect to Tailnet
+				await tailscaleManager.configure({
+					authKey: vpnConfig.tailscale.authKey,
+					tailnetName: vpnConfig.tailscale.tailnetName,
+					hostname: this.deviceInfo.deviceName,
+					shieldsUp: vpnConfig.tailscale.shieldsUp ?? true,
+					acceptRoutes: vpnConfig.tailscale.acceptRoutes ?? false,
+					acceptDNS: vpnConfig.tailscale.acceptDNS ?? false,
 				});
 
-				try {
-					const { TailscaleManager } = await import('../network/vpn/tailscale-manager.js');
-					const tailscaleManager = new TailscaleManager(this.logger);
-					
-					// Check if Tailscale is installed, install if needed
-					const isInstalled = await tailscaleManager.checkInstallation();
-					if (!isInstalled) {
-						await tailscaleManager.install();
-					}
+				// Get Tailscale IP
+				const tailscaleIP = await tailscaleManager.getIP();
 
-					// Configure and connect to Tailnet
-					await tailscaleManager.configure({
-						authKey: response.vpn.tailscale.authKey,
-						tailnetName: response.vpn.tailscale.tailnetName,
-						hostname: this.deviceInfo.deviceName,
-					});
-
-					// Get Tailscale IP
-					const tailscaleIP = await tailscaleManager.getIP();
-
-					this.logger?.infoSync('Tailscale VPN tunnel established successfully', {
-						component: LogComponents.deviceManager,
-						operation: 'provision',
-						tailscaleIP,
-						tailnetName: response.vpn.tailscale.tailnetName,
-					});
-				} catch (vpnError) {
-					// VPN setup failure is non-critical - device can still operate
-					this.logger?.warnSync('Tailscale VPN setup failed (device will continue without VPN)', {
-						component: LogComponents.deviceManager,
-						operation: 'provision',
-						error: vpnError instanceof Error ? vpnError.message : String(vpnError),
-					});
-				}
+				this.logger?.infoSync('Tailscale VPN tunnel established successfully', {
+					component: LogComponents.deviceManager,
+					operation: 'provision',
+					tailscaleIP,
+					tailnetName: vpnConfig.tailscale.tailnetName,
+				});
+			} catch (vpnError) {
+				// VPN setup failure is non-critical - device can still operate
+				this.logger?.warnSync('Tailscale VPN setup failed (device will continue without VPN)', {
+					component: LogComponents.deviceManager,
+					operation: 'provision',
+					error: vpnError instanceof Error ? vpnError.message : String(vpnError),
+				});
 			}
+		}
 
 			return this.getDeviceInfo();
 		} catch (error: any) {
-			// Handle already registered case - mark as provisioned
-			if (error.message === 'DEVICE_ALREADY_REGISTERED') {
-				this.logger?.infoSync('Device already registered - marking as provisioned', {
-					component: LogComponents.deviceManager,
-					operation: 'provision',
-					uuid: this.deviceInfo!.uuid,
-				});
-				
-				// Mark as provisioned and save to avoid re-provisioning
-				this.deviceInfo!.provisioned = true;
+			// Reset to last successful state for idempotent retry
+			const currentState = this.deviceInfo.provisioningState;
+			if (currentState === 'registering') {
+				// Phase 1 failed - reset to 'new' for full retry
+				this.deviceInfo.provisioningState = 'new';
 				await this.saveDeviceInfo();
-				
-				return this.getDeviceInfo();
+			} else if (currentState === 'key-exchanging') {
+				// Phase 2 failed - reset to 'registered' for partial retry
+				this.deviceInfo.provisioningState = 'registered';
+				await this.saveDeviceInfo();
 			}
-
+			
 			this.logger?.errorSync(
 				'Provisioning failed',
 				error instanceof Error ? error : new Error(String(error)),
 				{
 					component: LogComponents.deviceManager,
 					operation: 'provision',
+					state: currentState,
+					resetTo: this.deviceInfo.provisioningState,
+					note: 'State reset for idempotent retry',
 				}
 			);
 			throw error;
@@ -440,6 +715,10 @@ export class DeviceManager {
 
 		const url = buildApiEndpoint(apiEndpoint, '/device/register');
 		
+		// Generate idempotency key based on device UUID
+		// Same UUID = same idempotency key = safe retries
+		const idempotencyKey = `register-${this.deviceInfo.uuid}`;
+		
 		this.logger?.infoSync('Registering device with API', {
 			component: LogComponents.deviceManager,
 			operation: 'registerWithAPI',
@@ -447,26 +726,18 @@ export class DeviceManager {
 			uuid: provisionRequest.uuid,
 			deviceName: provisionRequest.deviceName,
 			deviceType: provisionRequest.deviceType,
+			idempotencyKey,
 		});
 
 		try {
 			const response = await this.httpClient.post<ProvisionResponse>(url, provisionRequest, {
-				headers: this.createAuthHeaders(provisioningApiKey),
+				headers: {
+					...this.createAuthHeaders(provisioningApiKey),
+					'X-Idempotency-Key': idempotencyKey,
+				},
 			});
 
 			if (!response.ok) {
-				// Handle 409 Conflict - device already registered
-				if (response.status === 409) {
-					this.logger?.warnSync('Device already registered with API', {
-						component: LogComponents.deviceManager,
-						operation: 'registerWithAPI',
-						uuid: provisionRequest.uuid,
-						note: 'Device has existing registration. Provisioning will be skipped.'
-					});
-					// Throw a specific error that can be caught by provision() to handle gracefully
-					throw new Error('DEVICE_ALREADY_REGISTERED');
-				}
-
 				const errorText = await response.json().catch(() => ({ message: response.statusText }));
 				throw new Error(`API returned ${response.status}: ${JSON.stringify(errorText)}`);
 			}
@@ -475,11 +746,6 @@ export class DeviceManager {
 
 			return result;
 		} catch (error: any) {
-			// Re-throw already registered error without logging as error
-			if (error.message === 'DEVICE_ALREADY_REGISTERED') {
-				throw error;
-			}
-
 			this.logger?.errorSync(
 				'Registration failed',
 				error instanceof Error ? error : new Error(String(error)),
@@ -495,40 +761,91 @@ export class DeviceManager {
 	/**
 	 * Exchange keys - verify device can authenticate with deviceApiKey
 	 * POST /api/${API_VERSION}/device/:uuid/key-exchange
+	 * 
+	 * Security: Uses asymmetric proof-of-possession (Ed25519 challenge-response).
+	 * - Device signs challenge with Ed25519 private key (never transmitted)
+	 * - Server verifies signature with public key (registered during provisioning)
+	 * - UUID bound into signature payload to prevent cross-device replay
+	 * 
+	 * This prevents:
+	 * - Replay attacks (challenge is single-use, UUID-bound)
+	 * - Key interception (private key never leaves device)
+	 * - Cross-device replay (UUID bound into signed payload)
+	 * - Circular authentication (proof != credential)
+	 * 
+	 * Requirements:
+	 * - Server must provide challenge
+	 * - Device must have PoP crypto initialized (Ed25519 key pair)
+	 * - No fallback to symmetric crypto (bcrypt deprecated)
 	 */
-	async exchangeKeys(apiEndpoint: string, uuid: string, deviceApiKey: string): Promise<void> {
+	async exchangeKeys(
+		apiEndpoint: string,
+		uuid: string,
+		deviceApiKey: string,
+		challenge?: string  // Server-provided nonce from registration response
+	): Promise<void> {
 		const url = buildApiEndpoint(apiEndpoint, `/device/${uuid}/key-exchange`);
+		
+		// Generate idempotency key based on device UUID and operation
+		const idempotencyKey = `key-exchange-${uuid}`;
+		
+		// PoP is mandatory - fail if requirements not met
+		if (!challenge) {
+			throw new Error('Server did not provide challenge - PoP authentication required');
+		}
+		
+		if (!this.popCrypto?.isEnabled()) {
+			throw new Error('PoP crypto not initialized - cannot authenticate');
+		}
 		
 		this.logger?.infoSync('Exchanging keys for device', {
 			component: LogComponents.deviceManager,
 			operation: 'exchangeKeys',
 			uuid,
+			authMethod: 'proof-of-possession',
+			challengeLength: challenge.length,
+			idempotencyKey,
 		});
 
 		try {
-			const response = await this.httpClient.post(url, {
+			// SECURE: Proof-of-possession with Ed25519 signature (mandatory)
+			// Binds device UUID to challenge to prevent cross-device replay
+			const signature = this.popCrypto.signChallenge(challenge, uuid);
+			
+			const requestBody: KeyExchangeRequest = {
 				uuid,
-				deviceApiKey,
-			}, {
-				headers: this.createAuthHeaders(deviceApiKey),
-			});
-
-			if (!response.ok) {
-				const errorText = await response.json().catch(() => ({ message: response.statusText }));
-				throw new Error(`Key exchange failed ${response.status}: ${JSON.stringify(errorText)}`);
-			}
-
-			const result = await response.json();
-			this.logger?.infoSync('Key exchange successful', {
+				signature,
+			};
+			
+			const headers = this.createAuthHeaders(deviceApiKey);
+			headers['X-Idempotency-Key'] = idempotencyKey;
+			
+			this.logger?.infoSync('Using Ed25519 PoP signature', {
 				component: LogComponents.deviceManager,
 				operation: 'exchangeKeys',
+				challengeLength: challenge.length,
+				signatureLength: signature.length,
+				keyFingerprint: this.popCrypto.getKeyFingerprint()
 			});
-		} catch (error: any) {
-			this.logger?.errorSync(
-				'Key exchange failed',
-				error instanceof Error ? error : new Error(String(error)),
-				{
-					component: LogComponents.deviceManager,
+		
+		const response = await this.httpClient.post(url, requestBody, { headers });
+
+		if (!response.ok) {
+			const errorText = await response.json().catch(() => ({ message: response.statusText }));
+			throw new Error(`Key exchange failed ${response.status}: ${JSON.stringify(errorText)}`);
+		}
+
+		const result = await response.json();
+		this.logger?.infoSync('Key exchange successful', {
+			component: LogComponents.deviceManager,
+			operation: 'exchangeKeys',
+			authMethod: 'proof-of-possession',
+		});
+	} catch (error: any) {
+		this.logger?.errorSync(
+			'Key exchange failed',
+			error instanceof Error ? error : new Error(String(error)),
+			{
 					operation: 'exchangeKeys',
 				}
 			);
@@ -624,6 +941,8 @@ export class DeviceManager {
 		this.deviceInfo.apiEndpoint = undefined;
 		this.deviceInfo.registeredAt = undefined;
 		this.deviceInfo.provisioned = false;
+		this.deviceInfo.provisioningState = 'new';
+		this.deviceInfo.applicationId = undefined;
 		
 		// Clear MQTT credentials (these are cloud-assigned)
 		this.deviceInfo.mqttBrokerConfig = undefined;
@@ -690,34 +1009,13 @@ export class DeviceManager {
 			}
 		}
 
-		// Import db connection
-		const { models } = await import('../db/connection.js');
-		
-		// Helper to safely delete from table (ignore if table doesn't exist)
-		const safeDelete = async (tableName: string) => {
-			try {
-				await models(tableName).delete();
-				this.logger?.infoSync(`Deleted ${tableName}`, {
-					component: LogComponents.deviceManager,
-					operation: 'factoryReset',
-				});
-			} catch (error: any) {
-				// Table doesn't exist or is empty - this is fine
-				this.logger?.debugSync(`Table ${tableName} not found or already empty`, {
-					component: LogComponents.deviceManager,
-					operation: 'factoryReset',
-					error: error.message,
-				});
-			}
-		};
-		
-		// Delete all data tables (ignore if they don't exist)
-		await safeDelete('stateSnapshot');
-		await safeDelete('service');
-		await safeDelete('app');
-		await safeDelete('image');
-		await safeDelete('endpoint_outputs');
-		await safeDelete('sensors');
+		// Use centralized database factory reset
+		// This is safer than direct table deletion:
+		// - Schema changes don't break reset logic
+		// - Permissions and journaling centralized
+		// - Future: backup before delete, confirmation prompts
+		const { factoryReset: dbFactoryReset } = await import('../db/connection.js');
+		await dbFactoryReset(this.logger);
 		
 		// Reset device info but preserve UUID for hardware identification
 		const preservedUuid = this.deviceInfo.uuid;
@@ -731,11 +1029,12 @@ export class DeviceManager {
 		this.deviceInfo.apiEndpoint = undefined;
 		this.deviceInfo.registeredAt = undefined;
 		this.deviceInfo.provisioned = false;
+		this.deviceInfo.provisioningState = 'new';
+		this.deviceInfo.applicationId = undefined;
 		this.deviceInfo.macAddress = undefined;
 		this.deviceInfo.osVersion = undefined;
 		this.deviceInfo.agentVersion = undefined;
 		this.deviceInfo.mqttBrokerConfig = undefined;
-		this.deviceInfo.apiTlsConfig = undefined;
 		this.deviceInfo.uuid = preservedUuid; // Restore UUID
 
 		await this.saveDeviceInfo();
@@ -750,3 +1049,7 @@ export class DeviceManager {
 }
 
 export default DeviceManager;
+
+
+
+

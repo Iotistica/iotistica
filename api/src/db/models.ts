@@ -39,6 +39,12 @@ export interface Device {
   provisioned_by_key_id?: string;
   mqtt_username?: string;
   mqtt_broker_id?: number;
+  // Proof of Possession fields
+  device_public_key?: string;
+  pop_verified?: boolean;
+  pop_verified_at?: Date;
+  last_challenge?: string;
+  last_challenge_expires_at?: Date;
   // VPN fields
   vpn_enabled?: boolean;
   vpn_username?: string;
@@ -299,6 +305,81 @@ export class DeviceModel {
    */
   static async delete(uuid: string): Promise<void> {
     await query('DELETE FROM devices WHERE uuid = $1', [uuid]);
+  }
+
+  /**
+   * Store PoP challenge for device
+   * @param uuid Device UUID
+   * @param challenge Cryptographically secure nonce
+   * @param expiresAt Challenge expiration (typically 5 minutes)
+   */
+  static async storeChallenge(uuid: string, challenge: string, expiresAt: Date): Promise<void> {
+    await query(
+      `UPDATE devices 
+       SET last_challenge = $1, last_challenge_expires_at = $2 
+       WHERE uuid = $3`,
+      [challenge, expiresAt, uuid]
+    );
+  }
+
+  /**
+   * Mark device as PoP verified
+   * Clears challenge data and sets verification timestamp
+   */
+  static async markPopVerified(uuid: string): Promise<void> {
+    await query(
+      `UPDATE devices 
+       SET pop_verified = true, 
+           pop_verified_at = CURRENT_TIMESTAMP,
+           last_challenge = NULL,
+           last_challenge_expires_at = NULL
+       WHERE uuid = $1`,
+      [uuid]
+    );
+  }
+
+  /**
+   * Record authentication method used for this device
+   * Enables future fleet-level policies:
+   * - Disable bcrypt per-fleet (enforce PoP-only)
+   * - Audit legacy stragglers still using bcrypt
+   * - Enforce high-security fleets to use PoP
+   */
+  static async recordAuthMethod(uuid: string, method: 'pop' | 'bcrypt'): Promise<void> {
+    await query(
+      `UPDATE devices 
+       SET last_auth_method = $1,
+           last_auth_at = CURRENT_TIMESTAMP
+       WHERE uuid = $2`,
+      [method, uuid]
+    );
+  }
+
+  /**
+   * Get device public key (for signature verification)
+   */
+  static async getPublicKey(uuid: string): Promise<string | null> {
+    const result = await query<{ device_public_key: string }>(
+      'SELECT device_public_key FROM devices WHERE uuid = $1',
+      [uuid]
+    );
+    return result.rows[0]?.device_public_key || null;
+  }
+
+  /**
+   * Update device public key (only allowed if not already set - immutable after first registration)
+   */
+  static async setPublicKey(uuid: string, publicKey: string): Promise<void> {
+    const result = await query(
+      `UPDATE devices 
+       SET device_public_key = $1 
+       WHERE uuid = $2 AND device_public_key IS NULL`,
+      [publicKey, uuid]
+    );
+    
+    if (result.rowCount === 0) {
+      throw new Error('Public key already set - cannot update (requires reprovisioning)');
+    }
   }
 }
 

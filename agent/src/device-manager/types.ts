@@ -24,6 +24,7 @@ export interface DeviceInfo {
 	apiEndpoint?: string;
 	registeredAt?: number;
 	provisioned: boolean;
+	popVerified?: boolean;        // True if provisioned via PoP (enables PoP-only features)
 	
 	// Provisioning state machine
 	provisioningState?: ProvisioningState;
@@ -84,6 +85,7 @@ export interface ProvisionRequest {
 	deviceName: string;
 	deviceType: string;
 	deviceApiKey: string;          // Pre-generated device key
+	devicePublicKey?: string;      // Ed25519 public key for PoP (PEM format)
 	applicationId?: number;
 	macAddress?: string;
 	osVersion?: string;
@@ -142,9 +144,10 @@ export interface ProvisionResponse {
 
 export interface KeyExchangeRequest {
 	uuid: string;
-	deviceApiKey: string;
-	challenge?: string;  // Server nonce for proof-of-possession
-	proof?: string;      // HMAC-SHA256 proof (computed from challenge)
+	deviceApiKey?: string;  // Optional: only sent in bcrypt fallback mode, NOT in PoP mode
+	challenge?: string;     // Server nonce for proof-of-possession (legacy)
+	proof?: string;         // HMAC-SHA256 proof (computed from challenge, legacy)
+	signature?: string;     // Ed25519 signature for PoP (base64-encoded)
 }
 
 export interface KeyExchangeResponse {

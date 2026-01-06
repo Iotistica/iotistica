@@ -15,6 +15,7 @@ import { query } from '../db/connection';
 import {
   DeviceModel,
   DeviceTargetStateModel,
+  Device,
 } from '../db/models';
 import {
   validateProvisioningKey,
@@ -48,6 +49,7 @@ export interface RegistrationRequest {
   deviceName: string;
   deviceType: string;
   deviceApiKey: string;
+  devicePublicKey?: string; // Ed25519/P-256 public key for PoP
   provisioningApiKey: string;
   applicationId?: number;
   macAddress?: string;
@@ -66,6 +68,7 @@ export interface ProvisioningResponse {
   deviceType: string;
   applicationId?: number;
   fleetId: string;
+  challenge?: string; // PoP challenge (if public key provided)
   createdAt: string;
   mqtt: {
     username: string;
@@ -113,7 +116,7 @@ export class ProvisioningService {
     ipAddress?: string,
     userAgent?: string
   ): Promise<ProvisioningResponse> {
-    const { uuid, deviceName, deviceType, deviceApiKey, provisioningApiKey, macAddress, osVersion, agentVersion } = data;
+    const { uuid, deviceName, deviceType, deviceApiKey, devicePublicKey, provisioningApiKey, macAddress, osVersion, agentVersion } = data;
 
     const now = new Date();
 
@@ -152,8 +155,8 @@ export class ProvisioningService {
       this.generateVpnCredentials(uuid, deviceName, ipAddress)
     ]);
 
-    // Upsert device with all provisioning fields atomically
-    const device = await DeviceModel.upsert(uuid, {
+    // Prepare device data
+    const deviceData: Partial<Device> = {
       device_name: deviceName,
       device_type: deviceType,
       device_api_key_hash: hashedApiKey,
@@ -170,6 +173,35 @@ export class ProvisioningService {
       status: 'online',
       provisioned_at: now,
       provisioning_state: 'registered'
+    };
+
+    // Add public key if provided (for PoP)
+    if (devicePublicKey) {
+      logger.info('Device registration includes public key for PoP', {
+        deviceUuid: uuid.substring(0, 8) + '...',
+        deviceName,
+        publicKeyLength: devicePublicKey.length,
+        publicKeyType: devicePublicKey.includes('BEGIN EC PRIVATE KEY') ? 'EC' : 
+                      devicePublicKey.includes('BEGIN PUBLIC KEY') ? 'Generic' : 'Unknown'
+      });
+      deviceData.device_public_key = devicePublicKey;
+      deviceData.pop_verified = false; // Will be verified in key-exchange phase
+    } else {
+      logger.warn('⚠️ Device registered without public key - using LEGACY authentication', {
+        deviceUuid: uuid.substring(0, 8) + '...',
+        deviceName,
+        message: 'Agent needs to generate key pair and send devicePublicKey for PoP authentication'
+      });
+    }
+
+    // Upsert device with all provisioning fields atomically
+    const device = await DeviceModel.upsert(uuid, deviceData);
+    
+    logger.info('Device upserted to database', {
+      deviceId: device.id,
+      deviceUuid: uuid.substring(0, 8) + '...',
+      hasPublicKey: !!devicePublicKey,
+      popVerified: device.pop_verified
     });
 
 
@@ -221,6 +253,30 @@ export class ProvisioningService {
         userAgent
    ).catch(err => logger.error('Failed to log successful provisioning', err));
 
+    // Generate PoP challenge if public key was provided
+    let challenge: string | undefined;
+    if (devicePublicKey) {
+      challenge = crypto.randomBytes(32).toString('base64url');
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+      
+      logger.info('Generating PoP challenge for device', {
+        deviceUuid: uuid.substring(0, 8) + '...',
+        challengeLength: challenge.length,
+        expiresAt: expiresAt.toISOString(),
+        expiresInSeconds: 300
+      });
+      
+      await DeviceModel.storeChallenge(uuid, challenge, expiresAt);
+      
+      logger.info('PoP challenge stored in database', {
+        deviceUuid: uuid.substring(0, 8) + '...',
+        expiresAt: expiresAt.toISOString()
+      });
+    } else {
+      logger.info('No PoP challenge generated (no public key provided)', {
+        deviceUuid: uuid.substring(0, 8) + '...'
+      });
+    }
 
     // Build and return provisioning response
     return this.buildProvisioningResponse(
@@ -228,7 +284,8 @@ export class ProvisioningService {
       data,
       keyRecord,
       mqttCredentials,
-      vpnCredentials
+      vpnCredentials,
+      challenge
     );
   }
 
@@ -360,7 +417,8 @@ export class ProvisioningService {
     data: RegistrationRequest,
     provisioningKeyRecord: any,
     mqttCredentials: { username: string; password: string },
-    vpnCredentials?: { type: 'tailscale'; tailscale: any }
+    vpnCredentials?: { type: 'tailscale'; tailscale: any },
+    challenge?: string
   ): Promise<ProvisioningResponse> {
     const { uuid, deviceName, deviceType, applicationId } = data;
 
@@ -412,6 +470,7 @@ export class ProvisioningService {
       deviceType,
       applicationId,
       fleetId: provisioningKeyRecord.fleet_id,
+      ...(challenge && { challenge }), // Include challenge if PoP enabled
       createdAt: device.created_at.toISOString(),
       mqtt: {
         // Legacy fields for backward compatibility (deprecated)

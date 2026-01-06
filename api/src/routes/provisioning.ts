@@ -389,6 +389,101 @@ router.post('/provisioning-keys/generate', async (req, res) => {
 // ============================================================================
 
 /**
+ * Issue a PoP challenge to device
+ * POST /api/v1/device/:uuid/challenge
+ * 
+ * Phase 2a: Challenge issuance for proof-of-possession
+ * - Generates cryptographically secure nonce
+ * - Stores challenge with 5-minute TTL
+ * - Device signs this challenge to prove it owns the private key
+ * 
+ * Security Features:
+ * - Cryptographically secure random nonce (32 bytes)
+ * - Short-lived challenge (5 minutes)
+ * - Replay protection via expiration
+ */
+router.post('/device/:uuid/challenge', async (req, res) => {
+  const { uuid } = req.params;
+  const ipAddress = req.ip;
+  const userAgent = req.headers['user-agent'];
+
+  try {
+    // Verify device exists
+    const device = await DeviceModel.getByUuid(uuid);
+    
+    if (!device) {
+      await logAuditEvent({
+        eventType: AuditEventType.AUTHENTICATION_FAILED,
+        deviceUuid: uuid,
+        ipAddress,
+        userAgent,
+        severity: AuditSeverity.WARNING,
+        details: { reason: 'Device not found', endpoint: 'challenge' }
+      });
+      return res.status(404).json({
+        error: 'Device not found',
+        message: `Device ${uuid} not registered`
+      });
+    }
+
+    // Generate cryptographically secure nonce
+    const challenge = crypto.randomBytes(32).toString('base64url');
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+    logger.info('Generating new PoP challenge', {
+      deviceUuid: uuid.substring(0, 8) + '...',
+      deviceName: device.device_name,
+      challengeLength: challenge.length,
+      expiresAt: expiresAt.toISOString(),
+      hasPublicKey: !!device.device_public_key,
+      currentlyVerified: device.pop_verified
+    });
+
+    // Store challenge for verification
+    await DeviceModel.storeChallenge(uuid, challenge, expiresAt);
+
+    logger.info('PoP challenge stored and issued to device', {
+      deviceUuid: uuid.substring(0, 8) + '...',
+      deviceName: device.device_name,
+      expiresAt: expiresAt.toISOString()
+    });
+
+    await logAuditEvent({
+      eventType: AuditEventType.KEY_EXCHANGE_SUCCESS, // Reusing event type
+      deviceUuid: uuid,
+      ipAddress,
+      userAgent,
+      severity: AuditSeverity.INFO,
+      details: { 
+        action: 'challenge_issued',
+        expiresAt: expiresAt.toISOString()
+      }
+    });
+
+    res.json({
+      challenge,
+      expiresAt: expiresAt.toISOString()
+    });
+  } catch (error: any) {
+    logger.error('Error issuing PoP challenge:', error);
+    
+    await logAuditEvent({
+      eventType: AuditEventType.KEY_EXCHANGE_FAILED,
+      deviceUuid: uuid,
+      ipAddress,
+      userAgent,
+      severity: AuditSeverity.ERROR,
+      details: { error: error.message, endpoint: 'challenge' }
+    });
+
+    res.status(500).json({
+      error: 'Challenge issuance failed',
+      message: error.message
+    });
+  }
+});
+
+/**
  * Register new device with provisioning API key
  * POST /api/v1/device/register
  * 
@@ -411,7 +506,7 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
 
   try {
     // Extract request data
-    const { uuid, deviceName, deviceType, deviceApiKey, applicationId, macAddress, osVersion, agentVersion } = req.body;
+    const { uuid, deviceName, deviceType, deviceApiKey, devicePublicKey, applicationId, macAddress, osVersion, agentVersion } = req.body;
     const provisioningApiKey = req.headers.authorization?.replace('Bearer ', '');
 
     // Validate required fields
@@ -426,6 +521,40 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
       return res.status(400).json({
         error: 'Missing required fields',
         message: 'uuid, deviceName, deviceType, and deviceApiKey are required'
+      });
+    }
+
+    // Validate devicePublicKey format if provided (for PoP)
+    if (devicePublicKey) {
+      logger.info('Received device registration with public key', {
+        uuid: uuid?.substring(0, 8) + '...',
+        publicKeyLength: devicePublicKey.length,
+        hasBeginMarker: devicePublicKey.includes('BEGIN PUBLIC KEY'),
+        hasEndMarker: devicePublicKey.includes('END PUBLIC KEY')
+      });
+      
+      if (!devicePublicKey.includes('BEGIN PUBLIC KEY') || !devicePublicKey.includes('END PUBLIC KEY')) {
+        logger.warn('Invalid public key format received', {
+          uuid: uuid?.substring(0, 8) + '...',
+          publicKeyLength: devicePublicKey.length,
+          preview: devicePublicKey.substring(0, 50)
+        });
+        
+        await logAuditEvent({
+          eventType: AuditEventType.PROVISIONING_FAILED,
+          ipAddress,
+          userAgent,
+          severity: AuditSeverity.WARNING,
+          details: { reason: 'Invalid public key format (must be PEM)', uuid: uuid?.substring(0, 8) }
+        });
+        return res.status(400).json({
+          error: 'Invalid public key format',
+          message: 'devicePublicKey must be in PEM format'
+        });
+      }
+    } else {
+      logger.info('Device registration without public key (legacy mode)', {
+        uuid: uuid?.substring(0, 8) + '...'
       });
     }
 
@@ -451,6 +580,7 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
         deviceName,
         deviceType,
         deviceApiKey,
+        devicePublicKey,
         provisioningApiKey,
         applicationId,
         macAddress,
@@ -488,30 +618,16 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
  * Exchange keys - verify device can authenticate with deviceApiKey
  * POST /api/v1/device/:uuid/key-exchange
  * 
- * Phase 2 of two-phase authentication:
- * - Verifies deviceApiKey against hashed value in database
- * - Uses bcrypt.compare for secure verification
- * - Rate limited (10 attempts per hour)
+ * Phase 2b of two-phase authentication:
+ * - Verifies proof-of-possession signature (preferred)
+ * - Falls back to deviceApiKey bcrypt verification (legacy)
+ * - Rate limited (50 attempts per hour)
  * - Logs all authentication events
  * 
  * Security Features:
- * - Secure key comparison using bcrypt
- * - Rate limiting to prevent brute force attacks
- * - Comprehensive audit logging
- * - No sensitive information in error messages
- */
-/**
- * Exchange keys - verify device can authenticate with deviceApiKey
- * POST /api/v1/device/:uuid/key-exchange
- * 
- * Phase 2 of two-phase authentication:
- * - Verifies deviceApiKey against hashed value in database
- * - Uses bcrypt.compare for secure verification
- * - Rate limited (10 attempts per hour)
- * - Logs all authentication events
- * 
- * Security Features:
- * - Secure key comparison using bcrypt
+ * - Asymmetric PoP with Ed25519/P-256 signatures
+ * - Challenge expiration and replay protection
+ * - Fallback to bcrypt for backward compatibility
  * - Rate limiting to prevent brute force attacks
  * - Comprehensive audit logging
  * - No sensitive information in error messages
@@ -522,40 +638,47 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
 
   try {
     const { uuid } = req.params;
-    const { deviceApiKey } = req.body;
+    const { deviceApiKey, signature } = req.body;
     const authKey = req.headers.authorization?.replace('Bearer ', '');
 
-    if (!deviceApiKey || !authKey) {
+    // PoP mode: requires signature (deviceApiKey not needed)
+    // Bcrypt fallback: requires deviceApiKey
+    const isPopMode = !!signature;
+    
+    if (!authKey) {
       await logAuditEvent({
         eventType: AuditEventType.KEY_EXCHANGE_FAILED,
         deviceUuid: uuid,
         ipAddress,
         userAgent,
         severity: AuditSeverity.WARNING,
-        details: { reason: 'Missing credentials' }
+        details: { reason: 'Missing Authorization header' }
       });
       return res.status(400).json({
         error: 'Missing credentials',
-        message: 'deviceApiKey required in body and Authorization header'
+        message: 'Authorization header required'
       });
     }
 
-    if (deviceApiKey !== authKey) {
+    if (!isPopMode && !deviceApiKey) {
       await logAuditEvent({
         eventType: AuditEventType.KEY_EXCHANGE_FAILED,
         deviceUuid: uuid,
         ipAddress,
         userAgent,
         severity: AuditSeverity.WARNING,
-        details: { reason: 'Key mismatch between body and header' }
+        details: { reason: 'Missing deviceApiKey for bcrypt fallback' }
       });
-      return res.status(401).json({
-        error: 'Key mismatch',
-        message: 'deviceApiKey in body must match Authorization header'
+      return res.status(400).json({
+        error: 'Missing credentials',
+        message: 'deviceApiKey required in body for bcrypt authentication'
       });
     }
 
-    logger.info('Key exchange request for device:', uuid.substring(0, 8) + '...');
+    logger.info('Key exchange request received', {
+      deviceUuid: uuid.substring(0, 8) + '...',
+      hasSignature: !!signature
+    });
 
     // Verify device exists
     const device = await DeviceModel.getByUuid(uuid);
@@ -575,7 +698,226 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
       });
     }
 
-    // SECURITY: Verify deviceApiKey against hashed value in database
+    // ========================================================================
+    // PROOF OF POSSESSION: Verify signature if public key and signature provided
+    // ========================================================================
+    if (device.device_public_key && signature) {
+      logger.info('Attempting PoP verification with signature', {
+        deviceUuid: uuid.substring(0, 8) + '...',
+        hasPublicKey: true,
+        signatureLength: signature.length,
+        hasChallenge: !!device.last_challenge,
+        challengeExpiry: device.last_challenge_expires_at?.toISOString()
+      });
+      
+      // Check challenge exists and not expired
+      if (!device.last_challenge || !device.last_challenge_expires_at) {
+        await logAuditEvent({
+          eventType: AuditEventType.KEY_EXCHANGE_FAILED,
+          deviceUuid: uuid,
+          ipAddress,
+          userAgent,
+          severity: AuditSeverity.WARNING,
+          details: { reason: 'No challenge found - call /challenge first' }
+        });
+        return res.status(401).json({
+          error: 'No challenge found',
+          message: 'Request a challenge from /device/:uuid/challenge first'
+        });
+      }
+
+      if (device.last_challenge_expires_at < new Date()) {
+        await logAuditEvent({
+          eventType: AuditEventType.KEY_EXCHANGE_FAILED,
+          deviceUuid: uuid,
+          ipAddress,
+          userAgent,
+          severity: AuditSeverity.WARNING,
+          details: { reason: 'Challenge expired' }
+        });
+        return res.status(401).json({
+          error: 'Challenge expired',
+          message: 'Challenge has expired - request a new one'
+        });
+      }
+
+      // Verify signature using public key
+      try {
+        logger.info('Verifying PoP signature', {
+          deviceUuid: uuid.substring(0, 8) + '...',
+          challengeLength: device.last_challenge.length,
+          signatureLength: signature.length,
+          publicKeyLength: device.device_public_key.length
+        });
+        
+        // 🔐 HARDENING: Enforce public key algorithm allowlist
+        // Only allow Ed25519 or ECDSA P-256 (reject weak RSA, algorithm downgrades)
+        const publicKeyObject = crypto.createPublicKey({
+          key: device.device_public_key,
+          format: 'pem'
+        });
+        
+        const allowedAlgorithms = ['ed25519', 'ec'];
+        const keyType = publicKeyObject.asymmetricKeyType;
+        
+        if (!allowedAlgorithms.includes(keyType)) {
+          logger.warn('Rejecting disallowed public key algorithm', {
+            deviceUuid: uuid.substring(0, 8) + '...',
+            algorithm: keyType,
+            allowed: allowedAlgorithms
+          });
+          
+          await logAuditEvent({
+            eventType: AuditEventType.AUTHENTICATION_FAILED,
+            deviceUuid: uuid,
+            ipAddress,
+            userAgent,
+            severity: AuditSeverity.WARNING,
+            details: { reason: `Disallowed key algorithm: ${keyType}. Only Ed25519 and ECDSA P-256 allowed.` }
+          });
+          
+          return res.status(401).json({
+            error: 'Invalid key algorithm',
+            message: 'Device public key must use Ed25519 or ECDSA P-256'
+          });
+        }
+        
+        // For EC keys, additionally verify it's P-256 (not P-384, P-521, etc.)
+        if (keyType === 'ec') {
+          const keyDetails = publicKeyObject.asymmetricKeyDetails;
+          if (keyDetails?.namedCurve !== 'prime256v1' && keyDetails?.namedCurve !== 'P-256') {
+            logger.warn('Rejecting ECDSA key with non-P-256 curve', {
+              deviceUuid: uuid.substring(0, 8) + '...',
+              curve: keyDetails?.namedCurve
+            });
+            
+            await logAuditEvent({
+              eventType: AuditEventType.AUTHENTICATION_FAILED,
+              deviceUuid: uuid,
+              ipAddress,
+              userAgent,
+              severity: AuditSeverity.WARNING,
+              details: { reason: `ECDSA key must use P-256 curve, got ${keyDetails?.namedCurve}` }
+            });
+            
+            return res.status(401).json({
+              error: 'Invalid key curve',
+              message: 'ECDSA key must use P-256 curve'
+            });
+          }
+        }
+        
+        // Bind device UUID to signature payload to prevent cross-device replay
+        // Client signs: uuid:challenge
+        // Server verifies: same payload construction
+        const payload = `${uuid}:${device.last_challenge}`;
+        
+        const isValid = crypto.verify(
+          null, // Algorithm detected from key
+          Buffer.from(payload, 'utf-8'),
+          device.device_public_key,
+          Buffer.from(signature, 'base64')
+        );
+
+        logger.info('Signature verification result', {
+          deviceUuid: uuid.substring(0, 8) + '...',
+          isValid,
+          payloadLength: payload.length
+        });
+
+        if (!isValid) {
+          await logAuditEvent({
+            eventType: AuditEventType.AUTHENTICATION_FAILED,
+            deviceUuid: uuid,
+            ipAddress,
+            userAgent,
+            severity: AuditSeverity.WARNING,
+            details: { reason: 'Invalid signature - proof of possession failed' }
+          });
+          return res.status(401).json({
+            error: 'Proof of possession failed',
+            message: 'Invalid signature'
+          });
+        }
+
+        // ✅ PoP verified - invalidate challenge immediately (single-use)
+        // Set challenge expiry to now to prevent replay
+        logger.info('Invalidating challenge after successful PoP verification', {
+          deviceUuid: uuid.substring(0, 8) + '...',
+          reason: 'single-use challenge enforcement'
+        });
+        
+        await DeviceModel.storeChallenge(uuid, null, new Date()); // Expire challenge immediately
+
+        // Mark device as PoP verified
+        logger.info('Marking device as PoP verified', {
+          deviceUuid: uuid.substring(0, 8) + '...',
+          deviceName: device.device_name
+        });
+        
+        await DeviceModel.markPopVerified(uuid);
+        
+        // Record authentication method for fleet-level policy enforcement
+        await DeviceModel.recordAuthMethod(uuid, 'pop');
+
+        logger.info('PoP verification successful and persisted', {
+          deviceUuid: uuid.substring(0, 8) + '...',
+          deviceName: device.device_name,
+          authMethod: 'proof-of-possession'
+        });
+
+        await logAuditEvent({
+          eventType: AuditEventType.KEY_EXCHANGE_SUCCESS,
+          deviceUuid: uuid,
+          ipAddress,
+          userAgent,
+          severity: AuditSeverity.INFO,
+          details: { 
+            deviceName: device.device_name,
+            authMethod: 'proof-of-possession'
+          }
+        });
+
+        return res.json({
+          status: 'ok',
+          message: 'Proof of possession verified',
+          device: {
+            id: device.id,
+            uuid: device.uuid,
+            deviceName: device.device_name,
+          }
+        });
+      } catch (verifyError: any) {
+        logger.error('Signature verification error:', verifyError);
+        
+        await logAuditEvent({
+          eventType: AuditEventType.KEY_EXCHANGE_FAILED,
+          deviceUuid: uuid,
+          ipAddress,
+          userAgent,
+          severity: AuditSeverity.ERROR,
+          details: { reason: 'Signature verification failed', error: verifyError.message }
+        });
+
+        return res.status(401).json({
+          error: 'Signature verification failed',
+          message: 'Invalid signature format or corrupted public key'
+        });
+      }
+    }
+
+    // ========================================================================
+    // FALLBACK: Legacy bcrypt verification (for backward compatibility)
+    // ========================================================================
+    logger.warn('⚠️ Using LEGACY bcrypt verification (not PoP)', {
+      deviceUuid: uuid.substring(0, 8) + '...',
+      deviceName: device.device_name,
+      hasPublicKey: !!device.device_public_key,
+      hasSignature: !!signature,
+      reason: !device.device_public_key ? 'device has no public key (not PoP-enabled)' : !signature ? 'no signature provided' : 'unknown',
+      recommendation: 'Update agent to send devicePublicKey during registration for PoP authentication'
+    });
+    
     if (!device.device_api_key_hash) {
       await logAuditEvent({
         eventType: AuditEventType.KEY_EXCHANGE_FAILED,
@@ -608,6 +950,14 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
       });
     }
 
+    logger.info('Legacy key exchange successful (bcrypt)', {
+      deviceUuid: uuid.substring(0, 8) + '...',
+      deviceName: device.device_name
+    });
+    
+    // Record authentication method for fleet-level policy enforcement
+    // This allows future enforcement of PoP-only policies for high-security fleets
+    await DeviceModel.recordAuthMethod(uuid, 'bcrypt');
 
     await logAuditEvent({
       eventType: AuditEventType.KEY_EXCHANGE_SUCCESS,
@@ -615,7 +965,10 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
       ipAddress,
       userAgent,
       severity: AuditSeverity.INFO,
-      details: { deviceName: device.device_name }
+      details: { 
+        deviceName: device.device_name,
+        authMethod: 'bcrypt-fallback'
+      }
     });
 
     res.json({
