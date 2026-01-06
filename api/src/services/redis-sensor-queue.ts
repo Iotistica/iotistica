@@ -384,7 +384,7 @@ class RedisSensorQueue {
                   device_uuid: entry.deviceUuid,
                   metric_name: reading.metric || reading.nodeName || reading.name || entry.sensorName,
                   value: numericValue,
-                  quality: reading.quality?.toLowerCase() || 'good',
+                  quality: typeof reading.quality === 'string' ? reading.quality.toLowerCase() : (reading.quality === 1 ? 'good' : 'bad'),
                   unit: reading.unit || null,
                   protocol,
                   extra,
@@ -430,7 +430,7 @@ class RedisSensorQueue {
               device_uuid: entry.deviceUuid,
               metric_name: reading.metric || reading.nodeName || reading.name || entry.sensorName,
               value: typeof reading.value === 'number' ? reading.value : null,
-              quality: reading.quality?.toLowerCase() || 'good',
+              quality: typeof reading.quality === 'string' ? reading.quality.toLowerCase() : (reading.quality === 1 ? 'good' : 'bad'),
               unit: reading.unit || null,
               protocol,
               extra,
@@ -448,7 +448,9 @@ class RedisSensorQueue {
             ? (entry.data.value ?? entry.data.rawValue ?? null)
             : entry.data;
 
-          const quality = entry.data?.quality?.toLowerCase() || 'good';
+          const quality = typeof entry.data?.quality === 'string' 
+            ? entry.data.quality.toLowerCase() 
+            : (entry.data?.quality === 1 ? 'good' : 'bad');
           const unit = entry.data?.unit || null;
 
           // Store protocol-specific metadata in extra
