@@ -8,7 +8,8 @@
  * Supports HTTPS with custom CA certificates for self-signed certs.
  */
 
-import { Agent } from 'undici';
+import { Agent, fetch } from 'undici';
+import type { Response } from 'undici';
 
 /**
  * HTTP Error thrown when response status indicates failure (4xx, 5xx)
@@ -105,8 +106,8 @@ export class FetchHttpClient implements HttpClient {
 			this.dispatcher = new Agent({
 				connections: 100, // Max concurrent connections per origin
 				pipelining: 10, // Max pipelined requests per connection
-				keepAliveTimeout: 4000, // Keep-alive timeout (ms)
-				keepAliveMaxTimeout: 600000, // Max keep-alive timeout (10min)
+			keepAliveTimeout: 10000, // 10s HTTP keep-alive timeout
+			keepAliveMaxTimeout: 600000, // Max keep-alive timeout (10min)
 				connect: {
 					ca: options.caCert,
 					rejectUnauthorized: options.rejectUnauthorized ?? true,
@@ -121,77 +122,78 @@ export class FetchHttpClient implements HttpClient {
 	}
 
 	/**
-	 * Create AbortSignal with timeout (Node.js 18+ compatible with polyfill)
-	 * Feature detection for older runtimes that don't support AbortSignal.timeout()
+	 * Create AbortSignal with timeout
+	 * undici supports AbortSignal natively
 	 */
 	private createAbortSignal(timeoutMs?: number): AbortSignal | undefined {
 		if (!timeoutMs) return undefined;
-		// Use native AbortSignal.timeout if available (Node ≥18)
-		if (typeof (AbortSignal as any).timeout === 'function') {
-			return (AbortSignal as any).timeout(timeoutMs);
-		}
-		// Fallback for older Node.js versions
 		const controller = new AbortController();
 		setTimeout(() => controller.abort(), timeoutMs);
 		return controller.signal;
+	}
+
+	/**
+	 * Unified HTTP request method
+	 * Handles GET, POST, PATCH with optional body compression
+	 */
+	private async request<T = any>(
+		method: 'GET' | 'POST' | 'PATCH',
+		url: string,
+		body?: any,
+		options?: {
+			headers?: Record<string, string>;
+			timeout?: number;
+			compress?: boolean;
+			onCompressionStats?: (stats: CompressionStats) => void;
+		}
+	): Promise<HttpResponse<T>> {
+		const timeout = options?.timeout ?? this.defaultTimeout;
+		let finalBody: Buffer | string | undefined;
+		let finalHeaders: Record<string, string>;
+
+		// Prepare body for POST/PATCH requests
+		if (method !== 'GET' && body !== undefined) {
+			const prepared = await this.prepareBody(body, options);
+			finalBody = prepared.finalBody;
+			finalHeaders = prepared.finalHeaders;
+		} else {
+			finalHeaders = { ...this.defaultHeaders, ...options?.headers };
+		}
+
+		const response = await fetch(url, {
+			method,
+			headers: finalHeaders,
+			body: finalBody,
+			signal: this.createAbortSignal(timeout),
+			dispatcher: this.dispatcher,
+		});
+
+		return this.checkResponse<T>(response, url);
 	}
 
 	async get<T = any>(url: string, options?: {
 		headers?: Record<string, string>;
 		timeout?: number;
 	}): Promise<HttpResponse<T>> {
-		const timeout = options?.timeout ?? this.defaultTimeout;
-		const response = await fetch(url, {
-			method: 'GET',
-			headers: { ...this.defaultHeaders, ...options?.headers },
-			signal: this.createAbortSignal(timeout),
-			// @ts-ignore - TypeScript doesn't recognize dispatcher option yet
-			dispatcher: this.dispatcher,
-		});
-		
-		return this.checkResponse<T>(response, url);
+		return this.request<T>('GET', url, undefined, options);
 	}
-	
+
 	async post<T = any>(url: string, body: any, options?: {
 		headers?: Record<string, string>;
 		timeout?: number;
 		compress?: boolean;
 		onCompressionStats?: (stats: CompressionStats) => void;
 	}): Promise<HttpResponse<T>> {
-		const { finalBody, finalHeaders } = await this.prepareBody(body, options);
-		
-		const timeout = options?.timeout ?? this.defaultTimeout;
-		const response = await fetch(url, {
-			method: 'POST',
-			headers: finalHeaders,
-			body: finalBody,
-			signal: this.createAbortSignal(timeout),
-			// @ts-ignore - TypeScript doesn't recognize dispatcher option yet
-			dispatcher: this.dispatcher,
-		});
-		
-		return this.checkResponse<T>(response, url);
+		return this.request<T>('POST', url, body, options);
 	}
-	
+
 	async patch<T = any>(url: string, body: any, options?: {
 		headers?: Record<string, string>;
 		timeout?: number;
 		compress?: boolean;
 		onCompressionStats?: (stats: CompressionStats) => void;
 	}): Promise<HttpResponse<T>> {
-		const { finalBody, finalHeaders } = await this.prepareBody(body, options);
-		
-		const timeout = options?.timeout ?? this.defaultTimeout;
-		const response = await fetch(url, {
-			method: 'PATCH',
-			headers: finalHeaders,
-			body: finalBody,
-			signal: this.createAbortSignal(timeout),
-			// @ts-ignore - TypeScript doesn't recognize dispatcher option yet
-			dispatcher: this.dispatcher,
-		});
-		
-		return this.checkResponse<T>(response, url);
+		return this.request<T>('PATCH', url, body, options);
 	}
 
 	/**
