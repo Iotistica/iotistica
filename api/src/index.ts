@@ -5,6 +5,7 @@
 import express from 'express';
 import cors from 'cors';
 import https from 'https';
+import helmet from 'helmet';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { createBrotliDecompress } from 'zlib';
 import logger from './utils/logger';
@@ -39,6 +40,12 @@ import prometheusRoutes from './routes/prometheus';
 import endpointsDataRoutes from './routes/endpoints-data';
 import anomalyRoutes from './routes/anomaly';
 import profileRoutes from './routes/profiles';
+import { 
+  globalApiRateLimit, 
+  authRateLimit, 
+  deviceDataRateLimit, 
+  adminRateLimit 
+} from './middleware/rate-limit';
 
 // Import jobs
 
@@ -59,36 +66,116 @@ const API_BASE = `/api/${API_VERSION}`;
 const app = express();
 const PORT = process.env.PORT || 3002;
 
-// CORS Configuration
+// SECURITY: Trust proxy for deployments behind reverse proxy (nginx, load balancers, K8s ingress)
+// This ensures req.ip, req.protocol, req.hostname reflect the original client request
+// Set to false for direct deployments, true/1 for single proxy, or number of hops for multiple proxies
+const TRUST_PROXY = process.env.TRUST_PROXY || 'false';
+if (TRUST_PROXY !== 'false') {
+  app.set('trust proxy', TRUST_PROXY === 'true' ? 1 : parseInt(TRUST_PROXY, 10));
+  logger.info(`Trust proxy enabled: ${TRUST_PROXY}`);
+}
+
+// SECURITY: Helmet middleware - sets secure HTTP headers
+// Protects against common browser-based attacks (XSS, clickjacking, MIME sniffing, etc.)
+app.use(helmet({
+  // Disable COEP for WebSocket compatibility (ws:// connections)
+  crossOriginEmbedderPolicy: false,
+  
+  // Content Security Policy - restrict resource loading
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"], // Allow inline scripts for Swagger UI
+      styleSrc: ["'self'", "'unsafe-inline'"], // Allow inline styles for Swagger UI
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "ws:", "wss:"], // Allow WebSocket connections
+      frameSrc: ["'none'"], // Prevent embedding in iframes
+    },
+  },
+  
+  // Additional security headers
+  hsts: {
+    maxAge: 31536000, // 1 year
+    includeSubDomains: true,
+    preload: true
+  },
+}));
+
+// ============================================================================
+// CORS Configuration - Hardened for production security
+// SECURITY: Never use '*' with credentials enabled (exposes session cookies)
+// ============================================================================
 const allowedOrigins = process.env.CORS_ORIGINS 
-  ? process.env.CORS_ORIGINS.split(',') 
+  ? process.env.CORS_ORIGINS.split(',').map(o => o.trim()) 
   : ['http://localhost:5173', 'http://localhost:3001', 'http://localhost:3000', 'http://localhost:4002'];
 
-// Middleware
+// SECURITY: Validate CORS configuration on startup
+if (allowedOrigins.includes('*')) {
+  logger.error('CRITICAL: CORS_ORIGINS contains "*" which is insecure with credentials enabled');
+  throw new Error('CORS misconfiguration: Cannot use "*" origin with credentials');
+}
+
+// Warn about wildcard patterns (use with caution)
+const hasWildcards = allowedOrigins.some(o => o.includes('*'));
+if (hasWildcards) {
+  logger.warn('CORS wildcard patterns detected - ensure these are intentional:', {
+    origins: allowedOrigins.filter(o => o.includes('*'))
+  });
+}
+
+// Routes that should skip CORS checks (internal service-to-service only)
+const corsExemptPaths = [
+  '/health',              // Kubernetes health checks
+  '/metrics',             // Prometheus scraping
+  '/mosquitto-auth',      // Mosquitto broker auth callbacks
+];
+
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or Postman)
-    if (!origin) return callback(null, true);
+    // No origin header (server-to-server, mobile apps, curl, Postman)
+    if (!origin) {
+      // Always allow requests without Origin header
+      // These are typically server-to-server calls (Mosquitto, Prometheus, health checks, devices)
+      return callback(null, true);
+    }
     
-    // Check if origin matches allowed patterns
+    // Check explicit origin allowlist (browser requests)
     const isAllowed = allowedOrigins.some(allowed => {
-      // Support wildcard patterns like http://*.example.com:30000
+      // Support wildcard patterns (e.g., https://*.example.com:3000)
+      // CAUTION: Use sparingly - prefer explicit origins for security
       if (allowed.includes('*')) {
-        const pattern = allowed.replace(/\*/g, '.*');
+        const pattern = allowed.replace(/\*/g, '.*').replace(/\./g, '\\.');
         return new RegExp(`^${pattern}$`).test(origin);
       }
+      // Exact match (preferred)
       return allowed === origin;
     });
     
     if (isAllowed) {
       callback(null, true);
     } else {
+      logger.warn('CORS: Rejected request from unauthorized origin', { 
+        origin,
+        allowedOrigins: allowedOrigins.slice(0, 5) // Log first 5 for debugging
+      });
       callback(new Error('Not allowed by CORS'));
     }
   },
+  
+  // SECURITY: credentials: true requires explicit origin (never '*')
   credentials: true,
+  
+  // Allowed HTTP methods
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-API-Key']
+  
+  // Allowed headers (explicit allowlist)
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-API-Key'],
+  
+  // Expose custom headers to browser (if needed)
+  exposedHeaders: ['RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset'],
+  
+  // Preflight cache duration (24 hours)
+  maxAge: 86400
 }));
 
 app.options('*', cors());
@@ -99,6 +186,7 @@ app.options('*', cors());
  * This middleware intercepts br-encoded requests and pipes them through a decompression transform.
  * 
  * CRITICAL: Uses stream piping instead of buffering to avoid consuming the request stream
+ * SECURITY: Protects against decompression bombs with size limits and timeouts
  */
 app.use((req, res, next) => {
   const contentEncoding = req.headers['content-encoding'];
@@ -108,13 +196,38 @@ app.use((req, res, next) => {
     return next();
   }
   
+  // SECURITY: Guard against decompression bomb attacks
+  // Reject compressed payloads larger than 10MB to prevent tiny compressed → massive decompressed attacks
+  const contentLength = Number(req.headers['content-length'] || 0);
+  if (contentLength > 10 * 1024 * 1024) {
+    logger.warn('Brotli payload too large - possible decompression bomb', {
+      path: req.path,
+      contentLength,
+      ip: req.ip
+    });
+    return res.status(413).json({ error: 'Compressed payload too large (max 10MB)' });
+  }
+  
   logger.debug('Brotli-encoded request detected', {
     path: req.path,
-    contentType: req.headers['content-type']
+    contentType: req.headers['content-type'],
+    contentLength
   });
   
   // Create Brotli decompression transform stream
   const brotliStream = createBrotliDecompress();
+  
+  // SECURITY: Set timeout to prevent slow decompression attacks
+  const decompressTimeout = setTimeout(() => {
+    logger.error('Brotli decompression timeout - possible attack', {
+      path: req.path,
+      ip: req.ip
+    });
+    brotliStream.destroy(new Error('Decompression timeout'));
+    if (!res.headersSent) {
+      res.status(408).json({ error: 'Decompression timeout' });
+    }
+  }, 30000); // 30 second timeout for decompression
   
   // Update headers to reflect decompressed state
   delete req.headers['content-encoding'];
@@ -132,13 +245,19 @@ app.use((req, res, next) => {
   (req as any).unpipe = brotliStream.unpipe.bind(brotliStream);
   
   brotliStream.on('error', (error: any) => {
+    clearTimeout(decompressTimeout);
     logger.error('Brotli decompression error', { 
       error: error.message,
-      path: req.path
+      path: req.path,
+      ip: req.ip
     });
     if (!res.headersSent) {
       res.status(400).json({ error: 'Invalid Brotli-compressed body' });
     }
+  });
+  
+  brotliStream.on('end', () => {
+    clearTimeout(decompressTimeout);
   });
   
   next();
@@ -220,31 +339,61 @@ setupApiDocs(app, API_BASE);
 // Prometheus metrics endpoint (no auth, no versioning - standard /metrics path)
 app.use(prometheusRoutes);
 
-// Mount route modules - All routes now use centralized versioning via API_BASE
-app.use(`${API_BASE}/endpoints`, endpointsDataRoutes);  // Generic endpoints data API
-app.use(`${API_BASE}/auth`, authRoutes);
-app.use(`${API_BASE}/users`, usersRoutes);
-app.use(API_BASE, licenseRoutes);
-
 // Mosquitto HTTP Auth Backend (no versioning, called directly by mosquitto-go-auth)
 app.use('/mosquitto-auth', mosquittoAuthRoutes);
-app.use(`${API_BASE}/billing`, billingRoutes);
+
+// ============================================================================
+// Rate Limiting - Token-based for IoT (prevents one device from blocking others)
+// Applied before route mounting for consistent enforcement
+// ============================================================================
+app.use(API_BASE, globalApiRateLimit);
+
+// ============================================================================
+// API Routes - All mounted at API_BASE for centralized versioning
+// Route modules define their own paths internally (e.g., router.get('/devices'))
+// This keeps versioning logic centralized and prevents mount path inconsistencies
+// ============================================================================
+
+// Authentication routes - strict rate limiting (brute-force protection)
+app.use(`${API_BASE}/auth`, authRateLimit, authRoutes);
+
+// User management and admin - moderate rate limiting
+app.use(API_BASE, adminRateLimit, usersRoutes);
+app.use(API_BASE, adminRateLimit, adminRoutes);
+
+// Device data ingestion - high rate limits (supports 16Hz sensor data)
+app.use(API_BASE, deviceDataRateLimit, deviceLogsRoutes);
+app.use(API_BASE, deviceDataRateLimit, deviceMetricsRoutes);
+app.use(API_BASE, deviceDataRateLimit, deviceSensorsRoutes);
+app.use(API_BASE, deviceDataRateLimit, endpointsDataRoutes);
+
+// Standard API routes - global rate limit applied above
+app.use(API_BASE, licenseRoutes);
+app.use(API_BASE, billingRoutes);
 app.use(API_BASE, provisioningRoutes);
 app.use(API_BASE, devicesRoutes);
-app.use(API_BASE, adminRoutes);
 app.use(API_BASE, appsRoutes);
 app.use(API_BASE, deviceStateRoutes);
-app.use(API_BASE, deviceLogsRoutes);
-app.use(API_BASE, deviceMetricsRoutes);
 app.use(API_BASE, imageRegistryRoutes);
 app.use(API_BASE, deviceJobsRoutes);
 app.use(API_BASE, rotationRoutes);
-app.use(`${API_BASE}/profiles`, profileRoutes);
-app.use(`${API_BASE}/digital-twin/graph`, digitalTwinGraphRoutes);
-app.use(`${API_BASE}/mqtt`, mqttMetricsRoutes);
+app.use(API_BASE, profileRoutes);
+app.use(API_BASE, digitalTwinGraphRoutes);
+app.use(API_BASE, mqttMetricsRoutes);
+app.use(API_BASE, eventsRoutes);
+app.use(API_BASE, mqttBrokerRoutes);
+app.use(API_BASE, trafficRoutes);
+app.use(API_BASE, deviceTagsRoutes);
+app.use(API_BASE, dashboardLayoutsRoutes);
+app.use(API_BASE, alertsRoutes);
+app.use(API_BASE, anomalyRoutes);
+app.use(API_BASE, noderedStorageRoutes);
 
-// API Gateway Proxy: Route mqtt-monitor requests to mqtt-monitor service
-// Protected by JWT authentication
+// ============================================================================
+// API Gateway Proxies - Route requests to microservices
+// ============================================================================
+
+// MQTT Monitor Service Proxy (protected by JWT)
 const MQTT_MONITOR_URL = process.env.MQTT_MONITOR_URL || 'http://mqtt-monitor:3500';
 app.use(`${API_BASE}/mqtt-monitor`, jwtAuth, createProxyMiddleware({
   target: `${MQTT_MONITOR_URL}/api/v1`,
@@ -252,17 +401,16 @@ app.use(`${API_BASE}/mqtt-monitor`, jwtAuth, createProxyMiddleware({
   on: {
     error: (err, req, res) => {
       logger.error('MQTT Monitor proxy error', { error: err.message });
-      if ('headersSent' in res && res.headersSent) return;
-      if ('writeHead' in res) {
-        res.writeHead(502, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: 'MQTT Monitor service unavailable' }));
+      // Type guard: check if res is an Express Response
+      if ('status' in res && 'headersSent' in res && typeof res.status === 'function' && !res.headersSent) {
+        res.status(502).json({ success: false, error: 'MQTT Monitor service unavailable' });
       }
     }
   },
   logger: logger
 }));
 
-// API Gateway Proxy: Route postoffice (email) requests to postoffice service
+// Postoffice (Email) Service Proxy
 const POSTOFFICE_URL = process.env.POSTOFFICE_URL || 'http://postoffice:3300';
 app.use(`${API_BASE}/postoffice`, createProxyMiddleware({
   target: `${POSTOFFICE_URL}/api/v1`,
@@ -270,25 +418,14 @@ app.use(`${API_BASE}/postoffice`, createProxyMiddleware({
   on: {
     error: (err, req, res) => {
       logger.error('Postoffice proxy error', { error: err.message });
-      if ('headersSent' in res && res.headersSent) return;
-      if ('writeHead' in res) {
-        res.writeHead(502, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: 'Postoffice service unavailable' }));
+      // Type guard: check if res is an Express Response
+      if ('status' in res && 'headersSent' in res && typeof res.status === 'function' && !res.headersSent) {
+        res.status(502).json({ success: false, error: 'Postoffice service unavailable' });
       }
     }
   },
   logger: logger
 }));
-
-app.use(API_BASE, eventsRoutes);
-app.use(`${API_BASE}/mqtt`, mqttBrokerRoutes);
-app.use(API_BASE, deviceSensorsRoutes);
-app.use(API_BASE, trafficRoutes);
-app.use(API_BASE, deviceTagsRoutes);
-app.use(`${API_BASE}/dashboard-layouts`, dashboardLayoutsRoutes);
-app.use(`${API_BASE}/alerts`, alertsRoutes);
-app.use(`${API_BASE}/anomaly`, anomalyRoutes);  // Anomaly detection aggregates
-app.use(API_BASE, noderedStorageRoutes);
 
 
 // 404 handler
@@ -536,21 +673,25 @@ async function startServer() {
     // Don't exit - this is not critical for API operation
   }
 
-  // Graceful shutdown
-  process.on('SIGTERM', async () => {
-    logger.info('SIGTERM received, shutting down gracefully...');
+  // Graceful shutdown function (consolidated from SIGTERM/SIGINT/disconnect handlers)
+  async function gracefulShutdown(reason: string, timeoutMs = 10000): Promise<void> {
+    logger.info(`${reason} received, shutting down gracefully...`);
     
     // Set a timeout to force close if shutdown hangs
     const forceCloseTimeout = setTimeout(() => {
       logger.warn('Forcefully closing server after timeout');
       process.exit(1);
-    }, 10000); // 10 second timeout
+    }, timeoutMs);
     
     // Close HTTPS server
     if (httpsServer) {
-      httpsServer.close(() => {
-        logger.info('HTTPS Server closed');
-      });
+      try {
+        httpsServer.close(() => {
+          logger.info('HTTPS Server closed');
+        });
+      } catch (error) {
+        // Ignore errors during shutdown
+      }
     }
     
     // Shutdown WebSocket Server
@@ -628,6 +769,15 @@ async function startServer() {
       logger.error('Error stopping Redis log queue worker', { error });
     }
     
+    // Stop Redis sensor queue worker (graceful shutdown with final batch processing)
+    try {
+      const { redisSensorQueue } = await import('./services/redis-sensor-queue');
+      await redisSensorQueue.stopWorker();
+      logger.info('Redis sensor queue worker stopped');
+    } catch (error) {
+      logger.error('Error stopping Redis sensor queue worker', { error });
+    }
+    
     // Close database pool
     try {
       await close();
@@ -641,138 +791,15 @@ async function startServer() {
       clearTimeout(forceCloseTimeout);
       process.exit(0);
     });
-  });
+  }
 
-  process.on('SIGINT', async () => {
-    logger.info('SIGINT received, shutting down gracefully...');
-    
-    // Set a timeout to force close if shutdown hangs
-    const forceCloseTimeout = setTimeout(() => {
-      logger.warn('Forcefully closing server after timeout');
-      process.exit(1);
-    }, 10000); // 10 second timeout
-    
-    // Close HTTPS server
-    if (httpsServer) {
-      httpsServer.close(() => {
-        logger.info('HTTPS Server closed');
-      });
-    }
-    
-    // Shutdown WebSocket Server
-    try {
-      websocketManager.shutdown();
-      logger.info('WebSocket Server stopped');
-    } catch (error) {
-      // Ignore errors during shutdown
-    }
-    
-    // Shutdown Metrics Batch Worker
-    try {
-      const { stopMetricsBatchWorker } = await import('./workers/metrics-batch-worker');
-      await stopMetricsBatchWorker();
-    } catch (error) {
-      // Ignore errors during shutdown
-    }
-    
-    // Shutdown Redis
-    try {
-      const { redisClient } = await import('./redis/client');
-      await redisClient.disconnect();
-    } catch (error) {
-      // Ignore errors during shutdown
-    }
-    
-    // Shutdown MQTT
-    try {
-      await shutdownMqtt();
-    } catch (error) {
-      // Ignore errors during shutdown
-    }
-    
-    // Rotation schedulers moved to housekeeper service
-    
-    
-    // Stop heartbeat monitor
-    try {
-      const heartbeatMonitor = await import('./services/heartbeat-monitor');
-      heartbeatMonitor.default.stop();
-    } catch (error) {
-      // Ignore errors during shutdown
-    }
-    
-    
-    // Stop job scheduler
-    try {
-      jobScheduler.stop();
-    } catch (error) {
-      // Ignore errors during shutdown
-    }
-    
-    // Stop MQTT Jobs Subscriber
-    try {
-      const { getMqttJobsSubscriber } = await import('./services/mqtt-jobs-subscriber');
-      const subscriber = getMqttJobsSubscriber();
-      await subscriber.stop();
-      logger.info('MQTT Jobs Subscriber stopped');
-    } catch (error) {
-      // Ignore errors during shutdown
-    }
-    
-    // Stop traffic flush service (final flush to database)
-    try {
-      await stopTrafficFlushService();
-      logger.info('Traffic flush service stopped');
-    } catch (error) {
-      // Ignore errors during shutdown
-    }
-    
-    // Stop Redis log queue worker (graceful shutdown with final batch processing)
-    try {
-      const { redisLogQueue } = await import('./services/redis-log-queue');
-      await redisLogQueue.stopWorker();
-      logger.info('Redis log queue worker stopped');
-    } catch (error) {
-      logger.error('Error stopping Redis log queue worker', { error });
-    }
-    
-    // Close database connections
-    try {
-      await close();
-      logger.info('Database connections closed');
-    } catch (error) {
-      logger.error('Error closing database connections', { error });
-    }
-    
-    server.close(() => {
-      logger.info('Server closed');
-      clearTimeout(forceCloseTimeout);
-      process.exit(0);
-    });
-  });
+  // Graceful shutdown signal handlers
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
-  // Handle debugger disconnect/restart (VS Code specific)
-  process.on('disconnect', async () => {
-    logger.info('Debugger disconnected, shutting down...');
-    
-    // Set shorter timeout for debugger disconnect
-    const forceCloseTimeout = setTimeout(() => {
-      logger.warn('Forcefully closing server after debugger disconnect timeout');
-      process.exit(1);
-    }, 3000); // 3 second timeout for debugger disconnect
-    
-    // Close HTTPS server
-    if (httpsServer) {
-      httpsServer.close(() => {
-        logger.info('HTTPS Server closed');
-      });
-    }
-    
-    server.close(() => {
-      clearTimeout(forceCloseTimeout);
-      process.exit(0);
-    });
-  });
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+  // Handle debugger disconnect/restart (VS Code specific - shorter timeout)
+  process.on('disconnect', () => gracefulShutdown('Debugger disconnect', 3000));
 }
 
 async function retryMqttInitialization(intervalMs: number = 15000): Promise<void> {

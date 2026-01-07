@@ -44,13 +44,31 @@ export function createHttpsServer(app: Express, config: HttpsConfig): https.Serv
       logger.info(`Using CA certificate: ${config.caCertPath}`);
     }
 
-    // Optional: Client certificate verification (mutual TLS)
+    // TLS Security Hardening
     const httpsOptions: https.ServerOptions = {
       cert,
       key,
       ca, // CA certificate for chain verification
       requestCert: config.requestCert || false,
       rejectUnauthorized: config.rejectUnauthorized || false,
+      
+      // SECURITY: Enforce TLS 1.2+ (prefer TLS 1.3)
+      minVersion: 'TLSv1.2',
+      maxVersion: 'TLSv1.3',
+      
+      // SECURITY: Strong cipher suites only (TLS 1.3 + TLS 1.2 fallback)
+      ciphers: [
+        // TLS 1.3 (preferred - no configuration needed, enabled by default)
+        // TLS 1.2 fallback (strong ciphers only)
+        'ECDHE-RSA-AES256-GCM-SHA384',
+        'ECDHE-RSA-AES128-GCM-SHA256',
+        'ECDHE-ECDSA-AES256-GCM-SHA384',
+        'ECDHE-ECDSA-AES128-GCM-SHA256',
+        // Reject weak ciphers (RC4, MD5, DES, 3DES, NULL)
+      ].join(':'),
+      
+      // SECURITY: Prefer server cipher order
+      honorCipherOrder: true,
     };
 
     // Create HTTPS server
