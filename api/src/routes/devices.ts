@@ -1475,12 +1475,19 @@ router.post('/devices/:uuid/update-agent', async (req, res) => {
 
     // Create MQTT client
     const mqtt = await import('mqtt');
-    const mqttClient = mqtt.connect(brokerUrl, {
+    const mqttOptions: any = {
       username: mqttUsername,
       password: mqttPassword,
       clientId: `api-agent-update-${Date.now()}`,
       clean: true,
-    });
+    };
+
+    // Add TLS options for mqtts:// connections
+    if (brokerUrl.startsWith('mqtts://')) {
+      mqttOptions.rejectUnauthorized = process.env.MQTT_TLS_REJECT_UNAUTHORIZED !== 'false';
+    }
+
+    const mqttClient = mqtt.connect(brokerUrl, mqttOptions);
 
     // Wait for connection
     await new Promise<void>((resolve, reject) => {

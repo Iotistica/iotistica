@@ -40,13 +40,21 @@ export class MqttJobsNotifier {
     return new Promise((resolve, reject) => {
        logger.info(' Connecting to MQTT broker:', this.brokerUrl);
 
-      this.mqttClient = mqtt.connect(this.brokerUrl, {
+      const options: any = {
         username: this.username,
         password: this.password,
         clientId: `api-jobs-notifier-${Date.now()}`,
         clean: true,
         reconnectPeriod: 5000,
-      });
+      };
+
+      // Add TLS options for mqtts:// connections
+      if (this.brokerUrl.startsWith('mqtts://')) {
+        options.rejectUnauthorized = process.env.MQTT_TLS_REJECT_UNAUTHORIZED !== 'false';
+        logger.info('MQTT Jobs Notifier TLS config', { rejectUnauthorized: options.rejectUnauthorized });
+      }
+
+      this.mqttClient = mqtt.connect(this.brokerUrl, options);
 
       this.mqttClient.on('connect', () => {
          logger.info(' Connected to MQTT broker');
