@@ -51,6 +51,7 @@
     "node-fetch": "^2.7.0",
     "p-limit": "^2.3.0",
     "pg": "^8.11.3",
+      "pg-copy-streams": "^6.0.5",
     "swagger-ui-express": "^5.0.1",
     "web-ifc": "^0.0.72",
     "winston": "^3.18.3",

@@ -13,13 +13,12 @@ import logger from '../utils/logger';
 
 /**
  * Handle incoming endpoint data
- * Queue to Redis Stream for batch processing
+ * Queue raw parsed data to Redis Stream (FAST - no compression!)
  * Supports both single messages and batches
  */
 export async function handleEndpointsData(data: SensorData): Promise<void> {
   try {
     const startTime = Date.now();
-    
     
     // Check if this is a batch (from Sensor Publish feature)
     const isBatch = data.data && Array.isArray((data.data as any).messages);
@@ -31,9 +30,9 @@ export async function handleEndpointsData(data: SensorData): Promise<void> {
       
       logger.debug(`Processing endpoints data batch: ${messages.length} messages from ${data.deviceUuid}/${data.sensorName}`);
       
-      // Transform all messages to queue format
+      // Transform all messages to SensorDataEntry format
       // Handle both JSON strings (legacy) and objects (current format)
-      const queueEntries = messages
+      const readings = messages
         .map((messageData: string | object) => {
           try {
             // If it's a string, parse it; if it's already an object, use it directly
@@ -52,20 +51,20 @@ export async function handleEndpointsData(data: SensorData): Promise<void> {
         })
         .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
       
-      // Add to Redis Stream
-      await redisSensorQueue.add(queueEntries);
+      // Queue raw parsed data (NO compression - worker handles it if needed)
+      await redisSensorQueue.add(readings);
       
       const duration = Date.now() - startTime;
-      logger.info('Queued endpoints data batch to Redis Stream', {
+      logger.info('Queued endpoints batch to Redis Stream', {
         deviceUuid: data.deviceUuid.substring(0, 8),
         sensorName: data.sensorName,
         received: messages.length,
-        queued: queueEntries.length,
-        dropped: messages.length - queueEntries.length,
+        queued: readings.length,
+        dropped: messages.length - readings.length,
         durationMs: duration
       });
     } else {
-      // Single message (legacy format)
+      // Single message
       await redisSensorQueue.add([{
         deviceUuid: data.deviceUuid,
         sensorName: data.sensorName,

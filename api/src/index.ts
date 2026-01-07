@@ -187,9 +187,17 @@ app.options('*', cors());
  * 
  * CRITICAL: Uses stream piping instead of buffering to avoid consuming the request stream
  * SECURITY: Protects against decompression bombs with size limits and timeouts
+ * 
+ * OPTIMIZATION: Skip for /device/:uuid/logs - those requests queue compressed data directly
+ * to avoid event loop blocking from CPU-intensive decompression + JSON parsing
  */
 app.use((req, res, next) => {
   const contentEncoding = req.headers['content-encoding'];
+  
+  // Skip Brotli middleware for log ingestion endpoint (handles compression in worker)
+  if (req.path.match(/^\/api\/v\d+\/device\/[^/]+\/logs$/)) {
+    return next();
+  }
   
   // Only process Brotli-encoded requests
   if (contentEncoding !== 'br') {

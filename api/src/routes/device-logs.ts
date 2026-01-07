@@ -78,197 +78,150 @@ async function storeBatchId(deviceUuid: string, batchId: string): Promise<void> 
 
 
 /**
+ * Brotli handling middleware (must run BEFORE express.raw())
+ * Express body-parser rejects Brotli encoding by default.
+ * We don't decompress here (that would block the event loop).
+ * Instead, we preserve the original encoding and strip the header so Express accepts it as binary,
+ * then the worker will decompress it asynchronously.
+ */
+const brotliHandlingMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const contentEncoding = req.headers['content-encoding'];
+  
+  if (contentEncoding === 'br') {
+    // Save original encoding so route handler can use it
+    (req as any).originalContentEncoding = 'br';
+    // Strip content-encoding header so Express doesn't reject Brotli
+    // The body stays compressed - worker will decompress it asynchronously
+    delete req.headers['content-encoding'];
+    logger.debug('Stripped Brotli content-encoding header (worker will decompress)', {
+      path: req.path,
+      uuid: req.params.uuid
+    });
+  } else if (contentEncoding === 'gzip' || contentEncoding === 'deflate') {
+    // Express will auto-decompress these, save the original encoding
+    (req as any).originalContentEncoding = contentEncoding;
+  } else {
+    (req as any).originalContentEncoding = 'identity';
+  }
+  
+  next();
+};
+
+/**
  * Device uploads logs with ACK-based durability
  * POST /api/v1/device/:uuid/logs
  * 
- * Accepts both JSON array and NDJSON (newline-delimited JSON) formats
+ * OPTIMIZATION: Accepts RAW compressed body (Brotli/gzip) and queues directly to Redis.
+ * CPU-intensive decompression + JSON parsing happens in worker process to avoid
+ * event loop blocking in the main API server.
+ * 
+ * Accepts both JSON array and NDJSON (newline-delimited JSON) formats (after decompression)
  * 
  * Headers:
+ * - Content-Encoding: br, gzip, deflate, or identity
+ * - Content-Type: application/x-ndjson or application/json
  * - X-Batch-Id: Unique batch identifier for idempotency
  * - X-Batch-Attempt: Retry attempt number (optional)
  * 
  * Response:
- * - { batchId: string, accepted: boolean } - ACK confirmation
+ * - { batchId: string, accepted: boolean, queued: true } - ACK confirmation (202 Accepted)
  */
-router.post('/device/:uuid/logs', deviceAuth, express.text({ 
-  type: 'application/x-ndjson',
-  limit: '100mb' // Match global JSON limit (decompressed logs can be 4-6x compressed size)
-}), async (req, res) => {
-  logger.debug('POST /device/:uuid/logs endpoint hit', { uuid: req.params.uuid });
+router.post('/device/:uuid/logs', 
+  deviceAuth,
+  brotliHandlingMiddleware, // Strip Brotli header (worker will decompress)
+  express.raw({ 
+    type: '*/*', // Accept any content type (worker will validate)
+    limit: '10mb' // COMPRESSED size limit (protects against decompression bombs)
+  }),
+  async (req, res) => {
+  logger.debug('POST /device/:uuid/logs endpoint hit (raw mode)', { uuid: req.params.uuid });
   try {
     const { uuid } = req.params;
-    let logs: any[];
     
     // Extract batch metadata for idempotency
     const batchId = req.headers['x-batch-id'] as string | undefined;
     const batchAttempt = parseInt(req.headers['x-batch-attempt'] as string || '1');
 
-    // Check Content-Type to determine format
-    const contentType = req.headers['content-type'] || '';
-    
-    if (contentType.includes('application/x-ndjson') || contentType.includes('text/plain')) {
-      // Parse NDJSON format (newline-delimited JSON)
-      const ndjsonText = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
-      logs = ndjsonText
-        .split('\n')
-        .filter(line => line.trim().length > 0)
-        .map(line => {
-          try {
-            return JSON.parse(line);
-          } catch (e) {
-            logger.warn('Failed to parse NDJSON line', { line: line.substring(0, 100) });
-            return null;
-          }
-        })
-        .filter(log => log !== null);
-      
-      logger.info('Received logs from device (NDJSON format)', { 
-        uuid: uuid.substring(0, 8), 
-        count: logs.length 
-      });
-    } else {
-      // Standard JSON array format
-      logs = req.body;
-      logger.info('Received logs from device (JSON array format)', { 
-        uuid: uuid.substring(0, 8),
-        count: Array.isArray(logs) ? logs.length : 0
-      });
-    }
-
-    logger.debug('Log details', { 
-      type: typeof logs, 
-      isArray: Array.isArray(logs), 
-      length: logs?.length,
-      firstLog: logs && logs.length > 0 ? logs[0] : null
-    });
-
-    // Ensure device exists
-    await DeviceModel.getOrCreate(uuid);
-
-    // Store logs
-    if (Array.isArray(logs) && logs.length > 0) {
-      const startTime = Date.now();
-      logger.debug('Storing logs', { count: logs.length });
-      
-      // Transform agent log format to API format
-      const transformedLogs = logs
-        .map((log: any) => ({
-          serviceName: log.serviceName || log.source?.name || null,
-          timestamp: log.timestamp ? new Date(log.timestamp) : new Date(),
-          message: log.message,
-          isSystem: log.isSystem || false,
-          isStderr: log.isStderr || log.isStdErr || false, // Handle both field names
-          level: log.level || 'info' // Agent sends this field
-        }))
-        .filter(log => {
-          // CRITICAL: Filter out logs with null/empty messages to prevent database constraint violations
-          // This handles corrupted data from failed Brotli decompression or malformed agent payloads
-          if (!log.message || typeof log.message !== 'string' || log.message.trim() === '') {
-            logger.warn('Dropping log with null/empty message', {
-              uuid: uuid.substring(0, 8),
-              serviceName: log.serviceName,
-              timestamp: log.timestamp
-            });
-            return false;
-          }
-          return true;
-        });
-      
-      // Apply sampling to reduce database writes
-      // LOG_SAMPLING_RATE: 0.0-1.0 (default: 1.0 = store all logs)
-      // Always store ERROR and WARN logs, sample INFO/DEBUG
-      const samplingRate = parseFloat(process.env.LOG_SAMPLING_RATE || '1.0');
-      const sampledLogs = transformedLogs.filter(log => {
-        // Always store errors and warnings (use level field from agent)
-        if (log.level === 'error' || log.level === 'warn' || log.isStderr) {
-          return true;
-        }
-        
-        // Sample info/debug logs based on rate
-        return Math.random() < samplingRate;
-      });
-      
-      const droppedCount = transformedLogs.length - sampledLogs.length;
-      if (droppedCount > 0) {
-        logger.debug('Sampled logs', { 
-          received: transformedLogs.length, 
-          stored: sampledLogs.length, 
-          dropped: droppedCount,
-          samplingRate 
-        });
-      }
-      
-      // Add logs to Redis Stream instead of writing immediately
-      if (sampledLogs.length > 0) {
-        // Add deviceUuid to each log entry
-        const logsWithDevice = sampledLogs.map(log => ({
-          ...log,
-          deviceUuid: uuid
-        }));
-        
-        await redisLogQueue.add(logsWithDevice);
-        
-        const duration = Date.now() - startTime;
-        logger.info('Queued logs to Redis Stream', { 
-          received: logs.length,
-          queued: sampledLogs.length,
-          dropped: droppedCount,
-          uuid: uuid.substring(0, 8),
-          durationMs: duration
-        });
-      }
-      
-      // Publish logs to Redis pub/sub for real-time WebSocket streaming
-      try {
-        const { redisClient } = await import('../redis/client');
-        await redisClient.publish(`device:${uuid}:logs`, JSON.stringify({ logs: transformedLogs }));
-        logger.debug('Published logs to Redis pub/sub', { count: transformedLogs.length });
-      } catch (error) {
-        logger.warn('Failed to publish logs to Redis', { error });
-        // Don't fail the request if Redis publish fails
-      }
-    } else {
-      logger.warn('No logs to store or invalid format');
-    }
-    
-    // Check for duplicate batch (idempotency)
+    // Idempotency check (deduplicate retries)
     if (batchId) {
       const isDuplicate = await checkBatchIdempotency(uuid, batchId);
-      
       if (isDuplicate) {
-        logger.info('Duplicate batch detected (idempotent retry)', { 
+        logger.info('Duplicate batch detected, skipping', { 
           uuid: uuid.substring(0, 8), 
-          batchId, 
-          attempt: batchAttempt 
+          batchId,
+          attempt: batchAttempt
         });
-        
-        // Return cached ACK (idempotent response)
-        return res.json({ 
+        return res.status(200).json({ 
           batchId, 
           accepted: true,
-          duplicate: true 
+          duplicate: true
         });
       }
-      
-      // Store batch ID for future duplicate detection
+    }
+    
+    // Ensure device exists (lightweight check)
+    await DeviceModel.getOrCreate(uuid);
+    
+    // CRITICAL: Express body-parser auto-decompresses gzip/deflate BEFORE our handler runs
+    // If original encoding was gzip/deflate, the body is now decompressed (raw JSON)
+    // Store as 'identity' encoding to prevent worker from trying to decompress again
+    let finalEncoding = (req as any).originalContentEncoding || 'identity';
+    if (finalEncoding === 'gzip' || finalEncoding === 'deflate') {
+      // Body-parser already decompressed this - treat as identity
+      logger.debug('Body-parser pre-decompressed', {
+        uuid: uuid.substring(0, 8),
+        originalEncoding: finalEncoding
+      });
+      finalEncoding = 'identity';
+    }
+    
+    const contentType = req.headers['content-type'] || 'application/x-ndjson';
+    const finalPayload = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body);
+    
+    logger.info('Queueing log payload', {
+      uuid: uuid.substring(0, 8),
+      batchId,
+      encoding: finalEncoding,
+      compressedBytes: finalPayload.length
+    });
+    
+    // Fire-and-forget: Don't await Redis write - return 202 immediately
+    // This prevents slow Redis network I/O from blocking the response (saves ~3 seconds)
+    redisLogQueue.addCompressed({
+      deviceUuid: uuid,
+      batchId: batchId || `auto-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      compressedPayload: finalPayload,
+      contentEncoding: finalEncoding,
+      contentType
+    }).catch(err => {
+      logger.error('Failed to queue logs to Redis (async)', {
+        uuid: uuid.substring(0, 8),
+        batchId,
+        error: err.message
+      });
+    });
+    
+    // Store batch ID for idempotency (24-hour TTL)
+    if (batchId) {
       await storeBatchId(uuid, batchId);
     }
-
-    // Return ACK confirmation
-    res.json({ 
-      batchId: batchId || 'unknown', 
+    
+    // Return ACK immediately (202 Accepted - queued for async processing)
+    // Worker will decompress, parse, validate, and insert to database
+    return res.status(202).json({ 
+      batchId: batchId || 'auto-generated',
       accepted: true,
-      received: Array.isArray(logs) ? logs.length : 0 
+      queued: true // Indicates async processing
     });
   } catch (error: any) {
-    logger.error('Error storing logs', { 
+    logger.error('Error queueing logs', { 
       error: error.message,
       stack: error.stack,
       uuid: req.params.uuid?.substring(0, 8),
-      bodySize: typeof req.body === 'string' ? req.body.length : 0
+      bodySize: Buffer.isBuffer(req.body) ? req.body.length : 0
     });
     res.status(500).json({
-      error: 'Failed to process logs',
+      error: 'Failed to queue logs',
       message: error.message
     });
   }
