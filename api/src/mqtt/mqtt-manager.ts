@@ -428,6 +428,20 @@ export class MqttManager extends EventEmitter {
         clean: this.config.clean
       };
 
+      // Add TLS options for mqtts:// connections
+      if (this.config.brokerUrl.startsWith('mqtts://')) {
+        // Check if we should skip certificate validation (for self-signed certs)
+        const rejectUnauthorized = process.env.MQTT_TLS_REJECT_UNAUTHORIZED !== 'false';
+        
+        options.rejectUnauthorized = rejectUnauthorized;
+        
+        logger.info('MQTT TLS configuration', {
+          protocol: 'mqtts',
+          rejectUnauthorized,
+          brokerUrl: this.config.brokerUrl
+        });
+      }
+
       this.client = mqtt.connect(this.config.brokerUrl, options);
 
       // Timeout for initial connection (30 seconds)

@@ -92,7 +92,9 @@ services:
             - DB_POOL_SIZE=${DB_POOL_SIZE:-20}
             - DB_SSL=${DB_SSL:-false}                      
             - DB_SSL_REJECT_UNAUTHORIZED=${DB_SSL_REJECT_UNAUTHORIZED:-false} 
-            - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtt://mosquitto:1883}
+            - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtts://mosquitto:8883}
+            - MQTT_BROKER_VERIFY_CERT=${MQTT_BROKER_VERIFY_CERT:-false}
+            - MQTT_TLS_REJECT_UNAUTHORIZED=${MQTT_TLS_REJECT_UNAUTHORIZED:-false}
             - MQTT_USERNAME=${MQTT_USERNAME:-nodered}
             - MQTT_PASSWORD=${MQTT_PASSWORD:-secret}
             - MQTT_PERSIST_TO_DB=${MQTT_PERSIST_TO_DB:-true}
@@ -139,20 +141,20 @@ services:
         restart: unless-stopped
         container_name: iotistic-mosquitto
         ports:
-          - "${MOSQUITTO_PORT_EXT:-5883}:1883"        # Non-TLS (local)
-          - "${MOSQUITTO_WS_PORT_EXT:-59002}:9001"    # WebSocket non-TLS
-          # MQTTS (TLS) - Commented out until certificate management is implemented
-          # - "${MOSQUITTO_TLS_PORT_EXT:-8883}:8883"    # MQTTS (TLS)
-          # - "${MOSQUITTO_WSS_PORT_EXT:-9002}:9002"    # WebSocket TLS
+          # Non-TLS (local development only)
+          # - "${MOSQUITTO_PORT_EXT:-5883}:1883"        # MQTT (disabled - use TLS)
+          # - "${MOSQUITTO_WS_PORT_EXT:-59002}:9001"    # WebSocket (disabled - use TLS)
+          # TLS Ports (enabled - self-signed certificates)
+          - "${MOSQUITTO_TLS_PORT_EXT:-8883}:8883"    # MQTTS (TLS) - native MQTT
+          - "${MOSQUITTO_WSS_PORT_EXT:-9002}:9002"    # WebSocket TLS
         volumes:
-          - ./mosquitto/mosquitto.conf:/etc/mosquitto/mosquitto.conf
-          # Certificate mount - uncomment when enabling MQTTS
-          # - ./certs:/mosquitto/certs:ro  # Mount certificates (read-only)
+          - ./mosquitto/mosquitto-tls.conf:/etc/mosquitto/mosquitto.conf
+          - ./mosquitto/certs:/mosquitto/certs
         depends_on:
             postgres:
                 condition: service_healthy
         healthcheck:
-            test: ["CMD-SHELL", "timeout 5 mosquitto_sub -h localhost -p 1883 -u ${MQTT_USERNAME:-nodered} -P ${MQTT_PASSWORD:-secret} -t '$$SYS/#' -C 1 || exit 1"]
+            test: ["CMD-SHELL", "timeout 5 mosquitto_sub -h localhost -p 8883 --insecure -u ${MQTT_USERNAME:-nodered} -P ${MQTT_PASSWORD:-secret} -t '$$SYS/#' -C 1 || exit 1"]
             interval: 30s
             timeout: 10s
             retries: 3
@@ -372,7 +374,8 @@ services:
             - DB_USER=${DB_USER:-postgres}
             - DB_PASSWORD=${DB_PASSWORD:-postgres}
             - DB_POOL_SIZE=10
-            - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtt://mosquitto:1883}
+            - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtts://mosquitto:8883}
+            - MQTT_TLS_REJECT_UNAUTHORIZED=${MQTT_TLS_REJECT_UNAUTHORIZED:-false}
             - MQTT_USERNAME=${MQTT_USERNAME:-nodered}
             - MQTT_PASSWORD=${MQTT_PASSWORD:-secret}
             - MQTT_PERSIST_DB=${MQTT_PERSIST_DB:-true}
