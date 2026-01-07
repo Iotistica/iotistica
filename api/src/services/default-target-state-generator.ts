@@ -217,11 +217,20 @@ export function generateDefaultTargetStateConfigV2(
         enabled: true,
         profile: 'COMAP',
         bufferCapacity: 128 * 1024, // 128KB - Standard Modbus responses
-        connection: {
-          host: '10.0.0.60',
-          port: 502,
-          timeoutMs: 2000,
-        },
+        connections: [
+          {
+            name: 'comap-gen-502',
+            host: '10.0.0.60',
+            port: 502,
+            timeoutMs: 2000,
+          },
+          {
+            name: 'comap-gen-503',
+            host: '10.0.0.60',
+            port: 503,
+            timeoutMs: 2000,
+          }
+        ],
         addressing: {
           slaveRange: {
             start: 1,

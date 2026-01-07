@@ -468,17 +468,15 @@ export class ConfigManager extends EventEmitter {
 				connection = (device as any).connection;
 			}
 			
-			// Extract protocol-specific metadata
-			let metadata: Record<string, any> = {};
+			// Preserve existing metadata from device (includes connectionName, profile, etc.)
+			let metadata: Record<string, any> = (device as any).metadata || {};
+			
+			// Add protocol-specific metadata if needed (preserve existing values)
 			if (device.protocol === 'modbus' && connection.unitId !== undefined) {
-				// For Modbus: store unitId as slaveId in metadata
-				metadata = { slaveId: connection.unitId };
-			} else if (device.protocol === 'can') {
-				// For CAN: add CAN-specific metadata here if needed
-				metadata = {};
-			} else if (device.protocol === 'opcua') {
-				// For OPC-UA: add OPC-UA-specific metadata here if needed
-				metadata = {};
+				// For Modbus: store unitId as slaveId in metadata (only if not already set)
+				if (!metadata.slaveId) {
+					metadata.slaveId = connection.unitId;
+				}
 			}
 			
 			// Normalize property names (camelCase → snake_case)

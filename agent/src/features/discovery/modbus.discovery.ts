@@ -47,7 +47,6 @@ interface ProfileMap {
 const PROFILE_ENV = process.env.MODBUS_PROFILE || 'Generic';
 
 export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
-  private connection?: ModbusConnection;
   private agentConfig?: AgentConfig;
 
   constructor(logger?: AgentLogger, agentConfig?: AgentConfig) {
@@ -63,24 +62,141 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 
     // Get profile data points from target state (pushed via CloudSync)
     const modbusConfig = this.agentConfig?.getModbusConfig();
+    
+    // Multi-connection mode detection
+    if (modbusConfig?.connections && modbusConfig.connections.length > 0) {
+      this.logger?.infoSync(`Starting multi-connection Modbus discovery (${modbusConfig.connections.length} connections)`, {
+        component: LogComponents.discovery + "] [" + this.protocol as any,
+        connectionCount: modbusConfig.connections.length
+      });
+
+      const allDiscovered: DiscoveredDevice[] = [];
+
+      // Separate TCP and serial connections (TCP can be parallel, RTU must be sequential)
+      const tcpConnections = modbusConfig.connections.filter(c => c.host);
+      const serialConnections = modbusConfig.connections.filter(c => !c.host);
+
+      // Parallel TCP scanning (controlled concurrency to avoid overwhelming network)
+      if (tcpConnections.length > 0) {
+        this.logger?.infoSync(`Scanning ${tcpConnections.length} TCP connections (max 3 parallel)`, {
+          component: LogComponents.discovery + "] [" + this.protocol as any
+        });
+
+        const MAX_PARALLEL = 3;
+        const chunks: typeof tcpConnections[] = [];
+        for (let i = 0; i < tcpConnections.length; i += MAX_PARALLEL) {
+          chunks.push(tcpConnections.slice(i, i + MAX_PARALLEL));
+        }
+
+        for (const chunk of chunks) {
+          const results = await Promise.all(
+            chunk.map(async (conn) => {
+              const connOptions: ModbusDiscoveryOptions = {
+                tcpHost: conn.host,
+                tcpPort: conn.port,
+                timeout: conn.timeoutMs,
+                slaveIdRange: conn.addressing?.slaveRange 
+                  ? [conn.addressing.slaveRange.start, conn.addressing.slaveRange.end]
+                  : [1, 10]
+              };
+
+              const profile = conn.profile || modbusConfig.profile || 'Generic';
+              const dataPoints = conn.points || modbusConfig.profileDataPoints || [];
+
+              this.logger?.infoSync(`Scanning TCP connection '${conn.name || conn.host}' (profile: ${profile})`, {
+                component: LogComponents.discovery + "] [" + this.protocol as any,
+                connection: conn.name,
+                host: conn.host,
+                port: conn.port
+              });
+
+              return await this.discoverOnBus(connOptions, profile, dataPoints, conn.name);
+            })
+          );
+
+          results.forEach(discovered => allDiscovered.push(...discovered));
+        }
+      }
+
+      // Sequential serial scanning (RTU bus requires sequential access)
+      if (serialConnections.length > 0) {
+        this.logger?.infoSync(`Scanning ${serialConnections.length} serial connections (sequential - shared bus)`, {
+          component: LogComponents.discovery + "] [" + this.protocol as any
+        });
+
+        for (const conn of serialConnections) {
+          const connOptions: ModbusDiscoveryOptions = {
+            serialPort: (conn as any).serialPort,  // Serial config uses serialPort field
+            baudRate: (conn as any).baudRate,
+            timeout: conn.timeoutMs,
+            slaveIdRange: conn.addressing?.slaveRange 
+              ? [conn.addressing.slaveRange.start, conn.addressing.slaveRange.end]
+              : [1, 10]
+          };
+
+          const profile = conn.profile || modbusConfig.profile || 'Generic';
+          const dataPoints = conn.points || modbusConfig.profileDataPoints || [];
+
+          this.logger?.infoSync(`Scanning serial connection '${conn.name || (conn as any).serialPort}' (profile: ${profile})`, {
+            component: LogComponents.discovery + "] [" + this.protocol as any,
+            connection: conn.name,
+            port: (conn as any).serialPort
+          });
+
+          const discovered = await this.discoverOnBus(connOptions, profile, dataPoints, conn.name);
+          allDiscovered.push(...discovered);
+        }
+      }
+
+      this.logger?.infoSync(`Multi-connection discovery complete: ${allDiscovered.length} devices across ${modbusConfig.connections.length} connections`, {
+        component: LogComponents.discovery + "] [" + this.protocol as any,
+        totalDevices: allDiscovered.length,
+        connectionCount: modbusConfig.connections.length,
+        tcpCount: tcpConnections.length,
+        serialCount: serialConnections.length
+      });
+
+      return allDiscovered;
+    }
+
+    // Legacy single-connection mode (backward compatibility)
     const dataPoints: DataPoint[] = modbusConfig?.profileDataPoints || [];
+    const profile = modbusConfig?.profile || 'Generic';
+
+    this.logger?.infoSync('Starting single-connection Modbus discovery (legacy mode)', {
+      component: LogComponents.discovery + "] [" + this.protocol as any,
+      profile
+    });
+
+    return this.discoverOnBus(options || {}, profile, dataPoints);
+  }
+
+  /**
+   * Discovery helper: Scan slave IDs on a single Modbus connection
+   * Extracted for reuse in both single and multi-connection modes
+   */
+  private async discoverOnBus(
+    options: ModbusDiscoveryOptions,
+    profile: string,
+    dataPoints: DataPoint[],
+    connectionName?: string
+  ): Promise<DiscoveredDevice[]> {
     
     if (dataPoints.length === 0) {
-      this.logger?.warnSync(`No profile data points in config (profile: ${modbusConfig?.profile || 'unknown'})`, {
+      this.logger?.warnSync(`No profile data points in config (profile: ${profile || 'unknown'})`, {
         component: LogComponents.discovery + "] [" + this.protocol as any
       });
     } else {
-      this.logger?.infoSync(`Using ${dataPoints.length} data points from profile '${modbusConfig?.profile}'`, {
+      this.logger?.infoSync(`Using ${dataPoints.length} data points from profile '${profile}'`, {
         component: LogComponents.discovery + "] [" + this.protocol as any
       });
     }
 
     const discovered: DiscoveredDevice[] = [];
 
-    this.logger?.infoSync('Starting Modbus discovery', {
+    this.logger?.infoSync('Starting Modbus discovery on bus', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
-      protocol: this.protocol,
-      phase: 'discovery'
+      connectionName
     });
 
     // Default options
@@ -98,34 +214,51 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
       return [];
     }
 
+    // CRITICAL: Open connection ONCE for all slave IDs (bus-scoped)
+    const connection = await this.openConnection(options);
+    
+    if (!connection?.isOpen) {
+      this.logger?.warnSync('Failed to open Modbus connection', {
+        component: LogComponents.discovery + "] [" + this.protocol as any
+      });
+      return [];
+    }
+
     try {
-      // CRITICAL: Open connection ONCE for all slave IDs
-      await this.openConnection(options);
-
-      if (!this.connection?.isOpen) {
-        this.logger?.warnSync('Failed to open Modbus connection', {
-          component: LogComponents.discovery + "] [" + this.protocol as any
-        });
-        return [];
-      }
-
+      // Generate bus identifier for logging
+      const busId = isSerial 
+        ? options.serialPort! 
+        : `${options.tcpHost}:${options.tcpPort || 502}`;
+      
       this.logger?.debugSync('Modbus connection established, scanning slave IDs', {
         component: LogComponents.discovery + "] [" + this.protocol as any,
+        connection: connectionName,
+        bus: busId,
         range: slaveIdRange,
-        type: this.connection.type
+        type: connection.type
       });
 
       // Scan slave IDs on same connection
       for (let slaveId = slaveIdRange[0]; slaveId <= slaveIdRange[1]; slaveId++) {
         try {
-          const deviceInfo = await this.testSlaveId(slaveId, timeout);
+          const deviceInfo = await this.testSlaveId(connection, slaveId, timeout);
 
           if (deviceInfo) {
-            // Generate cryptographic fingerprint (survives port/config changes)
-            const fingerprint = generateModbusFingerprint(slaveId, deviceInfo.deviceId);
+            // Generate bus identifier for unique fingerprinting
+            const busId = isSerial
+              ? options.serialPort!
+              : `${options.tcpHost}:${options.tcpPort || 502}`;
+            
+            // Generate cryptographic fingerprint (unique per bus + slave ID)
+            const fingerprint = generateModbusFingerprint(busId, slaveId, deviceInfo.deviceId);
+
+            // Device naming: Use connection name if provided (multi-connection mode)
+            const deviceName = connectionName 
+              ? `${connectionName}_slave_${slaveId}`
+              : deviceInfo.name || `modbus_slave_${slaveId}`;
 
             discovered.push({
-              name: deviceInfo.name || `modbus_slave_${slaveId}`,
+              name: deviceName,
               protocol: 'modbus' as const,
               fingerprint,
               connection: isSerial
@@ -149,18 +282,19 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
                 slaveId,
                 deviceId: deviceInfo.deviceId,
                 discoveryMethod: deviceInfo.method,
-                profile: modbusConfig?.profile || 'Generic'  // Store profile for change detection
+                profile,  // Store profile for change detection
+                connectionName  // NEW: Track connection association
               }
             });
 
             this.logger?.debugSync(`Discovered Modbus slave ${slaveId}`, {
               component: LogComponents.discovery + "] [" + this.protocol as any,
               phase: 'discovery',
-              method: deviceInfo.method
+              method: deviceInfo.method,
+              connectionName
             });
           }
         } catch (error) {
-          // Use infoSync for visibility - important to know which slaves are offline
           this.logger?.warnSync(`No response from slave ${slaveId} (offline or not configured)`, {
             component: LogComponents.discovery + "] [" + this.protocol as any,
             slaveId,
@@ -170,13 +304,13 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
       }
     } finally {
       // CRITICAL: Always close connection
-      await this.closeConnection();
+      await this.closeConnection(connection);
     }
 
-    this.logger?.infoSync(`Modbus discovery complete: ${discovered.length} devices`, {
+    this.logger?.infoSync(`Modbus discovery complete on bus: ${discovered.length} devices`, {
       component: LogComponents.discovery + "] [" + this.protocol as any,
-      phase: 'discovery',
-      deviceCount: discovered.length
+      deviceCount: discovered.length,
+      connectionName
     });
 
     return discovered;
@@ -500,8 +634,10 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
   /**
    * Open Modbus connection ONCE for entire scan
    * Industrial best practice: reuse connection across slave IDs
+   * 
+   * Returns connection object (bus-scoped, not shared)
    */
-  private async openConnection(options?: ModbusDiscoveryOptions): Promise<void> {
+  private async openConnection(options?: ModbusDiscoveryOptions): Promise<ModbusConnection | undefined> {
     try {
       // Dynamic import of modbus-serial (default export)
       // Note: Using 'any' because TypeScript has issues with dynamic import constructors
@@ -520,55 +656,57 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
           parity: 'none'
         });
 
-        this.connection = {
-          type: 'serial',
-          client,
-          isOpen: true
-        };
-
         this.logger?.debugSync('Opened Modbus RTU connection', {
           component: LogComponents.discovery + "] [" + this.protocol as any,
           phase: 'discovery',
           port: options!.serialPort,
           baudRate: options?.baudRate || 9600
         });
+
+        // Set timeout
+        client.setTimeout(timeout);
+        
+        return {
+          type: 'serial',
+          client,
+          isOpen: true
+        };
       } else {
         // TCP connection
         await client.connectTCP(options!.tcpHost!, {
           port: options?.tcpPort || 502
         });
 
-        this.connection = {
+        // Set timeout
+        client.setTimeout(timeout);
+        
+        return {
           type: 'tcp',
           client,
           isOpen: true
         };
-
       }
-
-      // Set timeout
-      client.setTimeout(timeout);
     } catch (error) {
       this.logger?.errorSync(
         'Failed to open Modbus connection',
         error as Error,
         { component: LogComponents.agent }
       );
-      this.connection = undefined;
+      return undefined;
     }
   }
 
   /**
    * Close Modbus connection after scan
    */
-  private async closeConnection(): Promise<void> {
-    if (this.connection?.isOpen) {
+  private async closeConnection(connection?: ModbusConnection): Promise<void> {
+    if (connection?.isOpen) {
       try {
-        this.connection.client.close(() => {
+        connection.client.close(() => {
           this.logger?.debugSync('Closed Modbus connection', {
             component: LogComponents.discovery + "] [" + this.protocol as any,
             phase: 'discovery',
-            type: this.connection?.type
+            type: connection?.type
           });
         });
       } catch (error) {
@@ -576,8 +714,6 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
           component: LogComponents.discovery + "] [" + this.protocol as any,
           error: (error as Error).message
         });
-      } finally {
-        this.connection = undefined;
       }
     }
   }
@@ -588,13 +724,14 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
    * 1. Try reading device identification (0x2B/0x0E) - proper way
    * 2. Fallback to holding register read (40001) - compatibility
    */
-private async testSlaveId(
-  slaveId: number,
-  timeout: number
-): Promise<{ name?: string; method: string; deviceId?: string } | null> {
+  private async testSlaveId(
+    connection: ModbusConnection,
+    slaveId: number,
+    timeout: number
+  ): Promise<{ name?: string; method: string; deviceId?: string } | null> {
 
-  if (!this.connection?.isOpen) return null;
-  const client = this.connection.client;
+    if (!connection?.isOpen) return null;
+    const client = connection.client;
 
   client.setID(slaveId);
   client.setTimeout(timeout);

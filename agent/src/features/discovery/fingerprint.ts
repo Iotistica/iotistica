@@ -11,18 +11,24 @@ import crypto from 'crypto';
 
 /**
  * Generate Modbus fingerprint
- * Based on slave ID + device identification register (if available)
+ * Based on bus identity + slave ID + device identification (if available)
  * 
+ * Industry-standard pattern: Fingerprint must be unique per physical endpoint
+ * - Same slave ID on different IPs/ports = different devices
+ * - Same slave ID on different serial ports = different devices
+ * 
+ * @param busId - Bus identifier (e.g., "192.168.1.10:502" or "/dev/ttyUSB0")
  * @param slaveId - Modbus slave ID (1-247)
  * @param deviceIdValue - Optional: Device identification register value (0x2B/0x0E)
  */
 export function generateModbusFingerprint(
+  busId: string,
   slaveId: number,
   deviceIdValue?: string
 ): string {
   const identity = deviceIdValue 
-    ? `${slaveId}:${deviceIdValue}`
-    : `${slaveId}`;
+    ? `${busId}:${slaveId}:${deviceIdValue}`
+    : `${busId}:${slaveId}`;
   
   return crypto
     .createHash('sha256')

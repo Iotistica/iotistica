@@ -142,9 +142,13 @@ export interface OPCUAProtocolConfig {
 }
 
 export interface ModbusConnection {
+  name?: string;  // Connection identifier (e.g., 'comap-gen-502')
   host: string;
   port: number;
   timeoutMs: number;
+  profile?: string;  // Optional: Override root profile
+  addressing?: ModbusAddressing;  // Optional: Override root addressing
+  points?: Record<string, ModbusDataPoint>;  // Optional: Override root points
 }
 
 export interface ModbusAddressing {
@@ -169,7 +173,8 @@ export interface ModbusProtocolConfig {
   enabled: boolean;
   profile: string;
   bufferCapacity?: number; // Buffer size in bytes for Modbus responses
-  connection: ModbusConnection;
+  connection?: ModbusConnection;  // Legacy: Single connection (optional for backward compat)
+  connections?: ModbusConnection[];  // Modern: Multiple connections (optional)
   addressing: ModbusAddressing;
   points: Record<string, ModbusDataPoint>;  // Object keyed by point name (e.g., "temperature", "humidity")
 }

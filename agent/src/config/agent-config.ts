@@ -22,10 +22,23 @@ import type { AgentLogger } from '../logging/agent-logger.js';
 import type { LogLevel } from '../logging/types.js';
 import { LogComponents } from '../logging/types.js';
 
+export interface ModbusConnectionConfig {
+  name?: string;                    // Connection identifier (e.g., 'gen-502')
+  host: string;                     // IP address or hostname
+  port: number;                     // Modbus TCP port (default 502)
+  timeoutMs?: number;               // Connection timeout
+  profile?: string;                 // Optional: Override root profile
+  addressing?: {                    // Optional: Override root addressing
+    slaveRange?: { start: number; end: number; };
+  };
+  points?: any;                     // Optional: Override root points
+}
+
 export interface ModbusConfig {
   enabled: boolean;
-  tcpHost: string;
-  tcpPort: number;
+  connections?: ModbusConnectionConfig[];  // Multi-connection support (NEW)
+  tcpHost?: string;                 // Legacy: Single connection host (optional)
+  tcpPort?: number;                 // Legacy: Single connection port (optional)
   slaveRangeStart: number;
   slaveRangeEnd: number;
   timeout: number;
@@ -198,9 +211,41 @@ export class AgentConfig extends EventEmitter {
     // V2 format uses connection.host/port, V1 uses tcpHost/tcpPort
     const cloudConnection = cloudProtocol?.connection;
     const cloudAddressing = cloudProtocol?.addressing;
+    const cloudConnections = cloudProtocol?.connections;
+
+    // Multi-connection mode: Parse connections[] array
+    let connections: ModbusConnectionConfig[] | undefined;
+    if (Array.isArray(cloudConnections) && cloudConnections.length > 0) {
+      connections = cloudConnections.map((conn: any) => {
+        // Per-connection profile resolution
+        const connProfile = conn.profile || cloudProtocol?.profile || 'Generic';
+        
+        // Per-connection points override (connection > root points)
+        let connPoints: any[] | undefined;
+        if (conn.points && typeof conn.points === 'object') {
+          connPoints = Object.entries(conn.points).map(([name, point]: [string, any]) => ({
+            name,
+            ...point
+          }));
+        } else if (!conn.points && profileDataPoints) {
+          connPoints = profileDataPoints;  // Inherit root points
+        }
+
+        return {
+          name: conn.name,
+          host: conn.host,
+          port: conn.port ?? 502,
+          timeoutMs: conn.timeoutMs ?? cloudConnection?.timeoutMs ?? 2000,
+          profile: connProfile,
+          addressing: conn.addressing,  // Optional override
+          points: connPoints
+        };
+      });
+    }
 
     return {
       enabled: cloudProtocol?.enabled ?? true,
+      connections,  // NEW: Multi-connection array
       tcpHost: cloudConnection?.host ?? cloudProtocol?.tcpHost ?? 'localhost',
       tcpPort: cloudConnection?.port ?? cloudProtocol?.tcpPort ?? 502,
       timeout: cloudConnection?.timeoutMs ?? cloudProtocol?.timeout ?? 2000,
