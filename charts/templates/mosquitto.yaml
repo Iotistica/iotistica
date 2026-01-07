@@ -9,86 +9,94 @@ metadata:
     app.kubernetes.io/component: mosquitto
 data:
   mosquitto.conf: |
-    # Mosquitto configuration with Go-Auth plugin
-    # HTTP backend authentication via API service
-   
-    # Basic Mosquitto settings
+    # Mosquitto configuration with TLS/SSL (MQTTS)
+    # Self-signed certificate configuration with no client certificate validation
+    # PostgreSQL backend for authentication and ACL
 
-    # Plain TCP listener (no cert)
-    listener {{ .Values.mosquitto.ports.mqtt }} 0.0.0.0
+    # MQTT over TLS (port 8883)
+    listener 8883 0.0.0.0
     protocol mqtt
 
-    # TLS listener
-    listener {{ .Values.mosquitto.ports.mqtts }} 0.0.0.0
-    protocol mqtt
+    # TLS Configuration for self-signed certificates
+    # Note: For self-signed certs, clients should use insecure/skip-verification mode
+    certfile /mosquitto/certs/server.crt
+    keyfile /mosquitto/certs/server.key
 
-    # TLS settings
-    cafile /mosquitto/certs/ca.crt
-    certfile /mosquitto/certs/tls.crt
-    keyfile /mosquitto/certs/tls.key
+    # Client certificate validation disabled (suitable for self-signed scenario)
+    # Clients authenticate via username/password only
     require_certificate false
-    
-    listener {{ .Values.mosquitto.ports.websocket }} 0.0.0.0
+
+    # For additional security with self-signed certs, optionally include CA file
+    # (clients can still skip verification)
+    # cafile /mosquitto/certs/ca.crt
+
+    # TLS version - 1.2 minimum recommended
+    tls_version tlsv1.2
+
+    # TLS Ciphers (optional: restrict to modern ciphers only)
+    # tls_ciphers DEFAULT:!aNULL:!eNULL:!MD5:!3DES:!DES:!RC4:!IDEA:!SEED:!aDSS:!SRP:!PSK
+
+    # WebSockets over TLS (port 9002)
+    listener 9002 0.0.0.0
     protocol websockets
-    
+
+    # TLS for WebSockets (same self-signed cert)
+    certfile /mosquitto/certs/server.crt
+    keyfile /mosquitto/certs/server.key
+    require_certificate false
+    tls_version tlsv1.2
+
+    # Optional: Keep non-TLS listeners for local/testing
+    # listener 1883 127.0.0.1
+    # protocol mqtt
+
     # Disable anonymous access (require authentication)
-    allow_anonymous {{ .Values.mosquitto.auth.allowAnonymous }}
-    
+    allow_anonymous false
+
     # Logging
     log_dest stdout
     log_type error
     log_type warning
     log_type notice
     log_type information
-    
-    # System statistics publishing (required for metrics exporter)
-    sys_interval 10
-    
+
     # Load Go-Auth plugin
     auth_plugin /mosquitto/go-auth.so
-    
-    # Backend configuration - HTTP authentication via API
+
+    # Backend configuration - HTTP authentication
     auth_opt_backends http
-    
-    # HTTP backend settings (connects to API service)
-    auth_opt_http_host {{ include "iotistic.fullname" . }}-api
-    auth_opt_http_port {{ .Values.api.port }}
+
+    # HTTP backend settings
+    auth_opt_http_host host.docker.internal
+    auth_opt_http_port 4002
     auth_opt_http_getuser_uri /mosquitto-auth/user
     auth_opt_http_superuser_uri /mosquitto-auth/superuser
     auth_opt_http_aclcheck_uri /mosquitto-auth/acl
-    
+
     # HTTP request configuration
     auth_opt_http_method POST
     auth_opt_http_request_type json
     auth_opt_http_response_mode status
     auth_opt_http_timeout 5
-    
-    # Password hashing configuration (validated by API)
-    auth_opt_hasher {{ .Values.mosquitto.auth.hasher }}
-    auth_opt_hasher_cost {{ .Values.mosquitto.auth.hasherCost }}
-    
-    {{- if .Values.redis.enabled }}
+
+    # Password hashing configuration
+    auth_opt_hasher bcrypt
+    auth_opt_hasher_cost 10
+
     # Redis cache configuration
     auth_opt_cache true
     auth_opt_cache_type redis
-    auth_opt_cache_host {{ include "iotistic.fullname" . }}-redis
-    auth_opt_cache_port {{ .Values.redis.port }}
+    auth_opt_cache_host redis
+    auth_opt_cache_port 6379
     auth_opt_cache_db 1
     auth_opt_auth_cache_seconds 300
     auth_opt_acl_cache_seconds 300
     auth_opt_auth_jitter_seconds 10
     auth_opt_cache_reset true
-    {{- end }}
-    
-    # Logging level
-    auth_opt_log_level {{ .Values.mosquitto.auth.logLevel }}
+
+    # Logging
+    auth_opt_log_level info
     auth_opt_log_dest stdout
-    
-    {{- if .Values.mosquitto.persistence.enabled }}
-    # Persistence for message queues
-    persistence true
-    persistence_location /mosquitto/data/
-    {{- end }}
 ---
 # Certificate for Mosquitto
 apiVersion: cert-manager.io/v1
