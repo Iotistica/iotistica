@@ -81,8 +81,8 @@ services:
             - NODE_ENV=${NODE_ENV:-development}
             - HTTPS_ENABLED=true
             - HTTPS_PORT=3443
-            - HTTPS_CERT_PATH=/app/certs/server.crt
-            - HTTPS_KEY_PATH=/app/certs/server.key
+            - HTTPS_CERT_PATH=/app/certs/tls.crt
+            - HTTPS_KEY_PATH=/app/certs/tls.key
             - HTTPS_CA_CERT_PATH=/app/certs/ca.crt
             - DB_HOST=${DB_HOST:-postgres}
             - DB_PORT=${DB_PORT:-5432}

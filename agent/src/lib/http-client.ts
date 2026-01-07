@@ -103,14 +103,6 @@ export class FetchHttpClient implements HttpClient {
 	}): Promise<HttpResponse<T>> {
 		const httpsAgent = this.isHttps(url) ? this.getHttpsAgent() : {};
 		
-		// Debug logging
-		if (this.isHttps(url)) {
-			console.log('[HttpClient] Making HTTPS request:', {
-				url,
-				hasAgent: !!(httpsAgent as any).agent,
-				rejectUnauthorized: this.rejectUnauthorized
-			});
-		}
 		
 		const timeout = options?.timeout ?? this.defaultTimeout;
 		const response = await fetch(url, {
@@ -251,10 +243,6 @@ export class FetchHttpClient implements HttpClient {
 
 	private getHttpsAgent() {
 		// Debug logging
-		console.log('[HttpClient] Creating HTTPS agent:', {
-			hasCaCert: !!this.caCert,
-			rejectUnauthorized: this.rejectUnauthorized
-		});
 		
 		// Node.js fetch uses undici internally but doesn't expose it
 		// The agent option doesn't work reliably with fetch()
