@@ -107,12 +107,16 @@ export class JobsFeature extends BaseFeature {
     this.baseUrl = `${normalizedBaseUrl}/${apiVersion}`;
     this.deviceApiKey = jobConfig.deviceApiKey || '';
     
+    // For localhost/development, disable TLS verification
+    const isLocalhost = normalizedBaseUrl.includes('localhost') || normalizedBaseUrl.includes('127.0.0.1');
+    
     this.httpClient = new FetchHttpClient({
       defaultHeaders: {
         'Content-Type': 'application/json',
         'User-Agent': `Iotistic-agent/${deviceUuid}`,
       },
       defaultTimeout: 30000,
+      rejectUnauthorized: !isLocalhost, // Allow self-signed certs for localhost
     });
   }
 
@@ -275,15 +279,26 @@ export class JobsFeature extends BaseFeature {
         }
       }
     } catch (error: any) {
-      // 404 is expected when no jobs available, don't log it
-      if (!error.response || error.response.status !== 404) {
+      // 404 is expected when no jobs available (via HttpError or response check)
+      const is404 = (error.status === 404) || (error.response?.status === 404);
+      
+      if (!is404) {
+        // Serialize error properly
         const errorMessage = error.message || error.cause?.message || String(error);
-        this.logger.error(`HTTP polling error: ${errorMessage}`, {
+        const errorDetails: Record<string, any> = {
           errorType: error.name || 'Unknown',
-          code: error.code,
-          cause: error.cause?.message,
           url: `${this.baseUrl}/devices/${this.deviceUuid}/jobs/next`
-        });
+        };
+        
+        // Add relevant error properties
+        if (error.code) errorDetails.code = error.code;
+        if (error.status) errorDetails.status = error.status;
+        if (error.cause) {
+          errorDetails.cause = error.cause.message || String(error.cause);
+          if (error.cause.code) errorDetails.causeCode = error.cause.code;
+        }
+        
+        this.logger.error(`HTTP polling error: ${errorMessage}`, errorDetails);
       }
     }
   }

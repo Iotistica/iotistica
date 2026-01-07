@@ -8,6 +8,23 @@
  * Supports HTTPS with custom CA certificates for self-signed certs.
  */
 
+import { Agent } from 'undici';
+
+/**
+ * HTTP Error thrown when response status indicates failure (4xx, 5xx)
+ */
+export class HttpError extends Error {
+	constructor(
+		public readonly status: number,
+		public readonly statusText: string,
+		public readonly url: string,
+		public readonly body?: any
+	) {
+		super(`HTTP ${status} ${statusText}: ${url}`);
+		this.name = 'HttpError';
+	}
+}
+
 export interface HttpResponse<T = any> {
 	ok: boolean;
 	status: number;
@@ -27,6 +44,8 @@ export interface HttpClientOptions {
 	defaultHeaders?: Record<string, string>;
 	/** Default timeout for all requests in milliseconds */
 	defaultTimeout?: number;
+	/** Whether to throw HttpError on non-2xx responses (default: false) */
+	throwOnHttpError?: boolean;
 }
 
 export interface CompressionStats {
@@ -70,58 +89,67 @@ export interface HttpClient {
  * Default implementation using native fetch with HTTPS support
  */
 export class FetchHttpClient implements HttpClient {
-	private caCert?: string;
-	private rejectUnauthorized: boolean;
+	private dispatcher?: Agent;
 	private defaultHeaders: Record<string, string>;
 	private defaultTimeout?: number;
+	private throwOnHttpError: boolean;
 
 	constructor(options?: HttpClientOptions) {
-		this.caCert = options?.caCert;
-		// Default to true unless explicitly set to false
-		this.rejectUnauthorized = options?.rejectUnauthorized ?? true;
 		this.defaultHeaders = options?.defaultHeaders || {};
 		this.defaultTimeout = options?.defaultTimeout;
+		this.throwOnHttpError = options?.throwOnHttpError ?? false;
 		
-		// Log constructor options for debugging
-		console.log('[HttpClient] Constructor called with options:', {
-			optionsRejectUnauthorized: options?.rejectUnauthorized,
-			thisRejectUnauthorized: this.rejectUnauthorized,
-			hasCaCert: !!options?.caCert
-		});
-		
-		// For localhost development with self-signed certs, we need to disable TLS verification
-		// Node.js fetch (undici) doesn't support per-request TLS options well
-		if (this.rejectUnauthorized === false) {
-			console.log('[HttpClient] Setting NODE_TLS_REJECT_UNAUTHORIZED=0 for self-signed HTTPS');
-			process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+		// Create undici dispatcher with TLS options (per-client, not global)
+		// Agent is created once and reused for connection pooling + keep-alive
+		if (options?.caCert || options?.rejectUnauthorized === false) {
+			this.dispatcher = new Agent({
+				connections: 100, // Max concurrent connections per origin
+				pipelining: 10, // Max pipelined requests per connection
+				keepAliveTimeout: 4000, // Keep-alive timeout (ms)
+				keepAliveMaxTimeout: 600000, // Max keep-alive timeout (10min)
+				connect: {
+					ca: options.caCert,
+					rejectUnauthorized: options.rejectUnauthorized ?? true,
+				}
+			});
+			
+			console.log('[HttpClient] Created undici dispatcher with TLS options:', {
+				rejectUnauthorized: options.rejectUnauthorized ?? true,
+				hasCaCert: !!options.caCert
+			});
 		}
+	}
+
+	/**
+	 * Create AbortSignal with timeout (Node.js 18+ compatible with polyfill)
+	 * Feature detection for older runtimes that don't support AbortSignal.timeout()
+	 */
+	private createAbortSignal(timeoutMs?: number): AbortSignal | undefined {
+		if (!timeoutMs) return undefined;
+		// Use native AbortSignal.timeout if available (Node ≥18)
+		if (typeof (AbortSignal as any).timeout === 'function') {
+			return (AbortSignal as any).timeout(timeoutMs);
+		}
+		// Fallback for older Node.js versions
+		const controller = new AbortController();
+		setTimeout(() => controller.abort(), timeoutMs);
+		return controller.signal;
 	}
 
 	async get<T = any>(url: string, options?: {
 		headers?: Record<string, string>;
 		timeout?: number;
 	}): Promise<HttpResponse<T>> {
-		const httpsAgent = this.isHttps(url) ? this.getHttpsAgent() : {};
-		
-		
 		const timeout = options?.timeout ?? this.defaultTimeout;
 		const response = await fetch(url, {
 			method: 'GET',
 			headers: { ...this.defaultHeaders, ...options?.headers },
-			signal: timeout ? AbortSignal.timeout(timeout) : undefined,
-			// @ts-ignore - Node.js fetch supports agent option
-			...httpsAgent,
+			signal: this.createAbortSignal(timeout),
+			// @ts-ignore - TypeScript doesn't recognize dispatcher option yet
+			dispatcher: this.dispatcher,
 		});
 		
-		return {
-			ok: response.ok,
-			status: response.status,
-			statusText: response.statusText,
-			headers: {
-				get: (name: string) => response.headers.get(name)
-			},
-			json: () => response.json() as Promise<T>
-		};
+		return this.checkResponse<T>(response, url);
 	}
 	
 	async post<T = any>(url: string, body: any, options?: {
@@ -137,20 +165,12 @@ export class FetchHttpClient implements HttpClient {
 			method: 'POST',
 			headers: finalHeaders,
 			body: finalBody,
-			signal: timeout ? AbortSignal.timeout(timeout) : undefined,
-			// @ts-ignore - Node.js fetch supports agent option
-			...(this.isHttps(url) ? this.getHttpsAgent() : {}),
+			signal: this.createAbortSignal(timeout),
+			// @ts-ignore - TypeScript doesn't recognize dispatcher option yet
+			dispatcher: this.dispatcher,
 		});
 		
-		return {
-			ok: response.ok,
-			status: response.status,
-			statusText: response.statusText,
-			headers: {
-				get: (name: string) => response.headers.get(name)
-			},
-			json: () => response.json() as Promise<T>
-		};
+		return this.checkResponse<T>(response, url);
 	}
 	
 	async patch<T = any>(url: string, body: any, options?: {
@@ -166,25 +186,22 @@ export class FetchHttpClient implements HttpClient {
 			method: 'PATCH',
 			headers: finalHeaders,
 			body: finalBody,
-			signal: timeout ? AbortSignal.timeout(timeout) : undefined,
-			// @ts-ignore - Node.js fetch supports agent option
-			...(this.isHttps(url) ? this.getHttpsAgent() : {}),
+			signal: this.createAbortSignal(timeout),
+			// @ts-ignore - TypeScript doesn't recognize dispatcher option yet
+			dispatcher: this.dispatcher,
 		});
 		
-		return {
-			ok: response.ok,
-			status: response.status,
-			statusText: response.statusText,
-			headers: {
-				get: (name: string) => response.headers.get(name)
-			},
-			json: () => response.json() as Promise<T>
-		};
+		return this.checkResponse<T>(response, url);
 	}
 
 	/**
 	 * Prepare request body with optional compression
 	 * Centralized logic for POST and PATCH methods
+	 * 
+	 * Compression strategy:
+	 * - Skip if < 1KB (overhead exceeds savings)
+	 * - Use Brotli for >= 10KB (better ratio)
+	 * - Use gzip for 1KB-10KB (faster)
 	 */
 	private async prepareBody(body: any, options?: {
 		headers?: Record<string, string>;
@@ -202,14 +219,28 @@ export class FetchHttpClient implements HttpClient {
 			finalHeaders['Content-Type'] = 'application/json';
 		}
 		
-		// Handle compression if requested
-		if (options?.compress) {
-			const { gzip } = await import('zlib');
+		const uncompressedBytes = Buffer.byteLength(bodyString, 'utf8');
+		
+		// Handle compression if requested and payload is large enough
+		if (options?.compress && uncompressedBytes >= 1024) {
+			const { brotliCompress, gzip } = await import('zlib');
 			const { promisify } = await import('util');
-			const gzipAsync = promisify(gzip);
 			
-			const uncompressedBytes = Buffer.byteLength(bodyString, 'utf8');
-			const compressed = await gzipAsync(bodyString);
+			let compressed: Buffer;
+			let encoding: string;
+			
+			// Use Brotli for large payloads (better compression ratio)
+			if (uncompressedBytes >= 10 * 1024) {
+				const brotliAsync = promisify(brotliCompress);
+				compressed = await brotliAsync(bodyString);
+				encoding = 'br';
+			} else {
+				// Use gzip for medium payloads (faster)
+				const gzipAsync = promisify(gzip);
+				compressed = await gzipAsync(bodyString);
+				encoding = 'gzip';
+			}
+			
 			const compressedBytes = compressed.length;
 			
 			// Calculate compression stats
@@ -229,7 +260,8 @@ export class FetchHttpClient implements HttpClient {
 			}
 			
 			finalBody = compressed;
-			finalHeaders['Content-Encoding'] = 'gzip';
+			finalHeaders['Content-Encoding'] = encoding;
+			finalHeaders['Content-Length'] = compressed.length.toString();
 		} else {
 			finalBody = bodyString;
 		}
@@ -237,22 +269,30 @@ export class FetchHttpClient implements HttpClient {
 		return { finalBody, finalHeaders };
 	}
 
-	private isHttps(url: string): boolean {
-		return url.startsWith('https://');
-	}
+	/**
+	 * Check response status and throw HttpError if configured
+	 */
+	private async checkResponse<T>(response: Response, url: string): Promise<HttpResponse<T>> {
+		const httpResponse: HttpResponse<T> = {
+			ok: response.ok,
+			status: response.status,
+			statusText: response.statusText,
+			headers: {
+				get: (name: string) => response.headers.get(name)
+			},
+			json: () => response.json() as Promise<T>
+		};
 
-	private getHttpsAgent() {
-		// Debug logging
-		
-		// Node.js fetch uses undici internally but doesn't expose it
-		// The agent option doesn't work reliably with fetch()
-		// We've already set NODE_TLS_REJECT_UNAUTHORIZED in constructor if needed
-		const https = require('https');
-		const agent = new https.Agent({
-			ca: this.caCert,
-			rejectUnauthorized: this.rejectUnauthorized,
-		});
-		
-		return { agent };
+		if (this.throwOnHttpError && !response.ok) {
+			let body: any;
+			try {
+				body = await response.json();
+			} catch {
+				// Ignore JSON parse errors
+			}
+			throw new HttpError(response.status, response.statusText, url, body);
+		}
+
+		return httpResponse;
 	}
 }

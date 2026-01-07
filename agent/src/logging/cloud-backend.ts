@@ -203,16 +203,21 @@ export class CloudLogBackend implements LogBackend {
 			// Note: Spool directory creation deferred to initialize() to avoid blocking constructor
 		}
 		
-		// Initialize HTTP client with default headers
-		this.httpClient = new FetchHttpClient({
-			defaultHeaders: {
-				'X-Device-API-Key': this.config.deviceApiKey
-			},
-			defaultTimeout: 30000 // 30 second timeout
-		});
-		
-		// Initialize sampling rates with defaults
-		this.samplingRates = {
+	// For localhost/development, disable TLS verification
+	const isLocalhost = this.config.cloudEndpoint.includes('localhost') || 
+	                     this.config.cloudEndpoint.includes('127.0.0.1');
+	
+	// Initialize HTTP client with default headers
+	this.httpClient = new FetchHttpClient({
+		defaultHeaders: {
+			'X-Device-API-Key': this.config.deviceApiKey
+		},
+		defaultTimeout: 30000, // 30 second timeout
+		rejectUnauthorized: !isLocalhost // Allow self-signed certs for localhost
+	});
+	
+	// Initialize sampling rates with defaults
+	this.samplingRates = {
 			error: config.samplingRates?.error ?? 1.0,   // 100% - all errors
 			warn: config.samplingRates?.warn ?? 1.0,     // 100% - all warnings
 			info: config.samplingRates?.info ?? 1.0,     // 100% - all info logs (critical for container lifecycle)
