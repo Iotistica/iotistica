@@ -620,19 +620,28 @@ export default class DeviceAgent {
       };
 
       // Add TLS options if broker config specifies TLS
-      if (config.useTls && config.caCert) {
-        // Fix double-escaped newlines in certificate (handles both \\n and \n)
-        const caCert = config.caCert.replace(/\\n/g, '\n');
-        
-        // MQTT library expects CA cert as string (not Buffer)
-        mqttOptions.ca = caCert;
-        mqttOptions.rejectUnauthorized = config.verifyCertificate ?? true;
+      if (config.useTls) {
+        const hasCaCert = !!config.caCert;
+        // If no CA is provided, always skip verification (self-signed/dev mode)
+        const rejectUnauthorized = hasCaCert
+          ? (config.verifyCertificate ?? true) // With CA: default to verify unless explicitly false
+          : false; // Without CA: never verify
+
+        mqttOptions.rejectUnauthorized = rejectUnauthorized;
+
+        if (config.caCert) {
+          // Fix double-escaped newlines in certificate (handles both \\n and \n)
+          const caCert = config.caCert.replace(/\\n/g, '\n');
+          // MQTT library expects CA cert as string (not Buffer)
+          mqttOptions.ca = caCert;
+        }
         
         this.agentLogger.debugSync("MQTT TLS enabled", {
           component: LogComponents.agent,
           protocol: config.protocol,
           verifyCertificate: config.verifyCertificate,
-          hasCaCert: !!config.caCert,
+          hasCaCert,
+          rejectUnauthorized,
         });
       }
 
