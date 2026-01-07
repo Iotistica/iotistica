@@ -218,16 +218,19 @@ app.use((req, res, next) => {
   const brotliStream = createBrotliDecompress();
   
   // SECURITY: Set timeout to prevent slow decompression attacks
+  // NOTE: Increased to 120s because legitimate agent log batches (10MB compressed)
+  // can take 60-90s to decompress on slow hardware. Monitor for abuse.
   const decompressTimeout = setTimeout(() => {
     logger.error('Brotli decompression timeout - possible attack', {
       path: req.path,
-      ip: req.ip
+      ip: req.ip,
+      contentLength
     });
     brotliStream.destroy(new Error('Decompression timeout'));
     if (!res.headersSent) {
       res.status(408).json({ error: 'Decompression timeout' });
     }
-  }, 30000); // 30 second timeout for decompression
+  }, 120000); // 120 second timeout for large log batches
   
   // Update headers to reflect decompressed state
   delete req.headers['content-encoding'];

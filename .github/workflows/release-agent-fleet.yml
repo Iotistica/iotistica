@@ -21,6 +21,50 @@ on:
         required: false
         default: false
         type: boolean
+      # Simulator configuration
+      modbus_simulator_count:
+        description: 'Number of Modbus simulators per agent (0-3)'
+        required: false
+        default: '1'
+        type: choice
+        options:
+          - '0'
+          - '1'
+          - '2'
+          - '3'
+      opcua_simulator_enabled:
+        description: 'Enable OPC-UA simulator (ignored if opcua_simulator_count provided)'
+        required: false
+        default: true
+        type: boolean
+      opcua_simulator_count:
+        description: 'Number of OPC-UA simulators per agent (0-3)'
+        required: false
+        default: '1'
+        type: choice
+        options:
+          - '0'
+          - '1'
+          - '2'
+          - '3'
+      sensor_simulator_enabled:
+        description: 'Enable sensor simulator'
+        required: false
+        default: false
+        type: boolean
+      # Simulator configuration presets
+      simulator_preset:
+        description: 'Simulator preset (overrides individual settings if not "custom")'
+        required: false
+        default: 'custom'
+        type: choice
+        options:
+          - 'custom'
+          - 'modbus-only'
+          - 'opcua-only'
+          - 'full-stack'
+          - 'minimal'
+          - 'heavy-load'
 
 permissions:
   contents: write
@@ -95,7 +139,7 @@ jobs:
     name: Deploy test fleet
     runs-on: [iotistic-lab-sc]
     needs: [validate-chart]
-    if: github.event_name == 'workflow_dispatch'
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -131,7 +175,7 @@ jobs:
           version: 'v3.13.0'
 
       - name: Cleanup previous namespace (before deploy)
-        if: ${{ inputs.clean_before_deploy == true }}
+        if: ${{ github.event.inputs.clean_before_deploy == 'true' }}
         run: |
           set -e
           NAMESPACE=agent-fleet-test
@@ -163,19 +207,91 @@ jobs:
           API_URL: ${{ secrets.TEST_API_URL || 'http://10.27.27.160:30002' }}
           FLEET_ID: agent-fleet-test-${{ github.run_number }}
         run: |
+          # Apply simulator preset configurations
+          PRESET="${{ github.event.inputs.simulator_preset }}"
+          
+          # Initialize from inputs or apply preset
+          case "$PRESET" in
+            "modbus-only")
+              MODBUS_COUNT=2
+              OPCUA_COUNT=0
+              OPCUA_ENABLED=false
+              SENSOR_ENABLED=false
+              echo "📦 Preset: Modbus Only (2 simulators)"
+              ;;
+            "opcua-only")
+              MODBUS_COUNT=0
+              OPCUA_COUNT=1
+              OPCUA_ENABLED=true
+              SENSOR_ENABLED=false
+              echo "📦 Preset: OPC-UA Only"
+              ;;
+            "full-stack")
+              MODBUS_COUNT=2
+              OPCUA_COUNT=1
+              OPCUA_ENABLED=true
+              SENSOR_ENABLED=true
+              echo "📦 Preset: Full Stack (all simulators)"
+              ;;
+            "minimal")
+              MODBUS_COUNT=0
+              OPCUA_COUNT=0
+              OPCUA_ENABLED=false
+              SENSOR_ENABLED=false
+              echo "📦 Preset: Minimal (no simulators)"
+              ;;
+            "heavy-load")
+              MODBUS_COUNT=3
+              OPCUA_COUNT=1
+              OPCUA_ENABLED=true
+              SENSOR_ENABLED=true
+              echo "📦 Preset: Heavy Load (max simulators)"
+              ;;
+            *)
+              # Custom configuration from inputs
+              MODBUS_COUNT=${{ github.event.inputs.modbus_simulator_count }}
+              OPCUA_COUNT_INPUT=${{ github.event.inputs.opcua_simulator_count }}
+              OPCUA_ENABLED=${{ github.event.inputs.opcua_simulator_enabled }}
+              SENSOR_ENABLED=${{ github.event.inputs.sensor_simulator_enabled }}
+              if [ -n "$OPCUA_COUNT_INPUT" ]; then
+                OPCUA_COUNT="$OPCUA_COUNT_INPUT"
+              else
+                if [ "$OPCUA_ENABLED" = "true" ]; then
+                  OPCUA_COUNT=1
+                else
+                  OPCUA_COUNT=0
+                fi
+              fi
+              echo "📦 Custom configuration: Modbus=$MODBUS_COUNT, OPC-UA count=$OPCUA_COUNT (enabled=$OPCUA_ENABLED), Sensor=$SENSOR_ENABLED"
+              ;;
+          esac
+          
           NAMESPACE="agent-fleet-test"
           RELEASE_NAME="agent-fleet-test-${{ github.run_number }}"
+          
+          echo "🚀 Deploying fleet with:"
+          echo "  - Agents: $FLEET_SIZE"
+          echo "  - Modbus simulators per agent: $MODBUS_COUNT"
+          echo "  - OPC-UA simulators per agent: $OPCUA_COUNT"
+          echo "  - OPC-UA enabled: $OPCUA_ENABLED"
+          echo "  - Sensor simulator enabled: $SENSOR_ENABLED"
           
           helm upgrade --install "$RELEASE_NAME" ${{ env.CHART_PATH }} \
             --namespace "$NAMESPACE" \
             --set fleet.replicaCount="$FLEET_SIZE" \
             --set fleet.cloudApiEndpoint="$API_URL" \
             --set fleet.fleetId="$FLEET_ID" \
+            --set simulator.modbusCount="$MODBUS_COUNT" \
+            --set opcuaSimulator.count="$OPCUA_COUNT" \
+            --set opcuaSimulator.enabled="$OPCUA_ENABLED" \
+            --set sensorSimulator.enabled="$SENSOR_ENABLED" \
             --set agent.env.MQTT_BROKER_URL=mqtt://10.27.27.160:30883 \
             --set agent.env.POLL_INTERVAL_MS=300000 \
             --set agent.env.REPORT_INTERVAL_MS=300000 \
             --set agent.env.METRICS_INTERVAL_MS=600000 \
-            --set agent.env.ENABLE_SENSOR_PUBLISH=false \
+            --set agent.env.ENABLE_SENSOR_PUBLISH="$SENSOR_ENABLED" \
+            --set agent.env.MODBUS_ENABLED="$([ $MODBUS_COUNT -gt 0 ] && echo true || echo false)" \
+            --set agent.env.OPCUA_ENABLED="$OPCUA_ENABLED" \
             --set agent.env.ANOMALY_DETECTION_ENABLED=false \
             --set agent.resources.requests.memory=128Mi \
             --set agent.resources.limits.memory=256Mi \

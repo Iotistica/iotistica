@@ -130,6 +130,19 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            # Simulator configuration (dynamic based on enabled sidecars)
+            {{- if gt (int .Values.simulator.modbusCount) 0 }}
+            - name: MODBUS_SIMULATOR_PORTS
+              value: {{ range $idx := until (int .Values.simulator.modbusCount) }}{{ if $idx }},{{ end }}{{ add 502 $idx }}{{ end | quote }}
+            {{- end }}
+            {{- if gt (int .Values.opcuaSimulator.count) 0 }}
+            - name: OPCUA_DISCOVERY_URLS
+              value: {{ range $idx := until (int .Values.opcuaSimulator.count) }}{{ if $idx }},{{ end }}opc.tcp://localhost:{{ add 4840 $idx }}{{ end | quote }}
+            {{- end }}
+            {{- if .Values.sensorSimulator.enabled }}
+            - name: SENSOR_SIMULATOR_ENABLED
+              value: "true"
+            {{- end }}
             - name: REQUIRE_PROVISIONING
               value: {{ .Values.provisioning.required | quote }}
           volumeMounts:
@@ -167,63 +180,76 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 3
         
-        # Modbus simulator sidecar
-        - name: modbus-simulator
-          image: "{{ .Values.simulator.image.repository }}:{{ .Values.simulator.image.tag }}"
-          imagePullPolicy: {{ .Values.simulator.image.pullPolicy }}
-          # Port definition removed to prevent hostPort conflicts on single-node clusters
-          # Modbus simulator accessed via localhost:502 by agent only
+        # Modbus simulators (dynamic count: 0-3)
+        {{- range $idx := until (int .Values.simulator.modbusCount) }}
+        - name: modbus-simulator-{{ $idx }}
+          image: "{{ $.Values.simulator.image.repository }}:{{ $.Values.simulator.image.tag }}"
+          imagePullPolicy: {{ $.Values.simulator.image.pullPolicy }}
+          # Each simulator on different port: 502, 503, 504
+          # Accessed via localhost:50X by agent only
           env:
-            {{- range $key, $value := .Values.simulator.env }}
+            {{- range $key, $value := $.Values.simulator.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            # Override port for each instance
+            - name: MODBUS_TCP_PORT
+              value: {{ add 502 $idx | quote }}
           resources:
-            {{- toYaml .Values.simulator.resources | nindent 12 }}
-#          livenessProbe:
-#            tcpSocket:
-#              port: 502
-#            initialDelaySeconds: 5
-#            periodSeconds: 10
-#            timeoutSeconds: 3
-#            failureThreshold: 3
-          # Readiness probe disabled - simulator may generate errors
-          # when agent queries addresses not defined in vendor config
-          # readinessProbe:
+            {{- toYaml $.Values.simulator.resources | nindent 12 }}
+          # Liveness probe disabled - may generate errors when agent queries undefined addresses
+          # livenessProbe:
           #   tcpSocket:
-          #     port: 502  # Use fixed port number since containerPort is removed
-          #   initialDelaySeconds: 2
-          #   periodSeconds: 5
-          #   timeoutSeconds: 3
-          #   failureThreshold: 3
+          #     port: {{ add 502 $idx }}
+          #   initialDelaySeconds: 5
+          #   periodSeconds: 10
+        {{- end }}
         
-        {{- if .Values.opcuaSimulator.enabled }}
-        # OPC-UA simulator sidecar
-        - name: opcua-simulator
-          image: "{{ .Values.opcuaSimulator.image.repository }}:{{ .Values.opcuaSimulator.image.tag }}"
-          imagePullPolicy: {{ .Values.opcuaSimulator.image.pullPolicy }}
-          # OPC-UA port 4840 accessed via localhost by agent only
+        {{- if gt (int .Values.opcuaSimulator.count) 0 }}
+        # OPC-UA simulators (dynamic count)
+        {{- range $idx := until (int .Values.opcuaSimulator.count) }}
+        - name: opcua-simulator-{{ $idx }}
+          image: "{{ $.Values.opcuaSimulator.image.repository }}:{{ $.Values.opcuaSimulator.image.tag }}"
+          imagePullPolicy: {{ $.Values.opcuaSimulator.image.pullPolicy }}
+          # OPC-UA port 4840+idx accessed via localhost by agent only
           env:
-            {{- range $key, $value := .Values.opcuaSimulator.env }}
+            {{- range $key, $value := $.Values.opcuaSimulator.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            - name: OPCUA_TCP_PORT
+              value: {{ add 4840 $idx | quote }}
           resources:
-            {{- toYaml .Values.opcuaSimulator.resources | nindent 12 }}
+            {{- toYaml $.Values.opcuaSimulator.resources | nindent 12 }}
           livenessProbe:
             tcpSocket:
-              port: 4840
+              port: {{ add 4840 $idx }}
             initialDelaySeconds: 10
             periodSeconds: 15
             timeoutSeconds: 3
             failureThreshold: 3
           readinessProbe:
             tcpSocket:
-              port: 4840
+              port: {{ add 4840 $idx }}
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
+        {{- end }}
+        {{- end }}
+        
+        {{- if .Values.sensorSimulator.enabled }}
+        # Sensor simulator sidecar (BME688, temperature, humidity, pressure, gas)
+        - name: sensor-simulator
+          image: "{{ .Values.sensorSimulator.image.repository }}:{{ .Values.sensorSimulator.image.tag }}"
+          imagePullPolicy: {{ .Values.sensorSimulator.image.pullPolicy }}
+          env:
+            {{- range $key, $value := .Values.sensorSimulator.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.sensorSimulator.resources | nindent 12 }}
         {{- end }}
       
       # Provisioning volume (emptyDir shared between init container and agent)

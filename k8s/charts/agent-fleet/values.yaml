@@ -86,6 +86,10 @@ agent:
 
 # Modbus simulator sidecar configuration
 simulator:
+  # Number of Modbus simulators per agent (0-3)
+  # Multiple simulators run on different ports to avoid conflicts
+  modbusCount: 1
+  
   image:
     repository: iotistic/modbus-simulator
     tag: latest
@@ -101,8 +105,9 @@ simulator:
       memory: 128Mi
   
   # Simulator environment variables
+  # Base configuration - port will be incremented for multiple instances
   env:
-    MODBUS_HOST: "127.0.0.1"         # Bind to localhost only (prevents conflicts on single-node)
+    MODBUS_HOST: "127.0.0.1"         # Bind to localhost (shared with agent container)
     MODBUS_PORT: "502"
     MODBUS_SLAVES: "5"               # Number of slave IDs to simulate
     MODBUS_VENDOR: "Generic"         # Vendor to simulate
@@ -110,7 +115,8 @@ simulator:
 
 # OPC-UA simulator sidecar configuration
 opcuaSimulator:
-  enabled: true
+  enabled: true  # Backward-compat: if true and count not set, defaults to 1
+  count: 1       # Number of OPC-UA simulators per agent (0-3). If 0, disables OPC-UA.
   image:
     repository: iotistic/opcua-simulator
     tag: latest
@@ -127,9 +133,31 @@ opcuaSimulator:
   
   # Simulator environment variables
   env:
-    OPCUA_PORT: "4840"
+    OPCUA_PORT: "4840"                   # Base port; instances will use 4840 + index
     OPCUA_ENDPOINT_URL: "opc.tcp://0.0.0.0:4840"
     # Add any OPC-UA specific config here
+
+# Sensor simulator configuration (optional)
+sensorSimulator:
+  enabled: false  # Disabled by default (resource-intensive)
+  image:
+    repository: iotistic/sensor-simulator
+    tag: latest
+    pullPolicy: Always
+  
+  # Resource limits per sensor simulator
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+  
+  # Simulator environment variables
+  env:
+    SENSOR_COUNT: "3"                # Number of simulated sensors
+    MQTT_PUBLISH_INTERVAL: "5000"   # Publish interval (ms)
 
 # Provisioning configuration
 provisioning:

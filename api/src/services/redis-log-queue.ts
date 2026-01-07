@@ -333,15 +333,28 @@ class RedisLogQueue {
         const placeholders: string[] = [];
 
         chunk.forEach((log, index) => {
+          // CRITICAL: Validate message field before insert to prevent constraint violations
+          // This is a safety net for corrupted data that passed earlier validation
+          const message = log.message || '[empty log message]';
+          const serviceName = log.serviceName || '[unknown]';
+          
+          if (!log.message || log.message.trim() === '') {
+            logger.warn('Database insert fallback: empty message replaced with placeholder', {
+              deviceUuid: log.deviceUuid?.substring(0, 8),
+              originalMessage: log.message,
+              serviceName: log.serviceName
+            });
+          }
+          
           const offset = index * 7;
           placeholders.push(
             `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7})`
           );
           values.push(
             log.deviceUuid,
-            log.serviceName || null,
+            serviceName,
             log.timestamp || new Date(),
-            log.message,
+            message,
             log.level || 'info',
             log.isSystem || false,
             log.isStderr || false

@@ -151,14 +151,28 @@ router.post('/device/:uuid/logs', deviceAuth, express.text({
       logger.debug('Storing logs', { count: logs.length });
       
       // Transform agent log format to API format
-      const transformedLogs = logs.map((log: any) => ({
-        serviceName: log.serviceName || log.source?.name || null,
-        timestamp: log.timestamp ? new Date(log.timestamp) : new Date(),
-        message: log.message,
-        isSystem: log.isSystem || false,
-        isStderr: log.isStderr || log.isStdErr || false, // Handle both field names
-        level: log.level || 'info' // Agent sends this field
-      }));
+      const transformedLogs = logs
+        .map((log: any) => ({
+          serviceName: log.serviceName || log.source?.name || null,
+          timestamp: log.timestamp ? new Date(log.timestamp) : new Date(),
+          message: log.message,
+          isSystem: log.isSystem || false,
+          isStderr: log.isStderr || log.isStdErr || false, // Handle both field names
+          level: log.level || 'info' // Agent sends this field
+        }))
+        .filter(log => {
+          // CRITICAL: Filter out logs with null/empty messages to prevent database constraint violations
+          // This handles corrupted data from failed Brotli decompression or malformed agent payloads
+          if (!log.message || typeof log.message !== 'string' || log.message.trim() === '') {
+            logger.warn('Dropping log with null/empty message', {
+              uuid: uuid.substring(0, 8),
+              serviceName: log.serviceName,
+              timestamp: log.timestamp
+            });
+            return false;
+          }
+          return true;
+        });
       
       // Apply sampling to reduce database writes
       // LOG_SAMPLING_RATE: 0.0-1.0 (default: 1.0 = store all logs)
