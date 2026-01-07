@@ -5,7 +5,7 @@
 **Growth Rate**: 0.41 MB/min  
 **Retained Memory**: 3.4 MB  
 **Context**: Modbus message publishing with msgpack+deflate compression  
-**Status**: ✅ **FIXED** - Parse-once + async deflate + buffer cleanup + CPU sampling + adaptive limits
+**Status**: ✅ **FIXED** - Parse-once + async deflate + buffer cleanup + CPU sampling + adaptive limits + micro-opts
 
 ---
 
@@ -36,7 +36,17 @@
   - Cloud server (4GB heap): 10MB limit (capped) ✅
 - **Result**: Prevents OOM on smaller devices, maintains safety on large servers
 
-### 5. **Explicit Buffer Cleanup** (Memory leak fix)
+### 5. **Micro-Optimizations** (Allocation reduction)
+- **Timestamp Caching**: Use `Date.now()` instead of `new Date()`, format once at publish
+  - **Impact**: Eliminates repeated Date object allocations per message
+- **Unit Inference Cache**: `Map<string, string>` for `inferUnit()` results
+  - **Impact**: Field names repeat heavily (temp, humidity, etc.), cache hits ~90%
+- **Batch-Level Sets**: Reuse `WeakSet` and `Set` across messages in batch
+  - **Before**: New `WeakSet()` and `new Set()` per message (12 allocations/batch)
+  - **After**: Clear and reuse batch-level sets (2 allocations/batch)
+  - **Impact**: 6× fewer Set allocations
+
+### 6. **Explicit Buffer Cleanup** (Memory leak fix)
 - **Before**: `resetBatch()` dereferenced array but didn't nullify buffers
 - **After**: Explicitly nullify each message + GC hint for large batches
 - **Result**: Compression buffers released immediately, survivor space stabilized

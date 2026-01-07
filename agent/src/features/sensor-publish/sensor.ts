@@ -157,7 +157,7 @@ export class Sensor extends EventEmitter {
   private messageBatch: MessageBatch = {
     messages: [],
     totalBytes: 0,
-    firstMessageTime: new Date()
+    firstMessageTime: Date.now() // OPTIMIZATION: Use timestamp instead of Date object
   };
   
   private stats: SensorStats = {
@@ -174,6 +174,13 @@ export class Sensor extends EventEmitter {
   private delimiterRegex: RegExp;
   private needStop = false;
   private dictionaryManager?: any; // Dictionary manager for MQTT message key compaction
+  
+  // OPTIMIZATION: Cache unit inference results (field names repeat heavily)
+  private unitCache = new Map<string, string>();
+  
+  // OPTIMIZATION: Pre-allocated sets for extractNumericFields (reused per batch)
+  private batchVisited = new WeakSet();
+  private batchProcessedMetrics = new Set<string>();
   
   // Compression configuration (set at initialization)
   private readonly useMsgpackPoc: boolean;
@@ -309,28 +316,31 @@ export class Sensor extends EventEmitter {
   private feedMessagesToAnomaly(messages: any[]): void {
     if (!anomalyService) return;
 
-    const timestamp = new Date();
+    const timestampMs = Date.now(); // OPTIMIZATION: Use timestamp instead of Date object
     const sensorName = this.getSensorName();
+    
+    // OPTIMIZATION: Clear and reuse batch-level sets instead of creating new ones per message
+    this.batchVisited = new WeakSet();
+    this.batchProcessedMetrics.clear();
 
     for (const data of messages) {
       // Messages are already parsed objects (no JSON.parse needed)
       // Extract all numeric fields and feed to anomaly detection
-      this.extractNumericFields(data, sensorName, timestamp);
+      this.extractNumericFields(data, sensorName, timestampMs);
     }
   }
 
   /**
    * Recursively extract numeric fields from sensor data
    * Handles nested objects and arrays
+   * OPTIMIZATION: Reuses batch-level WeakSet and Set instead of creating new ones per message
    */
   private extractNumericFields(
     data: any,
     sensorName: string,
-    timestamp: Date,
+    timestampMs: number, // OPTIMIZATION: Accept timestamp (ms) instead of Date object
     prefix = '',
-    depth = 0,
-    visited = new WeakSet(),
-    processedMetrics = new Set<string>() // Track processed metrics to avoid duplicates
+    depth = 0
   ): void {
     if (!anomalyService) return;
 
@@ -340,26 +350,24 @@ export class Sensor extends EventEmitter {
       return;
     }
 
-    // Prevent circular references
+    // Prevent circular references (use batch-level WeakSet)
     if (typeof data === 'object' && data !== null) {
-      if (visited.has(data)) {
+      if (this.batchVisited.has(data)) {
         return;
       }
-      visited.add(data);
+      this.batchVisited.add(data);
     }
-
-    const timestampMs = timestamp.getTime();
 
     if (typeof data === 'number') {
       // Direct numeric value
       const metricName = prefix || 'value';
       const fullMetricName = `${sensorName}_${metricName}`;
       
-      // Skip if already processed (prevents duplicates from nested parsing)
-      if (processedMetrics.has(fullMetricName)) {
+      // Skip if already processed (use batch-level Set)
+      if (this.batchProcessedMetrics.has(fullMetricName)) {
         return;
       }
-      processedMetrics.add(fullMetricName);
+      this.batchProcessedMetrics.add(fullMetricName);
       
       anomalyService.processDataPoint({
         source: 'endpoint',
@@ -392,11 +400,11 @@ export class Sensor extends EventEmitter {
         if (typeof value === 'number') {
           const fullMetricName = `${deviceName}_${fieldName}`;
           
-          // Skip if already processed
-          if (processedMetrics.has(fullMetricName)) {
+          // Skip if already processed (use batch-level Set)
+          if (this.batchProcessedMetrics.has(fullMetricName)) {
             return;
           }
-          processedMetrics.add(fullMetricName);
+          this.batchProcessedMetrics.add(fullMetricName);
           
           anomalyService.processDataPoint({
             source: 'endpoint',
@@ -431,11 +439,11 @@ export class Sensor extends EventEmitter {
             if (fieldName && typeof value === 'number') {
               const fullMetricName = `${deviceName}_${fieldName}`;
               
-              // Skip if already processed
-              if (processedMetrics.has(fullMetricName)) {
+              // Skip if already processed (use batch-level Set)
+              if (this.batchProcessedMetrics.has(fullMetricName)) {
                 continue;
               }
-              processedMetrics.add(fullMetricName);
+              this.batchProcessedMetrics.add(fullMetricName);
               
               anomalyService.processDataPoint({
                 source: 'endpoint',
@@ -464,11 +472,11 @@ export class Sensor extends EventEmitter {
           const metricName = prefix ? `${prefix}_${key}` : key;
           const fullMetricName = `${sensorName}_${metricName}`;
           
-          // Skip if already processed
-          if (processedMetrics.has(fullMetricName)) {
+          // Skip if already processed (use batch-level Set)
+          if (this.batchProcessedMetrics.has(fullMetricName)) {
             continue;
           }
-          processedMetrics.add(fullMetricName);
+          this.batchProcessedMetrics.add(fullMetricName);
           
           anomalyService.processDataPoint({
             source: 'sensor',
@@ -485,10 +493,10 @@ export class Sensor extends EventEmitter {
           });
         } else if (Array.isArray(value)) {
           // Handle arrays (e.g., "readings" array)
-          this.extractNumericFields(value, sensorName, timestamp, key, depth + 1, visited, processedMetrics);
+          this.extractNumericFields(value, sensorName, timestampMs, key, depth + 1);
         } else if (typeof value === 'object' && value !== null) {
           // Recurse into nested object (depth-limited)
-          this.extractNumericFields(value, sensorName, timestamp, key, depth + 1, visited, processedMetrics);
+          this.extractNumericFields(value, sensorName, timestampMs, key, depth + 1);
         }
       }
     }
@@ -497,69 +505,85 @@ export class Sensor extends EventEmitter {
   /**
    * Infer measurement unit from field name
    * Returns common units based on field name patterns
+   * OPTIMIZATION: Results cached (field names repeat heavily in sensor data)
    */
   private inferUnit(fieldName: string): string {
+    // OPTIMIZATION: Check cache first (field names repeat heavily)
+    const cached = this.unitCache.get(fieldName);
+    if (cached) {
+      return cached;
+    }
+    
     const lower = fieldName.toLowerCase();
 
     // Temperature
     if (lower.includes('temp') || lower.includes('temperature')) {
-      return '°C';
+      return this.cacheUnit(fieldName, '°C');
     }
 
     // Humidity
     if (lower.includes('humid') || lower.includes('moisture')) {
-      return '%';
+      return this.cacheUnit(fieldName, '%');
     }
 
     // Pressure
     if (lower.includes('pressure') || lower.includes('baro')) {
-      return 'hPa';
+      return this.cacheUnit(fieldName, 'hPa');
     }
 
     // Electrical
     if (lower.includes('voltage') || lower.includes('volt')) {
-      return 'V';
+      return this.cacheUnit(fieldName, 'V');
     }
     if (lower.includes('current') || lower.includes('ampere') || lower.includes('amp')) {
-      return 'A';
+      return this.cacheUnit(fieldName, 'A');
     }
     if (lower.includes('power') || lower.includes('watt')) {
-      return 'W';
+      return this.cacheUnit(fieldName, 'W');
     }
     if (lower.includes('resistance') || lower.includes('ohm')) {
-      return 'Ω';
+      return this.cacheUnit(fieldName, 'Ω');
     }
 
     // Gas/Air Quality
     if (lower.includes('co2') || lower.includes('carbon')) {
-      return 'ppm';
+      return this.cacheUnit(fieldName, 'ppm');
     }
     if (lower.includes('gas') || lower.includes('voc') || lower.includes('iaq')) {
-      return 'index';
+      return this.cacheUnit(fieldName, 'index');
     }
 
     // Light
     if (lower.includes('light') || lower.includes('lux') || lower.includes('illumin')) {
-      return 'lux';
+      return this.cacheUnit(fieldName, 'lux');
     }
 
     // Distance
     if (lower.includes('distance') || lower.includes('range')) {
-      return 'cm';
+      return this.cacheUnit(fieldName, 'cm');
     }
 
     // Speed
     if (lower.includes('speed') || lower.includes('velocity')) {
-      return 'm/s';
+      return this.cacheUnit(fieldName, 'm/s');
     }
 
     // Percentage
     if (lower.includes('percent') || lower.includes('level') || lower.includes('battery')) {
-      return '%';
+      return this.cacheUnit(fieldName, '%');
     }
 
     // Default
-    return 'value';
+    return this.cacheUnit(fieldName, 'value');
+  }
+  
+  /**
+   * Cache unit result for repeated field names
+   * OPTIMIZATION: Reduces string matching overhead for repeated fields
+   */
+  private cacheUnit(fieldName: string, unit: string): string {
+    this.unitCache.set(fieldName, unit);
+    return unit;
   }
 
   /**
@@ -720,7 +744,7 @@ export class Sensor extends EventEmitter {
     
     // Initialize batch timestamp if first message
     if (this.messageBatch.messages.length === 0) {
-      this.messageBatch.firstMessageTime = new Date();
+      this.messageBatch.firstMessageTime = Date.now(); // OPTIMIZATION: Use timestamp
     }
     
     // Store parsed object (not raw string)
@@ -918,9 +942,12 @@ export class Sensor extends EventEmitter {
     // Enrich messages with anomaly scores and forecasts
     const enrichedMessages = this.enrichMessagesWithAnomalyScores(this.messageBatch.messages);
     
+    // OPTIMIZATION: Format timestamp once (avoid repeated new Date().toISOString())
+    const timestampIso = new Date().toISOString();
+    
     const publishData: any = {
       sensor: this.getSensorName(),
-      timestamp: new Date().toISOString(),
+      timestamp: timestampIso,
       messages: enrichedMessages
     };
     
@@ -1235,7 +1262,7 @@ export class Sensor extends EventEmitter {
     this.messageBatch = {
       messages: [],
       totalBytes: 0,
-      firstMessageTime: new Date()
+      firstMessageTime: Date.now() // OPTIMIZATION: Use timestamp
     };
     
     // Hint to GC for large batches (survivor space leak mitigation)

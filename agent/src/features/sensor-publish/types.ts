@@ -82,9 +82,10 @@ export interface SensorStats {
  * OPTIMIZATION: Stores pre-parsed objects to avoid duplicate JSON.parse() calls
  * - feedMessagesToAnomaly() and enrichMessagesWithAnomalyScores() both need parsed objects
  * - Parsing once at batch entry reduces CPU by ~50% (eliminates 1 of 2 parse operations)
+ * - firstMessageTime uses timestamp (number) instead of Date object for efficiency
  */
 export interface MessageBatch {
   messages: any[]; // Pre-parsed objects (parsed once in addMessageToBatch)
   totalBytes: number;
-  firstMessageTime: Date;
+  firstMessageTime: number; // Timestamp (ms since epoch) - format once at publish
 }
