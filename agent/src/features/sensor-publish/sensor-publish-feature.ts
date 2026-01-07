@@ -5,7 +5,7 @@ import {
   SensorPublishConfig,
   SensorConfig
 } from './types.js';
-import { Sensor } from './sensor.js';
+import { Sensor } from './publish.js';
 
 /**
  * SensorPublishFeature - Manages multiple sensors and publishes data to MQTT

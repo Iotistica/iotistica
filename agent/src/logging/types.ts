@@ -84,7 +84,7 @@ export const LogComponents = {
   sshTunnel: 'SSHTunnel',
   remoteAccess: 'RemoteAccess',
   sensor: 'Sensor',
-  sensorPublish: 'EndpointsPublish',
+  sensorPublish: 'Publish',
   sensorConfigHandler: 'SensorConfigHandler',
 } as const;
 

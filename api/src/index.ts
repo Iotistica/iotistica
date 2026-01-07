@@ -6,6 +6,7 @@ import express from 'express';
 import cors from 'cors';
 import https from 'https';
 import { createProxyMiddleware } from 'http-proxy-middleware';
+import { createBrotliDecompress } from 'zlib';
 import logger from './utils/logger';
 
 // Import route modules
@@ -92,7 +93,58 @@ app.use(cors({
 
 app.options('*', cors());
 
-// Support compressed (gzip) request bodies
+/**
+ * Brotli decompression middleware
+ * Express only supports gzip/deflate out of the box, not Brotli (br).
+ * This middleware intercepts br-encoded requests and pipes them through a decompression transform.
+ * 
+ * CRITICAL: Uses stream piping instead of buffering to avoid consuming the request stream
+ */
+app.use((req, res, next) => {
+  const contentEncoding = req.headers['content-encoding'];
+  
+  // Only process Brotli-encoded requests
+  if (contentEncoding !== 'br') {
+    return next();
+  }
+  
+  logger.debug('Brotli-encoded request detected', {
+    path: req.path,
+    contentType: req.headers['content-type']
+  });
+  
+  // Create Brotli decompression transform stream
+  const brotliStream = createBrotliDecompress();
+  
+  // Update headers to reflect decompressed state
+  delete req.headers['content-encoding'];
+  delete req.headers['content-length']; // Will be recalculated by body parser
+  
+  // Pipe request through Brotli decompression
+  // This allows Express body parsers to read decompressed data
+  req.pipe(brotliStream);
+  
+  // Replace req with decompressed stream for downstream middleware
+  // This is the standard pattern for compression middleware
+  (req as any).pipe = brotliStream.pipe.bind(brotliStream);
+  (req as any).on = brotliStream.on.bind(brotliStream);
+  (req as any).read = brotliStream.read.bind(brotliStream);
+  (req as any).unpipe = brotliStream.unpipe.bind(brotliStream);
+  
+  brotliStream.on('error', (error: any) => {
+    logger.error('Brotli decompression error', { 
+      error: error.message,
+      path: req.path
+    });
+    if (!res.headersSent) {
+      res.status(400).json({ error: 'Invalid Brotli-compressed body' });
+    }
+  });
+  
+  next();
+});
+
+// Support compressed (gzip/deflate) request bodies (Brotli handled above)
 app.use(express.json({ 
   limit: '100mb',  // Large limit for decompressed logs (10MB compressed → 40-60MB decompressed)
   inflate: true  // Automatically decompress gzip/deflate

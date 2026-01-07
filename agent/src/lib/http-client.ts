@@ -114,10 +114,6 @@ export class FetchHttpClient implements HttpClient {
 				}
 			});
 			
-			console.log('[HttpClient] Created undici dispatcher with TLS options:', {
-				rejectUnauthorized: options.rejectUnauthorized ?? true,
-				hasCaCert: !!options.caCert
-			});
 		}
 	}
 

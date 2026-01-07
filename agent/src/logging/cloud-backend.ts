@@ -70,6 +70,7 @@ interface CloudLogBackendConfig {
 	cloudEndpoint: string;
 	deviceUuid: string;
 	deviceApiKey?: string;
+	httpClient?: HttpClient; // Optional: shared HTTP client for connection pooling
 	compression?: boolean;
 	batchSize?: number;
 	maxRetries?: number;
@@ -108,7 +109,7 @@ interface AckCursor {
 }
 
 export class CloudLogBackend implements LogBackend {
-	private config: Required<CloudLogBackendConfig>;
+	private config: Required<Omit<CloudLogBackendConfig, 'httpClient'>> & { httpClient?: HttpClient };
 	private buffer: LogMessage[] = [];
 	private isStreaming: boolean = false;
 	private retryCount: number = 0;
@@ -207,14 +208,18 @@ export class CloudLogBackend implements LogBackend {
 	const isLocalhost = this.config.cloudEndpoint.includes('localhost') || 
 	                     this.config.cloudEndpoint.includes('127.0.0.1');
 	
-	// Initialize HTTP client with default headers
-	this.httpClient = new FetchHttpClient({
-		defaultHeaders: {
-			'X-Device-API-Key': this.config.deviceApiKey
-		},
-		defaultTimeout: 30000, // 30 second timeout
-		rejectUnauthorized: !isLocalhost // Allow self-signed certs for localhost
-	});
+	// Use shared HTTP client if provided, otherwise create dedicated instance
+	if (config.httpClient) {
+		this.httpClient = config.httpClient;
+	} else {
+		this.httpClient = new FetchHttpClient({
+			defaultHeaders: {
+				'X-Device-API-Key': this.config.deviceApiKey
+			},
+			defaultTimeout: 30000, // 30 second timeout
+			rejectUnauthorized: !isLocalhost // Allow self-signed certs for localhost
+		});
+	}
 	
 	// Initialize sampling rates with defaults
 	this.samplingRates = {
@@ -725,9 +730,11 @@ export class CloudLogBackend implements LogBackend {
 		const shouldCompress = this.config.compression && ndjson.length > 2048;
 		
 		// Send to cloud using HTTP client with batch ID header for idempotency
+		// CRITICAL: Add X-Device-API-Key per-request (shared client doesn't have it in defaultHeaders)
 		const response = await this.httpClient.post(endpoint, ndjson, {
 			headers: {
 				'Content-Type': 'application/x-ndjson',
+				'X-Device-API-Key': this.config.deviceApiKey, // Required for device authentication
 				'X-Batch-Id': logBatch.batchId,  // Server can detect duplicates
 				'X-Batch-Attempt': logBatch.attempts.toString()
 			},

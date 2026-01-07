@@ -22,6 +22,7 @@ export interface FeatureContext {
   logger: AgentLogger;
   deviceInfo: DeviceInfo;
   mqttManager: MqttManager;
+  httpClient: any; // Shared HTTP client with connection pooling (singleton pattern)
   containerManager: any;
   deviceManager: any;
   stateReconciler: StateReconciler;
@@ -142,7 +143,8 @@ export class FeatureInitializer {
           defaultHandlerTimeout: 60000,
         },
         logger,
-        deviceInfo.uuid
+        deviceInfo.uuid,
+        this.context.httpClient // Use shared HTTP client for connection pooling
       );
 
       await this.features.jobs.start();
@@ -275,7 +277,7 @@ export class FeatureInitializer {
 
       // Configure edge AI anomaly detection if enabled
       if (anomalyService) {
-        const { configureAnomalyFeed } = await import('../features/sensor-publish/sensor.js');
+        const { configureAnomalyFeed } = await import('../features/sensor-publish/publish.js');
         configureAnomalyFeed(anomalyService);
 
         logger.debugSync('Configured edge AI anomaly detection for sensor data', {
@@ -707,10 +709,12 @@ export class FeatureInitializer {
     this.context.configProtocols = protocols;
 
     // Always reinitialize protocol adapters (will check database even if config is empty)
-    // Sensor Publish will auto-reconnect to new sockets (no manual reload needed)
     await this.initProtocolAdapters();
 
-    logger.infoSync('Protocol adapters reloaded, Sensor Publish will auto-reconnect', {
+    // Restart Sensor Publish to reconnect to new sockets
+    await this.initSensorPublish();
+
+    logger.infoSync('Protocol adapters and Sensor Publish reloaded', {
       component: LogComponents.agent
     });
 

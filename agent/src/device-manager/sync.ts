@@ -230,6 +230,8 @@ export class CloudSync extends EventEmitter {
 
 	/**
 	 * Create HTTP client with TLS configuration from device info
+	 * 
+	 * Note: This method is only called if no shared httpClient is provided to constructor
 	 */
 	private createHttpClient(): HttpClient {
 		const deviceInfo = this.deviceManager.getDeviceInfo();
@@ -243,7 +245,8 @@ export class CloudSync extends EventEmitter {
 			hasApiTlsConfig: !!deviceInfo?.apiTlsConfig,
 			apiTlsConfigKeys: deviceInfo?.apiTlsConfig ? Object.keys(deviceInfo.apiTlsConfig) : [],
 			hasCaCert: !!deviceInfo?.apiTlsConfig?.caCert,
-			caCertLength: deviceInfo?.apiTlsConfig?.caCert?.length
+			caCertLength: deviceInfo?.apiTlsConfig?.caCert?.length,
+			note: 'Creating dedicated HTTP client (shared client not provided)'
 		});
 		
 		const endpoint = this.config.cloudApiEndpoint;

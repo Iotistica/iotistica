@@ -27,6 +27,7 @@ import { LogComponents } from "./logging/types.js";
 
 import { MqttManager } from "./mqtt/manager.js";
 import { getPackageVersion } from "./utils/api-utils";
+import { FetchHttpClient } from "./lib/http-client.js";
 
 import { AgentFirewall } from "./network/firewall.js";
 import { AgentUpdater } from "./updater.js";
@@ -84,6 +85,7 @@ export default class DeviceAgent {
   private discoveryService?: DiscoveryService; // Protocol discovery (Modbus, OPC-UA, CAN, etc.)
   private agentConfig!: AgentConfig; // Configuration accessor (cloud → hardcoded fallback)
   private dictionaryManager?: import('./dictionary/manager').DictionaryManager; // MQTT message key compaction (top-level service)
+  private sharedHttpClient?: import('./lib/http-client').HttpClient; // Shared HTTP client for connection pooling
 
   // System settings (config-driven with env var defaults)
   // Note: All settings now accessed via agentConfig getters (intervals, endpoints, ports, etc.)
@@ -172,6 +174,15 @@ export default class DeviceAgent {
         hasSettings: !!targetState?.config?.settings
       });
      
+      // Initialize shared HTTP client (singleton pattern - reused across all features)
+      // This enables connection pooling for CloudSync, CloudLogBackend, JobsMonitor, etc.
+      const cloudApiEndpoint = this.agentConfig.getCloudApiEndpoint();
+      const isLocalhost = cloudApiEndpoint.includes('localhost') || cloudApiEndpoint.includes('127.0.0.1');
+      this.sharedHttpClient = new FetchHttpClient({
+        defaultTimeout: 30000,
+        rejectUnauthorized: !isLocalhost // Allow self-signed certs for localhost
+      });
+
       // Initialize optional features using FeatureInitializer
       const featureContext: FeatureContext = {
         logger: this.agentLogger,
@@ -179,6 +190,7 @@ export default class DeviceAgent {
         deviceManager: this.deviceManager,
         stateReconciler: this.stateReconciler,
         mqttManager: MqttManager.getInstance(),
+        httpClient: this.sharedHttpClient,
         containerManager: this.containerManager,
         configSettings: targetState?.config?.settings || {},
         configFeatures: this.agentConfig.getFeatures(),
@@ -416,6 +428,7 @@ export default class DeviceAgent {
           cloudEndpoint: cloudApiEndpoint,
           deviceUuid: this.deviceInfo.uuid,
           deviceApiKey: this.deviceInfo.apiKey,
+          httpClient: this.sharedHttpClient, // Use shared HTTP client for connection pooling
           compression: loggingConfig.enableCompression,
           batchSize: loggingConfig.logBatchSize,
           flushInterval: loggingConfig.logFlushIntervalMs,
@@ -957,7 +970,7 @@ export default class DeviceAgent {
     configureSystemMetrics(this.anomalyService);
     
     // Wire edge AI anomaly service to sensor-publish
-    const { configureAnomalyFeed: configureSensorAnomaly } = await import('./features/sensor-publish/sensor.js');
+    const { configureAnomalyFeed: configureSensorAnomaly } = await import('./features/sensor-publish/publish.js');
     configureSensorAnomaly(this.anomalyService);
     
     this.agentLogger?.infoSync('Anomaly detection configured for system metrics and endpoints', {
@@ -1096,7 +1109,7 @@ export default class DeviceAgent {
       undefined, // sensorPublish (unused)
       undefined, // sensors (unused)
       MqttManager.getInstance(), // Pass MQTT manager singleton for state reporting (optional)
-      undefined, // httpClient (uses default)
+      this.sharedHttpClient, // Use shared HTTP client for connection pooling
       this.updater // Pass AgentUpdater for version reporting
     );
 

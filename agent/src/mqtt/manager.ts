@@ -172,6 +172,40 @@ export function logCompressionStats(
  * 
  * Events:
  * - 'connect': Emitted when MQTT connection is established
+ * 
+ * TODO (ARCHITECTURE): Consider splitting into layered architecture when complexity justifies
+ * 
+ * Current monolithic design works well for single-protocol use case, but future needs
+ * (multi-protocol support, complex codec switching, advanced testing) may benefit from:
+ * 
+ * 1. MqttTransport (connect, disconnect, publish, subscribe)
+ *    - Pure MQTT.js wrapper
+ *    - Easy to mock for unit tests
+ *    - Could be abstracted to support AMQP/WebSocket transports
+ * 
+ * 2. MqttCodec (serialize, deserialize)
+ *    - JSON/MessagePack/Protobuf encoding
+ *    - Format detection/negotiation
+ *    - Independent of transport layer
+ * 
+ * 3. MqttReliability (queue, retry, deduplication, inflight limiting)
+ *    - Pending message queue management
+ *    - Exponential backoff reconnection
+ *    - Token bucket inflight control
+ *    - Message ID deduplication
+ * 
+ * Benefits:
+ * - Testability: Mock transport, test reliability logic in isolation
+ * - Codec swapping: Add Protobuf without touching transport/reliability
+ * - Maintenance: Clear boundaries reduce cognitive load (~800 lines → 3x ~250 lines)
+ * - Reusability: Transport layer could support non-MQTT protocols
+ * 
+ * Trade-offs:
+ * - More files/classes (3 vs 1)
+ * - More indirection (method calls across layers)
+ * - Only worth it if adding MessagePack/Protobuf support or multi-protocol transport
+ * 
+ * Decision: Keep monolithic for now. Refactor when adding second codec or protocol.
  */
 export class MqttManager extends EventEmitter {
   private static instance: MqttManager;
@@ -208,9 +242,13 @@ export class MqttManager extends EventEmitter {
     options?: IClientPublishOptions;
   }> = [];
   private readonly MAX_PENDING_PUBLISHES = 1000; // Prevent memory overflow
+  private readonly MAX_INFLIGHT = 10; // Max concurrent publishes (prevents socket congestion)
+  private inflightPublishes = 0; // Current inflight publish count (token bucket)
   private reconnectAttempts = 0;
   private readonly MAX_RECONNECT_DELAY_MS = 30000; // 30 seconds max
   private readonly BASE_RECONNECT_DELAY_MS = 1000; // 1 second base
+  private readonly MIN_RECONNECT_INTERVAL = 1000; // Minimum time between reconnect attempts (prevents thrashing)
+  private lastReconnectAt = 0; // Timestamp of last reconnect attempt
   private lastBrokerUrl?: string;
   private lastOptions?: IClientOptions;
   private messageIdGenerator?: MessageIdGenerator; // For HA deduplication
@@ -693,12 +731,25 @@ export class MqttManager extends EventEmitter {
 
   /**
    * Schedule reconnect with exponential backoff
+   * 
+   * Guards against reconnection thrashing:
+   * - isReconnecting: Prevents overlapping reconnect chains
+   * - MIN_RECONNECT_INTERVAL: Prevents rapid-fire reconnects in pathological cases
+   *   (e.g., flapping network + slow DNS → repeated forced teardowns)
    */
   private scheduleReconnect(brokerUrl: string, options?: IClientOptions): void {
-    // Prevent overlapping reconnection chains
+    // Guard 1: Prevent overlapping reconnection chains
     if (this.isReconnecting) {
       return;
     }
+
+    // Guard 2: Prevent reconnection thrashing (minimum interval between attempts)
+    const now = Date.now();
+    if (now - this.lastReconnectAt < this.MIN_RECONNECT_INTERVAL) {
+      console.log(`[MQTT] Reconnect throttled (min interval: ${this.MIN_RECONNECT_INTERVAL}ms)`);
+      return;
+    }
+    this.lastReconnectAt = now;
     this.isReconnecting = true;
     
     this.reconnectAttempts++;
@@ -737,6 +788,11 @@ export class MqttManager extends EventEmitter {
 
   /**
    * Drain pending publishes on reconnect
+   * 
+   * Uses inflight limiting (token bucket) to prevent memory spikes and socket congestion.
+   * - Max 10 concurrent publishes (MAX_INFLIGHT)
+   * - Continues draining as callbacks complete
+   * - Critical for stability on flaky links
    */
   private drainPendingPublishes(): void {
     if (this.pendingPublishes.length === 0) {
@@ -745,21 +801,42 @@ export class MqttManager extends EventEmitter {
 
     const count = this.pendingPublishes.length;
     this.logger?.infoSync(`Draining ${count} pending MQTT messages`, {
-      component: LogComponents.mqtt
+      component: LogComponents.mqtt,
+      maxInflight: this.MAX_INFLIGHT
     });
 
-    const messages = [...this.pendingPublishes];
-    this.pendingPublishes = [];
+    // Drain with inflight limiting (token bucket pattern)
+    this.drainBatch();
+  }
 
-    for (const msg of messages) {
-      this.client!.publish(msg.topic, msg.payload, msg.options || {}, (error) => {
+  /**
+   * Drain a batch of pending publishes (respecting inflight limit)
+   * Recursively called as publishes complete to maintain steady flow
+   */
+  private drainBatch(): void {
+    // Stop if queue empty or client disconnected
+    if (this.pendingPublishes.length === 0 || !this.client || !this.connected) {
+      return;
+    }
+
+    // Respect inflight limit to prevent socket congestion
+    while (this.pendingPublishes.length > 0 && this.inflightPublishes < this.MAX_INFLIGHT) {
+      const msg = this.pendingPublishes.shift()!;
+      this.inflightPublishes++;
+
+      this.client.publish(msg.topic, msg.payload, msg.options || {}, (error) => {
+        this.inflightPublishes--; // Release token
+
         if (error) {
           this.logger?.errorSync(`Failed to drain message to ${msg.topic}`, error, {
             component: LogComponents.mqtt
           });
-          // Re-queue failed message
-          this.pendingPublishes.push(msg);
+          // Re-queue failed message (back to front to preserve order)
+          this.pendingPublishes.unshift(msg);
         }
+
+        // Continue draining as callbacks complete (maintains steady flow)
+        this.drainBatch();
       });
     }
   }

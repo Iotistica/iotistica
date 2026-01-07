@@ -83,7 +83,8 @@ export class JobsFeature extends BaseFeature {
   constructor(
     config: JobsConfig,
     agentLogger: AgentLogger,
-    deviceUuid: string
+    deviceUuid: string,
+    httpClient?: HttpClient // Optional: shared HTTP client for connection pooling
   ) {
     super(
       config,
@@ -107,17 +108,22 @@ export class JobsFeature extends BaseFeature {
     this.baseUrl = `${normalizedBaseUrl}/${apiVersion}`;
     this.deviceApiKey = jobConfig.deviceApiKey || '';
     
-    // For localhost/development, disable TLS verification
-    const isLocalhost = normalizedBaseUrl.includes('localhost') || normalizedBaseUrl.includes('127.0.0.1');
-    
-    this.httpClient = new FetchHttpClient({
-      defaultHeaders: {
-        'Content-Type': 'application/json',
-        'User-Agent': `Iotistic-agent/${deviceUuid}`,
-      },
-      defaultTimeout: 30000,
-      rejectUnauthorized: !isLocalhost, // Allow self-signed certs for localhost
-    });
+    // Use shared HTTP client if provided, otherwise create dedicated instance
+    if (httpClient) {
+      this.httpClient = httpClient;
+    } else {
+      // For localhost/development, disable TLS verification
+      const isLocalhost = normalizedBaseUrl.includes('localhost') || normalizedBaseUrl.includes('127.0.0.1');
+      
+      this.httpClient = new FetchHttpClient({
+        defaultHeaders: {
+          'Content-Type': 'application/json',
+          'User-Agent': `Iotistic-agent/${deviceUuid}`,
+        },
+        defaultTimeout: 30000,
+        rejectUnauthorized: !isLocalhost, // Allow self-signed certs for localhost
+      });
+    }
   }
 
   /**

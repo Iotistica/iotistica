@@ -13,7 +13,7 @@ import {
   Logger,
   SensorStats,
   MessageBatch
-} from './types';
+} from './types.js';
 
 // ============================================================================
 // MESSAGEPACK POC CONFIGURATION
@@ -797,9 +797,8 @@ export class Sensor extends EventEmitter {
     const sensorName = this.getSensorName();
     const enrichedMessages: any[] = [];
     
-    // Get predictions once for all readings (cached by anomaly service)
-    // Note: getPredictions() is available via getSummaryForReport() internally
-    const predictions: Record<string, any> = {};
+    // Get predictions once for all readings (avoids repeated forecasting calls)
+    const predictions = anomalyService.getPredictions() || {};
 
     for (const data of messages) {
       // Messages are already parsed objects (no JSON.parse needed)

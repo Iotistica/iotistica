@@ -1,3 +1,3 @@
 export * from './types';
-export * from './sensor';
+export * from './publish';
 export * from './sensor-publish-feature';
