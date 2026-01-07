@@ -61,7 +61,7 @@ export class SensorsFeature extends BaseFeature {
     agentLogger: AgentLogger,
     deviceUuid: string
   ) {
-    super(config, agentLogger, 'ProtocolAdapters', deviceUuid, false, 'PROTOCOL_ADAPTERS_DEBUG');
+    super(config, agentLogger, 'Adapters', deviceUuid, false, 'PROTOCOL_ADAPTERS_DEBUG');
   }
 
   /**

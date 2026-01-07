@@ -4,6 +4,15 @@
  * ========================
  * Iotistic device management and configuration tool
  * 
+ * Error Handling Pattern:
+ *   - Validation errors: throw new CLIError(message, 1, {context})
+ *   - API errors: Let apiRequest throw, caught by main()
+ *   - Centralized handling: main().catch() handles all errors and calls process.exit
+ *   - Benefits: Testable, reusable in scripts/REPLs, clean separation of concerns
+ * 
+ * TODO: Complete migration of all process.exit(1) calls to throw new CLIError()
+ *       Pattern: Replace logger.error() + process.exit(1) with throw new CLIError()
+ * 
  * Usage:
  *   iotctl provision <key>            - Provision device with cloud
  *   iotctl config set-api <url>       - Update cloud API endpoint
@@ -19,7 +28,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, statSync } from 'fs';
 import { join, dirname } from 'path';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 
 
 // Configuration paths
@@ -31,9 +40,52 @@ const DEVICE_API_PORT = process.env.DEVICE_API_PORT || '48484';
 const DEVICE_API_BASE = process.env.DEVICE_API_URL || `http://localhost:${DEVICE_API_PORT}`;
 const DEVICE_API_V1 = `${DEVICE_API_BASE}/v1`;
 
+// Environment detection (once at startup)
+const ENV = {
+	isContainer: existsSync('/.dockerenv'),
+	hasDocker: (() => {
+		try {
+			execSync('docker --version', { stdio: 'ignore' });
+			return true;
+		} catch {
+			return false;
+		}
+	})()
+};
+
 // ============================================================================
-// Simple Logger (console output)
+// Error Handling
 // ============================================================================
+
+/**
+ * CLIError - Custom error for CLI operations
+ * 
+ * Usage Pattern (New - Preferred):
+ *   // Input validation
+ *   if (!input) {
+ *     throw new CLIError('Message', 1, { context });
+ *   }
+ * 
+ *   // Operation failure
+ *   catch (error) {
+ *     throw new CLIError('Operation failed', 1);
+ *   }
+ * 
+ * Old Pattern (Still exists in ~40 places - TODO: migrate):
+ *   logger.error('Message', error, { context });
+ *   process.exit(1);
+ * 
+ * Benefits:
+ *   - Testable: Functions can be unit tested without process.exit
+ *   - Reusable: Can embed CLI in scripts/REPLs without exiting process
+ *   - Centralized: All errors handled in main().catch()
+ */
+class CLIError extends Error {
+	constructor(message: string, public exitCode: number = 1, public context?: Record<string, any>) {
+		super(message);
+		this.name = 'CLIError';
+	}
+}
 
 class CLILogger {
 	info(message: string, context?: Record<string, any>): void {
@@ -73,8 +125,32 @@ interface DeviceConfig {
 }
 
 // ============================================================================
-// Device API Client
+// Device API Client with Request Coalescing
 // ============================================================================
+
+// In-memory cache for API responses during a single CLI invocation
+// Prevents duplicate API calls when multiple commands query the same endpoint
+// Cache is cleared between CLI invocations (process exit)
+const apiCache = new Map<string, Promise<any>>();
+
+/**
+ * Cached API request - prevents duplicate calls to same endpoint
+ * Use this instead of apiRequest() for idempotent GET requests
+ */
+async function apiCached(endpoint: string): Promise<any> {
+	if (!apiCache.has(endpoint)) {
+		apiCache.set(endpoint, apiRequest(endpoint));
+	}
+	return apiCache.get(endpoint)!;
+}
+
+/**
+ * Clear API cache (called before each command)
+ * Ensures fresh data for each CLI invocation
+ */
+function clearApiCache(): void {
+	apiCache.clear();
+}
 
 async function apiRequest(endpoint: string, options: RequestInit = {}): Promise<any> {
 	try {
@@ -84,6 +160,8 @@ async function apiRequest(endpoint: string, options: RequestInit = {}): Promise<
 				'Content-Type': 'application/json',
 				...options.headers,
 			},
+			// Default 5s timeout for edge devices (prevents hangs)
+			signal: options.signal ?? AbortSignal.timeout(5000)
 		});
 
 		if (!response.ok) {
@@ -97,14 +175,15 @@ async function apiRequest(endpoint: string, options: RequestInit = {}): Promise<
 			return { success: true };
 		}
 
-		return JSON.parse(text);
+		// Parse and normalize response (unwrap .Data if present)
+		const json = JSON.parse(text);
+		return json.Data ?? json;
 	} catch (error) {
 		if ((error as any).code === 'ECONNREFUSED') {
-			logger.error('Cannot connect to agent', undefined, {
+			throw new CLIError('Cannot connect to agent', 1, {
 				endpoint: DEVICE_API_BASE,
 				hint: 'Make sure the agent is running'
 			});
-			process.exit(1);
 		}
 		throw error;
 	}
@@ -123,6 +202,32 @@ function validateUrl(url: string): boolean {
 	}
 }
 
+/**
+ * Require confirmation for dangerous operations
+ * Checks for --yes flag, otherwise prompts user and exits
+ */
+function requireConfirmation(message: string): void {
+	const args = process.argv.slice(2);
+	if (!args.includes('--yes')) {
+		console.log(`\n⚠️  ${message}`);
+		console.log('Use --yes flag to confirm this action\n');
+		throw new CLIError('Confirmation required', 1, {
+			hint: 'Add --yes flag to confirm'
+		});
+	}
+}
+
+/**
+ * Redact sensitive values for safe logging
+ * Shows first 4 and last 4 characters, redacts the middle
+ */
+function redact(value: string | undefined | null): string {
+	if (!value || value.length <= 8) {
+		return value ? '****' : 'not set';
+	}
+	return `${value.slice(0, 4)}...${value.slice(-4)}`;
+}
+
 // ============================================================================
 // Commands
 // ============================================================================
@@ -131,7 +236,7 @@ function showHelp(): void {
 	console.log(`
 ╔═══════════════════════════════════════════════════════════════════════════╗
 ║                           iotctl - IoT Control                             ║
-║                        Iotistic Device Management CLI                      ║
+║                        Iotistica Device Management CLI                      ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 
 PROVISIONING COMMANDS:
@@ -142,14 +247,16 @@ PROVISIONING COMMANDS:
 
   provision status                  Show device provisioning status
 
-  deprovision                       Remove cloud registration (keeps UUID and deviceApiKey)
+  deprovision [--yes]               Remove cloud registration (keeps UUID and deviceApiKey)
                                     Clears: deviceId, MQTT credentials, cloud endpoint
                                     Preserves: UUID, deviceApiKey for re-provisioning
+                                    --yes : Skip confirmation prompt
 
-  factory-reset                     WARNING: Complete data wipe
+  factory-reset [--yes]             WARNING: Complete data wipe
                                     Deletes: All apps, services, state, sensors, credentials
                                     Preserves: Only device UUID
                                     This action cannot be undone!
+                                    --yes : Skip confirmation prompt
 
 CONFIGURATION COMMANDS:
 
@@ -191,7 +298,8 @@ CONTAINER/APPLICATION MANAGEMENT:
 
   apps info <appId>                 Show application details
 
-  apps purge <appId>                Purge application data (volumes)
+  apps purge <appId> [--yes]        Purge application data (volumes)
+                                    --yes : Skip confirmation prompt
 
   services list [<appId>]           List all services (optionally filtered by app)
 
@@ -256,17 +364,15 @@ EXAMPLES:
 
 async function configSetApi(url: string): Promise<void> {
 	if (!url) {
-		logger.error('API URL is required', undefined, {
+		throw new CLIError('API URL is required', 1, {
 			usage: 'iotctl config set-api <url>'
 		});
-		process.exit(1);
 	}
 	
 	if (!validateUrl(url)) {
-		logger.error('Invalid URL format', undefined, {
+		throw new CLIError('Invalid URL format', 1, {
 			hint: 'URL must start with http:// or https://'
 		});
-		process.exit(1);
 	}
 	
 	// Remove trailing slash
@@ -283,14 +389,14 @@ async function configSetApi(url: string): Promise<void> {
 			hint: 'Run: iotctl system restart'
 		});
 	} catch (error) {
-		logger.error('Failed to update API endpoint', error as Error);
-		process.exit(1);
+		throw new CLIError('Failed to update API endpoint', 1);
 	}
 }
 
 async function configGetApi(): Promise<void> {
+	clearApiCache(); // Ensure fresh data
 	try {
-		const provisionStatus = await apiRequest(`${DEVICE_API_V1}/provision/status`);
+		const provisionStatus = await apiCached(`${DEVICE_API_V1}/provision/status`);
 		
 		if (provisionStatus.apiEndpoint) {
 			logger.info('Cloud API Endpoint', { endpoint: provisionStatus.apiEndpoint });
@@ -298,8 +404,7 @@ async function configGetApi(): Promise<void> {
 			logger.warn('Cloud API endpoint not configured');
 		}
 	} catch (error) {
-		logger.error('Failed to retrieve API endpoint', error as Error);
-		process.exit(1);
+		throw new CLIError('Failed to retrieve API endpoint', 1);
 	}
 }
 
@@ -340,8 +445,9 @@ async function configGet(key: string): Promise<void> {
 		process.exit(1);
 	}
 	
+	clearApiCache(); // Ensure fresh data for this command
 	try {
-		const deviceState = await apiRequest(`${DEVICE_API_V1}/device`);
+		const deviceState = await apiCached(`${DEVICE_API_V1}/device`);
 		const config = deviceState.config || {};
 		
 		if (key in config) {
@@ -356,16 +462,17 @@ async function configGet(key: string): Promise<void> {
 }
 
 async function configShow(): Promise<void> {
+	clearApiCache(); // Ensure fresh data for this command
 	try {
-		// Get device state from API
-		const deviceState = await apiRequest(`${DEVICE_API_V1}/device`);
+		// Get device state from API (cached)
+		const deviceState = await apiCached(`${DEVICE_API_V1}/device`);
 		
-		// Get provision status for additional config
-		const provisionStatus = await apiRequest(`${DEVICE_API_V1}/provision/status`);
+		// Get provision status for additional config (cached)
+		const provisionStatus = await apiCached(`${DEVICE_API_V1}/provision/status`);
 		
 		const config = {
-			uuid: deviceState.uuid,
-			deviceId: provisionStatus.deviceId || 'not assigned',
+			uuid: redact(deviceState.uuid),
+			deviceId: redact(provisionStatus.deviceId),
 			deviceName: provisionStatus.deviceName || 'not set',
 			cloudApiEndpoint: provisionStatus.apiEndpoint || 'not configured',
 			mqttConfigured: provisionStatus.mqttConfigured || false,
@@ -396,14 +503,21 @@ async function configReset(): Promise<void> {
 }
 
 async function showStatusEnhanced(): Promise<void> {
+	clearApiCache(); // Ensure fresh data for this command
 	logger.info('Checking device health...');
 	
 	try {
-		// Check agent API connectivity
-		const deviceState = await apiRequest(`${DEVICE_API_V1}/device`);
+		// Check agent API connectivity (cached)
+		const deviceState = await apiCached(`${DEVICE_API_V1}/device`);
 		logger.info('Agent running', {
-			uuid: deviceState.uuid,
+			uuid: redact(deviceState.uuid),
 			online: deviceState.is_online
+		});
+		
+		// Environment info
+		logger.info('Environment', {
+			isContainer: ENV.isContainer,
+			hasDocker: ENV.hasDocker
 		});
 		
 		// Count apps
@@ -470,8 +584,9 @@ function showStatus(): void {
 // ============================================================================
 
 async function appsList(): Promise<void> {
+	clearApiCache(); // Ensure fresh data
 	try {
-		const deviceState = await apiRequest(`${DEVICE_API_V1}/device`);
+		const deviceState = await apiCached(`${DEVICE_API_V1}/device`);
 		const apps = deviceState.apps || {};
 		
 		if (Object.keys(apps).length === 0) {
@@ -606,6 +721,10 @@ async function appsPurge(appId: string): Promise<void> {
 			appId,
 			warning: 'This removes all volumes and data'
 		});
+		
+		// Require explicit confirmation
+		requireConfirmation(`Purge will remove ALL data for app ${appId}. This cannot be undone.`);
+		
 		await apiRequest(`${DEVICE_API_V1}/purge`, {
 			method: 'POST',
 			body: JSON.stringify({ appId, force: true })
@@ -623,8 +742,9 @@ async function appsPurge(appId: string): Promise<void> {
 // ============================================================================
 
 async function servicesList(appId?: string): Promise<void> {
+	clearApiCache(); // Ensure fresh data
 	try {
-		const deviceState = await apiRequest(`${DEVICE_API_V1}/device`);
+		const deviceState = await apiCached(`${DEVICE_API_V1}/device`);
 		const apps = deviceState.apps || {};
 		
 		let totalServices = 0;
@@ -749,6 +869,7 @@ async function servicesRestart(serviceId: string): Promise<void> {
 }
 
 async function servicesLogs(serviceId: string, follow: boolean = false): Promise<void> {
+	clearApiCache();
 	if (!serviceId) {
 		logger.error('Service ID is required', undefined, {
 			usage: 'iotctl services logs <serviceId> [-f]'
@@ -757,8 +878,12 @@ async function servicesLogs(serviceId: string, follow: boolean = false): Promise
 	}
 	
 	try {
-		// Get service info to find container ID
-		const deviceState = await apiRequest(`${DEVICE_API_V1}/device`);
+		// TODO: API Optimization - Over-fetching entire device state
+		// Current: Fetch entire device graph just to find one service's containerId
+		// Better: GET /v1/services/:id (returns single service with containerId)
+		// Alternative: GET /v1/device?include=apps.services (filtered response)
+		// Impact: Reduces payload size and parsing time, especially with many apps/services
+		const deviceState = await apiCached(`${DEVICE_API_V1}/device`);
 		const apps = deviceState.apps || {};
 		
 		let containerId: string | undefined;
@@ -776,6 +901,13 @@ async function servicesLogs(serviceId: string, follow: boolean = false): Promise
 			process.exit(1);
 		}
 		
+		// Check if Docker is available
+		if (!ENV.hasDocker) {
+			throw new CLIError('Docker is not available', 1, {
+				hint: 'Install Docker or ensure it is in your PATH'
+			});
+		}
+		
 		logger.info('Service logs', { serviceId, containerId: containerId.substring(0, 12) });
 		
 		// Use docker logs command
@@ -788,8 +920,7 @@ async function servicesLogs(serviceId: string, follow: boolean = false): Promise
 		args.push(containerId);
 		
 		const docker = spawn('docker', args, {
-			stdio: 'inherit',
-			shell: true
+			stdio: 'inherit'
 		});
 		
 		docker.on('error', (err) => {
@@ -805,6 +936,7 @@ async function servicesLogs(serviceId: string, follow: boolean = false): Promise
 }
 
 async function servicesInfo(serviceId: string): Promise<void> {
+	clearApiCache();
 	if (!serviceId) {
 		logger.error('Service ID is required', undefined, {
 			usage: 'iotctl services info <serviceId>'
@@ -813,7 +945,12 @@ async function servicesInfo(serviceId: string): Promise<void> {
 	}
 	
 	try {
-		const deviceState = await apiRequest(`${DEVICE_API_V1}/device`);
+		// TODO: API Optimization - Over-fetching entire device state
+		// Current: Fetch entire device graph just to find one service's details
+		// Better: GET /v1/services/:id (returns single service object)
+		// Alternative: GET /v1/device?include=apps.services (filtered response)
+		// Impact: Reduces payload size and parsing time, especially with many apps/services
+		const deviceState = await apiCached(`${DEVICE_API_V1}/device`);
 		const apps = deviceState.apps || {};
 		
 		for (const appId in apps) {
@@ -875,133 +1012,163 @@ async function runDiagnostics(): Promise<void> {
 	
 	const results: { [key: string]: { status: string; message: string; details?: any } } = {};
 	
-	// 1. Check Device API connection
-	try {
-		const response = await fetch(`${DEVICE_API_V1}/device`);
-		if (response.ok) {
-			const data: any = await response.json();
-			results['Device API'] = {
-				status: '✓ OK',
-				message: `Connected to ${DEVICE_API_BASE}`,
-				details: { uuid: data.Data?.uuid, provisioned: data.Data?.provisioned }
-			};
-		} else {
+	// Helper functions for each diagnostic check
+	const checkDeviceApi = async () => {
+		try {
+			const response = await fetch(`${DEVICE_API_V1}/device`);
+			if (response.ok) {
+				const json: any = await response.json();
+				const data = json.Data ?? json;
+				results['Device API'] = {
+					status: '✓ OK',
+					message: `Connected to ${DEVICE_API_BASE}`,
+					details: { uuid: redact(data.uuid), provisioned: data.provisioned }
+				};
+			} else {
+				results['Device API'] = {
+					status: '✗ FAIL',
+					message: `HTTP ${response.status}`,
+					details: { endpoint: DEVICE_API_BASE }
+				};
+			}
+		} catch (error: any) {
 			results['Device API'] = {
 				status: '✗ FAIL',
-				message: `HTTP ${response.status}`,
+				message: error.message,
 				details: { endpoint: DEVICE_API_BASE }
 			};
 		}
-	} catch (error: any) {
-		results['Device API'] = {
-			status: '✗ FAIL',
-			message: error.message,
-			details: { endpoint: DEVICE_API_BASE }
-		};
-	}
+	};
 	
-	// 2. Check database file
-	try {
-		if (existsSync(DB_PATH)) {
-			const stats = statSync(DB_PATH);
-			results['Database'] = {
-				status: '✓ OK',
-				message: `SQLite database exists`,
-				details: { path: DB_PATH, size: `${(stats.size / 1024).toFixed(2)} KB` }
-			};
-		} else {
+	const checkDatabase = async () => {
+		try {
+			if (existsSync(DB_PATH)) {
+				const stats = statSync(DB_PATH);
+				results['Database'] = {
+					status: '✓ OK',
+					message: `SQLite database exists`,
+					details: { path: DB_PATH, size: `${(stats.size / 1024).toFixed(2)} KB` }
+				};
+			} else {
+				results['Database'] = {
+					status: '✗ FAIL',
+					message: 'Database file not found',
+					details: { path: DB_PATH }
+				};
+			}
+		} catch (error: any) {
 			results['Database'] = {
 				status: '✗ FAIL',
-				message: 'Database file not found',
+				message: error.message,
 				details: { path: DB_PATH }
 			};
 		}
-	} catch (error: any) {
-		results['Database'] = {
-			status: '✗ FAIL',
-			message: error.message,
-			details: { path: DB_PATH }
-		};
-	}
+	};
 	
-	// 3. Check provisioning status
-	try {
-		const response = await fetch(`${DEVICE_API_V1}/provision/status`);
-		if (response.ok) {
-			const data: any = await response.json();
-			const provisioned = data.Data?.provisioned;
-			results['Provisioning'] = {
-				status: provisioned ? '✓ OK' : '⚠ WARN',
-				message: provisioned ? 'Device is provisioned' : 'Device not provisioned',
-				details: {
-					apiEndpoint: data.Data?.apiEndpoint,
-					deviceId: data.Data?.deviceId,
-					mqttBroker: data.Data?.mqttBrokerUrl
-				}
-			};
-		} else {
-			results['Provisioning'] = {
-				status: '✗ FAIL',
-				message: `Cannot check status (HTTP ${response.status})`
-			};
-		}
-	} catch (error: any) {
-		results['Provisioning'] = {
-			status: '✗ FAIL',
-			message: error.message
-		};
-	}
-	
-	// 4. Check Internet connectivity
-	try {
-		const testUrls = [
-			'https://www.google.com',
-			'https://1.1.1.1', // Cloudflare DNS
-			'https://8.8.8.8'  // Google DNS
-		];
-		
-		let connected = false;
-		let successUrl = '';
-		
-		for (const url of testUrls) {
-			try {
-				const response = await fetch(url, {
-					method: 'HEAD',
-					signal: AbortSignal.timeout(3000)
-				});
-				if (response.ok || response.status < 500) {
-					connected = true;
-					successUrl = url;
-					break;
-				}
-			} catch {
-				// Try next URL
-				continue;
+	const checkProvisioning = async () => {
+		try {
+			const response = await fetch(`${DEVICE_API_V1}/provision/status`);
+			if (response.ok) {
+				const json: any = await response.json();
+				const data = json.Data ?? json;
+				const provisioned = data.provisioned;
+				results['Provisioning'] = {
+					status: provisioned ? '✓ OK' : '⚠ WARN',
+					message: provisioned ? 'Device is provisioned' : 'Device not provisioned',
+					details: {
+						apiEndpoint: data.apiEndpoint,
+						deviceId: redact(data.deviceId),
+						mqttBroker: data.mqttBrokerUrl ? redact(data.mqttBrokerUrl) : 'not set'
+					}
+				};
+			} else {
+				results['Provisioning'] = {
+					status: '✗ FAIL',
+					message: `Cannot check status (HTTP ${response.status})`
+				};
 			}
-		}
-		
-		if (connected) {
-			results['Internet'] = {
-				status: '✓ OK',
-				message: 'Internet connection available',
-				details: { testedUrl: successUrl }
+		} catch (error: any) {
+			results['Provisioning'] = {
+				status: '✗ FAIL',
+				message: error.message
 			};
-		} else {
+		}
+	};
+	
+	const checkInternet = async () => {
+		try {
+			const testUrls = [
+				'https://www.google.com',
+				'https://1.1.1.1', // Cloudflare DNS
+				'https://8.8.8.8'  // Google DNS
+			];
+			
+			let connected = false;
+			let successUrl = '';
+			
+			for (const url of testUrls) {
+				try {
+					const response = await fetch(url, {
+						method: 'HEAD',
+						signal: AbortSignal.timeout(3000)
+					});
+					if (response.ok || response.status < 500) {
+						connected = true;
+						successUrl = url;
+						break;
+					}
+				} catch {
+					// Try next URL
+					continue;
+				}
+			}
+			
+			if (connected) {
+				results['Internet'] = {
+					status: '✓ OK',
+					message: 'Internet connection available',
+					details: { testedUrl: successUrl }
+				};
+			} else {
+				results['Internet'] = {
+					status: '✗ FAIL',
+					message: 'No internet connectivity detected',
+					details: { note: 'Tested Google, Cloudflare, and Google DNS' }
+				};
+			}
+		} catch (error: any) {
 			results['Internet'] = {
 				status: '✗ FAIL',
-				message: 'No internet connectivity detected',
-				details: { note: 'Tested Google, Cloudflare, and Google DNS' }
+				message: 'Internet check failed',
+				details: { error: error.message }
 			};
 		}
-	} catch (error: any) {
-		results['Internet'] = {
-			status: '✗ FAIL',
-			message: 'Internet check failed',
-			details: { error: error.message }
-		};
-	}
+	};
 	
-	// 5. Check Cloud API connection (if provisioned)
+	const checkEnvironment = async () => {
+		const envVars = {
+			DEVICE_API_PORT: process.env.DEVICE_API_PORT || '(default: 48484)',
+			CLOUD_API_ENDPOINT: process.env.CLOUD_API_ENDPOINT || '(not set)',
+			PROVISIONING_API_KEY: process.env.PROVISIONING_API_KEY ? '(set)' : '(not set)',
+			CONFIG_DIR: process.env.CONFIG_DIR || '/app/data'
+		};
+		results['Environment'] = {
+			status: '⊘ INFO',
+			message: 'Configuration variables',
+			details: envVars
+		};
+	};
+	
+	// Run core checks concurrently
+	await Promise.allSettled([
+		checkDeviceApi(),
+		checkDatabase(),
+		checkProvisioning(),
+		checkInternet(),
+		checkEnvironment()
+	]);
+	
+	// Cloud API check depends on provisioning results
 	if (results['Provisioning']?.details?.apiEndpoint) {
 		const cloudEndpoint = results['Provisioning'].details.apiEndpoint;
 		try {
@@ -1035,11 +1202,9 @@ async function runDiagnostics(): Promise<void> {
 		};
 	}
 	
-	// 6. Check MQTT connection (if provisioned)
+	// MQTT broker info depends on provisioning results
 	if (results['Provisioning']?.details?.mqttBroker) {
 		const mqttBroker = results['Provisioning'].details.mqttBroker;
-		// We can't easily test MQTT connection from CLI without mqtt library
-		// Just show the configured broker
 		results['MQTT Broker'] = {
 			status: '⊘ INFO',
 			message: 'Configured broker',
@@ -1051,19 +1216,6 @@ async function runDiagnostics(): Promise<void> {
 			message: 'Not provisioned - no MQTT broker configured'
 		};
 	}
-	
-	// 7. Check environment variables
-	const envVars = {
-		DEVICE_API_PORT: process.env.DEVICE_API_PORT || '(default: 48484)',
-		CLOUD_API_ENDPOINT: process.env.CLOUD_API_ENDPOINT || '(not set)',
-		PROVISIONING_API_KEY: process.env.PROVISIONING_API_KEY ? '(set)' : '(not set)',
-		CONFIG_DIR: process.env.CONFIG_DIR || '/app/data'
-	};
-	results['Environment'] = {
-		status: '⊘ INFO',
-		message: 'Configuration variables',
-		details: envVars
-	};
 	
 	// Print results
 	console.log('\n╔═══════════════════════════════════════════════════════════════════╗');
@@ -1138,10 +1290,9 @@ function showVersion(): void {
 
 async function provisionWithKey(key: string): Promise<void> {
 	if (!key) {
-		logger.error('Provisioning key is required', undefined, {
+		throw new CLIError('Provisioning key is required', 1, {
 			usage: 'iotctl provision <key> [--api <endpoint>] [--name <device-name>]'
 		});
-		process.exit(1);
 	}
 	
 	try {
@@ -1178,25 +1329,25 @@ async function provisionWithKey(key: string): Promise<void> {
 		});
 		
 		logger.info('Device provisioned successfully', {
-			uuid: result.device.uuid,
-			deviceId: result.device.deviceId,
+			uuid: redact(result.device.uuid),
+			deviceId: redact(result.device.deviceId),
 			deviceName: result.device.deviceName,
-			mqttBrokerUrl: result.device.mqttBrokerUrl
+			mqttBrokerUrl: redact(result.device.mqttBrokerUrl)
 		});
 	} catch (error) {
-		logger.error('Provisioning failed', error as Error);
-		process.exit(1);
+		throw new CLIError('Provisioning failed', 1);
 	}
 }
 
 async function provisionStatus(): Promise<void> {
+	clearApiCache();
 	try {
-		const status = await apiRequest(`${DEVICE_API_V1}/provision/status`);
+		const status = await apiCached(`${DEVICE_API_V1}/provision/status`);
 		
 		logger.info('Provisioning status', {
 			provisioned: status.provisioned,
-			uuid: status.uuid,
-			deviceId: status.deviceId || 'not assigned',
+			uuid: redact(status.uuid),
+			deviceId: redact(status.deviceId),
 			deviceName: status.deviceName || 'not set',
 			apiEndpoint: status.apiEndpoint || 'not set',
 			mqttConfigured: status.mqttConfigured
@@ -1208,14 +1359,16 @@ async function provisionStatus(): Promise<void> {
 			});
 		}
 	} catch (error) {
-		logger.error('Failed to get provisioning status', error as Error);
-		process.exit(1);
+		throw new CLIError('Failed to get provisioning status', 1);
 	}
 }
 
 async function deprovision(): Promise<void> {
 	try {
 		logger.warn('Deprovisioning device - this will remove cloud registration');
+		
+		// Require explicit confirmation
+		requireConfirmation('Deprovision will remove cloud registration. Continue?');
 		
 		const result = await apiRequest(`${DEVICE_API_V1}/deprovision`, {
 			method: 'POST'
@@ -1238,8 +1391,8 @@ async function factoryReset(): Promise<void> {
 		logger.warn('Only the device UUID will be preserved');
 		logger.warn('This action cannot be undone');
 		
-		// In production, you might want to add a confirmation prompt here
-		// For now, proceed with the reset
+		// Require explicit confirmation
+		requireConfirmation('Factory reset will DELETE ALL DATA. This cannot be undone.');
 		
 		const result = await apiRequest(`${DEVICE_API_V1}/factory-reset`, {
 			method: 'POST'
@@ -1250,8 +1403,7 @@ async function factoryReset(): Promise<void> {
 			status: result.status
 		});
 	} catch (error) {
-		logger.error('Factory reset failed', error as Error);
-		process.exit(1);
+		throw new CLIError('Factory reset failed', 1);
 	}
 }
 
@@ -1272,159 +1424,131 @@ async function main(): Promise<void> {
 	const arg1 = args[2];
 	const arg2 = args[3];
 	
-	switch (command) {
-		case 'provision':
-			if (!subcommand || subcommand.startsWith('--')) {
-				// iotctl provision <key> [flags]
-				provisionWithKey(subcommand);
-			} else if (subcommand === 'status') {
-				// iotctl provision status
-				provisionStatus();
-			} else {
-				// Treat as key
-				provisionWithKey(subcommand);
-			}
-			break;
-			
-		case 'deprovision':
-			deprovision();
-			break;
-		
-		case 'factory-reset':
-			factoryReset();
-			break;
-		
-		case 'config':
-			switch (subcommand) {
-				case 'set-api':
-					await configSetApi(arg1);
-					break;
-				case 'get-api':
-					await configGetApi();
-					break;
-				case 'set':
-					await configSet(arg1, arg2);
-					break;
-				case 'get':
-					await configGet(arg1);
-					break;
-				case 'show':
-					await configShow();
-					break;
-				case 'reset':
-					await configReset();
-					break;
-				default:
-					logger.error('Unknown config command', undefined, {
-						command: subcommand,
-						hint: 'Use "iotctl help" for usage information'
+	// Table-driven command dispatch
+	const commands: Record<string, any> = {
+		provision: {
+			_default: (key?: string) => {
+				// iotctl provision <key> or iotctl provision --flags
+				if (!key) {
+					throw new CLIError('Provisioning key is required', 1, {
+						usage: 'iotctl provision <key> [--api <endpoint>] [--name <device-name>]'
 					});
-					process.exit(1);
+				}
+				provisionWithKey(key);
+			},
+			status: provisionStatus
+		},
+		deprovision: {
+			_default: deprovision
+		},
+		'factory-reset': {
+			_default: factoryReset
+		},
+		config: {
+			'set-api': configSetApi,
+			'get-api': configGetApi,
+			set: configSet,
+			get: configGet,
+			show: configShow,
+			reset: configReset
+		},
+		apps: {
+			list: appsList,
+			start: appsStart,
+			stop: appsStop,
+			restart: appsRestart,
+			info: appsInfo,
+			purge: appsPurge
+		},
+		services: {
+			list: servicesList,
+			start: servicesStart,
+			stop: servicesStop,
+			restart: servicesRestart,
+			logs: (serviceId: string) => {
+				const followLogs = args.includes('--follow') || args.includes('-f');
+				return servicesLogs(serviceId, followLogs);
+			},
+			info: servicesInfo
+		},
+		status: {
+			_default: showStatusEnhanced
+		},
+		diagnostics: {
+			_default: runDiagnostics
+		},
+		diag: {
+			_default: runDiagnostics
+		},
+		restart: {
+			_default: restart
+		},
+		logs: {
+			_default: () => {
+				const follow = args.includes('--follow') || args.includes('-f');
+				const linesIndex = args.indexOf('-n');
+				const lines = linesIndex !== -1 && args[linesIndex + 1] 
+					? parseInt(args[linesIndex + 1]) 
+					: 50;
+				return showLogs(follow, lines);
 			}
-			break;
-		
-		case 'apps':
-			switch (subcommand) {
-				case 'list':
-					appsList();
-					break;
-				case 'start':
-					appsStart(arg1);
-					break;
-				case 'stop':
-					appsStop(arg1);
-					break;
-				case 'restart':
-					appsRestart(arg1);
-					break;
-				case 'info':
-					appsInfo(arg1);
-					break;
-				case 'purge':
-					appsPurge(arg1);
-					break;
-				default:
-					logger.error('Unknown apps command', undefined, {
-						command: subcommand,
-						hint: 'Use "iotctl help" for usage information'
-					});
-					process.exit(1);
-			}
-			break;
-		
-		case 'services':
-			switch (subcommand) {
-				case 'list':
-					// Optional appId filter
-					servicesList(arg1);
-					break;
-				case 'start':
-					servicesStart(arg1);
-					break;
-				case 'stop':
-					servicesStop(arg1);
-					break;
-				case 'restart':
-					servicesRestart(arg1);
-					break;
-				case 'logs':
-					const followLogs = args.includes('--follow') || args.includes('-f');
-					servicesLogs(arg1, followLogs);
-					break;
-				case 'info':
-					servicesInfo(arg1);
-					break;
-				default:
-					logger.error('Unknown services command', undefined, {
-						command: subcommand,
-						hint: 'Use "iotctl help" for usage information'
-					});
-					process.exit(1);
-			}
-			break;
-			
-		case 'status':
-			showStatusEnhanced();
-			break;
-		
-		case 'diagnostics':
-		case 'diag':
-			await runDiagnostics();
-			break;
-			
-		case 'restart':
-			await restart();
-			break;
-			
-		case 'logs':
-			const follow = args.includes('--follow') || args.includes('-f');
-			const linesIndex = args.indexOf('-n');
-			const lines = linesIndex !== -1 && args[linesIndex + 1] 
-				? parseInt(args[linesIndex + 1]) 
-				: 50;
-			showLogs(follow, lines);
-			break;
-			
-		case 'help':
-		case '--help':
-		case '-h':
-			showHelp();
-			break;
-			
-		case 'version':
-		case '--version':
-		case '-v':
-			showVersion();
-			break;
-			
-		default:
-			logger.error('Unknown command', undefined, {
-				command,
-				hint: 'Use "iotctl help" for usage information'
-			});
-			process.exit(1);
+		},
+		help: {
+			_default: showHelp
+		},
+		'--help': {
+			_default: showHelp
+		},
+		'-h': {
+			_default: showHelp
+		},
+		version: {
+			_default: showVersion
+		},
+		'--version': {
+			_default: showVersion
+		},
+		'-v': {
+			_default: showVersion
+		}
+	};
+	
+	// Dispatch command
+	const commandGroup = commands[command];
+	if (!commandGroup) {
+		throw new CLIError('Unknown command', 1, {
+			command,
+			hint: 'Use "iotctl help" for usage information'
+		});
+	}
+	
+	// Handle subcommands or default action
+	if (subcommand && commandGroup[subcommand]) {
+		// Subcommand exists
+		await commandGroup[subcommand](arg1, arg2);
+	} else if (commandGroup._default) {
+		// No subcommand or invalid subcommand - use default handler
+		await commandGroup._default(subcommand, arg1, arg2);
+	} else {
+		// No valid subcommand or default
+		throw new CLIError(`Unknown ${command} command`, 1, {
+			command: subcommand,
+			hint: 'Use "iotctl help" for usage information'
+		});
 	}
 }
 
-// Run CLI
-main();
+// Error handler
+function handleError(error: any): void {
+	if (error instanceof CLIError) {
+		logger.error(error.message, undefined, error.context);
+	} else {
+		logger.error('Unexpected error', error);
+	}
+}
+
+// Run CLI with centralized error handling
+main().catch((error) => {
+	handleError(error);
+	process.exit(error.exitCode ?? 1);
+});

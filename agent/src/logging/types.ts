@@ -28,7 +28,7 @@ export const LogComponents = {
   
   // State Management
   sync: 'Sync',
-  stateReconciler: 'StateReconciler',
+  stateReconciler: 'Reconciler',
   configManager: 'ConfigManager',
   
   // Container Orchestration
@@ -40,7 +40,7 @@ export const LogComponents = {
   driverFactory: 'DriverFactory',
   
   // Protocol Adapters
-  discovery: 'EndpointsDiscovery',
+  discovery: 'Discovery',
   modbus: 'Modbus',
   modbusRtu: 'ModbusRTU',
   modbusTcp: 'ModbusTCP',

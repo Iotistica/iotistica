@@ -92,34 +92,73 @@ function shouldDeflate(payloadSize: number, cpuLoad: number): boolean {
 
 /**
  * Check if CPU usage should be tracked for this publish
- * OPTIMIZATION: Reduces syscall overhead by sampling every 100th publish
- * Always tracks if HEAP_METRICS=true (for debugging/profiling)
+ * Currently enabled for all publishes (always returns true)
+ * Can be optimized later by sampling or using log level filtering
  * 
  * @param publishCount - Total number of publishes (stats.messagesPublished)
  * @returns true if CPU usage should be tracked
  */
 function shouldTrackCpuUsage(publishCount: number): boolean {
-  return HEAP_METRICS_ENABLED || (publishCount % 100) === 0;
+  return true;  // Always track CPU - filter via log levels if needed
+}
+
+/**
+ * Check if this publish should use baseline no-op path (control measurement)
+ * Every 1000th publish skips compression to measure baseline publishing overhead
+ * This provides a reference point to calibrate compression costs against
+ * 
+ * @param publishCount - Total number of publishes (stats.messagesPublished)
+ * @returns true if baseline measurement should be taken
+ */
+function shouldMeasureBaseline(publishCount: number): boolean {
+  return (publishCount % 1000) === 0;
 }
 
 /**
  * Compression information for logging and metrics
  */
 interface CompressionInfo {
-  method: 'json' | 'json+deflate' | 'msgpack' | 'msgpack+deflate' | 'dictionary' | 'dictionary+msgpack' | 'dictionary+deflate' | 'dictionary+msgpack+deflate';
+  method: 'json' | 'json+deflate' | 'msgpack' | 'msgpack+deflate' | 'dictionary' | 'dictionary+msgpack' | 'dictionary+deflate' | 'dictionary+msgpack+deflate' | 'baseline';
   originalSize: number;
   compressedSize: number;
   ratio: number; // Percentage saved (0-100)
   compressionMs: number; // Wall-clock time taken for compression in milliseconds
+  isBaseline?: boolean;  // True if this is a no-op control measurement
   cpuUsage?: {
     // CPU time = actual CPU cycles consumed (can be < wall-clock time due to I/O waits)
     // Values are in MICROSECONDS (1ms = 1000μs)
     // user = time in user-mode code (your JavaScript), system = time in kernel (system calls, I/O)
     // SAMPLING: Only populated when HEAP_METRICS=true or every 100th publish
-    dictionary?: { user: number; system: number }; // CPU μs for dictionary field compression
-    msgpack?: { user: number; system: number }; // CPU μs for msgpack binary serialization
-    deflate?: { user: number; system: number }; // CPU μs for zlib DEFLATE compression
-    total?: { user: number; system: number }; // Total CPU μs (sum of all layers) - optional when sampling
+    // 
+    // ⚠️ IMPORTANT: Separated into SERIALIZATION vs COMPRESSION:
+    // - Serialization: Object traversal + encoding (dictionary, msgpack)
+    // - Compression: Actual compression algorithms (deflate)
+    //
+    // ⚠️ DEFLATE CPU PROFILING CAVEAT:
+    // deflateAsync() runs in libuv thread pool (not main thread), so CPU measurements are misleading:
+    // - Actual deflate work happens off-thread (not measured by process.cpuUsage())
+    // - Measured CPU = main thread overhead (scheduling, promise resolution, buffer copying)
+    // - Wall-clock includes thread pool scheduling delays
+    // - Numbers answer: "How long until payload ready?" NOT "How expensive is deflate per byte?"
+    // - For pure deflate benchmarking, use sync deflate or worker_threads with dedicated profiling
+    //
+    // ⚠️ GC EFFECTS ARE INVISIBLE:
+    // These metrics do NOT capture garbage collection costs, which can be significant:
+    // - GC pause time: Not reflected in CPU measurements (happens asynchronously)
+    // - Survivor promotion: msgpack buffers may survive to old generation (slower GC)
+    // - Heap pressure: Large buffer allocations trigger more frequent GC cycles
+    // - Tail latency: GC pauses can cause unpredictable spikes in publish times
+    // Result: "msgpack looks cheap" may hide higher GC churn and worse P99 latency
+    // Use --trace-gc or v8.getHeapStatistics() for memory profiling
+    serialization?: {
+      method: 'dictionary' | 'msgpack' | 'json';  // Which serialization was used
+      cpu: { user: number; system: number };  // CPU μs for serialization overhead
+    };
+    compression?: {
+      method: 'deflate';  // Which compression was used
+      cpu: { user: number; system: number };  // CPU μs for compression - ⚠️ MISLEADING for deflate (main-thread overhead only)
+    };
+    total?: { user: number; system: number }; // Total CPU μs (serialization + compression)
   };
 }
 
@@ -899,8 +938,8 @@ export class Sensor extends EventEmitter {
     const messageCount = this.messageBatch.messages.length;
     const batchBytes = this.messageBatch.totalBytes;
     
-    // Prepare data with anomaly enrichment
-    const data = this.preparePublishData();
+    // Prepare data with anomaly enrichment and freeze baseline size
+    const { data, baselineSize } = this.preparePublishData();
     
     // Handle offline MQTT - buffer to local database
     if (!this.mqttConnection.isConnected()) {
@@ -909,8 +948,8 @@ export class Sensor extends EventEmitter {
     }
     
     try {
-      // Choose compression strategy and serialize payload
-      const { payload, compressionInfo } = await this.compressPayload(data);
+      // Choose compression strategy and serialize payload (using frozen baseline)
+      const { payload, compressionInfo } = await this.compressPayload(data, baselineSize);
       
       // Publish to MQTT (single call)
       await this.mqttConnection.publish(topic, payload, { qos: 1 });
@@ -932,7 +971,7 @@ export class Sensor extends EventEmitter {
   /**
    * Prepare data for publishing with anomaly detection and forecast enrichment
    */
-  private preparePublishData(): any {
+  private preparePublishData(): { data: any; baselineSize: number } {
     // Feed to edge AI anomaly detection FIRST (before enrichment)
     if (anomalyService) {
       this.feedMessagesToAnomaly(this.messageBatch.messages);
@@ -950,8 +989,14 @@ export class Sensor extends EventEmitter {
       messages: enrichedMessages
     };
     
+    // Freeze canonical baseline BEFORE any transformations (for valid compression comparison)
+    // This is the exact structure that will be compressed, measured as JSON
+    const baselineSize = Buffer.byteLength(
+      JSON.stringify({ sensor: publishData.sensor, timestamp: publishData.timestamp, messages: publishData.messages }),
+      'utf8'
+    );
     
-    return publishData;
+    return { data: publishData, baselineSize };
   }
 
   /**
@@ -984,29 +1029,60 @@ export class Sensor extends EventEmitter {
    * 1. Dictionary compression (with optional MessagePack stacking)
    * 2. MessagePack compression
    * 3. JSON (no compression)
+   * 
+   * IMPORTANT: Uses frozen baseline for valid cross-method comparison
+   * Baseline is calculated BEFORE any transformations in preparePublishData()
+   * All methods measure compression against the same canonical JSON size
+   * 
+   * BASELINE CONTROL: Every 1000th publish uses no-op path (JSON only) to measure
+   * baseline publishing overhead without compression. This calibrates all other measurements.
+   * 
+   * @param data - Data to compress
+   * @param baselineSize - Frozen baseline size (canonical JSON before transformations)
    */
-  private async compressPayload(data: any): Promise<{ payload: Buffer | string; compressionInfo: CompressionInfo }> {
+  private async compressPayload(data: any, baselineSize: number): Promise<{ payload: Buffer | string; compressionInfo: CompressionInfo }> {
+    // Baseline control measurement: Every 1000th publish skips compression
+    // This measures pure publishing overhead (JSON serialization + MQTT publish)
+    // Provides reference point to calibrate compression costs against
+    if (shouldMeasureBaseline(this.stats.messagesPublished)) {
+      const startTime = Date.now();
+      const msgIdGen = this.mqttConnection.getMessageIdGenerator?.();
+      const mqttPayload = createJsonPayload(data, msgIdGen);
+      const payload = serializePayload(mqttPayload);
+      const compressionMs = Date.now() - startTime;
+      const payloadSize = typeof payload === 'string' ? Buffer.byteLength(payload, 'utf-8') : payload.length;
+      
+      return {
+        payload,
+        compressionInfo: {
+          method: 'baseline',
+          originalSize: baselineSize,
+          compressedSize: payloadSize,
+          ratio: 0,  // No compression
+          compressionMs,
+          isBaseline: true
+        }
+      };
+    }
+    
     // Strategy 1: Dictionary compression (enabled and builds dictionary on first use)
     if (this.dictionaryManager && this.useKeyCompactionPoc) {
       this.logger?.debug(`Using dictionary compression (size: ${this.dictionaryManager.getDictionarySize()})`, {
         endpoint: this.getSensorName(),
         dictionarySize: this.dictionaryManager.getDictionarySize()
       });
-      return await this.applyDictionaryCompression(data);
+      return await this.applyDictionaryCompression(data, baselineSize);
     }
     
-    // Strategy 2 & 3: MessagePack or JSON (fallback when dictionary disabled)
-    this.logger?.debug(`Dictionary disabled, using fallback compression`, {
-      endpoint: this.getSensorName(),
-      useMsgpack: this.useMsgpackPoc
-    });
-    return await this.applyMsgpackOrJson(data);
+    return await this.applyMsgpackOrJson(data, baselineSize);
   }
 
   /**
    * Apply dictionary compression with optional MessagePack stacking
+   * @param data - Data to compress
+   * @param baselineSize - Frozen baseline (canonical JSON) for cross-method comparison
    */
-  private async applyDictionaryCompression(data: any): Promise<{ payload: Buffer | string; compressionInfo: CompressionInfo }> {
+  private async applyDictionaryCompression(data: any, baselineSize: number): Promise<{ payload: Buffer | string; compressionInfo: CompressionInfo }> {
     const startTime = Date.now();
     
     // OPTIMIZATION: Sample CPU usage (not every batch) to reduce syscall overhead
@@ -1019,11 +1095,15 @@ export class Sensor extends EventEmitter {
       dictionarySize: this.dictionaryManager.getDictionarySize()
     });
     
-    // Track dictionary compression CPU (measures ONLY dictionary layer)
+    // Track dictionary compaction CPU (measures field traversal + key replacement + object mutation)
+    // This is NOT pure compression - it's a serialization-like transformation
     const dictStartCpu = trackCpu ? process.cpuUsage() : undefined;
     const { compacted, originalSize, compactedSize, compressionRatio} = 
       await this.dictionaryManager.compact(data, this.protocol);
     const dictCpuUsage = (trackCpu && dictStartCpu) ? process.cpuUsage(dictStartCpu) : undefined;
+    
+    // Use frozen baseline for cross-method comparison (not dictionary's internal originalSize)
+    const consistentOriginalSize = baselineSize;
     
     this.logger?.debug('Dictionary compaction complete', {
       endpoint: this.getSensorName(),
@@ -1034,7 +1114,8 @@ export class Sensor extends EventEmitter {
       newDictionarySize: this.dictionaryManager.getDictionarySize()
     });
     
-    // Track MessagePack compression CPU (measures ONLY msgpack layer)
+    // Track MessagePack serialization CPU (measures object traversal + encoding + buffer allocation)
+    // This is NOT pure compression - it's binary serialization overhead
     let msgpackCpuUsage: { user: number; system: number } | undefined;
     let payload: Buffer | string;
     if (this.useMsgpackPoc) {
@@ -1045,7 +1126,9 @@ export class Sensor extends EventEmitter {
       payload = JSON.stringify(compacted);
     }
     
-    // Track DEFLATE compression CPU (measures ONLY deflate layer)
+    // Track DEFLATE compression CPU (this IS pure compression - DEFLATE algorithm only)
+    // ⚠️ CAVEAT: deflateAsync() runs in libuv thread pool, so this only measures main-thread overhead
+    // (scheduling, promise, buffer copying) NOT actual compression cost. Wall-clock includes scheduling delays.
     let deflateCpuUsage: { user: number; system: number } | undefined;
     let finalPayload: Buffer | string;
     if (this.useDeflatePoc) {
@@ -1069,7 +1152,7 @@ export class Sensor extends EventEmitter {
     
     // Calculate final compression ratio (dictionary + optional msgpack + optional deflate)
     const finalSize = typeof finalPayload === 'string' ? Buffer.byteLength(finalPayload, 'utf-8') : finalPayload.length;
-    const finalRatio = ((originalSize - finalSize) / originalSize) * 100;
+    const finalRatio = ((consistentOriginalSize - finalSize) / consistentOriginalSize) * 100;
     const compressionMs = Date.now() - startTime; // Wall-clock time (includes I/O waits)
     const totalCpuUsage = (trackCpu && startCpu) ? process.cpuUsage(startCpu) : undefined;
     
@@ -1077,18 +1160,29 @@ export class Sensor extends EventEmitter {
       ? (this.useDeflatePoc ? 'dictionary+msgpack+deflate' : 'dictionary+msgpack')
       : (this.useDeflatePoc ? 'dictionary+deflate' : 'dictionary');
     
+    // Determine serialization method (dictionary or dictionary+msgpack)
+    const serializationMethod = this.useMsgpackPoc ? 'msgpack' : 'dictionary';
+    const serializationCpu = this.useMsgpackPoc 
+      ? (msgpackCpuUsage || dictCpuUsage)  // Prefer msgpack if both exist
+      : dictCpuUsage;
+    
     return {
       payload: finalPayload,
       compressionInfo: {
         method: compressionMethod,
-        originalSize,
+        originalSize: consistentOriginalSize,  // Use consistent baseline for comparison
         compressedSize: finalSize,
         ratio: finalRatio,
         compressionMs,
         cpuUsage: trackCpu ? {
-          dictionary: dictCpuUsage,
-          msgpack: msgpackCpuUsage,
-          deflate: deflateCpuUsage,
+          serialization: serializationCpu ? {
+            method: serializationMethod,
+            cpu: serializationCpu
+          } : undefined,
+          compression: deflateCpuUsage ? {
+            method: 'deflate',
+            cpu: deflateCpuUsage
+          } : undefined,
           total: totalCpuUsage
         } : undefined
       }
@@ -1098,28 +1192,43 @@ export class Sensor extends EventEmitter {
   /**
    * Apply MessagePack or JSON serialization (fallback when dictionary disabled)
    * ASYNC: Uses non-blocking deflate to prevent event loop stalls on edge devices
+   * @param data - Data to compress
+   * @param baselineSize - Frozen baseline (canonical JSON) for cross-method comparison
    */
-  private async applyMsgpackOrJson(data: any): Promise<{ payload: Buffer | string; compressionInfo: CompressionInfo }> {
+  private async applyMsgpackOrJson(data: any, baselineSize: number): Promise<{ payload: Buffer | string; compressionInfo: CompressionInfo }> {
     const startTime = Date.now();
     const msgIdGen = this.mqttConnection.getMessageIdGenerator?.();
     
+    // CPU profiling setup
+    const trackCpu = shouldTrackCpuUsage(this.stats.messagesPublished);
+    const startCpu = trackCpu ? process.cpuUsage() : undefined;
+    let msgpackCpuUsage: { user: number; system: number } | undefined;
+    let deflateCpuUsage: { user: number; system: number } | undefined;
+    
     if (this.useMsgpackPoc) {
-      // MessagePack compression (handled by createMsgpackPayload + serializePayload)
+      // MessagePack serialization (measures object traversal + encoding + buffer allocation)
+      // NOT pure compression - this is binary serialization overhead
+      // ⚠️ Hidden cost: msgpack creates intermediate buffers (GC churn, survivor promotion)
+      const msgpackStartCpu = trackCpu ? process.cpuUsage(startCpu) : undefined;
       const mqttPayload = createMsgpackPayload(data, msgIdGen);
       let payload = serializePayload(mqttPayload);
+      msgpackCpuUsage = (trackCpu && msgpackStartCpu) ? process.cpuUsage(msgpackStartCpu) : undefined;
       
-      // Calculate compression stats
-      const originalSize = Buffer.from(JSON.stringify(data), 'utf-8').length;
+      // Use frozen baseline for cross-method comparison
+      const originalSize = baselineSize;
       let compressedSize = payload.length;
       
       // Apply deflate if enabled (async to prevent event loop blocking)
+      // ⚠️ CAVEAT: deflateAsync() in thread pool means CPU measurements only show main-thread overhead
       let finalPayload: Buffer | string;
       if (this.useDeflatePoc) {
         const cpuLoad = await getCpuUsage();
         
         // Adaptive deflate: only compress if beneficial
         if (shouldDeflate(payload.length, cpuLoad)) {
+          const deflateStartCpu = trackCpu ? process.cpuUsage(startCpu) : undefined;
           finalPayload = await deflateAsync(payload);
+          deflateCpuUsage = (trackCpu && deflateStartCpu) ? process.cpuUsage(deflateStartCpu) : undefined;
           compressedSize = finalPayload.length;
         } else {
           this.logger?.debug(`Skipping deflate (payload: ${payload.length} bytes, CPU: ${cpuLoad}%)`, {
@@ -1134,6 +1243,7 @@ export class Sensor extends EventEmitter {
       
       const ratio = ((originalSize - compressedSize) / originalSize) * 100;
       const compressionMs = Date.now() - startTime;
+      const totalCpuUsage = (trackCpu && startCpu) ? process.cpuUsage(startCpu) : undefined;
       
       return {
         payload: finalPayload,
@@ -1142,16 +1252,28 @@ export class Sensor extends EventEmitter {
           originalSize,
           compressedSize,
           ratio,
-          compressionMs
+          compressionMs,
+          cpuUsage: trackCpu ? {
+            serialization: msgpackCpuUsage ? {
+              method: 'msgpack',
+              cpu: msgpackCpuUsage
+            } : undefined,
+            compression: deflateCpuUsage ? {
+              method: 'deflate',
+              cpu: deflateCpuUsage
+            } : undefined,
+            total: totalCpuUsage
+          } : undefined
         }
       };
     } else {
       // JSON (no compression)
       const mqttPayload = createJsonPayload(data, msgIdGen);
       let payload = serializePayload(mqttPayload);
-      const originalSize = payload.length;
+      const originalSize = baselineSize;  // Use frozen baseline for cross-method comparison
       
       // Apply deflate if enabled (async to prevent event loop blocking)
+      // ⚠️ CAVEAT: deflateAsync() in thread pool means CPU measurements only show main-thread overhead
       let finalPayload: Buffer | string;
       let compressedSize: number;
       if (this.useDeflatePoc) {
@@ -1160,7 +1282,9 @@ export class Sensor extends EventEmitter {
         
         // Adaptive deflate: only compress if beneficial
         if (shouldDeflate(payloadBuffer.length, cpuLoad)) {
+          const deflateStartCpu = trackCpu ? process.cpuUsage(startCpu) : undefined;
           finalPayload = await deflateAsync(payloadBuffer);
+          deflateCpuUsage = (trackCpu && deflateStartCpu) ? process.cpuUsage(deflateStartCpu) : undefined;
           compressedSize = finalPayload.length;
         } else {
           this.logger?.debug(`Skipping deflate (payload: ${payloadBuffer.length} bytes, CPU: ${cpuLoad}%)`, {
@@ -1176,6 +1300,7 @@ export class Sensor extends EventEmitter {
       
       const ratio = this.useDeflatePoc ? ((originalSize - compressedSize) / originalSize) * 100 : 0;
       const compressionMs = Date.now() - startTime;
+      const totalCpuUsage = (trackCpu && startCpu) ? process.cpuUsage(startCpu) : undefined;
       
       return {
         payload: finalPayload,
@@ -1184,7 +1309,18 @@ export class Sensor extends EventEmitter {
           originalSize,
           compressedSize,
           ratio,
-          compressionMs
+          compressionMs,
+          cpuUsage: trackCpu ? {
+            serialization: {
+              method: 'json',
+              cpu: { user: 0, system: 0 }  // JSON serialization is negligible (native)
+            },
+            compression: deflateCpuUsage ? {
+              method: 'deflate',
+              cpu: deflateCpuUsage
+            } : undefined,
+            total: totalCpuUsage
+          } : undefined
         }
       };
     }
@@ -1210,28 +1346,43 @@ export class Sensor extends EventEmitter {
       compressedSize: info.compressedSize,
       savedBytes: info.originalSize - info.compressedSize,
       savedPercent: `${info.ratio.toFixed(1)}%`,
-      compressionMs: info.compressionMs
+      compressionMs: info.compressionMs,
+      throughputBytesPerMs: info.compressionMs > 0 
+        ? Math.round(info.compressedSize / info.compressionMs)
+        : 0
     };
 
     // Add CPU usage if available (in milliseconds for readability)
+    // ⚠️ Separated: serialization (msgpack/dictionary) vs compression (deflate)
+    // ⚠️ GC effects invisible: Metrics don't capture pause time, survivor promotion, or heap pressure
     if (info.cpuUsage) {
-      compressionLog.cpuMs = {
-        dictionary: info.cpuUsage.dictionary 
-          ? ((info.cpuUsage.dictionary.user + info.cpuUsage.dictionary.system) / 1000).toFixed(2) 
-          : undefined,
-        msgpack: info.cpuUsage.msgpack 
-          ? ((info.cpuUsage.msgpack.user + info.cpuUsage.msgpack.system) / 1000).toFixed(2) 
-          : undefined,
-        deflate: info.cpuUsage.deflate 
-          ? ((info.cpuUsage.deflate.user + info.cpuUsage.deflate.system) / 1000).toFixed(2) 
-          : undefined,
-        total: info.cpuUsage.total
-          ? ((info.cpuUsage.total.user + info.cpuUsage.total.system) / 1000).toFixed(2)
-          : undefined
-      };
+      // Serialization timing (msgpack, dictionary, or json)
+      if (info.cpuUsage.serialization) {
+        const cpuMs = ((info.cpuUsage.serialization.cpu.user + info.cpuUsage.serialization.cpu.system) / 1000).toFixed(2);
+        compressionLog.serialization = info.cpuUsage.serialization.method;
+        compressionLog.serializationMs = cpuMs;
+      }
+      
+      // Compression timing (deflate - main-thread overhead only)
+      if (info.cpuUsage.compression) {
+        const cpuMs = ((info.cpuUsage.compression.cpu.user + info.cpuUsage.compression.cpu.system) / 1000).toFixed(2);
+        compressionLog.compression = info.cpuUsage.compression.method;
+        compressionLog.compressionMs = cpuMs;
+      }
+      
+      // Total CPU time
+      if (info.cpuUsage.total) {
+        compressionLog.totalCpuMs = ((info.cpuUsage.total.user + info.cpuUsage.total.system) / 1000).toFixed(2);
+      }
     }
 
-    this.logger?.info(`Published ${messageCount} messages from '${this.getSensorName()}'`, {
+    // Log with special marker for baseline measurements (control path)
+    const logLevel = info.isBaseline ? 'info' : 'info';  // Could use 'debug' for baseline to reduce noise
+    const message = info.isBaseline
+      ? `[BASELINE] Published ${messageCount} messages from '${this.getSensorName()}' (no-op control)`
+      : `Published ${messageCount} messages from '${this.getSensorName()}'`;
+    
+    this.logger?.info(message, {
       endpoint: this.getSensorName(),
       messages: messageCount,
       batchBytes,
@@ -1245,6 +1396,13 @@ export class Sensor extends EventEmitter {
    * - Compression buffers (msgpack/deflate) may be retained in closures
    * - MQTT publish callbacks may hold references to payload buffers
    * - Nullifying ensures GC can reclaim memory immediately
+   * 
+   * ⚠️ GC EFFECTS NOT MEASURED:
+   * Manual GC calls and buffer churn from msgpack/deflate create hidden costs:
+   * - GC pause time (can spike to 10-50ms on large batches)
+   * - Survivor promotion (msgpack buffers may reach old generation)
+   * - Heap fragmentation (frequent large allocations)
+   * These costs are NOT reflected in CPU profiling metrics but affect tail latency
    */
   private resetBatch(): void {
     // Explicitly nullify object references before clearing array

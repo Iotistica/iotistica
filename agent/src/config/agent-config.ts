@@ -173,9 +173,10 @@ export class AgentConfig extends EventEmitter {
   /**
    * Get Modbus protocol adapter configuration
    * 
-   * Supports both V1 (profileDataPoints array) and V2 (points object) formats.
-   * V2 format: protocols.modbus.points {temperature: {address: 10, ...}}
-   * V1 format: protocols.modbus.profileDataPoints [{name: "temperature", address: 10, ...}]
+   * Supports multiple connection formats:
+   * - Legacy: Single connection via connection.host/port or tcpHost/tcpPort
+   * - Modern: Multiple connections via connections[] array
+   * - Points: V1 (profileDataPoints array) or V2 (points object)
    * 
    * Fallback: Cloud config.protocols.modbus → hardcoded defaults
    */
