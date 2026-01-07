@@ -447,7 +447,8 @@ export default class DeviceAgent {
   }
 
   private async initializeDeviceManager(): Promise<void> {
-    this.deviceManager = new DeviceManager(this.agentLogger);
+    const cloudApiEndpoint = this.agentConfig.getCloudApiEndpoint();
+    this.deviceManager = new DeviceManager(this.agentLogger, undefined, undefined, undefined, cloudApiEndpoint);
     await this.deviceManager.initialize();
 
     let deviceInfo = this.deviceManager.getDeviceInfo();

@@ -56,12 +56,54 @@ export class DeviceManager {
 		logger?: AgentLogger,
 		httpClient?: HttpClient,
 		dbClient?: DatabaseClient,
-		uuidGenerator?: UuidGenerator
+		uuidGenerator?: UuidGenerator,
+		cloudApiEndpoint?: string
 	) {
 		this.logger = logger;
-		this.httpClient = httpClient || new FetchHttpClient();
+		this.httpClient = httpClient || this.createHttpClient(cloudApiEndpoint);
 		this.dbClient = dbClient || new KnexDatabaseClient();
 		this.uuidGenerator = uuidGenerator || new DefaultUuidGenerator();
+	}
+
+	/**
+	 * Create HTTP client with TLS configuration for the API endpoint
+	 * Supports localhost HTTPS (development) and self-signed certs (no CA)
+	 */
+	private createHttpClient(cloudApiEndpoint?: string): HttpClient {
+		// If no endpoint provided, use default unencrypted client
+		if (!cloudApiEndpoint) {
+			return new FetchHttpClient();
+		}
+
+		// For localhost HTTPS (development mode) - always skip cert validation
+		if (cloudApiEndpoint.startsWith('https://localhost') || cloudApiEndpoint.startsWith('https://127.0.0.1')) {
+			this.logger?.infoSync('Creating HTTP client for localhost HTTPS - disabling certificate verification', {
+				component: LogComponents.deviceManager,
+				endpoint: cloudApiEndpoint
+			});
+			return new FetchHttpClient({
+				rejectUnauthorized: false,
+				defaultTimeout: this.PROVISIONING_TIMEOUT_MS,
+			});
+		}
+
+		// For other HTTPS endpoints without CA cert (self-signed) - skip validation
+		if (cloudApiEndpoint.startsWith('https://')) {
+			this.logger?.warnSync('Creating HTTP client for HTTPS without CA certificate - disabling certificate verification', {
+				component: LogComponents.deviceManager,
+				endpoint: cloudApiEndpoint,
+				note: 'Self-signed certificate mode'
+			});
+			return new FetchHttpClient({
+				rejectUnauthorized: false,
+				defaultTimeout: this.PROVISIONING_TIMEOUT_MS,
+			});
+		}
+
+		// HTTP (unencrypted) - no TLS options needed
+		return new FetchHttpClient({
+			defaultTimeout: this.PROVISIONING_TIMEOUT_MS,
+		});
 	}
 
 	/**

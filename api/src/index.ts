@@ -463,8 +463,8 @@ async function startServer() {
       httpsServer = createHttpsServer(app, {
         enabled: true,
         port: HTTPS_PORT,
-        certPath: process.env.HTTPS_CERT_PATH || './certs/server.crt',
-        keyPath: process.env.HTTPS_KEY_PATH || './certs/server.key',
+        certPath: process.env.HTTPS_CERT_PATH || './certs/tls.crt',
+        keyPath: process.env.HTTPS_KEY_PATH || './certs/tls.key',
         caCertPath: process.env.HTTPS_CA_CERT_PATH || './certs/ca.crt',
       });
     } catch (error) {

@@ -141,9 +141,6 @@ services:
         restart: unless-stopped
         container_name: iotistic-mosquitto
         ports:
-          # Non-TLS (local development only)
-          # - "${MOSQUITTO_PORT_EXT:-5883}:1883"        # MQTT (disabled - use TLS)
-          # - "${MOSQUITTO_WS_PORT_EXT:-59002}:9001"    # WebSocket (disabled - use TLS)
           # TLS Ports (enabled - self-signed certificates)
           - "${MOSQUITTO_TLS_PORT_EXT:-8883}:8883"    # MQTTS (TLS) - native MQTT
           - "${MOSQUITTO_WSS_PORT_EXT:-9002}:9002"    # WebSocket TLS

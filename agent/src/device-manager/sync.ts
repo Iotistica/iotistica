@@ -298,6 +298,20 @@ export class CloudSync extends EventEmitter {
 			});
 		}
 		
+		// If HTTPS without CA cert, skip validation (self-signed cert mode)
+		if (endpoint.startsWith('https://')) {
+			this.logger?.warnSync('Using HTTPS without CA certificate - disabling certificate verification (self-signed cert mode)', {
+				component: LogComponents.cloudSync,
+				endpoint: endpoint
+			});
+			
+			return new FetchHttpClient({
+				rejectUnauthorized: false, // Allow self-signed certs
+				defaultHeaders,
+				defaultTimeout: this.config.apiTimeout,
+			});
+		}
+		
 		// Default to plain HTTP client
 		this.logger?.infoSync('Using HTTP client', {
 			component: LogComponents.cloudSync,

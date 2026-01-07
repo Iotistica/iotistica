@@ -77,14 +77,22 @@ export class FetchHttpClient implements HttpClient {
 
 	constructor(options?: HttpClientOptions) {
 		this.caCert = options?.caCert;
-		this.rejectUnauthorized = options?.rejectUnauthorized !== false;
+		// Default to true unless explicitly set to false
+		this.rejectUnauthorized = options?.rejectUnauthorized ?? true;
 		this.defaultHeaders = options?.defaultHeaders || {};
 		this.defaultTimeout = options?.defaultTimeout;
 		
+		// Log constructor options for debugging
+		console.log('[HttpClient] Constructor called with options:', {
+			optionsRejectUnauthorized: options?.rejectUnauthorized,
+			thisRejectUnauthorized: this.rejectUnauthorized,
+			hasCaCert: !!options?.caCert
+		});
+		
 		// For localhost development with self-signed certs, we need to disable TLS verification
 		// Node.js fetch (undici) doesn't support per-request TLS options well
-		if (options?.rejectUnauthorized === false) {
-			console.log('[HttpClient] Setting NODE_TLS_REJECT_UNAUTHORIZED=0 for localhost HTTPS');
+		if (this.rejectUnauthorized === false) {
+			console.log('[HttpClient] Setting NODE_TLS_REJECT_UNAUTHORIZED=0 for self-signed HTTPS');
 			process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 		}
 	}
