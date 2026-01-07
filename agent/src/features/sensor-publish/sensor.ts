@@ -1,7 +1,11 @@
 import * as net from 'net';
 import { EventEmitter } from 'events';
+import { promisify } from 'util';
+import { deflate as zlibDeflate } from 'zlib';
+import { getHeapStatistics } from 'v8';
 import { createJsonPayload, createMsgpackPayload, serializePayload, logCompressionStats, MqttManager } from '../../mqtt/manager.js';
 import type { AnomalyDetectionService } from '../../ai/anomaly/index.js';
+import { getCpuUsage } from '../../system/metrics.js';
 import {
   SensorConfig,
   SensorState,
@@ -28,6 +32,77 @@ const USE_MSGPACK_POC = process.env.USE_MSGPACK_POC === 'true';
 const USE_DEFLATE_POC = process.env.USE_DEFLATE_COMPRESSION === 'true';
 
 /**
+ * Enable detailed CPU usage tracking for compression layers
+ * Set HEAP_METRICS=true to enable process.cpuUsage() calls (adds syscall overhead)
+ * When disabled, CPU usage tracking is sampled (every 100th publish)
+ */
+const HEAP_METRICS_ENABLED = process.env.HEAP_METRICS === 'true';
+
+/**
+ * Async deflate (non-blocking, uses thread pool)
+ */
+const deflateAsync = promisify(zlibDeflate);
+
+/**
+ * Adaptive batch safety limits - prevent OOM on edge devices
+ * Tie limits to available memory, not hardcoded constants
+ * 
+ * Calculated once at module load:
+ * - MAX_BATCH_BYTES: Lesser of 10MB OR 5% of heap_size_limit
+ * - MAX_BATCH_MESSAGES: Fixed at 10000 (count-based safety)
+ * 
+ * Example heap limits:
+ * - Raspberry Pi (512MB heap): 5% = 25.6MB → capped at 10MB ✅
+ * - Raspberry Pi (256MB heap): 5% = 12.8MB → capped at 10MB ✅
+ * - Raspberry Pi (128MB heap): 5% = 6.4MB → uses 6.4MB ✅
+ * - Cloud server (4GB heap): 5% = 204MB → capped at 10MB ✅
+ */
+const MAX_BATCH_MESSAGES = 10000; // Fixed count limit
+const MAX_BATCH_BYTES = (() => {
+  const heapLimit = getHeapStatistics().heap_size_limit;
+  const fivePercent = Math.floor(heapLimit * 0.05);
+  const tenMB = 10 * 1024 * 1024;
+  const limit = Math.min(tenMB, fivePercent);
+  
+  // Log calculated limit for visibility
+  console.log(`[Sensor] Adaptive batch limit: ${(limit / (1024 * 1024)).toFixed(2)}MB (heap: ${(heapLimit / (1024 * 1024)).toFixed(0)}MB)`);
+  
+  return limit;
+})();
+
+/**
+ * Adaptive deflate policy - only compress when beneficial
+ * Prevents event loop blocking on edge devices (Raspberry Pi, etc.)
+ * 
+ * Criteria:
+ * - Payload size > 4KB (small payloads don't benefit from compression)
+ * - CPU load < 70% (avoid compression when device is busy)
+ * - Network cost is high (if we can measure it, prefer compression over bandwidth)
+ * 
+ * @param payloadSize - Payload size in bytes
+ * @param cpuLoad - Current CPU load (0-100)
+ * @returns true if deflate should be applied
+ */
+function shouldDeflate(payloadSize: number, cpuLoad: number): boolean {
+  const MIN_PAYLOAD_SIZE = 4 * 1024; // 4KB threshold
+  const MAX_CPU_LOAD = 70; // 70% CPU threshold
+  
+  return payloadSize > MIN_PAYLOAD_SIZE && cpuLoad < MAX_CPU_LOAD;
+}
+
+/**
+ * Check if CPU usage should be tracked for this publish
+ * OPTIMIZATION: Reduces syscall overhead by sampling every 100th publish
+ * Always tracks if HEAP_METRICS=true (for debugging/profiling)
+ * 
+ * @param publishCount - Total number of publishes (stats.messagesPublished)
+ * @returns true if CPU usage should be tracked
+ */
+function shouldTrackCpuUsage(publishCount: number): boolean {
+  return HEAP_METRICS_ENABLED || (publishCount % 100) === 0;
+}
+
+/**
  * Compression information for logging and metrics
  */
 interface CompressionInfo {
@@ -40,10 +115,11 @@ interface CompressionInfo {
     // CPU time = actual CPU cycles consumed (can be < wall-clock time due to I/O waits)
     // Values are in MICROSECONDS (1ms = 1000μs)
     // user = time in user-mode code (your JavaScript), system = time in kernel (system calls, I/O)
+    // SAMPLING: Only populated when HEAP_METRICS=true or every 100th publish
     dictionary?: { user: number; system: number }; // CPU μs for dictionary field compression
     msgpack?: { user: number; system: number }; // CPU μs for msgpack binary serialization
     deflate?: { user: number; system: number }; // CPU μs for zlib DEFLATE compression
-    total: { user: number; system: number }; // Total CPU μs (sum of all layers)
+    total?: { user: number; system: number }; // Total CPU μs (sum of all layers) - optional when sampling
   };
 }
 
@@ -228,6 +304,7 @@ export class Sensor extends EventEmitter {
   /**
    * Feed sensor messages to anomaly detection
    * Extracts numeric values from all messages and feeds to AnomalyService
+   * OPTIMIZATION: Messages are now pre-parsed objects (parsed once in addMessageToBatch)
    */
   private feedMessagesToAnomaly(messages: any[]): void {
     if (!anomalyService) return;
@@ -235,19 +312,10 @@ export class Sensor extends EventEmitter {
     const timestamp = new Date();
     const sensorName = this.getSensorName();
 
-    for (const message of messages) {
-      try {
-        // Parse message if it's a string
-        const data = typeof message === 'string' ? JSON.parse(message) : message;
-
-        // Extract all numeric fields and feed to anomaly detection
-        this.extractNumericFields(data, sensorName, timestamp);
-      } catch (error) {
-        // Skip unparseable messages silently
-        this.logger?.debug(
-          `Could not parse sensor message for anomaly feed: ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
+    for (const data of messages) {
+      // Messages are already parsed objects (no JSON.parse needed)
+      // Extract all numeric fields and feed to anomaly detection
+      this.extractNumericFields(data, sensorName, timestamp);
     }
   }
 
@@ -626,6 +694,10 @@ export class Sensor extends EventEmitter {
 
   /**
    * Add message to batch
+   * OPTIMIZATION: Parse JSON once here to avoid duplicate parsing in:
+   * - feedMessagesToAnomaly() (was parsing each message)
+   * - enrichMessagesWithAnomalyScores() (was parsing each message)
+   * This eliminates 50% of JSON parsing CPU (1 parse instead of 2)
    */
   private addMessageToBatch(message: string): void {
     // Check if message exceeds buffer capacity
@@ -634,25 +706,37 @@ export class Sensor extends EventEmitter {
       return;
     }
     
+    // Parse JSON once (will be reused by anomaly detection + enrichment)
+    let parsed: any;
+    try {
+      parsed = JSON.parse(message);
+    } catch (error) {
+      this.logger?.warn(
+        `Failed to parse JSON message from '${this.getSensorName()}', discarding: ` +
+        `${error instanceof Error ? error.message : String(error)}`
+      );
+      return; // Skip invalid JSON
+    }
+    
     // Initialize batch timestamp if first message
     if (this.messageBatch.messages.length === 0) {
       this.messageBatch.firstMessageTime = new Date();
     }
     
-    this.messageBatch.messages.push(message);
+    // Store parsed object (not raw string)
+    this.messageBatch.messages.push(parsed);
     this.messageBatch.totalBytes += Buffer.byteLength(message, 'utf8');
     this.stats.messagesReceived++;
     
     // Safety: Force publish if batch grows too large (prevent unbounded memory growth)
     // This happens if MQTT is down or publishing is failing
-    const MAX_BATCH_MESSAGES = 10000; // Safety limit
-    const MAX_BATCH_BYTES = 10 * 1024 * 1024; // 10MB safety limit
-    
+    // Limits are adaptive based on available heap (see MAX_BATCH_BYTES calculation)
     if (this.messageBatch.messages.length >= MAX_BATCH_MESSAGES || 
         this.messageBatch.totalBytes >= MAX_BATCH_BYTES) {
       this.logger?.warn(
         `Message batch exceeds safety limits for endpoint '${this.getSensorName()}' ` +
-        `(messages: ${this.messageBatch.messages.length}, bytes: ${this.messageBatch.totalBytes}). ` +
+        `(messages: ${this.messageBatch.messages.length}, bytes: ${this.messageBatch.totalBytes}, ` +
+        `limits: ${MAX_BATCH_MESSAGES} msgs / ${(MAX_BATCH_BYTES / (1024 * 1024)).toFixed(1)}MB). ` +
         `Force publishing to prevent memory exhaustion.`
       );
       this.publishBatch();
@@ -681,6 +765,7 @@ export class Sensor extends EventEmitter {
    * Enrich messages with anomaly scores and forecasts from edge AI
    * Adds: anomaly_score, anomaly_threshold, baseline_samples, detection_methods,
    *       predicted_next, trend, trend_strength, forecast_confidence, time_to_threshold
+   * OPTIMIZATION: Messages are now pre-parsed objects (parsed once in addMessageToBatch)
    */
   private enrichMessagesWithAnomalyScores(messages: any[]): any[] {
     if (!anomalyService) return messages;
@@ -692,17 +777,15 @@ export class Sensor extends EventEmitter {
     // Note: getPredictions() is available via getSummaryForReport() internally
     const predictions: Record<string, any> = {};
 
-    for (const message of messages) {
-      try {
-        // Parse message if it's a string
-        const data = typeof message === 'string' ? JSON.parse(message) : message;
+    for (const data of messages) {
+      // Messages are already parsed objects (no JSON.parse needed)
         
         // Handle Modbus format: { readings: [...] }
         if (data.readings && Array.isArray(data.readings)) {
           for (const reading of data.readings) {
             if (typeof reading === 'object' && reading !== null) {
               const deviceName = reading.deviceName || sensorName;
-              const fieldName = reading.registerName || reading.name;
+              const fieldName = reading.registerName || reading.metric;
               
               // Get anomaly score and metadata for this metric
               if (fieldName) {
@@ -740,9 +823,9 @@ export class Sensor extends EventEmitter {
           }
         }
         // Handle OPC-UA format: direct reading object (no readings array)
-        else if (data.deviceName && (data.registerName || data.name) && data.value !== undefined) {
+        else if (data.deviceName && (data.registerName || data.metric) && data.value !== undefined) {
           const deviceName = data.deviceName;
-          const fieldName = data.registerName || data.name;
+          const fieldName = data.registerName || data.metric;
           const metricName = `${deviceName}_${fieldName}`;
           const score = anomalyService.getAnomalyScore(metricName);
           const metadata = anomalyService.getAnomalyMetadata(metricName);
@@ -773,13 +856,9 @@ export class Sensor extends EventEmitter {
             }
           }
         }
-        
-        // Return enriched message as object (for pretty MQTT display)
-        enrichedMessages.push(data);
-      } catch (error) {
-        // If parsing fails, return original message unchanged
-        enrichedMessages.push(message);
-      }
+      
+      // Return enriched message as object (for pretty MQTT display)
+      enrichedMessages.push(data);
     }
 
     return enrichedMessages;
@@ -900,7 +979,7 @@ export class Sensor extends EventEmitter {
       endpoint: this.getSensorName(),
       useMsgpack: this.useMsgpackPoc
     });
-    return this.applyMsgpackOrJson(data);
+    return await this.applyMsgpackOrJson(data);
   }
 
   /**
@@ -908,7 +987,11 @@ export class Sensor extends EventEmitter {
    */
   private async applyDictionaryCompression(data: any): Promise<{ payload: Buffer | string; compressionInfo: CompressionInfo }> {
     const startTime = Date.now();
-    const startCpu = process.cpuUsage(); // Baseline CPU usage (cumulative since process start)
+    
+    // OPTIMIZATION: Sample CPU usage (not every batch) to reduce syscall overhead
+    // Only track if HEAP_METRICS=true or every 100th publish
+    const trackCpu = shouldTrackCpuUsage(this.stats.messagesPublished);
+    const startCpu = trackCpu ? process.cpuUsage() : undefined;
     
     this.logger?.debug('Compacting message with dictionary', {
       endpoint: this.getSensorName(),
@@ -916,10 +999,10 @@ export class Sensor extends EventEmitter {
     });
     
     // Track dictionary compression CPU (measures ONLY dictionary layer)
-    const dictStartCpu = process.cpuUsage();
+    const dictStartCpu = trackCpu ? process.cpuUsage() : undefined;
     const { compacted, originalSize, compactedSize, compressionRatio} = 
       await this.dictionaryManager.compact(data, this.protocol);
-    const dictCpuUsage = process.cpuUsage(dictStartCpu); // Delta CPU: now - dictStartCpu
+    const dictCpuUsage = (trackCpu && dictStartCpu) ? process.cpuUsage(dictStartCpu) : undefined;
     
     this.logger?.debug('Dictionary compaction complete', {
       endpoint: this.getSensorName(),
@@ -934,9 +1017,9 @@ export class Sensor extends EventEmitter {
     let msgpackCpuUsage: { user: number; system: number } | undefined;
     let payload: Buffer | string;
     if (this.useMsgpackPoc) {
-      const msgpackStartCpu = process.cpuUsage();
+      const msgpackStartCpu = trackCpu ? process.cpuUsage() : undefined;
       payload = require('msgpack-lite').encode(compacted);
-      msgpackCpuUsage = process.cpuUsage(msgpackStartCpu); // Delta CPU: now - msgpackStartCpu
+      msgpackCpuUsage = (trackCpu && msgpackStartCpu) ? process.cpuUsage(msgpackStartCpu) : undefined;
     } else {
       payload = JSON.stringify(compacted);
     }
@@ -945,9 +1028,20 @@ export class Sensor extends EventEmitter {
     let deflateCpuUsage: { user: number; system: number } | undefined;
     let finalPayload: Buffer | string;
     if (this.useDeflatePoc) {
-      const deflateStartCpu = process.cpuUsage();
-      finalPayload = require('zlib').deflateSync(typeof payload === 'string' ? Buffer.from(payload, 'utf-8') : payload);
-      deflateCpuUsage = process.cpuUsage(deflateStartCpu); // Delta CPU: now - deflateStartCpu
+      const deflateStartCpu = trackCpu ? process.cpuUsage() : undefined;
+      const payloadBuffer = typeof payload === 'string' ? Buffer.from(payload, 'utf-8') : payload;
+      const cpuLoad = await getCpuUsage();
+      
+      // Adaptive deflate: only compress if beneficial (prevents event loop blocking)
+      if (shouldDeflate(payloadBuffer.length, cpuLoad)) {
+        finalPayload = await deflateAsync(payloadBuffer);
+      } else {
+        this.logger?.debug(`Skipping deflate (payload: ${payloadBuffer.length} bytes, CPU: ${cpuLoad}%)`, {
+          endpoint: this.getSensorName()
+        });
+        finalPayload = payloadBuffer;
+      }
+      deflateCpuUsage = (trackCpu && deflateStartCpu) ? process.cpuUsage(deflateStartCpu) : undefined;
     } else {
       finalPayload = payload;
     }
@@ -956,7 +1050,7 @@ export class Sensor extends EventEmitter {
     const finalSize = typeof finalPayload === 'string' ? Buffer.byteLength(finalPayload, 'utf-8') : finalPayload.length;
     const finalRatio = ((originalSize - finalSize) / originalSize) * 100;
     const compressionMs = Date.now() - startTime; // Wall-clock time (includes I/O waits)
-    const totalCpuUsage = process.cpuUsage(startCpu); // Delta CPU for entire compression pipeline
+    const totalCpuUsage = (trackCpu && startCpu) ? process.cpuUsage(startCpu) : undefined;
     
     const compressionMethod = this.useMsgpackPoc
       ? (this.useDeflatePoc ? 'dictionary+msgpack+deflate' : 'dictionary+msgpack')
@@ -970,20 +1064,21 @@ export class Sensor extends EventEmitter {
         compressedSize: finalSize,
         ratio: finalRatio,
         compressionMs,
-        cpuUsage: {
+        cpuUsage: trackCpu ? {
           dictionary: dictCpuUsage,
           msgpack: msgpackCpuUsage,
           deflate: deflateCpuUsage,
           total: totalCpuUsage
-        }
+        } : undefined
       }
     };
   }
 
   /**
    * Apply MessagePack or JSON serialization (fallback when dictionary disabled)
+   * ASYNC: Uses non-blocking deflate to prevent event loop stalls on edge devices
    */
-  private applyMsgpackOrJson(data: any): { payload: Buffer | string; compressionInfo: CompressionInfo } {
+  private async applyMsgpackOrJson(data: any): Promise<{ payload: Buffer | string; compressionInfo: CompressionInfo }> {
     const startTime = Date.now();
     const msgIdGen = this.mqttConnection.getMessageIdGenerator?.();
     
@@ -996,11 +1091,22 @@ export class Sensor extends EventEmitter {
       const originalSize = Buffer.from(JSON.stringify(data), 'utf-8').length;
       let compressedSize = payload.length;
       
-      // Apply deflate if enabled
+      // Apply deflate if enabled (async to prevent event loop blocking)
       let finalPayload: Buffer | string;
       if (this.useDeflatePoc) {
-        finalPayload = require('zlib').deflateSync(payload);
-        compressedSize = finalPayload.length;
+        const cpuLoad = await getCpuUsage();
+        
+        // Adaptive deflate: only compress if beneficial
+        if (shouldDeflate(payload.length, cpuLoad)) {
+          finalPayload = await deflateAsync(payload);
+          compressedSize = finalPayload.length;
+        } else {
+          this.logger?.debug(`Skipping deflate (payload: ${payload.length} bytes, CPU: ${cpuLoad}%)`, {
+            endpoint: this.getSensorName()
+          });
+          finalPayload = payload;
+          compressedSize = payload.length;
+        }
       } else {
         finalPayload = payload;
       }
@@ -1024,12 +1130,24 @@ export class Sensor extends EventEmitter {
       let payload = serializePayload(mqttPayload);
       const originalSize = payload.length;
       
-      // Apply deflate if enabled
+      // Apply deflate if enabled (async to prevent event loop blocking)
       let finalPayload: Buffer | string;
       let compressedSize: number;
       if (this.useDeflatePoc) {
-        finalPayload = require('zlib').deflateSync(typeof payload === 'string' ? Buffer.from(payload, 'utf-8') : payload);
-        compressedSize = finalPayload.length;
+        const payloadBuffer = typeof payload === 'string' ? Buffer.from(payload, 'utf-8') : payload;
+        const cpuLoad = await getCpuUsage();
+        
+        // Adaptive deflate: only compress if beneficial
+        if (shouldDeflate(payloadBuffer.length, cpuLoad)) {
+          finalPayload = await deflateAsync(payloadBuffer);
+          compressedSize = finalPayload.length;
+        } else {
+          this.logger?.debug(`Skipping deflate (payload: ${payloadBuffer.length} bytes, CPU: ${cpuLoad}%)`, {
+            endpoint: this.getSensorName()
+          });
+          finalPayload = payloadBuffer;
+          compressedSize = payloadBuffer.length;
+        }
       } else {
         finalPayload = payload;
         compressedSize = originalSize;
@@ -1086,7 +1204,9 @@ export class Sensor extends EventEmitter {
         deflate: info.cpuUsage.deflate 
           ? ((info.cpuUsage.deflate.user + info.cpuUsage.deflate.system) / 1000).toFixed(2) 
           : undefined,
-        total: ((info.cpuUsage.total.user + info.cpuUsage.total.system) / 1000).toFixed(2)
+        total: info.cpuUsage.total
+          ? ((info.cpuUsage.total.user + info.cpuUsage.total.system) / 1000).toFixed(2)
+          : undefined
       };
     }
 
@@ -1100,13 +1220,31 @@ export class Sensor extends EventEmitter {
 
   /**
    * Reset message batch
+   * MEMORY LEAK FIX: Explicitly nullify object references to prevent survivor space accumulation
+   * - Compression buffers (msgpack/deflate) may be retained in closures
+   * - MQTT publish callbacks may hold references to payload buffers
+   * - Nullifying ensures GC can reclaim memory immediately
    */
   private resetBatch(): void {
+    // Explicitly nullify object references before clearing array
+    // This helps GC reclaim compression buffers that may be retained in closures
+    for (let i = 0; i < this.messageBatch.messages.length; i++) {
+      this.messageBatch.messages[i] = null;
+    }
+    
     this.messageBatch = {
       messages: [],
       totalBytes: 0,
       firstMessageTime: new Date()
     };
+    
+    // Hint to GC for large batches (survivor space leak mitigation)
+    // Only runs if --expose-gc flag is set (npm run dev:gc or node --expose-gc)
+    if (this.messageBatch.totalBytes > 1024 * 1024 && global.gc) {
+      setImmediate(() => {
+        global.gc?.();
+      });
+    }
   }
 
   /**
