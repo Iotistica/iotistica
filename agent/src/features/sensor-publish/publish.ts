@@ -950,11 +950,6 @@ export class Sensor extends EventEmitter {
       messages: enrichedMessages
     };
     
-    // Attach batch-level forecasts summary if available
-    if (anomalyService) {
-      // Note: getPredictions is internal to anomaly service; skipping batch summary for now
-      // Forecast data is still attached to individual readings via anomaly metadata
-    }
     
     return publishData;
   }
