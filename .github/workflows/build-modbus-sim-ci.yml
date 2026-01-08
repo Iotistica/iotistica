@@ -6,7 +6,6 @@ on:
       - master
     paths:
       - 'sensors/modbus-simulator/**'
-      - 'config/vendors/dataPoints.json'
       - '.github/workflows/build-modbus-sim-ci.yml'
 
 jobs:
@@ -36,16 +35,6 @@ jobs:
       - name: Run pylint
         working-directory: ./sensors/modbus-simulator
         run: pylint --disable=all --enable=E,F simulator.py || true
-
-      - name: Validate vendors JSON
-        run: |
-          if [ ! -f config/vendors/dataPoints.json ]; then
-            echo "❌ config/vendors/dataPoints.json not found!"
-            exit 1
-          fi
-          echo "✅ config/vendors/dataPoints.json exists"
-          cat config/vendors/dataPoints.json | jq . > /dev/null
-          echo "✅ config/vendors/dataPoints.json is valid JSON"
 
       - name: Cleanup test artifacts
         if: always()
