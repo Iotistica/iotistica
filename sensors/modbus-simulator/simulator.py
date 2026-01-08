@@ -24,6 +24,8 @@ import time
 import random
 import logging
 import threading
+import urllib.request
+import urllib.error
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 from pymodbus.server import StartTcpServer
@@ -501,6 +503,84 @@ def get_datapoints(profile_name):
         'profile': profile_name,
         'dataPoints': profile_data[profile_name].get('dataPoints', [])
     })
+
+@app.route('/api/profile/save', methods=['POST'])
+def save_profile():
+    """Save current profile with overrides to API"""
+    try:
+        data = request.get_json()
+        new_profile_name = data.get('profile_name')
+        source_profile = data.get('source_profile', get_active_profile())
+        
+        if not new_profile_name:
+            return jsonify({'success': False, 'error': 'profile_name is required'}), 400
+        
+        # Get source profile data (current active profile or specified)
+        if source_profile not in profile_data:
+            return jsonify({'success': False, 'error': f'Source profile {source_profile} not found'}), 404
+        
+        # Get base profile data
+        base_profile = profile_data[source_profile]
+        data_points = []
+        
+        # Deep copy data points and apply current overrides
+        for dp in base_profile.get('dataPoints', []):
+            dp_copy = dp.copy()
+            address = dp_copy.get('address')
+            
+            # Apply current overrides if they exist
+            if address in REGISTER_OVERRIDES:
+                override = REGISTER_OVERRIDES[address]
+                dp_copy['base'] = override.get('base', dp_copy.get('base', 100))
+                dp_copy['noise_pct'] = override.get('noise_pct', dp_copy.get('noise_pct', 0.05))
+            
+            data_points.append(dp_copy)
+        
+        # Save to API
+        api_url = os.environ.get("MODBUS_API_URL", "http://api:3002")
+        api_token = os.environ.get("API_TOKEN", "")
+        
+        payload = {
+            'profile_name': new_profile_name,
+            'protocol': 'modbus',
+            'data_points': data_points,
+            'metadata': {
+                'description': base_profile.get('description', f'Copy of {source_profile}'),
+                'vendorUrl': base_profile.get('vendorUrl', ''),
+                'model': base_profile.get('model', '')
+            }
+        }
+        
+        headers = {
+            'Content-Type': 'application/json',
+            'User-Agent': 'modbus-simulator/1.0'
+        }
+        if api_token:
+            headers['Authorization'] = f'Bearer {api_token}'
+        
+        req = urllib.request.Request(
+            f"{api_url}/api/v1/profiles",
+            data=json.dumps(payload).encode('utf-8'),
+            headers=headers,
+            method='POST'
+        )
+        
+        with urllib.request.urlopen(req, timeout=10) as response:
+            result = json.loads(response.read().decode())
+            logger.info(f"Profile '{new_profile_name}' saved to API with {len(data_points)} data points (source: {source_profile})")
+            return jsonify({
+                'success': True, 
+                'message': f"Profile '{new_profile_name}' saved successfully", 
+                'profile': new_profile_name
+            })
+            
+    except urllib.error.HTTPError as e:
+        error_msg = e.read().decode() if e.fp else str(e)
+        logger.error(f"Failed to save profile to API: {error_msg}")
+        return jsonify({'success': False, 'error': f'API error: {error_msg}'}), 500
+    except Exception as e:
+        logger.error(f"Failed to save profile: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/scenarios/for-profile/<profile_name>', methods=['GET'])
 def get_scenarios_for_profile(profile_name):

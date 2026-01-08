@@ -27,6 +27,8 @@
                     {% endfor %}
                 </select>
                 <button onclick="loadProfileDataPoints()">📋 Load Profile</button>
+                <button onclick="saveProfile()">💾 Save Profile</button>
+                <button onclick="saveAsProfile()">💾 Save As...</button>
                 <button onclick="applyAllChanges()" class="apply-all-btn">✅ Apply Manual Changes</button>
             </div>
             
@@ -287,6 +289,75 @@
         function clearStagedOverrides() {
             stagedOverrides = {};
             showNotification('Cleared staged overrides', 'info');
+        }
+
+        async function saveProfile() {
+            const profile = currentProfile;
+            
+            if (!confirm(`Save current overrides to profile '${profile}'? This will update the profile in the database.`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/profile/save', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({profile_name: profile})
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showNotification(`✅ Profile '${profile}' saved successfully`, 'success');
+                    // Reload profile data to refresh
+                    location.reload();
+                } else {
+                    if (response.status === 401) {
+                        showNotification(`❌ Unauthorized: API_TOKEN environment variable not set. Contact admin to configure authentication.`, 'error');
+                    } else {
+                        showNotification(`Failed to save profile: ${result.error}`, 'error');
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to save profile:', error);
+                showNotification(`Error saving profile: ${error.message}`, 'error');
+            }
+        }
+
+        async function saveAsProfile() {
+            const newProfileName = prompt('Enter new profile name:');
+            
+            if (!newProfileName || newProfileName.trim() === '') {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/profile/save', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        profile_name: newProfileName.trim(),
+                        source_profile: currentProfile
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showNotification(`✅ Profile saved as '${newProfileName}'`, 'success');
+                    // Reload to show new profile in dropdown
+                    location.reload();
+                } else {
+                    if (response.status === 401) {
+                        showNotification(`❌ Unauthorized: API_TOKEN environment variable not set. Contact admin to configure authentication.`, 'error');
+                    } else {
+                        showNotification(`Failed to save profile: ${result.error}`, 'error');
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to save profile:', error);
+                showNotification(`Error saving profile: ${error.message}`, 'error');
+            }
         }
 
         async function applyProfile() {

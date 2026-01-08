@@ -94,6 +94,72 @@ publicRouter.get('/datapoints', async (req, res) => {
 });
 
 /**
+ * Create or update profile configuration (PUBLIC - for simulator use)
+ * POST /api/v1/profiles
+ * 
+ * PUBLIC ENDPOINT - No authentication required
+ * Allows simulators to save modified profiles
+ */
+publicRouter.post('/', async (req, res) => {
+  try {
+    const { profile_name, protocol, data_points, metadata } = req.body;
+
+    // Validation
+    if (!profile_name || typeof profile_name !== 'string') {
+      return res.status(400).json({
+        error: 'Invalid request',
+        message: 'profile_name is required and must be a string'
+      });
+    }
+
+    if (!protocol || typeof protocol !== 'string') {
+      return res.status(400).json({
+        error: 'Invalid request',
+        message: 'protocol is required and must be a string (e.g., "modbus")'
+      });
+    }
+
+    if (!data_points || !Array.isArray(data_points)) {
+      return res.status(400).json({
+        error: 'Invalid request',
+        message: 'data_points is required and must be an array'
+      });
+    }
+
+    // Basic data point validation
+    for (const dp of data_points) {
+      if (!dp.name || !dp.address || !dp.type || !dp.dataType) {
+        return res.status(400).json({
+          error: 'Invalid data point',
+          message: 'Each data point must have: name, address, type, dataType'
+        });
+      }
+    }
+
+    const profile = await ProfileConfigModel.upsert(
+      profile_name,
+      protocol,
+      data_points,
+      metadata
+    );
+
+    logger.info('Profile config updated (public endpoint)', { profile: profile_name, protocol, dataPointsCount: data_points.length });
+
+    res.json({
+      status: 'ok',
+      message: `Profile '${profile_name}' configuration saved`,
+      profile
+    });
+  } catch (error: any) {
+    logger.error('Error saving profile config (public endpoint)', { error: error.message });
+    res.status(500).json({
+      error: 'Failed to save profile config',
+      message: error.message
+    });
+  }
+});
+
+/**
  * List all profile configurations for a protocol
  * GET /api/v1/profiles?protocol=modbus
  */
