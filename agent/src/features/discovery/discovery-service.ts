@@ -384,12 +384,12 @@ export class DiscoveryService extends EventEmitter {
                   device.name = `${validationData.manufacturer || protocol}_${validationData.modelNumber || device.name}`.toLowerCase().replace(/\s+/g, '_');
                 }
 
-                // Check profile validation results (Modbus-specific)
-                if (validationData.profileValidation) {
-                  const pv = validationData.profileValidation;
+                // Check data point validation results (Modbus-specific)
+                if (validationData.dataPointValidation) {
+                  const pv = validationData.dataPointValidation;
                   
-                  if (pv.result === 'profile_mismatch') {
-                    this.logger?.warnSync(`⚠️  Profile mismatch detected for ${device.name}`, {
+                  if (pv.result === 'config_mismatch') {
+                    this.logger?.warnSync(`⚠️  Data point config mismatch detected for ${device.name}`, {
                       component: LogComponents.discovery,
                       traceId,
                       slaveId: device.metadata?.slaveId,
@@ -410,7 +410,7 @@ export class DiscoveryService extends EventEmitter {
                     await DeviceEndpointModel.update(device.name, {
                       metadata: {
                         ...device.metadata,
-                        profileValidation: pv,
+                        dataPointValidation: pv,
                         validated: true,
                         confidence: device.confidence
                       }
@@ -1110,9 +1110,8 @@ export class DiscoveryService extends EventEmitter {
               data_points: sensor.dataPoints || [],
               metadata: {
                 ...existing.metadata,
-                profile: sensor.metadata?.profile,
                 // Clear old validation data - will be revalidated
-                profileValidation: undefined
+                dataPointValidation: undefined
               },
               lastSeenAt: new Date()
             });
@@ -1191,8 +1190,8 @@ export class DiscoveryService extends EventEmitter {
               firmwareVersion: sensor.validationData.firmwareVersion,
               capabilities: sensor.validationData.capabilities,
               deviceInfo: sensor.validationData.deviceInfo,
-              // Profile validation results (Modbus)
-              profileValidation: sensor.validationData.profileValidation
+              // Data point validation results (Modbus)
+              dataPointValidation: sensor.validationData.dataPointValidation
             })
           }
         };

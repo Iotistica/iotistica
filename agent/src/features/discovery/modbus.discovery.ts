@@ -331,7 +331,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     
     if (dataPoints.length === 0) {
       return {
-        profileValidation: {
+        dataPointValidation: {
           result: 'unknown',
           state: 'unknown',
           responseConfidence: 0,
@@ -362,7 +362,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
         note: 'All data points marked unsafe or no safe flag set'
       });
       return {
-        profileValidation: {
+        dataPointValidation: {
           result: 'unknown',
           state: 'unknown',
           responseConfidence: 0,
@@ -425,7 +425,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     } catch (error) {
       // Connection failed
       return {
-        profileValidation: {
+        dataPointValidation: {
           result: 'unknown',
           state: 'unknown',
           responseConfidence: 0,
@@ -445,7 +445,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     const zeroRatio = readableCount > 0 ? zeroCount / readableCount : 0;
 
     // Determine result based on error pattern (NOT zero values)
-    let result: 'profile_match' | 'profile_mismatch' | 'degraded' | 'unknown';
+    let result: 'config_match' | 'config_mismatch' | 'degraded' | 'unknown';
     let state: 'idle' | 'active' | 'unknown';
     let responseConfidence: number;  // Addresses respond correctly
     let dataConfidence: number;      // Data is meaningful (not all zeros)
@@ -464,19 +464,19 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     }
 
     if (errorRatio > 0.8) {
-      // STRONG INDICATOR: Most addresses don't respond - likely wrong profile
-      result = 'profile_mismatch';
+      // STRONG INDICATOR: Most addresses don't respond - likely wrong data point config
+      result = 'config_mismatch';
       responseConfidence = 1 - errorRatio;  // Low - addresses don't work
       dataConfidence = 0;  // No meaningful data
-      details = `${errorCount}/${sampleSize} addresses unreadable - likely wrong profile config`;
+      details = `${errorCount}/${sampleSize} addresses unreadable - likely wrong data point config`;
       guidance = meiVendor 
-        ? `Device reports vendor '${meiVendor}' via MEI - verify configured profile matches`
-        : 'Check profile configuration in dashboard';
+        ? `Device reports vendor '${meiVendor}' via MEI - verify configured data points match device`
+        : 'Check data point configuration in dashboard';
     } else if (readableRatio > 0.7) {
-      // Addresses respond - profile config is likely correct
+      // Addresses respond - data point config is likely correct
       responseConfidence = readableRatio;  // High - addresses work
       dataConfidence = 1 - zeroRatio;      // 0.0 for all zeros, 1.0 for all variance
-      result = 'profile_match';
+      result = 'config_match';
       
       if (zeroRatio === 1.0) {
         // All zeros - common in idle/startup, but note it
@@ -484,7 +484,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
         if (meiVendor) {
           guidance = `Device idle or at startup. MEI reports: ${meiVendor}${meiModel ? ` ${meiModel}` : ''}`;
         } else {
-          guidance = 'All values zero - device may be idle, at startup, or verify profile config';
+          guidance = 'All values zero - device may be idle, at startup, or verify data point config';
         }
       } else if (dataConfidence > 0.5) {
         // Good variance - strong match
@@ -505,7 +505,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
       guidance = 'Partial address accessibility - wrong model variant or bus issues';
     }
 
-    this.logger?.infoSync('Profile validation complete', {
+    this.logger?.infoSync('Data point configuration validation complete', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       slaveId: device.metadata?.slaveId,
       result,
@@ -525,7 +525,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     });
 
     return {
-      profileValidation: {
+      dataPointValidation: {
         result,
         state,
         responseConfidence,

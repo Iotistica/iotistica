@@ -133,11 +133,11 @@ spec:
             # Simulator configuration (dynamic based on enabled sidecars)
             {{- if gt (int .Values.simulator.modbusCount) 0 }}
             - name: MODBUS_SIMULATOR_PORTS
-              value: {{ range $idx := until (int .Values.simulator.modbusCount) }}{{ if $idx }},{{ end }}{{ add 502 $idx }}{{ end | quote }}
+              value: "{{ range $idx := until (int .Values.simulator.modbusCount) }}{{ if $idx }},{{ end }}{{ add 502 $idx }}{{ end }}"
             {{- end }}
             {{- if gt (int .Values.opcuaSimulator.count) 0 }}
             - name: OPCUA_DISCOVERY_URLS
-              value: {{ range $idx := until (int .Values.opcuaSimulator.count) }}{{ if $idx }},{{ end }}opc.tcp://localhost:{{ add 4840 $idx }}{{ end | quote }}
+              value: "{{ range $idx := until (int .Values.opcuaSimulator.count) }}{{ if $idx }},{{ end }}opc.tcp://localhost:{{ add 4840 $idx }}{{ end }}"
             {{- end }}
             {{- if .Values.sensorSimulator.enabled }}
             - name: SENSOR_SIMULATOR_ENABLED
