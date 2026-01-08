@@ -42,7 +42,7 @@ export interface ModbusConfig {
   slaveRangeStart: number;
   slaveRangeEnd: number;
   timeout: number;
-  profile: string;
+  profile?: string; // Optional: For logging/organization only (not operationally used)
   profileDataPoints?: any[]; // Data points from profile config (pushed via CloudSync)
   // RTU configuration (optional)
   rtuPort?: string;
@@ -251,7 +251,6 @@ export class AgentConfig extends EventEmitter {
       timeout: cloudConnection?.timeoutMs ?? cloudProtocol?.timeout ?? 2000,
       slaveRangeStart: cloudAddressing?.slaveRange?.start ?? cloudProtocol?.slaveRangeStart ?? 1,
       slaveRangeEnd: cloudAddressing?.slaveRange?.end ?? cloudProtocol?.slaveRangeEnd ?? 10,
-      profile: cloudProtocol?.profile ?? 'Generic',
       profileDataPoints: profileDataPoints,
       // RTU configuration (all optional)
       rtuPort: cloudProtocol?.serialPort,

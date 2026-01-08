@@ -362,22 +362,10 @@ export default class DeviceAgent {
         }
       });
       
-      // Listen for protocol config changes (includes profile changes)
+      // Listen for protocol config changes
       this.stateReconciler.on('protocol-config-changed', async (change: { old: any; new: any }) => {
-        // Check for Modbus profile change
-        const oldProfile = change.old?.protocols?.modbus?.profile;
-        const newProfile = change.new?.protocols?.modbus?.profile;
-        
-        if (oldProfile && newProfile && oldProfile !== newProfile && this.anomalyService) {
-          this.agentLogger?.infoSync('Modbus profile changed - resetting anomaly baselines', {
-            component: LogComponents.agent,
-            oldProfile,
-            newProfile,
-          });
-          
-          // Handle profile change (resets in-memory buffers, preserves DB baselines)
-          this.anomalyService.handleProfileChange(newProfile, 'modbus_slave_%');
-        }
+        // Profile changes no longer trigger baseline resets - profile is metadata only
+        // Data point changes will naturally update metrics as they're read
       });
 
       //Final words
@@ -931,16 +919,10 @@ export default class DeviceAgent {
         this.deviceInfo.uuid
       );
       
-      // Set profile for Modbus metrics (for baseline filtering)
-      const modbusConfig = this.agentConfig.getModbusConfig();
-      if (modbusConfig?.profile) {
-        this.anomalyService.setProfileForMetrics('modbus_slave_%', modbusConfig.profile);
-        this.agentLogger?.infoSync("Profile configured for Modbus metrics", {
-          component: LogComponents.agent,
-          profile: modbusConfig.profile,
-          pattern: 'modbus_slave_%',
-        });
-      }
+      // Profile no longer used for baseline filtering - baselines are per-metric only
+      this.agentLogger?.infoSync("Anomaly detection initialized (profile-agnostic)", {
+        component: LogComponents.agent,
+      });
       
       // Wire anomaly service to system metrics and sensor-publish
       this.configureAnomalyFeed();

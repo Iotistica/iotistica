@@ -29,7 +29,7 @@
                 <button onclick="loadProfileDataPoints()">📋 Load Profile</button>
                 <button onclick="saveProfile()">💾 Save Profile</button>
                 <button onclick="saveAsProfile()">💾 Save As...</button>
-                <button onclick="applyAllChanges()" class="apply-all-btn">✅ Apply Manual Changes</button>
+                <button onclick="applyAllChanges()" class="apply-all-btn">✅ Apply</button>
             </div>
             
             <div class="control-group control-group-slaves">
@@ -292,17 +292,23 @@
         }
 
         async function saveProfile() {
-            const profile = currentProfile;
+            // Use staged profile if exists (user loaded but hasn't activated), otherwise current active profile
+            const profile = stagedProfile || currentProfile;
             
-            if (!confirm(`Save current overrides to profile '${profile}'? This will update the profile in the database.`)) {
+            if (!confirm(`Save current values to profile '${profile}'? This will update the profile in the database.`)) {
                 return;
             }
             
             try {
+                // Send staged overrides to backend for saving
                 const response = await fetch('/api/profile/save', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({profile_name: profile})
+                    body: JSON.stringify({
+                        profile_name: profile,
+                        source_profile: profile,
+                        staged_overrides: stagedOverrides  // Send staged overrides to include in save
+                    })
                 });
                 
                 const result = await response.json();
@@ -331,20 +337,25 @@
                 return;
             }
             
+            // Use staged profile if exists (user loaded but hasn't activated), otherwise current active profile
+            const sourceProfile = stagedProfile || currentProfile;
+            
             try {
+                // Send staged overrides to backend for saving
                 const response = await fetch('/api/profile/save', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         profile_name: newProfileName.trim(),
-                        source_profile: currentProfile
+                        source_profile: sourceProfile,
+                        staged_overrides: stagedOverrides  // Send staged overrides to include in save
                     })
                 });
                 
                 const result = await response.json();
                 
                 if (result.success) {
-                    showNotification(`✅ Profile saved as '${newProfileName}'`, 'success');
+                    showNotification(`✅ Profile saved as '${newProfileName}' (from ${sourceProfile})`, 'success');
                     // Reload to show new profile in dropdown
                     location.reload();
                 } else {
@@ -407,23 +418,27 @@
             let html = '<div class="datapoints-grid">';
             
             holdingPoints.forEach(point => {
+                const baseValue = point.base || 100;
+                const noisePct = Math.round((point.noise_pct || 0.05) * 100);
+                console.log(`Rendering point ${point.address}: base=${point.base}, noise_pct=${point.noise_pct}, calculated noisePct=${noisePct}`);
+                
                 html += `
                     <div class="datapoint-card">
                         <h3>${point.name}</h3>
                         <p class="address">Address: ${point.address} | Type: ${point.dataType}</p>
                         
                         <div class="slider-group">
-                            <label>Base Value: <span id="base-value-${point.address}">100</span></label>
+                            <label>Base Value: <span id="base-value-${point.address}">${baseValue}</span></label>
                             <input type="range" id="base-${point.address}" 
-                                   min="0" max="500" value="100" step="1"
+                                   min="0" max="500" value="${baseValue}" step="1"
                                    oninput="updateDisplay(${point.address})"
                                    onchange="setOverride(${point.address})">
                         </div>
                         
                         <div class="slider-group">
-                            <label>Noise: <span id="noise-value-${point.address}">5</span>%</label>
+                            <label>Noise: <span id="noise-value-${point.address}">${noisePct}</span>%</label>
                             <input type="range" id="noise-${point.address}" 
-                                   min="0" max="100" value="5" step="1"
+                                   min="0" max="100" value="${noisePct}" step="1"
                                    oninput="updateDisplay(${point.address})"
                                    onchange="setOverride(${point.address})">
                         </div>
@@ -450,6 +465,9 @@
             if (noiseSlider) {
                 document.getElementById(`noise-value-${address}`).textContent = noiseSlider.value;
             }
+            
+            // Also stage the override immediately as slider moves
+            setOverride(address);
         }
 
         // Stage override for a register (local only)

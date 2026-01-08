@@ -215,7 +215,6 @@ export function generateDefaultTargetStateConfigV2(
       },
       modbus: {
         enabled: true,
-        profile: 'COMAP',
         bufferCapacity: 128 * 1024, // 128KB - Standard Modbus responses
         connections: [
           {

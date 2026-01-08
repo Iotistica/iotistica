@@ -443,6 +443,10 @@ def resolve_scenario_to_addresses(scenario_name, scenario_def, profile_name):
 @app.route('/')
 def index():
     """Serve GUI homepage"""
+    # Reload profile data to pick up any new profiles saved via API
+    global profile_data
+    profile_data = load_profile_data()
+    
     return render_template('index.html', 
                           current_profile=get_active_profile(),
                           profiles=list(profile_data.keys()))
@@ -511,6 +515,7 @@ def save_profile():
         data = request.get_json()
         new_profile_name = data.get('profile_name')
         source_profile = data.get('source_profile', get_active_profile())
+        staged_overrides = data.get('staged_overrides', {})  # Overrides from UI that haven't been applied yet
         
         if not new_profile_name:
             return jsonify({'success': False, 'error': 'profile_name is required'}), 400
@@ -523,16 +528,29 @@ def save_profile():
         base_profile = profile_data[source_profile]
         data_points = []
         
-        # Deep copy data points and apply current overrides
+        # Merge applied overrides and staged overrides for logging
+        total_overrides = len(REGISTER_OVERRIDES) + len(staged_overrides)
+        logger.info(f"Saving profile '{new_profile_name}' from source '{source_profile}' with {len(REGISTER_OVERRIDES)} applied + {len(staged_overrides)} staged overrides")
+        
+        # Deep copy data points and apply overrides (both applied and staged)
         for dp in base_profile.get('dataPoints', []):
             dp_copy = dp.copy()
             address = dp_copy.get('address')
+            address_str = str(address)
             
-            # Apply current overrides if they exist
+            # First apply already-applied overrides from REGISTER_OVERRIDES
             if address in REGISTER_OVERRIDES:
                 override = REGISTER_OVERRIDES[address]
                 dp_copy['base'] = override.get('base', dp_copy.get('base', 100))
                 dp_copy['noise_pct'] = override.get('noise_pct', dp_copy.get('noise_pct', 0.05))
+                logger.debug(f"Applied server override for address {address}: base={dp_copy['base']}, noise_pct={dp_copy['noise_pct']}")
+            
+            # Then apply staged overrides (from UI, not yet applied to server)
+            if address_str in staged_overrides:
+                override = staged_overrides[address_str]
+                dp_copy['base'] = override.get('base', dp_copy.get('base', 100))
+                dp_copy['noise_pct'] = override.get('noise_pct', dp_copy.get('noise_pct', 0.05))
+                logger.debug(f"Applied staged override for address {address}: base={dp_copy['base']}, noise_pct={dp_copy['noise_pct']}")
             
             data_points.append(dp_copy)
         

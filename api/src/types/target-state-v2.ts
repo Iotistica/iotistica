@@ -171,7 +171,7 @@ export interface ModbusDataPoint {
 
 export interface ModbusProtocolConfig {
   enabled: boolean;
-  profile: string;
+  profile?: string; // Optional: Metadata only (not used operationally)
   bufferCapacity?: number; // Buffer size in bytes for Modbus responses
   connection?: ModbusConnection;  // Legacy: Single connection (optional for backward compat)
   connections?: ModbusConnection[];  // Modern: Multiple connections (optional)

@@ -100,17 +100,16 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
                   : [1, 10]
               };
 
-              const profile = conn.profile || modbusConfig.profile || 'Generic';
               const dataPoints = conn.points || modbusConfig.profileDataPoints || [];
 
-              this.logger?.infoSync(`Scanning TCP connection '${conn.name || conn.host}' (profile: ${profile})`, {
+              this.logger?.infoSync(`Scanning TCP connection '${conn.name || conn.host}' (${dataPoints.length} data points)`, {
                 component: LogComponents.discovery + "] [" + this.protocol as any,
                 connection: conn.name,
                 host: conn.host,
                 port: conn.port
               });
 
-              return await this.discoverOnBus(connOptions, profile, dataPoints, conn.name);
+              return await this.discoverOnBus(connOptions, dataPoints, conn.name);
             })
           );
 
@@ -134,16 +133,15 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
               : [1, 10]
           };
 
-          const profile = conn.profile || modbusConfig.profile || 'Generic';
           const dataPoints = conn.points || modbusConfig.profileDataPoints || [];
 
-          this.logger?.infoSync(`Scanning serial connection '${conn.name || (conn as any).serialPort}' (profile: ${profile})`, {
+          this.logger?.infoSync(`Scanning serial connection '${conn.name || (conn as any).serialPort}' (${dataPoints.length} data points)`, {
             component: LogComponents.discovery + "] [" + this.protocol as any,
             connection: conn.name,
             port: (conn as any).serialPort
           });
 
-          const discovered = await this.discoverOnBus(connOptions, profile, dataPoints, conn.name);
+          const discovered = await this.discoverOnBus(connOptions, dataPoints, conn.name);
           allDiscovered.push(...discovered);
         }
       }
@@ -161,14 +159,13 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 
     // Legacy single-connection mode (backward compatibility)
     const dataPoints: DataPoint[] = modbusConfig?.profileDataPoints || [];
-    const profile = modbusConfig?.profile || 'Generic';
 
     this.logger?.infoSync('Starting single-connection Modbus discovery (legacy mode)', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
-      profile
+      dataPointCount: dataPoints.length
     });
 
-    return this.discoverOnBus(options || {}, profile, dataPoints);
+    return this.discoverOnBus(options || {}, dataPoints);
   }
 
   /**
@@ -177,17 +174,16 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
    */
   private async discoverOnBus(
     options: ModbusDiscoveryOptions,
-    profile: string,
     dataPoints: DataPoint[],
     connectionName?: string
   ): Promise<DiscoveredDevice[]> {
     
     if (dataPoints.length === 0) {
-      this.logger?.warnSync(`No profile data points in config (profile: ${profile || 'unknown'})`, {
+      this.logger?.warnSync(`No data points in config`, {
         component: LogComponents.discovery + "] [" + this.protocol as any
       });
     } else {
-      this.logger?.infoSync(`Using ${dataPoints.length} data points from profile '${profile}'`, {
+      this.logger?.infoSync(`Using ${dataPoints.length} data points`, {
         component: LogComponents.discovery + "] [" + this.protocol as any
       });
     }
