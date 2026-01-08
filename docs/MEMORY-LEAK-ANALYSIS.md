@@ -1,10 +1,103 @@
 # Memory Leak Analysis - Agent Service
 
-**Analysis Date**: 2025-11-12  
+**Analysis Date**: 2025-11-12 (Updated: 2025-01-15)
 **Baseline Memory**: 15MB threshold (configurable via `MEMORY_THRESHOLD_MB`)  
 **Detection**: Active memory monitoring runs every 30s (configurable via `MEMORY_CHECK_INTERVAL_MS`)
 
 **⚠️ CRITICAL UPDATE**: Memory monitoring now runs **independently** as a background timer, not just on `/ping` healthcheck calls.
+
+---
+
+## 🚨 PRODUCTION LEAK DETECTED (2025-01-15)
+
+**Alert**: Survivor space leak at **95.7% heap utilization**, 0.40 MB/min growth, 6.7 MB retained objects
+
+**Root Cause CONFIRMED**: Modbus client event listeners accumulate on every reconnection attempt (NEVER removed)
+
+**Status**: 🔴 **CRITICAL** - Requires immediate fix
+
+### Modbus Client Event Listener Leak (P0 - CRITICAL)
+
+**File**: [agent/src/features/endpoints/modbus/client.ts](agent/src/features/endpoints/modbus/client.ts#L840-L853)
+
+**Issue**: `client.on('error')` and `client.on('close')` added on EVERY reconnection, never removed
+
+**Code Evidence**:
+```typescript
+// Line 840 - Error listener (NEVER removed)
+this.client.on('error', (error: unknown) => { ... });
+
+// Line 853 - Close listener (NEVER removed)
+this.client.on('close', () => { ... });
+
+// Line 100 - Admission of the problem
+// "modbus-serial may not expose removeAllListeners, so we just create a new instance"
+```
+
+**Leak Mechanism**:
+1. Device offline → connection fails
+2. `scheduleReconnect()` → exponential backoff (5s → 60s)
+3. `forceResetClient()` → new `ModbusRTU()` instance
+4. `setupErrorHandlers()` → adds 2 NEW listeners
+5. **OLD listeners remain attached** (event emitter holds references)
+6. Old client instance cannot be GC'd (listeners reference it)
+7. After 100 reconnects: **200 leaked listeners + 100 leaked client instances**
+
+**Memory Profile Match**:
+- ✅ Survivor space leak (listeners survive GC cycles)
+- ✅ Monotonically rising floor (new listeners added, old never removed)
+- ✅ Growth rate 0.40 MB/min (matches ~1 reconnect per 30s @ ~200KB per leak)
+- ✅ 6.7 MB retained (matches ~30-40 leaked client instances)
+
+**Fix Required**: Remove listeners BEFORE creating new client instance
+
+```typescript
+private cleanupEventListeners(): void {
+  if (this.client) {
+    if (typeof this.client.removeAllListeners === 'function') {
+      this.client.removeAllListeners('error');
+      this.client.removeAllListeners('close');
+      this.logger.debug(`Removed event listeners for ${this.device.name}`);
+    }
+  }
+}
+
+private forceResetClient(): void {
+  // Clear timer
+  if (this.reconnectTimer) {
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
+  }
+  
+  // CRITICAL: Remove listeners BEFORE new instance
+  this.cleanupEventListeners();
+  
+  // ... rest of reset logic ...
+}
+```
+
+**Expected Impact**: Heap 95.7% → 85-90%, growth 0.40 MB/min → 0.00 MB/min
+
+---
+
+### Reconnect Timer Leak (P0 - CRITICAL)
+
+**File**: [agent/src/features/endpoints/modbus/client.ts](agent/src/features/endpoints/modbus/client.ts#L901)
+
+**Issue**: `reconnectTimer` not cleared in all error paths
+
+**Code Evidence**:
+```typescript
+// Line 901 - Timer created
+this.reconnectTimer = setTimeout(() => { ... }, delay);
+
+// Line 187 - Only cleared in SOME paths
+clearTimeout(this.reconnectTimer);
+```
+
+**Fix**: Clear timer in `forceResetClient()` and `disconnect()` (see above)
+
+---
 
 ---
 

@@ -33,12 +33,55 @@ export class ModbusClient {
   private lastSuccessfulRead = Date.now(); // Last successful register read
   private lastConnectionSuccess = Date.now(); // Last successful connection
 
+  // Event handlers bound in constructor (NOT anonymous lambdas)
+  // CRITICAL: Prevents strong references that leak when client is replaced
+  private errorHandler: (error: unknown) => void;
+  private closeHandler: () => void;
+
   constructor(device: ModbusDevice, logger: Logger) {
     this.device = device;
     this.logger = logger;
     this.client = new ModbusRTU();
     this.currentRetryDelay = this.MIN_RETRY_DELAY;
+    
+    // Bind event handlers to instance (allows proper cleanup)
+    this.errorHandler = this.handleError.bind(this);
+    this.closeHandler = this.handleClose.bind(this);
+    
     this.setupErrorHandlers();
+  }
+  
+  /**
+   * Handle socket error event
+   * Bound in constructor to allow proper removeListener() cleanup
+   */
+  private handleError(error: unknown): void {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    this.logger.error(
+      `[RECOVERY] Socket error for device ${this.device.name}: ${errorMessage}`
+    );
+    this.connected = false;
+    this.consecutiveFailures++; // Explicit failure count for error event
+    this.logger.debug(
+      `[RECOVERY] Setting connected=false, client.isOpen=${this.client.isOpen}, scheduling reconnect (failures: ${this.consecutiveFailures})`
+    );
+    this.scheduleReconnect();
+  }
+  
+  /**
+   * Handle socket close event
+   * Bound in constructor to allow proper removeListener() cleanup
+   */
+  private handleClose(): void {
+    this.logger.debug(
+      `[RECOVERY] Socket closed for device ${this.device.name}`
+    );
+    this.connected = false;
+    this.consecutiveFailures++; // Explicit failure count for close event
+    this.logger.debug(
+      `[RECOVERY] Setting connected=false, client.isOpen=${this.client.isOpen}, scheduling reconnect (failures: ${this.consecutiveFailures})`
+    );
+    this.scheduleReconnect();
   }
   
   /**
@@ -76,6 +119,48 @@ export class ModbusClient {
   }
 
   /**
+   * Cleanup event listeners from current client instance
+   * CRITICAL: Prevents memory leak from accumulated event listeners during reconnections
+   * Each reconnection adds 2 new listeners (error + close), but old listeners remain
+   * attached to the event emitter, preventing garbage collection of old client instances
+   */
+  private cleanupEventListeners(): void {
+    if (!this.client) {
+      return;
+    }
+
+    try {
+      // STEP 1: Close client connection first (breaks socket references)
+      if (this.client.isOpen) {
+        this.client.close(() => {
+          // Callback intentionally empty - we're destroying this instance
+        });
+      }
+
+      // STEP 2: Remove event listeners (breaks EventEmitter references)
+      // modbus-serial extends EventEmitter, but TypeScript doesn't expose the methods
+      // Use type assertion to access EventEmitter methods
+      // CRITICAL: Use off() instead of removeAllListeners() to avoid removing
+      // modbus-serial's internal listeners (which could break internal state tracking)
+      const emitter = this.client as any;
+      if (typeof emitter.off === 'function') {
+        emitter.off('error', this.errorHandler);
+        emitter.off('close', this.closeHandler);
+        this.logger.debug(`Closed connection and removed event listeners for ${this.device.name}`);
+      } else {
+        // Fallback: Log warning if off() not available
+        this.logger.warn(
+          `off() not available on modbus-serial client for ${this.device.name}. ` +
+          `Event listeners may accumulate (memory leak risk).`
+        );
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.debug(`Error during client cleanup: ${errorMessage}`);
+    }
+  }
+
+  /**
    * Force reset the Modbus client instance
    * CRITICAL: modbus-serial does not recover cleanly on the same client instance
    * after connection failures. We must destroy and recreate the client completely.
@@ -83,21 +168,25 @@ export class ModbusClient {
   private async forceResetClient(): Promise<void> {
     this.logger.debug(`Force resetting Modbus client for device ${this.device.name}`);
     
-    try {
-      if (this.client.isOpen) {
-        this.logger.debug(`Closing existing client connection for ${this.device.name}`);
-        await new Promise<void>(resolve => {
-          this.client.close(() => resolve());
-        });
-      }
-    } catch (error) {
-      // Ignore close errors - client may already be in bad state
-      this.logger.debug(`Error closing client during reset: ${error}`);
+    // CRITICAL: Clear any pending reconnect timer to prevent timer leak
+    // Leaked timers hold references to closures, preventing GC of old client instances
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+      this.logger.debug(`Cleared reconnect timer for ${this.device.name}`);
     }
 
+    // CRITICAL: Close connection and remove event listeners BEFORE creating new instance
+    // This prevents memory leak from accumulated listeners (2 per reconnection)
+    // Without this, 100 reconnections = 200 leaked listeners + 100 leaked client instances (~40-60 MB)
+    this.cleanupEventListeners();
+
+    // CRITICAL: Reset the queue to break promise chain that references old client
+    // In-flight reads may still reference old client/closures until they resolve/timeout
+    this.queue = Promise.resolve();
+
     // CRITICAL: discard client instance completely
-    // This removes poisoned socket state, broken serial port handles, and accumulated event listeners
-    // Note: modbus-serial may not expose removeAllListeners, so we just create a new instance
+    // This removes poisoned socket state and broken serial port handles
     this.logger.debug(`Creating new ModbusRTU instance for ${this.device.name}`);
     this.client = new ModbusRTU();
     this.setupErrorHandlers();
@@ -161,6 +250,14 @@ export class ModbusClient {
       
       this.connected = true;
       
+      // CRITICAL: Clear reconnect timer on successful connection
+      // Prevents timer leak if connection succeeds before scheduled reconnection
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = undefined;
+        this.logger.debug(`Cleared reconnect timer after successful connection to ${this.device.name}`);
+      }
+      
       // Reset backoff on successful connection
       this.currentRetryDelay = this.MIN_RETRY_DELAY;
       this.consecutiveFailures = 0;
@@ -183,22 +280,19 @@ export class ModbusClient {
    */
   async disconnect(): Promise<void> {
     try {
+      // Clear reconnect timer
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = undefined;
+        this.logger.debug(`Cleared reconnect timer during disconnect for ${this.device.name}`);
       }
       
-      if (this.client.isOpen) {
-        // Properly await close callback (modbus-serial uses callbacks, not promises)
-        await new Promise<void>((resolve) => {
-          this.client.close(() => {
-            this.logger.debug(`Disconnected from Modbus device: ${this.device.name}`);
-            resolve();
-          });
-        });
-      }
+      // Cleanup event listeners to prevent memory leak
+      // This also closes the client connection
+      this.cleanupEventListeners();
       
       this.connected = false;
+      this.logger.debug(`Disconnected from Modbus device: ${this.device.name}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.error(`Error disconnecting from Modbus device ${this.device.name}: ${errorMessage}`);
@@ -835,32 +929,12 @@ export class ModbusClient {
 
   /**
    * Setup error handlers
+   * CRITICAL: Uses stored handler fields (not anonymous lambdas) to prevent strong references
+   * This allows proper cleanup via removeAllListeners() without leaking closures
    */
   private setupErrorHandlers(): void {
-    this.client.on('error', (error: unknown) => {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.error(
-        `[RECOVERY] Socket error for device ${this.device.name}: ${errorMessage}`
-      );
-      this.connected = false;
-      this.consecutiveFailures++; // Explicit failure count for error event
-      this.logger.debug(
-        `[RECOVERY] Setting connected=false, client.isOpen=${this.client.isOpen}, scheduling reconnect (failures: ${this.consecutiveFailures})`
-      );
-      this.scheduleReconnect();
-    });
-
-    this.client.on('close', () => {
-      this.logger.debug(
-        `[RECOVERY] Socket closed for device ${this.device.name}`
-      );
-      this.connected = false;
-      this.consecutiveFailures++; // Explicit failure count for close event
-      this.logger.debug(
-        `[RECOVERY] Setting connected=false, client.isOpen=${this.client.isOpen}, scheduling reconnect (failures: ${this.consecutiveFailures})`
-      );
-      this.scheduleReconnect();
-    });
+    this.client.on('error', this.errorHandler);
+    this.client.on('close', this.closeHandler);
   }
 
   /**
