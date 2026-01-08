@@ -278,8 +278,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
                 slaveId,
                 deviceId: deviceInfo.deviceId,
                 discoveryMethod: deviceInfo.method,
-                profile,  // Store profile for change detection
-                connectionName  // NEW: Track connection association
+                connectionName  // Track connection association
               }
             });
 
