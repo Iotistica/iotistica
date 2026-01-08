@@ -15,17 +15,30 @@ import type { AnomalyConfig, MetricConfig, DataPoint, DetectionMethod } from './
 export function loadConfigFromTargetState(targetStateConfig?: any): AnomalyConfig {
 	// V2 format: Top-level anomalyDetection section
 	if (targetStateConfig?.anomalyDetection) {
-		return targetStateConfig.anomalyDetection as AnomalyConfig;
+		const config = targetStateConfig.anomalyDetection as AnomalyConfig;
+		// Ensure warmupPeriodMs has default if not specified
+		if (config.warmupPeriodMs === undefined) {
+			config.warmupPeriodMs = 15 * 60 * 1000; // 15 minutes default
+		}
+		return config;
 	}
 	
 	// V1.5 format: Top-level anomaly section (backward compat)
 	if (targetStateConfig?.anomaly) {
-		return targetStateConfig.anomaly as AnomalyConfig;
+		const config = targetStateConfig.anomaly as AnomalyConfig;
+		if (config.warmupPeriodMs === undefined) {
+			config.warmupPeriodMs = 15 * 60 * 1000;
+		}
+		return config;
 	}
 	
 	// V1 format: config.anomaly (legacy)
 	if (targetStateConfig?.config?.anomaly) {
-		return targetStateConfig.config.anomaly as AnomalyConfig;
+		const config = targetStateConfig.config.anomaly as AnomalyConfig;
+		if (config.warmupPeriodMs === undefined) {
+			config.warmupPeriodMs = 15 * 60 * 1000;
+		}
+		return config;
 	}
 	
 	// Fallback to environment variables

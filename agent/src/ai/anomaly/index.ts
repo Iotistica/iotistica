@@ -52,6 +52,9 @@ export class AnomalyDetectionService {
 	}>();
 	// Profile tracking: Map metric prefix to profile (e.g., 'modbus_slave_1' → 'Generic')
 	private metricProfiles = new Map<string, string>();
+	// Startup timestamp for warm-up period (prevents false positives on new agents)
+	private startupTimestamp: number = Date.now();
+	private warmupPeriodMs: number;
 	
 	constructor(config: AnomalyConfig, db?: Knex, logger?: AgentLogger, mqttManager?: MqttManager, deviceUuid?: string) {
 		this.config = config;
@@ -59,6 +62,9 @@ export class AnomalyDetectionService {
 		this.mqttManager = mqttManager;
 		this.deviceUuid = deviceUuid;
 		this.enabled = true; // Controlled by features.enableAnomalyDetection
+		
+		// Set warm-up period from config (default: 15 minutes if not specified)
+		this.warmupPeriodMs = config.warmupPeriodMs ?? 15 * 60 * 1000;
 		
 		this.alertManager = new AlertManager(
 			config.alerts.maxQueueSize,
@@ -190,19 +196,42 @@ export class AnomalyDetectionService {
 		const results: AnomalyAlert[] = [];
 		let maxConfidence = 0.0; // Track max confidence across all detectors
 		
+		// WARM-UP PERIOD: Suppress alerts for first 15 minutes after agent startup
+		// Prevents false positives from:
+		// - Initial data collection noise
+		// - Simulator/test environment static data
+		// - Insufficient baseline samples
+		const agentUptimeMs = Date.now() - this.startupTimestamp;
+		if (agentUptimeMs < this.warmupPeriodMs) {
+			const remainingMinutes = Math.ceil((this.warmupPeriodMs - agentUptimeMs) / 60000);
+			this.logger?.debugSync(`Anomaly detection in warm-up mode (${remainingMinutes} min remaining)`, {
+				component: LogComponents.metrics,
+				metric: dataPoint.metric,
+				uptimeMs: agentUptimeMs,
+				warmupMs: this.warmupPeriodMs,
+			});
+			// Still update buffers and calculate scores for learning, just don't alert
+			this.anomalyScores.set(dataPoint.metric, 0.0);
+			return;
+		}
+		
 		// Get time slot for seasonal baseline lookup
 		const seasonalityPattern = metricConfig.seasonality || 'none';
 		const timeSlot = getTimeSlot(dataPoint.timestamp, seasonalityPattern);
 		const minimumSamples = getMinimumSamplesForSeasonalBaseline(seasonalityPattern);
 		
 		// Load latest baseline from database if available (with seasonality support)
+		// CRITICAL: Pass null profile to avoid filtering - we removed profile dependency
+		// This means baselines are shared across all scenarios (intentional since profile is metadata)
+		// If you need scenario isolation, clear anomaly_baselines table when changing scenarios
 		let dbBaseline: any = null;
 		if (this.storage) {
 			try {
 				dbBaseline = await this.storage.getLatestBaseline(
 					dataPoint.metric,
 					timeSlot,
-					minimumSamples
+					minimumSamples,
+					null // Profile filter disabled - baselines shared across scenarios
 				);
 			} catch (error) {
 				this.logger?.debugSync('Failed to load baseline from database, using buffer stats', {
@@ -872,8 +901,13 @@ export class AnomalyDetectionService {
 	
 	/**
 	 * Handle profile change - reset in-memory buffers for fresh baseline learning
-	 * Historical baselines are preserved in database, filtered by profile field
-	 * @param newProfile - New profile identifier
+	 * 
+	 * NOTE: Database baselines are NOT filtered by profile (profile is metadata only)
+	 * If you change simulator scenarios, manually clear anomaly_baselines table to avoid
+	 * mixing baselines from different data distributions:
+	 *   DELETE FROM anomaly_baselines WHERE metric LIKE 'modbus_%';
+	 * 
+	 * @param newProfile - New profile identifier (metadata only)
 	 * @param metricPattern - Pattern to match metrics (e.g., 'modbus_slave_%')
 	 */
 	handleProfileChange(newProfile: string, metricPattern: string = 'modbus_%'): void {

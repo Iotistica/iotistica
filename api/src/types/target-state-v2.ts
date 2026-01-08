@@ -40,6 +40,7 @@ export interface AnomalyDetectionConfig {
   metrics: AnomalyMetric[];
   storage: AnomalyStorage;
   sensitivity: number;
+  warmupPeriodMs: number;  // Suppress alerts during agent initialization (default: 900000 = 15 min)
 }
 
 // ============================================================================

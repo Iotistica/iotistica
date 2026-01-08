@@ -112,16 +112,17 @@ export function estimateStorageOverhead(pattern: SeasonalityPattern): number {
  */
 export function getMinimumSamplesForSeasonalBaseline(pattern: SeasonalityPattern): number {
 	// More granular patterns need more samples to be statistically significant
+	// Updated to reduce false positives on new agents and test environments
 	switch (pattern) {
 		case 'none':
-			return 10; // Standard minimum
+			return 30; // ~2.5 minutes @ 5sec intervals (basic statistical confidence)
 		case 'day-night':
-			return 5; // Can establish pattern quickly
+			return 20; // Need enough samples to see pattern shift
 		case 'hourly':
-			return 10; // Need more samples per hour
+			return 30; // Need more samples per hour slot
 		case 'weekly':
-			return 15; // Need even more for weekly patterns
+			return 50; // Need even more for weekly patterns
 		default:
-			return 10;
+			return 30;
 	}
 }

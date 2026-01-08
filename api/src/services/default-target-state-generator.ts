@@ -145,6 +145,7 @@ export function generateDefaultTargetStateConfigV2(
         minSamples: 5,
       },
       sensitivity: 5,
+      warmupPeriodMs: 900000,  // 15 minutes (suppress alerts during agent initialization)
     },
     logging: {
       level: 'debug',  // Default to debug for better visibility

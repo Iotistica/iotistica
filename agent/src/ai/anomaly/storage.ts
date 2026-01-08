@@ -335,6 +335,7 @@ export class AnomalyStorageService {
 	 * Get latest baseline for a metric and time slot
 	 * Falls back to overall baseline (-1) if seasonal baseline not found or has insufficient data
 	 * Backward compatible: falls back to old schema if time_slot column doesn't exist
+	 * Automatically retries with pool recovery on timeout
 	 */
 	async getLatestBaseline(
 		metric: string,
@@ -342,86 +343,78 @@ export class AnomalyStorageService {
 		minimumSamples: number = 10,
 		profile: string | null = null // Filter by profile (null for system metrics)
 	): Promise<AnomalyBaselineRecord | null> {
-		try {
-			// Try to get seasonal baseline first
-			if (timeSlot !== -1) {
-				try {
-					const query = this.db('anomaly_baselines')
-						.where({ metric, time_slot: timeSlot });
-					
-					// Add profile filter if provided
-					if (profile !== null) {
-						query.where({ profile });
-					}
-					
-					const seasonalBaseline = await query
-						.orderBy('calculated_at', 'desc')
-						.first();
-					
-					// Use seasonal baseline if it has enough samples
-					if (seasonalBaseline && seasonalBaseline.sample_count >= minimumSamples) {
-						return seasonalBaseline;
-					}
-					
-					// Fall back to overall baseline if seasonal baseline insufficient
-					this.logger?.debugSync('Seasonal baseline insufficient, falling back to overall', {
-						component: LogComponents.metrics,
-						metric,
-						timeSlot,
-						samples: seasonalBaseline?.sample_count || 0,
-						minimumSamples,
-					});
-				} catch (seasonalError: any) {
-					// Backward compatibility: if time_slot column doesn't exist, fall back to old schema
-					if (seasonalError?.message?.includes('no such column: time_slot')) {
-						this.logger?.debugSync('Seasonality not supported (time_slot column missing), using legacy baseline', {
-							component: LogComponents.metrics,
-							metric,
-							note: 'Run migration 002_add_seasonality_support.sql to enable seasonality',
-						});
-						// Fall through to overall baseline query without time_slot
-					} else {
-						throw seasonalError;
-					}
-				}
-			}
-			
-			// Get overall baseline (time_slot = -1) or legacy baseline (no time_slot)
+		// Try to get seasonal baseline first
+		if (timeSlot !== -1) {
 			try {
 				const query = this.db('anomaly_baselines')
-					.where({ metric, time_slot: -1 });
+					.where({ metric, time_slot: timeSlot });
 				
 				// Add profile filter if provided
 				if (profile !== null) {
 					query.where({ profile });
 				}
 				
-				const baseline = await query
+				const seasonalBaseline = await query
 					.orderBy('calculated_at', 'desc')
 					.first();
-
-				return baseline || null;
-			} catch (overallError: any) {
-				// Backward compatibility: if time_slot column doesn't exist, query without it
-				if (overallError?.message?.includes('no such column: time_slot')) {
-					const legacyBaseline = await this.db('anomaly_baselines')
-						.where({ metric })
-						.orderBy('calculated_at', 'desc')
-						.first();
-					
-					return legacyBaseline || null;
+				
+				// Use seasonal baseline if it has enough samples
+				if (seasonalBaseline && seasonalBaseline.sample_count >= minimumSamples) {
+					return seasonalBaseline;
 				}
-				throw overallError;
+				
+				// Fall back to overall baseline if seasonal baseline insufficient
+				this.logger?.debugSync('Seasonal baseline insufficient, falling back to overall', {
+					component: LogComponents.metrics,
+					metric,
+					timeSlot,
+					samples: seasonalBaseline?.sample_count || 0,
+					minimumSamples,
+				});
+			} catch (seasonalError: any) {
+				// Backward compatibility: if time_slot column doesn't exist, fall back to old schema
+				if (seasonalError?.message?.includes('no such column: time_slot')) {
+					this.logger?.debugSync('Seasonality not supported (time_slot column missing), using legacy baseline', {
+						component: LogComponents.metrics,
+						metric,
+						note: 'Run migration 002_add_seasonality_support.sql to enable seasonality',
+					});
+					// Fall through to overall baseline query without time_slot
+				} else {
+					throw seasonalError;
+				}
 			}
-		} catch (error) {
-			this.logger?.errorSync('Failed to fetch latest baseline', error as Error, {
-				component: LogComponents.metrics,
-				metric,
-				timeSlot,
-			});
-			return null;
+		}
+		
+		// Get overall baseline (time_slot = -1) or legacy baseline (no time_slot)
+		try {
+			const query = this.db('anomaly_baselines')
+				.where({ metric, time_slot: -1 });
+			
+			// Add profile filter if provided
+			if (profile !== null) {
+				query.where({ profile });
+			}
+			
+			const baseline = await query
+				.orderBy('calculated_at', 'desc')
+				.first();
+
+			return baseline || null;
+		} catch (overallError: any) {
+			// Backward compatibility: if time_slot column doesn't exist, query without it
+			if (overallError?.message?.includes('no such column: time_slot')) {
+				const legacyBaseline = await this.db('anomaly_baselines')
+					.where({ metric })
+					.orderBy('calculated_at', 'desc')
+					.first();
+				
+				return legacyBaseline || null;
+			}
+			throw overallError;
 		}
 	}
+
 
 	/**
 	 * Get alert statistics for a metric

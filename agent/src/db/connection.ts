@@ -47,7 +47,7 @@ const db = knex({
 	// WAL mode still serializes writes, so pool > 1 only adds overhead
 	// This dramatically reduces SQLITE_BUSY errors under load
 	pool: {
-		min: 1,
+		min: 0, // Let Knex open on demand (min: 1 keeps connection forever, can get stuck after errors)
 		max: 1, // Single connection = no lock contention
 		acquireTimeoutMillis: 30000,
 		idleTimeoutMillis: 30000,
@@ -169,7 +169,11 @@ export const initialized = async (logger?: AgentLogger): Promise<void> => {
 	// CRITICAL: Checkpoint WAL to prevent unbounded growth
 	// Edge devices: Limited storage on SD cards, low read traffic + frequent writes
 	// WAL can grow indefinitely if not checkpointed, leading to disk exhaustion
+	// 
 	// TRUNCATE mode: Move WAL contents to main DB file and truncate WAL to zero bytes
+	// ⚠️  TRUNCATE requires exclusive lock and blocks ALL writers
+	// ✅  SAFE here because this runs at startup before any concurrent access
+	// ❌  NEVER use TRUNCATE during runtime with pool=1 (use PASSIVE or auto-checkpoint)
 	try {
 		await db.raw('PRAGMA wal_checkpoint(TRUNCATE);');
 		logger?.debugSync('WAL checkpoint completed', {
@@ -249,11 +253,32 @@ export async function upsertModel(
 /**
  * Execute a callback within a database transaction
  * Supports both sync and async callbacks with return values
+ * 
+ * CRITICAL for SQLite: Keep transactions ultra-short
+ * - DB operations only (no network, logging, timers, retries)
+ * - Single connection pool means long transactions block ALL queries
+ * - Warns if transaction exceeds 50ms
+ * 
+ * ❌ BAD: await trx('table').insert(...); await publishMQTT(...);
+ * ✅ GOOD: await trx('table').insert(...); // then MQTT outside transaction
  */
-export function transaction<T = any>(
+export async function transaction<T = any>(
 	cb: (trx: Knex.Transaction) => Promise<T>,
 ): Promise<T> {
-	return db.transaction(cb);
+	const start = Date.now();
+	return db.transaction(async trx => {
+		const result = await cb(trx);
+		const duration = Date.now() - start;
+		
+		// Warn about long transactions that block the single connection
+		if (duration > 50) {
+			console.warn(`[SQLite] Long transaction detected: ${duration}ms - ` +
+				`this blocks ALL database access. Keep transactions DB-only ` +
+				`(no network, logging, timers, retries)`);
+		}
+		
+		return result;
+	});
 }
 
 /**

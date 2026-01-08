@@ -17,14 +17,16 @@ export class ZScoreDetector implements AnomalyDetector {
 	readonly method = 'zscore' as const;
 	
 	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig, dbBaseline?: { mean: number; std_dev: number; sample_count: number }): DetectionResult {
-		if (buffer.size < 10) {
+		// Z-score requires ~50 samples for Central Limit Theorem confidence
+		// 50 samples = ~4 minutes @ 5sec intervals
+		if (buffer.size < 50) {
 			return {
 				method: this.method,
 				isAnomaly: false,
 				confidence: 0,
 				deviation: 0,
 				expectedRange: [value, value],
-				message: 'Insufficient data for Z-score detection (need at least 10 samples)',
+				message: `Collecting baseline data (${buffer.size}/50 samples)`,
 			};
 		}
 		
@@ -91,14 +93,16 @@ export class MADDetector implements AnomalyDetector {
 	readonly method = 'mad' as const;
 	
 	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig, dbBaseline?: { median?: number; mad?: number; sample_count: number }): DetectionResult {
-		if (buffer.size < 10 && (!dbBaseline || dbBaseline.sample_count < 10)) {
+		// MAD requires ~50 samples for robust median/MAD calculation
+		// 50 samples = ~4 minutes @ 5sec intervals
+		if (buffer.size < 50 && (!dbBaseline || dbBaseline.sample_count < 50)) {
 			return {
 				method: this.method,
 				isAnomaly: false,
 				confidence: 0,
 				deviation: 0,
 				expectedRange: [value, value],
-				message: 'Insufficient data for MAD detection (need at least 10 samples)',
+				message: `Collecting baseline data (${buffer.size}/50 samples)`,
 			};
 		}
 		
@@ -170,14 +174,16 @@ export class IQRDetector implements AnomalyDetector {
 	readonly method = 'iqr' as const;
 	
 	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig): DetectionResult {
-		if (buffer.size < 10) {
+		// IQR requires ~50 samples for meaningful quartile calculation
+		// 50 samples = ~4 minutes @ 5sec intervals
+		if (buffer.size < 50) {
 			return {
 				method: this.method,
 				isAnomaly: false,
 				confidence: 0,
 				deviation: 0,
 				expectedRange: [value, value],
-				message: 'Insufficient data for IQR detection (need at least 10 samples)',
+				message: `Collecting baseline data (${buffer.size}/50 samples)`,
 			};
 		}
 		
@@ -239,8 +245,8 @@ export class ExpectedRangeDetector implements AnomalyDetector {
 		}
 		
 		// Require minimum baseline samples before alerting to avoid false positives during initial collection
-		// Use same threshold as MAD (10) so expected_range can protect against MAD false positives
-		const MIN_SAMPLES_FOR_RANGE_DETECTION = 10;
+		// 30 samples = ~2.5 minutes @ 5sec intervals (sufficient for basic range validation)
+		const MIN_SAMPLES_FOR_RANGE_DETECTION = 30;
 		if (buffer.size < MIN_SAMPLES_FOR_RANGE_DETECTION) {
 			return {
 				method: this.method,

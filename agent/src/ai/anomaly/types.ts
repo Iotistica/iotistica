@@ -202,6 +202,7 @@ export interface AnomalyConfig {
 	predictions?: {
 		cadence?: PredictionCadenceConfig;
 	};
+	warmupPeriodMs?: number;          // Suppress alerts during agent initialization (default: 900000 = 15 min)
 }
 
 /**

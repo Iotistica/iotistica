@@ -1079,15 +1079,12 @@ export class DiscoveryService extends EventEmitter {
           // CRITICAL: Also check if data points changed (profile same, but points different)
           const dataPointsChanged = JSON.stringify(existing.data_points) !== JSON.stringify(sensor.dataPoints);
           
-          // DEBUG: Log profile and data points comparison
-          this.logger?.infoSync(`Profile comparison for "${sensor.name}"`, {
+          // DEBUG: Log configuration comparison (profile is metadata only, not operationally used)
+          this.logger?.debugSync(`Configuration comparison for "${sensor.name}"`, {
             component: LogComponents.discovery,
             traceId,
-            existingProfile,
-            newProfile,
-            profileChanged,
-            existingDataPointsCount: existing.data_points?.length || 0,
-            newDataPointsCount: sensor.dataPoints?.length || 0,
+            configChanged: profileChanged || dataPointsChanged,
+            dataPointsCount: sensor.dataPoints?.length || 0,
             dataPointsChanged
           });
           
