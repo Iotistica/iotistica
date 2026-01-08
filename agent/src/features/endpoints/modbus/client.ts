@@ -929,8 +929,9 @@ export class ModbusClient {
         }
       })().catch(err => {
         // Safety net: catch any unhandled promise rejections
+        const errorMessage = err instanceof Error ? err.message : String(err);
         this.logger.error(
-          `Unhandled error in reconnection callback for device ${this.device.name}: ${err}`
+          `Unhandled error in reconnection callback for device ${this.device.name}: ${errorMessage}`
         );
         this.logger.debug(`Rescheduling reconnect after unhandled error`);
         this.scheduleReconnect();

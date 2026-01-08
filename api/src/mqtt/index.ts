@@ -26,6 +26,23 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
     return null;
   }
 
+  // If already connected, return existing instance
+  if (mqttManager && mqttManager.isConnected()) {
+    logger.debug('MQTT already connected, reusing existing instance');
+    return mqttManager;
+  }
+
+  // Clean up old connection if exists
+  if (mqttManager) {
+    logger.info('Cleaning up old MQTT connection before reinitializing');
+    try {
+      await mqttManager.destroy();
+    } catch (err) {
+      logger.warn('Error destroying old MQTT connection', { error: err });
+    }
+    mqttManager = null;
+  }
+
   try {
     logger.info('Initializing MQTT service...');
 

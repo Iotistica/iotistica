@@ -202,75 +202,30 @@ export class AnomalyStorageService {
 				median: record.median,
 			});
 
-			try {
-			// Use INSERT OR REPLACE to handle updates (SQLite upsert)
-			await this.db.raw(`
-				INSERT OR REPLACE INTO anomaly_baselines (
-					metric, profile, time_slot, mean, median, std_dev, mad, min, max,
-					q1, q3, iqr, sample_count, calculated_at, window_start, window_end
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			`, [
-				record.metric,
-				record.profile,
-				record.time_slot,
-				record.mean,
-				record.median,
-				record.std_dev,
-				record.mad,
-				record.min,
-				record.max,
-				record.q1,
-				record.q3,
-				record.iqr,
-				record.sample_count,
-				record.calculated_at,
-				record.window_start,
-				record.window_end
-			]);
-		} catch (insertError: any) {
-			// Backward compatibility: if time_slot column doesn't exist, use legacy insert
-			if (insertError?.message?.includes('no such column: time_slot') ||
-			    insertError?.message?.includes('has no column named time_slot')) {
-				this.logger?.debugSync('Inserting baseline without time_slot (legacy schema)', {
-					component: LogComponents.metrics,
-					metric,
-				});
-				
-				// Use INSERT OR REPLACE for legacy schema (without time_slot and profile)
-				const { time_slot, profile, ...legacyRecord } = record;
-				await this.db.raw(`
-					INSERT OR REPLACE INTO anomaly_baselines (
-						metric, mean, median, std_dev, mad, min, max,
-						q1, q3, iqr, sample_count, calculated_at, window_start, window_end
-					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-				`, [
-					legacyRecord.metric,
-					legacyRecord.mean,
-					legacyRecord.median,
-					legacyRecord.std_dev,
-					legacyRecord.mad,
-					legacyRecord.min,
-					legacyRecord.max,
-					legacyRecord.q1,
-					legacyRecord.q3,
-					legacyRecord.iqr,
-					legacyRecord.sample_count,
-					legacyRecord.calculated_at,
-					legacyRecord.window_start,
-					legacyRecord.window_end
-				]);
-			} else {
-				throw insertError;
-			}
-		}
-
-		this.logger?.debugSync('Stored anomaly baseline', {
-			component: LogComponents.metrics,
-			metric,
-			sample_count: buffer.size,
-			mean: record.mean,
-			median: record.median,
-		});
+		// Use INSERT OR REPLACE to handle updates (SQLite upsert)
+		await this.db.raw(`
+			INSERT OR REPLACE INTO anomaly_baselines (
+				metric, profile, time_slot, mean, median, std_dev, mad, min, max,
+				q1, q3, iqr, sample_count, calculated_at, window_start, window_end
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, [
+			record.metric,
+			record.profile,
+			record.time_slot,
+			record.mean,
+			record.median,
+			record.std_dev,
+			record.mad,
+			record.min,
+			record.max,
+			record.q1,
+			record.q3,
+			record.iqr,
+			record.sample_count,
+			record.calculated_at,
+			record.window_start,
+			record.window_end
+		]);
 	} catch (error) {
 		this.logger?.errorSync('Failed to store anomaly baseline', error as Error, {
 			component: LogComponents.metrics,
@@ -328,6 +283,40 @@ export class AnomalyStorageService {
 				component: LogComponents.metrics,
 			});
 			return [];
+		}
+	}
+
+	/**
+	 * Check if sufficient baselines exist for warm-up skip logic
+	 * Returns true if baselines exist for at least minCoveragePercent of metrics with minSamples each
+	 */
+	async checkBaselineCoverage(
+		metrics: string[],
+		minSamples: number = 30,
+		minCoveragePercent: number = 0.8
+	): Promise<{ hasCoverage: boolean; coveragePercent: number; metricsWithBaselines: number }> {
+		if (metrics.length === 0) {
+			return { hasCoverage: false, coveragePercent: 0, metricsWithBaselines: 0 };
+		}
+
+		try {
+			const baselines = await this.db('anomaly_baselines')
+				.whereIn('metric', metrics)
+				.where('sample_count', '>=', minSamples)
+				.select('metric')
+				.groupBy('metric');
+
+			const metricsWithBaselines = baselines.length;
+			const coveragePercent = metricsWithBaselines / metrics.length;
+			const hasCoverage = coveragePercent >= minCoveragePercent;
+
+			return { hasCoverage, coveragePercent, metricsWithBaselines };
+		} catch (error: any) {
+			this.logger?.warnSync('Failed to check baseline coverage', {
+				component: LogComponents.metrics,
+				error: error.message,
+			});
+			return { hasCoverage: false, coveragePercent: 0, metricsWithBaselines: 0 };
 		}
 	}
 

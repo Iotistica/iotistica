@@ -44,7 +44,7 @@
                 <div id="scenario-buttons">
                     <button onclick="loadScenarios()">🔄 Load Scenarios</button>
                 </div>
-                
+                <button onclick="clearAllOverrides()" class="danger" style="margin-top: 8px;">🗑️ Clear All Overrides</button>
             </div>
             
             <div class="control-group">
@@ -135,7 +135,7 @@
                     const noiseSlider = document.getElementById(`noise-${address}`);
                     if (baseSlider) baseSlider.value = override.base;
                     if (noiseSlider) noiseSlider.value = (override.noise_pct * 100).toFixed(0);
-                    updateDisplay(address);
+                    updateDisplay(address, true); // Skip staging when loading from server
                 });
             } catch (error) {
                 console.error('Failed to load status:', error);
@@ -215,6 +215,11 @@
             stagedProfile = profile;
             
             try {
+                // Clear any existing overrides (both UI and server) when loading fresh profile
+                stagedOverrides = {};
+                currentScenario = null;
+                await fetch('/api/overrides', {method: 'DELETE'});
+                
                 // Load data points for UI display only (no profile switch)
                 const response = await fetch(`/api/datapoints/${profile}`);
                 const data = await response.json();
@@ -224,7 +229,7 @@
                 // Load scenarios for this profile and get default scenario
                 const defaultScenario = await loadScenariosForProfile(profile);
                 
-                showNotification(`📋 Loaded ${dataPoints.length} data points from ${profile} (preview mode)`, 'info');
+                showNotification(`📋 Loaded ${dataPoints.length} data points from ${profile} (clean slate)`, 'info');
                 
                 // Auto-apply default scenario if one exists
                 if (defaultScenario) {
@@ -413,11 +418,12 @@
                 return;
             }
 
-            const holdingPoints = points.filter(p => p.type === 'holding');
+            // Show both holding and input registers (filter out coils/discrete)
+            const writablePoints = points.filter(p => p.type === 'holding' || p.type === 'input');
             
             let html = '<div class="datapoints-grid">';
             
-            holdingPoints.forEach(point => {
+            writablePoints.forEach(point => {
                 const baseValue = point.base || 100;
                 const noisePct = Math.round((point.noise_pct || 0.05) * 100);
                 console.log(`Rendering point ${point.address}: base=${point.base}, noise_pct=${point.noise_pct}, calculated noisePct=${noisePct}`);
@@ -430,17 +436,15 @@
                         <div class="slider-group">
                             <label>Base Value: <span id="base-value-${point.address}">${baseValue}</span></label>
                             <input type="range" id="base-${point.address}" 
-                                   min="0" max="500" value="${baseValue}" step="1"
-                                   oninput="updateDisplay(${point.address})"
-                                   onchange="setOverride(${point.address})">
+                                   min="0" max="5000" value="${baseValue}" step="1"
+                                   oninput="updateDisplay(${point.address})">
                         </div>
                         
                         <div class="slider-group">
                             <label>Noise: <span id="noise-value-${point.address}">${noisePct}</span>%</label>
                             <input type="range" id="noise-${point.address}" 
                                    min="0" max="100" value="${noisePct}" step="1"
-                                   oninput="updateDisplay(${point.address})"
-                                   onchange="setOverride(${point.address})">
+                                   oninput="updateDisplay(${point.address})">
                         </div>
                         
                         <div class="actions">
@@ -455,7 +459,7 @@
         }
 
         // Update display values
-        function updateDisplay(address) {
+        function updateDisplay(address, skipStaging = false) {
             const baseSlider = document.getElementById(`base-${address}`);
             const noiseSlider = document.getElementById(`noise-${address}`);
             
@@ -466,8 +470,10 @@
                 document.getElementById(`noise-value-${address}`).textContent = noiseSlider.value;
             }
             
-            // Also stage the override immediately as slider moves
-            setOverride(address);
+            // Only stage override if this is a user interaction (not a programmatic update)
+            if (!skipStaging) {
+                setOverride(address);
+            }
         }
 
         // Stage override for a register (local only)
@@ -482,26 +488,68 @@
         // Remove staged override for a register
         function resetOverride(address) {
             delete stagedOverrides[address];
-            document.getElementById(`base-${address}`).value = 100;
-            document.getElementById(`noise-${address}`).value = 5;
-            updateDisplay(address);
+            // Find original datapoint values
+            const originalPoint = dataPoints.find(p => p.address === address);
+            if (originalPoint) {
+                document.getElementById(`base-${address}`).value = originalPoint.base || 100;
+                document.getElementById(`noise-${address}`).value = (originalPoint.noise_pct || 0.05) * 100;
+            } else {
+                document.getElementById(`base-${address}`).value = 100;
+                document.getElementById(`noise-${address}`).value = 5;
+            }
+            updateDisplay(address, true); // Skip re-staging since we just deleted the override
         }
 
         // Clear all overrides
         async function clearAllOverrides() {
+            console.log('[DEBUG] clearAllOverrides() called');
             try {
+                const profile = document.getElementById('profile-select').value || currentProfile;
+                console.log('[DEBUG] Selected profile:', profile);
+                if (!profile) {
+                    showNotification('Please select a profile first', 'error');
+                    return;
+                }
+                
+                // Clear server-side overrides
+                console.log('[DEBUG] Clearing server overrides');
                 await fetch('/api/overrides', {method: 'DELETE'});
-                // Reset all sliders
-                dataPoints.forEach(point => {
-                    const baseSlider = document.getElementById(`base-${point.address}`);
-                    const noiseSlider = document.getElementById(`noise-${point.address}`);
-                    if (baseSlider) baseSlider.value = 100;
-                    if (noiseSlider) noiseSlider.value = 5;
-                    updateDisplay(point.address);
+                
+                // Clear staged overrides
+                stagedOverrides = {};
+                currentScenario = null;
+                console.log('[DEBUG] Cleared staged overrides and scenario');
+                
+                // Switch profile on backend to ensure it's active
+                if (profile !== currentProfile) {
+                    console.log('[DEBUG] Switching profile from', currentProfile, 'to', profile);
+                    await fetch(`/api/profile/switch/${profile}`, {method: 'POST'});
+                    currentProfile = profile;
+                }
+                
+                // Fetch and render fresh datapoints
+                console.log('[DEBUG] Fetching datapoints for profile:', profile);
+                const response = await fetch(`/api/datapoints/${profile}`);
+                const data = await response.json();
+                const freshDataPoints = data.dataPoints;
+                
+                // Debug log
+                console.log('[DEBUG] Fetched datapoints count:', freshDataPoints.length);
+                console.log('[DEBUG] First 3 datapoints:', freshDataPoints.slice(0, 3));
+                
+                // Update global dataPoints and re-render
+                dataPoints = freshDataPoints;
+                renderDataPoints(dataPoints);
+                
+                // Deselect all scenario buttons
+                document.querySelectorAll('.scenario-btn').forEach(button => {
+                    button.classList.remove('active');
                 });
-                loadStatus();
+                
+                showNotification(`✅ Cleared all overrides (reset to ${profile} defaults)`, 'success');
             } catch (error) {
                 console.error('Failed to clear overrides:', error);
+                showNotification(`❌ Failed to clear overrides: ${error.message}`, 'error');
             }
         }
 
@@ -519,22 +567,6 @@
         // Stage scenario and update UI sliders (doesn't apply to simulator yet)
         async function applyScenario(scenarioName) {
             try {
-                if (scenarioName === 'normal') {
-                    stagedOverrides = {};
-                    currentScenario = null;
-                    updateScenarioButtons(scenarioName);
-                    // Reset all sliders to defaults
-                    dataPoints.forEach(point => {
-                        const baseSlider = document.getElementById(`base-${point.address}`);
-                        const noiseSlider = document.getElementById(`noise-${point.address}`);
-                        if (baseSlider) baseSlider.value = point.base || 100;
-                        if (noiseSlider) noiseSlider.value = (point.noise_pct || 0.05) * 100;
-                        updateDisplay(point.address);
-                    });
-                    showNotification('Reset to profile defaults', 'info');
-                    return;
-                }
-                
                 // Get scenario definition from API for the target profile
                 const profile = stagedProfile || currentProfile;
                 const response = await fetch(`/api/scenarios/for-profile/${profile}`);
@@ -561,7 +593,7 @@
                         const noiseSlider = document.getElementById(`noise-${address}`);
                         if (baseSlider) baseSlider.value = override.base;
                         if (noiseSlider) noiseSlider.value = override.noise_pct * 100;
-                        updateDisplay(address);
+                        updateDisplay(address, true); // Skip re-staging since we already staged above
                     }
                     
                     // Update button states
@@ -839,7 +871,7 @@
                 const data = await response.json();
                 
                 const container = document.getElementById('slave-exception-controls');
-                container.innerHTML = data.slaves.map(slave => `
+                container.innerHTML = data.slave_states.map(slave => `
                     <div class="slave-exception-control">
                         <div class="slave-exception-header">
                             <span class="slave-id">Slave ${slave.id}</span>
@@ -888,17 +920,20 @@
                     }
                 } else {
                     // Inject exception
-                    const response = await fetch(`/api/exception/slave/${slaveId}`, {
+                    const response = await fetch('/api/exception/inject', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ exception })
+                        body: JSON.stringify({ 
+                            slave_id: slaveId,
+                            exception_code: exception
+                        })
                     });
                     const result = await response.json();
                     if (result.success) {
                         showNotification(`Injected ${exception} on Slave ${slaveId}`, 'success');
                         await updateExceptionStatus();
                     } else {
-                        showNotification('Failed to inject exception', 'error');
+                        showNotification(`Failed to inject exception: ${result.error}`, 'error');
                     }
                 }
             } catch (error) {
@@ -912,13 +947,16 @@
                 const response = await fetch('/api/exceptions');
                 const data = await response.json();
                 
+                // Clear all selects first
+                document.querySelectorAll('[id^="exception-select-"]').forEach(select => {
+                    select.value = '';
+                });
+                
                 // Update select elements with current exceptions
-                data.injections.forEach(inj => {
-                    if (inj.type === 'slave') {
-                        const select = document.getElementById(`exception-select-${inj.slave_id}`);
-                        if (select) {
-                            select.value = inj.exception;
-                        }
+                data.exceptions.forEach(exc => {
+                    const select = document.getElementById(`exception-select-${exc.slave_id}`);
+                    if (select) {
+                        select.value = exc.exception_code;
                     }
                 });
             } catch (error) {
@@ -930,11 +968,11 @@
             if (!confirm('Clear all exception injections?')) return;
             
             try {
-                const response = await fetch('/api/exception/clear', { method: 'POST' });
+                const response = await fetch('/api/exceptions/clear', { method: 'POST' });
                 const result = await response.json();
                 
                 if (result.success) {
-                    showNotification('All exceptions cleared', 'success');
+                    showNotification(`Cleared ${result.cleared} exceptions`, 'success');
                     await updateExceptionStatus();
                 } else {
                     showNotification('Failed to clear exceptions', 'error');

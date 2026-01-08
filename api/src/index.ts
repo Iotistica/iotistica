@@ -820,12 +820,16 @@ async function startServer() {
 }
 
 async function retryMqttInitialization(intervalMs: number = 15000): Promise<void> {
-  const { initializeMqtt } = await import('./mqtt');
+  const { initializeMqtt, getMqttManager } = await import('./mqtt');
   const interval = setInterval(async () => {
     try {
-      await initializeMqtt();
-      logger.info('MQTT reconnected successfully');
-      clearInterval(interval);
+      const manager = await initializeMqtt();
+      if (manager && manager.isConnected()) {
+        logger.info('MQTT reconnected successfully');
+        clearInterval(interval);
+      } else {
+        logger.debug('MQTT initialization returned but not connected, will retry');
+      }
     } catch (err: any) {
       logger.warn('MQTT still unavailable', { error: err?.message || err });
     }

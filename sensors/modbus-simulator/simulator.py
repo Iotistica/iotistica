@@ -31,6 +31,7 @@ from flask_cors import CORS
 from pymodbus.server import StartTcpServer
 from pymodbus.device import ModbusDeviceIdentification
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusSlaveContext, ModbusServerContext
+from pymodbus.exceptions import ModbusException
 
 # Configure logging
 log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
@@ -224,15 +225,34 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
         
         if self.unit_id in DISABLED_SLAVES:
             logger.warning(f"Slave {self.unit_id} disabled - rejecting read")
-            return []
+            raise ModbusException(0x02)  # Illegal Address
         
-        # Check exception injections
+        # Check for slave-wide exception injection
+        slave_wide_key = (self.unit_id, 'slave_wide', None)
+        if slave_wide_key in EXCEPTION_INJECTIONS:
+            exception_code = EXCEPTION_INJECTIONS[slave_wide_key]
+            logger.warning(f"⚠️ Exception injection: Slave {self.unit_id} returning {exception_code}")
+            
+            # Map exception codes to Modbus exception codes
+            exception_code_map = {
+                'illegal_function': 0x01,
+                'illegal_address': 0x02,
+                'illegal_value': 0x03,
+                'slave_failure': 0x04,
+                'acknowledge': 0x05,
+                'slave_busy': 0x06
+            }
+            
+            code = exception_code_map.get(exception_code, 0x04)
+            raise ModbusException(code)
+        
+        # Check exception injections for specific addresses
         for i in range(count):
             addr = address + i
             exception_key = (self.unit_id, self.register_type, addr)
             if exception_key in EXCEPTION_INJECTIONS:
                 logger.warning(f"Exception injection at {exception_key}")
-                return []
+                raise ModbusException(0x02)  # Illegal Address
         
         # Simulate response delay
         if self.unit_id in SLAVE_DELAYS:
@@ -269,7 +289,8 @@ class ProfileDataBlock(ModbusSequentialDataBlock):
                 dp = self._dp_index.get(key)
                 if dp:
                     dp_name = dp.get("name", "unknown")
-                    logger.info(f"  → {addr}: {val} ({dp_name})")
+                    override_marker = " [OVERRIDE]" if addr in REGISTER_OVERRIDES else ""
+                    logger.info(f"  → {addr}: {val} ({dp_name}){override_marker}")
             else:
                 val = False if self.register_type in ['coil', 'discrete'] else 0
                 values.append(val)
@@ -365,16 +386,13 @@ EXCEPTION_CODES = {
 
 # Scenario definitions (using register names, profile-agnostic)
 SCENARIO_DEFINITIONS = {
-    # Universal scenarios
-    "normal": {"default": False},  # Clear all overrides
-    
     # COMAP Generator scenarios
     "comap_normal_operation": {
-        "default": True,
+        "default": False,
         "profiles": ["COMAP", "COMAP-InteliGen"],
         "engine_rpm": {"base": 1500, "noise_pct": 0.02},
         "power_kw": {"base": 100, "noise_pct": 0.05},
-        "gen_voltage_c": {"base": 230, "noise_pct": 0.25},
+        "gen_voltage_c": {"base": 230, "noise_pct": 0.02},  # Reduced from 0.25 to match datapoints config
     },
     "comap_overvoltage": {
         "default": False,
@@ -391,7 +409,7 @@ SCENARIO_DEFINITIONS = {
     
     # PM556x Power Meter scenarios
     "pm556x_normal_load": {
-        "default": True,
+        "default": False,
         "profiles": ["PM556x"],
         "Current L1": {"base": 10, "noise_pct": 0.05},
         "Current L2": {"base": 10, "noise_pct": 0.05},
@@ -477,9 +495,8 @@ def switch_profile():
 def switch_profile_by_path(profile_name):
     """Switch to different profile (path-based)"""
     if set_active_profile(profile_name):
-        # Clear overrides when switching profiles
-        global REGISTER_OVERRIDES
-        REGISTER_OVERRIDES = {}
+        # Don't clear overrides - let the caller manage them
+        # This allows Apply button to switch profile AND keep staged overrides
         return jsonify({'success': True, 'profile': profile_name})
     else:
         return jsonify({'success': False, 'error': 'Profile not found'}), 404
@@ -622,14 +639,6 @@ def get_scenarios_for_profile(profile_name):
         if not is_universal and not is_for_profile:
             continue
         
-        if scenario_name == "normal":
-            available_scenarios[scenario_name] = {
-                "description": "Clear all overrides",
-                "registers": [],
-                "default": scenario_def.get('default', False)
-            }
-            continue
-        
         # Check which registers from scenario exist in profile (skip metadata)
         matching_registers = [reg for reg in scenario_def.keys() 
                             if reg not in ['default', 'profiles'] and reg in profile_registers]
@@ -666,14 +675,8 @@ def get_scenarios():
     # Filter scenarios
     available_scenarios = {}
     for scenario_name, scenario_def in SCENARIO_DEFINITIONS.items():
-        if scenario_name == "normal":
-            available_scenarios[scenario_name] = {
-                "description": "Clear all overrides",
-                "registers": []
-            }
-            continue
-        
-        matching_registers = [reg for reg in scenario_def.keys() if reg in profile_registers]
+        matching_registers = [reg for reg in scenario_def.keys() 
+                            if reg not in ['default', 'profiles'] and reg in profile_registers]
         
         if matching_registers:
             description = scenario_name.replace('_', ' ').title()
@@ -748,6 +751,16 @@ def set_override():
     
     logger.info(f"Override set: addr={address}, base={base}, noise={noise_pct}")
     return jsonify({'success': True, 'address': address})
+
+@app.route('/api/overrides', methods=['DELETE'])
+def clear_all_overrides():
+    """Clear all register overrides"""
+    global REGISTER_OVERRIDES, ACTIVE_SCENARIO
+    count = len(REGISTER_OVERRIDES)
+    REGISTER_OVERRIDES.clear()
+    ACTIVE_SCENARIO = None
+    logger.info(f"✅ Cleared all overrides ({count} registers)")
+    return jsonify({'success': True, 'cleared': count})
 
 @app.route('/api/overrides/<int:address>', methods=['DELETE'])
 def delete_override(address):
@@ -832,6 +845,71 @@ def set_slave_delay(slave_id):
     logger.info(f"Slave {slave_id} delay: {delay_ms}ms ± {jitter_ms}ms")
     return jsonify({'success': True, 'slave_id': slave_id})
 
+@app.route('/api/exception/inject', methods=['POST'])
+def inject_exception():
+    """Inject Modbus exception for slave"""
+    data = request.get_json()
+    slave_id = data.get('slave_id')
+    exception_code = data.get('exception_code')
+    
+    if not slave_id or not exception_code:
+        return jsonify({'success': False, 'error': 'Missing slave_id or exception_code'}), 400
+    
+    if exception_code not in EXCEPTION_CODES:
+        return jsonify({'success': False, 'error': f'Invalid exception code: {exception_code}'}), 400
+    
+    # Inject exception for all register types on this slave
+    # Store as (slave_id, register_type, address): exception_code
+    # For slave-wide exceptions, we'll set a marker that applies to all addresses
+    EXCEPTION_INJECTIONS[(slave_id, 'slave_wide', None)] = exception_code
+    
+    logger.warning(f"💉 Injected exception '{exception_code}' for Slave {slave_id}")
+    return jsonify({
+        'success': True,
+        'slave_id': slave_id,
+        'exception_code': exception_code,
+        'description': f"Slave {slave_id} will now return {exception_code} errors"
+    })
+
+@app.route('/api/exception/clear', methods=['POST'])
+def clear_exception():
+    """Clear exception injection for slave"""
+    data = request.get_json()
+    slave_id = data.get('slave_id')
+    
+    if not slave_id:
+        return jsonify({'success': False, 'error': 'Missing slave_id'}), 400
+    
+    # Remove slave-wide exception
+    key = (slave_id, 'slave_wide', None)
+    if key in EXCEPTION_INJECTIONS:
+        del EXCEPTION_INJECTIONS[key]
+        logger.info(f"✓ Cleared exception injection for Slave {slave_id}")
+    
+    return jsonify({'success': True, 'slave_id': slave_id})
+
+@app.route('/api/exceptions', methods=['GET'])
+def get_exceptions():
+    """Get current exception injections"""
+    exceptions = []
+    for key, exception_code in EXCEPTION_INJECTIONS.items():
+        slave_id, reg_type, address = key
+        if reg_type == 'slave_wide':
+            exceptions.append({
+                'slave_id': slave_id,
+                'exception_code': exception_code,
+                'scope': 'slave_wide'
+            })
+    return jsonify({'exceptions': exceptions})
+
+@app.route('/api/exceptions/clear', methods=['POST'])
+def clear_all_exceptions():
+    """Clear all exception injections"""
+    count = len(EXCEPTION_INJECTIONS)
+    EXCEPTION_INJECTIONS.clear()
+    logger.info(f"✓ Cleared all {count} exception injections")
+    return jsonify({'success': True, 'cleared': count})
+
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     """Get access statistics"""
@@ -848,6 +926,115 @@ def get_stats():
             'last_write': data.get('last_write')
         })
     return jsonify(stats)
+
+@app.route('/api/access-log', methods=['GET'])
+def get_access_log():
+    """Get formatted access log with summary and human-readable timestamps"""
+    now = time.time()
+    
+    # Build log entries with human-readable timestamps
+    log_entries = []
+    total_reads = 0
+    total_writes = 0
+    
+    for key, data in REGISTER_ACCESS_LOG.items():
+        slave_id, reg_type, address = key
+        reads = data.get('reads', 0)
+        writes = data.get('writes', 0)
+        last_read = data.get('last_read')
+        last_write = data.get('last_write')
+        
+        total_reads += reads
+        total_writes += writes
+        
+        # Convert timestamps to "X ago" format
+        last_read_ago = None
+        if last_read:
+            seconds_ago = int(now - last_read)
+            if seconds_ago < 60:
+                last_read_ago = f"{seconds_ago}s ago"
+            elif seconds_ago < 3600:
+                last_read_ago = f"{seconds_ago // 60}m ago"
+            else:
+                last_read_ago = f"{seconds_ago // 3600}h ago"
+        
+        last_write_ago = None
+        if last_write:
+            seconds_ago = int(now - last_write)
+            if seconds_ago < 60:
+                last_write_ago = f"{seconds_ago}s ago"
+            elif seconds_ago < 3600:
+                last_write_ago = f"{seconds_ago // 60}m ago"
+            else:
+                last_write_ago = f"{seconds_ago // 3600}h ago"
+        
+        log_entries.append({
+            'slave_id': slave_id,
+            'register_type': reg_type,
+            'address': address,
+            'reads': reads,
+            'writes': writes,
+            'last_read_ago': last_read_ago,
+            'last_write_ago': last_write_ago,
+            'total': reads + writes
+        })
+    
+    # Sort by total accesses (descending)
+    log_entries.sort(key=lambda x: x['total'], reverse=True)
+    
+    return jsonify({
+        'total_registers': len(log_entries),
+        'total_reads': total_reads,
+        'total_writes': total_writes,
+        'log': log_entries
+    })
+
+@app.route('/api/access-log/export/<format>', methods=['GET'])
+def export_access_log(format):
+    """Export access log as JSON or CSV"""
+    import io
+    import csv
+    from flask import make_response
+    
+    if format == 'json':
+        response = make_response(jsonify(list(REGISTER_ACCESS_LOG.items())))
+        response.headers['Content-Disposition'] = 'attachment; filename=access-log.json'
+        response.headers['Content-Type'] = 'application/json'
+        return response
+    
+    elif format == 'csv':
+        # Create CSV in memory
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['Slave ID', 'Register Type', 'Address', 'Reads', 'Writes', 'Last Read', 'Last Write'])
+        
+        for key, data in REGISTER_ACCESS_LOG.items():
+            slave_id, reg_type, address = key
+            writer.writerow([
+                slave_id,
+                reg_type,
+                address,
+                data.get('reads', 0),
+                data.get('writes', 0),
+                data.get('last_read', ''),
+                data.get('last_write', '')
+            ])
+        
+        response = make_response(output.getvalue())
+        response.headers['Content-Disposition'] = 'attachment; filename=access-log.csv'
+        response.headers['Content-Type'] = 'text/csv'
+        return response
+    
+    else:
+        return jsonify({'error': 'Invalid format. Use json or csv'}), 400
+
+@app.route('/api/access-log/clear', methods=['POST'])
+def clear_access_log():
+    """Clear all access log data"""
+    count = len(REGISTER_ACCESS_LOG)
+    REGISTER_ACCESS_LOG.clear()
+    logger.info(f"✓ Cleared access log ({count} entries)")
+    return jsonify({'success': True, 'cleared': count})
 
 @app.route('/api/status', methods=['GET'])
 def get_status():

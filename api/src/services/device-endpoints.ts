@@ -98,7 +98,7 @@ export class DeviceSensorSyncService {
           );
           logger.info(`Updated: ${endpoint.name} (${endpoint.protocol}) - ${deploymentStatus}`);
         } else {
-          // Insert new sensor into table
+          // Insert new sensor into table (or update if name collision exists)
           // If reconciliation from agent, mark as deployed (agent confirms it's running)
           // Otherwise, mark as pending (deployment just triggered, waiting for agent confirmation)
           const deploymentStatus = isReconciliation ? 'deployed' : 'pending';
@@ -108,7 +108,20 @@ export class DeviceSensorSyncService {
               device_uuid, uuid, name, protocol, enabled, poll_interval,
               connection, data_points, metadata, created_by, updated_by,
               config_version, synced_to_config, deployment_status, config_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, true, $13, $14)`,
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, true, $13, $14)
+            ON CONFLICT (device_uuid, name) DO UPDATE SET
+              uuid = EXCLUDED.uuid,
+              protocol = EXCLUDED.protocol,
+              enabled = EXCLUDED.enabled,
+              poll_interval = EXCLUDED.poll_interval,
+              connection = EXCLUDED.connection,
+              data_points = EXCLUDED.data_points,
+              metadata = EXCLUDED.metadata,
+              updated_by = EXCLUDED.updated_by,
+              config_version = EXCLUDED.config_version,
+              synced_to_config = EXCLUDED.synced_to_config,
+              deployment_status = EXCLUDED.deployment_status,
+              config_id = EXCLUDED.config_id`,
             [
               deviceUuid,
               endpoint.uuid,
@@ -126,7 +139,7 @@ export class DeviceSensorSyncService {
               endpoint.id || null // Populate config_id from config JSON
             ]
           );
-          logger.info(`Inserted: ${endpoint.name} (${endpoint.protocol}) - ${deploymentStatus}`);
+          logger.info(`Upserted: ${endpoint.name} (${endpoint.protocol}) - ${deploymentStatus}`);
         }
       }
 

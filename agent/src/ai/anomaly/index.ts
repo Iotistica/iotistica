@@ -90,13 +90,15 @@ export class AnomalyDetectionService {
 				logger
 			);
 			
-			// Initialize storage (verify tables exist, start cleanup)
-			this.storage.initialize().catch(error => {
-				this.logger?.errorSync('Failed to initialize anomaly storage', error as Error, {
-					component: LogComponents.metrics,
+			// Initialize storage and check for existing baselines
+			this.storage.initialize()
+				.then(() => this.checkAndSkipWarmupIfBaselinesExist())
+				.catch(error => {
+					this.logger?.errorSync('Failed to initialize anomaly storage', error as Error, {
+						component: LogComponents.metrics,
+					});
+					this.storage = undefined; // Disable storage on error
 				});
-				this.storage = undefined; // Disable storage on error
-			});
 			
 			// Start periodic baseline saving
 			this.startPeriodicBaselineSave();
@@ -806,6 +808,49 @@ export class AnomalyDetectionService {
 			component: LogComponents.metrics,
 			interval_hours: this.baselineSaveIntervalMs / (60 * 60 * 1000),
 		});
+	}
+
+	/**
+	 * Check if sufficient baselines exist and skip warm-up if so
+	 * This prevents repeated 15-minute alert blackouts after agent restarts
+	 */
+	private async checkAndSkipWarmupIfBaselinesExist(): Promise<void> {
+		if (!this.storage) return;
+
+		// Get list of enabled metrics from config
+		const enabledMetrics = this.config.metrics
+			.filter(m => m.enabled)
+			.map(m => m.name);
+
+		if (enabledMetrics.length === 0) return;
+
+		// Check if baselines exist for most metrics (80% coverage with 30+ samples each)
+		const { hasCoverage, coveragePercent, metricsWithBaselines } = await this.storage.checkBaselineCoverage(
+			enabledMetrics,
+			30, // minSamples (30 samples = ~2.5 min at 5sec intervals)
+			0.8  // minCoveragePercent (80% of metrics must have baselines)
+		);
+
+		if (hasCoverage) {
+			// Sufficient baselines exist - skip warm-up by backdating startup timestamp
+			this.startupTimestamp = Date.now() - this.warmupPeriodMs;
+			this.logger?.infoSync('Skipping warm-up period - sufficient baselines exist', {
+				component: LogComponents.metrics,
+				coveragePercent: (coveragePercent * 100).toFixed(1) + '%',
+				metricsWithBaselines,
+				totalMetrics: enabledMetrics.length,
+				warmupPeriodMs: this.warmupPeriodMs,
+			});
+		} else {
+			this.logger?.infoSync('Warm-up period active - insufficient baseline coverage', {
+				component: LogComponents.metrics,
+				coveragePercent: (coveragePercent * 100).toFixed(1) + '%',
+				metricsWithBaselines,
+				totalMetrics: enabledMetrics.length,
+				warmupPeriodMs: this.warmupPeriodMs,
+				remainingMinutes: Math.ceil(this.warmupPeriodMs / 60000),
+			});
+		}
 	}
 	
 	/**
