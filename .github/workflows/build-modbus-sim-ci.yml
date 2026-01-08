@@ -31,11 +31,11 @@ jobs:
 
       - name: Check Python syntax
         working-directory: ./sensors/modbus-simulator
-        run: python -m py_compile modbus_simulator.py
+        run: python -m py_compile simulator.py
 
       - name: Run pylint
         working-directory: ./sensors/modbus-simulator
-        run: pylint --disable=all --enable=E,F modbus_simulator.py || true
+        run: pylint --disable=all --enable=E,F simulator.py || true
 
       - name: Validate vendors JSON
         run: |

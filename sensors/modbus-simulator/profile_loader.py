@@ -1,6 +1,6 @@
 """
 Shared profile data loader for Modbus simulator
-Centralizes API calls for both modbus_simulator.py and web_gui.py
+Centralizes API calls for both simulator.py and web_gui.py
 """
 import json
 import urllib.request
