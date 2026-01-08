@@ -265,11 +265,13 @@ class RedisSensorQueue {
         });
       });
 
-      logger.debug('Queued compressed sensor payload (fire-and-forget, binary)', {
+      logger.info('Queued compressed sensor payload (pipelined, binary)', {
         deviceUuid: entry.deviceUuid.substring(0, 8),
         sensorName: entry.sensorName,
         batchId: entry.batchId,
-        bytes: entry.compressedPayload.length
+        payloadBytes: entry.compressedPayload.length,
+        encoding: entry.contentEncoding,
+        pipelineDepth: this.pipelineCount
       });
     } catch (err: any) {
       logger.error('Failed to queue compressed sensor data to Redis', {
@@ -344,9 +346,11 @@ class RedisSensorQueue {
       metrics.recordBatchLatency(duration);
       const logPayload = {
         count: sensorData.length,
+        payloadBytes: payload.length,
         durationMs: duration,
         batchLatencyP95Ms: metrics.getBatchLatencyP95(),
-        dataPerSecond: duration > 0 ? Math.round((sensorData.length / duration) * 1000) : sensorData.length
+        dataPerSecond: duration > 0 ? Math.round((sensorData.length / duration) * 1000) : sensorData.length,
+        pipelineDepth: this.pipelineCount
       };
 
       if (duration > 100) {
@@ -690,18 +694,15 @@ class RedisSensorQueue {
           const isCompressed = fieldMap.compressed === '1';
           
           if (isCompressed) {
-            // Binary payload (new) or base64/hex (legacy)
+            // Compressed payload stored as raw binary string in Redis
             const payloadRaw = fieldMap.payload;
             if (!payloadRaw) {
               logger.warn('Skipping sensor message with missing payload', { messageId: id });
               return null;
             }
             
-            const compressedPayload = Buffer.isBuffer(payloadRaw)
-              ? payloadRaw // Binary (new, zero overhead)
-              : fieldMap.payload_b64
-                ? Buffer.from(fieldMap.payload_b64, 'base64') // Legacy base64
-                : Buffer.from(payloadRaw, 'hex'); // Legacy hex
+            // Payload comes back as binary string - convert to Buffer
+            const compressedPayload = Buffer.from(payloadRaw, 'binary');
             
             return {
               id,
@@ -1216,8 +1217,17 @@ class RedisSensorQueue {
     }
 
     try {
+      const startTime = Date.now();
       await pipeline.exec();
-      logger.debug(`Flushed sensor pipeline with ${count} XADDs`);
+      const duration = Date.now() - startTime;
+      const avgLatency = count > 0 ? Math.round(duration / count) : 0;
+      
+      logger.info('Flushed sensor pipeline', {
+        operations: count,
+        totalLatencyMs: duration,
+        avgLatencyPerOpMs: avgLatency,
+        opsPerSecond: duration > 0 ? Math.round((count / duration) * 1000) : count
+      });
     } catch (err) {
       metrics.messagesDropped += count;
       logger.error('Sensor pipeline exec failed', {

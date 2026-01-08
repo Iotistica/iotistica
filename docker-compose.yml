@@ -215,8 +215,9 @@ services:
         volumes:
             - ./config/vendors:/app/vendors:ro
         environment:
-          - MODBUS_PROFILE=COMAP
+          - MODBUS_PROFILE=Generic
           - MODBUS_API_URL=http://api:3002
+          - API_TOKEN=${API_TOKEN:-}
           - GUI_PORT=5000
           - GUI_HOST=0.0.0.0
         ports:
@@ -237,8 +238,9 @@ services:
         container_name: iotistic-modbus-sim-2
         restart: unless-stopped
         environment:
-          - MODBUS_PROFILE=GENERIC
+          - MODBUS_PROFILE=Generic
           - MODBUS_API_URL=http://api:3002
+          - API_TOKEN=${API_TOKEN:-}
           - GUI_PORT=5000
           - GUI_HOST=0.0.0.0
         ports:

@@ -39,7 +39,7 @@ import alertsRoutes from './routes/alerts';
 import prometheusRoutes from './routes/prometheus';
 import endpointsDataRoutes from './routes/endpoints-data';
 import anomalyRoutes from './routes/anomaly';
-import profileRoutes from './routes/profiles';
+import profileRoutes, { publicRouter as profilePublicRoutes } from './routes/profiles';
 import { 
   globalApiRateLimit, 
   authRateLimit, 
@@ -352,6 +352,12 @@ app.use(prometheusRoutes);
 
 // Mosquitto HTTP Auth Backend (no versioning, called directly by mosquitto-go-auth)
 app.use('/mosquitto-auth', mosquittoAuthRoutes);
+
+// ============================================================================
+// PUBLIC API Routes - NO AUTHENTICATION REQUIRED
+// Mount these BEFORE any auth middleware to ensure they're accessible
+// ============================================================================
+app.use(`${API_BASE}/profiles`, profilePublicRoutes); // Public profile endpoints (e.g., /datapoints for simulators)
 
 // ============================================================================
 // Rate Limiting - Token-based for IoT (prevents one device from blocking others)

@@ -12,6 +12,7 @@
             <h1>Modbus Simulator Control Panel</h1>
             <div class="status-bar">
                 <span id="profile-status" class="active-profile-badge">🟢 Active: {{ current_profile }}</span>
+                <span id="scenario-status">Scenario: None</span>
                 <span id="slaves-status">Slaves: -</span>
                 <span id="overrides-status">Overrides: 0</span>
             </div>
@@ -114,6 +115,7 @@
                 const response = await fetch('/api/status');
                 const status = await response.json();
                 document.getElementById('profile-status').textContent = `🟢 Active: ${status.profile}`;
+                document.getElementById('scenario-status').textContent = status.scenario ? `📋 Scenario: ${status.scenario}` : 'Scenario: None';
                 document.getElementById('slaves-status').textContent = `Slaves: ${status.slaves}`;
                 document.getElementById('overrides-status').textContent = `Overrides: ${status.active_overrides}`;
                 
@@ -141,6 +143,7 @@
         // Load data points for current profile
         let stagedOverrides = {};  // Local staging for changes
         let stagedProfile = null;
+        let currentScenario = null;  // Track currently applied scenario
 
         // Auto-refresh scenarios when profile dropdown changes
         async function onProfileChange() {
@@ -172,7 +175,7 @@
                 
                 if (!data.scenarios || Object.keys(data.scenarios).length === 0) {
                     container.innerHTML = '<span class="help-text">No scenarios for this profile</span>';
-                    return;
+                    return null;
                 }
                 
                 let html = '';
@@ -191,9 +194,13 @@
                 }
                 
                 container.innerHTML = html;
+                
+                // Return default scenario name if exists
+                return data.default || null;
             } catch (error) {
                 console.error('Failed to load scenarios:', error);
                 container.innerHTML = '<button onclick="loadScenarios()">🔄 Retry</button>';
+                return null;
             }
         }
 
@@ -212,10 +219,17 @@
                 dataPoints = data.dataPoints;
                 renderDataPoints(dataPoints);
                 
-                // Load scenarios for this profile
-                await loadScenarios();
+                // Load scenarios for this profile and get default scenario
+                const defaultScenario = await loadScenariosForProfile(profile);
                 
                 showNotification(`📋 Loaded ${dataPoints.length} data points from ${profile} (preview mode)`, 'info');
+                
+                // Auto-apply default scenario if one exists
+                if (defaultScenario) {
+                    setTimeout(() => {
+                        applyScenario(defaultScenario);
+                    }, 500);
+                }
             } catch (error) {
                 console.error('Failed to load data points:', error);
                 document.getElementById('datapoints-container').innerHTML = '<p class="error">Failed to load data points</p>';
@@ -246,7 +260,10 @@
                         await fetch(`/api/overrides/${address}`, {
                             method: 'PUT',
                             headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify(override)
+                            body: JSON.stringify({
+                                ...override,
+                                scenario: currentScenario  // Include scenario context
+                            })
                         });
                     }
                 }
@@ -415,6 +432,7 @@
             try {
                 if (scenarioName === 'normal') {
                     stagedOverrides = {};
+                    currentScenario = null;
                     updateScenarioButtons(scenarioName);
                     // Reset all sliders to defaults
                     dataPoints.forEach(point => {
@@ -428,8 +446,9 @@
                     return;
                 }
                 
-                // Get scenario definition from API
-                const response = await fetch('/api/scenarios');
+                // Get scenario definition from API for the target profile
+                const profile = stagedProfile || currentProfile;
+                const response = await fetch(`/api/scenarios/for-profile/${profile}`);
                 const data = await response.json();
                 const scenarios = data.scenarios;
                 
@@ -439,13 +458,13 @@
                 }
                 
                 // Resolve scenario to addresses
-                const profile = stagedProfile || currentProfile;
                 const resolveResponse = await fetch(`/api/scenario/${scenarioName}/resolve?profile=${profile}`);
                 const resolveResult = await resolveResponse.json();
                 
                 if (resolveResult.success) {
                     // Stage the overrides locally
                     stagedOverrides = {...stagedOverrides, ...resolveResult.overrides};
+                    currentScenario = scenarioName;  // Track scenario for logging
                     
                     // Update UI sliders to show scenario values
                     for (const [address, override] of Object.entries(resolveResult.overrides)) {

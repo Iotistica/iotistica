@@ -7,17 +7,13 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy all files
-COPY modbus_simulator.py .
-COPY web_gui.py .
-COPY start.sh .
+COPY simulator.py .
+COPY profile_loader.py .
 COPY templates/ templates/
 COPY static/ static/
-
-# Make start script executable
-RUN chmod +x start.sh
 
 # Expose Modbus TCP port and Web GUI port
 EXPOSE 502 5000
 
-# Run both services
-CMD ["./start.sh"]
+# Run unified simulator (single process, no start.sh needed)
+CMD ["python3", "simulator.py"]

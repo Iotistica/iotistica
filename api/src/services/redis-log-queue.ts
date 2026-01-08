@@ -195,10 +195,12 @@ class RedisLogQueue {
         });
       });
 
-      logger.debug('Queued compressed log payload (fire-and-forget, binary)', {
+      logger.info('Queued compressed log payload (pipelined, binary)', {
         deviceUuid: entry.deviceUuid.substring(0, 8),
         batchId: entry.batchId,
-        bytes: entry.compressedPayload.length
+        payloadBytes: entry.compressedPayload.length,
+        encoding: entry.contentEncoding,
+        pipelineDepth: this.pipelineCount
       });
     } catch (err: any) {
       logger.error('Failed to queue compressed logs to Redis', {
@@ -281,13 +283,15 @@ class RedisLogQueue {
 
         const entries: RedisLogEntry[] = messages
           .map(([id, fields]: [string, string[]]) => {
-            const fieldMap: Record<string, string> = {};
+            const fieldMap: Record<string, any> = {};
             for (let i = 0; i < fields.length; i += 2) {
               fieldMap[fields[i]] = fields[i + 1];
             }
             
-            if (fieldMap.compressed === '1') {
-              // Binary payload (new) or base64/hex (legacy)
+            const compressedFlag = fieldMap.compressed;
+            if (compressedFlag === '1') {
+              // Compressed payload stored as raw binary string in Redis
+              // We need to convert it back to Buffer
               const payloadRaw = fieldMap.payload;
               if (!payloadRaw) {
                 logger.warn('Skipping log message with missing payload', { messageId: id });
@@ -295,11 +299,8 @@ class RedisLogQueue {
                 return null;
               }
               
-              const compressedPayload = Buffer.isBuffer(payloadRaw)
-                ? payloadRaw // Binary (new, zero overhead)
-                : fieldMap.payload_b64
-                  ? Buffer.from(fieldMap.payload_b64, 'base64') // Legacy base64
-                  : Buffer.from(payloadRaw, 'hex'); // Legacy hex
+              // Payload comes back as binary string - convert to Buffer
+              const compressedPayload = Buffer.from(payloadRaw, 'binary');
               
               return {
                 id,
@@ -856,8 +857,17 @@ class RedisLogQueue {
     }
 
     try {
+      const startTime = Date.now();
       await pipeline.exec();
-      logger.debug(`Flushed log pipeline with ${count} XADDs`);
+      const duration = Date.now() - startTime;
+      const avgLatency = count > 0 ? Math.round(duration / count) : 0;
+      
+      logger.info('Flushed log pipeline', {
+        operations: count,
+        totalLatencyMs: duration,
+        avgLatencyPerOpMs: avgLatency,
+        opsPerSecond: duration > 0 ? Math.round((count / duration) * 1000) : count
+      });
     } catch (err) {
       logger.error('Log pipeline exec failed', {
         error: err instanceof Error ? err.message : String(err),

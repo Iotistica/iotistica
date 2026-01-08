@@ -54,10 +54,14 @@ class ProfileConfigModel {
 }
 
 const router = express.Router();
+const publicRouter = express.Router(); // Separate router for public endpoints (no auth)
 
 /**
  * Get all profiles in dataPoints.json format (for simulators)
  * GET /api/v1/profiles/datapoints?protocol=modbus
+ * 
+ * PUBLIC ENDPOINT - No authentication required
+ * Used by internal services (Modbus simulator, other protocol simulators)
  * 
  * Returns format compatible with modbus-simulator:
  * {
@@ -65,7 +69,7 @@ const router = express.Router();
  *   "COMAP": { "dataPoints": [...] }
  * }
  */
-router.get('/datapoints', async (req, res) => {
+publicRouter.get('/datapoints', async (req, res) => {
   try {
     const protocol = (req.query.protocol as string) || 'modbus';
     const profiles = await ProfileConfigModel.listByProtocol(protocol);
@@ -242,3 +246,4 @@ router.delete('/:name', async (req, res) => {
 });
 
 export default router;
+export { publicRouter }; // Export public router separately for no-auth mounting
