@@ -547,9 +547,15 @@ jobs:
           
           echo ""
           echo "========================================="
-          echo "Agent Startup Logs:"
+          echo "Agent Startup Logs (last 100 lines):"
           echo "========================================="
-          sudo journalctl -u iotistic-agent -n 50 --no-pager
+          sudo journalctl -u iotistic-agent -n 100 --no-pager
+          
+          echo ""
+          echo "========================================="
+          echo "Agent Environment Variables:"
+          echo "========================================="
+          sudo cat /etc/iotistic/agent.env || echo "No environment file found"
           
           if sudo systemctl is-active --quiet iotistic-agent; then
             echo "✓ Agent service is running"
@@ -557,9 +563,14 @@ jobs:
             echo "✗ Agent service is not running"
             echo ""
             echo "========================================="
-            echo "Full Error Logs:"
+            echo "Full Error Logs (last 300 lines):"
             echo "========================================="
-            sudo journalctl -u iotistic-agent -n 200 --no-pager
+            sudo journalctl -u iotistic-agent -n 300 --no-pager
+            echo ""
+            echo "========================================="
+            echo "Service Status Details:"
+            echo "========================================="
+            sudo systemctl status iotistic-agent --no-pager -l
             exit 1
           fi
 
