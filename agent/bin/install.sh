@@ -507,6 +507,12 @@ STATE_FILE=/var/lib/iotistic/agent/target-state.json
 DATABASE_PATH=/var/lib/iotistic/agent/device.sqlite
 EOF
 
+    # Write CI mode flag if set (for testing environments)
+    if [ "$CI" = "true" ]; then
+        echo "[DEBUG] Writing CI=true to agent.env (testing mode)"
+        echo "CI=true" >> /etc/iotistic/agent.env
+    fi
+
     if [ -n "$PROVISIONING_KEY" ]; then
         echo "[DEBUG] Writing PROVISIONING_KEY to agent.env (redacted)"
         echo "PROVISIONING_KEY=${PROVISIONING_KEY}" >> /etc/iotistic/agent.env
