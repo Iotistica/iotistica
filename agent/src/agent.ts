@@ -17,7 +17,6 @@ import { DeviceAPI } from "./api/index.js";
 import { router as v1Router } from "./api/v1.js";
 import * as deviceActions from "./api/actions.js";
 import { CloudSync } from "./device-manager/sync.js";
-import * as db from "./db/connection.js";
 import { LocalLogBackend } from "./logging/local-backend.js";
 import { CloudLogBackend } from "./logging/cloud-backend.js";
 import { ContainerLogMonitor } from "./logging/docker-monitor.js";
