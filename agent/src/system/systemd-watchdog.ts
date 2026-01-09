@@ -126,14 +126,11 @@ function sendNativeNotification(message: string, socketPath: string, logger?: Ag
  */
 async function sendNotification(message: string, logger?: AgentLogger): Promise<void> {
   try {
-    // Use --pid with explicit process.pid instead of --pid=parent
-    // This ensures systemd receives notification from the correct main PID
-    await execFileAsync('systemd-notify', [`--pid=${process.pid}`, message]);
+    await execFileAsync('systemd-notify', ['--pid=parent', message]);
     logger?.debugSync(`Sent notification: ${message}`, {
       component: LogComponents.agent,
       operation: 'sendNotification',
-      method: 'systemd-notify',
-      pid: process.pid
+      method: 'systemd-notify'
     });
   } catch (error) {
     logger?.errorSync(`Failed to send notification: ${message}`, error instanceof Error ? error : undefined, {
@@ -355,22 +352,15 @@ export function startWatchdog(healthCheck?: HealthCheckFn, logger?: AgentLogger)
  * @param logger - Optional logger
  */
 export async function notifyReady(logger?: AgentLogger): Promise<void> {
-  const socketPath = process.env.NOTIFY_SOCKET;
-  if (!socketPath) {
+  if (!process.env.NOTIFY_SOCKET) {
     return; // Silently skip if not running under systemd
   }
 
-  // CRITICAL: Use native socket to avoid child process PID rejection
-  // systemd only accepts notifications from main PID, not child processes
-  sendNativeNotification('READY=1', socketPath, logger);
-  
-  // Small delay to ensure datagram is flushed to kernel
-  await new Promise(resolve => setTimeout(resolve, 50));
+  await sendNotification('READY=1', logger);
   
   logger?.infoSync('Systemd READY notification sent', {
     component: LogComponents.agent,
-    operation: 'notifyReady',
-    pid: process.pid
+    operation: 'notifyReady'
   });
 }
 
