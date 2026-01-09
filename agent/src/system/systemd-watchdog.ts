@@ -355,15 +355,22 @@ export function startWatchdog(healthCheck?: HealthCheckFn, logger?: AgentLogger)
  * @param logger - Optional logger
  */
 export async function notifyReady(logger?: AgentLogger): Promise<void> {
-  if (!process.env.NOTIFY_SOCKET) {
+  const socketPath = process.env.NOTIFY_SOCKET;
+  if (!socketPath) {
     return; // Silently skip if not running under systemd
   }
 
-  await sendNotification('READY=1', logger);
+  // CRITICAL: Use native socket to avoid child process PID rejection
+  // systemd only accepts notifications from main PID, not child processes
+  sendNativeNotification('READY=1', socketPath, logger);
+  
+  // Small delay to ensure datagram is flushed to kernel
+  await new Promise(resolve => setTimeout(resolve, 50));
   
   logger?.infoSync('Systemd READY notification sent', {
     component: LogComponents.agent,
-    operation: 'notifyReady'
+    operation: 'notifyReady',
+    pid: process.pid
   });
 }
 
