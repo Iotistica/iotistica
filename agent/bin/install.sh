@@ -596,6 +596,9 @@ RestartSec=5
 WatchdogSec=30
 NotifyAccess=main
 
+# Startup timeout (agent initialization can take time in CI)
+TimeoutStartSec=120
+
 # Graceful shutdown timeout (kill misbehaving services)
 TimeoutStopSec=20
 

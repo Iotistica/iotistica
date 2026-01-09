@@ -126,11 +126,14 @@ function sendNativeNotification(message: string, socketPath: string, logger?: Ag
  */
 async function sendNotification(message: string, logger?: AgentLogger): Promise<void> {
   try {
-    await execFileAsync('systemd-notify', ['--pid=parent', message]);
+    // Use --pid with explicit process.pid instead of --pid=parent
+    // This ensures systemd receives notification from the correct main PID
+    await execFileAsync('systemd-notify', [`--pid=${process.pid}`, message]);
     logger?.debugSync(`Sent notification: ${message}`, {
       component: LogComponents.agent,
       operation: 'sendNotification',
-      method: 'systemd-notify'
+      method: 'systemd-notify',
+      pid: process.pid
     });
   } catch (error) {
     logger?.errorSync(`Failed to send notification: ${message}`, error instanceof Error ? error : undefined, {
