@@ -539,6 +539,16 @@ jobs:
         run: |
           echo "Testing unified installation script with Systemd method..."
           sudo -E bash agent/bin/install.sh
+      
+      - name: Configure CI mode for systemd service
+        run: |
+          echo "Adding CI=true to agent environment file..."
+          echo "CI=true" | sudo tee -a /etc/iotistic/agent.env
+          echo "✓ CI mode configured"
+          
+          echo "Reloading systemd and starting service..."
+          sudo systemctl daemon-reload
+          sudo systemctl start iotistic-agent
 
       - name: Check systemd service status
         run: |
