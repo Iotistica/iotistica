@@ -734,109 +734,134 @@ function isHeapStable(): boolean {
  * - JS object retention: Heap growing, external stable
  * - GC pressure: Heap + RSS growing, external stable
  */
-function detectLeakPattern(currentHeap: number, currentRSS: number, currentExternal: number): {
-	pattern: 'survivor-leak' | 'buffer-crypto-native-leak' | 'external-cache-leak' | 'js-object-retention' | 'gc-pressure' | 'mixed-leak-jemalloc' | 'external-leak' | 'rss-leak' | 'stable' | 'unknown';
-	description: string;
+function detectLeakPattern(
+    currentHeap: number,
+    currentRSS: number,
+    currentExternal: number
+): {
+    pattern:
+        | 'survivor-leak'
+        | 'buffer-crypto-native-leak'
+        | 'external-cache-leak'
+        | 'js-object-retention'
+        | 'gc-pressure'
+        | 'mixed-leak-jemalloc'
+        | 'external-leak'
+        | 'rss-leak'
+        | 'stable'
+        | 'unknown';
+    description: string;
 } {
-	// Get growth rates (trend-based, not absolute delta)
-	const heapGrowthRate = calculateHeapGrowthRate();
-	const externalGrowthRate = calculateExternalGrowthRate();
-	const survivorGrowth = calculateSurvivorGrowthRate();
-	
-	// Define adaptive thresholds (scale with baseline heap size)
-	const HEAP_THRESHOLD = getAdaptiveHeapThreshold(false);
-	const EXTERNAL_THRESHOLD = getAdaptiveExternalThreshold(false);
-	const SURVIVOR_THRESHOLD = getAdaptiveSurvivorThreshold();
-	const RSS_GROWTH_THRESHOLD = 5 * 1024 * 1024; // 5MB absolute growth from baseline
-	
-	// Determine growth state for each metric (↑ = growing, → = stable)
-	const heapGrowing = heapGrowthRate !== null && heapGrowthRate > HEAP_THRESHOLD;
-	const externalGrowing = externalGrowthRate !== null && externalGrowthRate > EXTERNAL_THRESHOLD;
-	const survivorGrowing = survivorGrowth !== null && survivorGrowth.rate > SURVIVOR_THRESHOLD && survivorGrowth.isMonotonic;
-	const rssGrowing = (currentRSS - baselineRSS) > RSS_GROWTH_THRESHOLD;
-	
-	// Priority 1: Survivor leak (most accurate - long-lived objects)
-	// Only trigger if floor is rising monotonically (avoids false positives from bursty workloads)
-	if (survivorGrowing) {
-		return {
-			pattern: 'survivor-leak',
-			description: `Long-lived objects growing at ${survivorGrowth.rate.toFixed(2)} MB/min - floor rising monotonically, retained: ${survivorGrowth.retainedGrowth.toFixed(1)} MB (real leak)`
-		};
-	}
-	
-	// Priority 2: Correlation matrix classification
-	
-	// Buffer / crypto / native leak: ↑ ↑ ↑ (all metrics growing)
-	if (heapGrowing && externalGrowing && rssGrowing) {
-		return {
-			pattern: 'buffer-crypto-native-leak',
-			description: `Buffer/crypto/native leak - heap: ${heapGrowthRate?.toFixed(2)} MB/min, external: ${externalGrowthRate?.toFixed(2)} MB/min, RSS growing (Buffer accumulation)`
-		};
-	}
-	
-	// External cache leak: → ↑ → (only external growing)
-	if (!heapGrowing && externalGrowing && !rssGrowing) {
-		return {
-			pattern: 'external-cache-leak',
-			description: `External cache leak - external: ${externalGrowthRate?.toFixed(2)} MB/min, heap stable (Buffers not freed, check caching logic)`
-		};
-	}
-	
-	// JS object retention: ↑ → → (heap growing, external stable)
-	if (heapGrowing && !externalGrowing && !rssGrowing) {
-		return {
-			pattern: 'js-object-retention',
-			description: `JS object retention - heap: ${heapGrowthRate?.toFixed(2)} MB/min, external stable (check closures/event listeners/caches)`
-		};
-	}
-	
-	// GC pressure: ↑ → ↑ (heap and RSS growing, external stable)
-	if (heapGrowing && !externalGrowing && rssGrowing) {
-		return {
-			pattern: 'gc-pressure',
-			description: `GC pressure - heap: ${heapGrowthRate?.toFixed(2)} MB/min, RSS growing, external stable (allocator fragmentation)`
-		};
-	}
-	
-	// Mixed leak: ↑ ↑ → (heap + external growing, RSS stable via jemalloc)
-	if (heapGrowing && externalGrowing && !rssGrowing) {
-		return {
-			pattern: 'mixed-leak-jemalloc',
-			description: `Mixed leak - heap: ${heapGrowthRate?.toFixed(2)} MB/min, external: ${externalGrowthRate?.toFixed(2)} MB/min, RSS stable (jemalloc reusing arena)`
-		};
-	}
-	
-	// External leak: → ↑ ↑ (only external and RSS growing)
-	if (!heapGrowing && externalGrowing && rssGrowing) {
-		return {
-			pattern: 'external-leak',
-			description: `External leak - external: ${externalGrowthRate?.toFixed(2)} MB/min, heap stable (native allocations outside V8)`
-		};
-	}
-	
-	// RSS leak: → → ↑ (only RSS growing)
-	if (!heapGrowing && !externalGrowing && rssGrowing) {
-		return {
-			pattern: 'rss-leak',
-			description: `RSS leak - heap/external stable but RSS growing (OS page retention or memory mapping issue)`
-		};
-	}
-	
-	// Heap stable (good state)
-	const heapStable = isHeapStable();
-	if (heapStable) {
-		return {
-			pattern: 'stable',
-			description: 'Memory stable - no leak detected'
-		};
-	}
-	
-	// Fallback: Unable to classify
-	return {
-		pattern: 'unknown',
-		description: 'Memory pattern unclear - insufficient data or transient spike'
-	};
+    // --- Calculate growth trends ---
+    const heapGrowthRate = calculateHeapGrowthRate(); // MB/min
+    const externalGrowthRate = calculateExternalGrowthRate(); // MB/min
+    const survivorGrowth = calculateSurvivorGrowthRate(); // { rate, retainedGrowth, isMonotonic }
+
+    // --- Define adaptive thresholds ---
+    const HEAP_THRESHOLD = getAdaptiveHeapThreshold(false);
+    const EXTERNAL_THRESHOLD = getAdaptiveExternalThreshold(false);
+    const SURVIVOR_THRESHOLD = getAdaptiveSurvivorThreshold();
+    const RSS_GROWTH_THRESHOLD = 5 * 1024 * 1024; // 5MB absolute growth
+
+    // --- Determine metric states ---
+    const heapGrowing = heapGrowthRate !== null && heapGrowthRate > HEAP_THRESHOLD;
+    const externalGrowing = externalGrowthRate !== null && externalGrowthRate > EXTERNAL_THRESHOLD;
+    const survivorGrowing =
+        survivorGrowth !== null &&
+        survivorGrowth.rate > SURVIVOR_THRESHOLD &&
+        survivorGrowth.isMonotonic;
+    const rssGrowing = (currentRSS - baselineRSS) > RSS_GROWTH_THRESHOLD;
+
+    // --- Priority 1: Survivor leak ---
+    if (survivorGrowing) {
+        return {
+            pattern: 'survivor-leak',
+            description: `Long-lived objects growing at ${survivorGrowth.rate.toFixed(
+                2
+            )} MB/min - floor rising monotonically, retained: ${survivorGrowth.retainedGrowth.toFixed(
+                1
+            )} MB (real leak)`
+        };
+    }
+
+    // --- Priority 2: Other correlation-based patterns ---
+    if (heapGrowing && externalGrowing && rssGrowing) {
+        return {
+            pattern: 'buffer-crypto-native-leak',
+            description: `Buffer/crypto/native leak - heap: ${heapGrowthRate?.toFixed(
+                2
+            )} MB/min, external: ${externalGrowthRate?.toFixed(2)} MB/min, RSS growing`
+        };
+    }
+
+    if (!heapGrowing && externalGrowing && !rssGrowing) {
+        return {
+            pattern: 'external-cache-leak',
+            description: `External cache leak - external: ${externalGrowthRate?.toFixed(
+                2
+            )} MB/min, heap stable`
+        };
+    }
+
+    if (heapGrowing && !externalGrowing && !rssGrowing) {
+        return {
+            pattern: 'js-object-retention',
+            description: `JS object retention - heap: ${heapGrowthRate?.toFixed(2)} MB/min, external stable`
+        };
+    }
+
+    if (heapGrowing && !externalGrowing && rssGrowing) {
+        return {
+            pattern: 'gc-pressure',
+            description: `GC pressure - heap: ${heapGrowthRate?.toFixed(
+                2
+            )} MB/min, RSS growing, external stable`
+        };
+    }
+
+    if (heapGrowing && externalGrowing && !rssGrowing) {
+        return {
+            pattern: 'mixed-leak-jemalloc',
+            description: `Mixed leak - heap: ${heapGrowthRate?.toFixed(
+                2
+            )} MB/min, external: ${externalGrowthRate?.toFixed(
+                2
+            )} MB/min, RSS stable (jemalloc reusing arenas)`
+        };
+    }
+
+    if (!heapGrowing && externalGrowing && rssGrowing) {
+        return {
+            pattern: 'external-leak',
+            description: `External leak - external: ${externalGrowthRate?.toFixed(
+                2
+            )} MB/min, heap stable`
+        };
+    }
+
+    if (!heapGrowing && !externalGrowing && rssGrowing) {
+        return {
+            pattern: 'rss-leak',
+            description: `RSS leak - heap/external stable but RSS growing`
+        };
+    }
+
+    // --- Priority 3: Heap stable ---
+    const heapStable = isHeapStable(); // Make sure this considers survivor space too
+    if (heapStable) {
+        return {
+            pattern: 'stable',
+            description: 'Memory stable - no leak detected'
+        };
+    }
+
+    // --- Fallback ---
+    return {
+        pattern: 'unknown',
+        description: 'Memory pattern unclear - insufficient data or transient spike'
+    };
 }
+
 
 /**
  * Update sliding baseline when heap is stable for extended period

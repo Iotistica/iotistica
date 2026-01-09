@@ -241,12 +241,12 @@ export class MqttAdapter extends EventEmitter {
     return new Promise((resolve, reject) => {
       this.client!.subscribe(root, { qos }, (err) => {
         if (err) {
-          this.logger.error(`[OBSERVER] Failed to subscribe to observer root: ${root} - ${err.message}`);
+          this.logger.error(`Failed to subscribe to observer root: ${root} - ${err.message}`);
           reject(err);
           return;
         }
         
-        this.logger.info(`[OBSERVER] ✓ Subscribed to observer root: ${root} (QoS ${qos}) - now tracking all messages`);
+        this.logger.info(`Subscribed to observer root: ${root} (QoS ${qos}) - now tracking all messages`);
         resolve();
       });
     });

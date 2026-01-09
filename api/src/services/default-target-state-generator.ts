@@ -157,8 +157,8 @@ export function generateDefaultTargetStateConfigV2(
       maxLogFileSize: 52428800,  // 50 MB
     },
     features: {
-      enableDeviceJobs: true,
-      enableAnomalyDetection: true,
+      enableDeviceJobs: false,
+      enableAnomalyDetection: false,
       enableDeviceRemoteAccess: true,
       enableDeviceSensorPublish: true,
     },

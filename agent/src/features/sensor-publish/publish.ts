@@ -1421,7 +1421,7 @@ export class Sensor extends EventEmitter {
         compression: compressionLog
       });
     } else {
-      this.logger?.debug(message, {
+      this.logger?.info(message, {
         messages: messageCount,
         batchBytes,
         compression: compressionLog

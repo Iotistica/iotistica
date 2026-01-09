@@ -14,7 +14,7 @@ import { writeHeapSnapshot } from 'v8';
 import { mkdirSync } from 'fs';
 import { join } from 'path';
 import DeviceAgent from './agent';
-import { startWatchdog, notifySystemd, notifyReady } from './system/systemd-watchdog';
+import { startWatchdog, notifySystemd, notifyReady } from './system/watchdog';
 import { HealthArbiter } from './health/health-arbiter';
 import { healthcheck } from './system/memory';
 import { version as packageVersion } from '../package.json';

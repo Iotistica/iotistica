@@ -13,7 +13,7 @@ import { join } from 'path';
 import { AgentLogger } from './logging/agent-logger.js';
 import { LogComponents } from './logging/types.js';
 import { MqttManager, createJsonPayload } from './mqtt/manager.js';
-import { notifySystemd } from './system/systemd-watchdog.js';
+import { notifySystemd } from './system/watchdog.js';
 
 const execAsync = promisify(exec);
 
