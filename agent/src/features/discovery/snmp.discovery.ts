@@ -61,7 +61,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
   async discover(options?: SNMPDiscoveryOptions): Promise<DiscoveredDevice[]> {
     const discovered: DiscoveredDevice[] = [];
 
-    this.logger?.infoSync('Starting SNMP discovery', {
+    this.logger?.debugSync('Starting SNMP discovery', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       protocol: this.protocol,
       phase: 'discovery'
@@ -84,7 +84,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
       return [];
     }
 
-    this.logger?.infoSync('SNMP discovery configuration', {
+    this.logger?.debugSync('SNMP discovery configuration', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       ipRanges,
       port,
@@ -98,14 +98,14 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
     // --- skip gateway IPs ---
     const gatewayIPs = ips.filter(ip => ip.endsWith('.1'));
     if (gatewayIPs.length) {
-      this.logger?.infoSync(`Skipping gateway IPs: ${gatewayIPs.join(', ')}`, {
+      this.logger?.debugSync(`Skipping gateway IPs: ${gatewayIPs.join(', ')}`, {
         component: LogComponents.discovery + "] [" + this.protocol as any
       });
       ips = ips.filter(ip => !ip.endsWith('.1'));
     }
  
 
-    this.logger?.infoSync(`Scanning ${ips.length} IP addresses for SNMP devices`, {
+    this.logger?.debugSync(`Scanning ${ips.length} IP addresses for SNMP devices`, {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       totalIPs: ips.length
     });
@@ -165,7 +165,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
                 }
               };
 
-              this.logger?.infoSync(`Discovered SNMP device at ${ip}`, {
+              this.logger?.debugSync(`Discovered SNMP device at ${ip}`, {
                 component: LogComponents.discovery + "] [" + this.protocol as any,
                 phase: 'discovery',
                 sysDescr: deviceInfo.sysDescr?.substring(0, 50) + '...'
@@ -193,7 +193,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
       }
     }
 
-    this.logger?.infoSync(`SNMP discovery complete: ${discovered.length} devices found`, {
+    this.logger?.debugSync(`SNMP discovery complete: ${discovered.length} devices found`, {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       totalScanned: ips.length,
       discovered: discovered.length
@@ -206,7 +206,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
    * Phase 2: Validate device (read additional OIDs for identification)
    */
   async validate(device: DiscoveredDevice, timeout = 5000): Promise<ValidationResult | null> {
-    this.logger?.infoSync('Validating SNMP device', {
+    this.logger?.debugSync('Validating SNMP device', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       host: device.connection.host,
       phase: 'validation'
@@ -253,7 +253,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
         }
       };
 
-      this.logger?.infoSync('SNMP device validated', {
+      this.logger?.debugSync('SNMP device validated', {
         component: LogComponents.discovery + "] [" + this.protocol as any,
         host: device.connection.host,
         manufacturer,
@@ -385,13 +385,22 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
    */
   private async snmpGet(session: any, oids: string[], timeout: number): Promise<any[]> {
     return new Promise((resolve, reject) => {
+      let timedOut = false;
+      
       const timer = setTimeout(() => {
-        session.close();
+        timedOut = true;
+        // Don't close session inside timeout closure - let caller handle cleanup
+        // This prevents closure retention in survivor space
         reject(new Error('SNMP GET timeout'));
       }, timeout);
 
       session.get(oids, (error: Error | null, varbinds: any[]) => {
         clearTimeout(timer);
+        
+        if (timedOut) {
+          // Request already timed out, ignore result
+          return;
+        }
         
         if (error) {
           reject(error);
@@ -443,13 +452,13 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
         ips.push(range);
       } else {
         // Hostname/container name - resolve to IP
-        this.logger?.infoSync(`Attempting to resolve hostname: ${range}`, {
+        this.logger?.debugSync(`Attempting to resolve hostname: ${range}`, {
           component: LogComponents.discovery + "] [" + this.protocol as any
         });
         try {
           const resolved = await dnsLookup(range);
           ips.push(resolved.address);
-          this.logger?.infoSync(`Resolved hostname ${range} to ${resolved.address}`, {
+          this.logger?.debugSync(`Resolved hostname ${range} to ${resolved.address}`, {
             component: LogComponents.discovery + "] [" + this.protocol as any
           });
         } catch (error) {

@@ -1506,6 +1506,10 @@ export default class DeviceAgent {
    * @returns true if all critical components are operational
    */
   public isFullyOperational(): boolean {
+    // CI mode: Skip provisioning-dependent checks (MQTT, CloudSync)
+    // Allows agent to start and test basic functionality without cloud connection
+    const isCiMode = process.env.CI === 'true';
+    
     // Critical components that MUST be operational for READY=1
     const checks = {
       database: !!this.stateReconciler,
@@ -1513,10 +1517,10 @@ export default class DeviceAgent {
       deviceInfo: !!this.deviceInfo,
       deviceAPI: !!this.deviceAPI,
       containerManager: !!this.containerManager,
-      // MQTT is critical only if device is provisioned
-      mqtt: !this.deviceInfo?.provisioned || !!MqttManager.getInstance()?.isConnected(),
-      // CloudSync is critical only if device is provisioned
-      cloudSync: !this.deviceInfo?.provisioned || !!this.cloudSync
+      // MQTT is critical only if device is provisioned (skip in CI mode)
+      mqtt: isCiMode || !this.deviceInfo?.provisioned || !!MqttManager.getInstance()?.isConnected(),
+      // CloudSync is critical only if device is provisioned (skip in CI mode)
+      cloudSync: isCiMode || !this.deviceInfo?.provisioned || !!this.cloudSync
     };
 
     // Check all critical components

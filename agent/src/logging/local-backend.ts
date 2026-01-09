@@ -31,7 +31,7 @@ export class LocalLogBackend implements LogBackend {
 
 	constructor(options: LocalLogBackendOptions = {}) {
 		this.options = {
-			maxLogs: options.maxLogs ?? 10000,
+			maxLogs: options.maxLogs ?? 1000, // Reduced from 10000 to prevent survivor space leak from buffered compression logs
 			maxAge: options.maxAge ?? 24 * 60 * 60 * 1000, // 24 hours
 			enableFilePersistence: options.enableFilePersistence ?? false,
 			logDir: options.logDir ?? '/app/data/logs',

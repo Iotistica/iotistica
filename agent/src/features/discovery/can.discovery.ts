@@ -26,7 +26,7 @@ export class CANDiscoveryPlugin extends BaseDiscoveryPlugin {
   async discover(options?: CANDiscoveryOptions): Promise<DiscoveredDevice[]> {
     const discovered: DiscoveredDevice[] = [];
 
-    this.logger?.infoSync('Starting CAN discovery', {
+    this.logger?.debugSync('Starting CAN discovery', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       protocol: this.protocol,
       phase: 'discovery'
@@ -101,7 +101,7 @@ export class CANDiscoveryPlugin extends BaseDiscoveryPlugin {
         });
       }
 
-      this.logger?.infoSync(`Discovered ${discovered.length} CAN IDs`, {
+      this.logger?.debugSync(`Discovered ${discovered.length} CAN IDs`, {
         component: LogComponents.discovery + "] [" + this.protocol as any,
         interface: canInterface,
         phase: 'discovery'
@@ -120,7 +120,7 @@ export class CANDiscoveryPlugin extends BaseDiscoveryPlugin {
    * Phase 2: Validate messages (pattern analysis)
    */
   async validate(device: DiscoveredDevice, timeout = 10000): Promise<any> {
-    this.logger?.infoSync('Validating CAN messages', {
+    this.logger?.debugSync('Validating CAN messages', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       canId: device.metadata?.canId,
       phase: 'validation'

@@ -65,7 +65,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     
     // Multi-connection mode detection
     if (modbusConfig?.connections && modbusConfig.connections.length > 0) {
-      this.logger?.infoSync(`Starting multi-connection Modbus discovery (${modbusConfig.connections.length} connections)`, {
+      this.logger?.debugSync(`Starting multi-connection Modbus discovery (${modbusConfig.connections.length} connections)`, {
         component: LogComponents.discovery + "] [" + this.protocol as any,
         connectionCount: modbusConfig.connections.length
       });
@@ -78,7 +78,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 
       // Parallel TCP scanning (controlled concurrency to avoid overwhelming network)
       if (tcpConnections.length > 0) {
-        this.logger?.infoSync(`Scanning ${tcpConnections.length} TCP connections (max 3 parallel)`, {
+        this.logger?.debugSync(`Scanning ${tcpConnections.length} TCP connections (max 3 parallel)`, {
           component: LogComponents.discovery + "] [" + this.protocol as any
         });
 
@@ -105,7 +105,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
                 ? Object.values(conn.points) 
                 : (modbusConfig.profileDataPoints || []);
 
-              this.logger?.infoSync(`Scanning TCP connection '${conn.name || conn.host}' (${dataPoints.length} data points)`, {
+              this.logger?.debugSync(`Scanning TCP connection '${conn.name || conn.host}' (${dataPoints.length} data points)`, {
                 component: LogComponents.discovery + "] [" + this.protocol as any,
                 connection: conn.name,
                 host: conn.host,
@@ -122,7 +122,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 
       // Sequential serial scanning (RTU bus requires sequential access)
       if (serialConnections.length > 0) {
-        this.logger?.infoSync(`Scanning ${serialConnections.length} serial connections (sequential - shared bus)`, {
+        this.logger?.debugSync(`Scanning ${serialConnections.length} serial connections (sequential - shared bus)`, {
           component: LogComponents.discovery + "] [" + this.protocol as any
         });
 
@@ -141,7 +141,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
             ? Object.values(conn.points) 
             : (modbusConfig.profileDataPoints || []);
 
-          this.logger?.infoSync(`Scanning serial connection '${conn.name || (conn as any).serialPort}' (${dataPoints.length} data points)`, {
+          this.logger?.debugSync(`Scanning serial connection '${conn.name || (conn as any).serialPort}' (${dataPoints.length} data points)`, {
             component: LogComponents.discovery + "] [" + this.protocol as any,
             connection: conn.name,
             port: (conn as any).serialPort
@@ -152,7 +152,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
         }
       }
 
-      this.logger?.infoSync(`Multi-connection discovery complete: ${allDiscovered.length} devices across ${modbusConfig.connections.length} connections`, {
+      this.logger?.debugSync(`Multi-connection discovery complete: ${allDiscovered.length} devices across ${modbusConfig.connections.length} connections`, {
         component: LogComponents.discovery + "] [" + this.protocol as any,
         totalDevices: allDiscovered.length,
         connectionCount: modbusConfig.connections.length,
@@ -166,7 +166,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     // Legacy single-connection mode (backward compatibility)
     const dataPoints: DataPoint[] = modbusConfig?.profileDataPoints || [];
 
-    this.logger?.infoSync('Starting single-connection Modbus discovery (legacy mode)', {
+    this.logger?.debugSync('Starting single-connection Modbus discovery (legacy mode)', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       dataPointCount: dataPoints.length
     });
@@ -185,18 +185,18 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
   ): Promise<DiscoveredDevice[]> {
     
     if (dataPoints.length === 0) {
-      this.logger?.warnSync(`No data points in config`, {
+      this.logger?.debugSync(`No data points in config`, {
         component: LogComponents.discovery + "] [" + this.protocol as any
       });
     } else {
-      this.logger?.infoSync(`Using ${dataPoints.length} data points`, {
+      this.logger?.debugSync(`Using ${dataPoints.length} data points`, {
         component: LogComponents.discovery + "] [" + this.protocol as any
       });
     }
 
     const discovered: DiscoveredDevice[] = [];
 
-    this.logger?.infoSync('Starting Modbus discovery on bus', {
+    this.logger?.debugSync('Starting Modbus discovery on bus', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       connectionName
     });
@@ -308,7 +308,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
       await this.closeConnection(connection);
     }
 
-    this.logger?.infoSync(`Modbus discovery complete on bus: ${discovered.length} devices`, {
+    this.logger?.debugSync(`Modbus discovery complete on bus: ${discovered.length} devices`, {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       deviceCount: discovered.length,
       connectionName
@@ -322,7 +322,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
    * Tests if configured profile data points are readable
    */
   async validate(device: DiscoveredDevice, timeout = 2000): Promise<ValidationResult> {
-    this.logger?.infoSync('Validating Modbus device and profile config', {
+    this.logger?.debugSync('Validating Modbus device and profile config', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       slaveId: device.metadata?.slaveId,
       phase: 'validation',
@@ -511,7 +511,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
       guidance = 'Partial address accessibility - wrong model variant or bus issues';
     }
 
-    this.logger?.infoSync('Data point configuration validation complete', {
+    this.logger?.debugSync('Data point configuration validation complete', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       slaveId: device.metadata?.slaveId,
       result,
@@ -703,11 +703,20 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
   private async closeConnection(connection?: ModbusConnection): Promise<void> {
     if (connection?.isOpen) {
       try {
-        connection.client.close(() => {
-          this.logger?.debugSync('Closed Modbus connection', {
-            component: LogComponents.discovery + "] [" + this.protocol as any,
-            phase: 'discovery',
-            type: connection?.type
+        // Wrap callback-based close() in Promise to await completion
+        // This prevents closure accumulation in survivor space
+        await new Promise<void>((resolve, reject) => {
+          connection.client.close((err?: Error) => {
+            if (err) {
+              reject(err);
+            } else {
+              this.logger?.debugSync('Closed Modbus connection', {
+                component: LogComponents.discovery + "] [" + this.protocol as any,
+                phase: 'discovery',
+                type: connection?.type
+              });
+              resolve();
+            }
           });
         });
       } catch (error) {

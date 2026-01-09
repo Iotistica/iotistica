@@ -41,7 +41,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
       return [];
     }
 
-    this.logger?.infoSync('Starting OPC-UA discovery', {
+    this.logger?.debugSync('Starting OPC-UA discovery', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       protocol: this.protocol,
       phase: 'discovery'
@@ -171,7 +171,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
           await session.close();
         }
         
-        this.logger?.infoSync(`OPC UA recursive tree browsing complete: discovered ${dataPoints.length} nodes`, {
+        this.logger?.debugSync(`OPC UA recursive tree browsing complete: discovered ${dataPoints.length} nodes`, {
           component: LogComponents.discovery + "] [" + this.protocol as any,
           url,
           dataPointCount: dataPoints.length
@@ -217,7 +217,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
             }
           });
 
-          this.logger?.infoSync(`Discovered OPC-UA endpoint at ${url}`, {
+          this.logger?.debugSync(`Discovered OPC-UA endpoint at ${url}`, {
             component: LogComponents.discovery + "] [" + this.protocol as any,
             endpoints: endpoints.length,
             phase: 'discovery'
@@ -237,7 +237,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
    * Phase 2: Validate server (read ServerInfo)
    */
   async validate(device: DiscoveredDevice, timeout = 5000): Promise<any> {
-    this.logger?.infoSync('Validating OPC-UA server', {
+    this.logger?.debugSync('Validating OPC-UA server', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       endpoint: device.connection.endpointUrl,
       phase: 'validation'

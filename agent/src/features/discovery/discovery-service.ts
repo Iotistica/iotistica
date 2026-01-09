@@ -168,7 +168,7 @@ export class DiscoveryService extends EventEmitter {
     samplePayload?: string;
   }>): void {
     this.mqttObserverData = observedTopics;
-    this.logger?.infoSync(`🔄 DISCOVERY: Injected ${observedTopics.length} observer topics for next MQTT discovery`, {
+    this.logger?.debugSync(`🔄 DISCOVERY: Injected ${observedTopics.length} observer topics for next MQTT discovery`, {
       component: LogComponents.discovery,
       observerTopics: observedTopics.length,
       topics: observedTopics.map(t => ({ topic: t.topic, liveCount: t.liveCount, lastSeen: t.lastSeen }))
@@ -199,7 +199,7 @@ export class DiscoveryService extends EventEmitter {
     const enablePeriodicDiscovery = process.env.ENABLE_PERIODIC_DISCOVERY !== 'false'; // Default: enabled
     
     if (!enablePeriodicDiscovery) {
-      this.logger?.infoSync('Periodic discovery disabled', {
+      this.logger?.debugSync('Periodic discovery disabled', {
         component: LogComponents.discovery,
       });
       return;
@@ -216,7 +216,7 @@ export class DiscoveryService extends EventEmitter {
       return;
     }
     
-    this.logger?.infoSync('Starting periodic discovery timers', {
+    this.logger?.debugSync('Starting periodic discovery timers', {
       component: LogComponents.discovery,
       lightIntervalHours: intervals.discoveryLightIntervalMs! / (60 * 60 * 1000),
       fullIntervalHours: intervals.discoveryFullIntervalMs! / (60 * 60 * 1000),
@@ -224,7 +224,7 @@ export class DiscoveryService extends EventEmitter {
     
     // Light discovery: Fast scan (ping only)
     this.lightTimer = setInterval(() => {
-      this.logger?.infoSync('Running scheduled light discovery', {
+      this.logger?.debugSync('Running scheduled light discovery', {
         component: LogComponents.discovery,
       });
       
@@ -242,7 +242,7 @@ export class DiscoveryService extends EventEmitter {
     
     // Full discovery: Deep validation with device info reads
     this.fullTimer = setInterval(() => {
-      this.logger?.infoSync('Running scheduled full discovery', {
+      this.logger?.debugSync('Running scheduled full discovery', {
         component: LogComponents.discovery,
       });
       
@@ -274,6 +274,19 @@ export class DiscoveryService extends EventEmitter {
   }
 
   /**
+   * Clean up discovery service resources and break reference chains
+   * Call this when shutting down or to force garbage collection
+   */
+  public cleanup(): void {
+    this.stopPeriodicDiscovery();
+    this.mqttObserverData = undefined;
+    this.removeAllListeners(); // Clear EventEmitter listeners
+    
+    // Note: plugins Map is intentionally NOT cleared - it's needed for service lifetime
+    // Only transient data (observer data, listeners) is cleared
+  }
+
+  /**
    * Main entry point: Run discovery with rate limiting
    */
   async runDiscovery(options: DiscoveryOptions): Promise<DiscoveredDevice[]> {
@@ -282,7 +295,7 @@ export class DiscoveryService extends EventEmitter {
 
     // Check rate limiting
     if (!forceRun && !this.shouldRunDiscovery(trigger)) {
-      this.logger?.infoSync('Discovery skipped due to rate limiting', {
+      this.logger?.debugSync('Discovery skipped due to rate limiting', {
         component: LogComponents.discovery,
         traceId,
         trigger,
@@ -294,14 +307,14 @@ export class DiscoveryService extends EventEmitter {
 
     // Log special message for first boot discovery
     if (trigger === 'first_boot') {
-      this.logger?.infoSync('Running device discovery scan with full validation', {
+      this.logger?.debugSync('Running device discovery scan with full validation', {
         component: LogComponents.discovery,
         traceId,
         validate,
         protocols: protocols || 'all'
       });
     } else {
-      this.logger?.infoSync('Starting discovery', {
+      this.logger?.debugSync('Starting discovery', {
         component: LogComponents.discovery,
         traceId,
         trigger,
@@ -363,7 +376,7 @@ export class DiscoveryService extends EventEmitter {
 
         // Phase 2: Validation (optional)
         if (validate && discovered.length > 0) {
-          this.logger?.infoSync(`Validating ${discovered.length} ${protocol} devices`, {
+          this.logger?.debugSync(`Validating ${discovered.length} ${protocol} devices`, {
             component: LogComponents.discovery,
             traceId,
             protocol,
@@ -448,7 +461,7 @@ export class DiscoveryService extends EventEmitter {
 
     const duration = Date.now() - startTime;
 
-    this.logger?.infoSync(`Discovery complete: ${allDiscovered.length} devices found`, {
+    this.logger?.debugSync(`Discovery complete: ${allDiscovered.length} devices found`, {
       component: LogComponents.discovery,
       traceId,
       duration,
@@ -472,6 +485,12 @@ export class DiscoveryService extends EventEmitter {
       skippedCount: saveResults.skipped,
       traceId
     });
+
+    // Clear observer data after use to prevent memory accumulation
+    this.mqttObserverData = undefined;
+
+    // Clear discovered devices array to help GC (caller already has reference if needed)
+    allDiscovered.length = 0;
 
     return allDiscovered;
   }
@@ -1039,7 +1058,7 @@ export class DiscoveryService extends EventEmitter {
    */
   private async saveToDatabase(discovered: DiscoveredDevice[], traceId: string): Promise<{ saved: number; skipped: number }> {
     if (discovered.length === 0) {
-      this.logger?.infoSync('No discovered endpoints to save', {
+      this.logger?.debugSync('No discovered endpoints to save', {
         component: LogComponents.discovery,
         traceId
       });
@@ -1139,21 +1158,21 @@ export class DiscoveryService extends EventEmitter {
             await DeviceEndpointModel.updateLastSeen(sensor.fingerprint);
             
             if (configChanged) {
-              this.logger?.infoSync(`Device "${sensor.name}" moved/reconfigured`, {
+              this.logger?.debugSync(`Device "${sensor.name}" moved/reconfigured`, {
                 component: LogComponents.discovery,
                 traceId,
                 oldConnection: existing.connection,
                 newConnection: sensor.connection
               });
             } else if (fingerprintChanged) {
-              this.logger?.infoSync(`Device "${sensor.name}" fingerprint changed (dynamic data)`, {
+              this.logger?.debugSync(`Device "${sensor.name}" fingerprint changed (dynamic data)`, {
                 component: LogComponents.discovery,
                 traceId,
                 oldFingerprint: existing.metadata?.fingerprint,
                 newFingerprint: sensor.fingerprint
               });
             } else {
-              this.logger?.infoSync(`Device "${sensor.name}" already known - skipping`, {
+              this.logger?.debugSync(`Device "${sensor.name}" already known - skipping`, {
                 component: LogComponents.discovery,
                 traceId,
                 protocol: sensor.protocol,
@@ -1168,7 +1187,7 @@ export class DiscoveryService extends EventEmitter {
         // Convert to DeviceEndpoint format and save
         const deviceSensor: DeviceEndpoint = {
           name: sensor.name,
-          protocol: sensor.protocol as 'modbus' | 'can' | 'opcua',
+          protocol: sensor.protocol as 'modbus' | 'can' | 'opcua' | 'mqtt',
           enabled: this.isProtocolEnabled(sensor.protocol), // Check if protocol is enabled in config
           poll_interval: 5000, // Default 5 seconds
           connection: sensor.connection,
@@ -1196,7 +1215,7 @@ export class DiscoveryService extends EventEmitter {
         await DeviceEndpointModel.create(deviceSensor);
         saved++;
 
-        this.logger?.infoSync(`Saved discovered sensor "${sensor.name}" (${sensor.protocol})`, {
+        this.logger?.debugSync(`Saved discovered sensor "${sensor.name}" (${sensor.protocol})`, {
           component: LogComponents.discovery,
           traceId,
           confidence: sensor.confidence
@@ -1231,13 +1250,13 @@ export class DiscoveryService extends EventEmitter {
         })
         .map(d => `${d.name} (${d.protocol})`);
       
-      this.logger?.infoSync(`Discovery save complete: ${saved} saved, ${skipped} skipped (already exist)`, {
+      this.logger?.debugSync(`Discovery save complete: ${saved} saved, ${skipped} skipped (already exist)`, {
         component: LogComponents.discovery,
         traceId,
         skippedDevices: skipReasons
       });
     } else {
-      this.logger?.infoSync(`Discovery save complete: ${saved} saved, ${skipped} skipped`, {
+      this.logger?.debugSync(`Discovery save complete: ${saved} saved, ${skipped} skipped`, {
         component: LogComponents.discovery,
         traceId
       });
@@ -1298,7 +1317,7 @@ export class DiscoveryService extends EventEmitter {
       const liveTopics = this.mqttObserverData.filter(t => t.hasLiveMessages).length;
       const retainedOnly = this.mqttObserverData.length - liveTopics;
       
-      this.logger?.infoSync(`MQTT Observer: ${this.mqttObserverData.length} topics tracked (${liveTopics} with live messages)`, {
+      this.logger?.debugSync(`MQTT Observer: ${this.mqttObserverData.length} topics tracked (${liveTopics} with live messages)`, {
         component: LogComponents.discovery,
         totalObserved: this.mqttObserverData.length,
         liveTopics,
@@ -1310,7 +1329,7 @@ export class DiscoveryService extends EventEmitter {
         }))
       });
     } else {
-      this.logger?.infoSync('MQTT Observer: No observer data available (adapter may not be started yet)', {
+      this.logger?.debugSync('MQTT Observer: No observer data available (adapter may not be started yet)', {
         component: LogComponents.discovery,
         note: 'Observer tracks topics during runtime - run discovery after MQTT adapter starts'
       });

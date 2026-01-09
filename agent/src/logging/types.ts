@@ -20,7 +20,7 @@ export const LogComponents = {
   agentUpdater: 'AgentUpdater',
   
   // API Integration
-  cloudSync: 'CloudSync',
+  cloudSync: 'Sync',
   apiPoller: 'ApiPoller',
   
   // Connectivity

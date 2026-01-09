@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import { promisify } from 'util';
 import { deflate as zlibDeflate } from 'zlib';
 import { getHeapStatistics } from 'v8';
+import * as msgpack from 'msgpack-lite';
 import { createJsonPayload, createMsgpackPayload, serializePayload, logCompressionStats, MqttManager } from '../../mqtt/manager.js';
 import type { AnomalyDetectionService } from '../../ai/anomaly/index.js';
 import { getCpuUsage } from '../../system/metrics.js';
@@ -296,8 +297,9 @@ export class Sensor extends EventEmitter {
     this.clearBufferTimer();
     this.clearHeartbeatTimer();
     
-    // Disconnect socket
+    // Disconnect socket and remove all listeners (prevents closure retention)
     if (this.socket) {
+      this.socket.removeAllListeners(); // Critical: Remove event listeners before destroy
       this.socket.destroy();
       this.socket = null;
     }
@@ -306,6 +308,10 @@ export class Sensor extends EventEmitter {
     if (this.messageBatch.messages.length > 0) {
       await this.publishBatch();
     }
+    
+    // Clear caches to help GC
+    this.batchProcessedMetrics.clear();
+    // Note: unitCache is NOT cleared (it's meant to persist for reuse if sensor restarts)
     
     this.state = SensorState.DISCONNECTED;
   }
@@ -954,13 +960,25 @@ export class Sensor extends EventEmitter {
       // Publish to MQTT (single call)
       await this.mqttConnection.publish(topic, payload, { qos: 1 });
       
-      // Update statistics
+      // Update statistics BEFORE clearing references
       this.updatePublishStats(messageCount, batchBytes);
       
-      // Log publish success with compression details
+      // Log publish success BEFORE clearing (creates copy of compressionInfo)
       this.logPublishSuccess(messageCount, batchBytes, compressionInfo);
       
-      // Reset batch
+      // Clear all references immediately after logging (survivor space leak mitigation)
+      // These objects are captured in compression closures and survive minor GC cycles
+      // Must clear ASAP to break closure chains before next publish cycle
+      if (data.messages && Array.isArray(data.messages)) {
+        data.messages.length = 0;
+      }
+      // Explicitly clear CPU usage objects (contain large data structures)
+      if (compressionInfo.cpuUsage) {
+        // @ts-ignore - delete readonly property for GC
+        delete compressionInfo.cpuUsage;
+      }
+      
+      // Reset batch (clears messageBatch.messages array and caches)
       this.resetBatch();
       
     } catch (error) {
@@ -978,6 +996,7 @@ export class Sensor extends EventEmitter {
     }
     
     // Enrich messages with anomaly scores and forecasts
+    // ⚠️ CREATES NEW ARRAY - must be explicitly cleared to prevent survivor space leak
     const enrichedMessages = this.enrichMessagesWithAnomalyScores(this.messageBatch.messages);
     
     // OPTIMIZATION: Format timestamp once (avoid repeated new Date().toISOString())
@@ -1120,7 +1139,7 @@ export class Sensor extends EventEmitter {
     let payload: Buffer | string;
     if (this.useMsgpackPoc) {
       const msgpackStartCpu = trackCpu ? process.cpuUsage() : undefined;
-      payload = require('msgpack-lite').encode(compacted);
+      payload = msgpack.encode(compacted);
       msgpackCpuUsage = (trackCpu && msgpackStartCpu) ? process.cpuUsage(msgpackStartCpu) : undefined;
     } else {
       payload = JSON.stringify(compacted);
@@ -1209,7 +1228,7 @@ export class Sensor extends EventEmitter {
       // MessagePack serialization (measures object traversal + encoding + buffer allocation)
       // NOT pure compression - this is binary serialization overhead
       // ⚠️ Hidden cost: msgpack creates intermediate buffers (GC churn, survivor promotion)
-      const msgpackStartCpu = trackCpu ? process.cpuUsage(startCpu) : undefined;
+      const msgpackStartCpu = trackCpu ? process.cpuUsage() : undefined;
       const mqttPayload = createMsgpackPayload(data, msgIdGen);
       let payload = serializePayload(mqttPayload);
       msgpackCpuUsage = (trackCpu && msgpackStartCpu) ? process.cpuUsage(msgpackStartCpu) : undefined;
@@ -1226,7 +1245,7 @@ export class Sensor extends EventEmitter {
         
         // Adaptive deflate: only compress if beneficial
         if (shouldDeflate(payload.length, cpuLoad)) {
-          const deflateStartCpu = trackCpu ? process.cpuUsage(startCpu) : undefined;
+          const deflateStartCpu = trackCpu ? process.cpuUsage() : undefined;
           finalPayload = await deflateAsync(payload);
           deflateCpuUsage = (trackCpu && deflateStartCpu) ? process.cpuUsage(deflateStartCpu) : undefined;
           compressedSize = finalPayload.length;
@@ -1282,7 +1301,7 @@ export class Sensor extends EventEmitter {
         
         // Adaptive deflate: only compress if beneficial
         if (shouldDeflate(payloadBuffer.length, cpuLoad)) {
-          const deflateStartCpu = trackCpu ? process.cpuUsage(startCpu) : undefined;
+          const deflateStartCpu = trackCpu ? process.cpuUsage() : undefined;
           finalPayload = await deflateAsync(payloadBuffer);
           deflateCpuUsage = (trackCpu && deflateStartCpu) ? process.cpuUsage(deflateStartCpu) : undefined;
           compressedSize = finalPayload.length;
@@ -1377,17 +1396,28 @@ export class Sensor extends EventEmitter {
     }
 
     // Log with special marker for baseline measurements (control path)
-    const logLevel = info.isBaseline ? 'info' : 'info';  // Could use 'debug' for baseline to reduce noise
+    // MEMORY LEAK FIX: Use debug level to prevent buffering large compression objects in log backend
+    // LocalLogBackend keeps 1000 logs in memory - at 12 publishes/min, that's 30KB × 1000 = 30MB
+    // Debug level means these only log when LOG_LEVEL=debug, reducing buffer pressure
     const message = info.isBaseline
-      ? `[BASELINE] Published ${messageCount} messages from '${this.getSensorName()}' (no-op control)`
+      ? `Published ${messageCount} messages from '${this.getSensorName()}' (no-op control)`
       : `Published ${messageCount} messages from '${this.getSensorName()}'`;
     
-    this.logger?.info(message, {
-      endpoint: this.getSensorName(),
-      messages: messageCount,
-      batchBytes,
-      compression: compressionLog
-    });
+    // Baseline measurements at info level, regular publishes at debug level
+    // Global LOG_LEVEL setting controls whether these actually get logged/buffered
+    if (info.isBaseline) {
+      this.logger?.info(message, {
+        messages: messageCount,
+        batchBytes,
+        compression: compressionLog
+      });
+    } else {
+      this.logger?.debug(message, {
+        messages: messageCount,
+        batchBytes,
+        compression: compressionLog
+      });
+    }
   }
 
   /**
@@ -1405,21 +1435,24 @@ export class Sensor extends EventEmitter {
    * These costs are NOT reflected in CPU profiling metrics but affect tail latency
    */
   private resetBatch(): void {
-    // Explicitly nullify object references before clearing array
-    // This helps GC reclaim compression buffers that may be retained in closures
-    for (let i = 0; i < this.messageBatch.messages.length; i++) {
-      this.messageBatch.messages[i] = null;
-    }
+    // Capture batch size before clearing for GC hint threshold check
+    const lastBatchBytes = this.messageBatch.totalBytes;
     
-    this.messageBatch = {
-      messages: [],
-      totalBytes: 0,
-      firstMessageTime: Date.now() // OPTIMIZATION: Use timestamp
-    };
+    // Clear array in-place to help GC reclaim memory immediately
+    // Setting length to 0 is faster than splice() and properly releases references
+    this.messageBatch.messages.length = 0;
+    this.messageBatch.totalBytes = 0;
+    this.messageBatch.firstMessageTime = Date.now();
+    
+    // Clear batch-level caches to prevent survivor space accumulation
+    this.batchProcessedMetrics.clear();
+    // Note: batchVisited is WeakSet (auto-GC'd when objects released)
+    // Note: unitCache is intentionally NOT cleared (persists across batches for reuse)
     
     // Hint to GC for large batches (survivor space leak mitigation)
+    // Force minor GC to promote buffers out of survivor space faster
     // Only runs if --expose-gc flag is set (npm run dev:gc or node --expose-gc)
-    if (this.messageBatch.totalBytes > 1024 * 1024 && global.gc) {
+    if (lastBatchBytes > 1024 * 1024 && global.gc) {
       setImmediate(() => {
         global.gc?.();
       });

@@ -195,7 +195,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
       }
     }
 
-    this.logger?.infoSync('Starting MQTT discovery', {
+    this.logger?.debugSync('Starting MQTT discovery', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       protocol: this.protocol,
       phase: 'discovery',
@@ -228,7 +228,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
 
         this.client!.on('connect', () => {
           clearTimeout(timeout);
-          this.logger?.infoSync('Connected to MQTT broker for discovery', {
+          this.logger?.debugSync('Connected to MQTT broker for discovery', {
             component: LogComponents.discovery + "] [" + this.protocol as any,
             brokerUrl
           });
@@ -257,7 +257,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
               });
               reject(err);
             } else {
-              this.logger?.infoSync(`Subscribed to discovery root: ${root}`, {
+              this.logger?.debugSync(`Subscribed to discovery root: ${root}`, {
                 component: LogComponents.discovery + "] [" + this.protocol as any
               });
               resolve();
@@ -266,7 +266,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
         });
       }
 
-      this.logger?.infoSync(`Monitoring ${discoveryRoots.length} discovery roots for ${monitorDurationMs}ms`, {
+      this.logger?.debugSync(`Monitoring ${discoveryRoots.length} discovery roots for ${monitorDurationMs}ms`, {
         component: LogComponents.discovery + "] [" + this.protocol as any,
         rootCount: discoveryRoots.length
       });
@@ -287,7 +287,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
       const totalTopics = this.discoveredTopics.size;
       const retainedOnlyCount = retainedOnlyTopics.length;
 
-      this.logger?.infoSync(`Discovery complete - found ${totalTopics} active topics`, {
+      this.logger?.debugSync(`Discovery complete - found ${totalTopics} active topics`, {
         component: LogComponents.discovery + "] [" + this.protocol as any,
         topicCount: totalTopics,
         liveTopics: totalTopics - retainedOnlyCount,
@@ -651,7 +651,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
   async validate(device: DiscoveredDevice): Promise<ValidationResult> {
     const topic = (device.connection as any).topic;
 
-    this.logger?.infoSync(`Validating MQTT topic: ${topic}`, {
+    this.logger?.debugSync(`Validating MQTT topic: ${topic}`, {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       protocol: this.protocol,
       phase: 'validation'
@@ -764,7 +764,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
         estimatedIntervalMs = undefined;
       }
 
-      this.logger?.infoSync(`Validation complete for ${topic}`, {
+      this.logger?.debugSync(`Validation complete for ${topic}`, {
         component: LogComponents.discovery + "] [" + this.protocol as any,
         messageCount: messages.length,
         liveCount,
