@@ -217,6 +217,7 @@ export class Sensor extends EventEmitter {
   
   // OPTIMIZATION: Cache unit inference results (field names repeat heavily)
   private unitCache = new Map<string, string>();
+  private unitCacheBatchCount = 0; // Track batches since last cache clear
   
   // OPTIMIZATION: Pre-allocated sets for extractNumericFields (reused per batch)
   private batchVisited = new WeakSet();
@@ -721,7 +722,15 @@ export class Sensor extends EventEmitter {
     }
     
     // Append to buffer (safe - we checked capacity above)
-    this.buffer = Buffer.concat([this.buffer, data]);
+    // OPTIMIZATION: Avoid Buffer.concat() for small appends (reduces allocations)
+    if (this.buffer.length === 0) {
+      this.buffer = data;
+    } else {
+      const newBuffer = Buffer.allocUnsafe(this.buffer.length + data.length);
+      this.buffer.copy(newBuffer, 0);
+      data.copy(newBuffer, this.buffer.length);
+      this.buffer = newBuffer;
+    }
     
     // Parse messages from buffer (this adds them to messageBatch)
     this.parseMessages();
@@ -1435,9 +1444,6 @@ export class Sensor extends EventEmitter {
    * These costs are NOT reflected in CPU profiling metrics but affect tail latency
    */
   private resetBatch(): void {
-    // Capture batch size before clearing for GC hint threshold check
-    const lastBatchBytes = this.messageBatch.totalBytes;
-    
     // Clear array in-place to help GC reclaim memory immediately
     // Setting length to 0 is faster than splice() and properly releases references
     this.messageBatch.messages.length = 0;
@@ -1447,16 +1453,18 @@ export class Sensor extends EventEmitter {
     // Clear batch-level caches to prevent survivor space accumulation
     this.batchProcessedMetrics.clear();
     // Note: batchVisited is WeakSet (auto-GC'd when objects released)
-    // Note: unitCache is intentionally NOT cleared (persists across batches for reuse)
     
-    // Hint to GC for large batches (survivor space leak mitigation)
-    // Force minor GC to promote buffers out of survivor space faster
-    // Only runs if --expose-gc flag is set (npm run dev:gc or node --expose-gc)
-    if (lastBatchBytes > 1024 * 1024 && global.gc) {
-      setImmediate(() => {
-        global.gc?.();
-      });
+    // Clear unitCache periodically to prevent unbounded growth
+    // Cache field name → unit mappings but reset every 100 batches (~10 min)
+    this.unitCacheBatchCount++;
+    if (this.unitCacheBatchCount >= 100) {
+      this.unitCache.clear();
+      this.unitCacheBatchCount = 0;
     }
+    
+    // Force buffer cleanup to break circular references
+    // Manual GC hints cause survivor promotion - let V8 handle GC naturally
+    this.buffer = Buffer.alloc(0);
   }
 
   /**
