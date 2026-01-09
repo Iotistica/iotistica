@@ -174,6 +174,12 @@ api:
   license:
     publicKey: ""
     key: ""
+  monitoring:
+    enabled: true  # Enable ServiceMonitor for Prometheus scraping
+    interval: 30s  # How often Prometheus scrapes metrics
+    scrapeTimeout: 10s
+    labels: {}  # Additional labels for ServiceMonitor (match your Prometheus selector)
+    relabelings: []  # Optional metric relabeling
 
 # Dashboard UI
 dashboard:
