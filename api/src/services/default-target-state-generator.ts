@@ -219,25 +219,45 @@ export function generateDefaultTargetStateConfigV2(
         bufferCapacity: 128 * 1024, // 128KB - Standard Modbus responses
         connections: [
           {
-            name: 'comap-gen-502',
+            name: 'modbus-sim-1',
             host: '10.0.0.60',
             port: 502,
             timeoutMs: 2000,
+            profile: 'Generic',  
+            addressing: {
+              slaveRange: {
+                start: 1,
+                end: 10,
+              },
+            },
           },
           {
-            name: 'comap-gen-503',
+            name: 'modbus-sim-2',
             host: '10.0.0.60',
             port: 503,
             timeoutMs: 2000,
+            profile: 'COMAP',  
+            addressing: {
+              slaveRange: {
+                start: 1,
+                end: 10,
+              },
+            },
+          },
+          {
+            name: 'modbus-sim-3',
+            host: '10.0.0.60',
+            port: 504,
+            timeoutMs: 2000,
+            profile: 'Generic',  
+            addressing: {
+              slaveRange: {
+                start: 1,
+                end: 10,
+              },
+            },
           }
         ],
-        addressing: {
-          slaveRange: {
-            start: 1,
-            end: 10,
-          },
-        },
-        points: modbusPoints,  // Points object (transformed from array)
       },
     },
   };
@@ -286,11 +306,19 @@ export function generateDefaultTargetStateConfigV2(
  * @returns Complete target state V2 with preinstalled core services and generated config
  */
 export async function generateDefaultTargetStateV2(licenseData: LicenseData | null) {
-  // Fetch profile data points from database (array format)
-  const profileDataPoints = await getProfileDataPoints('COMAP', 'modbus');
+  // Generate V2 config with connection profiles defined
+  const config = generateDefaultTargetStateConfigV2(licenseData, []);
   
-  // Generate V2 config (converts array → points object internally)
-  const config = generateDefaultTargetStateConfigV2(licenseData, profileDataPoints as ModbusProfileDataPoint[]);
+  // Load points for each connection based on its profile
+  if (config.protocols.modbus.connections) {
+    for (const connection of config.protocols.modbus.connections) {
+      if (connection.profile) {
+        const profileDataPoints = await getProfileDataPoints(connection.profile, 'modbus');
+        connection.points = profileDataPointsToPointsObject(profileDataPoints as ModbusProfileDataPoint[]);
+        logger.info(`Loaded ${Object.keys(connection.points).length} points for ${connection.name} (${connection.profile})`);
+      }
+    }
+  }
   
   return {
     apps: {

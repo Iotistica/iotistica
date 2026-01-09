@@ -203,29 +203,11 @@ export class AnomalyStorageService {
 			});
 
 		// Use INSERT OR REPLACE to handle updates (SQLite upsert)
-		await this.db.raw(`
-			INSERT OR REPLACE INTO anomaly_baselines (
-				metric, profile, time_slot, mean, median, std_dev, mad, min, max,
-				q1, q3, iqr, sample_count, calculated_at, window_start, window_end
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, [
-			record.metric,
-			record.profile,
-			record.time_slot,
-			record.mean,
-			record.median,
-			record.std_dev,
-			record.mad,
-			record.min,
-			record.max,
-			record.q1,
-			record.q3,
-			record.iqr,
-			record.sample_count,
-			record.calculated_at,
-			record.window_start,
-			record.window_end
-		]);
+		// MEMORY LEAK FIX: Use Knex query builder instead of raw() to avoid template string accumulation
+		await this.db('anomaly_baselines')
+			.insert(record)
+			.onConflict(['metric', 'profile', 'time_slot'])
+			.merge();
 	} catch (error) {
 		this.logger?.errorSync('Failed to store anomaly baseline', error as Error, {
 			component: LogComponents.metrics,

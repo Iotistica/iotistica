@@ -206,14 +206,12 @@ services:
     #         start_period: 60s
     
     # Protocol Simulators for Testing
-    modbus-simulator:
+    modbus-sim-1:
         build:
             context: ./sensors/modbus-simulator
             dockerfile: Dockerfile
-        container_name: iotistic-modbus-sim
+        container_name: modbus-sim-1
         restart: unless-stopped
-        volumes:
-            - ./config/vendors:/app/vendors:ro
         environment:
           - MODBUS_PROFILE=Generic
           - MODBUS_API_URL=http://api:3002
@@ -231,11 +229,11 @@ services:
                 max-size: "5m"
                 max-file: "2"
 
-    modbus-simulator-2:
+    modbus-sim-2:
         build:
             context: ./sensors/modbus-simulator
             dockerfile: Dockerfile
-        container_name: iotistic-modbus-sim-2
+        container_name: modbus-sim-2
         restart: unless-stopped
         environment:
           - MODBUS_PROFILE=Generic
@@ -253,7 +251,29 @@ services:
             options:
                 max-size: "5m"
                 max-file: "2"
-    
+    modbus-sim-3:
+        build:
+            context: ./sensors/modbus-simulator
+            dockerfile: Dockerfile
+        container_name: modbus-sim-3
+        restart: unless-stopped
+        environment:
+          - MODBUS_PROFILE=Generic
+          - MODBUS_API_URL=http://api:3002
+          - API_TOKEN=${API_TOKEN:-}
+          - GUI_PORT=5000
+          - GUI_HOST=0.0.0.0
+        ports:
+            - "504:502"
+            - "5004:5000"  # Web GUI: http://localhost:5001
+        networks:
+            - iotistic-net
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "5m"
+                max-file: "2"
+
     snmp-simulator:
         build:
             context: ./sensors/snmp-simulator

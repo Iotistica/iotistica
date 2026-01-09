@@ -147,11 +147,25 @@ export class ModbusClient {
         emitter.off('error', this.errorHandler);
         emitter.off('close', this.closeHandler);
         this.logger.debug(`Closed connection and removed event listeners for ${this.device.name}`);
+      } else if (typeof emitter.removeListener === 'function') {
+        // Fallback for older Node/EventEmitter implementations
+        emitter.removeListener('error', this.errorHandler);
+        emitter.removeListener('close', this.closeHandler);
+        this.logger.debug(`Closed connection and removed event listeners via removeListener for ${this.device.name}`);
       } else {
-        // Fallback: Log warning if off() not available
+        // Fallback: Log warning if neither off() nor removeListener() are available
         this.logger.warn(
-          `off() not available on modbus-serial client for ${this.device.name}. ` +
+          `EventEmitter cleanup API not available on modbus-serial client for ${this.device.name}. ` +
           `Event listeners may accumulate (memory leak risk).`
+        );
+      }
+
+      // Instrumentation: log handler counts after cleanup
+      if (typeof emitter.listenerCount === 'function') {
+        const errCount = emitter.listenerCount('error');
+        const closeCount = emitter.listenerCount('close');
+        this.logger.debug(
+          `[RECOVERY] Handler counts after cleanup for ${this.device.name}: error=${errCount}, close=${closeCount}`
         );
       }
     } catch (error) {
@@ -935,6 +949,16 @@ export class ModbusClient {
   private setupErrorHandlers(): void {
     this.client.on('error', this.errorHandler);
     this.client.on('close', this.closeHandler);
+
+    // Instrumentation: log handler counts after attach
+    const emitter = this.client as any;
+    if (typeof emitter.listenerCount === 'function') {
+      const errCount = emitter.listenerCount('error');
+      const closeCount = emitter.listenerCount('close');
+      this.logger.debug(
+        `[RECOVERY] Handler counts after attach for ${this.device.name}: error=${errCount}, close=${closeCount}`
+      );
+    }
   }
 
   /**

@@ -1,0 +1,379 @@
+{
+  "agent": {
+    "version": "1.0.230"
+  },
+  "logging": {
+    "level": "debug",
+    "maxLogs": 10000,
+    "logMaxAge": 86400000,
+    "maxLogFileSize": 52428800,
+    "enableCompression": true,
+    "enableRemoteLogging": true,
+    "enableFilePersistence": false
+  },
+  "runtime": {
+    "memory": {
+      "thresholdMb": 30,
+      "checkIntervalMs": 30000
+    },
+    "scheduledRestart": {
+      "reason": "heap_fragmentation_cleanup",
+      "enabled": true,
+      "intervalDays": 7
+    }
+  },
+  "features": {
+    "enableDeviceJobs": true,
+    "enableAnomalyDetection": true,
+    "enableDeviceRemoteAccess": true,
+    "enableDeviceSensorPublish": true
+  },
+  "intervals": {
+    "device": {
+      "reportIntervalMs": 60000,
+      "metricsIntervalMs": 60000,
+      "reconciliationIntervalMs": 30000,
+      "targetStatePollIntervalMs": 60000
+    },
+    "discovery": {
+      "fullIntervalMs": 86400000,
+      "lightIntervalMs": 300000
+    }
+  },
+  "protocols": {
+    "can": {
+      "enabled": false,
+      "bufferCapacity": 65536
+    },
+    "mqtt": {
+      "qos": 0,
+      "enabled": true,
+      "connection": {
+        "brokerUrl": "mqtt://10.0.0.60:1883"
+      },
+      "bufferCapacity": 524288,
+      "discoveryRoots": [
+        "edge/+",
+        "sensor/+/data"
+      ],
+      "monitorDurationMs": 30000
+    },
+    "snmp": {
+      "port": 161,
+      "enabled": true,
+      "ipRanges": [
+        "10.0.0.60"
+      ],
+      "bufferCapacity": 131072
+    },
+    "opcua": {
+      "enabled": true,
+      "discoveryUrls": [
+        "opc.tcp://10.0.0.60:4840"
+      ],
+      "bufferCapacity": 1048576
+    },
+    "modbus": {
+      "enabled": true,
+      "connections": [
+        {
+          "host": "10.0.0.60",
+          "name": "comap-gen-502",
+          "port": 502,
+          "points": {
+            "humidity": {
+              "base": 550,
+              "type": "holding",
+              "unit": "%RH",
+              "scale": 0.1,
+              "address": 11,
+              "dataType": "uint16",
+              "noise_pct": 0.1,
+              "description": "Relative humidity (scaled ×10, e.g., 550 = 55.0%)"
+            },
+            "pressure": {
+              "base": 1013,
+              "type": "holding",
+              "unit": "hPa",
+              "address": 12,
+              "dataType": "uint16",
+              "noise_pct": 0.015,
+              "description": "Atmospheric pressure in hectopascals (1013 hPa = sea level)"
+            },
+            "temperature": {
+              "base": 230,
+              "type": "holding",
+              "unit": "°C",
+              "scale": 0.1,
+              "address": 10,
+              "dataType": "uint16",
+              "noise_pct": 0.08,
+              "description": "Ambient temperature (scaled ×10, e.g., 230 = 23.0°C)"
+            },
+            "holding_register_0": {
+              "base": 200,
+              "type": "holding",
+              "unit": "count",
+              "address": 1,
+              "dataType": "uint16",
+              "noise_pct": 0.1
+            },
+            "holding_register_1": {
+              "base": 100,
+              "type": "holding",
+              "unit": "count",
+              "address": 2,
+              "dataType": "uint16",
+              "noise_pct": 0.26
+            },
+            "holding_register_2": {
+              "base": 150,
+              "type": "holding",
+              "unit": "count",
+              "address": 3,
+              "dataType": "uint16",
+              "noise_pct": 0.15
+            }
+          },
+          "profile": "Generic",
+          "timeoutMs": 2000,
+          "addressing": {
+            "slaveRange": {
+              "end": 10,
+              "start": 1
+            }
+          }
+        },
+        {
+          "host": "10.0.0.60",
+          "name": "comap-gen-503",
+          "port": 503,
+          "points": {
+            "power_kw": {
+              "base": 100,
+              "type": "holding",
+              "unit": "kW",
+              "address": 139,
+              "dataType": "uint16",
+              "noise_pct": 0.15
+            },
+            "frequency": {
+              "base": 50,
+              "type": "holding",
+              "unit": "Hz",
+              "address": 129,
+              "dataType": "uint16",
+              "noise_pct": 0.01
+            },
+            "engine_rpm": {
+              "base": 1500,
+              "type": "holding",
+              "unit": "RPM",
+              "address": 99,
+              "dataType": "uint16",
+              "noise_pct": 0.05
+            },
+            "fuel_level": {
+              "base": 75,
+              "type": "holding",
+              "unit": "%",
+              "address": 159,
+              "dataType": "uint16",
+              "noise_pct": 0.02
+            },
+            "engine_temp": {
+              "base": 85,
+              "type": "holding",
+              "unit": "°C",
+              "address": 149,
+              "dataType": "uint16",
+              "noise_pct": 0.05
+            },
+            "gen_current_a": {
+              "base": 50,
+              "type": "holding",
+              "unit": "A",
+              "address": 119,
+              "dataType": "uint16",
+              "noise_pct": 0.1
+            },
+            "gen_current_b": {
+              "base": 50,
+              "type": "holding",
+              "unit": "A",
+              "address": 120,
+              "dataType": "uint16",
+              "noise_pct": 0.1
+            },
+            "gen_current_c": {
+              "base": 50,
+              "type": "holding",
+              "unit": "A",
+              "address": 121,
+              "dataType": "uint16",
+              "noise_pct": 0.1
+            },
+            "gen_voltage_a": {
+              "base": 230,
+              "type": "holding",
+              "unit": "V",
+              "address": 109,
+              "dataType": "uint16",
+              "noise_pct": 0.02
+            },
+            "gen_voltage_b": {
+              "base": 230,
+              "type": "holding",
+              "unit": "V",
+              "address": 110,
+              "dataType": "uint16",
+              "noise_pct": 0.02
+            },
+            "gen_voltage_c": {
+              "base": 230,
+              "type": "holding",
+              "unit": "V",
+              "address": 111,
+              "dataType": "uint16",
+              "noise_pct": 0.02
+            }
+          },
+          "profile": "COMAP",
+          "timeoutMs": 2000,
+          "addressing": {
+            "slaveRange": {
+              "end": 10,
+              "start": 1
+            }
+          }
+        },
+        {
+          "host": "10.0.0.60",
+          "name": "comap-gen-504",
+          "port": 504,
+          "points": {
+            "humidity": {
+              "base": 550,
+              "type": "holding",
+              "unit": "%RH",
+              "scale": 0.1,
+              "address": 11,
+              "dataType": "uint16",
+              "noise_pct": 0.1,
+              "description": "Relative humidity (scaled ×10, e.g., 550 = 55.0%)"
+            },
+            "pressure": {
+              "base": 1013,
+              "type": "holding",
+              "unit": "hPa",
+              "address": 12,
+              "dataType": "uint16",
+              "noise_pct": 0.015,
+              "description": "Atmospheric pressure in hectopascals (1013 hPa = sea level)"
+            },
+            "temperature": {
+              "base": 230,
+              "type": "holding",
+              "unit": "°C",
+              "scale": 0.1,
+              "address": 10,
+              "dataType": "uint16",
+              "noise_pct": 0.08,
+              "description": "Ambient temperature (scaled ×10, e.g., 230 = 23.0°C)"
+            },
+            "holding_register_0": {
+              "base": 200,
+              "type": "holding",
+              "unit": "count",
+              "address": 1,
+              "dataType": "uint16",
+              "noise_pct": 0.1
+            },
+            "holding_register_1": {
+              "base": 100,
+              "type": "holding",
+              "unit": "count",
+              "address": 2,
+              "dataType": "uint16",
+              "noise_pct": 0.26
+            },
+            "holding_register_2": {
+              "base": 150,
+              "type": "holding",
+              "unit": "count",
+              "address": 3,
+              "dataType": "uint16",
+              "noise_pct": 0.15
+            }
+          },
+          "profile": "Generic",
+          "timeoutMs": 2000,
+          "addressing": {
+            "slaveRange": {
+              "end": 10,
+              "start": 1
+            }
+          }
+        }
+      ],
+      "bufferCapacity": 131072
+    }
+  },
+  "anomalyDetection": {
+    "alerts": {
+      "cooldownMs": 300000,
+      "maxQueueSize": 1000
+    },
+    "metrics": [
+      {
+        "name": "cpu_usage",
+        "enabled": true,
+        "methods": [
+          "zscore",
+          "ewma"
+        ],
+        "threshold": 3,
+        "windowSize": 100,
+        "expectedRange": [
+          0,
+          85
+        ]
+      },
+      {
+        "name": "memory_percent",
+        "enabled": true,
+        "methods": [
+          "zscore",
+          "ewma",
+          "rate_change"
+        ],
+        "threshold": 3,
+        "windowSize": 200,
+        "expectedRange": [
+          0,
+          85
+        ]
+      },
+      {
+        "name": "cpu_temp",
+        "enabled": true,
+        "methods": [
+          "zscore",
+          "mad"
+        ],
+        "threshold": 3,
+        "windowSize": 300,
+        "expectedRange": [
+          30,
+          80
+        ]
+      }
+    ],
+    "storage": {
+      "retention": 30,
+      "minSamples": 5
+    },
+    "sensitivity": 5,
+    "warmupPeriodMs": 900000
+  }
+}

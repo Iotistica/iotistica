@@ -10,11 +10,43 @@
  */
 
 import process from 'process';
+import { writeHeapSnapshot } from 'v8';
+import { mkdirSync } from 'fs';
+import { join } from 'path';
 import DeviceAgent from './agent';
 import { startWatchdog, notifySystemd, notifyReady } from './system/systemd-watchdog';
 import { HealthArbiter } from './health/health-arbiter';
 import { healthcheck } from './system/memory';
 import { version as packageVersion } from '../package.json';
+
+// Heap profiling for memory leak investigation
+// Enable with: ENABLE_HEAP_PROFILING=true HEAP_SNAPSHOT_INTERVAL_MIN=5
+if (process.env.ENABLE_HEAP_PROFILING === 'true') {
+	const intervalMin = parseInt(process.env.HEAP_SNAPSHOT_INTERVAL_MIN || '5', 10);
+	const snapshotDir = process.env.HEAP_SNAPSHOT_DIR || '/tmp/heap-snapshots';
+	
+	try {
+		mkdirSync(snapshotDir, { recursive: true });
+		console.log(`[PROFILING] Heap profiling enabled - snapshots every ${intervalMin} min → ${snapshotDir}`);
+		
+		setInterval(() => {
+			try {
+				const filename = join(snapshotDir, `heap-${Date.now()}.heapsnapshot`);
+				writeHeapSnapshot(filename);
+				const stats = process.memoryUsage();
+				console.log(`[PROFILING] Heap snapshot written: ${filename}`, {
+					heapUsedMB: (stats.heapUsed / 1024 / 1024).toFixed(2),
+					heapTotalMB: (stats.heapTotal / 1024 / 1024).toFixed(2),
+					rssMB: (stats.rss / 1024 / 1024).toFixed(2)
+				});
+			} catch (err) {
+				console.error('[PROFILING] Failed to write heap snapshot:', err);
+			}
+		}, intervalMin * 60 * 1000);
+	} catch (err) {
+		console.error(`[PROFILING] Failed to create snapshot directory ${snapshotDir}:`, err);
+	}
+}
 
 // Start the device agent
 const agent = new DeviceAgent();

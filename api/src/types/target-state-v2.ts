@@ -176,8 +176,8 @@ export interface ModbusProtocolConfig {
   bufferCapacity?: number; // Buffer size in bytes for Modbus responses
   connection?: ModbusConnection;  // Legacy: Single connection (optional for backward compat)
   connections?: ModbusConnection[];  // Modern: Multiple connections (optional)
-  addressing: ModbusAddressing;
-  points: Record<string, ModbusDataPoint>;  // Object keyed by point name (e.g., "temperature", "humidity")
+  addressing?: ModbusAddressing;  // Optional: Global addressing (legacy, prefer per-connection)
+  points?: Record<string, ModbusDataPoint>;  // Optional: Global points (legacy, prefer per-connection)
 }
 
 export interface MQTTConnection {

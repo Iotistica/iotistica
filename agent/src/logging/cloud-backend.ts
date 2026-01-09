@@ -680,7 +680,7 @@ export class CloudLogBackend implements LogBackend {
 				
 				process.stderr.write(`[CloudLogBackend] Adaptive decrease due to error: ${Math.floor(oldSize)}→${Math.floor(this.adaptiveBatchSize)} logs, ${(oldBytes/1024/1024).toFixed(1)}→${(this.adaptiveMaxBytes/1024/1024).toFixed(1)}MB\n`);
 				
-				// All retries exhausted - drop batch after too many attempts
+				// Drop batch if retries exhausted or too many attempts
 				if (this.retryPolicy.hasExhaustedRetries() || logBatch.attempts >= 10) {
 					const summary = this.createDroppedLogSummary(logBatch.logs, 'retry_exhausted');
 					this.totalBatchesFailed++;
@@ -690,7 +690,7 @@ export class CloudLogBackend implements LogBackend {
 					// Remove from pending (give up)
 					this.pendingBatches.delete(logBatch.batchId);
 					
-					process.stderr.write(`[CloudLogBackend] Dropping batch ${logBatch.batchId} (${logBatch.logs.length} logs) after ${logBatch.attempts} attempts\n`);
+					process.stderr.write(`[CloudLogBackend] Dropping batch ${logBatch.batchId} (${logBatch.logs.length} logs) after ${logBatch.attempts} attempts (retry exhaustion)\n`);
 					continue;
 				}
 				

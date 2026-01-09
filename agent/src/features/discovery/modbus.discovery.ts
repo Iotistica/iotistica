@@ -100,7 +100,10 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
                   : [1, 10]
               };
 
-              const dataPoints = conn.points || modbusConfig.profileDataPoints || [];
+              // Convert points object to array (API sends Record<string, ModbusDataPoint>)
+              const dataPoints = conn.points 
+                ? Object.values(conn.points) 
+                : (modbusConfig.profileDataPoints || []);
 
               this.logger?.infoSync(`Scanning TCP connection '${conn.name || conn.host}' (${dataPoints.length} data points)`, {
                 component: LogComponents.discovery + "] [" + this.protocol as any,
@@ -133,7 +136,10 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
               : [1, 10]
           };
 
-          const dataPoints = conn.points || modbusConfig.profileDataPoints || [];
+          // Convert points object to array (API sends Record<string, ModbusDataPoint>)
+          const dataPoints = conn.points 
+            ? Object.values(conn.points) 
+            : (modbusConfig.profileDataPoints || []);
 
           this.logger?.infoSync(`Scanning serial connection '${conn.name || (conn as any).serialPort}' (${dataPoints.length} data points)`, {
             component: LogComponents.discovery + "] [" + this.protocol as any,

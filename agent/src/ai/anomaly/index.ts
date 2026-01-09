@@ -878,7 +878,7 @@ export class AnomalyDetectionService {
 			bufferSizes[metricName] = buffer.size;
 		}
 		
-		this.logger?.infoSync('Baseline save starting', {
+		this.logger?.debugSync('Baseline save starting', {
 			component: LogComponents.metrics,
 			minSamples,
 			bufferSizes,

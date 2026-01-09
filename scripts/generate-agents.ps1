@@ -72,6 +72,7 @@ param(
     [string]$UseMsgpackPoc = "true",
     [string]$UseKeyCompactionPoc = "false",
     [string]$UseDeflateCompression = "true",
+    [string]$EnableHeapProfiling = "true",
     
     # Protocol Adapter Configuration
     [string]$EnableProtocolAdapters = "true",
@@ -407,6 +408,7 @@ $networkConfig
       - USE_MSGPACK_POC=$UseMsgpackPoc
       - USE_KEY_COMPACTION_POC=$UseKeyCompactionPoc
       - USE_DEFLATE_COMPRESSION=$UseDeflateCompression
+      - ENABLE_HEAP_PROFILING=$EnableHeapProfiling
 "@
     
     $services += $service
