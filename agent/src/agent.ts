@@ -443,7 +443,8 @@ export default class DeviceAgent {
   }
 
   private async initDatabase(): Promise<void> {
-    await db.initialized(this.agentLogger);
+    const { initialized } = await import('./db/connection.js');
+    await initialized(this.agentLogger);
   }
 
   private async initializeDeviceManager(): Promise<void> {
@@ -875,7 +876,8 @@ export default class DeviceAgent {
       const config = loadConfigFromTargetState(targetStateConfig);
       
       // Get database connection for storage
-      const dbInstance = db.getKnex();
+      const { getKnex } = await import('./db/connection.js');
+      const dbInstance = getKnex();
       
       // Auto-discover endpoint metrics and merge with cloud config
       const { discoverEndpointMetrics, mergeMetricConfigs } = await import('./ai/anomaly/endpoint-sync.js');
