@@ -60,15 +60,25 @@ spec:
               value: {{ .Values.postoffice.env.REDIS_DB | quote }}
             # Database connection for audit logging
             - name: DB_HOST
-              value: {{ include "iotistic.fullname" . }}-postgres
+              value: timescaledb-cluster-rw.io-cluster-tsdb.svc
             - name: DB_PORT
-              value: {{ .Values.postgres.port | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.sql.SecretName }}
+                  key: port
             - name: DB_NAME
-              value: {{ .Values.postgres.database | quote }}
+              value: {{ .Values.client.name | quote }}
+            # Read SQL credentials from existing Kubernetes Secret
             - name: DB_USER
-              value: {{ .Values.postgres.username | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.sql.SecretName }}
+                  key: username
             - name: DB_PASSWORD
-              value: {{ .Values.postgres.password | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.sql.SecretName }}
+                  key: password
             # Email transport configuration
             - name: EMAIL_TRANSPORT
               value: {{ .Values.postoffice.email.transport | quote }}

@@ -1,14 +1,14 @@
 apiVersion: postgresql.cnpg.io/v1
 kind: Database
 metadata:
-  name: client2
+  name: {{ .Values.client.name }}
   namespace: io-cluster-tsdb
 spec:
   cluster:
     name: timescaledb-cluster
 
-  name: client2
-  owner: client2
+  name: {{ .Values.client.name }}
+  owner: {{ .Values.client.name }}
 
   ensure: present
   databaseReclaimPolicy: delete

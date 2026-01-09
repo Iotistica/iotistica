@@ -73,11 +73,14 @@ spec:
             - name: NODE_ENV
               value: {{ .Values.api.env.NODE_ENV | quote }}
             - name: DB_HOST
-              value: timescaledb-cluster-rw.io-cluster-tsdb.svc #{{ include "iotistic.fullname" . }}-postgres
+              value: timescaledb-cluster-rw.io-cluster-tsdb.svc
             - name: DB_PORT
-              value: {{ .Values.postgres.port | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.sql.SecretName }}
+                  key: port
             - name: DB_NAME
-              value: {{ .Values.postgres.database | quote }}
+              value: {{ .Values.client.name | quote }}
             # Read SQL credentials from existing Kubernetes Secret
             - name: DB_USER
               valueFrom:
