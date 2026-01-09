@@ -34,6 +34,7 @@ interface DataPoint {
 	dataType: string;
 	base?: number;
 	noise_pct?: number;
+	scale?: number;  // Scale factor for unit conversion (e.g., 0.1 for temperature)
 	unit?: string;
 }
 
