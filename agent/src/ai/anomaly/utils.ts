@@ -74,7 +74,7 @@ export function loadConfigFromEnv(): AnomalyConfig {
 	
 	// Storage
 	const historyDays = parseInt(process.env.ANOMALY_HISTORY_DAYS || '30', 10);
-	const dbPath = process.env.ANOMALY_DB_PATH || '/app/data/anomaly.db';
+	const dbPath = process.env.ANOMALY_DB_PATH || `${process.env.DATA_DIR || '/app/data'}/anomaly.db`;
 	
 	// MQTT
 	const mqttEnabled = process.env.ANOMALY_MQTT_ENABLED !== 'false';

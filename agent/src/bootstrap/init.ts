@@ -138,7 +138,7 @@ export class FeatureInitializer {
           deviceApiKey: deviceInfo.apiKey,
           pollingIntervalMs,
           maxRetries: 3,
-          handlerDirectory: process.env.JOB_HANDLER_DIR || "/app/data/job-handlers",
+          handlerDirectory: process.env.JOB_HANDLER_DIR || `${process.env.DATA_DIR || '/app/data'}/job-handlers`,
           maxConcurrentJobs: 1,
           defaultHandlerTimeout: 60000,
         },

@@ -209,13 +209,14 @@ export class DeviceManager {
 	 */
 	async initialize(): Promise<void> {
 		// Initialize encryption for secure credential storage in persisted location
-		// CRITICAL: Use absolute path /app/data (Docker volume) so encryption key persists across rebuilds
-		// DO NOT use process.cwd() - it may vary across environments
+		// Use DATA_DIR env var (systemd: /var/lib/iotistic/agent, Docker: /app/data)
+		// CRITICAL: Absolute path required so encryption key persists across rebuilds
+		const dataDir = process.env.DATA_DIR || '/app/data';
 		
-		DeviceModel.initializeEncryption('/app/data');
+		DeviceModel.initializeEncryption(dataDir);
 
 		// Initialize PoP crypto (generates keys if needed)
-		this.popCrypto = new PopCryptoManager('/app/data', this.logger);
+		this.popCrypto = new PopCryptoManager(dataDir, this.logger);
 		await this.popCrypto.initialize();
 
 		await this.loadDeviceInfo();
