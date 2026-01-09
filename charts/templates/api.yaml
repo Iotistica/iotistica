@@ -18,6 +18,23 @@ spec:
     {{- include "iotistic.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: api
 ---
+# Certificate for API
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.api.tlsCertName }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  secretName: {{ .Values.api.tlsSecret }}
+  issuerRef:
+    name: {{ .Values.api.tlsIssuer }}
+    kind: ClusterIssuer
+  commonName: {{ .Values.api.tlsCommonName }}
+  dnsNames:
+{{- range .Values.api.sniHosts }}
+    - {{ . }}
+{{- end }}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -61,10 +78,17 @@ spec:
               value: {{ .Values.postgres.port | quote }}
             - name: DB_NAME
               value: {{ .Values.postgres.database | quote }}
+            # Read SQL credentials from existing Kubernetes Secret
             - name: DB_USER
-              value: {{ .Values.postgres.username | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.sql.SecretName }}
+                  key: username
             - name: DB_PASSWORD
-              value: {{ .Values.postgres.password | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.sql.SecretName }}
+                  key: password
             - name: DB_POOL_SIZE
               value: {{ .Values.api.env.DB_POOL_SIZE | quote }}
             - name: DB_SSL
@@ -127,17 +151,17 @@ spec:
             - name: MQTT_BROKER_PROTOCOL
               value: "mqtts"
             {{- end }}
-            {{- if .Values.api.mqtt.existingSecret }}
+            {{- if .Values.api.mqtt.SecretName }}
             # Read MQTT credentials from existing Kubernetes Secret
             - name: MQTT_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.api.mqtt.existingSecret }}
+                  name: {{ .Values.api.mqtt.SecretName }}
                   key: username
             - name: MQTT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.api.mqtt.existingSecret }}
+                  name: {{ .Values.api.mqtt.SecretName }}
                   key: password
             {{- else }}
             # Use credentials from values.yaml (not recommended for production)

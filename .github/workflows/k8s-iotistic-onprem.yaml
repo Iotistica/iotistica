@@ -85,6 +85,7 @@ jobs:
             --namespace "${CLIENT_NAME}" \
             --create-namespace \
             -f "${VALUES_FILE}" \
+            --set client.name="${CLIENT_NAME}"
             --set api.image.tag="${RELEASE_VERSION}" \
             --set dashboard.image.tag="${RELEASE_VERSION}" \
             --wait \
