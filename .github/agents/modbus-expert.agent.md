@@ -148,6 +148,13 @@ CREATE TABLE profile_configs (
 );
 ```
 
+**Modbus Simulator Containers**:
+- **modbus-sim1**, **modbus-sim2**, **modbus-sim3** - Docker containers for testing
+- Simulators load profiles from API PostgreSQL `profile_configs` table
+- Each simulator can emulate different device types (COMAP, SCHNEIDER, Generic, etc.)
+- Used for development and testing without physical Modbus devices
+- Connect to simulators: `host: modbus-sim1, port: 502` (or modbus-sim2/modbus-sim3)
+
 ### Profile Data Points Structure
 ```json
 [

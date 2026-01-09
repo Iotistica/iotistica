@@ -66,6 +66,13 @@ Sensor/System Data → DataPoint → Buffer → Detector(s) → Fusion → Alert
 - `agent/src/ai/anomaly/buffer.ts` - Rolling statistical buffer
 - `agent/src/ai/anomaly/types.ts` (274 lines) - TypeScript type definitions
 
+**Endpoint Discovery**:
+- `agent/src/ai/anomaly/endpoint-sync.ts` (173 lines) - Endpoint → Metric config converter
+  - Generates MetricConfig from endpoint data points
+  - Calculates expectedRange from base, noise_pct, and **scale** factor
+  - Critical: Must apply scale factor to avoid unit mismatches
+  - Discovery layer between protocols and anomaly detection
+
 ## Statistical Detectors (Deep Dive)
 
 ### 1. Z-Score Detector (Standard Normal)
@@ -635,6 +642,49 @@ if (shouldPublishForecast(metric, prediction, cadence, state)) {
 2. Reduce tracked metrics count
 3. Lower maxQueueSize (1000 → 500)
 
+### Issue: False positives on scaled metrics (temperature, humidity)
+**Symptom**: Static simulator data flagged as critical anomalies with 90%+ deviation
+
+**Root Cause**: Scale factor not applied when calculating expectedRange
+
+**Example**:
+```typescript
+// Data point from profile
+{ base: 230, scale: 0.1, noise_pct: 0.08 }  // Temperature
+
+// WRONG: Calculate range from raw base value
+expectedRange = [floor(230 × 0.68), ceil(230 × 1.32)]
+              = [156, 304]  // ❌ Unscaled register values
+
+// Protocol adapter sends SCALED value
+value = 230 × 0.1 = 22.3°C  // ✅ Scaled metric
+
+// Detector compares: 22.3 vs [156, 304] → CRITICAL ANOMALY ❌
+```
+
+**Solution**: Apply scale factor in `endpoint-sync.ts` before calculating range
+```typescript
+// CORRECT: Apply scale first
+const scale = dp.scale || 1;
+const scaledBase = dp.base * scale;  // 230 × 0.1 = 23.0
+
+expectedRange = [floor(23.0 × 0.68), ceil(23.0 × 1.32)]
+              = [15, 31]°C  // ✅ Scaled metric values
+
+// Detector compares: 22.3°C vs [15, 31]°C → NORMAL ✅
+```
+
+**Files to Check**:
+- `agent/src/ai/anomaly/endpoint-sync.ts` lines 85-110 (expectedRange calculation)
+- Verify scale factor is applied: `const scaledBase = dp.base * scale`
+- Debug logs should show: `base: 230, scale: 0.1, scaledBase: 23, expectedRange: [15, 31]`
+
+**Common Scaled Metrics**:
+- Temperature (Modbus): base=230, scale=0.1 → 23.0°C
+- Humidity (Modbus): base=550, scale=0.1 → 55.0%RH
+- Voltage (Modbus): base=2300, scale=0.1 → 230.0V
+- Any metric where raw register value ≠ actual metric value
+
 ## Guidelines for Code Changes
 
 - ALWAYS use incremental computation (no recomputing entire buffers)
@@ -643,6 +693,7 @@ if (shouldPublishForecast(metric, prediction, cadence, state)) {
 - ALWAYS persist baselines to database (skip warm-up on restart)
 - ALWAYS use epsilon floors for stdDev/MAD (prevent division by zero)
 - ALWAYS deduplicate alerts (cooldown period)
+- ALWAYS apply scale factor when calculating expectedRange (endpoint-sync.ts)
 - NEVER use heavyweight ML libraries (TensorFlow, PyTorch) on edge
 - NEVER recompute statistics from scratch (use rolling updates)
 - VERIFY statistical requirements (50 samples for Z-Score)
@@ -656,10 +707,11 @@ if (shouldPublishForecast(metric, prediction, cadence, state)) {
 3. Check data quality: Are BAD quality points filtered?
 4. Review threshold: Is 3.0 too sensitive for this metric?
 5. Inspect expected range: Should hard bounds be used?
-6. Evaluate seasonality: Does metric have time-of-day patterns?
-7. Check detector choice: Z-Score vs MAD vs IQR?
-8. Review alert deduplication: Is cooldown period too long?
-9. Verify database baselines: Are historical baselines loaded?
-10. Monitor fusion consensus: Are multiple detectors agreeing?
+6. **Check scale factor**: Does metric have `scale` field? Is it applied in expectedRange?
+7. Evaluate seasonality: Does metric have time-of-day patterns?
+8. Check detector choice: Z-Score vs MAD vs IQR?
+9. Review alert deduplication: Is cooldown period too long?
+10. Verify database baselines: Are historical baselines loaded?
+11. Monitor fusion consensus: Are multiple detectors agreeing?
 
 Your responses should prioritize edge device constraints, statistical rigor, false positive reduction, and production-proven patterns for detecting anomalies in noisy IoT sensor data and system metrics.

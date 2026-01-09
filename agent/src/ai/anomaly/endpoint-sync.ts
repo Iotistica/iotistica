@@ -89,19 +89,27 @@ export async function discoverEndpointMetrics(
 				// This accommodates normal variance without flooding alerts
 				const marginMultiplier = 4;
 				
+				// Apply scale factor to convert raw register values to actual metric values
+				// Example: temperature base=230 with scale=0.1 → scaledBase=23.0°C
+				const scale = dp.scale || 1;
+				const scaledBase = dp.base * scale;
+				
 				// Handle special case: base = 0 (e.g., unused registers)
 				if (dp.base === 0) {
 					// For constant zero values, set small range to allow zero
 					expectedRange = [-1, 1];
 				} else {
-					const lowerBound = Math.floor(dp.base * (1 - dp.noise_pct * marginMultiplier));
-					const upperBound = Math.ceil(dp.base * (1 + dp.noise_pct * marginMultiplier));
+					// Calculate range based on SCALED values (what detectors actually see)
+					const lowerBound = Math.floor(scaledBase * (1 - dp.noise_pct * marginMultiplier));
+					const upperBound = Math.ceil(scaledBase * (1 + dp.noise_pct * marginMultiplier));
 					expectedRange = [lowerBound, upperBound];
 				}
 				
 				logger?.debugSync(`Calculated expectedRange for ${metricName}`, {
 					component: LogComponents.metrics,
 					base: dp.base,
+					scale,
+					scaledBase,
 					noise_pct: dp.noise_pct,
 					expectedRange,
 				});
