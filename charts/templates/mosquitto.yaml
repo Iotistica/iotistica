@@ -102,6 +102,7 @@ spec:
     name: {{ .Values.mosquitto.tlsIssuer }}
     kind: ClusterIssuer
   commonName: {{ .Values.mosquitto.tlsCommonName }}
+{{- if .Values.mosquitto.sniHosts }}
   dnsNames:
 {{- range .Values.mosquitto.sniHosts }}
     - {{ . }}

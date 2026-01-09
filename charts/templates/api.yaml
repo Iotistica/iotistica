@@ -30,6 +30,7 @@ spec:
     name: {{ .Values.api.tlsIssuer }}
     kind: ClusterIssuer
   commonName: {{ .Values.api.tlsCommonName }}
+{{- if .Values.api.sniHosts }}
   dnsNames:
 {{- range .Values.api.sniHosts }}
     - {{ . }}
