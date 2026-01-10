@@ -31,6 +31,7 @@ import logging
 import threading
 import urllib.request
 import urllib.error
+import ssl
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 from pymodbus.server import StartTcpServer, StartSerialServer
@@ -629,7 +630,12 @@ def save_profile():
             method='POST'
         )
         
-        with urllib.request.urlopen(req, timeout=10) as response:
+        # Create SSL context that accepts self-signed certificates
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        with urllib.request.urlopen(req, timeout=10, context=ssl_context) as response:
             result = json.loads(response.read().decode())
             logger.info(f"Profile '{new_profile_name}' saved to API with {len(data_points)} data points (source: {source_profile})")
             return jsonify({

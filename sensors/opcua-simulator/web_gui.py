@@ -40,9 +40,15 @@ def read_state():
 def load_profile_data():
     """Load profile data from API (profile_configs table in PostgreSQL)"""
     import urllib.request
+    import ssl
     import time
     
     API_URL = os.environ.get("OPCUA_API_URL", "http://api:3002")
+    
+    # Create SSL context that accepts self-signed certificates
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
     
     # Try API with retries
     max_retries = 3
@@ -50,7 +56,7 @@ def load_profile_data():
         try:
             url = f"{API_URL}/api/v1/profiles/datapoints?protocol=opcua"
             req = urllib.request.Request(url, headers={'User-Agent': 'opcua-gui/1.0'})
-            with urllib.request.urlopen(req, timeout=3) as response:
+            with urllib.request.urlopen(req, timeout=3, context=ssl_context) as response:
                 profile_data = json.loads(response.read().decode())
                 logger.info(f"Loaded {len(profile_data)} profiles from API")
                 return profile_data
