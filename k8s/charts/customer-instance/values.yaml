@@ -237,6 +237,14 @@ ingress:
   annotations:
     # cert-manager.io/cluster-issuer: letsencrypt-prod  # Disabled for local dev
     nginx.ingress.kubernetes.io/ssl-redirect: "false"  # Disabled for local dev
+    # Support large compressed payloads from agents
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
+    nginx.ingress.kubernetes.io/proxy-buffers-number: "4"
+    # Preserve custom headers - nginx strips X- headers by default
+    nginx.ingress.kubernetes.io/server-snippet: |
+      # Explicitly pass through device API key header
+      underscores_in_headers on;
   tls:
     enabled: false  # Disabled for local dev
 

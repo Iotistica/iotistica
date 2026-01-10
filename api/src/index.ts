@@ -310,7 +310,13 @@ app.use((req, res, next) => {
       url: req.url,
       originalUrl: req.originalUrl,
       baseUrl: req.baseUrl,
-      headers: { authorization: req.headers.authorization?.substring(0, 30) }
+      headers: {
+        authorization: req.headers.authorization?.substring(0, 30),
+        'x-device-api-key': req.headers['x-device-api-key']?.toString().substring(0, 30),
+        'content-encoding': req.headers['content-encoding'],
+        'content-type': req.headers['content-type'],
+        'content-length': req.headers['content-length']
+      }
     });
   }
   
