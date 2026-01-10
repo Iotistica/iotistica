@@ -96,7 +96,7 @@ mqttBroker:
     provider: hivemq
     # Connection details (must be configured if enabled)
     host: "client3-release-iotistic-mosquitto"  # e.g., abc123.s1.eu.hivemq.cloud
-    port: 1883
+    port: 8883
     protocol: mqtts
     username: ""
     password: ""
