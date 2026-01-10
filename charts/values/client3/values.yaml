@@ -79,13 +79,10 @@ mqttBroker:
   
   # Local broker configuration (uses Mosquitto deployment)
   local:
-    # Credentials for API and services to connect to local broker
-    username: admin
-    password: iotistic42!  # Change in production
     # Internal service connection
-    protocol: mqtts
+    protocol: mqtt
     host: "{{ include \"iotistic.fullname\" . }}-mosquitto"
-    port: 8883
+    port: 1883
     useTls: false
     
   # Cloud broker configuration (HiveMQ Cloud, AWS IoT Core, etc.)
