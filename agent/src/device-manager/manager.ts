@@ -34,8 +34,10 @@ import {
 } from '../utils/crypto';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
-import { HttpClient, FetchHttpClient } from '../lib/http-client';
-import { DatabaseClient, KnexDatabaseClient } from '../db/client';
+import type { HttpClient } from '../lib/http-client.js';
+import { createHttpClient, FetchHttpClient } from '../lib/http-client.js';
+import type { DatabaseClient } from '../db/client.js';
+import { KnexDatabaseClient } from '../db/client.js';
 import { PopCryptoManager } from '../security/pop-crypto.js';
 
 export class DeviceManager {
@@ -67,7 +69,7 @@ export class DeviceManager {
 
 	/**
 	 * Create HTTP client with TLS configuration for the API endpoint
-	 * Supports localhost HTTPS (development) and self-signed certs (no CA)
+	 * Uses centralized factory for consistent behavior
 	 */
 	private createHttpClient(cloudApiEndpoint?: string): HttpClient {
 		// If no endpoint provided, use default unencrypted client
@@ -75,34 +77,8 @@ export class DeviceManager {
 			return new FetchHttpClient();
 		}
 
-		// For localhost HTTPS (development mode) - always skip cert validation
-		if (cloudApiEndpoint.startsWith('https://localhost') || cloudApiEndpoint.startsWith('https://127.0.0.1')) {
-			this.logger?.infoSync('Creating HTTP client for localhost HTTPS - disabling certificate verification', {
-				component: LogComponents.deviceManager,
-				endpoint: cloudApiEndpoint
-			});
-			return new FetchHttpClient({
-				rejectUnauthorized: false,
-				defaultTimeout: this.PROVISIONING_TIMEOUT_MS,
-			});
-		}
-
-		// For other HTTPS endpoints without CA cert (self-signed) - skip validation
-		if (cloudApiEndpoint.startsWith('https://')) {
-			this.logger?.warnSync('Creating HTTP client for HTTPS without CA certificate - disabling certificate verification', {
-				component: LogComponents.deviceManager,
-				endpoint: cloudApiEndpoint,
-				note: 'Self-signed certificate mode'
-			});
-			return new FetchHttpClient({
-				rejectUnauthorized: false,
-				defaultTimeout: this.PROVISIONING_TIMEOUT_MS,
-			});
-		}
-
-		// HTTP (unencrypted) - no TLS options needed
-		return new FetchHttpClient({
-			defaultTimeout: this.PROVISIONING_TIMEOUT_MS,
+		return createHttpClient(cloudApiEndpoint, {
+			defaultTimeout: this.PROVISIONING_TIMEOUT_MS
 		});
 	}
 

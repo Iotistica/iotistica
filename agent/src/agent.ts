@@ -26,7 +26,7 @@ import { LogComponents } from "./logging/types.js";
 
 import { MqttManager } from "./mqtt/manager.js";
 import { getPackageVersion } from "./utils/api-utils";
-import { FetchHttpClient } from "./lib/http-client.js";
+import { FetchHttpClient, createHttpClient } from "./lib/http-client.js";
 
 import { AgentFirewall } from "./network/firewall.js";
 import { AgentUpdater } from "./updater.js";
@@ -126,7 +126,12 @@ export default class DeviceAgent {
       // Pass logger to StateReconciler (created before logger was available)
       this.stateReconciler.setLogger(this.agentLogger);
 
-      // Initialize device provisioning
+      // Initialize shared HTTP client EARLY (before DeviceManager needs it)
+      // Uses centralized factory for consistent TLS configuration
+      const cloudApiEndpoint = this.agentConfig.getCloudApiEndpoint();
+      this.sharedHttpClient = createHttpClient(cloudApiEndpoint);
+
+      // Initialize device provisioning (uses sharedHttpClient)
       await this.initializeDeviceManager();
 
       // Initialize VPN auto-reconnection EARLY (right after device manager)
@@ -171,15 +176,6 @@ export default class DeviceAgent {
         hasConfig: !!targetState?.config,
         hasProtocols: !!targetState?.config?.protocols,
         hasSettings: !!targetState?.config?.settings
-      });
-     
-      // Initialize shared HTTP client (singleton pattern - reused across all features)
-      // This enables connection pooling for CloudSync, CloudLogBackend, JobsMonitor, etc.
-      const cloudApiEndpoint = this.agentConfig.getCloudApiEndpoint();
-      const isLocalhost = cloudApiEndpoint.includes('localhost') || cloudApiEndpoint.includes('127.0.0.1');
-      this.sharedHttpClient = new FetchHttpClient({
-        defaultTimeout: 30000,
-        rejectUnauthorized: !isLocalhost // Allow self-signed certs for localhost
       });
 
       // Initialize optional features using FeatureInitializer
@@ -449,7 +445,8 @@ export default class DeviceAgent {
 
   private async initializeDeviceManager(): Promise<void> {
     const cloudApiEndpoint = this.agentConfig.getCloudApiEndpoint();
-    this.deviceManager = new DeviceManager(this.agentLogger, undefined, undefined, undefined, cloudApiEndpoint);
+    // Pass shared HTTP client for connection pooling
+    this.deviceManager = new DeviceManager(this.agentLogger, this.sharedHttpClient, undefined, undefined, cloudApiEndpoint);
     await this.deviceManager.initialize();
 
     let deviceInfo = this.deviceManager.getDeviceInfo();

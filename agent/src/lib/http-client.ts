@@ -87,7 +87,47 @@ export interface HttpClient {
 }
 
 /**
- * Default implementation using native fetch with HTTPS support
+ * Create HTTP client with appropriate TLS configuration based on endpoint
+ * 
+ * Centralized factory for all HTTP client creation to ensure consistent behavior:
+ * - HTTPS endpoints: Accept self-signed certificates (rejectUnauthorized: false)
+ * - HTTP endpoints: No TLS configuration needed
+ * 
+ * @param endpoint - API endpoint URL (e.g., "https://api.example.com:443")
+ * @param options - Additional HTTP client options (timeout, headers, etc.)
+ * @returns Configured HttpClient instance
+ */
+export function createHttpClient(
+	endpoint: string,
+	options?: {
+		defaultTimeout?: number;
+		defaultHeaders?: Record<string, string>;
+		caCert?: string; // Optional CA certificate (PEM format)
+	}
+): HttpClient {
+	const isHttps = endpoint.startsWith('https://');
+	
+	// For HTTPS endpoints without CA cert, disable certificate verification
+	// This supports self-signed certificates across all environments
+	const clientOptions: HttpClientOptions = {
+		defaultTimeout: options?.defaultTimeout || 30000,
+		defaultHeaders: options?.defaultHeaders,
+	};
+
+	if (options?.caCert) {
+		// Use provided CA certificate
+		clientOptions.caCert = options.caCert;
+		clientOptions.rejectUnauthorized = true;
+	} else if (isHttps) {
+		// HTTPS without CA cert - accept self-signed certificates
+		clientOptions.rejectUnauthorized = false;
+	}
+
+	return new FetchHttpClient(clientOptions);
+}
+
+/**
+ * FetchHttpClient - HTTP client implementation using undici (fetch)
  */
 export class FetchHttpClient implements HttpClient {
 	private dispatcher?: Agent;

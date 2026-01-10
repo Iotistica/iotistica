@@ -25,7 +25,8 @@ import { OfflineQueue } from '../logging/offline-queue';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import { buildDeviceEndpoint, buildApiEndpoint } from '../utils/api-utils';
-import { HttpClient, FetchHttpClient } from '../lib/http-client';
+import type { HttpClient } from '../lib/http-client.js';
+import { createHttpClient, FetchHttpClient } from '../lib/http-client.js';
 import { RetryPolicy, CircuitBreaker, AsyncLock, isAuthError } from '../utils/retry-policy';
 import { createHash } from 'crypto';
 
@@ -230,99 +231,32 @@ export class CloudSync extends EventEmitter {
 
 	/**
 	 * Create HTTP client with TLS configuration from device info
+	 * Uses centralized factory for consistent behavior
 	 * 
 	 * Note: This method is only called if no shared httpClient is provided to constructor
 	 */
 	private createHttpClient(): HttpClient {
 		const deviceInfo = this.deviceManager.getDeviceInfo();
+		const endpoint = this.config.cloudApiEndpoint;
 		
-		// Debug: log full device info
+		// Debug: log device info
 		this.logger?.debugSync('Device info for HTTP client creation', {
 			component: LogComponents.cloudSync,
 			hasDeviceInfo: !!deviceInfo,
 			uuid: deviceInfo?.uuid,
 			hasApiKey: !!deviceInfo?.apiKey,
 			hasApiTlsConfig: !!deviceInfo?.apiTlsConfig,
-			apiTlsConfigKeys: deviceInfo?.apiTlsConfig ? Object.keys(deviceInfo.apiTlsConfig) : [],
 			hasCaCert: !!deviceInfo?.apiTlsConfig?.caCert,
-			caCertLength: deviceInfo?.apiTlsConfig?.caCert?.length,
 			note: 'Creating dedicated HTTP client (shared client not provided)'
 		});
-		
-		const endpoint = this.config.cloudApiEndpoint;
-		const isLocalhostHttps = endpoint.startsWith('https://localhost') || 
-		                          endpoint.startsWith('https://127.0.0.1');
-		
-		// Common headers for all HTTP requests
-		// Note: X-Device-API-Key is added per-request to ensure fresh credentials
-		const defaultHeaders = {
-			'Content-Type': 'application/json',
-		};
-		
-		this.logger?.infoSync('Creating HTTP client', {
-			component: LogComponents.cloudSync,
-			endpoint: endpoint,
-			isLocalhostHttps: isLocalhostHttps,
-			hasApiTlsConfig: !!deviceInfo?.apiTlsConfig,
-			hasCaCert: !!deviceInfo?.apiTlsConfig?.caCert,
-			note: 'API key added per-request for fresh credentials'
-		});
-		
-		// Check if using localhost HTTPS (development mode) - MUST CHECK FIRST
-		// This takes precedence over apiTlsConfig because we're not talking to the real API
-		if (isLocalhostHttps) {
-			this.logger?.warnSync('Using HTTPS with localhost - disabling certificate verification (development mode)', {
-				component: LogComponents.cloudSync,
-				endpoint: endpoint
-			});
-			
-			return new FetchHttpClient({
-				rejectUnauthorized: false, // Allow self-signed certs for localhost
-				defaultHeaders,
-				defaultTimeout: this.config.apiTimeout,
-			});
-		}
-		
+
 		// Check if API TLS is configured (production mode with provisioned CA cert)
 		const apiTlsConfig = deviceInfo?.apiTlsConfig;
 		
-		if (apiTlsConfig?.caCert) {
-			this.logger?.infoSync('Initializing HTTPS client with CA certificate', {
-				component: LogComponents.cloudSync,
-				hasCert: true,
-				verify: apiTlsConfig.verifyCertificate
-			});
-			
-			return new FetchHttpClient({
-				caCert: apiTlsConfig.caCert.replace(/\\n/g, '\n'), // Fix escaped newlines
-				rejectUnauthorized: apiTlsConfig.verifyCertificate !== false,
-				defaultHeaders,
-				defaultTimeout: this.config.apiTimeout,
-			});
-		}
-		
-		// If HTTPS without CA cert, skip validation (self-signed cert mode)
-		if (endpoint.startsWith('https://')) {
-			this.logger?.warnSync('Using HTTPS without CA certificate - disabling certificate verification (self-signed cert mode)', {
-				component: LogComponents.cloudSync,
-				endpoint: endpoint
-			});
-			
-			return new FetchHttpClient({
-				rejectUnauthorized: false, // Allow self-signed certs
-				defaultHeaders,
-				defaultTimeout: this.config.apiTimeout,
-			});
-		}
-		
-		// Default to plain HTTP client
-		this.logger?.infoSync('Using HTTP client', {
-			component: LogComponents.cloudSync,
-			endpoint: endpoint
-		});
-		return new FetchHttpClient({
-			defaultHeaders,
+		return createHttpClient(endpoint, {
 			defaultTimeout: this.config.apiTimeout,
+			defaultHeaders: { 'Content-Type': 'application/json' },
+			caCert: apiTlsConfig?.caCert?.replace(/\\n/g, '\n') // Fix escaped newlines
 		});
 	}
 	
