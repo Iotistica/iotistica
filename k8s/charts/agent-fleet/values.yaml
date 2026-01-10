@@ -10,7 +10,7 @@ fleet:
   replicaCount: 5
   
   # Cloud API endpoint
-  cloudApiEndpoint: "http://api.iotistic.svc.cluster.local:3002"
+  cloudApiEndpoint: "https://api1.iotistica.com:443"
   
   # Fleet ID for provisioning
   fleetId: "default-fleet"
@@ -61,7 +61,7 @@ agent:
     OPCUA_DISCOVERY_URLS: "opc.tcp://localhost:4840"  # OPC-UA simulator sidecar
     
     # MQTT configuration (cloud broker)
-    MQTT_BROKER_URL: "mqtt://10.27.27.160:30883"
+    MQTT_BROKER_URL: "mqtts://mqtt1.iotistica.com:8883"
     MQTT_CLIENT_ID_PREFIX: "agent-fleet"
     MQTT_RECONNECT_PERIOD: "5000"
     MQTT_CONNECT_TIMEOUT: "30000"
