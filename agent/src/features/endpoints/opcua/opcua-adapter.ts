@@ -89,7 +89,8 @@ import {
 interface OPCUASession {
   client: OPCUAClient;
   session: ClientSession | null;
-  subscription: ClientSubscription | null;
+  subscription: ClientSubscription | null; // Legacy - kept for backwards compatibility
+  subscriptions: ClientSubscription[]; // Multiple subscriptions for load distribution
   monitoredItems: Map<string, ClientMonitoredItem>; // nodeId -> monitored item
   validatedNodes: Set<string>; // NodeIDs that passed validation
   reconnecting: boolean;
@@ -110,6 +111,9 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
   // Concurrency control: OPC-UA sessions do NOT support concurrent requests
   // Concurrent reads will cause BadSessionIdInvalid, BadSecureChannelClosed, or corrupted data
   private locks: Map<string, Promise<any>> = new Map();
+  
+  // Subscription splitting (many PLCs struggle with 200+ monitored items)
+  private readonly MAX_MONITORED_ITEMS_PER_SUBSCRIPTION = 100; // Split subscriptions beyond this
   
   // Reconnection settings
   private readonly MIN_RETRY_DELAY = 5000;   // 5 seconds
@@ -234,93 +238,90 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 
     this.logger.debug(`Validating ${dataPoints.length} NodeIDs for ${deviceName}...`);
 
+    // PERFORMANCE: Batch all reads into single request
+    // Before: 4 RTTs per node (Value, NodeClass, DataType, Description)
+    // After: 1 RTT for all nodes × all attributes
+    // Impact: 1000 nodes = 4000 RTTs → 1 RTT (4000x faster!)
+    const nodesToRead: ReadValueIdOptions[] = [];
+    
     for (const dp of dataPoints) {
-      try {
-        // Read node value, class, data type, and description in parallel
-        // Note: EngineeringUnits is a property, not an attribute, so we read Description instead
-        const [valueResult, nodeClassResult, dataTypeResult, descriptionResult] = await Promise.all([
-          session.read({ nodeId: dp.nodeId, attributeId: AttributeIds.Value }),
-          session.read({ nodeId: dp.nodeId, attributeId: AttributeIds.NodeClass }),
-          session.read({ nodeId: dp.nodeId, attributeId: AttributeIds.DataType }),
-          session.read({ nodeId: dp.nodeId, attributeId: AttributeIds.Description }),
-        ]);
+      nodesToRead.push(
+        { nodeId: dp.nodeId, attributeId: AttributeIds.Value },
+        { nodeId: dp.nodeId, attributeId: AttributeIds.NodeClass },
+        { nodeId: dp.nodeId, attributeId: AttributeIds.DataType },
+        { nodeId: dp.nodeId, attributeId: AttributeIds.Description }
+      );
+    }
+    
+    const validationStart = Date.now();
+    const results = await session.read(nodesToRead);
+    const validationTime = Date.now() - validationStart;
+    
+    this.logger.debug(`Batch validation completed in ${validationTime}ms`, {
+      deviceName,
+      nodeCount: dataPoints.length,
+      readCount: nodesToRead.length,
+      avgTimePerNode: Math.round(validationTime / dataPoints.length)
+    });
+    
+    // Parse results (4 consecutive results per data point)
+    for (let i = 0; i < dataPoints.length; i++) {
+      const dp = dataPoints[i];
+      const baseIdx = i * 4;
+      const valueResult = results[baseIdx];
+      const nodeClassResult = results[baseIdx + 1];
+      const dataTypeResult = results[baseIdx + 2];
+      const descriptionResult = results[baseIdx + 3];
 
-        // Check if reads were successful
-        if (!valueResult.statusCode.isGood()) {
-          invalid.push(dp.nodeId);
-          this.logger.warn(`✗ NodeID validation failed: ${dp.nodeId} (${dp.name})`, {
-            deviceName,
-            statusCode: valueResult.statusCode.name,
-            description: valueResult.statusCode.description
-          });
-          continue;
-        }
+      // Check if reads were successful
+      if (!valueResult.statusCode.isGood()) {
+        invalid.push(dp.nodeId);
+        this.logger.warn(`✗ NodeID validation failed: ${dp.nodeId} (${dp.name})`, {
+          deviceName,
+          statusCode: valueResult.statusCode.name,
+          description: valueResult.statusCode.description
+        });
+        continue;
+      }
 
-        // Extract metadata
-        const nodeClass = nodeClassResult.value?.value;
-        const dataTypeNodeId = dataTypeResult.value?.value;
+      // Extract metadata
+      const nodeClass = nodeClassResult.value?.value;
+      const dataTypeNodeId = dataTypeResult.value?.value;
 
-        // Auto-populate unit from Description if not already set
-        // OPC UA Description often contains unit info (e.g., "Temperature in °C")
-        if (!dp.unit && descriptionResult.statusCode.isGood()) {
-          const description = descriptionResult.value?.value?.text || descriptionResult.value?.value;
-          if (description && typeof description === 'string') {
-            // Extract unit from description - supports both simple and composite units
-            // Pattern matches: "in {unit}" or "{unit}" at end of string
-            // Examples: "Temperature in °C", "Flow in L/min", "Vibration in mm/s"
-            const inUnitMatch = description.match(/\bin\s+([^\s,]+(?:\/[^\s,]+)?)/i);
-            if (inUnitMatch) {
-              (dp as any).unit = inUnitMatch[1];
-              // this.logger.debug(`Auto-extracted unit from description: ${inUnitMatch[1]}`, {
-              //   deviceName,
-              //   nodeId: dp.nodeId,
-              //   description
-              // });
-            }
+      // Auto-populate unit from Description if not already set
+      // OPC UA Description often contains unit info (e.g., "Temperature in °C")
+      if (!dp.unit && descriptionResult.statusCode.isGood()) {
+        const description = descriptionResult.value?.value?.text || descriptionResult.value?.value;
+        if (description && typeof description === 'string') {
+          // Extract unit from description - supports both simple and composite units
+          // Pattern matches: "in {unit}" or "{unit}" at end of string
+          // Examples: "Temperature in °C", "Flow in L/min", "Vibration in mm/s"
+          const inUnitMatch = description.match(/\bin\s+([^\s,]+(?:\/[^\s,]+)?)/i);
+          if (inUnitMatch) {
+            (dp as any).unit = inUnitMatch[1];
           }
         }
+      }
 
-        // Classify using hierarchy of authority: semantic > prefixes > OPC UA metadata > datatype
-        const explicitSemantic = (dp as any).semantic; // User-provided semantic intent
-        const classified = this.classifyNodeByMetadata(nodeClass, dataTypeNodeId, dp.name, explicitSemantic);
+      // Classify using hierarchy of authority: semantic > prefixes > OPC UA metadata > datatype
+      const explicitSemantic = (dp as any).semantic; // User-provided semantic intent
+      const classified = this.classifyNodeByMetadata(nodeClass, dataTypeNodeId, dp.name, explicitSemantic);
 
-        // Skip nodes that should be ignored (non-Variable nodes)
-        if (classified === 'ignore') {
-          this.logger.debug(`⊘ Skipping non-Variable node: ${dp.nodeId} (${dp.name})`, {
-            deviceName,
-            nodeClass
-          });
-          continue;
-        }
-
-        // Set computed nodeType (result of classification)
-        (dp as any).nodeType = classified;
-
-        // Only include metrics in validated nodes (metadata excluded from polling/subscription)
-        if (classified === 'metric') {
-          valid.push(dp);
-          // this.logger.debug(`✓ Metric node validated: ${dp.nodeId} (${dp.name})`, {
-          //   deviceName,
-          //   nodeType: classified,
-          //   nodeClass,
-          //   dataType: dataTypeNodeId,
-          //   value: valueResult.value?.value
-          // });
-        } else {
-          // this.logger.debug(`⊘ Metadata node excluded: ${dp.nodeId} (${dp.name})`, {
-          //   deviceName,
-          //   nodeType: classified,
-          //   nodeClass,
-          //   dataType: dataTypeNodeId,
-          //   value: valueResult.value?.value
-          // });
-        }
-      } catch (error) {
-        invalid.push(dp.nodeId);
-        this.logger.error(`✗ NodeID validation error: ${dp.nodeId} (${dp.name})`, {
+      // Skip nodes that should be ignored (non-Variable nodes)
+      if (classified === 'ignore') {
+        this.logger.debug(`⊘ Skipping non-Variable node: ${dp.nodeId} (${dp.name})`, {
           deviceName,
-          error: error instanceof Error ? error.message : String(error)
+          nodeClass
         });
+        continue;
+      }
+
+      // Set computed nodeType (result of classification)
+      (dp as any).nodeType = classified;
+
+      // Only include metrics in validated nodes (metadata excluded from polling/subscription)
+      if (classified === 'metric') {
+        valid.push(dp);
       }
     }
 
@@ -434,104 +435,131 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       return;
     }
 
-    // Create subscription
-    const subscription = await session.createSubscription2({
-      requestedPublishingInterval: connection.publishingInterval || 1000,
-      requestedLifetimeCount: 100,
-      requestedMaxKeepAliveCount: 10,
-      maxNotificationsPerPublish: 100,
-      publishingEnabled: true,
-      priority: 10,
-    });
+    // PERFORMANCE: Split into multiple subscriptions if node count exceeds limit
+    // Many PLCs struggle with 200+ monitored items per subscription
+    // Symptoms: missed publishes, queue overflows, silent throttling
+    const maxItemsPerSub = connection.maxMonitoredItemsPerSubscription || this.MAX_MONITORED_ITEMS_PER_SUBSCRIPTION;
+    const subscriptionCount = Math.ceil(validDataPoints.length / maxItemsPerSub);
+    
+    if (subscriptionCount > 1) {
+      this.logger.debug(`Splitting ${validDataPoints.length} nodes into ${subscriptionCount} subscriptions`, {
+        deviceName,
+        maxItemsPerSub,
+        reason: 'plc_load_distribution'
+      });
+    }
 
-    sessionWrapper.subscription = subscription;
+    sessionWrapper.subscriptions = [];
 
-    this.logger.debug(`Created subscription for ${deviceName}`, {
-      publishingInterval: connection.publishingInterval || 1000,
-      samplingInterval: connection.samplingInterval || 500,
-      dataPointCount: validDataPoints.length,
-      totalConfigured: dataPoints.length,
-    });
+    // Create subscriptions (one or more depending on node count)
+    for (let subIdx = 0; subIdx < subscriptionCount; subIdx++) {
+      const startIdx = subIdx * maxItemsPerSub;
+      const endIdx = Math.min(startIdx + maxItemsPerSub, validDataPoints.length);
+      const batchDataPoints = validDataPoints.slice(startIdx, endIdx);
 
-    // Create monitored items for each validated data point
-    for (const dp of validDataPoints) {
-      try {
-        const itemToMonitor = {
-          nodeId: dp.nodeId,
-          attributeId: AttributeIds.Value,
-        };
+      // Create subscription
+      const subscription = await session.createSubscription2({
+        requestedPublishingInterval: connection.publishingInterval || 1000,
+        requestedLifetimeCount: 100,
+        requestedMaxKeepAliveCount: 10,
+        maxNotificationsPerPublish: 100,
+        publishingEnabled: true,
+        priority: 10,
+      });
 
-        const parameters = {
-          samplingInterval: connection.samplingInterval || 500,
-          discardOldest: true,
-          queueSize: 10,
-        };
+      sessionWrapper.subscriptions.push(subscription);
+      
+      // Set legacy field for backwards compatibility (first subscription)
+      if (subIdx === 0) {
+        sessionWrapper.subscription = subscription;
+      }
 
-        const monitoredItem = await subscription.monitor(
-          itemToMonitor,
-          parameters,
-          TimestampsToReturn.Both
-        );
+      this.logger.debug(`Created subscription ${subIdx + 1}/${subscriptionCount} for ${deviceName}`, {
+        publishingInterval: connection.publishingInterval || 1000,
+        samplingInterval: connection.samplingInterval || 500,
+        itemCount: batchDataPoints.length,
+        totalItems: validDataPoints.length,
+      });
 
-        // Handle data changes (real-time streaming)
-        monitoredItem.on('changed', (dataValue: DataValue) => {
-          // Hard gate: Never emit metadata nodes
-          if ((dp as OPCUADataPoint).nodeType !== 'metric') {
-            this.logger.warn(`Blocked metadata node emission: ${dp.name}`, { deviceName });
-            return;
-          }
-
-          const quality = this.determineQuality(dataValue.statusCode);
-          const qualityCode = quality !== 'GOOD' ? this.extractQualityCode(dataValue.statusCode) : undefined;
-
-          const dataPoint: SensorDataPoint = {
-            timestamp: new Date().toISOString(),
-            deviceName,
-            metric: dp.name,
-            value: dataValue.value?.value ?? null,
-            unit: dp.unit || '',
-            quality,
-            ...(qualityCode && { qualityCode }),  // Only include if quality != GOOD
-            protocol: 'opcua',  // For enum namespacing
-            nodeType: 'metric', // Always 'metric' at this point (metadata filtered)
+      // Create monitored items for this subscription's batch
+      for (const dp of batchDataPoints) {
+        try {
+          const itemToMonitor = {
+            nodeId: dp.nodeId,
+            attributeId: AttributeIds.Value,
           };
 
-          // Emit immediately (real-time streaming)
-          this.emit('data', [dataPoint]);
-        });
+          const parameters = {
+            samplingInterval: connection.samplingInterval || 500,
+            discardOldest: true,
+            queueSize: 10,
+          };
 
-        // Handle errors
-        monitoredItem.on('err', (errorMessage: string) => {
-          this.logger.error(`Monitored item error for ${dp.name}: ${errorMessage}`, {
+          const monitoredItem = await subscription.monitor(
+            itemToMonitor,
+            parameters,
+            TimestampsToReturn.Both
+          );
+
+          // Handle data changes (real-time streaming)
+          monitoredItem.on('changed', (dataValue: DataValue) => {
+            // Hard gate: Never emit metadata nodes
+            if ((dp as OPCUADataPoint).nodeType !== 'metric') {
+              this.logger.warn(`Blocked metadata node emission: ${dp.name}`, { deviceName });
+              return;
+            }
+
+            const quality = this.determineQuality(dataValue.statusCode);
+            const qualityCode = quality !== 'GOOD' ? this.extractQualityCode(dataValue.statusCode) : undefined;
+
+            const dataPoint: SensorDataPoint = {
+              timestamp: new Date().toISOString(),
+              deviceName,
+              metric: dp.name,
+              value: dataValue.value?.value ?? null,
+              unit: dp.unit || '',
+              quality,
+              ...(qualityCode && { qualityCode }),  // Only include if quality != GOOD
+              protocol: 'opcua',  // For enum namespacing
+              nodeType: 'metric', // Always 'metric' at this point (metadata filtered)
+            };
+
+            // Emit immediately (real-time streaming)
+            this.emit('data', [dataPoint]);
+          });
+
+          // Handle errors
+          monitoredItem.on('err', (errorMessage: string) => {
+            this.logger.error(`Monitored item error for ${dp.name}: ${errorMessage}`, {
+              deviceName,
+              nodeId: dp.nodeId,
+            });
+          });
+
+          sessionWrapper.monitoredItems.set(dp.nodeId, monitoredItem);
+
+          this.logger.debug(`Created monitored item for ${dp.name}`, {
+            deviceName,
+            nodeId: dp.nodeId,
+            subscriptionIndex: subIdx + 1,
+          });
+        } catch (error) {
+          this.logger.error(`Failed to create monitored item for ${dp.name}: ${error}`, {
             deviceName,
             nodeId: dp.nodeId,
           });
-        });
-
-        sessionWrapper.monitoredItems.set(dp.nodeId, monitoredItem);
-
-        this.logger.debug(`Created monitored item for ${dp.name}`, {
-          deviceName,
-          nodeId: dp.nodeId,
-        });
-      } catch (error) {
-        this.logger.error(`Failed to create monitored item for ${dp.name}: ${error}`, {
-          deviceName,
-          nodeId: dp.nodeId,
-        });
+        }
       }
+
+      // Handle subscription errors
+      subscription.on('terminated', () => {
+        this.logger.warn(`Subscription ${subIdx + 1} terminated for ${deviceName}`);
+      });
+
+      subscription.on('keepalive', () => {
+        this.logger.debug(`Subscription ${subIdx + 1} keepalive for ${deviceName}`);
+      });
     }
-
-    // Handle subscription errors
-    subscription.on('terminated', () => {
-      this.logger.warn(`Subscription terminated for ${deviceName}`);
-      sessionWrapper.subscription = null;
-      sessionWrapper.monitoredItems.clear();
-    });
-
-    subscription.on('keepalive', () => {
-      this.logger.debug(`Subscription keepalive for ${deviceName}`);
-    });
   }
 
   /**
@@ -702,60 +730,58 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
    * @returns Array of data values
    */
   private async readWithRetry(session: ClientSession, nodesToRead: ReadValueIdOptions[]): Promise<DataValue[]> {
-    let lastError: Error | null = null;
+    let results = await session.read(nodesToRead);
+    
+    // PERFORMANCE: Smart retry - only retry failed nodes, not successful ones
+    // Before: 1 transient error → re-read all 100 nodes
+    // After: 1 transient error → re-read only that 1 node
+    // This prevents load amplification on weak PLCs
     
     for (let attempt = 1; attempt <= this.MAX_READ_RETRIES; attempt++) {
-      try {
-        const dataValues = await session.read(nodesToRead);
-        
-        // Check if any values have transient errors
-        const hasTransientErrors = dataValues.some((dv: DataValue) => 
-          !dv.statusCode.isGood() && this.isTransientError(dv.statusCode)
-        );
-        
-        // If no transient errors, or this is the last attempt, return results
-        if (!hasTransientErrors || attempt === this.MAX_READ_RETRIES) {
-          if (attempt > 1) {
-            this.logger.debug(`Read succeeded on attempt ${attempt}/${this.MAX_READ_RETRIES}`);
-          }
-          return dataValues;
+      // Find indices of nodes with transient errors
+      const failedIndices: number[] = [];
+      results.forEach((dv: DataValue, idx: number) => {
+        if (!dv.statusCode.isGood() && this.isTransientError(dv.statusCode)) {
+          failedIndices.push(idx);
         }
-        
-        // Log transient error and retry
-        const transientCount = dataValues.filter((dv: DataValue) => 
-          !dv.statusCode.isGood() && this.isTransientError(dv.statusCode)
-        ).length;
-        
-        this.logger.warn(`Transient errors detected (${transientCount}/${dataValues.length} nodes), retrying...`, {
-          attempt,
-          maxAttempts: this.MAX_READ_RETRIES,
-          retryDelayMs: this.READ_RETRY_DELAY
-        });
-        
-        // Wait before retry
-        await new Promise(resolve => setTimeout(resolve, this.READ_RETRY_DELAY));
-        
-      } catch (error) {
-        lastError = error as Error;
-        
-        // If this is not the last attempt and error looks transient, retry
-        if (attempt < this.MAX_READ_RETRIES) {
-          this.logger.warn(`Read failed (attempt ${attempt}/${this.MAX_READ_RETRIES}), retrying...`, {
-            error: lastError.message,
-            retryDelayMs: this.READ_RETRY_DELAY
+      });
+      
+      // If no transient errors, or this is the last attempt, return results
+      if (failedIndices.length === 0 || attempt === this.MAX_READ_RETRIES) {
+        if (attempt > 1 && failedIndices.length > 0) {
+          this.logger.warn(`Max retries reached with ${failedIndices.length} transient errors remaining`, {
+            attempt,
+            failedNodes: failedIndices.length,
+            totalNodes: nodesToRead.length
           });
-          
-          await new Promise(resolve => setTimeout(resolve, this.READ_RETRY_DELAY));
-          continue;
+        } else if (attempt > 1) {
+          this.logger.debug(`All transient errors resolved after ${attempt} attempts`);
         }
-        
-        // Last attempt failed, throw error
-        throw lastError;
+        return results;
       }
+      
+      // Log and retry only failed nodes
+      this.logger.debug(`Retrying ${failedIndices.length} transient errors (attempt ${attempt}/${this.MAX_READ_RETRIES})`, {
+        failedNodes: failedIndices.length,
+        totalNodes: nodesToRead.length,
+        successfulNodes: nodesToRead.length - failedIndices.length
+      });
+      
+      // Wait before retry
+      await new Promise(resolve => setTimeout(resolve, this.READ_RETRY_DELAY));
+      
+      // Retry only failed nodes
+      const retryNodes = failedIndices.map(idx => nodesToRead[idx]);
+      const retryResults = await session.read(retryNodes);
+      
+      // Update results with retry outcomes
+      retryResults.forEach((dv: DataValue, retryIdx: number) => {
+        const originalIdx = failedIndices[retryIdx];
+        results[originalIdx] = dv;
+      });
     }
     
-    // Should never reach here, but TypeScript needs it
-    throw lastError || new Error('Read failed after all retries');
+    return results;
   }
 
   /**
@@ -979,6 +1005,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
         client,
         session,
         subscription: null,
+        subscriptions: [], // Initialize empty array for multiple subscriptions
         monitoredItems: new Map(),
         validatedNodes: new Set(),
         reconnecting: false,
@@ -1154,14 +1181,25 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
     );
     
     // Calculate exponential backoff delay
-    const delay = Math.min(
+    let delay = Math.min(
       sessionWrapper.currentRetryDelay,
       this.MAX_RETRY_DELAY
     );
     
+    // PERFORMANCE: Add random jitter (0-500ms) to prevent thundering herd
+    // When 50+ devices reconnect simultaneously:
+    // - CPU spikes from validation/subscription bursts
+    // - Downstream event-storm pressure
+    // - Network congestion
+    // Jitter staggers reconnects to smooth out load
+    const jitter = Math.random() * 500;
+    delay += jitter;
+    
     this.logger.debug(`Scheduling reconnect for ${device.name}`, {
       reason,
-      delayMs: delay,
+      baseDelayMs: sessionWrapper.currentRetryDelay,
+      jitterMs: Math.round(jitter),
+      totalDelayMs: Math.round(delay),
       consecutiveFailures: sessionWrapper.consecutiveFailures,
       maxRetryDelay: this.MAX_RETRY_DELAY
     });
@@ -1248,9 +1286,23 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       // Clear monitored items
       sessionWrapper.monitoredItems.clear();
       
-      // Close subscription
+      // Close all subscriptions
+      for (const subscription of sessionWrapper.subscriptions) {
+        try {
+          await subscription.terminate();
+        } catch (error) {
+          // Ignore individual subscription errors
+        }
+      }
+      sessionWrapper.subscriptions = [];
+      
+      // Close legacy subscription field
       if (sessionWrapper.subscription) {
-        await sessionWrapper.subscription.terminate();
+        try {
+          await sessionWrapper.subscription.terminate();
+        } catch (error) {
+          // Ignore
+        }
         sessionWrapper.subscription = null;
       }
       

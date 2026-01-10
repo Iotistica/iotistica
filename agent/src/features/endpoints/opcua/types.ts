@@ -68,6 +68,10 @@ export const OPCUAConnectionSchema = z.object({
   
   /** Subscription sampling interval in milliseconds (only if useSubscription=true) */
   samplingInterval: z.number().int().positive().default(500),
+  
+  /** Maximum monitored items per subscription (default: 100) */
+  /** Many PLCs struggle with 200+ items - this auto-splits subscriptions for load distribution */
+  maxMonitoredItemsPerSubscription: z.number().int().positive().default(100),
 });
 export type OPCUAConnection = z.infer<typeof OPCUAConnectionSchema>;
 

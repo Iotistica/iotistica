@@ -236,7 +236,7 @@ export function generateDefaultTargetStateConfigV2(
             host: '10.0.0.60',
             port: 503,
             timeoutMs: 2000,
-            profile: 'COMAP',  
+            profile: 'Generic',  
             addressing: {
               slaveRange: {
                 start: 1,
