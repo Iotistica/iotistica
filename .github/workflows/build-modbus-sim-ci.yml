@@ -100,11 +100,32 @@ jobs:
           git add sensors/modbus-simulator/package.json
           git commit -m "chore: bump modbus-simulator version to ${{ steps.bump.outputs.package_version }} [skip ci]"
           
+          # Fetch latest from remote to avoid race conditions
+          git fetch origin master
+          
           # Pull with rebase strategy, auto-stashing if needed
           git pull --rebase --autostash origin master
           
-          # Push to master
-          git push origin HEAD:master
+          # Push to master with retry logic
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if git push origin HEAD:master; then
+              echo "Push successful"
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "Push failed, retrying ($RETRY_COUNT/$MAX_RETRIES)..."
+                git fetch origin master
+                git pull --rebase --autostash origin master
+                sleep 2
+              else
+                echo "Push failed after $MAX_RETRIES attempts"
+                exit 1
+              fi
+            fi
+          done
 
       - name: Display version info
         run: |
