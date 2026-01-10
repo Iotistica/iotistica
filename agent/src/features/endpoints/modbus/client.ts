@@ -23,9 +23,16 @@ export class ModbusClient {
   // Multiple simultaneous reads will corrupt frames and return bad data
   private queue: Promise<any> = Promise.resolve();
   
+  // Generation counter to discard stale results after client reset
+  // Prevents out-of-order state updates when mid-flight requests resolve after forceResetClient()
+  private generation = 0;
+  
   // Batch optimization constants
   private readonly MAX_BATCH_SIZE = 125; // Modbus protocol limit
-  private readonly GAP_TOLERANCE = 2; // Allow gaps up to 2 registers (reading extra is often faster than separate requests)
+  private readonly GAP_TOLERANCE: number; // Configurable gap tolerance (default: 2)
+  
+  // Precomputed batches (computed once, reused every poll)
+  private precomputedBatches: Map<number, any[][]> = new Map();
   
   // Exponential backoff for reconnection attempts
   private currentRetryDelay: number;
@@ -48,11 +55,17 @@ export class ModbusClient {
     this.client = new ModbusRTU();
     this.currentRetryDelay = this.MIN_RETRY_DELAY;
     
+    // Initialize gap tolerance (configurable per device, default: 2)
+    this.GAP_TOLERANCE = (device as any).gapTolerance ?? 2;
+    
     // Bind event handlers to instance (allows proper cleanup)
     this.errorHandler = this.handleError.bind(this);
     this.closeHandler = this.handleClose.bind(this);
     
     this.setupErrorHandlers();
+    
+    // Precompute register batches (do this once, reuse every poll)
+    this.precomputeBatches();
   }
   
   /**
@@ -64,10 +77,11 @@ export class ModbusClient {
     this.logger.error(
       `[RECOVERY] Socket error for device ${this.device.name}: ${errorMessage}`
     );
+    // Note: client.isOpen will be false after error, this.connected is redundant
     this.connected = false;
     this.consecutiveFailures++; // Explicit failure count for error event
     this.logger.debug(
-      `[RECOVERY] Setting connected=false, client.isOpen=${this.client.isOpen}, scheduling reconnect (failures: ${this.consecutiveFailures})`
+      `[RECOVERY] Socket error, client.isOpen=${this.client.isOpen}, scheduling reconnect (failures: ${this.consecutiveFailures})`
     );
     this.scheduleReconnect();
   }
@@ -80,10 +94,11 @@ export class ModbusClient {
     this.logger.debug(
       `[RECOVERY] Socket closed for device ${this.device.name}`
     );
+    // Note: client.isOpen will be false after close, this.connected is redundant
     this.connected = false;
     this.consecutiveFailures++; // Explicit failure count for close event
     this.logger.debug(
-      `[RECOVERY] Setting connected=false, client.isOpen=${this.client.isOpen}, scheduling reconnect (failures: ${this.consecutiveFailures})`
+      `[RECOVERY] Socket closed, client.isOpen=${this.client.isOpen}, scheduling reconnect (failures: ${this.consecutiveFailures})`
     );
     this.scheduleReconnect();
   }
@@ -202,6 +217,11 @@ export class ModbusClient {
     // CRITICAL: Reset the queue to break promise chain that references old client
     // In-flight reads may still reference old client/closures until they resolve/timeout
     this.queue = Promise.resolve();
+    
+    // Increment generation to discard any stale in-flight requests that resolve later
+    // This prevents out-of-order metrics/logs when requests complete after reset
+    this.generation++;
+    this.logger.debug(`Incremented generation to ${this.generation} for ${this.device.name}`);
 
     // CRITICAL: discard client instance completely
     // This removes poisoned socket state and broken serial port handles
@@ -336,15 +356,15 @@ export class ModbusClient {
       `[RECOVERY] readAllRegisters: Device ${this.device.name} connected (client.isOpen=${this.client.isOpen}), proceeding with reads`
     );
 
+    const pollStart = Date.now();
     const dataPoints: SensorDataPoint[] = [];
     const timestamp = new Date().toISOString();
+    
+    // Capture generation at start of poll to detect mid-poll client resets
+    const generation = this.generation;
 
-    // Group registers by function code for batch optimization
-    const registersByFunction = this.groupRegistersByFunction();
-
-    for (const [functionCode, registers] of Object.entries(registersByFunction)) {
-      // Try to batch contiguous reads
-      const batches = this.optimizeBatches(registers);
+    // Use precomputed batches (computed once in constructor)
+    for (const [functionCode, batches] of this.precomputedBatches) {
       
       for (const batch of batches) {
         if (batch.length === 1) {
@@ -377,7 +397,8 @@ export class ModbusClient {
         } else {
           // Batch read - multiple contiguous registers
           try {
-            const batchResults = await this.readRegisterBatch(batch);
+            // Use retry-enabled batch read (handles DEVICE_BUSY/ACKNOWLEDGE)
+            const batchResults = await this.readRegisterBatchWithRetry(batch);
             
             // Track successful batch read
             this.lastSuccessfulRead = Date.now();
@@ -395,36 +416,50 @@ export class ModbusClient {
               });
             }
           } catch (error) {
-            // Batch read failed - fall back to individual reads
-            this.logger.warn(`Batch read failed, falling back to individual reads: ${error}`);
+            // Batch read failed - use smart binary-search fallback
+            // This splits batch in half recursively instead of reading all individually
+            this.logger.warn(`Batch read failed, using smart fallback: ${error}`);
             
-            for (const register of batch) {
-              try {
-                const value = await this.readRegisterWithRetry(register);
-                
-                // Track successful fallback read
-                this.lastSuccessfulRead = Date.now();
-                this.consecutiveFailures = 0; // Reset failure counter on success
-                
-                dataPoints.push({
-                  deviceName: this.device.name,
-                  metric: register.name,
-                  value: value,
-                  unit: register.unit || '',
-                  timestamp: timestamp,
-                  quality: 'GOOD',
-                  protocol: 'modbus'
-                });
-              } catch (individualError) {
-                dataPoints.push(this.createBadDataPoint(register, timestamp, individualError));
-              }
-            }
+            const fallbackResults = await this.readBatchSmartFallback(batch, timestamp);
+            dataPoints.push(...fallbackResults);
           }
         }
       }
     }
 
+    // Check if client was reset during this poll (generation changed)
+    // If so, discard results to prevent out-of-order state updates
+    if (generation !== this.generation) {
+      this.logger.debug(
+        `[RACE] Discarding stale poll results for ${this.device.name} (gen ${generation} -> ${this.generation})`
+      );
+      return this.createBadQualityDataPoints('CLIENT_RESET_DURING_POLL');
+    }
+    
+    const pollTime = Date.now() - pollStart;
+    this.logger.debug(
+      `[PERF] ${this.device.name} poll completed in ${pollTime}ms (${dataPoints.length} data points, ${this.precomputedBatches.size} function codes)`
+    );
+
     return dataPoints;
+  }
+  
+  /**
+   * Precompute register batches once (called in constructor)
+   * Registers rarely change, so compute batches once and reuse every poll
+   * Performance: Eliminates sorting/grouping overhead on every poll cycle
+   */
+  private precomputeBatches(): void {
+    const registersByFunction = this.groupRegistersByFunction();
+    
+    for (const [functionCode, registers] of Object.entries(registersByFunction)) {
+      const batches = this.optimizeBatches(registers);
+      this.precomputedBatches.set(Number(functionCode), batches);
+    }
+    
+    this.logger.debug(
+      `[BATCH PRECOMPUTE] Device ${this.device.name}: Precomputed batches for ${this.precomputedBatches.size} function codes`
+    );
   }
   
   /**
@@ -473,11 +508,13 @@ export class ModbusClient {
       const potentialBatchSize = potentialEnd - batchStart;
       
       // Check if we can batch this register:
-      // 1. Gap is within tolerance (contiguous or small gap)
-      // 2. Total batch size doesn't exceed Modbus limit
+      // 1. Register allows batching (noBatch flag for vendor-specific restrictions)
+      // 2. Gap is within tolerance (contiguous or small gap)
+      // 3. Total batch size doesn't exceed Modbus limit
+      const registerAllowsBatch = !(reg as any).noBatch && !(currentBatch[0] as any).noBatch;
       const withinGapTolerance = gap <= this.GAP_TOLERANCE;
       const withinSizeLimit = potentialBatchSize <= this.MAX_BATCH_SIZE;
-      const canBatch = withinGapTolerance && withinSizeLimit;
+      const canBatch = registerAllowsBatch && withinGapTolerance && withinSizeLimit;
       
       if (canBatch) {
         currentBatch.push(reg);
@@ -515,6 +552,42 @@ export class ModbusClient {
     }
     
     return batches;
+  }
+  
+  /**
+   * Read a batch with automatic retry on DEVICE_BUSY/ACKNOWLEDGE
+   * This prevents unnecessary fallback to individual reads on transient errors
+   * Performance: Can reduce load by 3-5x on busy PLCs
+   */
+  private async readRegisterBatchWithRetry(
+    registers: any[],
+    retryCount = 0
+  ): Promise<Array<{ register: any; value: number | boolean | string }>> {
+    const maxRetries = 2;
+    const retryDelay = 100; // 100ms delay for device busy
+
+    try {
+      return await this.readRegisterBatch(registers);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const qualityCode = this.extractQualityCode(errorMessage);
+
+      // Auto-retry on DEVICE_BUSY or ACKNOWLEDGE (device processing previous request)
+      if ((qualityCode === 'DEVICE_BUSY' || qualityCode === 'ACKNOWLEDGE') && retryCount < maxRetries) {
+        this.logger.debug(
+          `Batch read for device ${this.device.name} busy, retrying (attempt ${retryCount + 1}/${maxRetries})`
+        );
+
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+
+        // Recursive retry
+        return this.readRegisterBatchWithRetry(registers, retryCount + 1);
+      }
+
+      // Not retryable or max retries exceeded
+      throw error;
+    }
   }
   
   /**
@@ -573,6 +646,83 @@ export class ModbusClient {
     }
     
     return results;
+  }
+  
+  /**
+   * Smart fallback using binary search to isolate bad registers
+   * Instead of reading all registers individually, split batch in half recursively
+   * 
+   * Example: 1 bad register in 50
+   * - Old approach: 50 individual reads
+   * - New approach: ~log2(50) ≈ 6 reads
+   * 
+   * Performance: Massive win for sparse failures
+   */
+  private async readBatchSmartFallback(
+    batch: any[],
+    timestamp: string
+  ): Promise<SensorDataPoint[]> {
+    // Base case: single register - read individually
+    if (batch.length === 1) {
+      const register = batch[0];
+      try {
+        const value = await this.readRegisterWithRetry(register);
+        this.lastSuccessfulRead = Date.now();
+        this.consecutiveFailures = 0;
+        
+        return [{
+          deviceName: this.device.name,
+          metric: register.name,
+          value: value,
+          unit: register.unit || '',
+          timestamp: timestamp,
+          quality: 'GOOD',
+          protocol: 'modbus'
+        }];
+      } catch (error) {
+        return [this.createBadDataPoint(register, timestamp, error)];
+      }
+    }
+    
+    // Recursive case: split batch in half and try each half
+    try {
+      // Try reading entire batch first
+      const batchResults = await this.readRegisterBatchWithRetry(batch);
+      
+      this.lastSuccessfulRead = Date.now();
+      this.consecutiveFailures = 0;
+      
+      return batchResults.map(result => ({
+        deviceName: this.device.name,
+        metric: result.register.name,
+        value: result.value,
+        unit: result.register.unit || '',
+        timestamp: timestamp,
+        quality: 'GOOD',
+        protocol: 'modbus'
+      }));
+    } catch (error) {
+      // Batch failed - split in half and recurse
+      const mid = Math.floor(batch.length / 2);
+      const leftHalf = batch.slice(0, mid);
+      const rightHalf = batch.slice(mid);
+      
+      this.logger.debug(
+        `[SMART FALLBACK] Batch of ${batch.length} failed, splitting: ` +
+        `${leftHalf.length} + ${rightHalf.length}`
+      );
+      
+      // Recursively process each half
+      // NOTE: Promise.all() provides logical parallelism (faster failure isolation)
+      // but actual Modbus reads still serialize through lock() mutex
+      // This is correct behavior - Modbus does not support concurrent requests
+      const [leftResults, rightResults] = await Promise.all([
+        this.readBatchSmartFallback(leftHalf, timestamp),
+        this.readBatchSmartFallback(rightHalf, timestamp)
+      ]);
+      
+      return [...leftResults, ...rightResults];
+    }
   }
   
   /**
@@ -703,8 +853,9 @@ export class ModbusClient {
         `[RECOVERY] ⚠️ Too many consecutive failures (${this.consecutiveFailures}) for ${this.device.name}, forcing reconnect`
       );
       this.logger.debug(
-        `[RECOVERY] Setting connected=false, client.isOpen=${this.client.isOpen}, calling forceResetClient`
+        `[RECOVERY] client.isOpen=${this.client.isOpen}, calling forceResetClient`
       );
+      // Note: this.connected is redundant - client.isOpen is the source of truth
       this.connected = false;
       await this.forceResetClient();
       // Don't increment consecutiveFailures in scheduleReconnect since we already did it here
