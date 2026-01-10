@@ -36,6 +36,8 @@ spec:
         {{- include "iotistic.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: housekeeper
     spec:
+      nodeSelector:
+        role: worker
       containers:
         - name: housekeeper
           image: "{{ .Values.housekeeper.image.repository }}:{{ .Values.housekeeper.image.tag }}"

@@ -5,29 +5,6 @@
 global:
   namespace: iotistic
 
-# PostgreSQL database
-postgres:
-  enabled: true
-  image:
-    repository: timescale/timescaledb
-    tag: "latest-pg16"  # TimescaleDB with PostgreSQL 16
-  database: iotistic
-  username: postgres
-  password: Z7c38x4iPeAcxrwhRzdrOAMUGhu54MpBu9Dpfe4npOZIM5iK3UaiaoETlzRLSFih
-  port: 5432
-  storage:
-    size: 10Gi
-    storageClass: ""
-  resources:
-    requests:
-      cpu: 250m
-      memory: 256Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
-  persistence:
-    enabled: true
-
 # Redis cache
 redis:
   enabled: true
@@ -71,9 +48,9 @@ mosquitto:
   # - If empty with NodePort: falls back to internal service name (devices won't connect)
   # TLS configuration
   tlsSecret: mosquitto-tls         # Secret created by cert-manager
-  tlsCertName: mosquitto-client1
+  tlsCertName: mosquitto-client3
   tlsIssuer: selfsigned-issuer
-  tlsCommonName: mqtt1.iotistica.com
+  tlsCommonName: mqtt3.iotistica.com
   externalHost: "10.27.27.160"  # Set to your K8s node IP
   resources:
     requests:
@@ -145,7 +122,7 @@ api:
   port: 3002
   serviceType: ClusterIP
   tlsSecret: api-tls         # Secret created by cert-manager
-  tlsCertName: api-client1
+  tlsCertName: api-client3
   tlsIssuer: selfsigned-issuer
   tlsCommonName: api3.iotistica.com
   # CORS configuration for cross-origin requests from dashboard

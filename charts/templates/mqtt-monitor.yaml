@@ -36,6 +36,8 @@ spec:
         {{- include "iotistic.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: mqtt-monitor
     spec:
+      nodeSelector:
+        role: worker
       containers:
         - name: mqtt-monitor
           image: "{{ .Values.mqttMonitor.image.repository }}:{{ .Values.mqttMonitor.image.tag }}"

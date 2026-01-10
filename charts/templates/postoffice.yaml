@@ -36,6 +36,8 @@ spec:
         {{- include "iotistic.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: postoffice
     spec:
+      nodeSelector:
+        role: worker
       containers:
         - name: postoffice
           image: "{{ .Values.postoffice.image.repository }}:{{ .Values.postoffice.image.tag }}"
