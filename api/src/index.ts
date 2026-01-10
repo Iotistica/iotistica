@@ -107,7 +107,15 @@ app.use(helmet({
 // ============================================================================
 const allowedOrigins = process.env.CORS_ORIGINS 
   ? process.env.CORS_ORIGINS.split(',').map(o => o.trim()) 
-  : ['http://localhost:5173', 'http://localhost:3001', 'http://localhost:3000', 'http://localhost:4002'];
+  : [
+      'http://localhost:5173', 
+      'http://localhost:3001', 
+      'http://localhost:3000', 
+      'http://localhost:4002',
+      // Allow K8s fleet cluster to call provisioning API
+      'https://api1.iotistica.com',
+      'http://api1.iotistica.com'
+    ];
 
 // SECURITY: Validate CORS configuration on startup
 if (allowedOrigins.includes('*')) {

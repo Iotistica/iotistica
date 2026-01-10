@@ -312,15 +312,30 @@ router.delete('/provisioning-keys/:keyId', async (req, res) => {
  * - fleetId: Fleet/application identifier (optional, defaults to 'default-fleet')
  * - newKey: If true, invalidates previous key for this device (optional, defaults to false)
  * - previousKeyId: ID of previous key to invalidate (optional, used when newKey=true)
+ * - deploymentType: Deployment type ('k8s-fleet' | 'edge-device' | 'standalone') (optional)
+ * - metadata: Additional metadata about the deployment (optional)
+ * - simulatorConfig: Simulator configuration for K8s fleet deployments (optional)
+ *   - modbus: { count: number, startPort: number, host: string, profile?: string }
+ *   - opcua: { count: number, startPort: number, host: string }
+ *   - snmp: { ipRanges: string[] }
  * 
  * Returns:
  * - id: Key ID
  * - key: Provisioning key (64-char hex, only shown once)
  * - expiresAt: Expiration timestamp
+ * - deploymentType: Echo back deployment type (if provided)
+ * - simulatorConfig: Echo back simulator config (if provided)
  */
 router.post('/provisioning-keys/generate', async (req, res) => {
   try {
-    const { fleetId = 'default-fleet', newKey = false, previousKeyId } = req.body;
+    const { 
+      fleetId = 'default-fleet', 
+      newKey = false, 
+      previousKeyId,
+      deploymentType,
+      metadata,
+      simulatorConfig
+    } = req.body;
 
     // If regenerating, invalidate the previous key first
     if (newKey && previousKeyId) {
@@ -364,17 +379,52 @@ router.post('/provisioning-keys/generate', async (req, res) => {
       'dashboard-user' // TODO: Replace with actual authenticated user
     );
 
+    // Store simulator config and deployment metadata if provided (optional - backward compatible)
+    if (deploymentType || simulatorConfig || metadata) {
+      try {
+        // Update the existing provisioning key with metadata (columns may not exist in older deployments)
+        await query(
+          `UPDATE provisioning_keys 
+           SET deployment_type = $1,
+               simulator_config = $2,
+               metadata = $3
+           WHERE id = $4`,
+          [
+            deploymentType || null,
+            simulatorConfig ? JSON.stringify(simulatorConfig) : null,
+            metadata ? JSON.stringify(metadata) : null,
+            id
+          ]
+        );
+        logger.info(`Stored simulator config for provisioning key ${id}`, { deploymentType, simulatorConfig });
+      } catch (metadataError: any) {
+        // Non-fatal error - columns may not exist yet or other DB issue
+        // Provisioning key generation still succeeds
+        logger.warn(`Failed to store provisioning metadata for key ${id} (columns may not exist):`, metadataError.message);
+      }
+    }
+
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 30);
 
-    logger.info(`Single-device provisioning key generated: ${id}`);
+    logger.info(`Single-device provisioning key generated: ${id}`, { deploymentType });
 
-    res.status(201).json({
+    const response: any = {
       id,
       key,
       expiresAt: expiresAt.toISOString(),
       warning: 'Store this key securely - it cannot be retrieved again!'
-    });
+    };
+
+    // Echo back deployment config for verification
+    if (deploymentType) {
+      response.deploymentType = deploymentType;
+    }
+    if (simulatorConfig) {
+      response.simulatorConfig = simulatorConfig;
+    }
+
+    res.status(201).json(response);
   } catch (error: any) {
     logger.error('Error generating provisioning key:', error);
     res.status(500).json({

@@ -43,10 +43,39 @@ spec:
               echo "Pod index: $INDEX"
               echo "Generating fresh provisioning key from API..."
               
+              # Build simulator config JSON based on environment variables
+              SIMULATOR_CONFIG=""
+              
+              {{- if or (gt (int .Values.simulator.modbusCount) 0) (gt (int .Values.opcuaSimulator.count) 0) }}
+              # Start building simulator config
+              SIMULATOR_CONFIG='"simulatorConfig":{'
+              
+              {{- if gt (int .Values.simulator.modbusCount) 0 }}
+              # Add Modbus config
+              SIMULATOR_CONFIG="${SIMULATOR_CONFIG}\"modbus\":{\"count\":{{ .Values.simulator.modbusCount }},\"startPort\":502,\"host\":\"localhost\",\"profile\":\"Generic\"}"
+              {{- end }}
+              
+              {{- if and (gt (int .Values.simulator.modbusCount) 0) (gt (int .Values.opcuaSimulator.count) 0) }}
+              SIMULATOR_CONFIG="${SIMULATOR_CONFIG},"
+              {{- end }}
+              
+              {{- if gt (int .Values.opcuaSimulator.count) 0 }}
+              # Add OPC-UA config
+              SIMULATOR_CONFIG="${SIMULATOR_CONFIG}\"opcua\":{\"count\":{{ .Values.opcuaSimulator.count }},\"startPort\":4840,\"host\":\"localhost\"}"
+              {{- end }}
+              
+              SIMULATOR_CONFIG="${SIMULATOR_CONFIG}},"
+              {{- end }}
+              
+              # Build complete JSON payload
+              PAYLOAD="{\"fleetId\":\"$FLEET_ID\",\"newKey\":false,\"deploymentType\":\"k8s-fleet\",${SIMULATOR_CONFIG}\"metadata\":{\"index\":$INDEX,\"podName\":\"$POD_NAME\"}}"
+              
+              echo "Request payload: $PAYLOAD"
+              
               # Generate new key via API
               RESPONSE=$(curl -s -w "\nHTTP_CODE:%{http_code}" -X POST "$CLOUD_API_ENDPOINT/api/v1/provisioning-keys/generate" \
                 -H "Content-Type: application/json" \
-                -d "{\"fleetId\":\"$FLEET_ID\",\"newKey\":false,\"metadata\":{\"index\":$INDEX,\"podName\":\"$POD_NAME\"}}")
+                -d "$PAYLOAD")
               
               HTTP_CODE=$(echo "$RESPONSE" | grep "HTTP_CODE:" | cut -d: -f2)
               BODY=$(echo "$RESPONSE" | sed '/HTTP_CODE:/d')

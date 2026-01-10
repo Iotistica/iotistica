@@ -93,16 +93,196 @@ interface LicenseData {
   };
 }
 
+interface SimulatorOptions {
+  deploymentType?: 'k8s-fleet' | 'edge-device' | 'standalone';
+  simulatorConfig?: {
+    modbus?: {
+      count: number;
+      startPort: number;
+      host: string;
+      profile?: string;
+    };
+    opcua?: {
+      count: number;
+      startPort: number;
+      host: string;
+    };
+    snmp?: {
+      ipRanges: string[];
+    };
+  };
+}
+
+/**
+ * Generate protocols configuration based on simulator options or defaults
+ */
+function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
+  // If no simulator options provided, return default configuration for dev/edge devices
+  if (!simulatorOptions || !simulatorOptions.simulatorConfig) {
+    return {
+      can: {
+        enabled: false,
+        bufferCapacity: 64 * 1024,
+      },
+      snmp: {
+        enabled: true,
+        port: 161,
+        ipRanges: ["10.0.0.60"],
+        bufferCapacity: 128 * 1024,
+      },
+      mqtt: {
+        enabled: false,
+        connection: {
+          brokerUrl: 'mqtt://10.0.0.60:1883',
+        },
+        discoveryRoots: [
+          'edge/+',
+          'sensor/+/data'
+        ],
+        monitorDurationMs: 30000,
+        qos: 0 as 0 | 1 | 2,
+        bufferCapacity: 512 * 1024,
+      },
+      opcua: {
+        enabled: true,
+        discoveryUrls: ["opc.tcp://10.0.0.60:4840"],
+        bufferCapacity: 1024 * 1024,
+      },
+      modbus: {
+        enabled: true,
+        bufferCapacity: 128 * 1024,
+        connections: [
+          {
+            name: 'modbus-sim-1',
+            host: '10.0.0.60',
+            port: 502,
+            timeoutMs: 2000,
+            profile: 'Generic',
+            addressing: {
+              slaveRange: {
+                start: 1,
+                end: 10,
+              },
+            },
+          },
+          {
+            name: 'modbus-sim-2',
+            host: '10.0.0.60',
+            port: 503,
+            timeoutMs: 2000,
+            profile: 'Generic',
+            addressing: {
+              slaveRange: {
+                start: 1,
+                end: 10,
+              },
+            },
+          },
+          {
+            name: 'modbus-sim-3',
+            host: '10.0.0.60',
+            port: 504,
+            timeoutMs: 2000,
+            profile: 'Generic',
+            addressing: {
+              slaveRange: {
+                start: 1,
+                end: 10,
+              },
+            },
+          }
+        ],
+      },
+    };
+  }
+  
+  // K8s fleet deployment with dynamic simulator config
+  const simConfig = simulatorOptions.simulatorConfig;
+  
+  // Generate Modbus connections
+  const modbusConnections = [];
+  if (simConfig.modbus && simConfig.modbus.count > 0) {
+    const { count, startPort, host, profile = 'Generic' } = simConfig.modbus;
+    
+    for (let i = 0; i < count; i++) {
+      modbusConnections.push({
+        name: `modbus-sim-${i + 1}`,
+        host: host,
+        port: startPort + i,
+        timeoutMs: 2000,
+        profile: profile,
+        addressing: {
+          slaveRange: {
+            start: 1,
+            end: 10,
+          },
+        },
+      });
+    }
+  }
+  
+  // Generate OPC-UA discovery URLs
+  const opcuaUrls = [];
+  if (simConfig.opcua && simConfig.opcua.count > 0) {
+    const { count, startPort, host } = simConfig.opcua;
+    
+    for (let i = 0; i < count; i++) {
+      opcuaUrls.push(`opc.tcp://${host}:${startPort + i}`);
+    }
+  }
+  
+  // Generate SNMP IP ranges
+  const snmpRanges = simConfig.snmp?.ipRanges || [];
+  
+  return {
+    can: {
+      enabled: false,
+      bufferCapacity: 64 * 1024,
+    },
+    snmp: {
+      enabled: snmpRanges.length > 0,
+      port: 161,
+      ipRanges: snmpRanges,
+      bufferCapacity: 128 * 1024,
+    },
+    mqtt: {
+      enabled: false,
+      connection: {
+        brokerUrl: '',
+      },
+      discoveryRoots: [
+        'edge/+',
+        'sensor/+/data'
+      ],
+      monitorDurationMs: 30000,
+      qos: 0 as 0 | 1 | 2,
+      bufferCapacity: 512 * 1024,
+    },
+    opcua: {
+      enabled: opcuaUrls.length > 0,
+      discoveryUrls: opcuaUrls,
+      bufferCapacity: 1024 * 1024,
+    },
+    modbus: {
+      enabled: modbusConnections.length > 0,
+      bufferCapacity: 128 * 1024,
+      connections: modbusConnections,
+    },
+  };
+}
+
 /**
  * Generate default target state config V2 (new structure)
  * 
  * @param licenseData - License data from system_config
  * @param profileDataPoints - Profile data points from database (array format)
+ * @param simulatorOptions - Simulator configuration from provisioning (optional)
  * @returns Target state V2 configuration object
  */
 export function generateDefaultTargetStateConfigV2(
   licenseData: LicenseData | null,
-  profileDataPoints: ModbusProfileDataPoint[] = []
+  profileDataPoints: ModbusProfileDataPoint[] = [],
+  simulatorOptions?: SimulatorOptions
 ): TargetStateV2 {
   // Transform profileDataPoints array → points object
   const modbusPoints = profileDataPointsToPointsObject(profileDataPoints);
@@ -185,81 +365,7 @@ export function generateDefaultTargetStateConfigV2(
         lightIntervalMs: 300000,  // 5 minutes
       },
     },
-    protocols: {
-      can: {
-        enabled: false,
-        bufferCapacity: 64 * 1024, // 64KB - CAN bus messages
-      },
-      snmp: {
-        enabled: true,
-        port: 161,
-        ipRanges: ["10.0.0.60"],
-        bufferCapacity: 128 * 1024, // 128KB - SNMP trap messages
-      },
-      mqtt: {
-        enabled: true,
-        connection: {
-          brokerUrl: 'mqtt://10.0.0.60:1883',
-        },
-        discoveryRoots: [
-          'edge/+',
-          'sensor/+/data'
-        ],
-        monitorDurationMs: 30000,  // 30 seconds
-        qos: 0,
-        bufferCapacity: 512 * 1024, // 512KB - MQTT discovery messages
-      },
-      opcua: {
-        enabled: true,
-        discoveryUrls: ["opc.tcp://10.0.0.60:4840"],
-        bufferCapacity: 1024 * 1024, // 1MB - Large OPC UA discovery messages
-      },
-      modbus: {
-        enabled: true,
-        bufferCapacity: 128 * 1024, // 128KB - Standard Modbus responses
-        connections: [
-          {
-            name: 'modbus-sim-1',
-            host: '10.0.0.60',
-            port: 502,
-            timeoutMs: 2000,
-            profile: 'Generic',  
-            addressing: {
-              slaveRange: {
-                start: 1,
-                end: 10,
-              },
-            },
-          },
-          {
-            name: 'modbus-sim-2',
-            host: '10.0.0.60',
-            port: 503,
-            timeoutMs: 2000,
-            profile: 'Generic',  
-            addressing: {
-              slaveRange: {
-                start: 1,
-                end: 10,
-              },
-            },
-          },
-          {
-            name: 'modbus-sim-3',
-            host: '10.0.0.60',
-            port: 504,
-            timeoutMs: 2000,
-            profile: 'Generic',  
-            addressing: {
-              slaveRange: {
-                start: 1,
-                end: 10,
-              },
-            },
-          }
-        ],
-      },
-    },
+    protocols: generateProtocolsConfig(simulatorOptions),
   };
 
   // If no license data, return default
@@ -303,11 +409,15 @@ export function generateDefaultTargetStateConfigV2(
  * Generate complete target state V2 (apps + config) for new device
  * 
  * @param licenseData - License data from system_config
+ * @param simulatorOptions - Simulator configuration from provisioning (optional)
  * @returns Complete target state V2 with preinstalled core services and generated config
  */
-export async function generateDefaultTargetStateV2(licenseData: LicenseData | null) {
+export async function generateDefaultTargetStateV2(
+  licenseData: LicenseData | null,
+  simulatorOptions?: SimulatorOptions
+) {
   // Generate V2 config with connection profiles defined
-  const config = generateDefaultTargetStateConfigV2(licenseData, []);
+  const config = generateDefaultTargetStateConfigV2(licenseData, [], simulatorOptions);
   
   // Load points for each connection based on its profile
   if (config.protocols.modbus.connections) {

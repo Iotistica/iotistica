@@ -207,7 +207,7 @@ export class ProvisioningService {
 
     // Create default target state with agent version (MUST happen before response)
     // This ensures first poll after provisioning gets the correct target state
-    await this.createDefaultTargetState(uuid, agentVersion);
+    await this.createDefaultTargetState(uuid, agentVersion, keyRecord.id);
 
     // Increment provisioning key usage, fire and forget
     incrementProvisioningKeyUsage(keyRecord.id).catch(err => console.error('Failed to increment provisioning key usage', err));
@@ -377,13 +377,43 @@ export class ProvisioningService {
   /**
    * Create default target state for device
    */
-  private async createDefaultTargetState(deviceUuid: string, agentVersion?: string): Promise<void> {
+  private async createDefaultTargetState(deviceUuid: string, agentVersion?: string, provisioningKeyId?: string): Promise<void> {
     const targetState = await DeviceTargetStateModel.get(deviceUuid);
     if (!targetState) {
       const licenseData = await configService.get('license_data');
       
+      // Fetch simulator config from provisioning key if available
+      let simulatorOptions = undefined;
+      if (provisioningKeyId) {
+        try {
+          const keyResult = await query(
+            'SELECT deployment_type, simulator_config, metadata FROM provisioning_keys WHERE id = $1',
+            [provisioningKeyId]
+          );
+          
+          if (keyResult.rows.length > 0 && keyResult.rows[0].simulator_config) {
+            const { deployment_type, simulator_config } = keyResult.rows[0];
+            simulatorOptions = {
+              deploymentType: deployment_type,
+              simulatorConfig: simulator_config
+            };
+            logger.info('Using simulator config from provisioning key for target state generation', {
+              deviceUuid,
+              deploymentType: deployment_type,
+              simulatorConfig: simulator_config
+            });
+          }
+        } catch (error: any) {
+          logger.warn('Failed to fetch simulator config from provisioning key', {
+            error: error.message,
+            provisioningKeyId
+          });
+          // Non-fatal - continue with default config
+        }
+      }
+      
       // Always use V2 format (single source of truth)
-      const { apps, config } = await generateDefaultTargetStateV2(licenseData);
+      const { apps, config } = await generateDefaultTargetStateV2(licenseData, simulatorOptions);
       
       // Get required agent version from cloud policy (system_config)
       const requiredAgentVersion = await configService.get('required_agent_version');
