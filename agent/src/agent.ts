@@ -882,16 +882,19 @@ export default class DeviceAgent {
       // Auto-discover endpoint metrics and merge with cloud config
       const { discoverEndpointMetrics, mergeMetricConfigs } = await import('./ai/anomaly/endpoint-sync.js');
       const discoveredMetrics = await discoverEndpointMetrics(dbInstance, this.agentLogger);
+      const cloudMetricsCount = config.metrics?.length || 0;
       const mergedMetrics = mergeMetricConfigs(config.metrics, discoveredMetrics);
       
       // Update config with merged metrics
       config.metrics = mergedMetrics;
       
-      this.agentLogger?.infoSync("Merged cloud and discovered endpoint metrics", {
+      const mode = cloudMetricsCount > 0 ? 'whitelist' : 'auto-discovery';
+      this.agentLogger?.infoSync(`Anomaly metrics configured (${mode} mode)`, {
         component: LogComponents.agent,
-        cloudMetrics: config.metrics.length - discoveredMetrics.length,
+        mode,
+        cloudMetrics: cloudMetricsCount,
         discoveredMetrics: discoveredMetrics.length,
-        totalMetrics: mergedMetrics.length,
+        activeMetrics: mergedMetrics.length,
       });
       
       // Save merged config back to target state (will be reported to cloud)

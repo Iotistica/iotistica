@@ -115,11 +115,20 @@ export async function jwtAuth(
   res: Response,
   next: NextFunction
 ): Promise<void> {
+  const startTime = Date.now();
+  console.log('[JWT-AUTH] *** MIDDLEWARE CALLED ***', {
+    method: req.method,
+    path: req.path,
+    fullUrl: req.originalUrl,
+    hasAuthHeader: !!req.headers.authorization
+  });
+  
   try {
     // Extract token from Authorization header
     const authHeader = req.headers.authorization;
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.log('[JWT-AUTH] No valid auth header, rejecting');
       res.status(401).json({
         error: 'Unauthorized',
         message: 'JWT token required. Send in Authorization: Bearer <token> header.'
@@ -129,11 +138,15 @@ export async function jwtAuth(
 
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
+    console.log('[JWT-AUTH] Token extracted, verifying...');
+    
     // Verify token
     let payload: JWTPayload;
     try {
       payload = verifyToken(token);
+      console.log('[JWT-AUTH] Token verified successfully for user:', payload.username);
     } catch (error: any) {
+      console.log('[JWT-AUTH] Token verification failed:', error.message);
       res.status(401).json({
         error: 'Unauthorized',
         message: 'Invalid or expired token',

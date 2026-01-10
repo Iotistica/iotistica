@@ -80,6 +80,12 @@ export default function App() {
 
   // Fetch devices from API
   useEffect(() => {
+    // Don't fetch devices if not authenticated
+    if (!isAuthenticated) {
+      setIsLoadingDevices(false);
+      return;
+    }
+
     let isFirstLoad = true;
     
     const fetchDevices = async () => {
@@ -90,9 +96,26 @@ export default function App() {
           isFirstLoad = false;
         }
         
-        const response = await fetch(buildApiUrl('/api/v1/devices'));
+        // Get auth token from localStorage
+        const accessToken = localStorage.getItem('accessToken');
+        const apiUrl = buildApiUrl('/api/v1/devices');
+        console.log('[DEBUG] API URL:', apiUrl);
+        console.log('[DEBUG] Fetching devices with token:', accessToken ? `${accessToken.substring(0, 20)}...` : 'NULL');
+        console.log('[DEBUG] Full auth header:', `Bearer ${accessToken}`);
         
+        const response = await fetch(apiUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+          },
+        });
+        
+        console.log('[DEBUG] Fetch response status:', response.status, response.statusText);
+        console.log('[DEBUG] Response headers:', Object.fromEntries(response.headers.entries()));
+        
+        // Try to get error details if not ok
         if (!response.ok) {
+          const errorText = await response.text();
+          console.log('[DEBUG] Error response body:', errorText);
           throw new Error(`Failed to fetch devices: ${response.statusText}`);
         }
 
@@ -152,10 +175,12 @@ export default function App() {
     // Refresh devices every 30 seconds
     const interval = setInterval(fetchDevices, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isAuthenticated]); // Only run when authentication status changes
 
   // Fetch device state from context when device changes
   useEffect(() => {
+    // Don't fetch device state if not authenticated
+    if (!isAuthenticated) return;
     if (!selectedDeviceId) return;
     
     const selectedDevice = devices.find((d) => d.id === selectedDeviceId);
@@ -170,7 +195,7 @@ export default function App() {
     }, 10000);
     
     return () => clearInterval(interval);
-  }, [selectedDeviceId, devices, fetchDeviceState]);
+  }, [selectedDeviceId, devices, isAuthenticated]); // fetchDeviceState is stable (useCallback with []), safe to omit
 
   // Get selected device UUID for WebSocket connection
   const currentDevice = useMemo(() => 
@@ -268,10 +293,12 @@ export default function App() {
         toast.loading('Updating device...', { id: 'update-device' });
         
         // Update device basic info
+        const accessToken = localStorage.getItem('accessToken');
         const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceData.id}`), {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
           },
           body: JSON.stringify({
             deviceName: deviceData.name,
@@ -300,6 +327,7 @@ export default function App() {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
+              'Authorization': `Bearer ${accessToken}`,
             },
             body: JSON.stringify({
               tags: deviceData.tags
@@ -336,10 +364,12 @@ export default function App() {
       try {
         toast.loading('Registering device...', { id: 'register-device' });
 
+        const accessToken = localStorage.getItem('accessToken');
         const response = await fetch(buildApiUrl('/api/v1/devices'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
           },
           body: JSON.stringify({
             deviceName: deviceData.name,
@@ -362,6 +392,7 @@ export default function App() {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
+              'Authorization': `Bearer ${accessToken}`,
             },
             body: JSON.stringify({
               tags: deviceData.tags

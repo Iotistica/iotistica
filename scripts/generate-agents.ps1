@@ -67,11 +67,11 @@ param(
     [int]$MaxLogFileSize = 52428800,
     [int]$MaxLogs = 10000,
     [string]$SimulateMemoryLeak = "false",
-    [string]$AnomalyDetectionEnabled = "false",
+    [string]$AnomalyDetectionEnabled = "true",
     [string]$FirewallEnabled = "false",
     [string]$UseMsgpackPoc = "true",
     [string]$UseKeyCompactionPoc = "false",
-    [string]$UseDeflateCompression = "false",
+    [string]$UseDeflateCompression = "true",
     [string]$EnableHeapProfiling = "true",
     
     # Protocol Adapter Configuration

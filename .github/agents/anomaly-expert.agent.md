@@ -72,6 +72,13 @@ Sensor/System Data → DataPoint → Buffer → Detector(s) → Fusion → Alert
   - Calculates expectedRange from base, noise_pct, and **scale** factor
   - Critical: Must apply scale factor to avoid unit mismatches
   - Discovery layer between protocols and anomaly detection
+  - **Whitelist mode**: If cloud config has metrics → use ONLY those (filter)
+  - **Fallback mode**: If cloud config empty → use all discovered metrics
+
+**Cloud Integration**:
+- `agent/src/device-manager/config.ts` lines 88-105 - Include dataPoints in endpoint reports
+- `api/src/services/device-endpoints.ts` line 347 - API extracts dataPoints for cloud dashboard
+- Production workflow: Agent discovers → reports to cloud → cloud whitelists → target state controls
 
 ## Statistical Detectors (Deep Dive)
 
@@ -436,6 +443,129 @@ if (baselines.length > 0 && baselines[0].sampleCount >= 100) {
 
 ## Configuration Patterns
 
+### Cloud Whitelisting Workflow
+
+**The "Why"**: In production, monitoring ALL discovered metrics (54+ Modbus points) causes alert fatigue and wastes edge resources.
+
+**Two Modes** ([endpoint-sync.ts](agent/src/ai/anomaly/endpoint-sync.ts#L157-L170)):
+```typescript
+// WHITELIST MODE: If cloud config has metrics, use ONLY those
+if (cloudMetrics && cloudMetrics.length > 0) {
+  return cloudMetrics;  // Ignore discovered metrics
+}
+
+// FALLBACK MODE: No cloud config, use auto-discovery
+return discoveredMetrics;  // Monitor everything during commissioning
+```
+
+**Commissioning Phase** (auto-discovery):
+```json
+{
+  "features": {
+    "enableAnomalyDetection": true
+  },
+  "anomalyDetection": {
+    "metrics": []  // Empty = monitor all 54 discovered metrics
+  }
+}
+```
+- Agent auto-discovers all numeric metrics from endpoints table
+- Explores baseline behavior across all data points
+- Identifies which metrics have meaningful anomalies
+- Reports discovered metrics to cloud (includes dataPoints metadata)
+
+**Production Phase** (whitelist):
+```json
+{
+  "features": {
+    "enableAnomalyDetection": true
+  },
+  "anomalyDetection": {
+    "metrics": [
+      {
+        "name": "engine_temp",
+        "enabled": true,
+        "methods": ["zscore", "mad"],
+        "threshold": 3.0,
+        "windowSize": 300,
+        "expectedRange": [30, 80]
+      },
+      {
+        "name": "frequency",
+        "enabled": true,
+        "methods": ["zscore"],
+        "threshold": 2.5,
+        "windowSize": 200,
+        "expectedRange": [59.5, 60.5]
+      },
+      {
+        "name": "power_kw",
+        "enabled": true,
+        "methods": ["zscore", "ewma"],
+        "threshold": 3.0,
+        "windowSize": 100
+      }
+    ]
+  }
+}
+```
+- Only 3-5 critical metrics monitored
+- Low false positive rate
+- Actionable alerts for operators
+- Reduced edge resource usage (CPU, RAM, storage)
+
+**Best Practices**:
+- **Critical Metrics** (5-15): Always monitored (safety, revenue, compliance)
+- **Diagnostic Metrics** (20-50): Monitored only during troubleshooting
+- **Context Metrics** (100+): Logged but not anomaly-checked
+
+### expectedRange Override Behavior
+
+**Critical**: `expectedRange` is a **hard bounds check** that OVERRIDES all statistical methods.
+
+**Detection Flow**:
+```typescript
+// 1. Check expectedRange FIRST (if defined)
+if (config.expectedRange) {
+  const [min, max] = config.expectedRange;
+  if (value >= min && value <= max) {
+    return { isAnomaly: false };  // ✅ Skip statistical checks
+  }
+}
+
+// 2. Only runs if expectedRange not defined OR value outside bounds
+runStatisticalMethods(value, buffer, config);
+```
+
+**Use Cases for expectedRange**:
+- **Physical limits**: CPU 0-100%, voltage 110-130V
+- **Regulatory bounds**: Grid frequency 59.5-60.5Hz (tight tolerance)
+- **Known operational ranges**: Engine temp 30-80°C
+
+**When NOT to use expectedRange**:
+- Metrics where you want to detect subtle drift (gradual memory leak)
+- Metrics with wide normal ranges (network latency 10-500ms)
+- Metrics where statistical anomalies matter more than hard limits
+
+**Auto-calculated expectedRange** ([endpoint-sync.ts](agent/src/ai/anomaly/endpoint-sync.ts#L85-L110)):
+```typescript
+// For auto-discovered Modbus metrics:
+const scale = dp.scale || 1;
+const scaledBase = dp.base * scale;  // CRITICAL: Apply scale first!
+
+// 4x noise margin (e.g., 5% noise → ±20% range)
+const lowerBound = Math.floor(scaledBase * (1 - dp.noise_pct * 4));
+const upperBound = Math.ceil(scaledBase * (1 + dp.noise_pct * 4));
+expectedRange = [lowerBound, upperBound];
+```
+
+**Example**:
+- Temperature: base=230, scale=0.1, noise=8%
+  - scaledBase = 23.0°C
+  - expectedRange = [15.36, 30.64]°C (±32% margin)
+  - Value 22.3°C → within range → skip statistical checks
+  - Value 35.0°C → outside range → run MAD detector
+
 ### Metric Configuration
 ```typescript
 interface MetricConfig {
@@ -554,6 +684,34 @@ if (!buffer) {
 - Alert queue: 1000 alerts × 1 KB = 1 MB max
 
 ## Production Best Practices
+
+### Industrial Monitoring Tiers
+
+**NOT typical to monitor everything in production**. Resource-constrained edge devices require prioritization:
+
+**Tier 1: Critical Metrics** (5-15 metrics)
+- Safety-related: Temperature limits, pressure thresholds
+- Revenue-impacting: Power output, production rate
+- Regulatory compliance: Emissions, grid frequency
+- Alert fatigue risk: **HIGH** if too many metrics
+- Edge resources: 15 metrics × 200 samples × 16 bytes = ~48 KB RAM
+
+**Tier 2: Diagnostic Metrics** (20-50 metrics)
+- Investigated during troubleshooting only
+- Individual phase currents (when investigating imbalance)
+- Bearing vibration (when maintenance scheduled)
+- Enable via target state when needed
+
+**Tier 3: Context Metrics** (100+ metrics)
+- Logged to time-series database but NOT anomaly-checked
+- Historical trends, commissioning data, reference baselines
+- Query on-demand from storage, don't monitor real-time
+
+**Alert Fatigue Example**:
+- 54 metrics × 5-second intervals = potential 10+ alerts/minute
+- Operators ignore alerts when overwhelmed
+- Critical alerts get missed in noise
+- **Solution**: Whitelist only critical metrics via cloud config
 
 ### Warm-up Period (Default: 15 minutes)
 ```typescript
@@ -708,10 +866,33 @@ expectedRange = [floor(23.0 × 0.68), ceil(23.0 × 1.32)]
 4. Review threshold: Is 3.0 too sensitive for this metric?
 5. Inspect expected range: Should hard bounds be used?
 6. **Check scale factor**: Does metric have `scale` field? Is it applied in expectedRange?
-7. Evaluate seasonality: Does metric have time-of-day patterns?
-8. Check detector choice: Z-Score vs MAD vs IQR?
-9. Review alert deduplication: Is cooldown period too long?
-10. Verify database baselines: Are historical baselines loaded?
-11. Monitor fusion consensus: Are multiple detectors agreeing?
+7. **Verify whitelist mode**: Is cloud config defining metrics or relying on auto-discovery?
+8. Evaluate seasonality: Does metric have time-of-day patterns?
+9. Check detector choice: Z-Score vs MAD vs IQR?
+10. Review alert deduplication: Is cooldown period too long?
+11. Verify database baselines: Are historical baselines loaded?
+12. Monitor fusion consensus: Are multiple detectors agreeing?
+13. **Production readiness**: Are too many metrics being monitored? (recommend 5-15 critical only)
 
-Your responses should prioritize edge device constraints, statistical rigor, false positive reduction, and production-proven patterns for detecting anomalies in noisy IoT sensor data and system metrics.
+## Key Takeaways
+
+**Cloud-Controlled Whitelisting**:
+- Agent auto-discovers ALL numeric metrics from endpoints
+- Reports discovered metrics to cloud (with dataPoints metadata)
+- Cloud dashboard shows available metrics for selection
+- User whitelists critical metrics via target state
+- Agent respects whitelist (ignores non-selected discovered metrics)
+
+**expectedRange as Safety Net**:
+- Hard bounds check that OVERRIDES statistical methods
+- Use for physical/regulatory limits only
+- Auto-calculated for discovered metrics (includes scale factor)
+- Don't use if you want to detect subtle drift/trends
+
+**Production Monitoring**:
+- Commissioning: Monitor all (auto-discovery mode)
+- Production: Monitor 5-15 critical metrics (whitelist mode)
+- Alert fatigue is real - prioritize actionable alerts
+- Edge resources are limited - don't monitor everything
+
+Your responses should prioritize edge device constraints, statistical rigor, false positive reduction, cloud-based whitelisting workflows, and production-proven patterns for detecting anomalies in noisy IoT sensor data and system metrics.

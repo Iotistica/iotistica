@@ -26,12 +26,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Initialize auth state from localStorage
   useEffect(() => {
+    let isMounted = true; // Prevent state updates if unmounted
+
     const initAuth = async () => {
       const accessToken = localStorage.getItem('accessToken');
       const refreshTokenValue = localStorage.getItem('refreshToken');
 
       if (!accessToken || !refreshTokenValue) {
-        setIsLoading(false);
+        if (isMounted) setIsLoading(false);
         return;
       }
 
@@ -43,29 +45,79 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           },
         });
 
+        if (!isMounted) return; // Component unmounted, skip state updates
+
         if (response.ok) {
           const data = await response.json();
           setUser(data.data.user);
         } else if (response.status === 401) {
-          // Try to refresh token
-          const refreshed = await refreshToken();
-          if (!refreshed) {
-            // Refresh failed, clear tokens
-            localStorage.removeItem('accessToken');
-            localStorage.removeItem('refreshToken');
+          // Try to refresh token inline (avoid circular dependency)
+          try {
+            const refreshResponse = await fetch(buildApiUrl('/api/v1/auth/refresh'), {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ refreshToken: refreshTokenValue }),
+            });
+
+            if (!isMounted) return;
+
+            if (refreshResponse.ok) {
+              const refreshData = await refreshResponse.json();
+              localStorage.setItem('accessToken', refreshData.data.accessToken);
+
+              // Fetch updated user info
+              const userResponse = await fetch(buildApiUrl('/api/v1/auth/me'), {
+                headers: {
+                  Authorization: `Bearer ${refreshData.data.accessToken}`,
+                },
+              });
+
+              if (!isMounted) return;
+
+              if (userResponse.ok) {
+                const userData = await userResponse.json();
+                setUser(userData.data.user);
+              } else {
+                // Failed to get user, clear tokens
+                localStorage.removeItem('accessToken');
+                localStorage.removeItem('refreshToken');
+              }
+            } else {
+              // Refresh failed, clear tokens
+              localStorage.removeItem('accessToken');
+              localStorage.removeItem('refreshToken');
+            }
+          } catch (refreshError) {
+            console.error('Token refresh error:', refreshError);
+            if (isMounted) {
+              localStorage.removeItem('accessToken');
+              localStorage.removeItem('refreshToken');
+            }
           }
+        } else {
+          // Other error status, clear tokens
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('refreshToken');
         }
       } catch (error) {
         console.error('Auth initialization error:', error);
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
+        if (isMounted) {
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('refreshToken');
+        }
       } finally {
-        setIsLoading(false);
+        if (isMounted) setIsLoading(false);
       }
     };
 
     initAuth();
-  }, []);
+
+    return () => {
+      isMounted = false; // Cleanup: prevent state updates after unmount
+    };
+  }, []); // Safe: no external dependencies
 
   const login = (accessToken: string, refreshTokenValue: string, userData: User) => {
     localStorage.setItem('accessToken', accessToken);

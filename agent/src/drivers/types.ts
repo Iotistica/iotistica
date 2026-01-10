@@ -362,6 +362,7 @@ export interface ProtocolAdapterDevice {
 	pollInterval: number;
 	enabled: boolean;
 	metadata?: Record<string, any>;
+	dataPoints?: any[]; // Data point definitions from endpoint discovery
 }
 
 /**

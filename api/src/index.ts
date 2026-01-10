@@ -287,6 +287,21 @@ app.use(express.urlencoded({
 
 app.use(trafficLogger);
 
+// Debug: Log ALL requests
+app.use((req, res, next) => {
+  if (req.path.includes('devices') || req.path.includes('device')) {
+    console.log('[DEBUG] Request received:', {
+      method: req.method,
+      path: req.path,
+      url: req.url,
+      originalUrl: req.originalUrl,
+      baseUrl: req.baseUrl,
+      headers: { authorization: req.headers.authorization?.substring(0, 30) }
+    });
+  }
+  next();
+});
+
 // Request logging with Winston
 app.use((req, res, next) => {
   const startTime = Date.now();
@@ -385,9 +400,11 @@ app.use(API_BASE, deviceDataRateLimit, deviceSensorsRoutes);
 app.use(API_BASE, deviceDataRateLimit, endpointsDataRoutes);
 
 // Standard API routes - global rate limit applied above
+console.log('[INDEX] Mounting routes...');
 app.use(API_BASE, licenseRoutes);
 app.use(API_BASE, billingRoutes);
 app.use(API_BASE, provisioningRoutes);
+console.log('[INDEX] Mounting devicesRoutes at', API_BASE);
 app.use(API_BASE, devicesRoutes);
 app.use(API_BASE, appsRoutes);
 app.use(API_BASE, deviceStateRoutes);

@@ -27,9 +27,25 @@ import { EventPublisher } from '../services/event-sourcing';
 import logger from '../utils/logger';
 import { SystemConfig } from '../config/system-config';
 import deviceAuth from '../middleware/device-auth';
+import { jwtAuth } from '../middleware/jwt-auth';
+
+console.log('[DEVICES-ROUTES] jwtAuth imported:', typeof jwtAuth, jwtAuth.name);
 
 export const router = express.Router();
 
+console.log('[DEVICES.TS] Router created, stack:', router.stack?.length || 0);
+
+// DEBUGGING: Catch-all middleware to verify router is being reached
+router.use((req, res, next) => {
+  console.log('[DEVICES-ROUTER] Middleware hit:', {
+    method: req.method,
+    path: req.path,
+    url: req.url,
+    hasUser: !!req.user,
+    hasAuthHeader: !!req.headers.authorization
+  });
+  next();
+});
 
 router.patch('/devices/:uuid', async (req, res) => {
   try {
@@ -184,6 +200,47 @@ const eventPublisher = new EventPublisher();
  * GET /api/v1/devices
  */
 router.get('/devices', async (req, res) => {
+  console.log('[DEVICES-ROUTE] GET /devices called', {
+    hasUser: !!req.user,
+    user: req.user ? { id: req.user.id, username: req.user.username } : null,
+    hasAuthHeader: !!req.headers.authorization
+  });
+  
+  // Explicit authentication check
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    console.log('[DEVICES-ROUTE] No auth header, rejecting');
+    return res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Authentication required'
+    });
+  }
+
+  const token = authHeader.substring(7);
+  
+  try {
+    // Import verifyToken dynamically to avoid circular deps
+    const { verifyToken } = await import('../middleware/jwt-auth');
+    const payload = verifyToken(token);
+    
+    // Verify it's an access token
+    if (payload.type !== 'access') {
+      console.log('[DEVICES-ROUTE] Invalid token type:', payload.type);
+      return res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Invalid token type'
+      });
+    }
+    
+    console.log('[DEVICES-ROUTE] User authenticated:', payload.username);
+  } catch (error: any) {
+    console.log('[DEVICES-ROUTE] Token verification failed:', error.message);
+    return res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Invalid or expired token'
+    });
+  }
+  
   try {
     const isOnline = req.query.online === 'true' ? true : 
                      req.query.online === 'false' ? false : 

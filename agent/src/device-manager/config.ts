@@ -97,7 +97,8 @@ export class ConfigManager extends EventEmitter {
 			connectionString: JSON.stringify(sensor.connection), // Serialize connection object
 			pollInterval: sensor.poll_interval,
 			enabled: sensor.enabled,
-			metadata: sensor.metadata
+			metadata: sensor.metadata,
+			dataPoints: sensor.data_points // Include data point definitions for cloud reporting
 		}));
 		
 		const result: DeviceConfig = {

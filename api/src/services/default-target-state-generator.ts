@@ -158,7 +158,7 @@ export function generateDefaultTargetStateConfigV2(
     },
     features: {
       enableDeviceJobs: false,
-      enableAnomalyDetection: false,
+      enableAnomalyDetection: true,
       enableDeviceRemoteAccess: true,
       enableDeviceSensorPublish: true,
     },

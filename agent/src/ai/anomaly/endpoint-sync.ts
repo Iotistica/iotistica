@@ -150,32 +150,22 @@ export async function discoverEndpointMetrics(
 /**
  * Merge cloud config with discovered endpoint metrics
  * 
- * Strategy:
- * - Cloud config takes priority (overrides discovered)
- * - If metric exists in cloud config, use cloud config
- * - Add discovered metrics not in cloud config
+ * WHITELIST MODE: If cloud has metrics defined, use ONLY cloud config (filter)
+ * FALLBACK MODE: If cloud config empty, use auto-discovered metrics
  * 
- * @param cloudMetrics - Metrics from cloud target state (priority)
- * @param discoveredMetrics - Auto-discovered from endpoints table
- * @returns Merged metric configuration
+ * @param cloudMetrics - Metrics from cloud target state (whitelist)
+ * @param discoveredMetrics - Auto-discovered from endpoints table (fallback)
+ * @returns Final metric configuration
  */
 export function mergeMetricConfigs(
 	cloudMetrics: MetricConfig[],
 	discoveredMetrics: MetricConfig[]
 ): MetricConfig[] {
-	const merged = new Map<string, MetricConfig>();
-	
-	// First, add all cloud metrics (priority)
-	for (const metric of cloudMetrics) {
-		merged.set(metric.name, metric);
+	// WHITELIST MODE: If cloud config has metrics, use ONLY those (ignore discovered)
+	if (cloudMetrics && cloudMetrics.length > 0) {
+		return cloudMetrics;
 	}
 	
-	// Add discovered metrics if not already in cloud config
-	for (const metric of discoveredMetrics) {
-		if (!merged.has(metric.name)) {
-			merged.set(metric.name, metric);
-		}
-	}
-	
-	return Array.from(merged.values());
+	// FALLBACK MODE: No cloud config, use all discovered metrics
+	return discoveredMetrics;
 }
