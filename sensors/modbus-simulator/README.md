@@ -1,9 +1,10 @@
 # Modbus Simulator with Web GUI
 
-Profile-aware Modbus TCP simulator with real-time control interface and slave failure simulation.
+Profile-aware Modbus TCP/RTU simulator with real-time control interface and slave failure simulation.
 
 ## Features
 
+- **Dual Transport**: Supports both Modbus TCP and RTU (serial) via TRANSPORT environment variable
 - **Profile-Agnostic**: Automatically adapts to any profile in `dataPoints.json`
 - **Real-time Control**: Adjust register values via web interface
 - **Slave Failure Simulation**: Enable/disable individual slaves to test fault tolerance
@@ -340,13 +341,42 @@ This feature is comparable to:
 
 ## Environment Variables
 
+**Transport Configuration**:
+- `TRANSPORT`: Transport type - `tcp` or `rtu` (default: `tcp`)
+
+**TCP Mode**:
+- `MODBUS_PORT`: TCP port number (default: `502`)
+- `MODBUS_HOST`: TCP bind address (default: `0.0.0.0`)
+
+**RTU Mode**:
+- `MODBUS_PORT`: Serial port device (default: `/dev/ttyUSB0`)
+- `MODBUS_BAUDRATE`: Baudrate (default: `19200`)
+- `MODBUS_BYTESIZE`: Data bits (default: `8`)
+- `MODBUS_PARITY`: Parity - `N` (none), `E` (even), `O` (odd) (default: `N`)
+- `MODBUS_STOPBITS`: Stop bits (default: `1`)
+
+**General**:
 - `MODBUS_PROFILE`: Profile to simulate (default: `Generic`)
 - `MODBUS_SLAVES`: Number of slave IDs (default: `3`)
-- `MODBUS_PORT`: Modbus TCP port (default: `502`)
 - `MODBUS_API_URL`: API URL to fetch profile data (default: `http://api:3002`)
 - `MODBUS_PROFILE_JSON`: Fallback JSON file path (default: `./profiles/dataPoints.json`)
 - `GUI_PORT`: Web GUI port (default: `5000`)
 - `GUI_HOST`: Web GUI host (default: `0.0.0.0`)
+
+**Examples**:
+
+```bash
+# Modbus TCP (default)
+docker run -e TRANSPORT=tcp -e MODBUS_PORT=502 iotistic/modbus-simulator
+
+# Modbus RTU over serial
+docker run --device=/dev/ttyUSB0 \
+  -e TRANSPORT=rtu \
+  -e MODBUS_PORT=/dev/ttyUSB0 \
+  -e MODBUS_BAUDRATE=9600 \
+  -e MODBUS_PARITY=E \
+  iotistic/modbus-simulator
+```
 
 ## Adding New Profiles
 

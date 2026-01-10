@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 """
-Unified Modbus TCP Simulator with Web GUI
+Unified Modbus TCP/RTU Simulator with Web GUI
 Combines Modbus server and Flask GUI in a single process with shared state.
 
 Architecture:
-- Modbus TCP server runs in background thread
+- Modbus TCP or RTU server runs in background thread
 - Flask GUI runs in main thread
 - Shared in-memory state (no file IPC)
 - Profile hot-swapping via GUI
 - Real-time register overrides
 
 Environment Variables:
+- TRANSPORT: transport type ('tcp' or 'rtu', default: 'tcp')
 - MODBUS_PROFILE: initial profile (default: 'Generic')
 - MODBUS_SLAVES: number of slave IDs (default: 3)
-- MODBUS_PORT: Modbus TCP port (default: 502)
+- MODBUS_PORT: Modbus TCP port (default: 502) or RTU serial port (e.g., '/dev/ttyUSB0')
+- MODBUS_BAUDRATE: RTU baudrate (default: 19200)
+- MODBUS_BYTESIZE: RTU bytesize (default: 8)
+- MODBUS_PARITY: RTU parity ('N', 'E', 'O', default: 'N')
+- MODBUS_STOPBITS: RTU stopbits (default: 1)
 - GUI_PORT: Flask web GUI port (default: 5000)
 - LOG_LEVEL: logging level (default: INFO)
 """
@@ -28,7 +33,7 @@ import urllib.request
 import urllib.error
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
-from pymodbus.server import StartTcpServer
+from pymodbus.server import StartTcpServer, StartSerialServer
 from pymodbus.device import ModbusDeviceIdentification
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusSlaveContext, ModbusServerContext
 from pymodbus.exceptions import ModbusException
@@ -355,16 +360,40 @@ def setup_modbus_server(slaves=3):
     return context
 
 def run_modbus_server():
-    """Run Modbus TCP server (blocking call)"""
+    """Run Modbus TCP or RTU server (blocking call)"""
+    transport = os.environ.get("TRANSPORT", "tcp").lower()
     slaves = int(os.environ.get("MODBUS_SLAVES", 3))
-    port = int(os.environ.get("MODBUS_PORT", 502))
-    host = os.environ.get("MODBUS_HOST", "0.0.0.0")
     
-    logger.info(f"Starting Modbus TCP server: {host}:{port} ({slaves} slaves)")
+    logger.info(f"Starting Modbus {transport.upper()} server ({slaves} slaves)")
     context = setup_modbus_server(slaves=slaves)
     
     try:
-        StartTcpServer(context=context, address=(host, port))
+        if transport == "rtu":
+            # Modbus RTU over serial
+            port = os.environ.get("MODBUS_PORT", "/dev/ttyUSB0")
+            baudrate = int(os.environ.get("MODBUS_BAUDRATE", 19200))
+            bytesize = int(os.environ.get("MODBUS_BYTESIZE", 8))
+            parity = os.environ.get("MODBUS_PARITY", "N")
+            stopbits = int(os.environ.get("MODBUS_STOPBITS", 1))
+            
+            logger.info(f"RTU config: port={port}, baudrate={baudrate}, bytesize={bytesize}, parity={parity}, stopbits={stopbits}")
+            
+            StartSerialServer(
+                context=context,
+                port=port,
+                baudrate=baudrate,
+                bytesize=bytesize,
+                parity=parity,
+                stopbits=stopbits,
+                timeout=1
+            )
+        else:
+            # Modbus TCP (default)
+            port = int(os.environ.get("MODBUS_PORT", 502))
+            host = os.environ.get("MODBUS_HOST", "0.0.0.0")
+            
+            logger.info(f"TCP config: {host}:{port}")
+            StartTcpServer(context=context, address=(host, port))
     except Exception as e:
         logger.error(f"Modbus server error: {e}", exc_info=True)
 
@@ -1070,10 +1099,12 @@ def get_status():
 # =============================================================================
 def main():
     """Start unified simulator"""
+    transport = os.environ.get("TRANSPORT", "tcp").lower()
+    
     # Start Modbus server in background thread
     modbus_thread = threading.Thread(target=run_modbus_server, daemon=True)
     modbus_thread.start()
-    logger.info("✓ Modbus TCP server thread started")
+    logger.info(f"✓ Modbus {transport.upper()} server thread started")
     
     # Start Flask GUI in main thread
     gui_port = int(os.environ.get("GUI_PORT", 5000))
