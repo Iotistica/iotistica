@@ -5,29 +5,6 @@
 global:
   namespace: iotistic
 
-# PostgreSQL database
-postgres:
-  enabled: true
-  image:
-    repository: timescale/timescaledb
-    tag: "latest-pg16"  # TimescaleDB with PostgreSQL 16
-  database: iotistic
-  username: postgres
-  password: postgres
-  port: 5432
-  storage:
-    size: 10Gi
-    storageClass: ""
-  resources:
-    requests:
-      cpu: 250m
-      memory: 256Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
-  persistence:
-    enabled: true
-
 # Redis cache
 redis:
   enabled: true
@@ -106,9 +83,9 @@ mqttBroker:
     username: admin
     password: iotistic42!  # Change in production
     # Internal service connection
+    protocol: mqtts
     host: "{{ include \"iotistic.fullname\" . }}-mosquitto"
-    port: 1883
-    protocol: mqtt
+    port: 8883
     useTls: false
     
   # Cloud broker configuration (HiveMQ Cloud, AWS IoT Core, etc.)
@@ -118,7 +95,7 @@ mqttBroker:
     # Provider: 'hivemq', 'aws-iot', 'azure-iot', 'custom'
     provider: hivemq
     # Connection details (must be configured if enabled)
-    host: ""  # e.g., abc123.s1.eu.hivemq.cloud
+    host: "{{ include \"iotistic.fullname\" . }}-mosquitto"
     port: 8883
     protocol: mqtts
     username: ""
@@ -143,8 +120,11 @@ api:
     pullPolicy: IfNotPresent  # Use local images only (prevents pulling from registry)
   replicas: 1  # Single replica for now
   port: 3002
-  serviceType: NodePort
-  nodePort: 30002
+  serviceType: ClusterIP
+  tlsSecret: api-tls         # Secret created by cert-manager
+  tlsCertName: api-client2
+  tlsIssuer: selfsigned-issuer
+  tlsCommonName: api2.iotistica.com
   # CORS configuration for cross-origin requests from dashboard
   # Use wildcard pattern like "http://*:30000" to allow any IP on NodePort 30000
   corsOrigins: "http://localhost:5173,http://localhost:3001,http://localhost:3000,http://*:30000"
@@ -190,12 +170,22 @@ api:
   #   helm install --set mqtt.username=admin --set mqtt.password=secret
   mqtt:
     # Reference existing Kubernetes secret (recommended for production)
-    existingSecret: "iotistic-mqtt-credentials"
+    SecretName: "mqtt-credentials-client2"
+  sql:
+    # Reference existing Kubernetes secret (recommended for production)
+    SecretName: "sql-credentials-client2"
   # License configuration (optional)
   license:
     publicKey: ""
     key: ""
-
+  # Prometheus metrics monitoring
+  monitoring:
+    enabled: true  # Enable ServiceMonitor for Prometheus scraping
+    interval: 30s  # How often Prometheus scrapes metrics
+    scrapeTimeout: 10s
+    labels: {}  # Additional labels for ServiceMonitor (match your Prometheus selector)
+    relabelings: []  # Optional metric relabeling
+  
 # Dashboard UI
 dashboard:
   enabled: true
@@ -205,8 +195,9 @@ dashboard:
     pullPolicy: IfNotPresent  # Use local images only (prevents pulling from registry)
   replicas: 1
   port: 80
-  serviceType: NodePort
-  nodePort: 30000
+  serviceType: ClusterIP
+#  nodePort: 30000
+  tlsCommonName: dash2.iotistica.com
   # API URL for browser access
   # Options:
   # 1. Use node IP with NodePort: "http://<NODE_IP>:30002" (replace <NODE_IP> with your K8s node IP)
@@ -259,7 +250,7 @@ mqttMonitor:
   # See api.mqtt configuration above for security options
   mqtt:
     # Reference existing Kubernetes secret (recommended for production)
-    existingSecret: "iotistic-mqtt-credentials"
+    existingSecret: "mqtt-credentials-client2"
 
 # Housekeeper service - Database maintenance and cleanup
 housekeeper:

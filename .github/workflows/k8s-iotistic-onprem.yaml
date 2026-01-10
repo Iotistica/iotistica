@@ -64,7 +64,7 @@ jobs:
           CLIENT_NAME="${{ inputs.client_name || '' }}"
 
           echo "Deleting previous Helm release (if exists)..."
-          helm uninstall "${CLIENT_NAME}"-release -n "${CLIENT_NAME}" || true
+          helm uninstall "${CLIENT_NAME}"-release -n "${CLIENT_NAME}" --wait|| true
 
       # ------------------------------------
       # DEPLOY
