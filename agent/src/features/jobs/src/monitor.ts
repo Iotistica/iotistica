@@ -115,13 +115,16 @@ export class JobsFeature extends BaseFeature {
       // For localhost/development, disable TLS verification
       const isLocalhost = normalizedBaseUrl.includes('localhost') || normalizedBaseUrl.includes('127.0.0.1');
       
+      // Also disable for any HTTPS endpoint (handle self-signed certs in production)
+      const isHttps = normalizedBaseUrl.startsWith('https://');
+      
       this.httpClient = new FetchHttpClient({
         defaultHeaders: {
           'Content-Type': 'application/json',
           'User-Agent': `Iotistic-agent/${deviceUuid}`,
         },
         defaultTimeout: 30000,
-        rejectUnauthorized: !isLocalhost, // Allow self-signed certs for localhost
+        rejectUnauthorized: !isLocalhost && !isHttps, // Accept self-signed certs for localhost and HTTPS
       });
     }
   }
