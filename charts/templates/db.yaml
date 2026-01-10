@@ -2,10 +2,10 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Database
 metadata:
   name: {{ .Values.client.name }}
-  namespace: io-cluster-tsdb
+  namespace: io-cluster-tsdb01
 spec:
   cluster:
-    name: timescaledb-cluster
+    name: io-cluster-tsdb01
 
   name: {{ .Values.client.name }}
   owner: {{ .Values.client.name }}

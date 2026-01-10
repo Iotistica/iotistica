@@ -77,7 +77,10 @@ spec:
             - name: NODE_ENV
               value: {{ .Values.api.env.NODE_ENV | quote }}
             - name: DB_HOST
-              value: timescaledb-cluster-rw.io-cluster-tsdb.svc
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.sql.SecretName }}
+                  key: server
             - name: DB_PORT
               valueFrom:
                 secretKeyRef:

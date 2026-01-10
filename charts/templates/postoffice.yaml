@@ -62,7 +62,10 @@ spec:
               value: {{ .Values.postoffice.env.REDIS_DB | quote }}
             # Database connection for audit logging
             - name: DB_HOST
-              value: timescaledb-cluster-rw.io-cluster-tsdb.svc
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.sql.SecretName }}
+                  key: server
             - name: DB_PORT
               valueFrom:
                 secretKeyRef:

@@ -56,7 +56,10 @@ spec:
             - name: LOG_LEVEL
               value: {{ .Values.mqttMonitor.env.LOG_LEVEL | quote }}
             - name: DB_HOST
-              value: timescaledb-cluster-rw.io-cluster-tsdb.svc
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.sql.SecretName }}
+                  key: server
             - name: DB_PORT
               valueFrom:
                 secretKeyRef:
