@@ -495,6 +495,10 @@ export class FeatureInitializer {
       );
 
       await this.features.sensors.start();
+      
+      // Make sensors feature available to device API
+      const { setSensorsFeature } = await import('../api/actions.js');
+      setSensorsFeature(this.features.sensors);
 
       logger.debugSync('Protocol Adapters initialized', {
         component: LogComponents.agent,

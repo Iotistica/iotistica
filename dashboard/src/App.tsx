@@ -595,13 +595,13 @@ export default function App() {
               <Activity className="w-4 h-4 mr-2" />
               Endpoints
             </Button>
-            <Button              variant={currentView === 'endpoints' ? 'default' : 'outline'}
+            {/* <Button              variant={currentView === 'endpoints' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCurrentView('endpoints')}
             >
               <BarChart3 className="w-4 h-4 mr-2" />
               Endpoints Viz
-            </Button>
+            </Button> */}
             <Button              variant={currentView === 'mqtt' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCurrentView('mqtt')}
@@ -633,14 +633,14 @@ export default function App() {
               <Clock className="w-4 h-4 mr-2" />
               Timeline
             </Button>
-            <Button
+            {/* <Button
               variant={currentView === 'event-debugger' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCurrentView('event-debugger')}
             >
               <Activity className="w-4 h-4 mr-2" />
               Event Debugger
-            </Button>
+            </Button> */}
             <Button
               variant={currentView === 'usage' ? 'default' : 'outline'}
               size="sm"
@@ -665,14 +665,14 @@ export default function App() {
               <Shield className="w-4 h-4 mr-2" />
               Security
             </Button>
-            <Button
+            {/* <Button
               variant={currentView === 'maintenance' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCurrentView('maintenance')}
             >
               <Settings className="w-4 h-4 mr-2" />
               Housekeeping
-            </Button>
+            </Button> */}
             <Button
               variant={currentView === 'logs' ? 'default' : 'outline'}
               size="sm"

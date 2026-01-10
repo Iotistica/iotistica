@@ -502,4 +502,115 @@ router.post('/v1/vpn/tailscale/ping', async (req: Request, res: Response, next: 
 	}
 });
 
+/**
+ * GET /v1/modbus/devices
+ * Get all Modbus device statuses
+ */
+router.get('/v1/modbus/devices', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const sensorsFeature = actions.getSensorsFeature();
+		if (!sensorsFeature) {
+			return res.status(503).json({ error: 'Sensors feature not initialized' });
+		}
+
+		const modbusAdapter = sensorsFeature.getAdapter('modbus');
+		if (!modbusAdapter) {
+			return res.status(404).json({ error: 'Modbus adapter not running' });
+		}
+
+		const devices = modbusAdapter.getDeviceStatuses();
+		return res.status(200).json({ devices });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/modbus/devices/:deviceName
+ * Get specific Modbus device status with enriched metrics
+ */
+router.get('/v1/modbus/devices/:deviceName', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { deviceName } = req.params;
+		const sensorsFeature = actions.getSensorsFeature();
+		
+		if (!sensorsFeature) {
+			return res.status(503).json({ error: 'Sensors feature not initialized' });
+		}
+
+		const modbusAdapter = sensorsFeature.getAdapter('modbus');
+		if (!modbusAdapter) {
+			return res.status(404).json({ error: 'Modbus adapter not running' });
+		}
+
+		const status = modbusAdapter.getEnrichedDeviceStatus(deviceName);
+		if (!status) {
+			return res.status(404).json({ error: `Device not found: ${deviceName}` });
+		}
+
+		return res.status(200).json(status);
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/modbus/devices/:deviceName/metrics
+ * Get Modbus device metrics summary with P95/P99 statistics
+ */
+router.get('/v1/modbus/devices/:deviceName/metrics', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { deviceName } = req.params;
+		const sensorsFeature = actions.getSensorsFeature();
+		
+		if (!sensorsFeature) {
+			return res.status(503).json({ error: 'Sensors feature not initialized' });
+		}
+
+		const modbusAdapter = sensorsFeature.getAdapter('modbus');
+		if (!modbusAdapter) {
+			return res.status(404).json({ error: 'Modbus adapter not running' });
+		}
+
+		const metrics = modbusAdapter.getDeviceMetricsSummary(deviceName);
+		if (!metrics) {
+			return res.status(404).json({ error: `Device not found: ${deviceName}` });
+		}
+
+		return res.status(200).json(metrics);
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/modbus/metrics
+ * Get all Modbus device metrics summaries
+ */
+router.get('/v1/modbus/metrics', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const sensorsFeature = actions.getSensorsFeature();
+		if (!sensorsFeature) {
+			return res.status(503).json({ error: 'Sensors feature not initialized' });
+		}
+
+		const modbusAdapter = sensorsFeature.getAdapter('modbus');
+		if (!modbusAdapter) {
+			return res.status(404).json({ error: 'Modbus adapter not running' });
+		}
+
+		const allMetrics = modbusAdapter.getAllDeviceMetrics();
+		
+		// Convert Map to object for JSON serialization
+		const metricsObject: Record<string, any> = {};
+		for (const [deviceName, metrics] of allMetrics) {
+			metricsObject[deviceName] = metrics;
+		}
+
+		return res.status(200).json(metricsObject);
+	} catch (error) {
+		next(error);
+	}
+});
+
 export default router;

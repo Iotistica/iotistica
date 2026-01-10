@@ -36,6 +36,8 @@ export interface SensorDataPoint {
 /**
  * Device Status interface
  * Contains both static metadata and dynamic health metrics
+ * 
+ * Generic across all protocols (Modbus, SNMP, OPC-UA, MQTT, BACnet)
  */
 export interface DeviceStatus {
   // Basic identity
@@ -50,7 +52,7 @@ export interface DeviceStatus {
   errorCount: number;
   lastError: string | null;
   
-  // Performance metrics
+  // Performance metrics (point-in-time)
   responseTimeMs: number | null;  // Last response time in milliseconds
   pollSuccessRate: number;  // Rolling success rate 0-1 (calculated from recent polls)
   
@@ -59,6 +61,20 @@ export interface DeviceStatus {
   
   // Overall health indicator
   communicationQuality: 'good' | 'degraded' | 'poor' | 'offline';
+  
+  // Time-series metrics (optional - for advanced monitoring)
+  // Enables P95/P99 calculations, trending, and anomaly detection
+  metrics?: {
+    pollDurations: number[];        // Last N poll durations (ms) - for P95/P99
+    pollSuccessCount: number;       // Total successful polls
+    pollTotalCount: number;         // Total poll attempts
+    dataPointsUpdated: number[];    // Last N data points changed per poll
+    lastErrors: Array<{             // Last N errors with context
+      timestamp: Date;
+      type: string;                 // Error code (TIMEOUT, CONNECTION_REFUSED, etc.)
+      message: string;
+    }>;
+  };
 }
 
 /**

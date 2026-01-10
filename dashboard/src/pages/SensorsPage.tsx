@@ -11,8 +11,10 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AddSensorDialog } from '@/components/sensors/AddSensorDialog';
 import { SensorSummaryCards } from '@/components/sensors/SensorSummaryCards';
+import { DataPointsViewer } from '@/components/sensors/DataPointsViewer';
 import { toast } from 'sonner';
 import { buildApiUrl } from '@/config/api';
 import { canPerformDeviceActions } from "@/utils/devicePermissions";
@@ -25,6 +27,23 @@ interface SensorsPageProps {
   deviceStatus?: Device['status']; // Add device status for permission checks
   debugMode?: boolean;
   onDebugModeChange?: (enabled: boolean) => void;
+}
+
+interface ModbusDataPoint {
+  name: string;
+  address: number;
+  type: string;
+  dataType: string;
+  unit?: string;
+  scale?: number;
+  description?: string;
+  base?: number;
+  noise_pct?: number;
+}
+
+interface OPCUADataPoint {
+  name: string;
+  nodeId: string;
 }
 
 interface Sensor {
@@ -40,6 +59,7 @@ interface Sensor {
   type?: 'pipeline' | 'device'; // pipeline = sensor publish, device = protocol adapter
   protocol?: string;
   connected?: boolean;
+  dataPoints?: ModbusDataPoint[] | OPCUADataPoint[]; // Protocol-specific data points
   // Deployment tracking fields
   deploymentStatus?: 'pending' | 'deployed' | 'failed' | 'reconciling' | 'draft' | 'saved-draft';
   lastDeployedAt?: string | null;
@@ -59,6 +79,8 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [addSensorDialogOpen, setAddSensorDialogOpen] = useState(false);
   const [selectedSensor, setSelectedSensor] = useState<Sensor | null>(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
+  const [selectedProtocol, setSelectedProtocol] = useState<string>('all');
+  const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const canAddApp = canPerformDeviceActions(deviceStatus);
   const { addPendingSensor, getPendingConfig, getTargetConfig } = useDeviceState();
 
@@ -98,6 +120,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         type: 'device' as const,
         protocol: d.protocol,
         connected: d.connected,
+        dataPoints: d.data_points || d.dataPoints || [], // Include data points from API
         // Deployment tracking
         deploymentStatus: d.deploymentStatus,
         lastDeployedAt: d.lastDeployedAt,
@@ -282,6 +305,57 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           />
         )}
 
+        {/* Protocol Filter */}
+        {sensors.length > 0 && (
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-foreground">Protocol:</label>
+              <select 
+                value={selectedProtocol} 
+                onChange={(e) => setSelectedProtocol(e.target.value)}
+                className="border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="all">All ({sensors.length})</option>
+                {Array.from(new Set(sensors.map(s => s.protocol).filter(Boolean))).sort().map(protocol => (
+                  <option key={protocol} value={protocol}>
+                    {protocol?.toUpperCase()} ({sensors.filter(s => s.protocol === protocol).length})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-foreground">Status:</label>
+              <select 
+                value={selectedStatus} 
+                onChange={(e) => setSelectedStatus(e.target.value)}
+                className="border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="all">All ({sensors.length})</option>
+                <option value="CONNECTED">Connected ({sensors.filter(s => s.state === 'CONNECTED').length})</option>
+                <option value="DISCONNECTED">Disconnected ({sensors.filter(s => s.state === 'DISCONNECTED').length})</option>
+                <option value="PENDING">Pending ({sensors.filter(s => s.state === 'PENDING').length})</option>
+                <option value="healthy">Healthy ({sensors.filter(s => s.healthy).length})</option>
+                <option value="unhealthy">Unhealthy ({sensors.filter(s => !s.healthy && s.state !== 'PENDING').length})</option>
+              </select>
+            </div>
+
+            {(selectedProtocol !== 'all' || selectedStatus !== 'all') && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => {
+                  setSelectedProtocol('all');
+                  setSelectedStatus('all');
+                }}
+                className="text-sm"
+              >
+                Clear Filters
+              </Button>
+            )}
+          </div>
+        )}
+
        
         {/* Sensors List */}
         <Card>
@@ -290,7 +364,21 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             <CardDescription>
               {sensors.length === 0 
                 ? 'No endpoints configured yet.' 
-                : `${sensors.length} endpoint(s) configured`}
+                : (() => {
+                    const filtered = sensors
+                      .filter(s => selectedProtocol === 'all' || s.protocol === selectedProtocol)
+                      .filter(s => {
+                        if (selectedStatus === 'all') return true;
+                        if (selectedStatus === 'healthy') return s.healthy;
+                        if (selectedStatus === 'unhealthy') return !s.healthy && s.state !== 'PENDING';
+                        return s.state === selectedStatus;
+                      });
+                    
+                    const hasFilters = selectedProtocol !== 'all' || selectedStatus !== 'all';
+                    return hasFilters 
+                      ? `${filtered.length} of ${sensors.length} endpoint(s) matching filters`
+                      : `${sensors.length} endpoint(s) configured`;
+                  })()}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -302,99 +390,114 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
               </div>
             ) : (
               <div className="space-y-3">
-                {sensors.map((sensor) => (
-                  <div
-                    key={sensor.name}
-                    className="flex items-center justify-between p-4 border border-border rounded-lg hover:border-muted-foreground/20 transition-colors"
-                  >
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="text-lg font-semibold text-foreground">{sensor.name}</h3>
-                        {getStatusBadge(sensor)}
-                        {sensor.protocol && (
-                          <Badge variant="outline" className="text-xs">
-                            {sensor.protocol.toUpperCase()}
-                          </Badge>
+                {sensors
+                  .filter(sensor => selectedProtocol === 'all' || sensor.protocol === selectedProtocol)
+                  .filter(sensor => {
+                    if (selectedStatus === 'all') return true;
+                    if (selectedStatus === 'healthy') return sensor.healthy;
+                    if (selectedStatus === 'unhealthy') return !sensor.healthy && sensor.state !== 'PENDING';
+                    return sensor.state === selectedStatus;
+                  })
+                  .map((sensor) => (
+                  <div key={sensor.name}>
+                    {/* Sensor Row */}
+                    <div
+                      className="flex items-center justify-between p-4 border border-border rounded-lg hover:border-muted-foreground/20 transition-colors"
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <h3 className="text-lg font-semibold text-foreground">{sensor.name}</h3>
+                          {getStatusBadge(sensor)}
+                          {sensor.protocol && (
+                            <Badge variant="outline" className="text-xs">
+                              {sensor.protocol.toUpperCase()}
+                            </Badge>
+                          )}
+                          {sensor.dataPoints && sensor.dataPoints.length > 0 && (
+                            <Badge variant="secondary" className="text-xs">
+                              {sensor.dataPoints.length} data point{sensor.dataPoints.length !== 1 ? 's' : ''}
+                            </Badge>
+                          )}
+                          {sensor.type === 'device' && sensor.deploymentStatus && getDeploymentStatusBadge(sensor.deploymentStatus)}
+                        </div>
+                      
+                        <div className="flex flex-wrap gap-6 text-sm text-muted-foreground">
+                          {sensor.type === 'pipeline' && (
+                            <div>
+                              <span className="font-medium">Messages Published:</span>{' '}
+                              {sensor.messagesPublished.toLocaleString()}
+                            </div>
+                          )}
+                          <div>
+                            <span className="font-medium">Last Activity:</span>{' '}
+                            {sensor.lastActivity 
+                              ? new Date(sensor.lastActivity).toLocaleString()
+                              : 'Never'}
+                          </div>
+                          {sensor.type === 'device' && sensor.lastDeployedAt && (
+                            <div>
+                              <span className="font-medium">Last Deployed:</span>{' '}
+                              {new Date(sensor.lastDeployedAt).toLocaleString()}
+                            </div>
+                          )}
+                          {sensor.type === 'device' && sensor.deploymentAttempts !== undefined && sensor.deploymentAttempts > 1 && (
+                            <div>
+                              <span className="font-medium">Deploy Attempts:</span>{' '}
+                              {sensor.deploymentAttempts}
+                            </div>
+                          )}
+                        </div>
+
+                        {sensor.lastError && sensor.state !== 'PENDING' && (
+                          <div className="mt-2 text-sm text-red-600">
+                            <span className="font-medium">Error:</span> {sensor.lastError}
+                          </div>
                         )}
-                        {sensor.type === 'device' && sensor.deploymentStatus && getDeploymentStatusBadge(sensor.deploymentStatus)}
+
+                        {sensor.deploymentError && (
+                          <div className="mt-2 text-sm text-red-600">
+                            <span className="font-medium">Deployment Error:</span> {sensor.deploymentError}
+                          </div>
+                        )}
+                        
+                        {sensor.state === 'PENDING' && (
+                          <div className="mt-2 text-sm text-yellow-600">
+                            <span className="font-medium">Status:</span> Waiting for agent to initialize sensor...
+                          </div>
+                        )}
                       </div>
                       
-                      <div className="flex flex-wrap gap-6 text-sm text-muted-foreground">
-                        {sensor.type === 'pipeline' && (
-                          <div>
-                            <span className="font-medium">Messages Published:</span>{' '}
-                            {sensor.messagesPublished.toLocaleString()}
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-3 ml-4">
+                        {/* Enable/Disable Toggle - only show for deployed sensors */}
+                        {sensor.type === 'device' && 
+                         sensor.deploymentStatus !== 'draft' && 
+                         sensor.deploymentStatus !== 'saved-draft' && (
+                          <div className="flex items-center gap-2 border border-gray-200 rounded-md px-3 py-1.5">
+                            <span className="text-sm text-gray-700">
+                              {sensor.enabled ? 'Enabled' : 'Disabled'}
+                            </span>
+                            <Switch
+                              checked={sensor.enabled !== undefined ? sensor.enabled : true}
+                              onCheckedChange={() => handleToggleSensorEnabled(sensor, sensor.enabled !== undefined ? sensor.enabled : true)}
+                              className="data-[state=checked]:bg-green-500 data-[state=unchecked]:bg-gray-300"
+                            />
                           </div>
                         )}
-                        <div>
-                          <span className="font-medium">Last Activity:</span>{' '}
-                          {sensor.lastActivity 
-                            ? new Date(sensor.lastActivity).toLocaleString()
-                            : 'Never'}
-                        </div>
-                        {sensor.type === 'device' && sensor.lastDeployedAt && (
-                          <div>
-                            <span className="font-medium">Last Deployed:</span>{' '}
-                            {new Date(sensor.lastDeployedAt).toLocaleString()}
-                          </div>
-                        )}
-                        {sensor.type === 'device' && sensor.deploymentAttempts !== undefined && sensor.deploymentAttempts > 1 && (
-                          <div>
-                            <span className="font-medium">Deploy Attempts:</span>{' '}
-                            {sensor.deploymentAttempts}
-                          </div>
-                        )}
+                        
+                        {/* View Details Button */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedSensor(sensor);
+                            setDetailsDialogOpen(true);
+                          }}
+                        >
+                          <Eye className="h-4 w-4 mr-2" />
+                          View Details
+                        </Button>
                       </div>
-
-                      {sensor.lastError && sensor.state !== 'PENDING' && (
-                        <div className="mt-2 text-sm text-red-600">
-                          <span className="font-medium">Error:</span> {sensor.lastError}
-                        </div>
-                      )}
-
-                      {sensor.deploymentError && (
-                        <div className="mt-2 text-sm text-red-600">
-                          <span className="font-medium">Deployment Error:</span> {sensor.deploymentError}
-                        </div>
-                      )}
-                      
-                      {sensor.state === 'PENDING' && (
-                        <div className="mt-2 text-sm text-yellow-600">
-                          <span className="font-medium">Status:</span> Waiting for agent to initialize sensor...
-                        </div>
-                      )}
-                    </div>
-                    
-                    {/* Action Buttons */}
-                    <div className="flex items-center gap-3 ml-4">
-                      {/* Enable/Disable Toggle - only show for deployed sensors */}
-                      {sensor.type === 'device' && 
-                       sensor.deploymentStatus !== 'draft' && 
-                       sensor.deploymentStatus !== 'saved-draft' && (
-                        <div className="flex items-center gap-2 border border-gray-200 rounded-md px-3 py-1.5">
-                          <span className="text-sm text-gray-700">
-                            {sensor.enabled ? 'Enabled' : 'Disabled'}
-                          </span>
-                          <Switch
-                            checked={sensor.enabled !== undefined ? sensor.enabled : true}
-                            onCheckedChange={() => handleToggleSensorEnabled(sensor, sensor.enabled !== undefined ? sensor.enabled : true)}
-                            className="data-[state=checked]:bg-green-500 data-[state=unchecked]:bg-gray-300"
-                          />
-                        </div>
-                      )}
-                      
-                      {/* View Details Button */}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setSelectedSensor(sensor);
-                          setDetailsDialogOpen(true);
-                        }}
-                      >
-                        <Eye className="h-4 w-4 mr-2" />
-                        View Details
-                      </Button>
                     </div>
                   </div>
                 ))}
@@ -413,126 +516,190 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
         {/* Sensor Details Dialog */}
         <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
             <DialogHeader>
               <DialogTitle>Sensor Details: {selectedSensor?.name}</DialogTitle>
               <DialogDescription>
-                View detailed information about this sensor
+                {selectedSensor?.protocol && `${selectedSensor.protocol.toUpperCase()} sensor`}
               </DialogDescription>
             </DialogHeader>
             
             {selectedSensor && (
-              <div className="space-y-6">
-                {/* Status Section */}
-                <div>
-                  <h3 className="text-sm font-semibold mb-3 text-foreground">Status</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-muted-foreground">State</p>
-                      <div className="mt-1">{getStatusBadge(selectedSensor)}</div>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Health</p>
-                      <p className="text-sm font-medium mt-1">{selectedSensor.healthy ? '✓ Healthy' : '✗ Unhealthy'}</p>
-                    </div>
-                    {selectedSensor.protocol && (
-                      <div>
-                        <p className="text-sm text-muted-foreground">Protocol</p>
-                        <Badge variant="outline" className="mt-1">{selectedSensor.protocol.toUpperCase()}</Badge>
-                      </div>
+              <Tabs defaultValue="overview" className="flex-1 overflow-hidden flex flex-col">
+                <TabsList className="w-full justify-start">
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="datapoints">
+                    Data Points {selectedSensor.dataPoints && selectedSensor.dataPoints.length > 0 && (
+                      <Badge variant="secondary" className="ml-2 text-xs">
+                        {selectedSensor.dataPoints.length}
+                      </Badge>
                     )}
-                    {selectedSensor.connected !== undefined && (
-                      <div>
-                        <p className="text-sm text-muted-foreground">Connected</p>
-                        <p className="text-sm font-medium mt-1">{selectedSensor.connected ? '✓ Yes' : '✗ No'}</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                  </TabsTrigger>
+                  <TabsTrigger value="anomaly">Anomaly Detection</TabsTrigger>
+                </TabsList>
 
-                {/* Deployment Section */}
-                {selectedSensor.type === 'device' && (
+                {/* Overview Tab */}
+                <TabsContent value="overview" className="flex-1 overflow-y-auto space-y-6 mt-4">
+                  {/* Status Section */}
                   <div>
-                    <h3 className="text-sm font-semibold mb-3 text-foreground">Deployment</h3>
+                    <h3 className="text-sm font-semibold mb-3 text-foreground">Status</h3>
                     <div className="grid grid-cols-2 gap-4">
-                      {selectedSensor.deploymentStatus && (
+                      <div>
+                        <p className="text-sm text-muted-foreground">State</p>
+                        <div className="mt-1">{getStatusBadge(selectedSensor)}</div>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Health</p>
+                        <p className="text-sm font-medium mt-1">{selectedSensor.healthy ? '✓ Healthy' : '✗ Unhealthy'}</p>
+                      </div>
+                      {selectedSensor.protocol && (
                         <div>
-                          <p className="text-sm text-muted-foreground">Status</p>
-                          <div className="mt-1">{getDeploymentStatusBadge(selectedSensor.deploymentStatus)}</div>
+                          <p className="text-sm text-muted-foreground">Protocol</p>
+                          <Badge variant="outline" className="mt-1">{selectedSensor.protocol.toUpperCase()}</Badge>
                         </div>
                       )}
-                      {selectedSensor.lastDeployedAt && (
+                      {selectedSensor.connected !== undefined && (
                         <div>
-                          <p className="text-sm text-muted-foreground">Last Deployed</p>
+                          <p className="text-sm text-muted-foreground">Connected</p>
+                          <p className="text-sm font-medium mt-1">{selectedSensor.connected ? '✓ Yes' : '✗ No'}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Deployment Section */}
+                  {selectedSensor.type === 'device' && (
+                    <div>
+                      <h3 className="text-sm font-semibold mb-3 text-foreground">Deployment</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        {selectedSensor.deploymentStatus && (
+                          <div>
+                            <p className="text-sm text-muted-foreground">Status</p>
+                            <div className="mt-1">{getDeploymentStatusBadge(selectedSensor.deploymentStatus)}</div>
+                          </div>
+                        )}
+                        {selectedSensor.lastDeployedAt && (
+                          <div>
+                            <p className="text-sm text-muted-foreground">Last Deployed</p>
+                            <p className="text-sm font-medium mt-1">
+                              {new Date(selectedSensor.lastDeployedAt).toLocaleString()}
+                            </p>
+                          </div>
+                        )}
+                        {selectedSensor.deploymentAttempts !== undefined && (
+                          <div>
+                            <p className="text-sm text-muted-foreground">Deploy Attempts</p>
+                            <p className="text-sm font-medium mt-1">{selectedSensor.deploymentAttempts}</p>
+                          </div>
+                        )}
+                      </div>
+                      {selectedSensor.deploymentError && (
+                        <Alert variant="destructive" className="mt-4">
+                          <AlertDescription>
+                            <span className="font-medium">Deployment Error:</span> {selectedSensor.deploymentError}
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Activity Section */}
+                  <div>
+                    <h3 className="text-sm font-semibold mb-3 text-foreground">Activity</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      {selectedSensor.type === 'pipeline' && (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Messages Published</p>
                           <p className="text-sm font-medium mt-1">
-                            {new Date(selectedSensor.lastDeployedAt).toLocaleString()}
+                            {selectedSensor.messagesPublished.toLocaleString()}
                           </p>
                         </div>
                       )}
-                      {selectedSensor.deploymentAttempts !== undefined && (
-                        <div>
-                          <p className="text-sm text-muted-foreground">Deploy Attempts</p>
-                          <p className="text-sm font-medium mt-1">{selectedSensor.deploymentAttempts}</p>
-                        </div>
-                      )}
-                    </div>
-                    {selectedSensor.deploymentError && (
-                      <Alert variant="destructive" className="mt-4">
-                        <AlertDescription>
-                          <span className="font-medium">Deployment Error:</span> {selectedSensor.deploymentError}
-                        </AlertDescription>
-                      </Alert>
-                    )}
-                  </div>
-                )}
-
-                {/* Activity Section */}
-                <div>
-                  <h3 className="text-sm font-semibold mb-3 text-foreground">Activity</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    {selectedSensor.type === 'pipeline' && (
                       <div>
-                        <p className="text-sm text-muted-foreground">Messages Published</p>
+                        <p className="text-sm text-muted-foreground">Last Activity</p>
                         <p className="text-sm font-medium mt-1">
-                          {selectedSensor.messagesPublished.toLocaleString()}
+                          {selectedSensor.lastActivity 
+                            ? new Date(selectedSensor.lastActivity).toLocaleString()
+                            : 'Never'}
                         </p>
                       </div>
-                    )}
+                    </div>
+                  </div>
+
+                  {/* Error Section */}
+                  {selectedSensor.lastError && selectedSensor.state !== 'PENDING' && (
+                    <Alert variant="destructive">
+                      <AlertDescription>
+                        <span className="font-medium">Last Error:</span> {selectedSensor.lastError}
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  {/* Configuration Section */}
+                  <div>
+                    <h3 className="text-sm font-semibold mb-3 text-foreground">Configuration</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Type</p>
+                        <p className="text-sm font-medium mt-1 capitalize">{selectedSensor.type || 'Unknown'}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Configured</p>
+                        <p className="text-sm font-medium mt-1">{selectedSensor.configured ? '✓ Yes' : '✗ No'}</p>
+                      </div>
+                    </div>
+                  </div>
+                </TabsContent>
+
+                {/* Data Points Tab */}
+                <TabsContent value="datapoints" className="flex-1 overflow-y-auto mt-4">
+                  {selectedSensor.dataPoints && selectedSensor.dataPoints.length > 0 ? (
                     <div>
-                      <p className="text-sm text-muted-foreground">Last Activity</p>
-                      <p className="text-sm font-medium mt-1">
-                        {selectedSensor.lastActivity 
-                          ? new Date(selectedSensor.lastActivity).toLocaleString()
-                          : 'Never'}
+                      <div className="mb-4">
+                        <p className="text-sm text-muted-foreground">
+                          Configured data points for this {selectedSensor.protocol?.toUpperCase()} sensor
+                        </p>
+                      </div>
+                      <DataPointsViewer 
+                        protocol={selectedSensor.protocol || 'unknown'} 
+                        dataPoints={selectedSensor.dataPoints}
+                      />
+                    </div>
+                  ) : (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <p className="text-lg font-medium mb-2">No data points configured</p>
+                      <p className="text-sm">Add data points to start collecting metrics from this sensor</p>
+                    </div>
+                  )}
+                </TabsContent>
+
+                {/* Anomaly Detection Tab */}
+                <TabsContent value="anomaly" className="flex-1 overflow-y-auto mt-4">
+                  <div className="space-y-4">
+                    <div className="mb-4">
+                      <p className="text-sm text-muted-foreground">
+                        Configure anomaly detection rules for data points
                       </p>
                     </div>
+                    
+                    {selectedSensor.dataPoints && selectedSensor.dataPoints.length > 0 ? (
+                      <div className="border border-border rounded-lg p-6 text-center">
+                        <p className="text-sm font-medium text-muted-foreground mb-2">
+                          Anomaly Detection (Coming Soon)
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Select data points from the list and configure threshold-based or ML-based anomaly detection rules
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="text-center py-12 text-muted-foreground">
+                        <p className="text-lg font-medium mb-2">No data points available</p>
+                        <p className="text-sm">Configure data points first to enable anomaly detection</p>
+                      </div>
+                    )}
                   </div>
-                </div>
-
-                {/* Error Section */}
-                {selectedSensor.lastError && selectedSensor.state !== 'PENDING' && (
-                  <Alert variant="destructive">
-                    <AlertDescription>
-                      <span className="font-medium">Last Error:</span> {selectedSensor.lastError}
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                {/* Configuration Section */}
-                <div>
-                  <h3 className="text-sm font-semibold mb-3 text-foreground">Configuration</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Type</p>
-                      <p className="text-sm font-medium mt-1 capitalize">{selectedSensor.type || 'Unknown'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Configured</p>
-                      <p className="text-sm font-medium mt-1">{selectedSensor.configured ? '✓ Yes' : '✗ No'}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
+                </TabsContent>
+              </Tabs>
             )}
           </DialogContent>
         </Dialog>

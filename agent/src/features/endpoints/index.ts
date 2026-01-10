@@ -658,4 +658,21 @@ export class SensorsFeature extends BaseFeature {
 
     return health;
   }
+  
+  /**
+   * Get a specific protocol adapter
+   * @param protocol - Protocol name ('modbus', 'opcua', 'snmp', 'mqtt')
+   * @returns The adapter instance or undefined if not running
+   */
+  getAdapter(protocol: string): any | undefined {
+    return this.adapters.get(protocol);
+  }
+  
+  /**
+   * Get all running adapters
+   * @returns Map of protocol name to adapter instance
+   */
+  getAllAdapters(): Map<string, any> {
+    return new Map(this.adapters);
+  }
 }

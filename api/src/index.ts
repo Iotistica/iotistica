@@ -180,6 +180,12 @@ app.use(cors({
 
 app.options('*', cors());
 
+// Security headers
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false
+}));
+
 /**
  * Brotli decompression middleware
  * Express only supports gzip/deflate out of the box, not Brotli (br).
@@ -274,7 +280,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Support compressed (gzip/deflate) request bodies (Brotli handled above)
+// Support compressed (gzip/deflate) request bodies
 app.use(express.json({ 
   limit: '100mb',  // Large limit for decompressed logs (10MB compressed → 40-60MB decompressed)
   inflate: true  // Automatically decompress gzip/deflate
@@ -299,6 +305,20 @@ app.use((req, res, next) => {
       headers: { authorization: req.headers.authorization?.substring(0, 30) }
     });
   }
+  
+  // Intercept response to log 401s
+  const originalJson = res.json.bind(res);
+  res.json = function(body: any) {
+    if (res.statusCode === 401) {
+      console.log('[DEBUG] *** 401 RESPONSE ***', {
+        path: req.path,
+        body,
+        stack: new Error().stack?.split('\n').slice(1, 5)
+      });
+    }
+    return originalJson(body);
+  };
+  
   next();
 });
 
@@ -389,6 +409,10 @@ app.use(API_BASE, globalApiRateLimit);
 // Authentication routes - strict rate limiting (brute-force protection)
 app.use(`${API_BASE}/auth`, authRateLimit, authRoutes);
 
+// CRITICAL: Mount devicesRoutes BEFORE usersRoutes to prevent /:id from matching /devices
+console.log('[INDEX] Mounting devicesRoutes at', API_BASE);
+app.use(API_BASE, devicesRoutes);
+
 // User management and admin - moderate rate limiting
 app.use(API_BASE, adminRateLimit, usersRoutes);
 app.use(API_BASE, adminRateLimit, adminRoutes);
@@ -404,8 +428,7 @@ console.log('[INDEX] Mounting routes...');
 app.use(API_BASE, licenseRoutes);
 app.use(API_BASE, billingRoutes);
 app.use(API_BASE, provisioningRoutes);
-console.log('[INDEX] Mounting devicesRoutes at', API_BASE);
-app.use(API_BASE, devicesRoutes);
+// devicesRoutes moved earlier to avoid conflict with usersRoutes /:id
 app.use(API_BASE, appsRoutes);
 app.use(API_BASE, deviceStateRoutes);
 app.use(API_BASE, imageRegistryRoutes);

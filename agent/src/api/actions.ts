@@ -9,6 +9,7 @@ import type { CloudSync } from '../device-manager/sync';
 import type { AgentLogger } from '../logging/agent-logger';
 import type { AnomalyDetectionService } from '../ai/anomaly';
 import type { SimulationOrchestrator } from '../simulation';
+import type { SensorsFeature } from '../features/endpoints';
 import { LogComponents } from '../logging/types';
 
 let containerManager: ContainerManager;
@@ -17,6 +18,7 @@ let cloudSync: CloudSync | undefined;
 let logger: AgentLogger | undefined;
 let anomalyService: AnomalyDetectionService | undefined;
 let simulationOrchestrator: SimulationOrchestrator | undefined;
+let sensorsFeature: SensorsFeature | undefined;
 
 export function initialize(
 	cm: ContainerManager, 
@@ -32,6 +34,20 @@ export function initialize(
 	logger = agentLogger;
 	anomalyService = anomaly;
 	simulationOrchestrator = simulation;
+}
+
+/**
+ * Set sensors feature (called by agent after initialization)
+ */
+export function setSensorsFeature(feature: SensorsFeature | undefined) {
+	sensorsFeature = feature;
+}
+
+/**
+ * Get sensors feature (for accessing protocol adapters)
+ */
+export function getSensorsFeature(): SensorsFeature | undefined {
+	return sensorsFeature;
 }
 
 /**

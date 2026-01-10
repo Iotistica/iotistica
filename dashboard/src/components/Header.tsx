@@ -232,10 +232,10 @@ export function Header({
                       </DropdownMenuItem>
                     </>
                   )}
-                  <DropdownMenuItem onClick={onDigitalTwinClick}>
+                  {/* <DropdownMenuItem onClick={onDigitalTwinClick}>
                     <Building2 className="w-4 h-4 mr-2" />
                     Digital Twin
-                  </DropdownMenuItem>
+                  </DropdownMenuItem> */}
                   <DropdownMenuItem onClick={() => toast.info("Opening help...")}>
                     <HelpCircle className="w-4 h-4 mr-2" />
                     Help & Support

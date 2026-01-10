@@ -3,6 +3,7 @@ import { ModbusAdapterConfig } from './types';
 import { ModbusDevice } from './types';
 import { ModbusClient } from './client';
 import { SensorDataPoint, DeviceStatus, Logger } from '../types.js';
+import { DeviceMetrics, MetricsSummary } from '../metrics.js';
 
 /**
  * Main Modbus Adapter class that coordinates Modbus devices
@@ -23,14 +24,20 @@ export class ModbusAdapter extends EventEmitter {
   private config: ModbusAdapterConfig;
   private logger: Logger;
   private clients: Map<string, ModbusClient> = new Map();
-  private pollTimers: Map<string, NodeJS.Timeout> = new Map();
   private deviceStatuses: Map<string, DeviceStatus> = new Map();
+  private deviceMetrics: Map<string, DeviceMetrics> = new Map(); // Time-series metrics
   private running = false;
+  private pollLoopRunning = false;
   
   // Performance tracking
   private pollHistory: Map<string, boolean[]> = new Map(); // Track last N poll results
   private lastValues: Map<string, Map<string, any>> = new Map(); // Track last register values for change detection
+  private lastPollTimes: Map<string, number> = new Map(); // Track last poll timestamp per device
+  private retryAttempts: Map<string, number> = new Map(); // Track retry attempts per device
   private readonly pollHistorySize = 100; // Track last 100 polls for success rate
+  private readonly POLL_TICK_INTERVAL = 1000; // Global poll loop tick interval (1 second)
+  private readonly POLL_CONCURRENCY = 20; // Max concurrent device polls
+  private readonly MAX_RETRY_DELAY = 30000; // Max retry delay: 30 seconds
 
   constructor(config: ModbusAdapterConfig, logger: Logger) {
     super();
@@ -49,14 +56,37 @@ export class ModbusAdapter extends EventEmitter {
     }
 
     try {
-      // Initialize and connect all enabled devices
-      for (const deviceConfig of this.config.devices) {
-        if (deviceConfig.enabled) {
-          await this.initializeDevice(deviceConfig);
-        }
+      // Parallelize device initialization with concurrency control
+      // At scale (50-100 devices), sequential init blocks startup
+      const { default: pLimit } = await import('p-limit');
+      const limit = pLimit(10); // Max 10 concurrent device initializations
+      
+      const enabledDevices = this.config.devices.filter(d => d.enabled);
+      
+      this.logger.debug(`Initializing ${enabledDevices.length} Modbus devices in parallel (concurrency: 10)...`);
+      
+      // Use allSettled to ensure one device failure doesn't block others
+      const results = await Promise.allSettled(
+        enabledDevices.map(deviceConfig => 
+          limit(() => this.initializeDevice(deviceConfig))
+        )
+      );
+      
+      // Log initialization summary
+      const successful = results.filter(r => r.status === 'fulfilled').length;
+      const failed = results.filter(r => r.status === 'rejected').length;
+      
+      if (failed > 0) {
+        this.logger.warn(`Device initialization complete: ${successful} succeeded, ${failed} failed`);
+      } else {
+        this.logger.debug(`All ${successful} devices initialized successfully`);
       }
 
       this.running = true;
+      
+      // Start global poll loop
+      this.startGlobalPollLoop();
+      
       this.emit('started');
 
     } catch (error) {
@@ -78,11 +108,8 @@ export class ModbusAdapter extends EventEmitter {
     try {
       this.logger.debug('Stopping Modbus Adapter...');
 
-      // Stop all polling timers
-      for (const [deviceName, timer] of this.pollTimers) {
-        clearTimeout(timer);
-        this.pollTimers.delete(deviceName);
-      }
+      // Stop global poll loop
+      this.pollLoopRunning = false;
 
       // Disconnect all devices
       const disconnectPromises = Array.from(this.clients.values()).map(client => 
@@ -170,6 +197,44 @@ export class ModbusAdapter extends EventEmitter {
   isRunning(): boolean {
     return this.running;
   }
+  
+  /**
+   * Get metrics summary for a specific device
+   * Provides P95/P99 latency, success rate, error analysis
+   */
+  getDeviceMetricsSummary(deviceName: string): MetricsSummary | null {
+    const metrics = this.deviceMetrics.get(deviceName);
+    return metrics ? metrics.getSummary() : null;
+  }
+  
+  /**
+   * Get metrics summaries for all devices
+   */
+  getAllDeviceMetrics(): Map<string, MetricsSummary> {
+    const summaries = new Map<string, MetricsSummary>();
+    
+    for (const [deviceName, metrics] of this.deviceMetrics) {
+      summaries.set(deviceName, metrics.getSummary());
+    }
+    
+    return summaries;
+  }
+  
+  /**
+   * Get enriched device status with metrics
+   * Merges existing DeviceStatus with time-series metrics
+   */
+  getEnrichedDeviceStatus(deviceName: string): DeviceStatus | null {
+    const status = this.deviceStatuses.get(deviceName);
+    if (!status) return null;
+    
+    const metrics = this.deviceMetrics.get(deviceName);
+    if (metrics) {
+      status.metrics = metrics.toDeviceStatusMetrics();
+    }
+    
+    return status;
+  }
 
   /**
    * Initialize device statuses
@@ -189,9 +254,13 @@ export class ModbusAdapter extends EventEmitter {
         communicationQuality: 'offline'
       });
       
-      // Initialize poll history and last values tracking
+      // Initialize poll history, last values tracking, and retry attempts
       this.pollHistory.set(device.name, []);
       this.lastValues.set(device.name, new Map());
+      this.retryAttempts.set(device.name, 0);
+      
+      // Initialize advanced metrics
+      this.deviceMetrics.set(device.name, new DeviceMetrics(device.name));
     }
   }
 
@@ -213,9 +282,11 @@ export class ModbusAdapter extends EventEmitter {
       const status = this.deviceStatuses.get(deviceConfig.name)!;
       status.connected = true;
       status.lastError = null;
+      
+      // Reset retry attempts on successful connection
+      this.retryAttempts.set(deviceConfig.name, 0);
 
-      // Start polling
-      this.startPolling(deviceConfig);
+      // Global poll loop will handle polling automatically
 
       this.logger.debug(`Device ${deviceConfig.name} initialized successfully`);
       this.emit('device-connected', deviceConfig.name);
@@ -232,11 +303,7 @@ export class ModbusAdapter extends EventEmitter {
 
       this.emit('device-error', deviceConfig.name, error);
       
-      // ✅ Start polling even when disconnected (to send BAD quality data)
-      this.startPolling(deviceConfig);
-      
-      // Schedule retry
-      this.scheduleDeviceRetry(deviceConfig);
+      // Global poll loop will handle polling and retry automatically
     }
   }
 
@@ -244,12 +311,11 @@ export class ModbusAdapter extends EventEmitter {
    * Cleanup device resources
    */
   private async cleanupDevice(deviceName: string): Promise<void> {
-    // Stop polling timer
-    const timer = this.pollTimers.get(deviceName);
-    if (timer) {
-      clearTimeout(timer);
-      this.pollTimers.delete(deviceName);
-    }
+    // Remove last poll time tracking
+    this.lastPollTimes.delete(deviceName);
+    
+    // Reset retry attempts
+    this.retryAttempts.set(deviceName, 0);
 
     // Disconnect client
     const client = this.clients.get(deviceName);
@@ -269,109 +335,198 @@ export class ModbusAdapter extends EventEmitter {
   }
 
   /**
-   * Start polling for a device
+   * Start global poll loop (single async loop for all devices)
+   * Benefits:
+   * - Single loop = predictable timing
+   * - Controlled concurrency via p-limit
+   * - Avoids timer storms (100+ devices = 100+ timers)
+   * - Drift compensation
    */
-  private startPolling(deviceConfig: ModbusDevice): void {
-    const pollDevice = async () => {
-      const startTime = Date.now();
+  private startGlobalPollLoop(): void {
+    this.pollLoopRunning = true;
+    
+    const pollLoop = async () => {
+      while (this.pollLoopRunning) {
+        const tickStart = Date.now();
+        
+        try {
+          // Get devices that need polling (enabled + interval elapsed)
+          const devicesToPoll = this.getDevicesDueForPoll();
+          
+          if (devicesToPoll.length > 0) {
+            this.logger.debug(`Global poll tick: ${devicesToPoll.length} devices due for poll`);
+            
+            // Poll devices with concurrency control
+            const { default: pLimit } = await import('p-limit');
+            const limit = pLimit(this.POLL_CONCURRENCY);
+            
+            const pollPromises = devicesToPoll.map(deviceConfig => 
+              limit(() => this.pollDevice(deviceConfig))
+            );
+            
+            // Wait for all polls to complete (or fail)
+            await Promise.allSettled(pollPromises);
+          }
+          
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          this.logger.error(`Error in global poll loop: ${errorMessage}`);
+        }
+        
+        // Calculate drift and sleep until next tick
+        const elapsed = Date.now() - tickStart;
+        const nextTick = Math.max(this.POLL_TICK_INTERVAL - elapsed, 0);
+        
+        await new Promise(resolve => setTimeout(resolve, nextTick));
+      }
       
+      this.logger.debug('Global poll loop stopped');
+    };
+    
+    // Start the loop
+    pollLoop().catch(error => {
+      this.logger.error(`Fatal error in poll loop: ${error}`);
+      this.pollLoopRunning = false;
+    });
+  }
+  
+  /**
+   * Get devices that are due for polling based on their poll interval
+   */
+  private getDevicesDueForPoll(): ModbusDevice[] {
+    const now = Date.now();
+    const devicesDue: ModbusDevice[] = [];
+    
+    for (const deviceConfig of this.config.devices) {
+      if (!deviceConfig.enabled) continue;
+      
+      const lastPoll = this.lastPollTimes.get(deviceConfig.name) || 0;
+      const timeSinceLastPoll = now - lastPoll;
+      
+      // Check if poll interval has elapsed
+      if (timeSinceLastPoll >= deviceConfig.pollInterval) {
+        devicesDue.push(deviceConfig);
+      }
+    }
+    
+    return devicesDue;
+  }
+  
+  /**
+   * Poll a single device (extracted from old startPolling)
+   */
+  private async pollDevice(deviceConfig: ModbusDevice): Promise<void> {
+    const startTime = Date.now();
+    
+    // Update last poll time
+    this.lastPollTimes.set(deviceConfig.name, startTime);
+    
+    this.logger.debug(
+      `[RECOVERY] Poll cycle starting for ${deviceConfig.name}`
+    );
+    
+    try {
+      const client = this.clients.get(deviceConfig.name);
+      if (!client) {
+        this.logger.error(`[RECOVERY] No client found for ${deviceConfig.name}`);
+        return;
+      }
+      
+      const isConnected = client.isConnected();
       this.logger.debug(
-        `[RECOVERY] Poll cycle starting for ${deviceConfig.name}`
+        `[RECOVERY] Device ${deviceConfig.name} isConnected()=${isConnected}`
       );
       
-      try {
-        const client = this.clients.get(deviceConfig.name);
-        if (!client) {
-          this.logger.error(`[RECOVERY] No client found for ${deviceConfig.name}`);
-          // Don't return - schedule next poll
-        } else {
-          const isConnected = client.isConnected();
-          this.logger.debug(
-            `[RECOVERY] Device ${deviceConfig.name} isConnected()=${isConnected}`
-          );
-          
-          if (!isConnected) {
-            this.logger.debug(`[RECOVERY] Device ${deviceConfig.name} offline, attempting read (will auto-reconnect)`);
-            
-            // Record failed poll
-            this.recordPollResult(deviceConfig.name, false);
-            
-            // CRITICAL: Call readAllRegisters even when disconnected
-            // This triggers tryEnsureConnected() which schedules reconnection
-            const dataPoints = await client.readAllRegisters();
-            
-            if (dataPoints.length > 0) {
-              this.emit('data', dataPoints);
-            }
-            
-            // Don't return - schedule next poll
-          } else {
-            // Read all registers (measure time)
-            this.logger.debug(
-              `[RECOVERY] Device ${deviceConfig.name} connected, calling readAllRegisters()`
-            );
-            const dataPoints = await client.readAllRegisters();
-            const responseTime = Date.now() - startTime;
+      if (!isConnected) {
+        this.logger.debug(`[RECOVERY] Device ${deviceConfig.name} offline, attempting read (will auto-reconnect)`);
+        
+        // Record failed poll
+        this.recordPollResult(deviceConfig.name, false);
+        
+        // CRITICAL: Call readAllRegisters even when disconnected
+        // This triggers tryEnsureConnected() which schedules reconnection
+        const dataPoints = await client.readAllRegisters();
+        
+        if (dataPoints.length > 0) {
+          this.emit('data', dataPoints);
+        }
+      } else {
+        // Read all registers (measure time)
+        this.logger.debug(
+          `[RECOVERY] Device ${deviceConfig.name} connected, calling readAllRegisters()`
+        );
+        const dataPoints = await client.readAllRegisters();
+        const responseTime = Date.now() - startTime;
 
-            this.logger.debug(
-              `[RECOVERY] ✅ Device ${deviceConfig.name} read succeeded! Got ${dataPoints.length} data points in ${responseTime}ms`
-            );
+        this.logger.debug(
+          `[RECOVERY] ✅ Device ${deviceConfig.name} read succeeded! Got ${dataPoints.length} data points in ${responseTime}ms`
+        );
 
-            // Track register changes
-            const registersUpdated = this.trackRegisterChanges(deviceConfig.name, dataPoints);
-            
-            // Record successful poll with metrics
-            this.recordPollResult(deviceConfig.name, true, responseTime, registersUpdated);
-
-            // Emit data event with sensor readings
-            if (dataPoints.length > 0) {
-              this.emit('data', dataPoints);
-              this.emit('data-received', deviceConfig.name, dataPoints);
-            }
-          }
+        // Track register changes
+        const registersUpdated = this.trackRegisterChanges(deviceConfig.name, dataPoints);
+        
+        // Record successful poll with metrics
+        this.recordPollResult(deviceConfig.name, true, responseTime, registersUpdated);
+        
+        // Reset retry attempts on successful poll
+        this.retryAttempts.set(deviceConfig.name, 0);
+        
+        // Record advanced metrics
+        const metrics = this.deviceMetrics.get(deviceConfig.name);
+        if (metrics) {
+          metrics.recordPoll(responseTime, true, registersUpdated);
         }
 
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        this.logger.error(`Error polling device ${deviceConfig.name}: ${errorMessage}`);
-
-        // Update device status
-        const status = this.deviceStatuses.get(deviceConfig.name)!;
-        status.connected = false;
-        status.errorCount++;
-        status.lastError = errorMessage;
-
-        this.emit('device-error', deviceConfig.name, error);
-        
-        // Send BAD quality data points with error code
-        const timestamp = new Date().toISOString();
-        const qualityCode = this.extractQualityCode(errorMessage);
-        const badDataPoints = deviceConfig.registers.map(register => ({
-          deviceName: deviceConfig.name,
-          metric: register.name,
-          value: null,
-          unit: register.unit || '',
-          timestamp: timestamp,
-          quality: 'BAD' as const,
-          qualityCode: qualityCode
-        }));
-        
-        if (badDataPoints.length > 0) {
-          this.emit('data', badDataPoints);
+        // Emit data event with sensor readings
+        if (dataPoints.length > 0) {
+          this.emit('data', dataPoints);
+          this.emit('data-received', deviceConfig.name, dataPoints);
         }
-        
-        // Try to reconnect
-        this.scheduleDeviceRetry(deviceConfig);
       }
 
-      // CRITICAL: Always schedule next poll, even after errors
-      // This ensures continuous BAD quality data emission and auto-recovery when device comes back
-      const timer = setTimeout(pollDevice, deviceConfig.pollInterval);
-      this.pollTimers.set(deviceConfig.name, timer);
-    };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Error polling device ${deviceConfig.name}: ${errorMessage}`);
+      
+      const pollTime = Date.now() - startTime;
 
-    // Start first poll immediately
-    setTimeout(pollDevice, 100);
+      // Update device status
+      const status = this.deviceStatuses.get(deviceConfig.name)!;
+      status.connected = false;
+      status.errorCount++;
+      status.lastError = errorMessage;
+      
+      // Extract quality code for metrics and data points
+      const qualityCode = this.extractQualityCode(errorMessage);
+      
+      // Record failed poll in metrics
+      const metrics = this.deviceMetrics.get(deviceConfig.name);
+      if (metrics) {
+        metrics.recordPoll(pollTime, false, 0);
+        metrics.recordError(qualityCode, errorMessage);
+      }
+
+      this.emit('device-error', deviceConfig.name, error);
+      
+      // Send BAD quality data points with error code
+      const timestamp = new Date().toISOString();
+      const badDataPoints = deviceConfig.registers.map(register => ({
+        deviceName: deviceConfig.name,
+        metric: register.name,
+        value: null,
+        unit: register.unit || '',
+        timestamp: timestamp,
+        quality: 'BAD' as const,
+        qualityCode: qualityCode
+      }));
+      
+      if (badDataPoints.length > 0) {
+        this.emit('data', badDataPoints);
+      }
+      
+      // Try to reconnect
+      this.scheduleDeviceRetry(deviceConfig);
+    }
   }
 
   /**
@@ -484,17 +639,70 @@ export class ModbusAdapter extends EventEmitter {
   }
 
   /**
-   * Schedule device retry
+   * Schedule device retry with exponential backoff and jitter
+   * 
+   * Benefits:
+   * - Prevents retry storms when many devices fail simultaneously
+   * - Handles persistent failures gracefully with increasing delays
+   * - Adds random jitter to avoid thundering herd problem
+   * - Respects max retry attempts from device config
    */
   private scheduleDeviceRetry(deviceConfig: ModbusDevice): void {
-    const retryDelay = deviceConfig.connection.retryDelay || 5000;
+    // Get current retry attempt (increment for this retry)
+    const currentAttempt = (this.retryAttempts.get(deviceConfig.name) || 0) + 1;
+    this.retryAttempts.set(deviceConfig.name, currentAttempt);
+    
+    // Check if we've exceeded max retry attempts
+    const maxAttempts = deviceConfig.connection.retryAttempts || 3;
+    if (currentAttempt > maxAttempts) {
+      this.logger.warn(
+        `Device ${deviceConfig.name} exceeded max retry attempts (${maxAttempts}). ` +
+        `Will retry on next poll cycle.`
+      );
+      // Don't schedule more retries - global poll loop will handle eventual recovery
+      return;
+    }
+    
+    // Exponential backoff: delay = baseDelay * 2^(attempt-1)
+    const baseDelay = deviceConfig.connection.retryDelay || 5000;
+    const exponentialDelay = baseDelay * Math.pow(2, currentAttempt - 1);
+    
+    // Cap at max delay
+    const cappedDelay = Math.min(exponentialDelay, this.MAX_RETRY_DELAY);
+    
+    // Add random jitter (0-1000ms) to prevent thundering herd
+    const jitter = Math.random() * 1000;
+    const finalDelay = cappedDelay + jitter;
+    
+    this.logger.debug(
+      `Scheduling retry for ${deviceConfig.name}: attempt ${currentAttempt}/${maxAttempts}, ` +
+      `delay ${Math.round(finalDelay)}ms (base: ${baseDelay}ms, backoff: ${Math.round(exponentialDelay)}ms)`
+    );
     
     setTimeout(async () => {
-      if (this.running && deviceConfig.enabled) {
-        this.logger.debug(`Retrying connection to device: ${deviceConfig.name}`);
+      if (!this.running || !deviceConfig.enabled) {
+        this.logger.debug(`Skipping retry for ${deviceConfig.name} (adapter stopped or device disabled)`);
+        return;
+      }
+      
+      this.logger.debug(`Retrying connection to device: ${deviceConfig.name} (attempt ${currentAttempt})`);
+      
+      try {
         await this.cleanupDevice(deviceConfig.name);
         await this.initializeDevice(deviceConfig);
+        
+        // Check if connection succeeded
+        const status = this.deviceStatuses.get(deviceConfig.name);
+        if (status && !status.connected) {
+          // Still failed - scheduleDeviceRetry will be called again from initializeDevice
+          this.logger.debug(`Retry ${currentAttempt} failed for ${deviceConfig.name}`);
+        } else {
+          this.logger.info(`Device ${deviceConfig.name} reconnected successfully after ${currentAttempt} attempts`);
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Error during retry for ${deviceConfig.name}: ${errorMessage}`);
       }
-    }, retryDelay);
+    }, finalDelay);
   }
 }
