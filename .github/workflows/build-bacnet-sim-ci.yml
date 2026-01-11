@@ -132,15 +132,12 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Platforms:** \`linux/amd64,linux/arm64,linux/arm/v7\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platforms:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker Tags:" >> $GITHUB_STEP_SUMMARY
           echo "- \`iotistic/bacnet-simulator:latest\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`iotistic/bacnet-simulator:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`iotistic/bacnet-simulator:${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -167,10 +164,10 @@ jobs:
         if: success()
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./sensors/bacnet-simulator
           file: ./sensors/bacnet-simulator/Dockerfile
           push: true
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          platforms: linux/amd64
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
           tags: |
@@ -248,7 +245,7 @@ jobs:
           echo "## Version Information" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Platforms:** \`linux/amd64, linux/arm64, linux/arm/v7\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platforms:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           echo "## Docker Image" >> $GITHUB_STEP_SUMMARY
