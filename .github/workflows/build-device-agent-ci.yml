@@ -178,93 +178,6 @@ jobs:
     name: Build x86_64
     needs: [version]
     runs-on: [iotistic-lab-sc]
-  #   permissions:
-  #     contents: write
-
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-  #       with:
-  #         ref: master
-
-  #     - name: Display Version Update
-  #       run: |
-  #         echo "## Building Version ${{ needs.version.outputs.package_version }}" >> $GITHUB_STEP_SUMMARY
-  #         echo "" >> $GITHUB_STEP_SUMMARY
-  #         echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
-  #         echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-  #         echo "**Platforms:** \`linux/amd64, linux/arm/v7\`" >> $GITHUB_STEP_SUMMARY
-  #         echo "" >> $GITHUB_STEP_SUMMARY
-  #         echo "### Docker Images:" >> $GITHUB_STEP_SUMMARY
-  #         echo "- [\`iotistic/agent:latest\`](https://hub.docker.com/r/iotistic/agent/tags?name=latest)" >> $GITHUB_STEP_SUMMARY
-  #         echo "- [\`iotistic/agent:${{ needs.version.outputs.sha_short }}\`](https://hub.docker.com/r/iotistic/agent/tags?name=${{ needs.version.outputs.sha_short }})" >> $GITHUB_STEP_SUMMARY
-  #         echo "- [\`iotistic/agent:${{ needs.version.outputs.package_version }}\`](https://hub.docker.com/r/iotistic/agent/tags?name=${{ needs.version.outputs.package_version }})" >> $GITHUB_STEP_SUMMARY
-  #         echo "" >> $GITHUB_STEP_SUMMARY
-  #         echo "### Installation Scripts:" >> $GITHUB_STEP_SUMMARY
-  #         echo "- [install-docker.sh](https://apps.iotistic.ca/agent/install-docker.sh) ([checksum](https://apps.iotistic.ca/agent/install-docker.sh.sha256))" >> $GITHUB_STEP_SUMMARY
-  #         echo "- [install-systemd.sh](https://apps.iotistic.ca/agent/install-systemd.sh) ([checksum](https://apps.iotistic.ca/agent/install-systemd.sh.sha256))" >> $GITHUB_STEP_SUMMARY
-  #         echo "- [install-docker-${{ needs.version.outputs.package_version }}.sh](https://apps.iotistic.ca/agent/versions/install-docker-${{ needs.version.outputs.package_version }}.sh) ([checksum](https://apps.iotistic.ca/agent/versions/install-docker-${{ needs.version.outputs.package_version }}.sh.sha256))" >> $GITHUB_STEP_SUMMARY
-  #         echo "- [install-systemd-${{ needs.version.outputs.package_version }}.sh](https://apps.iotistic.ca/agent/versions/install-systemd-${{ needs.version.outputs.package_version }}.sh) ([checksum](https://apps.iotistic.ca/agent/versions/install-systemd-${{ needs.version.outputs.package_version }}.sh.sha256))" >> $GITHUB_STEP_SUMMARY
-
-  #     - name: Set up QEMU
-  #       uses: docker/setup-qemu-action@v3
-
-  #     - name: Set up Docker Buildx
-  #       uses: docker/setup-buildx-action@v3
-  #       with:
-  #         driver-opts: |
-  #           image=moby/buildkit:buildx-stable-1
-  #           network=host
-
-  #     - name: Cache Docker layers
-  #       uses: actions/cache@v4
-  #       with:
-  #         path: /tmp/.buildx-cache
-  #         key: ${{ runner.os }}-buildx-agent-${{ hashFiles('agent/package-lock.json', 'agent/Dockerfile') }}
-  #         restore-keys: |
-  #           ${{ runner.os }}-buildx-agent-
-
-  #     # Login to Docker Hub (only if tests passed)
-  #     - name: Login to Docker Hub
-  #       if: success()
-  #       uses: docker/login-action@v3
-  #       with:
-  #         username: ${{ secrets.DOCKERHUB_USERNAME }}
-  #         password: ${{ secrets.DOCKERHUB_PASSWORD }}
-
-  #     # Build and push to registry1
-  #     - name: Build & Push final image
-  #       id: docker_build
-  #       if: success()
-  #       uses: docker/build-push-action@v5
-  #       with:
-  #         context: .
-  #         file: ./agent/Dockerfile
-  #         push: true
-          
-  #         platforms: linux/amd64 
-  #         cache-from: |
-  #           type=local,src=/tmp/.buildx-cache
-  #           type=registry,ref=iotistic/agent:buildcache
-  #         cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-  #         tags: |
-  #           iotistic/agent:latest
-  #           iotistic/agent:${{ needs.version.outputs.sha_short }}
-  #           iotistic/agent:${{ needs.version.outputs.package_version }}
-  #         build-args: |
-  #           BUILDKIT_INLINE_CACHE=1
-
-  #     # Move cache to prevent unlimited growthe
-  #     - name: Move cache
-  #       if: always()
-  #       run: |
-  #         rm -rf /tmp/.buildx-cache
-  #         mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
-
-  build-x86:
-    name: Build x86_64
-    needs: [version]
-    runs-on: [iotistic-lab-sc]
     
     steps:
       - name: Checkout repository
@@ -593,148 +506,148 @@ jobs:
   #   name: Test Systemd Installation (x86_64)
   #   needs: [version, build-x86]
   #   runs-on: [iotistic-lab-sc]
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Clean build artifacts and installation directories
-        run: |
-          echo "Cleaning any stale build artifacts from repository..."
-          rm -rf agent/dist
-          rm -rf agent/node_modules
-          
-          echo "Cleaning any previous installations..."
-          sudo rm -rf /opt/iotistic/agent
-          sudo rm -rf /var/lib/iotistic/agent
-          sudo rm -rf /etc/iotistic
-          
-          echo "✓ All artifacts and installations cleaned"
-
-      - name: Make install script executable
-        run: chmod +x agent/bin/install.sh
-
-      - name: Run unified installation script (Systemd method)
-        env:
-          CI: true
-          IOTISTIC_INSTALL_METHOD: systemd
-          IOTISTIC_AGENT_VERSION: ${{ needs.version.outputs.package_version }}
-          IOTISTIC_DEVICE_PORT: 48484
-          CLOUD_API_ENDPOINT: ''
-          PROVISIONING_KEY: ''
-    
-        run: |
-          echo "Testing unified installation script with Systemd method..."
-          sudo -E bash agent/bin/install.sh
-
-      - name: Check systemd service status
-        run: |
-          echo "Checking systemd service status..."
-          sudo systemctl status iotistic-agent --no-pager || true
-          
-          echo ""
-          echo "========================================="
-          echo "Agent Startup Logs (last 100 lines):"
-          echo "========================================="
-          sudo journalctl -u iotistic-agent -n 100 --no-pager
-          
-          echo ""
-          echo "========================================="
-          echo "Agent Environment Variables:"
-          echo "========================================="
-          sudo cat /etc/iotistic/agent.env || echo "No environment file found"
-          
-          if sudo systemctl is-active --quiet iotistic-agent; then
-            echo "✓ Agent service is running"
-          else
-            echo "✗ Agent service is not running"
-            echo ""
-            echo "========================================="
-            echo "Full Error Logs (last 300 lines):"
-            echo "========================================="
-            sudo journalctl -u iotistic-agent -n 300 --no-pager
-            echo ""
-            echo "========================================="
-            echo "Service Status Details:"
-            echo "========================================="
-            sudo systemctl status iotistic-agent --no-pager -l
-            exit 1
-          fi
-
-      - name: Check agent logs
-        run: |
-          echo "Agent Logs (journald):"
-          sudo journalctl -u iotistic-agent -n 100 --no-pager
-          
-          echo ""
-          echo "Checking for errors in logs..."
-          if sudo journalctl -u iotistic-agent -n 100 --no-pager | grep -qi "error"; then
-            echo "⚠ Errors found in logs"
-          else
-            echo "✓ No errors found"
-          fi
-
-      - name: Test agent API
-        run: |
-          echo "Testing agent API..."
-          
-          if curl -f http://localhost:48484/v1/healthy 2>/dev/null || \
-             curl -f http://localhost:48484/ping 2>/dev/null; then
-            echo "✓ Agent API is responding"
-          else
-            echo "⚠ Agent API not responding"
-            sudo journalctl -u iotistic-agent -n 50 --no-pager
-          fi
-
-      - name: Show agent logs
-        if: always()
-        run: |
-          echo "========================================="
-          echo "Agent Logs (journald):"
-          echo "========================================="
-          sudo journalctl -u iotistic-agent -n 200 --no-pager
-
-      - name: Generate systemd test summary
-        if: always()
-        run: |
-          echo "# Agent Systemd Installation Test" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Installation" >> $GITHUB_STEP_SUMMARY
-          echo "- **Location**: \`/opt/iotistic/agent\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **User**: \`iotistic\` (non-root)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Process Manager**: systemd" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Add device configuration if available
-          if [ -n "${{ env.DEVICE_UUID }}" ]; then
-            echo "## Device Configuration" >> $GITHUB_STEP_SUMMARY
-            echo "- **Device UUID**: \`${{ env.DEVICE_UUID }}\`" >> $GITHUB_STEP_SUMMARY
-            echo "- **Device Name**: \`${{ env.DEVICE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
-            echo "- **Device Type**: \`${{ env.DEVICE_TYPE }}\`" >> $GITHUB_STEP_SUMMARY
-            echo "- **Agent Version**: \`${{ env.AGENT_VERSION }}\`" >> $GITHUB_STEP_SUMMARY
-            echo "- **Provisioned**: \`${{ env.PROVISIONED }}\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "<details>" >> $GITHUB_STEP_SUMMARY
-            echo "<summary>Full Device Configuration (JSON)</summary>" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo '```json' >> $GITHUB_STEP_SUMMARY
-            echo '${{ env.DEVICE_CONFIG }}' | jq '.' >> $GITHUB_STEP_SUMMARY || echo '${{ env.DEVICE_CONFIG }}' >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "</details>" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "## Tests Performed" >> $GITHUB_STEP_SUMMARY
-          echo "1. System dependencies installation (SQLite, Docker, etc.)" >> $GITHUB_STEP_SUMMARY
-          echo "2. Agent build and installation" >> $GITHUB_STEP_SUMMARY
-          echo "3. Systemd service configuration and hardening" >> $GITHUB_STEP_SUMMARY
-          echo "4. Journald log limits configuration" >> $GITHUB_STEP_SUMMARY
-          echo "5. Process startup and status check" >> $GITHUB_STEP_SUMMARY
-          echo "6. API health verification" >> $GITHUB_STEP_SUMMARY
-          echo "7. Configuration file permissions verification" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Agent running with systemd validated successfully!" >> $GITHUB_STEP_SUMMARY
+  #   
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Clean build artifacts and installation directories
+  #       run: |
+  #         echo "Cleaning any stale build artifacts from repository..."
+  #         rm -rf agent/dist
+  #         rm -rf agent/node_modules
+  #         
+  #         echo "Cleaning any previous installations..."
+  #         sudo rm -rf /opt/iotistic/agent
+  #         sudo rm -rf /var/lib/iotistic/agent
+  #         sudo rm -rf /etc/iotistic
+  #         
+  #         echo "✓ All artifacts and installations cleaned"
+  #
+  #     - name: Make install script executable
+  #       run: chmod +x agent/bin/install.sh
+  #
+  #     - name: Run unified installation script (Systemd method)
+  #       env:
+  #         CI: true
+  #         IOTISTIC_INSTALL_METHOD: systemd
+  #         IOTISTIC_AGENT_VERSION: ${{ needs.version.outputs.package_version }}
+  #         IOTISTIC_DEVICE_PORT: 48484
+  #         CLOUD_API_ENDPOINT: ''
+  #         PROVISIONING_KEY: ''
+  #   
+  #       run: |
+  #         echo "Testing unified installation script with Systemd method..."
+  #         sudo -E bash agent/bin/install.sh
+  #
+  #     - name: Check systemd service status
+  #       run: |
+  #         echo "Checking systemd service status..."
+  #         sudo systemctl status iotistic-agent --no-pager || true
+  #         
+  #         echo ""
+  #         echo "========================================="
+  #         echo "Agent Startup Logs (last 100 lines):"
+  #         echo "========================================="
+  #         sudo journalctl -u iotistic-agent -n 100 --no-pager
+  #         
+  #         echo ""
+  #         echo "========================================="
+  #         echo "Agent Environment Variables:"
+  #         echo "========================================="
+  #         sudo cat /etc/iotistic/agent.env || echo "No environment file found"
+  #         
+  #         if sudo systemctl is-active --quiet iotistic-agent; then
+  #           echo "✓ Agent service is running"
+  #         else
+  #           echo "✗ Agent service is not running"
+  #           echo ""
+  #           echo "========================================="
+  #           echo "Full Error Logs (last 300 lines):"
+  #           echo "========================================="
+  #           sudo journalctl -u iotistic-agent -n 300 --no-pager
+  #           echo ""
+  #           echo "========================================="
+  #           echo "Service Status Details:"
+  #           echo "========================================="
+  #           sudo systemctl status iotistic-agent --no-pager -l
+  #           exit 1
+  #         fi
+  #
+  #     - name: Check agent logs
+  #       run: |
+  #         echo "Agent Logs (journald):"
+  #         sudo journalctl -u iotistic-agent -n 100 --no-pager
+  #         
+  #         echo ""
+  #         echo "Checking for errors in logs..."
+  #         if sudo journalctl -u iotistic-agent -n 100 --no-pager | grep -qi "error"; then
+  #           echo "⚠ Errors found in logs"
+  #         else
+  #           echo "✓ No errors found"
+  #         fi
+  #
+  #     - name: Test agent API
+  #       run: |
+  #         echo "Testing agent API..."
+  #         
+  #         if curl -f http://localhost:48484/v1/healthy 2>/dev/null || \
+  #            curl -f http://localhost:48484/ping 2>/dev/null; then
+  #           echo "✓ Agent API is responding"
+  #         else
+  #           echo "⚠ Agent API not responding"
+  #           sudo journalctl -u iotistic-agent -n 50 --no-pager
+  #         fi
+  #
+  #     - name: Show agent logs
+  #       if: always()
+  #       run: |
+  #         echo "========================================="
+  #         echo "Agent Logs (journald):"
+  #         echo "========================================="
+  #         sudo journalctl -u iotistic-agent -n 200 --no-pager
+  #
+  #     - name: Generate systemd test summary
+  #       if: always()
+  #       run: |
+  #         echo "# Agent Systemd Installation Test" >> $GITHUB_STEP_SUMMARY
+  #         echo "" >> $GITHUB_STEP_SUMMARY
+  #         echo "## Installation" >> $GITHUB_STEP_SUMMARY
+  #         echo "- **Location**: \`/opt/iotistic/agent\`" >> $GITHUB_STEP_SUMMARY
+  #         echo "- **User**: \`iotistic\` (non-root)" >> $GITHUB_STEP_SUMMARY
+  #         echo "- **Process Manager**: systemd" >> $GITHUB_STEP_SUMMARY
+  #         echo "" >> $GITHUB_STEP_SUMMARY
+  #         
+  #         # Add device configuration if available
+  #         if [ -n "${{ env.DEVICE_UUID }}" ]; then
+  #           echo "## Device Configuration" >> $GITHUB_STEP_SUMMARY
+  #           echo "- **Device UUID**: \`${{ env.DEVICE_UUID }}\`" >> $GITHUB_STEP_SUMMARY
+  #           echo "- **Device Name**: \`${{ env.DEVICE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+  #           echo "- **Device Type**: \`${{ env.DEVICE_TYPE }}\`" >> $GITHUB_STEP_SUMMARY
+  #           echo "- **Agent Version**: \`${{ env.AGENT_VERSION }}\`" >> $GITHUB_STEP_SUMMARY
+  #           echo "- **Provisioned**: \`${{ env.PROVISIONED }}\`" >> $GITHUB_STEP_SUMMARY
+  #           echo "" >> $GITHUB_STEP_SUMMARY
+  #           echo "<details>" >> $GITHUB_STEP_SUMMARY
+  #           echo "<summary>Full Device Configuration (JSON)</summary>" >> $GITHUB_STEP_SUMMARY
+  #           echo "" >> $GITHUB_STEP_SUMMARY
+  #           echo '```json' >> $GITHUB_STEP_SUMMARY
+  #           echo '${{ env.DEVICE_CONFIG }}' | jq '.' >> $GITHUB_STEP_SUMMARY || echo '${{ env.DEVICE_CONFIG }}' >> $GITHUB_STEP_SUMMARY
+  #           echo '```' >> $GITHUB_STEP_SUMMARY
+  #           echo "" >> $GITHUB_STEP_SUMMARY
+  #           echo "</details>" >> $GITHUB_STEP_SUMMARY
+  #           echo "" >> $GITHUB_STEP_SUMMARY
+  #         fi
+  #         
+  #         echo "## Tests Performed" >> $GITHUB_STEP_SUMMARY
+  #         echo "1. System dependencies installation (SQLite, Docker, etc.)" >> $GITHUB_STEP_SUMMARY
+  #         echo "2. Agent build and installation" >> $GITHUB_STEP_SUMMARY
+  #         echo "3. Systemd service configuration and hardening" >> $GITHUB_STEP_SUMMARY
+  #         echo "4. Journald log limits configuration" >> $GITHUB_STEP_SUMMARY
+  #         echo "5. Process startup and status check" >> $GITHUB_STEP_SUMMARY
+  #         echo "6. API health verification" >> $GITHUB_STEP_SUMMARY
+  #         echo "7. Configuration file permissions verification" >> $GITHUB_STEP_SUMMARY
+  #         echo "" >> $GITHUB_STEP_SUMMARY
+  #         echo "Agent running with systemd validated successfully!" >> $GITHUB_STEP_SUMMARY
 
   upload-artifacts:
     name: Upload install scripts to Azure
