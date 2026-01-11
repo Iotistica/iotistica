@@ -55,6 +55,7 @@ from profile_loader import load_profile_data
 # =============================================================================
 ACTIVE_PROFILE = os.environ.get("MODBUS_PROFILE", "Generic")
 profile_data = load_profile_data()
+profile_loaded = False  # Track if profile was successfully loaded
 
 # GUI control state (shared memory, no file IPC needed!)
 REGISTER_OVERRIDES = {}  # {address: {"base": int, "noise_pct": float, "value": int}}
@@ -74,8 +75,12 @@ if ACTIVE_PROFILE not in profile_data:
     if available:
         ACTIVE_PROFILE = available[0]
         logger.warning(f"Defaulting to '{ACTIVE_PROFILE}'")
+        profile_loaded = True
+    else:
+        logger.warning(f"No profiles loaded yet, will retry in background")
 else:
     logger.info(f"✓ Loaded profile '{ACTIVE_PROFILE}'")
+    profile_loaded = True
 
 # =============================================================================
 # SHARED FUNCTIONS
@@ -114,6 +119,49 @@ def build_profile_index(profile_name: str) -> dict:
 for profile in profile_data.keys():
     PROFILE_INDEX[profile] = build_profile_index(profile)
 logger.info(f"Preloaded {len(PROFILE_INDEX)} profile indexes")
+
+# =============================================================================
+# PROFILE AUTO-RELOAD (for K8s environments where API may not be ready at startup)
+# =============================================================================
+def retry_profile_loading():
+    """Background thread to retry loading profiles if initial load failed"""
+    global profile_data, ACTIVE_PROFILE, PROFILE_INDEX, profile_loaded
+    
+    retry_interval = 10  # seconds
+    max_retries = 12  # 2 minutes total
+    
+    for attempt in range(max_retries):
+        if profile_loaded:
+            logger.info("Profile already loaded, stopping retry thread")
+            return
+        
+        time.sleep(retry_interval)
+        logger.info(f"Retrying profile load (attempt {attempt + 1}/{max_retries})...")
+        
+        try:
+            new_profile_data = load_profile_data()
+            if new_profile_data:
+                profile_data.update(new_profile_data)
+                
+                # Set active profile
+                desired_profile = os.environ.get("MODBUS_PROFILE", "Generic")
+                if desired_profile in profile_data:
+                    ACTIVE_PROFILE = desired_profile
+                elif profile_data:
+                    ACTIVE_PROFILE = list(profile_data.keys())[0]
+                    logger.warning(f"Desired profile '{desired_profile}' not found, using '{ACTIVE_PROFILE}'")
+                
+                # Rebuild indexes
+                for profile in profile_data.keys():
+                    PROFILE_INDEX[profile] = build_profile_index(profile)
+                
+                profile_loaded = True
+                logger.info(f"✓ Profile '{ACTIVE_PROFILE}' loaded successfully on retry")
+                return
+        except Exception as e:
+            logger.warning(f"Profile reload attempt {attempt + 1} failed: {e}")
+    
+    logger.error(f"Failed to load profiles after {max_retries} retries")
 
 # =============================================================================
 # MODBUS SERVER COMPONENTS
@@ -1106,6 +1154,12 @@ def get_status():
 def main():
     """Start unified simulator"""
     transport = os.environ.get("TRANSPORT", "tcp").lower()
+    
+    # Start profile retry thread if initial load failed
+    if not profile_loaded:
+        logger.info("Starting background profile loader...")
+        profile_retry_thread = threading.Thread(target=retry_profile_loading, daemon=True)
+        profile_retry_thread.start()
     
     # Start Modbus server in background thread
     modbus_thread = threading.Thread(target=run_modbus_server, daemon=True)
