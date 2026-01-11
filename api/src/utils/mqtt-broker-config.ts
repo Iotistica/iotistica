@@ -143,25 +143,8 @@ export async function getBrokerConfigForDevice(deviceUuid: string): Promise<Mqtt
  */
 export async function getBrokerConfigForExternalDevice(deviceUuid: string): Promise<MqttBrokerConfig | null> {
   try {
-    // Priority 1: Environment override with external host
-    const envHost = process.env.MQTT_BROKER_HOST;
-    const envPort = process.env.MQTT_BROKER_PORT;
-    const envProtocol = process.env.MQTT_BROKER_PROTOCOL;
-    const externalHost = process.env.MQTT_BROKER_EXTERNAL_HOST;
-    const externalPort = process.env.MQTT_BROKER_EXTERNAL_PORT;
-    
-    if (envHost && envPort && envProtocol) {
-      console.log(`[MQTT Config] Environment override for external device ${deviceUuid}:`, {
-        protocol: envProtocol,
-        host: externalHost || envHost,
-        port: externalPort || envPort,
-        use_tls: process.env.MQTT_BROKER_USE_TLS === 'true'
-      });
-      
-      return createConfigFromEnvExternal();
-    }
-    
-    // Priority 2: Environment broker type preference (local vs cloud)
+    // Priority 1: Environment broker type preference (local vs cloud)
+    // Removed full environment override - always use database for provisioning
     const preferredBrokerType = process.env.MQTT_BROKER_TYPE;
     
     if (preferredBrokerType) {
