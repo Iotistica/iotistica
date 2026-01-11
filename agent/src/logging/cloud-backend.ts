@@ -728,8 +728,7 @@ export class CloudLogBackend implements LogBackend {
 		
 		// Compression disabled: Envoy Gateway auto-decompresses and corrupts payloads
 		// Only compress if payload is large enough to benefit (CPU > bandwidth on edge devices)
-		// const shouldCompress = this.config.compression && ndjson.length > 2048;
-		const shouldCompress = false;  // DISABLED: Envoy strips Content-Encoding, causing decompression failures
+		const shouldCompress = this.config.compression && ndjson.length > 2048;
 		
 		// Send to cloud using HTTP client with batch ID header for idempotency
 		// CRITICAL: Add X-Device-API-Key per-request (shared client doesn't have it in defaultHeaders)
