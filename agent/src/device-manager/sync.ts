@@ -1299,12 +1299,12 @@ export class CloudSync extends EventEmitter {
 		// Get fresh API key from device manager
 		const apiKey = deviceInfo.deviceApiKey;
 		
-		// Use httpClient.patch() with compression
+		// Use httpClient.patch() WITHOUT compression (Envoy Gateway auto-decompresses and corrupts body)
 		const response = await this.httpClient.patch(endpoint, report, {
 			headers: {
 				'X-Device-API-Key': apiKey || '',
 			},
-			compress: true
+			compress: false  // Disabled: Envoy strips Content-Encoding, causing body corruption
 		});
 		
 		if (!response.ok) {

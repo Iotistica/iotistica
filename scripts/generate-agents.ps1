@@ -37,8 +37,7 @@ param(
     [string]$OutputFile = "docker-compose.agents.yml",
     #[string]$ApiUrl = "http://23.233.80.107:30002",
     #[string]$ApiUrl = "https://localhost:3443",
-    #[string]$ApiUrl = "https://localhost:3443",
-    [string]$ApiUrl = "https://api1.iotistica.com:443",
+    [string]$ApiUrl = "https://localhost:3443",
     [string]$FleetId = "default-fleet",
     
     # Cleanup Mode
@@ -57,8 +56,7 @@ param(
     [string]$NodeEnv = "development",
     #[string]$CLOUD_API_ENDPOINT = "http://23.233.80.107:30002",
     #[string]$CLOUD_API_ENDPOINT = "https://api:3443",
-    #[string]$CLOUD_API_ENDPOINT = "https://api:3443",
-    [string]$CLOUD_API_ENDPOINT ="https://api1.iotistica.com:443",
+    [string]$CLOUD_API_ENDPOINT = "https://api:3443",
     [int]$ReportInterval = 20000,
     [int]$MetricsInterval = 30000,
     [string]$LogCompression = "true",

@@ -176,7 +176,7 @@ jobs:
 
   build-x86:
     name: Build x86_64
-    needs: [version]
+    needs: [version, buildx]
     runs-on: [iotistic-lab-sc]
     
     steps:
@@ -286,7 +286,7 @@ jobs:
 
   build-arm64:
     name: Build ARM64
-    needs: [version]
+    needs: [version, buildx]
     runs-on: ubuntu-latest
     
     steps:
