@@ -12,7 +12,7 @@ RUN apt-get update && \
 RUN pip install --no-cache-dir bacpypes3==0.0.91
 
 # Copy simulator script
-COPY bacnet_simulator.py .
+COPY sensors/bacnet-simulator/bacnet_simulator.py .
 
 # Expose BACnet port (UDP 47808)
 EXPOSE 47808/udp
