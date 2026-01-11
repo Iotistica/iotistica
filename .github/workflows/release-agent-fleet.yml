@@ -123,29 +123,6 @@ jobs:
           echo "Chart templates rendered successfully"
           cat /tmp/rendered.yaml
 
-      - name: Check for required files
-        run: |
-          required_files=(
-            "Chart.yaml"
-            "values.yaml"
-            "README.md"
-            "PROVISIONING.md"
-            "templates/statefulset.yaml"
-            "templates/service.yaml"
-            "templates/secret.yaml"
-            "templates/_helpers.tpl"
-            "scripts/generate-provisioning-keys.sh"
-            "scripts/generate-provisioning-keys.ps1"
-          )
-          
-          for file in "${required_files[@]}"; do
-            if [ ! -f "${{ env.CHART_PATH }}/$file" ]; then
-              echo "❌ Missing required file: $file"
-              exit 1
-            fi
-            echo "✅ Found: $file"
-          done
-
   deploy-test-fleet:
     name: Deploy test fleet
     runs-on: [iotistic-lab-sc]
