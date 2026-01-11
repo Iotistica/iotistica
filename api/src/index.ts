@@ -8,6 +8,7 @@ import https from 'https';
 import helmet from 'helmet';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { createBrotliDecompress } from 'zlib';
+import { brotliDecompressionMiddleware } from './middleware/brotli-decompression';
 import logger from './utils/logger';
 
 // Import route modules
@@ -194,23 +195,18 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false
 }));
 
-/**
- * Decompression middleware - DISABLED
- * Envoy Gateway handles decompression before requests reach the API
- * API receives already-decompressed payloads
- */
-// Brotli middleware disabled - Envoy handles this
-// app.use((req, res, next) => { ... });
+// Brotli decompression middleware
+app.use(brotliDecompressionMiddleware);
 
-// Support request bodies (no decompression - Envoy handles it)
+// Support compressed (gzip/deflate) request bodies
 app.use(express.json({ 
-  limit: '100mb',
-  inflate: false  // Envoy already decompressed
+  limit: '100mb',  // Large limit for decompressed logs (10MB compressed → 40-60MB decompressed)
+  inflate: true  // Automatically decompress gzip/deflate
 }));
 app.use(express.urlencoded({ 
-  limit: '100mb',
+  limit: '100mb',  // Large limit for decompressed logs
   extended: true,
-  inflate: false  // Envoy already decompressed
+  inflate: true  // Automatically decompress gzip/deflate
 }));
 
 app.use(trafficLogger);

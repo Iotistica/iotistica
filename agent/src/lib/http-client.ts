@@ -267,20 +267,10 @@ export class FetchHttpClient implements HttpClient {
 			let compressed: Buffer;
 			let encoding: string;
 			
-			// Use Brotli for large payloads (better compression ratio)
-			if (uncompressedBytes >= 10 * 1024) {
-				const brotliAsync = promisify(brotliCompress);
-				compressed = await brotliAsync(bodyString);
-				encoding = 'br';
-			} else {
-				// Use gzip for medium payloads (faster)
-				const gzipAsync = promisify(gzip);
-				compressed = await gzipAsync(bodyString);
-				encoding = 'gzip';
-			}
-			
-			const compressedBytes = compressed.length;
-			
+		// Always use gzip (Envoy Gateway doesn't properly handle Brotli Content-Encoding)
+		const gzipAsync = promisify(gzip);
+		compressed = await gzipAsync(bodyString);
+		encoding = 'gzip';
 			// Calculate compression stats
 			const savings = uncompressedBytes - compressedBytes;
 			const compressionRatio = uncompressedBytes > 0 
