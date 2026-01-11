@@ -31,7 +31,6 @@ import {
 } from '../utils/audit-logger';
 import { EventPublisher } from './event-sourcing';
 import {
-  getBrokerConfigForDevice,
   getBrokerConfigForExternalDevice,
   buildBrokerUrl,
   formatBrokerConfigForClient

@@ -143,34 +143,24 @@ export async function getBrokerConfigForDevice(deviceUuid: string): Promise<Mqtt
  */
 export async function getBrokerConfigForExternalDevice(deviceUuid: string): Promise<MqttBrokerConfig | null> {
   try {
-    // Priority 1: Environment broker type preference (local vs cloud)
-    // Removed full environment override - always use database for provisioning
-    const preferredBrokerType = process.env.MQTT_BROKER_TYPE;
+    // Database-only provisioning - use default broker only
+    const result = await query(
+      `SELECT * FROM mqtt_broker_config 
+       WHERE is_default = true
+       LIMIT 1`
+    );
     
-    if (preferredBrokerType) {
-      const typeResult = await query(
-        `SELECT * FROM mqtt_broker_config 
-         WHERE broker_type = $1 AND is_active = true 
-         ORDER BY is_default DESC, id ASC
-         LIMIT 1`,
-        [preferredBrokerType]
-      );
-      
-      if (typeResult.rows.length > 0) {
-        console.log(`[MQTT Config] Using ${preferredBrokerType} broker for external device ${deviceUuid}:`, {
-          name: typeResult.rows[0].name,
-          protocol: typeResult.rows[0].protocol,
-          host: typeResult.rows[0].host,
-          port: typeResult.rows[0].port
-        });
-        return typeResult.rows[0];
-      } else {
-        console.log(`[MQTT Config] No ${preferredBrokerType} broker found, falling back to default`);
-      }
+    if (result.rows.length > 0) {
+      console.log(`[MQTT Config] Using default broker for external device ${deviceUuid}:`, {
+        name: result.rows[0].name,
+        host: result.rows[0].host,
+        port: result.rows[0].port
+      });
+      return result.rows[0];
     }
     
-    // Priority 3 & 4: Fall back to device-specific or default broker
-    return getBrokerConfigForDevice(deviceUuid);
+    console.log(`[MQTT Config] No default broker found for external device ${deviceUuid}`);
+    return null;
   } catch (error) {
     console.error(`[MQTT Config] Error fetching external broker config for device ${deviceUuid}:`, error);
     return null;
