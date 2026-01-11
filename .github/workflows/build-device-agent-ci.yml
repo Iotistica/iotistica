@@ -106,7 +106,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Platforms:** \`linux/amd64, linux/arm/v7\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platforms:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker Images:" >> $GITHUB_STEP_SUMMARY
           echo "- [\`iotistic/agent:latest\`](https://hub.docker.com/r/iotistic/agent/tags?name=latest)" >> $GITHUB_STEP_SUMMARY
@@ -118,9 +118,6 @@ jobs:
           echo "- [install-systemd.sh](https://apps.iotistic.ca/agent/install-systemd.sh) ([checksum](https://apps.iotistic.ca/agent/install-systemd.sh.sha256))" >> $GITHUB_STEP_SUMMARY
           echo "- [install-docker-${{ needs.version.outputs.package_version }}.sh](https://apps.iotistic.ca/agent/versions/install-docker-${{ needs.version.outputs.package_version }}.sh) ([checksum](https://apps.iotistic.ca/agent/versions/install-docker-${{ needs.version.outputs.package_version }}.sh.sha256))" >> $GITHUB_STEP_SUMMARY
           echo "- [install-systemd-${{ needs.version.outputs.package_version }}.sh](https://apps.iotistic.ca/agent/versions/install-systemd-${{ needs.version.outputs.package_version }}.sh) ([checksum](https://apps.iotistic.ca/agent/versions/install-systemd-${{ needs.version.outputs.package_version }}.sh.sha256))" >> $GITHUB_STEP_SUMMARY
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -137,24 +134,21 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-agent-
 
-      # Login to Docker Hub (only if tests passed)
+      # Login to Docker Hub
       - name: Login to Docker Hub
-        if: success()
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Build and push to registry1
+      # Build and push to registry
       - name: Build & Push final image
         id: docker_build
-        if: success()
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./agent/Dockerfile
           push: true
-          
           platforms: linux/amd64
           cache-from: |
             type=local,src=/tmp/.buildx-cache
