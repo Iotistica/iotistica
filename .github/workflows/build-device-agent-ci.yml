@@ -155,7 +155,7 @@ jobs:
           file: ./agent/Dockerfile
           push: true
           
-          platforms: linux/amd64 
+          platforms: linux/amd64,linux/arm64
           cache-from: |
             type=local,src=/tmp/.buildx-cache
             type=registry,ref=iotistic/agent:buildcache
@@ -651,7 +651,7 @@ jobs:
 
   upload-artifacts:
     name: Upload install scripts to Azure
-    needs: [version]
+    needs: [version, buildx, build-x86, build-arm64]
     runs-on: ubuntu-latest
     if: success()
     
