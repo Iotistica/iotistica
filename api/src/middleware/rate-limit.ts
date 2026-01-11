@@ -7,7 +7,7 @@
  * 3. Per-device rate limiting (prevents one misbehaving device from blocking others)
  */
 
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import type { Request, Response } from 'express';
 import logger from '../utils/logger';
 
@@ -30,7 +30,8 @@ function tokenBasedKeyGenerator(req: Request): string {
   }
   
   // Fallback: IP address (for unauthenticated requests)
-  return `ip:${req.ip}`;
+  // Use ipKeyGenerator helper for IPv6 compatibility
+  return `ip:${ipKeyGenerator(req.ip || '')}`;
 }
 
 /**
@@ -85,7 +86,7 @@ export const authRateLimit = rateLimit({
   max: 10, // 10 requests per minute
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => `auth:${req.ip}`, // Always use IP for auth endpoints
+  keyGenerator: (req) => `auth:${ipKeyGenerator(req.ip || '')}`, // Always use IP for auth endpoints, IPv6-safe
   handler: rateLimitHandler,
   skipSuccessfulRequests: true // Only count failed auth attempts
 });
@@ -131,6 +132,6 @@ export const publicRateLimit = rateLimit({
   max: 50, // 50 requests per minute
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => `public:${req.ip}`, // IP-based for public routes
+  keyGenerator: (req) => `public:${ipKeyGenerator(req.ip || '')}`, // IP-based for public routes, IPv6-safe
   handler: rateLimitHandler
 });

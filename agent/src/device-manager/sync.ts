@@ -1304,7 +1304,7 @@ export class CloudSync extends EventEmitter {
 			headers: {
 				'X-Device-API-Key': apiKey || '',
 			},
-			compress: false  // Disabled: Envoy strips Content-Encoding, causing body corruption
+			compress: true  // Disabled: Envoy strips Content-Encoding, causing body corruption
 		});
 		
 		if (!response.ok) {
