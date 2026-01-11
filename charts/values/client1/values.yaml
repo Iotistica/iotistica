@@ -80,7 +80,7 @@ mqttBroker:
   # Local broker configuration (uses Mosquitto deployment)
   local:
     # Internal service connection
-    protocol: mqtt1
+    protocol: mqtt
     host: "{{ include \"iotistic.fullname\" . }}-mosquitto"
     port: 1883
     useTls: false
