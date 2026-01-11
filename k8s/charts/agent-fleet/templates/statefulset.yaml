@@ -224,6 +224,9 @@ spec:
             # Override port for each instance
             - name: MODBUS_TCP_PORT
               value: {{ add 502 $idx | quote }}
+            # Unique GUI port for Flask (5000, 5001, 5002, etc.)
+            - name: GUI_PORT
+              value: {{ add 5000 $idx | quote }}
           resources:
             {{- toYaml $.Values.simulator.resources | nindent 12 }}
           # Liveness probe disabled - may generate errors when agent queries undefined addresses
