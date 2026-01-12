@@ -227,6 +227,9 @@ spec:
             # Unique GUI port for Flask (5000, 5001, 5002, etc.)
             - name: GUI_PORT
               value: {{ add 5000 $idx | quote }}
+            # API endpoint for profile loading (fully qualified K8s service name)
+            - name: MODBUS_API_URL
+              value: {{ $.Values.fleet.cloudApiEndpoint | quote }}
           resources:
             {{- toYaml $.Values.simulator.resources | nindent 12 }}
           # Liveness probe disabled - may generate errors when agent queries undefined addresses
