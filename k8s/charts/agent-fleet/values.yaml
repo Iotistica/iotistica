@@ -70,7 +70,14 @@ agent:
     # Logging
     LOG_LEVEL: "info"
     LOG_COMPRESSION: "true"
+    LOG_COMPRESSION_FORMAT: "deflate"  # gzip, deflate, or msgpack
+    LOG_COMPRESSION_LEVEL: "6"         # 1-9, higher = better compression
     LOG_FILE_PERSISTENCE: "false"    # Disable file logging in K8s
+    
+    # Experimental POC features
+    USE_MSGPACK_POC: "true"            # MessagePack compression POC
+    USE_DEFLATE_COMPRESSION: "true"    # Deflate compression POC
+    USE_KEY_COMPACTION_POC: "false"    # Key compaction POC (disabled)
     
     # Performance
     MEMORY_CHECK_INTERVAL_MS: "30000"

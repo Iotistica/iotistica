@@ -35,7 +35,7 @@ redis:
     repository: redis
     tag: "7-alpine"
   port: 6379
-  maxMemory: 256mb
+  maxMemory: 512mb
   maxMemoryPolicy: volatile-lru
   persistence:
     enabled: true
@@ -45,10 +45,10 @@ redis:
   resources:
     requests:
       cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 200m
       memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
 
 # Mosquitto MQTT broker
 mosquitto:
