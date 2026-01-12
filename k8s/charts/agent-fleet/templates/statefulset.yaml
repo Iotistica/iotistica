@@ -222,7 +222,7 @@ spec:
               value: {{ $value | quote }}
             {{- end }}
             # Override port for each instance
-            - name: MODBUS_TCP_PORT
+            - name: MODBUS_PORT
               value: {{ add 502 $idx | quote }}
             # Unique GUI port for Flask (5000, 5001, 5002, etc.)
             - name: GUI_PORT
