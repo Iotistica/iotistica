@@ -4,6 +4,7 @@ Centralizes API calls for both simulator.py and web_gui.py
 """
 import json
 import urllib.request
+import ssl
 import time
 import os
 import logging
@@ -14,6 +15,13 @@ def load_profile_data():
     """Load profile data points from API (shared by simulator and GUI)"""
     API_URL = os.environ.get("MODBUS_API_URL", "http://api:3002")
     API_TOKEN = os.environ.get("API_TOKEN", "")
+    VERIFY_SSL = os.environ.get("VERIFY_SSL", "false").lower() == "true"
+    
+    # Create SSL context for HTTPS (disable verification for self-signed certs)
+    ssl_context = ssl.create_default_context()
+    if not VERIFY_SSL:
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
     
     # Try API with retries
     max_retries = 3
@@ -27,7 +35,7 @@ def load_profile_data():
                 headers['Authorization'] = f'Bearer {API_TOKEN}'
             
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=5) as response:
+            with urllib.request.urlopen(req, timeout=5, context=ssl_context) as response:
                 profile_data = json.loads(response.read().decode())
                 logger.info(f"✓ Loaded profile data from API ({len(profile_data)} profiles)")
                 return profile_data
