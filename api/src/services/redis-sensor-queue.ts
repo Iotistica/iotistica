@@ -16,6 +16,8 @@ import { logger } from '../utils/logger';
 import { ReadingsService, ReadingInsert } from './readings.service';
 import { promisify } from 'util';
 import { brotliDecompress, gunzip, inflate } from 'zlib';
+import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * Prometheus metrics for observability
@@ -72,6 +74,92 @@ class SensorQueueMetrics {
 
 const metrics = new SensorQueueMetrics();
 
+/**
+ * Circuit breaker states for Redis connection
+ */
+enum CircuitState {
+  CLOSED = 'CLOSED',     // Normal operation
+  OPEN = 'OPEN',         // Redis unhealthy, using fallback
+  HALF_OPEN = 'HALF_OPEN' // Probing recovery
+}
+
+class RedisCircuitBreaker {
+  private state: CircuitState = CircuitState.CLOSED;
+  private failureCount = 0;
+  private successCount = 0;
+  private lastFailureTime = 0;
+  private readonly failureThreshold = 5;      // Open circuit after 5 consecutive failures
+  private readonly successThreshold = 3;      // Close circuit after 3 consecutive successes
+  private readonly timeoutMs = 30000;         // Try recovery after 30s
+  
+  recordSuccess(): void {
+    this.failureCount = 0;
+    
+    if (this.state === CircuitState.HALF_OPEN) {
+      this.successCount++;
+      if (this.successCount >= this.successThreshold) {
+        logger.info('Redis circuit breaker CLOSED - connection recovered', {
+          previousState: this.state,
+          successCount: this.successCount
+        });
+        this.state = CircuitState.CLOSED;
+        this.successCount = 0;
+      }
+    }
+  }
+  
+  recordFailure(): void {
+    this.successCount = 0;
+    this.failureCount++;
+    this.lastFailureTime = Date.now();
+    
+    if (this.state === CircuitState.CLOSED && this.failureCount >= this.failureThreshold) {
+      logger.error('Redis circuit breaker OPEN - switching to disk spool fallback', {
+        failureCount: this.failureCount,
+        threshold: this.failureThreshold
+      });
+      this.state = CircuitState.OPEN;
+    } else if (this.state === CircuitState.HALF_OPEN) {
+      logger.warn('Redis circuit breaker OPEN again - recovery failed', {
+        previousState: this.state
+      });
+      this.state = CircuitState.OPEN;
+    }
+  }
+  
+  shouldAllowRequest(): boolean {
+    if (this.state === CircuitState.CLOSED) {
+      return true;
+    }
+    
+    if (this.state === CircuitState.OPEN) {
+      // Check if timeout elapsed - try recovery
+      if (Date.now() - this.lastFailureTime >= this.timeoutMs) {
+        logger.info('Redis circuit breaker HALF_OPEN - probing recovery');
+        this.state = CircuitState.HALF_OPEN;
+        this.failureCount = 0;
+        return true;
+      }
+      return false; // Stay open
+    }
+    
+    // HALF_OPEN: allow requests to probe recovery
+    return true;
+  }
+  
+  getState(): CircuitState {
+    return this.state;
+  }
+  
+  reset(): void {
+    this.state = CircuitState.CLOSED;
+    this.failureCount = 0;
+    this.successCount = 0;
+  }
+}
+
+const circuitBreaker = new RedisCircuitBreaker();
+
 interface SensorDataEntry {
   deviceUuid: string;
   sensorName: string;
@@ -100,7 +188,8 @@ class RedisSensorQueue {
   private redisConsumer: Redis;  // Read-only: XREADGROUP, XACK, XAUTOCLAIM, XINFO
   private consumerGroup = 'sensor-writers';
   private consumerName: string;
-  private streamKey = 'device:sensors';
+  private streamKey = 'device:sensors:ingestion';  // Short-lived ingestion queue
+  private processingStreamKey = 'device:sensors:ready';  // Processing queue
   private dlqStreamKey = 'device:sensors:dlq';
   private maxRetries: number;
   private isRunning = false;
@@ -108,6 +197,8 @@ class RedisSensorQueue {
   private batchSize: number;
   private blockTimeMs: number;
   private maxStreamLength: number;
+  private maxDlqLength: number;
+  private maxProcessingStreamLength: number;
   private readingsService: ReadingsService;
   
   // Pipeline batching for multiple rapid XADDs
@@ -115,6 +206,15 @@ class RedisSensorQueue {
   private pipelineCount = 0;
   private readonly pipelineBatchSize = 10; // Flush after 10 XADDs
   private pipelineFlushTimer: NodeJS.Timeout | null = null;
+  
+  // Disk spool fallback (bounded, rotating files)
+  private diskSpoolEnabled: boolean;
+  private diskSpoolPath: string;
+  private diskSpoolMaxSizeMb: number;
+  private diskSpoolCurrentFile: string | null = null;
+  private diskSpoolCurrentSize = 0;
+  private diskSpoolFileIndex = 0;
+  private diskSpoolReplayInterval: NodeJS.Timeout | null = null;
 
   constructor() {
     // Separate ingestion connection (write-optimized, fail-fast)
@@ -152,10 +252,23 @@ class RedisSensorQueue {
     this.maxRetries = parseInt(process.env.SENSOR_MAX_RETRIES || '3', 10);
     this.batchSize = parseInt(process.env.SENSOR_BATCH_SIZE || '100', 10);
     this.blockTimeMs = parseInt(process.env.SENSOR_FLUSH_INTERVAL_MS || '2000', 10);
-    // Stream retention: ~1M messages = ~2-4h of data at 100-200 msg/s ingestion rate
-    // Provides buffer for DB outages while preventing OOM
-    this.maxStreamLength = parseInt(process.env.REDIS_STREAM_MAXLEN || '1000000', 10);
+    // Ingestion stream: Short-lived (10k messages = ~5-10 min at high volume)
+    // Aggressively trimmed to prevent memory buildup
+    this.maxStreamLength = parseInt(process.env.REDIS_INGESTION_STREAM_MAXLEN || '10000', 10);
+    // Processing stream: Larger buffer for DB outages (100k messages)
+    this.maxProcessingStreamLength = parseInt(process.env.REDIS_PROCESSING_STREAM_MAXLEN || '100000', 10);
+    // DLQ: Bounded to prevent infinite growth (1k failed messages)
+    this.maxDlqLength = parseInt(process.env.REDIS_DLQ_MAXLEN || '1000', 10);
     this.readingsService = new ReadingsService();
+    
+    // Disk spool configuration (bounded fallback when Redis down)
+    this.diskSpoolEnabled = process.env.DISK_SPOOL_ENABLED === 'true';
+    this.diskSpoolPath = process.env.DISK_SPOOL_PATH || '/tmp/iotistic-spool';
+    this.diskSpoolMaxSizeMb = parseInt(process.env.DISK_SPOOL_MAX_SIZE_MB || '1000', 10); // 1GB default
+    
+    if (this.diskSpoolEnabled) {
+      this.initializeDiskSpool();
+    }
 
     this.redisIngestion.on('error', (err) => {
       logger.error('Redis sensor ingestion connection error', { error: err.message });
@@ -187,16 +300,18 @@ class RedisSensorQueue {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        // Create consumer group (fails if already exists, that's ok)
+        // Create consumer groups for both streams
         await this.redisConsumer.xgroup('CREATE', this.streamKey, this.consumerGroup, '0', 'MKSTREAM');
-        logger.info('Created Redis consumer group for sensors', {
-          stream: this.streamKey,
+        await this.redisConsumer.xgroup('CREATE', this.processingStreamKey, this.consumerGroup, '0', 'MKSTREAM');
+        logger.info('Created Redis consumer groups for sensors', {
+          ingestionStream: this.streamKey,
+          processingStream: this.processingStreamKey,
           group: this.consumerGroup
         });
         return; // Success
       } catch (err: any) {
         if (err.message.includes('BUSYGROUP')) {
-          logger.info('Redis consumer group already exists', { group: this.consumerGroup });
+          logger.info('Redis consumer groups already exist', { group: this.consumerGroup });
           return; // Already exists, success
         }
         
@@ -237,6 +352,12 @@ class RedisSensorQueue {
         return; // Graceful degradation: drop data instead of crashing
       }
 
+      // TIER-2 OPTIMIZATION: Store payload metadata only, not raw data
+      // Payload is already written to disk spool by agent/API before MQTT publish
+      // Redis becomes control plane (metadata) not data plane (payloads)
+      const payloadPointer = `${entry.deviceUuid}/${entry.batchId}`;
+      const payloadSize = entry.compressedPayload.length;
+
       // Add to pipeline for batching (reduces network round trips)
       this.addToPipeline(() => {
         const pipeline = this.pendingPipeline || this.redisIngestion.pipeline();
@@ -252,11 +373,12 @@ class RedisSensorQueue {
           'batchId', entry.batchId,
           'encoding', entry.contentEncoding,
           'contentType', entry.contentType,
-          'payload', entry.compressedPayload // Raw buffer (no encoding!)
+          'payloadPointer', payloadPointer,  // Pointer instead of raw data
+          'payloadSize', payloadSize.toString()
         );
         return pipeline;
       }).catch(err => {
-        logger.error('Failed to queue compressed sensor data to Redis (async)', {
+        logger.error('Failed to queue compressed sensor metadata to Redis (async)', {
           deviceUuid: entry.deviceUuid.substring(0, 8),
           sensorName: entry.sensorName,
           batchId: entry.batchId,
@@ -265,16 +387,17 @@ class RedisSensorQueue {
         });
       });
 
-      logger.info('Queued compressed sensor payload (pipelined, binary)', {
+      logger.info('Queued compressed sensor metadata (pointer-based)', {
         deviceUuid: entry.deviceUuid.substring(0, 8),
         sensorName: entry.sensorName,
         batchId: entry.batchId,
-        payloadBytes: entry.compressedPayload.length,
+        payloadBytes: payloadSize,
         encoding: entry.contentEncoding,
-        pipelineDepth: this.pipelineCount
+        pipelineDepth: this.pipelineCount,
+        pointer: payloadPointer
       });
     } catch (err: any) {
-      logger.error('Failed to queue compressed sensor data to Redis', {
+      logger.error('Failed to queue compressed sensor metadata to Redis', {
         deviceUuid: entry.deviceUuid.substring(0, 8),
         sensorName: entry.sensorName,
         batchId: entry.batchId,
@@ -308,15 +431,44 @@ class RedisSensorQueue {
     try {
       const startTime = Date.now();
 
-      // Check Redis connection before attempting write
+      // Circuit breaker: Check if Redis is healthy
+      if (!circuitBreaker.shouldAllowRequest()) {
+        // Circuit OPEN - use disk spool fallback
+        if (this.diskSpoolEnabled) {
+          await this.spoolToDisk(sensorData);
+          logger.warn('Redis circuit OPEN - spooled to disk', {
+            count: sensorData.length,
+            circuitState: circuitBreaker.getState()
+          });
+        } else {
+          metrics.messagesDropped += sensorData.length;
+          logger.error('Redis circuit OPEN and disk spool disabled - data dropped', {
+            count: sensorData.length,
+            totalDropped: metrics.messagesDropped,
+            hint: 'Set DISK_SPOOL_ENABLED=true to enable fallback'
+          });
+        }
+        return;
+      }
+      
+      // Check Redis connection status
       if (this.redisIngestion.status !== 'ready' && this.redisIngestion.status !== 'connect') {
-        metrics.messagesDropped += sensorData.length;
-        logger.warn('Redis ingestion not ready, dropping sensor data', {
-          status: this.redisIngestion.status,
-          count: sensorData.length,
-          totalDropped: metrics.messagesDropped
-        });
-        return; // Graceful degradation: drop data instead of crashing
+        circuitBreaker.recordFailure();
+        if (this.diskSpoolEnabled) {
+          await this.spoolToDisk(sensorData);
+          logger.warn('Redis not ready - spooled to disk', {
+            status: this.redisIngestion.status,
+            count: sensorData.length
+          });
+        } else {
+          metrics.messagesDropped += sensorData.length;
+          logger.error('Redis not ready and disk spool disabled - data dropped', {
+            status: this.redisIngestion.status,
+            count: sensorData.length,
+            totalDropped: metrics.messagesDropped
+          });
+        }
+        return;
       }
 
       // Store all readings as a single JSON array entry (much faster than per-item pipeline)
@@ -344,6 +496,10 @@ class RedisSensorQueue {
 
       const duration = Date.now() - startTime;
       metrics.recordBatchLatency(duration);
+      
+      // Record success for circuit breaker
+      circuitBreaker.recordSuccess();
+      
       const logPayload = {
         count: sensorData.length,
         payloadBytes: payload.length,
@@ -359,6 +515,7 @@ class RedisSensorQueue {
         logger.info('Added sensor data to Redis stream', logPayload);
       }
     } catch (err: any) {
+      circuitBreaker.recordFailure();
       logger.error('Failed to add sensor data to Redis stream', {
         count: sensorData.length,
         error: err.message,
@@ -368,7 +525,155 @@ class RedisSensorQueue {
     }
   }
 
+  /**Initialize disk spool directory (bounded, rotating files)
+   */
+  private initializeDiskSpool(): void {
+    try {
+      if (!fs.existsSync(this.diskSpoolPath)) {
+        fs.mkdirSync(this.diskSpoolPath, { recursive: true });
+        logger.info('Created disk spool directory', { path: this.diskSpoolPath });
+      }
+      
+      // Start background replayer (drains spool to Redis when healthy)
+      this.startSpoolReplayer();
+      
+      logger.info('Disk spool fallback initialized', {
+        enabled: this.diskSpoolEnabled,
+        path: this.diskSpoolPath,
+        maxSizeMb: this.diskSpoolMaxSizeMb
+      });
+    } catch (err: any) {
+      logger.error('Failed to initialize disk spool', { error: err.message });
+      this.diskSpoolEnabled = false;
+    }
+  }
+  
   /**
+   * Spool sensor data to disk (bounded, rotating files)
+   * Called when Redis circuit is OPEN
+   */
+  private async spoolToDisk(sensorData: SensorDataEntry[]): Promise<void> {
+    try {
+      const payload = JSON.stringify(sensorData);
+      const payloadSize = Buffer.byteLength(payload, 'utf8');
+      
+      // Check total spool size (bounded - prevent disk full)
+      const totalSpoolSize = this.getSpoolTotalSize();
+      if (totalSpoolSize + payloadSize > this.diskSpoolMaxSizeMb * 1024 * 1024) {
+        // Delete oldest spool file to make room
+        this.deleteOldestSpoolFile();
+      }
+      
+      // Rotate file if current file too large (10MB chunks)
+      if (!this.diskSpoolCurrentFile || this.diskSpoolCurrentSize > 10 * 1024 * 1024) {
+        this.diskSpoolFileIndex++;
+        this.diskSpoolCurrentFile = path.join(this.diskSpoolPath, `spool-${this.diskSpoolFileIndex}.ndjson`);
+        this.diskSpoolCurrentSize = 0;
+      }
+      
+      // Append to current spool file (NDJSON format)
+      fs.appendFileSync(this.diskSpoolCurrentFile, payload + '\n');
+      this.diskSpoolCurrentSize += payloadSize;
+      
+      logger.debug('Spooled sensor data to disk', {
+        count: sensorData.length,
+        file: path.basename(this.diskSpoolCurrentFile),
+        sizeBytes: payloadSize,
+        totalSpoolMb: Math.round(totalSpoolSize / 1024 / 1024)
+      });
+    } catch (err: any) {
+      logger.error('Failed to spool to disk - data lost', {
+        count: sensorData.length,
+        error: err.message
+      });
+      metrics.messagesDropped += sensorData.length;
+    }
+  }
+  
+  /**
+   * Get total size of spool directory
+   */
+  private getSpoolTotalSize(): number {
+    try {
+      const files = fs.readdirSync(this.diskSpoolPath);
+      return files.reduce((total, file) => {
+        const stats = fs.statSync(path.join(this.diskSpoolPath, file));
+        return total + stats.size;
+      }, 0);
+    } catch {
+      return 0;
+    }
+  }
+  
+  /**
+   * Delete oldest spool file (LRU eviction)
+   */
+  private deleteOldestSpoolFile(): void {
+    try {
+      const files = fs.readdirSync(this.diskSpoolPath)
+        .filter(f => f.startsWith('spool-'))
+        .sort(); // Lexicographic sort works because of numeric index
+      
+      if (files.length > 0) {
+        const oldestFile = path.join(this.diskSpoolPath, files[0]);
+        fs.unlinkSync(oldestFile);
+        logger.info('Deleted oldest spool file (disk full)', { file: files[0] });
+      }
+    } catch (err: any) {
+      logger.error('Failed to delete oldest spool file', { error: err.message });
+    }
+  }
+  
+  /**
+   * Background replayer: Drain spool to Redis when circuit closed
+   */
+  private startSpoolReplayer(): void {
+    this.diskSpoolReplayInterval = setInterval(async () => {
+      // Only replay when circuit is CLOSED (Redis healthy)
+      if (circuitBreaker.getState() !== CircuitState.CLOSED) {
+        return;
+      }
+      
+      try {
+        const files = fs.readdirSync(this.diskSpoolPath)
+          .filter(f => f.startsWith('spool-'))
+          .sort();
+        
+        if (files.length === 0) return;
+        
+        // Process oldest file first (FIFO)
+        const oldestFile = path.join(this.diskSpoolPath, files[0]);
+        const content = fs.readFileSync(oldestFile, 'utf8');
+        const lines = content.split('\n').filter(l => l.trim());
+        
+        logger.info('Replaying spooled data to Redis', {
+          file: files[0],
+          batches: lines.length,
+          totalSpooledFiles: files.length
+        });
+        
+        // Replay each batch
+        for (const line of lines) {
+          try {
+            const sensorData = JSON.parse(line) as SensorDataEntry[];
+            await this.add(sensorData); // Recursive, but with circuit breaker protection
+          } catch (err: any) {
+            logger.error('Failed to replay spooled batch', { error: err.message });
+          }
+        }
+        
+        // Delete file after successful replay
+        fs.unlinkSync(oldestFile);
+        logger.info('Replayed and deleted spool file', { file: files[0] });
+        
+      } catch (err: any) {
+        logger.error('Spool replay error', { error: err.message });
+      }
+    }, 10000); // Replay every 10 seconds when Redis healthy
+  }
+
+  /**
+   * 
    * Start background worker that consumes and batches sensor data
    */
   async startWorker(): Promise<void> {
@@ -386,6 +691,9 @@ class RedisSensorQueue {
       batchSize: this.batchSize,
       blockTimeMs: this.blockTimeMs
     });
+    
+    // TIER-2: Periodic failure tracking hash pruning (prevent unbounded growth)
+    this.startFailureTrackingPruner();
 
     // Start multiple worker loops for parallel processing
     // Each worker competes for messages via consumer group (load balancing)
@@ -399,6 +707,53 @@ class RedisSensorQueue {
         // Other workers continue running
       });
     }
+  }
+
+  /**
+   * TIER-2: Periodically prune old failure tracking entries
+   * Prevents unbounded hash growth during Redis crashes
+   */
+  private startFailureTrackingPruner(): void {
+    setInterval(async () => {
+      try {
+        // Get all message IDs in failure tracking
+        const allEntries = await this.redisConsumer.hgetall('sensor:failed:attempts');
+        
+        if (!allEntries || Object.keys(allEntries).length === 0) return;
+        
+        const now = Date.now();
+        const maxAgeMs = 24 * 60 * 60 * 1000; // 24 hours
+        let prunedCount = 0;
+        
+        // Check each entry against pending list
+        for (const messageId of Object.keys(allEntries)) {
+          try {
+            // Extract timestamp from Redis Stream message ID (format: timestamp-sequence)
+            const timestamp = parseInt(messageId.split('-')[0], 10);
+            const ageMs = now - timestamp;
+            
+            // Prune if older than max age (likely already processed or lost)
+            if (ageMs > maxAgeMs) {
+              await this.redisConsumer.hdel('sensor:failed:attempts', messageId);
+              prunedCount++;
+            }
+          } catch (err) {
+            // Invalid message ID format - remove it
+            await this.redisConsumer.hdel('sensor:failed:attempts', messageId);
+            prunedCount++;
+          }
+        }
+        
+        if (prunedCount > 0) {
+          logger.info('Pruned old failure tracking entries', {
+            pruned: prunedCount,
+            remaining: Object.keys(allEntries).length - prunedCount
+          });
+        }
+      } catch (err: any) {
+        logger.error('Failed to prune failure tracking hash', { error: err.message });
+      }
+    }, 60 * 60 * 1000); // Run every hour
   }
 
   /**
@@ -529,9 +884,12 @@ class RedisSensorQueue {
    */
   private async moveToDLQ(entry: RedisSensorEntry, error: string, attempts: number): Promise<void> {
     try {
-      // Add to DLQ stream with error context
+      // Add to DLQ stream with error context + MAXLEN to prevent unbounded growth
       await this.redisConsumer.xadd(
         this.dlqStreamKey,
+        'MAXLEN',
+        '~',  // Approximate trimming
+        this.maxDlqLength,  // TIER-2: Bounded DLQ (prevent infinite growth)
         '*',
         'data', JSON.stringify(entry.data),
         'original_id', entry.id,
