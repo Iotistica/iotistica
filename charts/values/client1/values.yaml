@@ -12,20 +12,20 @@ redis:
     repository: redis
     tag: "7-alpine"
   port: 6379
-  maxMemory: 256mb
+  maxMemory: 512mb
   maxMemoryPolicy: volatile-lru
   persistence:
     enabled: true
   storage:
     size: 5Gi
-    storageClass: ""
+    storageClass: "longhorn"
   resources:
     requests:
       cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 200m
       memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 # Mosquitto MQTT broker
 mosquitto:
@@ -51,7 +51,7 @@ mosquitto:
   tlsCertName: mosquitto-client1
   tlsIssuer: selfsigned-issuer
   tlsCommonName: mqtt1.iotistica.com
-  externalHost: "10.27.27.160"  # Set to your K8s node IP
+  externalHost: "mqtt1.iotistica.com"  # Set to your K8s node IP
   resources:
     requests:
       cpu: 100m
