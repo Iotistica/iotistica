@@ -374,6 +374,16 @@ export class DiscoveryService extends EventEmitter {
      
         allDiscovered.push(...discovered);
 
+        // Log warning if enabled protocol found zero devices (helps catch simulator/server issues)
+        if (discovered.length === 0) {
+          this.logger?.warnSync(`${protocol.toUpperCase()} discovery found 0 devices`, {
+            component: LogComponents.discovery,
+            protocol,
+            note: `Check if ${protocol} server/devices are running and reachable`,
+            config: JSON.stringify(pluginOptions)
+          });
+        }
+
         // Phase 2: Validation (optional)
         if (validate && discovered.length > 0) {
           this.logger?.debugSync(`Validating ${discovered.length} ${protocol} devices`, {

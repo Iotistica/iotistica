@@ -212,39 +212,39 @@ app.use(express.urlencoded({
 app.use(trafficLogger);
 
 // Debug: Log ALL requests
-app.use((req, res, next) => {
-  if (req.path.includes('devices') || req.path.includes('device')) {
-    console.log('[DEBUG] Request received:', {
-      method: req.method,
-      path: req.path,
-      url: req.url,
-      originalUrl: req.originalUrl,
-      baseUrl: req.baseUrl,
-      headers: {
-        authorization: req.headers.authorization?.substring(0, 30),
-        'x-device-api-key': req.headers['x-device-api-key']?.toString().substring(0, 30),
-        'content-encoding': req.headers['content-encoding'],
-        'content-type': req.headers['content-type'],
-        'content-length': req.headers['content-length']
-      }
-    });
-  }
+// app.use((req, res, next) => {
+//   if (req.path.includes('devices') || req.path.includes('device')) {
+//     console.log('[DEBUG] Request received:', {
+//       method: req.method,
+//       path: req.path,
+//       url: req.url,
+//       originalUrl: req.originalUrl,
+//       baseUrl: req.baseUrl,
+//       headers: {
+//         authorization: req.headers.authorization?.substring(0, 30),
+//         'x-device-api-key': req.headers['x-device-api-key']?.toString().substring(0, 30),
+//         'content-encoding': req.headers['content-encoding'],
+//         'content-type': req.headers['content-type'],
+//         'content-length': req.headers['content-length']
+//       }
+//     });
+//   }
   
-  // Intercept response to log 401s
-  const originalJson = res.json.bind(res);
-  res.json = function(body: any) {
-    if (res.statusCode === 401) {
-      console.log('[DEBUG] *** 401 RESPONSE ***', {
-        path: req.path,
-        body,
-        stack: new Error().stack?.split('\n').slice(1, 5)
-      });
-    }
-    return originalJson(body);
-  };
+//   // Intercept response to log 401s
+//   const originalJson = res.json.bind(res);
+//   res.json = function(body: any) {
+//     if (res.statusCode === 401) {
+//       console.log('[DEBUG] *** 401 RESPONSE ***', {
+//         path: req.path,
+//         body,
+//         stack: new Error().stack?.split('\n').slice(1, 5)
+//       });
+//     }
+//     return originalJson(body);
+//   };
   
-  next();
-});
+//   next();
+// });
 
 // Request logging with Winston
 app.use((req, res, next) => {

@@ -106,6 +106,14 @@ services:
             - IOTISTIC_LICENSE_KEY=${IOTISTIC_LICENSE_KEY}
             - REDIS_HOST=${REDIS_HOST:-redis}
             - REDIS_PORT=${REDIS_PORT:-6379}
+            # Redis OOM Protection (Tier-1: Circuit breaker + disk spool)
+            - DISK_SPOOL_ENABLED=${DISK_SPOOL_ENABLED:-false}
+            - DISK_SPOOL_PATH=${DISK_SPOOL_PATH:-/var/lib/iotistic/spool}
+            - DISK_SPOOL_MAX_SIZE_MB=${DISK_SPOOL_MAX_SIZE_MB:-1000}
+            # Redis OOM Protection (Tier-2: Stream MAXLEN limits)
+            - REDIS_INGESTION_STREAM_MAXLEN=${REDIS_INGESTION_STREAM_MAXLEN:-10000}
+            - REDIS_PROCESSING_STREAM_MAXLEN=${REDIS_PROCESSING_STREAM_MAXLEN:-100000}
+            - REDIS_DLQ_MAXLEN=${REDIS_DLQ_MAXLEN:-1000}
             - NEO4J_URI=${NEO4J_URI:-bolt://neo4j:7687}
             - NEO4J_USERNAME=${NEO4J_USERNAME:-neo4j}
             - NEO4J_PASSWORD=${NEO4J_PASSWORD:-iotistic123}
@@ -123,6 +131,7 @@ services:
             - "3443:3443"
         volumes:
             - ./certs:/app/certs:ro
+            - iotistic-api-spool:/var/lib/iotistic/spool  # Persistent disk spool for circuit breaker
         healthcheck:
             test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
             interval: 10s
@@ -144,6 +153,8 @@ services:
           # TLS Ports (enabled - self-signed certificates)
           - "${MOSQUITTO_TLS_PORT_EXT:-8883}:8883"    # MQTTS (TLS) - native MQTT
           - "${MOSQUITTO_WSS_PORT_EXT:-9002}:9002"    # WebSocket TLS
+          # Non-TLS port for testing
+          - "${MOSQUITTO_PORT_EXT:-5883}:1883"        # MQTT (non-TLS)
         volumes:
           - ./mosquitto/mosquitto-tls.conf:/etc/mosquitto/mosquitto.conf
           - ./mosquitto/certs:/mosquitto/certs
@@ -620,6 +631,8 @@ volumes:
   iotistic-pg-data:
     driver: local
   iotistic-redis-data:
+    driver: local
+  iotistic-api-spool:
     driver: local
   vpn-config:
     driver: local

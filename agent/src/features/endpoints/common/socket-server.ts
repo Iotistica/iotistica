@@ -348,9 +348,9 @@ export class SocketServer {
   /**
    * Handle new client connection
    * 
-   * Startup jitter: Random 0-10s delay before accepting data from new client
-   * Purpose: Break synchronized startup storms (50 simulators waking simultaneously)
-   * Implementation: Warm-up throttling (drop 9/10 messages for first 10 seconds)
+   * NOTE: Warmup/jitter DISABLED - OPC UA discovery already slow (40s cert creation)
+   * Adding warmup delay would further delay first data publication
+   * Token bucket (Layer 1) provides sufficient burst protection
    */
   private handleClientConnection(socket: net.Socket): void {
     // Prevent IPC DoS: reject connections beyond max client limit
@@ -360,20 +360,18 @@ export class SocketServer {
       return;
     }
 
-    // Two-phase startup protection:
-    // Phase 1: Jitter (0-10s random delay) - breaks synchronization
-    // Phase 2: Warmup (10s fixed) - throttles initial burst
-    const jitterMs = Math.random() * 10_000;
-    const startAcceptAt = Date.now() + jitterMs;
-    (socket as any)._startAcceptAt = startAcceptAt;
-    (socket as any)._warmupUntil = startAcceptAt + this.WARMUP_DURATION_MS;
+    // WARMUP DISABLED: Accept data immediately
+    // Reason: OPC UA discovery takes 40s, warmup would add more delay
+    // Layer 1 token bucket provides burst protection
+    (socket as any)._startAcceptAt = 0; // Accept immediately
+    (socket as any)._warmupUntil = 0; // No warmup phase
     (socket as any)._warmupCounter = 0;
 
     // Per-client rate tracking
     (socket as any)._rateWindow = Date.now();
     (socket as any)._rateCount = 0;
 
-    this.logger.debug(`New IPC client connected (jitter: ${Math.floor(jitterMs / 1000)}s, warmup: ${this.WARMUP_DURATION_MS / 1000}s) at ${this.config.socketPath}`);
+    this.logger.debug(`New IPC client connected (warmup: DISABLED) at ${this.config.socketPath}`);
 
     this.clients.push(socket);
 
