@@ -22,6 +22,16 @@ let mqttManager: MqttManager | null = null;
 export async function initializeMqtt(): Promise<MqttManager | null> {
   const mqttBrokerUrl = process.env.MQTT_BROKER_URL || process.env.MQTT_BROKER;
   
+  logger.info('🔍 MQTT INITIALIZATION STARTING', {
+    MQTT_BROKER_URL: process.env.MQTT_BROKER_URL,
+    MQTT_BROKER: process.env.MQTT_BROKER,
+    resolvedUrl: mqttBrokerUrl,
+    MQTT_CLIENT_ID: process.env.MQTT_CLIENT_ID,
+    MQTT_USERNAME: process.env.MQTT_USERNAME,
+    HOSTNAME: process.env.HOSTNAME,
+    hasPassword: !!process.env.MQTT_PASSWORD
+  });
+  
   if (!mqttBrokerUrl) {
     logger.warn('MQTT broker not configured. Set MQTT_BROKER_URL to enable MQTT features.');
     return null;
