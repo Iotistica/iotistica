@@ -36,6 +36,9 @@ export class SocketServer {
     clientsDroppedRateLimit: 0
   };
 
+  // Backpressure threshold (bytes)
+  private readonly BACKPRESSURE_THRESHOLD_BYTES: number;
+
   constructor(config: SocketOutput, logger: Logger) {
     this.config = config;
     this.logger = logger;
@@ -44,12 +47,17 @@ export class SocketServer {
     this.isWindowsNamedPipe = this.config.socketPath.startsWith('\\\\.\\pipe\\');
 
     // Configure byte-based rate limits from environment
-    // Default: 500 KB/sec refill rate (handles ~500 1KB messages/sec)
+    // Default: 256 KB/sec refill rate (conservative for 30+ devices)
+    // Reduced from 512 KB/sec to prevent OOM with many simultaneous devices
     // Correlates with Redis memory pressure better than message count
-    const envRefillRate = parseInt(process.env.SOCKET_INGRESS_RATE_LIMIT || '512000', 10);
-    this.refillRate = envRefillRate > 0 ? envRefillRate : 512000; // bytes/sec
-    this.maxTokens = this.refillRate * 2; // 2-second burst capacity
+    const envRefillRate = parseInt(process.env.SOCKET_INGRESS_RATE_LIMIT || '262144', 10);
+    this.refillRate = envRefillRate > 0 ? envRefillRate : 262144; // bytes/sec (256 KB/sec)
+    this.maxTokens = this.refillRate * 1.5; // 1.5-second burst capacity (reduced from 2s)
     this.tokens = this.maxTokens;
+
+    // Backpressure threshold: When tokens drop below 25% of max, signal upstream to slow down
+    // This prevents OOM from modbus adapters generating data faster than socket can accept
+    this.BACKPRESSURE_THRESHOLD_BYTES = this.maxTokens * 0.25;
   }
 
   /**
@@ -341,8 +349,19 @@ export class SocketServer {
       activeClients: this.clients.length,
       dropRate: this.stats.messagesAccepted > 0
         ? (this.stats.messagesDroppedRateLimit / this.stats.messagesAccepted * 100).toFixed(2) + '%'
-        : '0%'
+        : '0%',
+      backpressureActive: this.isBackpressureActive()
     };
+  }
+
+  /**
+   * Check if backpressure should be signaled to upstream producers
+   * Returns true when token bucket is below 25% capacity
+   * Upstream adapters should skip polling when this returns true
+   */
+  isBackpressureActive(): boolean {
+    this.refillTokens(); // Ensure tokens are up-to-date
+    return this.tokens < this.BACKPRESSURE_THRESHOLD_BYTES;
   }
 
   /**

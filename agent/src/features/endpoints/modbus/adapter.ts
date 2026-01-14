@@ -29,6 +29,10 @@ export class ModbusAdapter extends EventEmitter {
   private running = false;
   private pollLoopRunning = false;
   
+  // Backpressure tracking
+  private pollsSkippedBackpressure = 0;
+  private lastBackpressureLog = 0;
+  
   // Performance tracking
   private pollHistory: Map<string, boolean[]> = new Map(); // Track last N poll results
   private lastValues: Map<string, Map<string, any>> = new Map(); // Track last register values for change detection
@@ -417,6 +421,30 @@ export class ModbusAdapter extends EventEmitter {
    */
   private async pollDevice(deviceConfig: ModbusDevice): Promise<void> {
     const startTime = Date.now();
+    
+    // BACKPRESSURE CHECK: Skip polling if socket server is overwhelmed
+    // This prevents OOM from generating data faster than it can be consumed
+    const socketServer = (this as any)._socketServer;
+    if (socketServer && typeof socketServer.isBackpressureActive === 'function') {
+      if (socketServer.isBackpressureActive()) {
+        this.pollsSkippedBackpressure++;
+        
+        // Log once per second to avoid spam
+        const now = Date.now();
+        if (now - this.lastBackpressureLog > 1000) {
+          this.logger.warn(
+            `[BACKPRESSURE] Skipping polls - socket server overwhelmed`,
+            {
+              skippedPolls: this.pollsSkippedBackpressure,
+              deviceName: deviceConfig.name,
+              socketStats: socketServer.getStats()
+            }
+          );
+          this.lastBackpressureLog = now;
+        }
+        return; // Skip this poll cycle
+      }
+    }
     
     // Update last poll time
     this.lastPollTimes.set(deviceConfig.name, startTime);

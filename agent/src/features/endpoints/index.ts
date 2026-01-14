@@ -201,6 +201,9 @@ export class SensorsFeature extends BaseFeature {
       // Create Modbus adapter (socket-agnostic)
       const modbusAdapter = new ModbusAdapter(modbusConfig, this.logger);
       this.adapters.set('modbus', modbusAdapter);
+      
+      // Pass socket server reference for backpressure checking
+      (modbusAdapter as any)._socketServer = modbusSocket;
 
       // Wire up event handlers
       modbusAdapter.on('started', () => {
