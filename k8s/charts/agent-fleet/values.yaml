@@ -25,11 +25,11 @@ agent:
   # Resource limits per agent
   resources:
     requests:
-      cpu: 50m
-      memory: 256Mi
-    limits:
-      cpu: 300m
+      cpu: 100m
       memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
   
   # Agent environment variables
   env:
