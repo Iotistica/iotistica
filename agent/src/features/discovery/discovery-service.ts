@@ -573,11 +573,6 @@ export class DiscoveryService extends EventEmitter {
    */
   private isProtocolEnabled(protocol: string): boolean {
     // Default: Save all discovered devices as disabled
-    // This prevents startup OOM when many devices are discovered
-    const saveDisabled = process.env.DISCOVERY_SAVE_DISABLED !== 'false'; // Default: true
-    if (saveDisabled) {
-      return false;
-    }
     
     if (!this.agentConfig) {
       // No config available, default to enabled
@@ -1209,7 +1204,7 @@ export class DiscoveryService extends EventEmitter {
         const deviceSensor: DeviceEndpoint = {
           name: sensor.name,
           protocol: sensor.protocol as 'modbus' | 'can' | 'opcua' | 'mqtt',
-          enabled: this.isProtocolEnabled(sensor.protocol), // Check if protocol is enabled in config
+          enabled: false, //this.isProtocolEnabled(sensor.protocol), // Check if protocol is enabled in config
           poll_interval: 5000, // Default 5 seconds
           connection: sensor.connection,
           data_points: sensor.dataPoints || [],
