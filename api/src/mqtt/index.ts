@@ -176,7 +176,17 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
     return mqttManager;
 
   } catch (error) {
-    logger.error('Failed to initialize MQTT service:', error);
+    logger.error('❌ FAILED TO INITIALIZE MQTT SERVICE', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      brokerUrl: mqttBrokerUrl,
+      clientId: process.env.MQTT_CLIENT_ID || `api-${process.env.HOSTNAME || 'server'}`,
+      username: process.env.MQTT_USERNAME,
+      hasPassword: !!process.env.MQTT_PASSWORD,
+      reconnectPeriod: process.env.MQTT_RECONNECT_PERIOD || '5000',
+      keepalive: process.env.MQTT_KEEPALIVE || '60',
+      useKeyCompaction: process.env.USE_KEY_COMPACTION_POC === 'true'
+    });
     return null;
   }
 }
