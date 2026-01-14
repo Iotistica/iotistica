@@ -581,7 +581,7 @@ export default class DeviceAgent {
 
   private async initializeMqttManager(): Promise<void> {
 
-    //try {
+    try {
       // Only use MQTT if device is provisioned with mqttBrokerConfig
       if (!this.deviceInfo.mqttBrokerConfig) {
         this.agentLogger.debugSync("MQTT disabled - device not provisioned with broker config", {
@@ -650,7 +650,7 @@ export default class DeviceAgent {
           mqttOptions.ca = caCert;
         }
         
-        this.agentLogger.debugSync("MQTT TLS enabled", {
+        this.agentLogger.infoSync("MQTT TLS enabled", {
           component: LogComponents.agent,
           protocol: config.protocol,
           verifyCertificate: config.verifyCertificate,
@@ -684,17 +684,17 @@ export default class DeviceAgent {
 
       // Initialize dictionary manager as top-level service (decoupled from MqttManager)
       await this.initializeDictionaryManager();
-    // } catch (error) {
-    //   this.agentLogger.errorSync(
-    //     "Failed to initialize MQTT Manager",
-    //     error instanceof Error ? error : new Error(String(error)),
-    //     {
-    //       component: LogComponents.agent,
-    //       note: "MQTT features will be unavailable",
-    //     }
-    //   );
-    //   // Don't throw - allow agent to continue without MQTT
-    // }
+    } catch (error) {
+      this.agentLogger.errorSync(
+        "Failed to initialize MQTT Manager",
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          component: LogComponents.agent,
+          note: "MQTT features will be unavailable",
+        }
+      );
+      // Don't throw - allow agent to continue without MQTT
+    }
   }
 
   /**
