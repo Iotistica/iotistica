@@ -362,7 +362,7 @@ export function generateDefaultTargetStateConfigV2(
       },
       discovery: {
         fullIntervalMs: 86400000,  // 24 hours
-        lightIntervalMs: 300000,  // 5 minutes
+        lightIntervalMs: 14400000,  // 4 hours
       },
     },
     protocols: generateProtocolsConfig(simulatorOptions),
