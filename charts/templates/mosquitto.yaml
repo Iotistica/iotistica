@@ -102,9 +102,11 @@ spec:
     name: {{ .Values.mosquitto.tlsIssuer }}
     kind: ClusterIssuer
   commonName: {{ .Values.mosquitto.tlsCommonName }}
+{{- if .Values.mosquitto.sniHosts }}
   dnsNames:
 {{- range .Values.mosquitto.sniHosts }}
     - {{ . }}
+{{- end }}
 {{- end }}
 ---
 apiVersion: v1
@@ -154,6 +156,8 @@ spec:
         {{- include "iotistic.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: mosquitto
     spec:
+      nodeSelector:
+        role: worker
       containers:
         - name: mosquitto
           image: {{ printf "%s:%s" .Values.mosquitto.image.repository (.Values.mosquitto.image.tag | default "3.0.0-mosquitto_2.0.18") | quote }}

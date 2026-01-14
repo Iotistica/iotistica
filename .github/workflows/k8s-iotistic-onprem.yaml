@@ -58,13 +58,13 @@ jobs:
       # OPTIONAL CLEAN BEFORE DEPLOY
       # ------------------------------------
       - name: Cleanup previous Helm release (before deploy)
-        if: ${{ inputs.destroy == false && inputs.clean_before_deploy == true }}
+        if: ${{ inputs.destroy == true && inputs.clean_before_deploy == false }}
         run: |
           set -e
           CLIENT_NAME="${{ inputs.client_name || '' }}"
 
           echo "Deleting previous Helm release (if exists)..."
-          helm uninstall "${CLIENT_NAME}"-release -n "${CLIENT_NAME}" || true
+          helm uninstall "${CLIENT_NAME}"-release -n "${CLIENT_NAME}" --wait|| true
 
       # ------------------------------------
       # DEPLOY
@@ -85,6 +85,7 @@ jobs:
             --namespace "${CLIENT_NAME}" \
             --create-namespace \
             -f "${VALUES_FILE}" \
+            --set client.name="${CLIENT_NAME}" \
             --set api.image.tag="${RELEASE_VERSION}" \
             --set dashboard.image.tag="${RELEASE_VERSION}" \
             --wait \
@@ -129,7 +130,7 @@ jobs:
       # DESTROY
       # ------------------------------------
       - name: Destroy deployed Iotistic (helm)
-        if: ${{ inputs.destroy == true }}
+        if: ${{ inputs.clean_before_deploy == true }}
         run: |
           set -e
           CLIENT_NAME="${{ inputs.client_name || '' }}"

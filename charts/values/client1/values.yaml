@@ -5,29 +5,6 @@
 global:
   namespace: iotistic
 
-# PostgreSQL database
-postgres:
-  enabled: true
-  image:
-    repository: timescale/timescaledb
-    tag: "latest-pg16"  # TimescaleDB with PostgreSQL 16
-  database: iotistic
-  username: postgres
-  password: Z7c38x4iPeAcxrwhRzdrOAMUGhu54MpBu9Dpfe4npOZIM5iK3UaiaoETlzRLSFih
-  port: 5432
-  storage:
-    size: 10Gi
-    storageClass: ""
-  resources:
-    requests:
-      cpu: 250m
-      memory: 256Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
-  persistence:
-    enabled: true
-
 # Redis cache
 redis:
   enabled: true
@@ -41,7 +18,7 @@ redis:
     enabled: true
   storage:
     size: 5Gi
-    storageClass: ""
+    storageClass: "longhorn"
   resources:
     requests:
       cpu: 100m
@@ -74,7 +51,7 @@ mosquitto:
   tlsCertName: mosquitto-client1
   tlsIssuer: selfsigned-issuer
   tlsCommonName: mqtt1.iotistica.com
-  externalHost: "10.27.27.160"  # Set to your K8s node IP
+  externalHost: "mqtt1.iotistica.com"  # Set to your K8s node IP
   resources:
     requests:
       cpu: 100m
@@ -102,13 +79,10 @@ mqttBroker:
   
   # Local broker configuration (uses Mosquitto deployment)
   local:
-    # Credentials for API and services to connect to local broker
-    username: admin
-    password: iotistic42!  # Change in production
     # Internal service connection
-    protocol: mqtts
+    protocol: mqtt
     host: "{{ include \"iotistic.fullname\" . }}-mosquitto"
-    port: 8883
+    port: 1883
     useTls: false
     
   # Cloud broker configuration (HiveMQ Cloud, AWS IoT Core, etc.)
@@ -118,8 +92,8 @@ mqttBroker:
     # Provider: 'hivemq', 'aws-iot', 'azure-iot', 'custom'
     provider: hivemq
     # Connection details (must be configured if enabled)
-    host: "client1-release-iotistic-mosquitto"  # e.g., abc123.s1.eu.hivemq.cloud
-    port: 1883
+    host: "{{ include \"iotistic.fullname\" . }}-mosquitto"
+    port: 8883
     protocol: mqtts
     username: ""
     password: ""
@@ -140,11 +114,13 @@ api:
   image:
     repository: iotistic/api
     tag: latest
-    pullPolicy: IfNotPresent  # Use local images only (prevents pulling from registry)
+    pullPolicy: Always  # Use local images only (prevents pulling from registry)
   replicas: 1  # Single replica for now
   port: 3002
   serviceType: ClusterIP
-  nodePort: 30002
+  tlsSecret: api-tls         # Secret created by cert-manager
+  tlsCertName: api-client1
+  tlsIssuer: selfsigned-issuer
   tlsCommonName: api1.iotistica.com
   # CORS configuration for cross-origin requests from dashboard
   # Use wildcard pattern like "http://*:30000" to allow any IP on NodePort 30000
@@ -191,7 +167,10 @@ api:
   #   helm install --set mqtt.username=admin --set mqtt.password=secret
   mqtt:
     # Reference existing Kubernetes secret (recommended for production)
-    existingSecret: "iotistic-mqtt-credentials"
+    SecretName: "mqtt-credentials-client1"
+  sql:
+    # Reference existing Kubernetes secret (recommended for production)
+    SecretName: "sql-credentials-client1"
   # License configuration (optional)
   license:
     publicKey: ""
@@ -203,7 +182,7 @@ api:
     scrapeTimeout: 10s
     labels: {}  # Additional labels for ServiceMonitor (match your Prometheus selector)
     relabelings: []  # Optional metric relabeling
-
+  
 # Dashboard UI
 dashboard:
   enabled: true
@@ -268,7 +247,7 @@ mqttMonitor:
   # See api.mqtt configuration above for security options
   mqtt:
     # Reference existing Kubernetes secret (recommended for production)
-    existingSecret: "iotistic-mqtt-credentials"
+    existingSecret: "mqtt-credentials-client1"
 
 # Housekeeper service - Database maintenance and cleanup
 housekeeper:

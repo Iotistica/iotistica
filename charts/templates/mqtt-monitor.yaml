@@ -36,6 +36,8 @@ spec:
         {{- include "iotistic.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: mqtt-monitor
     spec:
+      nodeSelector:
+        role: worker
       containers:
         - name: mqtt-monitor
           image: "{{ .Values.mqttMonitor.image.repository }}:{{ .Values.mqttMonitor.image.tag }}"
@@ -54,15 +56,28 @@ spec:
             - name: LOG_LEVEL
               value: {{ .Values.mqttMonitor.env.LOG_LEVEL | quote }}
             - name: DB_HOST
-              value: timescaledb-cluster-rw.io-cluster-tsdb.svc #{{ include "iotistic.fullname" . }}-postgres
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.sql.SecretName }}
+                  key: server
             - name: DB_PORT
-              value: {{ .Values.postgres.port | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.sql.SecretName }}
+                  key: port
             - name: DB_NAME
-              value: {{ .Values.postgres.database | quote }}
+              value: {{ .Values.client.name | quote }}
+            # Read SQL credentials from existing Kubernetes Secret
             - name: DB_USER
-              value: {{ .Values.postgres.username | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.sql.SecretName }}
+                  key: username
             - name: DB_PASSWORD
-              value: {{ .Values.postgres.password | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.sql.SecretName }}
+                  key: password
             - name: DB_POOL_SIZE
               value: {{ .Values.mqttMonitor.env.DB_POOL_SIZE | quote }}
             - name: MQTT_BROKER_URL

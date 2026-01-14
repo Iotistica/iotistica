@@ -1,0 +1,18 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: {{ .Values.client.name }}
+  namespace: io-cluster-tsdb01
+spec:
+  cluster:
+    name: io-cluster-tsdb01
+
+  name: {{ .Values.client.name }}
+  owner: {{ .Values.client.name }}
+
+  ensure: present
+  databaseReclaimPolicy: delete
+
+  extensions:
+    - name: timescaledb
+      schema: public
