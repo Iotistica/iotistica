@@ -419,8 +419,6 @@ export class MqttManager extends EventEmitter {
       let initialConnectionSucceeded = false;
       let connectionTimeout: NodeJS.Timeout | null = null;
 
-      logger.info('Connecting to MQTT broker', { brokerUrl: this.config.brokerUrl });
-
       const options: mqtt.IClientOptions = {
         clientId: this.config.clientId,
         username: this.config.username || undefined,
@@ -431,18 +429,29 @@ export class MqttManager extends EventEmitter {
       };
 
       // Add TLS options for mqtts:// connections
+      let useTls = false;
+      let rejectUnauthorized = true;
       if (this.config.brokerUrl.startsWith('mqtts://')) {
+        useTls = true;
         // Check if we should skip certificate validation (for self-signed certs)
-        const rejectUnauthorized = process.env.MQTT_TLS_REJECT_UNAUTHORIZED !== 'false';
+        rejectUnauthorized = process.env.MQTT_TLS_REJECT_UNAUTHORIZED !== 'false';
         
         options.rejectUnauthorized = rejectUnauthorized;
-        
-        logger.info('MQTT TLS configuration', {
-          protocol: 'mqtts',
-          rejectUnauthorized,
-          brokerUrl: this.config.brokerUrl
-        });
       }
+
+      // Log comprehensive connection summary
+      logger.info('🔌 MQTT CONNECTION SUMMARY', {
+        brokerUrl: this.config.brokerUrl,
+        clientId: this.config.clientId,
+        username: this.config.username,
+        hasPassword: !!this.config.password,
+        useTls,
+        rejectUnauthorized,
+        reconnectPeriod: this.config.reconnectPeriod,
+        keepalive: this.config.keepalive,
+        clean: this.config.clean,
+        qos: this.config.qos
+      });
 
       this.client = mqtt.connect(this.config.brokerUrl, options);
 
