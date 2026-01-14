@@ -348,9 +348,8 @@ export class SocketServer {
   /**
    * Handle new client connection
    * 
-   * NOTE: Warmup/jitter DISABLED - OPC UA discovery already slow (40s cert creation)
-   * Adding warmup delay would further delay first data publication
-   * Token bucket (Layer 1) provides sufficient burst protection
+   * NOTE: Warmup prevents data spikes from adapter restarts overwhelming the pipeline.
+   * Unix domain sockets are local-only, so warmup is brief (no network delay).
    */
   private handleClientConnection(socket: net.Socket): void {
     // Prevent IPC DoS: reject connections beyond max client limit
@@ -360,18 +359,17 @@ export class SocketServer {
       return;
     }
 
-    // WARMUP DISABLED: Accept data immediately
-    // Reason: OPC UA discovery takes 40s, warmup would add more delay
-    // Layer 1 token bucket provides burst protection
-    (socket as any)._startAcceptAt = 0; // Accept immediately
-    (socket as any)._warmupUntil = 0; // No warmup phase
+    // Apply warmup: delay data acceptance to prevent burst overload
+    const jitter = Math.floor(Math.random() * 10000); // 0-10s jitter
+    (socket as any)._startAcceptAt = Date.now() + jitter; // Random start delay
+    (socket as any)._warmupUntil = (socket as any)._startAcceptAt + 10000; // 10s warmup after start
     (socket as any)._warmupCounter = 0;
 
     // Per-client rate tracking
     (socket as any)._rateWindow = Date.now();
     (socket as any)._rateCount = 0;
 
-    this.logger.debug(`New IPC client connected (warmup: DISABLED) at ${this.config.socketPath}`);
+    this.logger.debug(`New IPC client connected (warmup: ${jitter}ms + 10s) at ${this.config.socketPath}`);
 
     this.clients.push(socket);
 
