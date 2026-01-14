@@ -4,10 +4,10 @@
 # Fleet configuration
 fleet:
   # Name of the agent fleet (for labels and identification)
-  name: "test-fleet-1"
+  name: "perf-test-40-modbus"
   
   # Number of agent pods to deploy
-  replicaCount: 5
+  replicaCount: 1
   
   # Cloud API endpoint
   cloudApiEndpoint: "https://api1.iotistica.com:443"
@@ -23,13 +23,14 @@ agent:
     pullPolicy: Always
   
   # Resource limits per agent
+  # Configured for 40 modbus devices + 1 OPC-UA
   resources:
     requests:
-      cpu: 50m
-      memory: 256Mi
+      cpu: 500m
+      memory: 1Gi
     limits:
-      cpu: 300m
-      memory: 512Mi
+      cpu: 2000m
+      memory: 3Gi
   
   # Agent environment variables
   env:
@@ -98,6 +99,7 @@ agent:
 simulator:
   # Number of Modbus simulators per agent (0-3)
   # Multiple simulators run on different ports to avoid conflicts
+  # For 40 devices test: Use 1 simulator with MODBUS_SLAVES=40
   modbusCount: 1
   
   image:
@@ -106,20 +108,21 @@ simulator:
     pullPolicy: Always
   
   # Resource limits per simulator
+  # Increased for 40 slave devices
   resources:
     requests:
-      cpu: 25m
-      memory: 64Mi
-    limits:
       cpu: 100m
-      memory: 128Mi
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
   
   # Simulator environment variables
   # Base configuration - port will be incremented for multiple instances
   env:
     MODBUS_HOST: "127.0.0.1"         # Bind to localhost (shared with agent container)
     MODBUS_PORT: "502"
-    MODBUS_SLAVES: "5"               # Number of slave IDs to simulate
+    MODBUS_SLAVES: "40"              # 40 slave devices for perf test
     MODBUS_VENDOR: "Generic"         # Vendor to simulate
     MODBUS_VENDOR_JSON: "/app/vendors/dataPoints.json"
 
