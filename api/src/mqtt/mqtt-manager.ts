@@ -502,10 +502,17 @@ export class MqttManager extends EventEmitter {
         // Throttle error logging to reduce spam
         const now = Date.now();
         if (now - this.lastErrorLog > this.errorLogThrottle) {
-          logger.error('MQTT connection error (throttled - shown once per 30s)', { 
+          logger.error('❌ MQTT CONNECTION ERROR', { 
             error: error.message || (error as any).code,
             reconnectAttempts: this.reconnectAttempts,
-            initialConnection: !initialConnectionSucceeded
+            initialConnection: !initialConnectionSucceeded,
+            // Include connection config for debugging
+            brokerUrl: this.config.brokerUrl,
+            clientId: this.config.clientId,
+            username: this.config.username,
+            useTls,
+            rejectUnauthorized,
+            keepalive: this.config.keepalive
           });
           this.lastErrorLog = now;
         }
