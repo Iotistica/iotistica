@@ -16,65 +16,12 @@ export class SocketServer {
   private isWindowsNamedPipe: boolean;
   private readonly MAX_CLIENTS = 10; // Prevent IPC DoS attacks
 
-  // Global ingress rate limiter (token bucket)
-  // Byte-based tokens correlate better with Redis memory pressure
-  private tokens: number;
-  private maxTokens: number;
-  private refillRate: number; // bytes/sec (configurable via env)
-  private lastRefill = Date.now();
-  private lastRateLimitLog = 0; // Throttle hot-path logging
-
-  // Warmup configuration
-  private readonly WARMUP_DURATION_MS = 10_000; // Fixed 10s warmup period
-  private readonly WARMUP_DROP_RATE = 10; // Drop 9/10 messages during warmup
-
-  // Stats tracking
-  private stats = {
-    messagesAccepted: 0,
-    messagesDroppedRateLimit: 0,
-    messagesDroppedWarmup: 0,
-    clientsDroppedRateLimit: 0
-  };
-
-  // Backpressure threshold (bytes)
-  private readonly BACKPRESSURE_THRESHOLD_BYTES: number;
-
   constructor(config: SocketOutput, logger: Logger) {
     this.config = config;
     this.logger = logger;
     
     // Detect if this is a Windows Named Pipe
     this.isWindowsNamedPipe = this.config.socketPath.startsWith('\\\\.\\pipe\\');
-
-    // Configure byte-based rate limits from environment
-    // Default: 256 KB/sec refill rate (conservative for 30+ devices)
-    // Reduced from 512 KB/sec to prevent OOM with many simultaneous devices
-    // Correlates with Redis memory pressure better than message count
-    const envRefillRate = parseInt(process.env.SOCKET_INGRESS_RATE_LIMIT || '262144', 10);
-    this.refillRate = envRefillRate > 0 ? envRefillRate : 262144; // bytes/sec (256 KB/sec)
-    this.maxTokens = this.refillRate * 1.5; // 1.5-second burst capacity (reduced from 2s)
-    this.tokens = this.maxTokens;
-
-    // Backpressure threshold: When tokens drop below 25% of max, signal upstream to slow down
-    // This prevents OOM from modbus adapters generating data faster than socket can accept
-    this.BACKPRESSURE_THRESHOLD_BYTES = this.maxTokens * 0.25;
-  }
-
-  /**
-   * Refill token bucket based on elapsed time
-   * Called before every sendData() to maintain steady-state rate
-   * 
-   * Byte-based tokens: Correlates with Redis memory pressure better than message count
-   */
-  private refillTokens(): void {
-    const now = Date.now();
-    const elapsed = (now - this.lastRefill) / 1000;
-    this.lastRefill = now;
-
-    this.tokens = Math.min(
-      this.maxTokens,
-      this.tokens + elapsed * this.refillRate
-    );
   }
 
   /**
@@ -194,32 +141,23 @@ export class SocketServer {
   /**
    * Send sensor data to all connected clients
    * 
-   * 4-LAYER ADMISSION CONTROL (Ingress Gate):
+   * Backpressure handling: Drops slow consumers instead of buffering
+   * Rationale: Real-time telemetry data loses value quickly, and slow consumers
+   * shouldn't block fast ones or cause memory growth on edge devices.
    * 
-   * Layer 1: Global token bucket rate limiter (byte-based)
-   *   - Guarantees Redis never sees more than REFILL_RATE bytes/sec
-   *   - Byte-based accounting correlates with Redis memory pressure
-   *   - Prevents synchronized startup storms (50 devices × 10 KB/sec = 500 KB/sec burst)
-   *   - Default: 512 KB/sec refill, 1024 KB capacity (2-second burst)
+   * TODO (OPTIMIZATION): Broadcast amplification at high scale
    * 
-   * Layer 2: Warm-up throttling (per-client)
-   *   - First 10 seconds: drop 9 out of 10 messages
-   *   - Reduces initial CPU/memory pressure during reconnect storms
-   *   - Prevents 50 simulators → 50 immediate floods
+   * Current approach: Write same payload N times (one per client)
+   * - Fine for typical edge deployments (1-2 clients, <1k msgs/sec)
+   * - Becomes CPU-bound at high scale (10+ clients × 1k msgs/sec = 10k syscalls/sec)
    * 
-   * Layer 3: Per-client rate limiting
-   *   - Track msgs/sec per socket, drop clients exceeding limits
-   *   - Prevents single misbehaving simulator from monopolizing capacity
-   *   - Default: 100 msgs/sec per client
+   * Optimization strategies (if profiling shows bottleneck):
+   * 1. Per-client sampling: Fast clients get all data, debug clients get every Nth message
+   * 2. Shared memory: Write once, clients read at their own pace (zero-copy broadcast)
+   * 3. Client rate limiting: Cap per-client throughput (e.g., max 100 msgs/sec)
    * 
-   * Layer 4: Backpressure handling (kernel buffer)
-   *   - Drops slow consumers instead of buffering
-   *   - Prevents OOM from slow readers blocking fast writers
-   * 
-   * Why this is the correct layer:
-   * - Sits BEFORE JSON parsing, batching, compression, MQTT publish
-   * - Blocking here saves CPU, memory, and prevents synchronized load downstream
-   * - This is the Ingress Gate protecting the entire pipeline
+   * Decision: Keep simple broadcast until proven hot. The backpressure handling
+   * already prevents the critical failure mode (OOM from slow consumers).
    */
   sendData(dataPoints: SensorDataPoint[]): void {
     if (!this.started || this.clients.length === 0) {
@@ -229,76 +167,13 @@ export class SocketServer {
     try {
       const message = this.formatData(dataPoints);
       const data = message + this.config.delimiter;
-      const payloadBytes = Buffer.byteLength(data, 'utf8');
-      const now = Date.now();
 
-      // Layer 1: Global rate limiter (byte-based token bucket)
-      // Bytes correlate better with Redis memory pressure than message count
-      this.refillTokens();
-      if (this.tokens < payloadBytes) {
-        this.stats.messagesDroppedRateLimit += dataPoints.length;
-        
-        // Throttle logging: Log once per second to avoid flooding under load
-        if (now - this.lastRateLimitLog > 1000) {
-          this.logger.warn('Ingress rate limited: dropping sensor data', {
-            dropped: dataPoints.length,
-            payloadBytes,
-            tokensAvailable: Math.floor(this.tokens),
-            refillRate: this.refillRate,
-            totalDropped: this.stats.messagesDroppedRateLimit
-          });
-          this.lastRateLimitLog = now;
-        }
-        return;
-      }
-      this.tokens -= payloadBytes;
-      this.stats.messagesAccepted += dataPoints.length;
-
-      // Send to all connected clients with multi-layer admission control
+      // Send to all connected clients with backpressure handling
       this.clients.forEach((client, index) => {
         try {
-          const clientMeta = client as any;
-
-          // Layer 2: Warm-up throttling
-          // Phase 1: Jitter delay (client can't send until startAcceptAt)
-          // Phase 2: Warmup period (drop 9/10 messages for WARMUP_DURATION_MS)
-          if (now < clientMeta._startAcceptAt) {
-            this.stats.messagesDroppedWarmup++;
-            return; // Still in jitter delay, drop all messages
-          }
-          
-          if (now < clientMeta._warmupUntil) {
-            clientMeta._warmupCounter = (clientMeta._warmupCounter || 0) + 1;
-            if (clientMeta._warmupCounter % this.WARMUP_DROP_RATE !== 0) {
-              this.stats.messagesDroppedWarmup++;
-              return; // Drop 9 out of 10 messages during warmup
-            }
-          }
-
-          // Layer 3: Per-client rate limiting (100 msgs/sec)
-          const PER_CLIENT_RATE_LIMIT = 100; // msgs/sec
-          const RATE_WINDOW_MS = 1000;
-          
-          if (!clientMeta._rateWindow || (now - clientMeta._rateWindow) >= RATE_WINDOW_MS) {
-            // Reset window
-            clientMeta._rateWindow = now;
-            clientMeta._rateCount = 0;
-          }
-          
-          clientMeta._rateCount++;
-          if (clientMeta._rateCount > PER_CLIENT_RATE_LIMIT) {
-            this.logger.warn(`Dropping fast IPC client (rate limit exceeded) at ${this.config.socketPath}`, {
-              clientIndex: index,
-              rate: clientMeta._rateCount,
-              limit: PER_CLIENT_RATE_LIMIT
-            });
-            this.stats.clientsDroppedRateLimit++;
-            this.removeClient(client);
-            return;
-          }
-
-          // Layer 4: Backpressure handling (kernel buffer)
           const flushed = client.write(data);
+          
+          // Backpressure detected: kernel buffer full
           if (!flushed) {
             this.logger.warn(`Dropping slow IPC client (backpressure detected) at ${this.config.socketPath}`, {
               clientIndex: index,
@@ -334,41 +209,7 @@ export class SocketServer {
   }
 
   /**
-   * Get ingress control statistics
-   * Used for monitoring and alerting on admission control effectiveness
-   */
-  getStats() {
-    return {
-      ...this.stats,
-      tokensAvailable: Math.floor(this.tokens),
-      tokensAvailableKB: (this.tokens / 1024).toFixed(2),
-      maxTokens: this.maxTokens,
-      maxTokensKB: (this.maxTokens / 1024).toFixed(2),
-      refillRate: this.refillRate,
-      refillRateKBps: (this.refillRate / 1024).toFixed(2),
-      activeClients: this.clients.length,
-      dropRate: this.stats.messagesAccepted > 0
-        ? (this.stats.messagesDroppedRateLimit / this.stats.messagesAccepted * 100).toFixed(2) + '%'
-        : '0%',
-      backpressureActive: this.isBackpressureActive()
-    };
-  }
-
-  /**
-   * Check if backpressure should be signaled to upstream producers
-   * Returns true when token bucket is below 25% capacity
-   * Upstream adapters should skip polling when this returns true
-   */
-  isBackpressureActive(): boolean {
-    this.refillTokens(); // Ensure tokens are up-to-date
-    return this.tokens < this.BACKPRESSURE_THRESHOLD_BYTES;
-  }
-
-  /**
    * Handle new client connection
-   * 
-   * NOTE: Warmup prevents data spikes from adapter restarts overwhelming the pipeline.
-   * Unix domain sockets are local-only, so warmup is brief (no network delay).
    */
   private handleClientConnection(socket: net.Socket): void {
     // Prevent IPC DoS: reject connections beyond max client limit
@@ -377,18 +218,6 @@ export class SocketServer {
       socket.destroy();
       return;
     }
-
-    // Apply warmup: delay data acceptance to prevent burst overload
-    const jitter = Math.floor(Math.random() * 10000); // 0-10s jitter
-    (socket as any)._startAcceptAt = Date.now() + jitter; // Random start delay
-    (socket as any)._warmupUntil = (socket as any)._startAcceptAt + 10000; // 10s warmup after start
-    (socket as any)._warmupCounter = 0;
-
-    // Per-client rate tracking
-    (socket as any)._rateWindow = Date.now();
-    (socket as any)._rateCount = 0;
-
-    this.logger.debug(`New IPC client connected (warmup: ${jitter}ms + 10s) at ${this.config.socketPath}`);
 
     this.clients.push(socket);
 
