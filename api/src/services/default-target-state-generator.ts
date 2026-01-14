@@ -436,23 +436,23 @@ export async function generateDefaultTargetStateV2(
         appId: "1000",
         appName: "core-services",
         services: [
-          {
-            serviceId: 1,
-            serviceName: "mosquitto",
-            imageName: "eclipse-mosquitto:2.0",
-            config: {
-              image: "eclipse-mosquitto:2.0",
-              ports: ["1883:1883", "9001:9001"],
-              volumes: [
-                "mosquitto-data:/mosquitto/data",
-                "mosquitto-config:/mosquitto/config",
-                "mosquitto-log:/mosquitto/log"
-              ],
-              command: ["mosquitto", "-c", "/mosquitto-no-auth.conf"],
-              restart: "unless-stopped",
-              networks: ["default"]
-            }
-          },
+          // {
+          //   serviceId: 1,
+          //   serviceName: "mosquitto",
+          //   imageName: "eclipse-mosquitto:2.0",
+          //   config: {
+          //     image: "eclipse-mosquitto:2.0",
+          //     ports: ["1883:1883", "9001:9001"],
+          //     volumes: [
+          //       "mosquitto-data:/mosquitto/data",
+          //       "mosquitto-config:/mosquitto/config",
+          //       "mosquitto-log:/mosquitto/log"
+          //     ],
+          //     command: ["mosquitto", "-c", "/mosquitto-no-auth.conf"],
+          //     restart: "unless-stopped",
+          //     networks: ["default"]
+          //   }
+          // },
           {
             serviceId: 2,
             serviceName: "nodered",

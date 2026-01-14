@@ -554,6 +554,20 @@ export class DeviceManager {
 				this.deviceInfo.mqttBrokerConfig = response.mqtt.brokerConfig;
 				this.deviceInfo.apiTlsConfig = response.api?.tlsConfig;
 
+				// Log full provisioning response for troubleshooting
+				this.logger?.infoSync('🔍 PROVISIONING RESPONSE RECEIVED', {
+					component: LogComponents.deviceManager,
+					operation: 'provision',
+					responseKeys: Object.keys(response),
+					mqttKeys: Object.keys(response.mqtt || {}),
+					brokerConfigKeys: Object.keys(response.mqtt?.brokerConfig || {}),
+					brokerConfig: response.mqtt?.brokerConfig,
+					hasUseTls: response.mqtt?.brokerConfig?.useTls,
+					hasVerifyCertificate: response.mqtt?.brokerConfig?.verifyCertificate,
+					protocol: response.mqtt?.brokerConfig?.protocol,
+					host: response.mqtt?.brokerConfig?.host,
+					port: response.mqtt?.brokerConfig?.port
+				});
 				
 				this.logger?.infoSync('Phase 1 complete: Device registered', {
 					component: LogComponents.deviceManager,

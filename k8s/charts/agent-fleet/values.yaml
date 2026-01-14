@@ -83,6 +83,9 @@ agent:
     MEMORY_CHECK_INTERVAL_MS: "30000"
     MEMORY_THRESHOLD_MB: "30"
     
+    # Heap profiling (debugging memory usage)
+    ENABLE_HEAP_PROFILING: "true"
+    
     # Security
     REQUIRE_PROVISIONING: "false"    # Pre-provisioned keys
     API_SECURITY_MODE: "OPEN"  # Allow K8s probes in cluster

@@ -607,6 +607,21 @@ export default class DeviceAgent {
       
       const mqttManager = MqttManager.getInstance();
 
+      // Log MQTT broker config for troubleshooting
+      this.agentLogger.infoSync("🔍 MQTT BROKER CONFIG FROM DATABASE", {
+        component: LogComponents.agent,
+        operation: "mqtt-init",
+        configKeys: Object.keys(config),
+        protocol: config.protocol,
+        host: config.host,
+        port: config.port,
+        useTls: config.useTls,
+        verifyCertificate: config.verifyCertificate,
+        hasCaCert: !!config.caCert,
+        hasUsername: !!config.username,
+        hasPassword: !!config.password
+      });
+
       // Build MQTT connection options from mqttBrokerConfig
       const mqttOptions: any = {
         clientId: config.clientIdPrefix ? `${config.clientIdPrefix}_${this.deviceInfo.uuid}` : `device_${this.deviceInfo.uuid}`,
