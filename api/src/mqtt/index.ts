@@ -58,6 +58,15 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
       qos: (parseInt(process.env.MQTT_QOS || '1') as 0 | 1 | 2)
     });
 
+    logger.info('🔌 MQTT CONFIG CREATED', {
+      brokerUrl: mqttBrokerUrl,
+      clientId: process.env.MQTT_CLIENT_ID || `api-${process.env.HOSTNAME || 'server'}`,
+      username: process.env.MQTT_USERNAME,
+      hasPassword: !!process.env.MQTT_PASSWORD,
+      reconnectPeriod: parseInt(process.env.MQTT_RECONNECT_PERIOD || '5000'),
+      keepalive: parseInt(process.env.MQTT_KEEPALIVE || '60')
+    });
+
     // Initialize dictionary manager if key compaction enabled
     const useKeyCompaction = process.env.USE_KEY_COMPACTION_POC === 'true';
     if (useKeyCompaction) {
