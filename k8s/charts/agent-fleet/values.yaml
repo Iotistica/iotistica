@@ -48,6 +48,10 @@ agent:
     ENABLE_SENSOR_PUBLISH: "false"  # Disabled - no OPC-UA server in K8s fleet
     ENABLE_FIRST_BOOT_DISCOVERY: "true"
     
+    # Discovery behavior (default: save devices as disabled to prevent OOM)
+    # Set to "false" to auto-enable discovered devices (old behavior)
+    DISCOVERY_SAVE_DISABLED: "true"
+    
     # Modbus configuration (sidecar)
     MODBUS_ENABLED: "true"
     MODBUS_TCP_HOST: "localhost"     # Sidecar on same pod

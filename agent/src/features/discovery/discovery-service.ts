@@ -566,8 +566,19 @@ export class DiscoveryService extends EventEmitter {
   /**
    * Check if a specific protocol is enabled in agent configuration
    * Used to set the 'enabled' flag when saving discovered devices
+   * 
+   * Default behavior: Save devices as DISABLED (DISCOVERY_SAVE_DISABLED=true by default)
+   * This prevents OOM from loading all devices at once during startup.
+   * Set DISCOVERY_SAVE_DISABLED=false to restore old behavior (auto-enable discovered devices).
    */
   private isProtocolEnabled(protocol: string): boolean {
+    // Default: Save all discovered devices as disabled
+    // This prevents startup OOM when many devices are discovered
+    const saveDisabled = process.env.DISCOVERY_SAVE_DISABLED !== 'false'; // Default: true
+    if (saveDisabled) {
+      return false;
+    }
+    
     if (!this.agentConfig) {
       // No config available, default to enabled
       return true;
