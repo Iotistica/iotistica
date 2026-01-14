@@ -161,6 +161,7 @@ export interface TopicMessageMap {
   metrics: MetricsData;
   status: { deviceUuid: string; status: any };
   anomaly: any;  // Anomaly events from edge detection
+  jobs: { topic: string; payload: Buffer };  // Job messages from devices
   unknown: UnknownMessage;
 }
 
@@ -244,7 +245,8 @@ export class MqttManager extends EventEmitter {
       metrics: this.handleMetricsMessage.bind(this),
       status: this.handleStatusMessage.bind(this),
       events: this.handleEventsMessage.bind(this),
-      meta: this.handleMetaMessage.bind(this)
+      meta: this.handleMetaMessage.bind(this),
+      jobs: this.handleJobsMessage.bind(this)
     };
   }
 
@@ -689,11 +691,17 @@ export class MqttManager extends EventEmitter {
           return `iot/device/${mqttDevicePattern}/events/+`;
         case 'meta':
           return `iot/device/${mqttDevicePattern}/meta/+`;
+        case 'jobs':
+          // Jobs topic has two patterns, return both
+          return [
+            `iot/device/${mqttDevicePattern}/jobs/+/update`,
+            `iot/device/${mqttDevicePattern}/jobs/start-next`
+          ];
         default:
           logger.warn(`Unknown topic type: ${type}`);
           return null;
       }
-    }).filter(Boolean);  // Remove null values
+    }).flat().filter(Boolean);  // Flatten arrays and remove null values
 
     logger.info('Subscribing to MQTT topic patterns', { 
       count: topicPatterns.length, 
@@ -731,6 +739,28 @@ export class MqttManager extends EventEmitter {
    */
   async subscribeToAll(topics: string[]): Promise<void> {
     await this.subscribe('*', topics);
+  }
+
+  /**
+   * Subscribe to a specific MQTT topic pattern (for custom subscriptions like jobs)
+   */
+  async subscribeTopic(topicPattern: string, qos: 0 | 1 | 2 = 1): Promise<void> {
+    if (!this.client) {
+      throw new Error('MQTT client not connected');
+    }
+
+    return new Promise((resolve, reject) => {
+      this.client!.subscribe(topicPattern, { qos }, (err) => {
+        if (err) {
+          logger.error('Failed to subscribe to MQTT topic', { topic: topicPattern, error: err });
+          reject(err);
+        } else {
+          logger.info('Subscribed to MQTT topic', { topic: topicPattern, qos });
+          this.subscriptions.add(topicPattern);
+          resolve();
+        }
+      });
+    });
   }
 
   /**
@@ -1100,6 +1130,19 @@ export class MqttManager extends EventEmitter {
    */
   private handleStatusMessage(deviceUuid: string, subTopic: string | undefined, data: any, rest: string[] = []): void {
     this.handleStatus(deviceUuid, data);
+  }
+
+  /**
+   * Handle jobs message
+   */
+  private handleJobsMessage(deviceUuid: string, subTopic: string | undefined, data: any, rest: string[] = []): void {
+    // Reconstruct original topic: iot/device/{uuid}/jobs/{jobId}/{action}
+    const topicParts = ['iot', 'device', deviceUuid, 'jobs'];
+    if (subTopic) topicParts.push(subTopic);
+    topicParts.push(...rest);
+    const topic = topicParts.join('/');
+    
+    this.emitTyped('jobs', { topic, payload: Buffer.from(JSON.stringify(data)) });
   }
 
   /**

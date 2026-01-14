@@ -326,3 +326,18 @@ export async function handleAnomalyEvent(event: AnomalyEvent): Promise<void> {
     throw error;
   }
 }
+
+/**
+ * Handle job-related MQTT messages
+ * Processes job updates and start-next requests from devices
+ */
+export async function handleJobMessage(data: { topic: string; payload: Buffer }): Promise<void> {
+  try {
+    const { getJobsHandler } = await import('./jobs-handler');
+    const handler = getJobsHandler();
+    await handler.processMessage(data.topic, data.payload);
+  } catch (error) {
+    logger.error('Failed to handle job message:', error);
+    throw error;
+  }
+}

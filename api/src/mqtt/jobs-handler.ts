@@ -1,37 +1,153 @@
 /**
- * MQTT Jobs Subscriber Service
+ * MQTT Jobs Handler
  * 
  * Listens for job status updates from devices via MQTT and saves them to the database.
  * Handles the server-side of the AWS IoT Jobs MQTT protocol.
  */
 
-import { getMqttJobsNotifier } from './mqtt-jobs-notifier';
+import type { MqttManager } from './mqtt-manager';
 import { pool } from '../db/connection';
-import { EventPublisher } from './event-sourcing';
+import { EventPublisher } from '../services/event-sourcing';
 import logger from '../utils/logger';
 
-export class MqttJobsSubscriber {
-  private notifier = getMqttJobsNotifier();
-  private initialized = false;
-  private eventPublisher = new EventPublisher('mqtt-jobs-subscriber');
+export class JobsHandler {
+  private eventPublisher = new EventPublisher('mqtt-jobs-handler');
+  private mqttManager: MqttManager | null = null;
 
   /**
-   * Initialize the subscriber and register handlers
+   * Set MQTT manager instance (called once during initialization)
    */
-  async initialize(): Promise<void> {
-    if (this.initialized) {
-      return;
+  setMqttManager(manager: MqttManager): void {
+    this.mqttManager = manager;
+  }
+
+  /**
+   * Process incoming job message (called by handler)
+   */
+  async processMessage(topic: string, payload: Buffer): Promise<void> {
+    try {
+      const message = JSON.parse(payload.toString());
+      
+      // Handle job update messages
+      if (topic.endsWith('/update')) {
+        await this.handleJobUpdateMessage(topic, message);
+      }
+      
+      // Handle start-next requests
+      else if (topic.endsWith('/start-next')) {
+        await this.handleStartNextRequest(topic, message);
+      }
+    } catch (error) {
+      logger.error(`Failed to process job message on ${topic}`, { error });
+      throw error;
     }
+  }
 
-    console.log('[MqttJobsSubscriber] Initializing job update subscriber');
+  /**
+   * Handle job update message from MQTT
+   */
+  private async handleJobUpdateMessage(topic: string, message: any): Promise<void> {
+    // Parse topic: iot/device/{deviceUuid}/jobs/{jobId}/update
+    const parts = topic.split('/');
+    const deviceUuid = parts[2];
+    const jobId = parts[4];
 
-    // Register wildcard handler for all job updates
-    this.notifier.onJobUpdate('*', async (update) => {
-      await this.handleJobUpdate(update);
+    logger.info(`Received job update for ${jobId} from device ${deviceUuid}`, {
+      status: message.status,
+      hasStdout: !!message.statusDetails?.stdout,
+      hasStderr: !!message.statusDetails?.stderr,
     });
 
-    this.initialized = true;
-    logger.info('[MqttJobsSubscriber] Job update subscriber initialized');
+    // Process the update
+    await this.handleJobUpdate({
+      deviceUuid,
+      jobId,
+      status: message.status,
+      statusDetails: message.statusDetails,
+    });
+  }
+
+  /**
+   * Handle start-next request from device
+   */
+  private async handleStartNextRequest(topic: string, message: any): Promise<void> {
+    const parts = topic.split('/');
+    const deviceUuid = parts[2];
+
+    logger.info(`Received start-next request from device ${deviceUuid}`);
+    
+    // Fetch next pending job for this device
+    const result = await pool.query(
+      `SELECT id, job_document, created_at 
+       FROM jobs 
+       WHERE device_uuid = $1 AND status = 'QUEUED' 
+       ORDER BY created_at ASC 
+       LIMIT 1`,
+      [deviceUuid]
+    );
+
+    const nextJob = result.rows[0] || null;
+    
+    // Publish response
+    await this.publishStartNextResponse(deviceUuid, nextJob);
+  }
+
+  /**
+   * Publish start-next response to device
+   */
+  private async publishStartNextResponse(deviceUuid: string, job: any | null): Promise<void> {
+    if (!this.mqttManager) {
+      throw new Error('MQTT manager not initialized');
+    }
+    
+    const topic = job
+      ? `iot/device/${deviceUuid}/jobs/start-next/accepted`
+      : `iot/device/${deviceUuid}/jobs/start-next/rejected`;
+
+    const payload = job ? {
+      execution: {
+        jobId: job.id,
+        jobDocument: job.job_document,
+        queuedAt: new Date(job.created_at).getTime(),
+        lastUpdatedAt: Date.now(),
+        versionNumber: 1,
+        executionNumber: 1,
+        status: 'IN_PROGRESS',
+      },
+      timestamp: Date.now(),
+    } : {
+      timestamp: Date.now(),
+      clientToken: null,
+    };
+
+    await this.mqttManager.publish(topic, JSON.stringify(payload), 1);
+    logger.info(`Published start-next response to ${topic}`);
+  }
+
+  /**
+   * Publish job notification to device
+   */
+  async publishJobNotification(deviceUuid: string, jobId: string, jobDocument: any): Promise<void> {
+    if (!this.mqttManager) {
+      throw new Error('MQTT manager not initialized');
+    }
+    
+    const topic = `iot/device/${deviceUuid}/jobs/notify`;
+    const payload = JSON.stringify({
+      execution: {
+        jobId,
+        jobDocument,
+        queuedAt: Date.now(),
+        lastUpdatedAt: Date.now(),
+        versionNumber: 1,
+        executionNumber: 1,
+        status: 'QUEUED',
+      },
+      timestamp: Date.now(),
+    });
+
+    await this.mqttManager.publish(topic, payload, 1);
+    logger.info(`Published job notification to ${topic}`, { jobId });
   }
 
   /**
@@ -53,11 +169,11 @@ export class MqttJobsSubscriber {
     clientToken?: string;
   }): Promise<void> {
     // Debug: Log raw update object
-    logger.info(`[MqttJobsSubscriber] Raw update object:`, JSON.stringify(update, null, 2));
+    logger.info(`[JobsHandler] Raw update object:`, JSON.stringify(update, null, 2));
     
     const { deviceUuid, jobId, status, statusDetails } = update;
 
-    console.log(`[MqttJobsSubscriber] Processing update for job ${jobId}:`, {
+    console.log(`[JobsHandler] Processing update for job ${jobId}:`, {
       deviceUuid,
       status,
       hasDetails: !!statusDetails,
@@ -121,13 +237,13 @@ export class MqttJobsSubscriber {
 
         await pool.query(updateQuery, params);
 
-        logger.info(`[MqttJobsSubscriber] Updated job ${jobId} status to ${status}`);
+        logger.info(`[JobsHandler] Updated job ${jobId} status to ${status}`);
 
         // Publish job lifecycle events
         await this.publishJobEvent(deviceUuid, jobId, status, existing.rows[0], statusDetails);
       } else {
         // Insert new record (should already exist from job creation, but handle just in case)
-        logger.warn(`[MqttJobsSubscriber] Job status record not found, creating new one for ${jobId}`);
+        logger.warn(`[JobsHandler] Job status record not found, creating new one for ${jobId}`);
 
         await pool.query(
           `INSERT INTO device_job_status 
@@ -147,10 +263,10 @@ export class MqttJobsSubscriber {
           ]
         );
 
-        logger.info(`[MqttJobsSubscriber] Created job status record for ${jobId}`);
+        logger.info(`[JobsHandler] Created job status record for ${jobId}`);
       }
     } catch (error) {
-      logger.error(`[MqttJobsSubscriber] Failed to update job ${jobId}:`, error);
+      logger.error(`[JobsHandler] Failed to update job ${jobId}:`, error);
     }
   }
 
@@ -238,26 +354,20 @@ export class MqttJobsSubscriber {
   }
 
   /**
-   * Stop the subscriber
+   * Stop the handler
    */
   async stop(): Promise<void> {
-    logger.info('[MqttJobsSubscriber] Stopping job update subscriber');
-    this.notifier.removeHandler('*');
-    this.initialized = false;
+    logger.info('[JobsHandler] Stopping jobs handler');
+    this.mqttManager = null;
   }
 }
 
 // Singleton instance
-let instance: MqttJobsSubscriber | null = null;
+let instance: JobsHandler | null = null;
 
-export function getMqttJobsSubscriber(): MqttJobsSubscriber {
+export function getJobsHandler(): JobsHandler {
   if (!instance) {
-    instance = new MqttJobsSubscriber();
-    
-    // Auto-initialize
-    instance.initialize().catch((error) => {
-      logger.error('[MqttJobsSubscriber] Failed to initialize:', error);
-    });
+    instance = new JobsHandler();
   }
   
   return instance;

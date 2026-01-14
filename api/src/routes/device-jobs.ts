@@ -9,7 +9,7 @@ import express, { Request, Response } from 'express';
 import { randomUUID } from 'crypto';
 import poolWrapper from '../db/connection';
 import deviceAuth, { deviceAuthFromBody } from '../middleware/device-auth';
-import { getMqttJobsNotifier } from '../services/mqtt-jobs-notifier';
+import { getJobsHandler } from '../mqtt/jobs-handler';
 import { hasPermission, hasAnyPermission } from '../middleware/permissions';
 import { PERMISSIONS } from '../types/permissions';
 import { jwtAuth } from '../middleware/jwt-auth';
@@ -18,7 +18,7 @@ import { logger } from '../utils/logger';
 
 const router = express.Router();
 const pool = poolWrapper.pool;
-const mqttNotifier = getMqttJobsNotifier();
+const jobsHandler = getJobsHandler();
 const eventPublisher = new EventPublisher('device-jobs-api');
 
 // Apply JWT authentication to all dashboard/cloud routes
@@ -390,23 +390,13 @@ router.post('/jobs/execute', async (req: Request, res: Response) => {
     }
 
     // Send MQTT notification for real-time job delivery
-    if (mqttNotifier.connected) {
-      try {
-        for (const deviceUuid of deviceUuids) {
-          await mqttNotifier.notifyNextJob(deviceUuid, {
-            job_id: jobId,
-            job_name,
-            job_document: finalJobDocument,
-            queued_at: new Date(),
-            timeout_seconds: (timeout_minutes || 60) * 60,
-          });
-        }
-        logger.info(`Sent MQTT notifications to ${deviceUuids.length} devices`);
-      } catch (mqttError) {
-        logger.error('Failed to send MQTT notifications (HTTP fallback will work):', mqttError);
+    try {
+      for (const deviceUuid of deviceUuids) {
+        await jobsHandler.publishJobNotification(deviceUuid, jobId, finalJobDocument);
       }
-    } else {
-      logger.info('MQTT not connected - devices will receive jobs via HTTP polling');
+      logger.info(`Sent MQTT notifications to ${deviceUuids.length} devices`);
+    } catch (mqttError) {
+      logger.error('Failed to send MQTT notifications (HTTP fallback will work):', mqttError);
     }
 
     return res.status(201).json({

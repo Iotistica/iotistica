@@ -461,7 +461,7 @@ async function startServer() {
     logger.info('PostgreSQL database initialized successfully');
     
     // Initialize MQTT users (replaces K8s postgres-init-job)
-    const { initializeMqttAdmin, initializeNodeRedMqttCredentials } = await import('./services/mqtt-bootstrap');
+    const { initializeMqttAdmin, initializeNodeRedMqttCredentials } = await import('./mqtt/bootstrap');
     await initializeMqttAdmin();
     
     // Initialize Node-RED instance MQTT credentials (FlowFuse pattern)
@@ -540,17 +540,6 @@ async function startServer() {
     logger.info('Traffic flush service started');
   } catch (error) {
     logger.warn('Failed to start traffic flush service', { error });
-    // Don't exit - this is not critical for API operation
-  }
-
-  // Initialize MQTT Jobs Subscriber (listens for job status updates from devices)
-  try {
-    const { getMqttJobsSubscriber } = await import('./services/mqtt-jobs-subscriber');
-    const subscriber = getMqttJobsSubscriber();
-    await subscriber.initialize();
-    logger.info('MQTT Jobs Subscriber started');
-  } catch (error) {
-    logger.warn('Failed to start MQTT Jobs Subscriber', { error });
     // Don't exit - this is not critical for API operation
   }
 
@@ -723,12 +712,12 @@ async function startServer() {
       // Ignore errors during shutdown
     }
     
-    // Stop MQTT Jobs Subscriber
+    // Stop MQTT Jobs Handler
     try {
-      const { getMqttJobsSubscriber } = await import('./services/mqtt-jobs-subscriber');
-      const subscriber = getMqttJobsSubscriber();
-      await subscriber.stop();
-      logger.info('MQTT Jobs Subscriber stopped');
+      const { getJobsHandler } = await import('./mqtt/jobs-handler');
+      const handler = getJobsHandler();
+      await handler.stop();
+      logger.info('MQTT Jobs Handler stopped');
     } catch (error) {
       // Ignore errors during shutdown
     }

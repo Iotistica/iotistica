@@ -10,7 +10,8 @@ import {
   handleEndpointsData,
   handleDeviceState,
   handleAgentStatus,
-  handleAnomalyEvent
+  handleAnomalyEvent,
+  handleJobMessage
 } from './handlers';
 
 let mqttManager: MqttManager | null = null;
@@ -113,6 +114,24 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
       }
     });
 
+    mqttManager.on('jobs', async (data) => {
+      try {
+        await handleJobMessage(data);
+      } catch (error) {
+        logger.error('Error handling job message:', error);
+      }
+    });
+
+    // Initialize jobs handler
+    try {
+      const { getJobsHandler } = await import('./jobs-handler');
+      const handler = getJobsHandler();
+      handler.setMqttManager(mqttManager);
+      logger.info('MQTT Jobs Handler initialized');
+    } catch (error) {
+      logger.warn('Failed to initialize MQTT Jobs Handler', { error });
+    }
+
     // Subscribe to all device topics
     // Use '*' wildcard for all devices, or specific UUIDs for targeted subscriptions
     const subscribeToAll = process.env.MQTT_SUBSCRIBE_ALL !== 'false';
@@ -120,7 +139,7 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
     if (subscribeToAll) {
       logger.info('Subscribing to all device topics...');
       
-      const topics = ['endpoints', 'state', 'agent', 'events'];
+      const topics = ['endpoints', 'state', 'agent', 'events', 'jobs'];
       
       // Add meta topic if dictionary manager enabled
       if (useKeyCompaction) {
@@ -135,7 +154,7 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
       // ✅ FIX: Await subscription to ensure it completes before processing messages
       await mqttManager.subscribeToAll(topics);
       
-      logger.info('✅ Subscribed to MQTT topics', {
+      logger.info('✅ All MQTT subscriptions active', {
         topics,
         wildcardPattern: 'iot/device/+/{topic}/#',
         timestamp: new Date().toISOString()
