@@ -196,8 +196,7 @@ export class SensorsFeature extends BaseFeature {
       const modbusSocket = new SocketServer(outputConfig, this.logger);
       await modbusSocket.start();
       this.socketServers.set('modbus', modbusSocket);
-      this.logger.info(`Modbus socket server started at: ${outputConfig.socketPath}`);
-
+    
       // Create Modbus adapter (socket-agnostic)
       const modbusAdapter = new ModbusAdapter(modbusConfig, this.logger);
       this.adapters.set('modbus', modbusAdapter);
@@ -287,8 +286,7 @@ export class SensorsFeature extends BaseFeature {
       const opcuaSocket = new SocketServer(outputConfig, this.logger);
       await opcuaSocket.start();
       this.socketServers.set('opcua', opcuaSocket);
-      this.logger.info(`OPC-UA socket server started at: ${outputConfig.socketPath}`);
-
+   
       // Dynamically import OPC-UA adapter (only loads node-opcua-client when needed)
       const { OPCUAAdapter } = await import('./opcua/opcua-adapter.js');
       
@@ -360,8 +358,7 @@ export class SensorsFeature extends BaseFeature {
       const snmpSocket = new SocketServer(outputConfig, this.logger);
       await snmpSocket.start();
       this.socketServers.set('snmp', snmpSocket);
-      this.logger.info(`SNMP socket server started at: ${outputConfig.socketPath}`);
-
+    
       // Map database devices to SNMPDeviceConfig format
       const snmpDevices = dbDevices.map(d => ({
         name: d.name,
@@ -508,8 +505,7 @@ export class SensorsFeature extends BaseFeature {
       const mqttSocket = new SocketServer(outputConfig, this.logger);
       await mqttSocket.start();
       this.socketServers.set('mqtt', mqttSocket);
-      this.logger.info(`MQTT socket server started at: ${outputConfig.socketPath}`);
-
+   
       // Create MQTT adapter (socket-agnostic)
       const mqttAdapter = new MqttAdapter(mqttConfig, this.logger);
       this.adapters.set('mqtt', mqttAdapter);

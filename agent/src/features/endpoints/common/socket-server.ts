@@ -29,6 +29,7 @@ export class SocketServer {
    */
   async start(): Promise<void> {
     if (this.started) {
+      this.logger.debug(`IPC server already running at: ${this.config.socketPath}`);
       return;
     }
 

@@ -23,8 +23,8 @@
     }
   },
   "features": {
-    "enableDeviceJobs": true,
-    "enableAnomalyDetection": true,
+    "enableDeviceJobs": false,
+    "enableAnomalyDetection": false,
     "enableDeviceRemoteAccess": true,
     "enableDeviceSensorPublish": true
   },
@@ -37,7 +37,7 @@
     },
     "discovery": {
       "fullIntervalMs": 86400000,
-      "lightIntervalMs": 300000
+      "lightIntervalMs": 14400000
     }
   },
   "protocols": {
@@ -47,7 +47,7 @@
     },
     "mqtt": {
       "qos": 0,
-      "enabled": true,
+      "enabled": false,
       "connection": {
         "brokerUrl": "mqtt://10.0.0.60:1883"
       },
@@ -61,14 +61,14 @@
     "snmp": {
       "port": 161,
       "enabled": true,
-      "ipRanges": [
+      "connections": [
         "10.0.0.60"
       ],
       "bufferCapacity": 131072
     },
     "opcua": {
       "enabled": true,
-      "discoveryUrls": [
+      "connections": [
         "opc.tcp://10.0.0.60:4840"
       ],
       "bufferCapacity": 1048576
@@ -76,9 +76,10 @@
     "modbus": {
       "enabled": true,
       "connections": [
-        {
+
+            {
           "host": "10.0.0.60",
-          "name": "comap-gen-502",
+          "name": "modbus-sim-1",
           "port": 502,
           "points": {
             "humidity": {
@@ -135,121 +136,88 @@
               "noise_pct": 0.15
             }
           },
+          "enabled": true,
           "profile": "Generic",
           "timeoutMs": 2000,
           "addressing": {
             "slaveRange": {
-              "end": 10,
+              "end": 3,
               "start": 1
             }
           }
         },
         {
           "host": "10.0.0.60",
-          "name": "comap-gen-503",
+          "name": "modbus-sim-2",
           "port": 503,
           "points": {
-            "power_kw": {
-              "base": 100,
+            "humidity": {
+              "base": 550,
               "type": "holding",
-              "unit": "kW",
-              "address": 139,
+              "unit": "%RH",
+              "scale": 0.1,
+              "address": 11,
               "dataType": "uint16",
-              "noise_pct": 0.15
+              "noise_pct": 0.1,
+              "description": "Relative humidity (scaled ×10, e.g., 550 = 55.0%)"
             },
-            "frequency": {
-              "base": 50,
+            "pressure": {
+              "base": 1013,
               "type": "holding",
-              "unit": "Hz",
-              "address": 129,
+              "unit": "hPa",
+              "address": 12,
               "dataType": "uint16",
-              "noise_pct": 0.01
+              "noise_pct": 0.015,
+              "description": "Atmospheric pressure in hectopascals (1013 hPa = sea level)"
             },
-            "engine_rpm": {
-              "base": 1500,
-              "type": "holding",
-              "unit": "RPM",
-              "address": 99,
-              "dataType": "uint16",
-              "noise_pct": 0.05
-            },
-            "fuel_level": {
-              "base": 75,
-              "type": "holding",
-              "unit": "%",
-              "address": 159,
-              "dataType": "uint16",
-              "noise_pct": 0.02
-            },
-            "engine_temp": {
-              "base": 85,
+            "temperature": {
+              "base": 230,
               "type": "holding",
               "unit": "°C",
-              "address": 149,
+              "scale": 0.1,
+              "address": 10,
               "dataType": "uint16",
-              "noise_pct": 0.05
+              "noise_pct": 0.08,
+              "description": "Ambient temperature (scaled ×10, e.g., 230 = 23.0°C)"
             },
-            "gen_current_a": {
-              "base": 50,
+            "holding_register_0": {
+              "base": 200,
               "type": "holding",
-              "unit": "A",
-              "address": 119,
+              "unit": "count",
+              "address": 1,
               "dataType": "uint16",
               "noise_pct": 0.1
             },
-            "gen_current_b": {
-              "base": 50,
+            "holding_register_1": {
+              "base": 100,
               "type": "holding",
-              "unit": "A",
-              "address": 120,
+              "unit": "count",
+              "address": 2,
               "dataType": "uint16",
-              "noise_pct": 0.1
+              "noise_pct": 0.26
             },
-            "gen_current_c": {
-              "base": 50,
+            "holding_register_2": {
+              "base": 150,
               "type": "holding",
-              "unit": "A",
-              "address": 121,
+              "unit": "count",
+              "address": 3,
               "dataType": "uint16",
-              "noise_pct": 0.1
-            },
-            "gen_voltage_a": {
-              "base": 230,
-              "type": "holding",
-              "unit": "V",
-              "address": 109,
-              "dataType": "uint16",
-              "noise_pct": 0.02
-            },
-            "gen_voltage_b": {
-              "base": 230,
-              "type": "holding",
-              "unit": "V",
-              "address": 110,
-              "dataType": "uint16",
-              "noise_pct": 0.02
-            },
-            "gen_voltage_c": {
-              "base": 230,
-              "type": "holding",
-              "unit": "V",
-              "address": 111,
-              "dataType": "uint16",
-              "noise_pct": 0.02
+              "noise_pct": 0.15
             }
           },
-          "profile": "COMAP",
+          "enabled": true,
+          "profile": "Generic",
           "timeoutMs": 2000,
           "addressing": {
             "slaveRange": {
-              "end": 10,
+              "end": 3,
               "start": 1
             }
           }
         },
         {
           "host": "10.0.0.60",
-          "name": "comap-gen-504",
+          "name": "modbus-sim-3",
           "port": 504,
           "points": {
             "humidity": {
@@ -306,11 +274,12 @@
               "noise_pct": 0.15
             }
           },
+          "enabled": false,
           "profile": "Generic",
           "timeoutMs": 2000,
           "addressing": {
             "slaveRange": {
-              "end": 10,
+              "end": 3,
               "start": 1
             }
           }

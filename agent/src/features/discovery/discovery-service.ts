@@ -1163,10 +1163,18 @@ export class DiscoveryService extends EventEmitter {
         }
 
         // Convert to DeviceEndpoint format and save
+        // Get enabled state from parent connection (if available)
+        let endpointEnabled = false;
+        if (sensor.metadata?.connectionName && this.agentConfig) {
+          const modbusConfig = this.agentConfig.getModbusConfig();
+          const parentConn = modbusConfig.connections?.find(c => c.name === sensor.metadata?.connectionName);
+          endpointEnabled = parentConn?.enabled ?? false;
+        }
+
         const deviceSensor: DeviceEndpoint = {
           name: sensor.name,
           protocol: sensor.protocol as 'modbus' | 'can' | 'opcua' | 'mqtt',
-          enabled: false, //this.isProtocolEnabled(sensor.protocol), // Check if protocol is enabled in config
+          enabled: endpointEnabled, // Inherit enabled state from parent connection
           poll_interval: 5000, // Default 5 seconds
           connection: sensor.connection,
           data_points: sensor.dataPoints || [],

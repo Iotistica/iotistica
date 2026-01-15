@@ -599,11 +599,6 @@ export class CloudSync extends EventEmitter {
 				},
 			});
 		
-			this.logger?.debugSync('Poll response received', {
-				component: LogComponents.cloudSync,
-				operation: 'poll',
-				status: response.status
-			});
 		
 			// 304 Not Modified - target state unchanged
 			if (response.status === 304) {

@@ -251,7 +251,9 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
               : `${options.tcpHost}:${options.tcpPort || 502}`;
             
             // Generate cryptographic fingerprint (unique per bus + slave ID)
-            const fingerprint = generateModbusFingerprint(busId, slaveId, deviceInfo.deviceId);
+            // CRITICAL: Don't include deviceInfo.deviceId - it's unreliable (MEI timeouts)
+            // Fingerprint must be stable across discovery runs regardless of MEI success
+            const fingerprint = generateModbusFingerprint(busId, slaveId);
 
             // Device naming: Use connection name if provided (multi-connection mode)
             const deviceName = connectionName 

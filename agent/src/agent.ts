@@ -361,6 +361,34 @@ export default class DeviceAgent {
       this.stateReconciler.on('protocol-config-changed', async (change: { old: any; new: any }) => {
         // Profile changes no longer trigger baseline resets - profile is metadata only
         // Data point changes will naturally update metrics as they're read
+        
+        // Trigger discovery for protocols with new connections
+        if (this.discoveryService) {
+          const protocolsToDiscover: string[] = [];
+          for (const protocol of ['modbus', 'opcua', 'snmp', 'mqtt', 'can']) {
+            const oldConns = change.old?.[protocol]?.connections?.length || 0;
+            const newConns = change.new?.[protocol]?.connections?.length || 0;
+            if (change.new?.[protocol]?.enabled && newConns > oldConns) {
+              protocolsToDiscover.push(protocol);
+            }
+          }
+          if (protocolsToDiscover.length > 0) {
+            this.agentLogger?.infoSync('New protocol connections detected - triggering discovery', {
+              component: LogComponents.agent,
+              protocols: protocolsToDiscover
+            });
+            this.discoveryService.runDiscovery({
+              trigger: 'manual',
+              validate: true,
+              forceRun: true,
+              protocols: protocolsToDiscover as any
+            }).catch(err => {
+              this.agentLogger?.errorSync('Discovery failed after protocol config change', err, {
+                component: LogComponents.agent
+              });
+            });
+          }
+        }
       });
 
       //Final words
@@ -1214,9 +1242,6 @@ export default class DeviceAgent {
         const features = this.featureInitializer.getFeatures();
         if (features.sensors) {
           this.cloudSync.setEndpoints(features.sensors);
-          this.agentLogger?.infoSync('CloudSync endpoints reference updated after discovery', {
-            component: LogComponents.agent
-          });
         }
       }
 
