@@ -1094,6 +1094,9 @@ export default class DeviceAgent {
     // Get intervals from agentConfig (cloud → env fallback)
     const intervals = this.agentConfig.getIntervalConfig();
 
+    // Get features for CloudSync (endpoints service for health reporting)
+    const features = this.featureInitializer?.getFeatures() || {};
+
     this.cloudSync = new CloudSync(
       this.stateReconciler, // Use StateReconciler instead of ContainerManager
       this.deviceManager,
@@ -1105,7 +1108,7 @@ export default class DeviceAgent {
       },
       this.agentLogger, // Pass the agent logger
       undefined, // sensorPublish (unused)
-      undefined, // sensors (unused)
+      features.sensors, // Endpoints service for health reporting
       MqttManager.getInstance(), // Pass MQTT manager singleton for state reporting (optional)
       this.sharedHttpClient, // Use shared HTTP client for connection pooling
       this.updater // Pass AgentUpdater for version reporting
