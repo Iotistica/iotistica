@@ -460,21 +460,21 @@ export async function generateDefaultTargetState(
           //     networks: ["default"]
           //   }
           // },
-          {
-            serviceId: 2,
-            serviceName: "nodered",
-            imageName: "nodered/node-red:latest",
-            config: {
-              image: "nodered/node-red:latest",
-              ports: ["8880:1880"],
-              volumes: ["nodered-data:/data"],
-              environment: {
-                "TZ": "UTC"
-              },
-              restart: "unless-stopped",
-              networks: ["default"]
-            }
-          }
+          // {
+          //   serviceId: 2,
+          //   serviceName: "nodered",
+          //   imageName: "nodered/node-red:latest",
+          //   config: {
+          //     image: "nodered/node-red:latest",
+          //     ports: ["8880:1880"],
+          //     volumes: ["nodered-data:/data"],
+          //     environment: {
+          //       "TZ": "UTC"
+          //     },
+          //     restart: "unless-stopped",
+          //     networks: ["default"]
+          //   }
+          // }
         ]
       }
     },
