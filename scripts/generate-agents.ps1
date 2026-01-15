@@ -463,15 +463,15 @@ $content += $networksFooter
 $outputPath = Join-Path $PSScriptRoot ".." $OutputFile
 $content | Out-File -FilePath $outputPath -Encoding UTF8 -Force
 
-# Save provisioning keys
-$keysFile = Join-Path $PSScriptRoot ".." "provisioning-keys-batch.txt"
-$keyHeader = "`n# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-$keyHeader += "`n# Agents: $StartIndex to $($StartIndex + $Count - 1)"
-$keyHeader += "`n# Fleet: $FleetId`n"
-Add-Content -Path $keysFile -Value $keyHeader
-foreach ($keyEntry in $provisioningKeys) {
-    Add-Content -Path $keysFile -Value $keyEntry
-}
+# Skip saving provisioning keys to file (available in console output only)
+# $keysFile = Join-Path $PSScriptRoot ".." "provisioning-keys-batch.txt"
+# $keyHeader = "`n# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+# $keyHeader += "`n# Agents: $StartIndex to $($StartIndex + $Count - 1)"
+# $keyHeader += "`n# Fleet: $FleetId`n"
+# Add-Content -Path $keysFile -Value $keyHeader
+# foreach ($keyEntry in $provisioningKeys) {
+#     Add-Content -Path $keysFile -Value $keyEntry
+# }
 
 # Calculate storage requirements
 try {
@@ -526,7 +526,7 @@ Write-Host "  Total Disk: ~$totalStorage MB (~$([math]::Round($totalStorage/1024
 Write-Host "`n🧠 Memory Requirements:" -ForegroundColor Cyan
 Write-Host "  Per Agent: $memLimit MB (limit), $($MemReservation -replace 'm', '') MB (reserved)" -ForegroundColor Gray
 Write-Host "  Total Memory: ~$totalMemory MB (~$([math]::Round($totalMemory/1024, 2)) GB) max" -ForegroundColor Yellow
-Write-Host "📝 Provisioning keys saved to: provisioning-keys-batch.txt" -ForegroundColor Magenta
+# Write-Host "📝 Provisioning keys saved to: provisioning-keys-batch.txt" -ForegroundColor Magenta
 Write-Host "`nUsage:" -ForegroundColor Cyan
 Write-Host "  docker-compose -f docker-compose.yml -f $OutputFile up -d" -ForegroundColor Yellow
 Write-Host "`nTo start only the new agents:" -ForegroundColor Cyan

@@ -722,8 +722,6 @@ export class DeviceSensorSyncService {
       for (const [endpointName, health] of Object.entries(endpointsHealth)) {
         const { status, connected, lastPoll, errorCount, lastError } = health;
 
-        logger.info(`Health data for endpoint "${endpointName}":`, { status, connected, lastPoll, errorCount, lastError });
-
         // Update health columns in device_sensors table (match by name)
         // Note: For disabled endpoints, set connected to NULL instead of false (less confusing)
         const result = await query(
@@ -737,7 +735,7 @@ export class DeviceSensorSyncService {
            WHERE device_uuid = $6 AND name = $7`,
           [
             status,
-            status === 'disabled' ? null : connected,  // NULL for disabled, actual value for others
+            status === 'disabled' ? null : connected,
             lastPoll ? new Date(lastPoll) : null,
             errorCount || 0,
             lastError || null,
@@ -748,8 +746,6 @@ export class DeviceSensorSyncService {
 
         if (result.rowCount === 0) {
           logger.warn(`Endpoint "${endpointName}" not found in device_sensors table (device ${deviceUuid.substring(0, 8)}...)`);
-        } else {
-          logger.info(`Updated health for "${endpointName}": status=${status}, lastPoll=${lastPoll}, rows=${result.rowCount}`);
         }
       }
 
