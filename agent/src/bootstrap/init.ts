@@ -372,12 +372,6 @@ export class FeatureInitializer {
                 updated_at: new Date()
               });
             
-            logger.debugSync(`Updated buffer capacity for ${protocol}`, {
-              component: LogComponents.agent,
-              protocol,
-              bufferCapacity,
-              bufferCapacityMB: (bufferCapacity / 1024 / 1024).toFixed(2)
-            });
           }
         }
       }
@@ -591,13 +585,6 @@ export class FeatureInitializer {
 
     // Listen for discovery-complete events (batch reload after full discovery)
     this.features.discoveryService.on('discovery-complete', async (data: any) => {
-      logger.infoSync('Discovery completed, checking if adapters need to be reloaded', {
-        component: LogComponents.agent,
-        trigger: data.trigger,
-        deviceCount: data.deviceCount,
-        savedCount: data.savedCount,
-        skippedCount: data.skippedCount
-      });
 
       // Only reload protocol adapters if NEW devices were discovered
       // Skip reload if all devices were skipped (already exist)

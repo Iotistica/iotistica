@@ -162,6 +162,17 @@ router.get('/device/:uuid/state', deviceAuth, async (req, res) => {
 router.patch('/device/state', deviceAuthFromBody, async (req, res) => {
   try {
     const stateReport = req.body;
+    
+    // DEBUG: Log the structure of the state report
+    const firstUuid = Object.keys(stateReport)[0];
+    if (firstUuid) {
+      logger.info('State report received', {
+        uuid: firstUuid.substring(0, 8),
+        keys: Object.keys(stateReport[firstUuid]),
+        has_endpoints_health: !!stateReport[firstUuid].endpoints_health,
+        endpoints_health_keys: stateReport[firstUuid].endpoints_health ? Object.keys(stateReport[firstUuid].endpoints_health) : []
+      });
+    }
 
     // Process state report using shared service
     await processDeviceStateReport(stateReport, {

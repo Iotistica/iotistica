@@ -45,6 +45,7 @@ export interface DeviceStateReport {
     network_interfaces?: any;
     sensor_health?: any;
     protocol_adapters_health?: any;
+    endpoints_health?: Record<string, any>; // Endpoint health from agent
   };
 }
 
@@ -70,6 +71,8 @@ export async function processDeviceStateReport(
       appsKeys: deviceState.apps ? Object.keys(deviceState.apps) : 'empty',
       configKeys: deviceState.config ? Object.keys(deviceState.config) : 'empty',
       hasConfigEndpoints: deviceState.config?.endpoints ? deviceState.config.endpoints.length : 'missing',
+      hasEndpointsHealth: !!deviceState.endpoints_health,
+      endpointsHealthCount: deviceState.endpoints_health ? Object.keys(deviceState.endpoints_health).length : 0,
       version: deviceState.version,
       hasVersion: deviceState.version !== undefined,
       versionType: typeof deviceState.version
@@ -97,6 +100,15 @@ export async function processDeviceStateReport(
     // Only reconcile if config is present in the report (agent only sends config when changed)
     if (deviceState.config) {
         await deviceSensorSync.syncCurrentStateToTable(uuid, deviceState);
+    }
+
+    // 🩺 HEALTH UPDATE: Update endpoint health from agent report
+    // endpoints_health is sent at root level, not in config
+    if (deviceState.endpoints_health) {
+      logger.info(`Processing endpoint health for device ${uuid.substring(0, 8)}... (${Object.keys(deviceState.endpoints_health).length} endpoints)`);
+      await deviceSensorSync.updateEndpointHealth(uuid, deviceState.endpoints_health);
+    } else {
+      logger.debug(`No endpoints_health in state report for device ${uuid.substring(0, 8)}`);
     }
 
     // EVENT SOURCING: Publish current state updated event

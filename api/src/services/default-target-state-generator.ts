@@ -145,27 +145,29 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
       },
       opcua: {
         enabled: true,
-        connections: ["opc.tcp://10.0.0.60:4840"],
+        connections: [
+          "opc.tcp://10.0.0.60:4840",  // opcua-sim-1 (port 4840)
+        ],
         bufferCapacity: 1024 * 1024,
       },
       modbus: {
         enabled: true,
         bufferCapacity: 128 * 1024,
         connections: [
-          {
-            name: 'modbus-sim-1',
-            host: '10.0.0.60',
-            port: 502,
-            enabled: false, // Default to disabled - user enables after discovery
-            timeoutMs: 2000,
-            profile: 'Generic',
-            addressing: {
-              slaveRange: {
-                start: 1,
-                end: 10,
-              },
-            },
-          },
+          // {
+          //   name: 'modbus-sim-1',
+          //   host: '10.0.0.60',
+          //   port: 502,
+          //   enabled: false, // Default to disabled - user enables after discovery
+          //   timeoutMs: 2000,
+          //   profile: 'Generic',
+          //   addressing: {
+          //     slaveRange: {
+          //       start: 1,
+          //       end: 3, // Match simulator default (MODBUS_SLAVES=3)
+          //     },
+          //   },
+          // },
           {
             name: 'modbus-sim-2',
             host: '10.0.0.60',
@@ -176,7 +178,7 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
             addressing: {
               slaveRange: {
                 start: 1,
-                end: 10,
+                end: 3, // Match simulator default (MODBUS_SLAVES=3)
               },
             },
           },
@@ -190,7 +192,7 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
             addressing: {
               slaveRange: {
                 start: 1,
-                end: 10,
+                end: 3, // Match simulator default (MODBUS_SLAVES=3)
               },
             },
           }
@@ -218,7 +220,7 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
         addressing: {
           slaveRange: {
             start: 1,
-            end: 10,
+            end: 3, // Match simulator default (MODBUS_SLAVES=3)
           },
         },
       });
@@ -231,7 +233,8 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
     const { count, startPort, host } = simConfig.opcua;
     
     for (let i = 0; i < count; i++) {
-      opcuaUrls.push(`opc.tcp://${host}:${startPort + i}`);
+      const port = startPort + i;
+      opcuaUrls.push(`opc.tcp://${host}:${port}`); // opcua-sim-${i+1}
     }
   }
   

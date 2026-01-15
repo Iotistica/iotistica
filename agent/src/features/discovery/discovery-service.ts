@@ -1037,6 +1037,8 @@ export class DiscoveryService extends EventEmitter {
 
     let saved = 0;
     let skipped = 0;
+    const savedDevices: Array<{ name: string; protocol: string; confidence: string }> = [];
+    const skippedDevices: Array<{ name: string; protocol: string; reason: string }> = [];
 
     for (const sensor of discovered) {
       try {
@@ -1117,6 +1119,11 @@ export class DiscoveryService extends EventEmitter {
             }
             
             saved++; // Count as saved (updated)
+            savedDevices.push({
+              name: sensor.name,
+              protocol: sensor.protocol,
+              confidence: sensor.confidence || 'updated'
+            });
             continue; // Move to next device (don't fall through to create)
             
           } else {
@@ -1146,6 +1153,11 @@ export class DiscoveryService extends EventEmitter {
               });
             }
             skipped++;
+            skippedDevices.push({
+              name: sensor.name,
+              protocol: sensor.protocol,
+              reason: configChanged ? 'moved' : (fingerprintChanged ? 'fingerprint_changed' : 'already_exists')
+            });
             continue;
           }
         }
@@ -1180,11 +1192,10 @@ export class DiscoveryService extends EventEmitter {
 
         await DeviceEndpointModel.create(deviceSensor);
         saved++;
-
-        this.logger?.debugSync(`Saved discovered sensor "${sensor.name}" (${sensor.protocol})`, {
-          component: LogComponents.discovery,
-          traceId,
-          confidence: sensor.confidence
+        savedDevices.push({
+          name: sensor.name,
+          protocol: sensor.protocol,
+          confidence: sensor.confidence || 'unknown'
         });
 
         // Emit event for enabled endpoints (triggers Sensor Publish reload)
@@ -1205,28 +1216,16 @@ export class DiscoveryService extends EventEmitter {
       }
     }
 
-    // Log detailed skip reasons if devices were skipped
-    if (skipped > 0) {
-      const skipReasons = discovered
-        .filter(d => {
-          const existing = existingSensors.find(s => 
-            s.metadata?.fingerprint === d.fingerprint || s.name === d.name
-          );
-          return existing !== undefined;
-        })
-        .map(d => `${d.name} (${d.protocol})`);
-      
-      this.logger?.debugSync(`Discovery save complete: ${saved} saved, ${skipped} skipped (already exist)`, {
+    // Log single summary with all discovered devices
+    this.logger?.debugSync(
+      `Discovery complete: ${saved} new, ${skipped} existing`,
+      {
         component: LogComponents.discovery,
         traceId,
-        skippedDevices: skipReasons
-      });
-    } else {
-      this.logger?.debugSync(`Discovery save complete: ${saved} saved, ${skipped} skipped`, {
-        component: LogComponents.discovery,
-        traceId
-      });
-    }
+        saved: savedDevices.length > 0 ? savedDevices : undefined,
+        skipped: skippedDevices.length > 0 ? skippedDevices : undefined,
+      }
+    );
 
     // Check for stale devices (not seen in 7+ days)
     await this.checkStaleDevices(traceId);

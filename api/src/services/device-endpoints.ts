@@ -449,7 +449,9 @@ export class DeviceSensorSyncService {
         SELECT id, device_uuid, name, protocol, enabled, poll_interval,
                connection, data_points, metadata, config_version, synced_to_config,
                deployment_status, last_deployed_at, deployment_error, deployment_attempts,
-               config_id, created_at, updated_at, created_by, updated_by
+               config_id, created_at, updated_at, created_by, updated_by,
+               health_status, health_connected, health_last_poll, health_error_count,
+               health_last_error, health_updated_at
         FROM device_sensors 
         WHERE device_uuid = $1
       `;
@@ -486,7 +488,16 @@ export class DeviceSensorSyncService {
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         createdBy: row.created_by,
-        updatedBy: row.updated_by
+        updatedBy: row.updated_by,
+        // Health data from agent reports
+        health: row.health_status ? {
+          status: row.health_status,
+          connected: row.health_connected,
+          lastPoll: row.health_last_poll,
+          errorCount: row.health_error_count,
+          lastError: row.health_last_error,
+          updatedAt: row.health_updated_at
+        } : null
       }));
     } catch (error) {
       logger.error('Error getting sensors from table:', error);
@@ -688,6 +699,63 @@ export class DeviceSensorSyncService {
       };
     } catch (error) {
       logger.error('Error deleting sensor:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update endpoint health from agent state reports
+   * Called when agent reports endpoint health status
+   */
+  async updateEndpointHealth(
+    deviceUuid: string,
+    endpointsHealth: Record<string, any>
+  ): Promise<void> {
+    if (!endpointsHealth || Object.keys(endpointsHealth).length === 0) {
+      return;
+    }
+
+    logger.info(`Updating health for ${Object.keys(endpointsHealth).length} endpoints (device ${deviceUuid.substring(0, 8)}...)`);
+
+    try {
+      // Process each endpoint's health data
+      for (const [endpointName, health] of Object.entries(endpointsHealth)) {
+        const { status, connected, lastPoll, errorCount, lastError } = health;
+
+        logger.info(`Health data for endpoint "${endpointName}":`, { status, connected, lastPoll, errorCount, lastError });
+
+        // Update health columns in device_sensors table (match by name)
+        // Note: For disabled endpoints, set connected to NULL instead of false (less confusing)
+        const result = await query(
+          `UPDATE device_sensors SET
+             health_status = $1,
+             health_connected = $2,
+             health_last_poll = $3,
+             health_error_count = $4,
+             health_last_error = $5,
+             health_updated_at = NOW()
+           WHERE device_uuid = $6 AND name = $7`,
+          [
+            status,
+            status === 'disabled' ? null : connected,  // NULL for disabled, actual value for others
+            lastPoll ? new Date(lastPoll) : null,
+            errorCount || 0,
+            lastError || null,
+            deviceUuid,
+            endpointName
+          ]
+        );
+
+        if (result.rowCount === 0) {
+          logger.warn(`Endpoint "${endpointName}" not found in device_sensors table (device ${deviceUuid.substring(0, 8)}...)`);
+        } else {
+          logger.info(`Updated health for "${endpointName}": status=${status}, lastPoll=${lastPoll}, rows=${result.rowCount}`);
+        }
+      }
+
+      logger.info(`Health updated for device ${deviceUuid.substring(0, 8)}...`);
+    } catch (error) {
+      logger.error('Error updating endpoint health:', error);
       throw error;
     }
   }

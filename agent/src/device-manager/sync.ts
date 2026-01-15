@@ -1432,7 +1432,8 @@ export class CloudSync extends EventEmitter {
 				component: LogComponents.cloudSync,
 				operation: 'collect-endpoint-health',
 				healthCount: Object.keys(health).length,
-				endpoints: Object.keys(health)
+				endpoints: Object.keys(health),
+				sampleHealth: Object.keys(health).length > 0 ? health[Object.keys(health)[0]] : null
 			});
 			
 			return health;
