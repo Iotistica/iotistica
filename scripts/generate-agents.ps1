@@ -99,7 +99,9 @@ param(
 
 
     #VPN
-    [string]$EnableTailscale = "false"
+    [string]$EnableTailscale = "false",
+
+    [string]$LogLevel = "debug"
 )
 
 $ErrorActionPreference = "Stop"
@@ -400,7 +402,7 @@ $networkConfig
       - $volumeName`:/app/data
       - ./certs/ca.crt:/app/certs/ca.crt:ro
     environment:
-      - LOG_LEVEL=debug
+      - LOG_LEVEL=$LogLevel
       - DEVICE_API_PORT=$port
       - CLOUD_API_ENDPOINT=$cloudApiEndpoint
       - NODE_ENV=$NodeEnv

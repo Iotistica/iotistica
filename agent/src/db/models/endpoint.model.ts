@@ -11,6 +11,7 @@ const { v4: uuidv4 } = require('uuid');
 export interface DeviceEndpoint {
   id?: number;
   uuid?: string; // Stable identifier for cloud/edge sync (survives name changes)
+  fingerprint?: string; // Cryptographic hash of physical identity (bus+slaveId+deviceId)
   name: string;
   protocol: 'modbus' | 'can' | 'opcua' | 'snmp' | 'mqtt';
   enabled: boolean;
@@ -65,6 +66,26 @@ export class DeviceEndpointModel {
   }
 
   /**
+   * Get device by fingerprint (cryptographic hash of physical identity)
+   * This is the RECOMMENDED lookup method for discovery - survives name changes
+   */
+  static async getByFingerprint(fingerprint: string): Promise<DeviceEndpoint | null> {
+    const device = await models(this.table)
+      .where('fingerprint', fingerprint)
+      .first();
+    
+    if (!device) return null;
+    
+    // Parse JSON fields (SQLite stores as TEXT)
+    return {
+      ...device,
+      connection: typeof device.connection === 'string' ? JSON.parse(device.connection) : device.connection,
+      data_points: device.data_points ? (typeof device.data_points === 'string' ? JSON.parse(device.data_points) : device.data_points) : null,
+      metadata: device.metadata ? (typeof device.metadata === 'string' ? JSON.parse(device.metadata) : device.metadata) : null,
+    };
+  }
+
+  /**
    * Get enabled devices for a protocol
    */
   static async getEnabled(protocol: string): Promise<DeviceEndpoint[]> {
@@ -98,15 +119,25 @@ export class DeviceEndpointModel {
   }
 
   /**
-   * Upsert endpoint (insert or update if name exists)
-   * Used when target state may contain devices that were already discovered
+   * Upsert endpoint (insert or update if fingerprint exists)
+   * Uses fingerprint-based lookup for stability (survives name changes)
+   * Fallback to name-based lookup for legacy devices without fingerprints
    */
   static async upsert(device: DeviceEndpoint): Promise<DeviceEndpoint> {
-    const existing = await this.getByName(device.name);
+    // Primary: Lookup by fingerprint (if available)
+    let existing: DeviceEndpoint | null = null;
+    if (device.fingerprint) {
+      existing = await this.getByFingerprint(device.fingerprint);
+    }
+    
+    // Fallback: Lookup by name (for legacy devices or manual configs)
+    if (!existing) {
+      existing = await this.getByName(device.name);
+    }
     
     if (existing) {
-      // Update existing device
-      return await this.update(device.name, device) as DeviceEndpoint;
+      // Update existing device (preserve UUID)
+      return await this.updateByFingerprint(device.fingerprint || existing.fingerprint || '', device) as DeviceEndpoint;
     } else {
       // Create new device
       return await this.create(device);
@@ -114,7 +145,7 @@ export class DeviceEndpointModel {
   }
 
   /**
-   * Update endpoint
+   * Update endpoint (by name - legacy method)
    */
   static async update(name: string, updates: Partial<DeviceEndpoint>): Promise<DeviceEndpoint | null> {
     const updateData: any = {
@@ -140,6 +171,36 @@ export class DeviceEndpointModel {
       .update(updateData);
 
     return await this.getByName(name);
+  }
+
+  /**
+   * Update endpoint by fingerprint (recommended method)
+   * Uses fingerprint for lookup, preserves UUID and other stable fields
+   */
+  static async updateByFingerprint(fingerprint: string, updates: Partial<DeviceEndpoint>): Promise<DeviceEndpoint | null> {
+    const updateData: any = {
+      ...updates,
+      updated_at: new Date(),
+    };
+
+    if (updates.connection) {
+      updateData.connection = JSON.stringify(updates.connection);
+    }
+    if (updates.data_points) {
+      updateData.data_points = JSON.stringify(updates.data_points);
+    }
+    if (updates.metadata) {
+      updateData.metadata = JSON.stringify(updates.metadata);
+    }
+    if (updates.lastSeenAt) {
+      updateData.lastSeenAt = updates.lastSeenAt instanceof Date ? updates.lastSeenAt.toISOString() : updates.lastSeenAt;
+    }
+
+    await models(this.table)
+      .where('fingerprint', fingerprint)
+      .update(updateData);
+
+    return await this.getByFingerprint(fingerprint);
   }
 
   /**
@@ -192,10 +253,11 @@ export class DeviceEndpointModel {
 
   /**
    * Update lastSeenAt timestamp for a endpoint
+   * Uses fingerprint column for fast indexed lookup
    */
   static async updateLastSeen(fingerprint: string): Promise<void> {
     await models(this.table)
-      .where('metadata', 'like', `%"fingerprint":"${fingerprint}"%`)
+      .where('fingerprint', fingerprint)
       .update({ lastSeenAt: new Date().toISOString() });
   }
 

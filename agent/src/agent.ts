@@ -1209,6 +1209,17 @@ export default class DeviceAgent {
         component: LogComponents.agent
       });
 
+      // Update CloudSync's endpoints reference (health reporting now available)
+      if (this.cloudSync && this.featureInitializer) {
+        const features = this.featureInitializer.getFeatures();
+        if (features.sensors) {
+          this.cloudSync.setEndpoints(features.sensors);
+          this.agentLogger?.infoSync('CloudSync endpoints reference updated after discovery', {
+            component: LogComponents.agent
+          });
+        }
+      }
+
       // Re-initialize anomaly detection now that endpoints are discovered
       // This allows auto-discovery of endpoint metrics
       if (this.agentConfig.getFeatures().enableAnomalyDetection) {

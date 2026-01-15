@@ -274,6 +274,19 @@ export class CloudSync extends EventEmitter {
 	}
 	
 	/**
+	 * Update endpoints service reference (for health reporting)
+	 * Called after first boot discovery completes
+	 */
+	public setEndpoints(endpoints: any): void {
+		this.endpoints = endpoints;
+		this.logger?.infoSync('Endpoints service updated', {
+			component: LogComponents.cloudSync,
+			operation: 'set-endpoints',
+			hasEndpoints: !!endpoints
+		});
+	}
+	
+	/**
 	 * Setup connection event listeners
 	 */
 	private setupConnectionEventListeners(): void {

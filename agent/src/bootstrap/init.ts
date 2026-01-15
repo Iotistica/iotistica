@@ -200,11 +200,6 @@ export class FeatureInitializer {
       const endpointOutputs = await EndpointOutputModel.getAll();
 
       const mem4 = process.memoryUsage();
-      logger.debugSync('Memory after getAll()', {
-        component: LogComponents.agent,
-        heapUsed: `${Math.round(mem4.heapUsed / 1024 / 1024)}MB`,
-        outputCount: endpointOutputs.length
-      });
 
       if (endpointOutputs.length === 0) {
         logger.warnSync('No sensor outputs configured in database', {
