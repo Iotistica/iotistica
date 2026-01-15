@@ -400,6 +400,7 @@ $networkConfig
       - $volumeName`:/app/data
       - ./certs/ca.crt:/app/certs/ca.crt:ro
     environment:
+      - LOG_LEVEL=debug
       - DEVICE_API_PORT=$port
       - CLOUD_API_ENDPOINT=$cloudApiEndpoint
       - NODE_ENV=$NodeEnv
@@ -416,7 +417,6 @@ $networkConfig
       - USE_KEY_COMPACTION_POC=$UseKeyCompactionPoc
       - USE_DEFLATE_COMPRESSION=$UseDeflateCompression
       - ENABLE_HEAP_PROFILING=$EnableHeapProfiling
-      - TAILSCALE_ENABLED=$EnableTailscale
 "@
     
     $services += $service

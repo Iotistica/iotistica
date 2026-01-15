@@ -363,9 +363,9 @@ export class AgentConfig extends EventEmitter {
       logFlushIntervalMs: cloudLogging?.logFlushIntervalMs ?? 30000,
       logDir: process.env.LOG_DIR ?? cloudSettings?.logDir ?? `${process.env.DATA_DIR || '/app/data'}/logs`,
       
-      // Always use cloud config for log level (ignore LOG_LEVEL env var)
-      // This allows dynamic log level control via dashboard/target state
-      logLevel: cloudLogging?.level ?? "info",
+      // Log level: Cloud config → LOG_LEVEL env var → default "info"
+      // This allows dynamic log level control via dashboard while supporting env var override
+      logLevel: (cloudLogging?.level ?? process.env.LOG_LEVEL ?? "info") as 'error' | 'warn' | 'info' | 'debug',
     };
   }
 

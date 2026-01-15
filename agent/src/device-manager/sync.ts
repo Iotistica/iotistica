@@ -1403,11 +1403,25 @@ export class CloudSync extends EventEmitter {
 	 * Returns dynamic runtime status (NOT static metadata)
 	 */
 	private async collectEndpointHealth(): Promise<Record<string, any>> {
-		if (!this.endpoints) return {};
+		if (!this.endpoints) {
+			this.logger?.debugSync('No endpoints service available for health collection', {
+				component: LogComponents.cloudSync,
+				operation: 'collect-endpoint-health'
+			});
+			return {};
+		}
 		
 		try {
 			// getAllDeviceStatuses() queries database + overlays adapter runtime status
 			const health = await this.endpoints.getAllDeviceStatuses();
+			
+			this.logger?.debugSync('Collected endpoint health', {
+				component: LogComponents.cloudSync,
+				operation: 'collect-endpoint-health',
+				healthCount: Object.keys(health).length,
+				endpoints: Object.keys(health)
+			});
+			
 			return health;
 		} catch (error) {
 			this.logger?.warnSync('Failed to collect endpoint health', {
