@@ -65,16 +65,28 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     
     // Multi-connection mode detection
     if (modbusConfig?.connections && modbusConfig.connections.length > 0) {
-      this.logger?.debugSync(`Starting multi-connection Modbus discovery (${modbusConfig.connections.length} connections)`, {
+      // Filter to only enabled connections
+      const enabledConnections = modbusConfig.connections.filter(c => c.enabled !== false);
+      
+      if (enabledConnections.length === 0) {
+        this.logger?.debugSync('All Modbus connections are disabled - skipping discovery', {
+          component: LogComponents.discovery + "] [" + this.protocol as any,
+          totalConnections: modbusConfig.connections.length,
+          enabledConnections: 0
+        });
+        return [];
+      }
+      
+      this.logger?.debugSync(`Starting multi-connection Modbus discovery (${enabledConnections.length} enabled / ${modbusConfig.connections.length} total)`, {
         component: LogComponents.discovery + "] [" + this.protocol as any,
-        connectionCount: modbusConfig.connections.length
+        connectionCount: enabledConnections.length
       });
 
       const allDiscovered: DiscoveredDevice[] = [];
 
       // Separate TCP and serial connections (TCP can be parallel, RTU must be sequential)
-      const tcpConnections = modbusConfig.connections.filter(c => c.host);
-      const serialConnections = modbusConfig.connections.filter(c => !c.host);
+      const tcpConnections = enabledConnections.filter(c => c.host);
+      const serialConnections = enabledConnections.filter(c => !c.host);
 
       // Parallel TCP scanning (controlled concurrency to avoid overwhelming network)
       if (tcpConnections.length > 0) {

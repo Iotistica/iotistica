@@ -276,6 +276,83 @@ export class DeviceSensorSyncService {
       // Update config with endpoints from table
       config.endpoints = configDevices;
 
+      // 🔄 SYNC: Propagate enabled flags to all protocol connections
+      // This ensures agent reads the correct enabled state from target state
+      if (!config.protocols) config.protocols = {};
+
+      // Build map of enabled status by endpoint name
+      const enabledByName = new Map<string, boolean>();
+      for (const endpoint of configDevices) {
+        enabledByName.set(endpoint.name, endpoint.enabled);
+      }
+
+      // Sync to Modbus connections
+      if (config.protocols.modbus?.connections) {
+        for (const connection of config.protocols.modbus.connections) {
+          if (connection.name && enabledByName.has(connection.name)) {
+            connection.enabled = enabledByName.get(connection.name);
+            logger.info(`Synced enabled=${connection.enabled} to modbus connection "${connection.name}"`);
+          }
+        }
+      }
+
+      // Sync to OPC UA discovery URLs (match by URL)
+      if (config.protocols.opcua?.discoveryUrls) {
+        for (const endpoint of configDevices.filter(e => e.protocol === 'opcua')) {
+          const urlMatch = config.protocols.opcua.discoveryUrls.find((url: string) => 
+            endpoint.connection?.endpointUrl === url || endpoint.name === url
+          );
+          if (urlMatch) {
+            if (!config.protocols.opcua.servers) config.protocols.opcua.servers = [];
+            const existing = config.protocols.opcua.servers.find((s: any) => s.url === urlMatch);
+            if (existing) {
+              existing.enabled = endpoint.enabled;
+            } else {
+              config.protocols.opcua.servers.push({ url: urlMatch, enabled: endpoint.enabled });
+            }
+            logger.info(`Synced enabled=${endpoint.enabled} to opcua server "${urlMatch}"`);
+          }
+        }
+      }
+
+      // Sync to SNMP IP ranges (match by IP)
+      if (config.protocols.snmp?.ipRanges) {
+        for (const endpoint of configDevices.filter(e => e.protocol === 'snmp')) {
+          const ipMatch = config.protocols.snmp.ipRanges.find((ip: string) => 
+            endpoint.connection?.host === ip || endpoint.name === ip
+          );
+          if (ipMatch) {
+            if (!config.protocols.snmp.hosts) config.protocols.snmp.hosts = [];
+            const existing = config.protocols.snmp.hosts.find((h: any) => h.ip === ipMatch);
+            if (existing) {
+              existing.enabled = endpoint.enabled;
+            } else {
+              config.protocols.snmp.hosts.push({ ip: ipMatch, enabled: endpoint.enabled });
+            }
+            logger.info(`Synced enabled=${endpoint.enabled} to snmp host "${ipMatch}"`);
+          }
+        }
+      }
+
+      // Sync to MQTT discovery roots (match by topic)
+      if (config.protocols.mqtt?.discoveryRoots) {
+        for (const endpoint of configDevices.filter(e => e.protocol === 'mqtt')) {
+          const topicMatch = config.protocols.mqtt.discoveryRoots.find((topic: string) => 
+            endpoint.connection?.topic === topic || endpoint.name === topic
+          );
+          if (topicMatch) {
+            if (!config.protocols.mqtt.topics) config.protocols.mqtt.topics = [];
+            const existing = config.protocols.mqtt.topics.find((t: any) => t.name === topicMatch);
+            if (existing) {
+              existing.enabled = endpoint.enabled;
+            } else {
+              config.protocols.mqtt.topics.push({ name: topicMatch, enabled: endpoint.enabled });
+            }
+            logger.info(`Synced enabled=${endpoint.enabled} to mqtt topic "${topicMatch}"`);
+          }
+        }
+      }
+
       // Save updated target state
       const updateResult = await query(
         `INSERT INTO device_target_state (device_uuid, apps, config, version, updated_at, needs_deployment)

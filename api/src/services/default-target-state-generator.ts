@@ -33,10 +33,10 @@
 import logger from '../utils/logger';
 import { query } from '../db/connection.js';
 import { 
-  TargetStateV2, 
+  TargetState, 
   profileDataPointsToPointsObject,
   type ModbusProfileDataPoint 
-} from '../types/target-state-v2.js';
+} from '../types/target-state.js';
 
 /**
  * Fetch profile data points from database
@@ -156,6 +156,7 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
             name: 'modbus-sim-1',
             host: '10.0.0.60',
             port: 502,
+            enabled: false, // Default to disabled - user enables after discovery
             timeoutMs: 2000,
             profile: 'Generic',
             addressing: {
@@ -169,6 +170,7 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
             name: 'modbus-sim-2',
             host: '10.0.0.60',
             port: 503,
+            enabled: false, // Default to disabled - user enables after discovery
             timeoutMs: 2000,
             profile: 'Generic',
             addressing: {
@@ -182,6 +184,7 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
             name: 'modbus-sim-3',
             host: '10.0.0.60',
             port: 504,
+            enabled: false, // Default to disabled - user enables after discovery
             timeoutMs: 2000,
             profile: 'Generic',
             addressing: {
@@ -209,6 +212,7 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
         name: `modbus-sim-${i + 1}`,
         host: host,
         port: startPort + i,
+        enabled: false, // Default to disabled - user enables after discovery
         timeoutMs: 2000,
         profile: profile,
         addressing: {
@@ -272,23 +276,23 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
 }
 
 /**
- * Generate default target state config V2 (new structure)
+ * Generate default target state config
  * 
  * @param licenseData - License data from system_config
  * @param profileDataPoints - Profile data points from database (array format)
  * @param simulatorOptions - Simulator configuration from provisioning (optional)
- * @returns Target state V2 configuration object
+ * @returns Target state configuration object
  */
-export function generateDefaultTargetStateConfigV2(
+export function generateDefaultTargetStateConfig(
   licenseData: LicenseData | null,
   profileDataPoints: ModbusProfileDataPoint[] = [],
   simulatorOptions?: SimulatorOptions
-): TargetStateV2 {
+): TargetState {
   // Transform profileDataPoints array → points object
   const modbusPoints = profileDataPointsToPointsObject(profileDataPoints);
   
-  // Default V2 config
-  const defaultConfig: TargetStateV2 = {
+  // Default config
+  const defaultConfig: TargetState = {
     anomalyDetection: {
       alerts: {
         cooldownMs: 300000,  // 5 minutes (agent-side alert deduplication)
@@ -410,14 +414,14 @@ export function generateDefaultTargetStateConfigV2(
  * 
  * @param licenseData - License data from system_config
  * @param simulatorOptions - Simulator configuration from provisioning (optional)
- * @returns Complete target state V2 with preinstalled core services and generated config
+ * @returns Complete target state with preinstalled core services and generated config
  */
-export async function generateDefaultTargetStateV2(
+export async function generateDefaultTargetState(
   licenseData: LicenseData | null,
   simulatorOptions?: SimulatorOptions
 ) {
-  // Generate V2 config with connection profiles defined
-  const config = generateDefaultTargetStateConfigV2(licenseData, [], simulatorOptions);
+  // Generate config with connection profiles defined
+  const config = generateDefaultTargetStateConfig(licenseData, [], simulatorOptions);
   
   // Load points for each connection based on its profile
   if (config.protocols.modbus.connections) {

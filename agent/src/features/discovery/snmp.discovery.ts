@@ -68,7 +68,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
     });
 
     // Default options
-    const ipRanges = options?.ipRanges || [];
+    let ipRanges = options?.ipRanges || [];
     const port = options?.port || 161;
     const community = options?.community || 'public';
     const version = options?.version || 'v2c';
@@ -76,8 +76,17 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
     const retries = options?.retries || 1;
     const concurrency = options?.concurrency || 10;
 
+    // Filter to only enabled hosts if hosts config exists
+    const hostsConfig = (options as any)?.hosts;
+    if (Array.isArray(hostsConfig)) {
+      ipRanges = ipRanges.filter(ip => {
+        const host = hostsConfig.find((h: any) => h.ip === ip);
+        return !host || host.enabled !== false;
+      });
+    }
+
     if (ipRanges.length === 0) {
-      this.logger?.warnSync('No IP ranges specified for SNMP discovery - skipping to prevent network flooding', {
+      this.logger?.warnSync('No enabled IP ranges for SNMP discovery - skipping', {
         component: LogComponents.discovery + "] [" + this.protocol as any,
         note: 'Configure SNMP IP ranges via dashboard or set SNMP_IP_RANGES env var'
       });

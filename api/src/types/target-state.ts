@@ -1,15 +1,8 @@
 /**
- * Target State V2 Type Definitions
+ * Target State Type Definitions
  * 
- * This represents the restructured target state configuration format.
- * Better organized into logical sections: anomaly, logging, features, runtime, intervals, protocols.
- * 
- * Key changes from V1:
- * - Anomaly detection consolidated into single section
- * - Logging settings grouped together (including maxLogs, logMaxAge, maxLogFileSize)
- * - Runtime section (renamed from "settings") for memory/restart policies
- * - Intervals extracted into dedicated section
- * - Modbus profile points as object instead of array (keyed by point name)
+ * This represents the target state configuration format sent to agents.
+ * Organized into logical sections: anomaly, logging, features, runtime, intervals, protocols.
  */
 
 // ============================================================================
@@ -205,10 +198,10 @@ export interface ProtocolsConfig {
 }
 
 // ============================================================================
-// Complete Target State V2
+// Complete Target State 
 // ============================================================================
 
-export interface TargetStateV2 {
+export interface TargetState {
   anomalyDetection: AnomalyDetectionConfig;
   logging: LoggingConfig;
   features: FeaturesConfig;
@@ -269,7 +262,7 @@ export function pointsObjectToProfileDataPoints(
 // Validation Helpers
 // ============================================================================
 
-export function isTargetStateV2(config: any): config is TargetStateV2 {
+export function isTargetState(config: any): config is TargetState {
   return (
     config &&
     typeof config === 'object' &&

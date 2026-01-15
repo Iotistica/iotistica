@@ -117,14 +117,9 @@ services:
             - NEO4J_USERNAME=${NEO4J_USERNAME:-neo4j}
             - NEO4J_PASSWORD=${NEO4J_PASSWORD:-iotistic123}
             - MODBUS_TCP_HOST=${MODBUS_TCP_HOST:-iotistic-modbus-sim}
-            - VPN_ENABLED=true
-            - VPN_TYPE=tailscale
-            - TAILSCALE_ENABLED=true
-            - TAILSCALE_API_KEY=tskey-api-k1T3jA2zK611CNTRL-Mze4n9w5EfFw55iT5pNMfFfXNZWVCW4S7
-            - TAILSCALE_TAILNET=TV1oSp4kL811CNTRL
+            - TAILSCALE_ENABLED=false
             - MQTT_MONITOR_URL=${MQTT_MONITOR_URL:-http://mqtt-monitor:3500}
             - POSTOFFICE_URL=${POSTOFFICE_URL:-http://postoffice:3300}
-            - USE_TARGET_STATE_V2=${USE_TARGET_STATE_V2:-true}
         ports:
             - "${API_PORT_EXT:-4002}:3002"
             - "3443:3443"

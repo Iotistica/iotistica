@@ -1438,12 +1438,15 @@ export default class DeviceAgent {
     this.agentLogger?.infoSync('Checking VPN auto-reconnection status', {
       component: LogComponents.agent,
       provisioned: this.deviceInfo.provisioned,
+      vpnEnabled: this.deviceInfo.vpnEnabled,
     });
 
-    // Only attempt VPN reconnection if device is provisioned
-    if (!this.deviceInfo.provisioned) {
-      this.agentLogger?.infoSync('VPN auto-reconnection skipped (device not provisioned)', {
+    // Only attempt VPN reconnection if device is provisioned AND VPN was enabled during provisioning
+    if (!this.deviceInfo.provisioned || !this.deviceInfo.vpnEnabled) {
+      this.agentLogger?.infoSync('VPN auto-reconnection skipped (device not provisioned with VPN)', {
         component: LogComponents.agent,
+        provisioned: this.deviceInfo.provisioned,
+        vpnEnabled: this.deviceInfo.vpnEnabled,
       });
       return;
     }

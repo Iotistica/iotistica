@@ -1034,8 +1034,8 @@ export class CloudSync extends EventEmitter {
 			}
 	}
 		
-		// Add VPN health stats (if provisioned and Tailscale enabled)
-		if (deviceInfo.provisioned) {
+		// Add VPN health stats (only if device was provisioned WITH VPN credentials)
+		if (deviceInfo.provisioned && deviceInfo.vpnEnabled) {
 			try {
 				const { TailscaleManager } = await import('../network/vpn/tailscale-manager.js');
 				const tailscale = new TailscaleManager(this.logger);

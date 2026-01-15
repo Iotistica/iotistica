@@ -91,10 +91,15 @@ param(
     
     # Simulation Control
     [switch]$EnableSimulation,
+
     
     # Container Resources
     [string]$MemLimit = "512m",
-    [string]$MemReservation = "256m"
+    [string]$MemReservation = "256m",
+
+
+    #VPN
+    [string]$EnableTailscale = "false"
 )
 
 $ErrorActionPreference = "Stop"
@@ -411,6 +416,7 @@ $networkConfig
       - USE_KEY_COMPACTION_POC=$UseKeyCompactionPoc
       - USE_DEFLATE_COMPRESSION=$UseDeflateCompression
       - ENABLE_HEAP_PROFILING=$EnableHeapProfiling
+      - TAILSCALE_ENABLED=$EnableTailscale
 "@
     
     $services += $service

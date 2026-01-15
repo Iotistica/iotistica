@@ -29,6 +29,9 @@ export interface DeviceInfo {
 	// Provisioning state machine
 	provisioningState?: ProvisioningState;
 	
+	// VPN configuration
+	vpnEnabled?: boolean;         // True if device was provisioned with VPN credentials
+	
 	// Additional metadata
 	applicationId?: number;
 	macAddress?: string;

@@ -44,7 +44,7 @@ import {
 } from '../utils/mqtt-broker-config';
 import { getVpnConfigForDevice, formatVpnConfigForDevice } from '../utils/vpn-config';
 import { SystemConfigModel } from '../db/system-config-model';
-import { generateDefaultTargetStateV2 } from '../services/default-target-state-generator.js';
+import { generateDefaultTargetState } from '../services/default-target-state-generator.js';
 import { provisioningService } from '../services/provisioning.service';
 import logger from '../utils/logger';
 export const router = express.Router();

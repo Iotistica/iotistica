@@ -26,6 +26,7 @@ export interface ModbusConnectionConfig {
   name?: string;                    // Connection identifier (e.g., 'gen-502')
   host: string;                     // IP address or hostname
   port: number;                     // Modbus TCP port (default 502)
+  enabled?: boolean;                // Connection enabled flag (default: true)
   timeoutMs?: number;               // Connection timeout
   profile?: string;                 // Optional: Override root profile
   addressing?: {                    // Optional: Override root addressing

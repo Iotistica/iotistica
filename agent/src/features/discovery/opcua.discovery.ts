@@ -27,14 +27,23 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
     const discovered: DiscoveredDevice[] = [];
 
     // Default discovery URLs (empty array = skip discovery)
-    const discoveryUrls = options?.discoveryUrls || [
+    let discoveryUrls = options?.discoveryUrls || [
       'opc.tcp://10.0.0.60:4840',
       'opc.tcp://10.0.0.60:48010'
     ];
 
-    // Skip if no URLs configured
+    // Filter to only enabled servers if servers config exists
+    const opcuaConfig = (options as any)?.servers;
+    if (Array.isArray(opcuaConfig)) {
+      discoveryUrls = discoveryUrls.filter(url => {
+        const server = opcuaConfig.find((s: any) => s.url === url);
+        return !server || server.enabled !== false;
+      });
+    }
+
+    // Skip if no URLs configured or all disabled
     if (discoveryUrls.length === 0) {
-      this.logger?.debugSync('OPC-UA discovery skipped - no URLs configured', {
+      this.logger?.debugSync('OPC-UA discovery skipped - no enabled URLs', {
         component: LogComponents.discovery + "] [" + this.protocol as any,
         protocol: this.protocol
       });
@@ -44,7 +53,8 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
     this.logger?.debugSync('Starting OPC-UA discovery', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       protocol: this.protocol,
-      phase: 'discovery'
+      phase: 'discovery',
+      urlCount: discoveryUrls.length
     });
 
     for (const url of discoveryUrls) {

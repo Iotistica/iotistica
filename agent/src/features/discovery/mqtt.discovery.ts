@@ -168,9 +168,18 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
     this.discoveredTopics.clear();
 
     const brokerUrl = options?.brokerUrl || process.env.MQTT_BROKER_URL || 'mqtt://mosquitto:1883';
-    const discoveryRoots = options?.discoveryRoots || [];
+    let discoveryRoots = options?.discoveryRoots || [];
     const monitorDurationMs = options?.monitorDurationMs || 30000;
     const qos = options?.qos ?? 0;
+    
+    // Filter to only enabled topics if topics config exists
+    const topicsConfig = (options as any)?.topics;
+    if (Array.isArray(topicsConfig)) {
+      discoveryRoots = discoveryRoots.filter(root => {
+        const topic = topicsConfig.find((t: any) => t.name === root);
+        return !topic || topic.enabled !== false;
+      });
+    }
     
     // No observer logic needed - discovery now handled by subscribing to discoveryRoots
     // directly in the adapter (see adapter.ts saveDiscoveryRootsToDatabase)

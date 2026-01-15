@@ -631,11 +631,14 @@ export class DeviceManager {
 			this.deviceInfo.provisioned = true;
 			this.deviceInfo.provisioningState = 'provisioned';
 			this.deviceInfo.registeredAt = Date.now();
+			
+			// Store VPN status from provisioning response
+			const vpnConfig = response?.vpn;
+			this.deviceInfo.vpnEnabled = !!(vpnConfig?.enabled);
 
 			// Save to database
 			await this.saveDeviceInfo();
 
-			const vpnConfig = response?.vpn; // May be undefined if resuming
 			this.logger?.infoSync('Device provisioned successfully', {
 				component: LogComponents.deviceManager,
 				operation: 'provision',

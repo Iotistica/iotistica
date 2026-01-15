@@ -36,7 +36,7 @@ import {
   formatBrokerConfigForClient
 } from '../utils/mqtt-broker-config';
 
-import { generateDefaultTargetStateV2 } from './default-target-state-generator';
+import { generateDefaultTargetState } from './default-target-state-generator';
 import logger from '../utils/logger';
 import { configService }  from './config.service';
 
@@ -411,8 +411,8 @@ export class ProvisioningService {
         }
       }
       
-      // Always use V2 format (single source of truth)
-      const { apps, config } = await generateDefaultTargetStateV2(licenseData, simulatorOptions);
+      // Single source of truth for target state generation
+      const { apps, config } = await generateDefaultTargetState(licenseData, simulatorOptions);
       
       // Get required agent version from cloud policy (system_config)
       const requiredAgentVersion = await configService.get('required_agent_version');
