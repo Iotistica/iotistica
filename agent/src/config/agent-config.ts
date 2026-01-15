@@ -96,6 +96,14 @@ export interface MQTTConfig {
   qos?: 0 | 1 | 2;
 }
 
+export interface BACnetConfig {
+  enabled?: boolean;
+  port?: number;
+  broadcastAddress?: string;
+  timeout?: number;
+  maxDevices?: number;
+}
+
 export interface PerformanceConfig {
   memoryCheckIntervalMs?: number;
   memoryThresholdMb?: number;
@@ -309,6 +317,23 @@ export class AgentConfig extends EventEmitter {
       discoveryRoots: cloudProtocol?.discoveryRoots ?? [],
       monitorDurationMs: cloudProtocol?.monitorDurationMs ?? 30000,
       qos: (cloudProtocol?.qos ?? 0) as 0 | 1 | 2,
+    };
+  }
+
+  /**
+   * Get BACnet protocol adapter configuration
+   * 
+   * Fallback: Cloud config.protocols.bacnet → hardcoded defaults
+   */
+  getBACnetConfig(): BACnetConfig {
+    const cloudProtocol = this.getTargetConfig().protocols?.bacnet;
+
+    return {
+      enabled: cloudProtocol?.enabled ?? false,
+      port: cloudProtocol?.port ?? 47808,
+      broadcastAddress: cloudProtocol?.broadcastAddress ?? '255.255.255.255',
+      timeout: cloudProtocol?.timeout ?? 5000,
+      maxDevices: cloudProtocol?.maxDevices ?? 100,
     };
   }
 

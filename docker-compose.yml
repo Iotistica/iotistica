@@ -318,16 +318,15 @@ services:
             options:
                 max-size: "5m"
                 max-file: "2"
-    bacnet-simulator:
+    bacnet-sim:
         build:
             context: ./sensors/bacnet-simulator
             dockerfile: Dockerfile
-        container_name: iotistic-bacnet-sim
+        container_name: bacnet-sim
         restart: unless-stopped
-        ports:
-            - "47808:47808/udp"
-        networks:
-            - iotistic-net
+        network_mode: host  # Same network as agent for BACnet broadcast discovery
+        environment:
+            - BACPYPES_IFACE=0.0.0.0:47808/24  # Bind to all interfaces on port 47808
         logging:
             driver: "json-file"
             options:

@@ -45,6 +45,7 @@
     "@types/mqtt": "^0.0.34",
     "@types/uuid": "^10.0.0",
     "axios": "^1.12.2",
+    "bacstack": "^0.0.1-beta.14",
     "better-sqlite3": "^12.4.1",
     "blinking": "^1.0.1",
     "bluebird": "^3.7.2",

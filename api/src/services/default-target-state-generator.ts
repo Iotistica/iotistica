@@ -110,6 +110,11 @@ interface SimulatorOptions {
     snmp?: {
       ipRanges: string[];
     };
+    bacnet?: {
+      broadcastAddress?: string;
+      port?: number;
+      timeout?: number;
+    };
   };
 }
 
@@ -142,6 +147,14 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
         monitorDurationMs: 30000,
         qos: 0 as 0 | 1 | 2,
         bufferCapacity: 512 * 1024,
+      },
+      bacnet: {
+        enabled: true,
+        port: 47808,
+        broadcastAddress: '255.255.255.255',  // Both agent and simulator on host network
+        timeout: 5000,
+        maxDevices: 100,
+        bufferCapacity: 256 * 1024,
       },
       opcua: {
         enabled: true,
@@ -241,6 +254,13 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
   // Generate SNMP IP ranges
   const snmpRanges = simConfig.snmp?.ipRanges || [];
   
+  // BACnet configuration
+  const bacnetConfig = simConfig.bacnet || {
+    broadcastAddress: '255.255.255.255',  // Both agent and simulator on host network
+    port: 47808,
+    timeout: 5000
+  };
+  
   return {
     can: {
       enabled: false,
@@ -264,6 +284,14 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
       monitorDurationMs: 30000,
       qos: 0 as 0 | 1 | 2,
       bufferCapacity: 512 * 1024,
+    },
+    bacnet: {
+      enabled: true,
+      port: bacnetConfig.port || 47808,
+      broadcastAddress: bacnetConfig.broadcastAddress || '255.255.255.255',
+      timeout: bacnetConfig.timeout || 5000,
+      maxDevices: 100,
+      bufferCapacity: 256 * 1024,
     },
     opcua: {
       enabled: opcuaUrls.length > 0,
