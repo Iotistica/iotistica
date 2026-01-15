@@ -27,6 +27,6 @@ export function logSystemEvent(eventType: string, data: any, logger?: AgentLogge
   } else {
     // Fallback for cases where logger is not available
     const timestamp = new Date().toISOString();
-    console.log(`[SYSTEM_EVENT] ${timestamp} - ${eventType}:`, JSON.stringify(data, null, 2));
+    console.log(`[SYSTEM_EVENT] ${timestamp} - ${eventType}:`, JSON.stringify(data));
   }
 }

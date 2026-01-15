@@ -1163,6 +1163,11 @@ export default class DeviceAgent {
    * Called after CloudSync initializes and fetches target state
    */
   private async runFirstBootDiscoveryIfEnabled(): Promise<void> {
+    this.agentLogger?.infoSync('Checking if first boot discovery should run', {
+      component: LogComponents.agent,
+      hasDiscoveryService: !!this.discoveryService
+    });
+
     if (!this.discoveryService) {
       this.agentLogger?.debugSync('Discovery service not available, skipping first boot discovery', {
         component: LogComponents.agent
@@ -1173,6 +1178,12 @@ export default class DeviceAgent {
     // Check if first boot discovery is enabled (default: true)
     const enableFirstBootDiscovery = process.env.ENABLE_FIRST_BOOT_DISCOVERY !== 'false';
     
+    this.agentLogger?.infoSync('First boot discovery check', {
+      component: LogComponents.agent,
+      enableFirstBootDiscovery,
+      envValue: process.env.ENABLE_FIRST_BOOT_DISCOVERY
+    });
+    
     if (!enableFirstBootDiscovery) {
       this.agentLogger?.infoSync('First boot discovery disabled by configuration', {
         component: LogComponents.agent
@@ -1182,6 +1193,10 @@ export default class DeviceAgent {
 
 
     try {
+      this.agentLogger?.infoSync('Starting first boot discovery', {
+        component: LogComponents.agent
+      });
+
       await this.discoveryService.runDiscovery({
         trigger: 'first_boot',
         validate: true, // Always run full validation on first boot

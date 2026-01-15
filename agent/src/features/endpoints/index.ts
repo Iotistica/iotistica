@@ -298,7 +298,7 @@ export class SensorsFeature extends BaseFeature {
 
       // Wire up event handlers
       opcuaAdapter.on('started', () => {
-        this.logger.info('OPC-UA adapter started');
+        this.logger.debug('OPC-UA adapter started');
       });
 
       opcuaAdapter.on('data', (dataPoints: SensorDataPoint[]) => {
@@ -307,7 +307,7 @@ export class SensorsFeature extends BaseFeature {
       });
 
       opcuaAdapter.on('device-connected', (deviceName: string) => {
-        this.logger.info(`OPC-UA device connected: ${deviceName}`);
+        this.logger.debug(`OPC-UA device connected: ${deviceName}`);
       });
 
       opcuaAdapter.on('device-disconnected', (deviceName: string) => {

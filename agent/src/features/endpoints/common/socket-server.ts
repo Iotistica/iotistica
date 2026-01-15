@@ -110,7 +110,7 @@ export class SocketServer {
       await new Promise<void>((resolve) => {
         this.server!.close(() => {
           const transportType = this.isWindowsNamedPipe ? 'Windows Named Pipe' : 'Unix socket';
-          this.logger.info(`IPC server stopped (${transportType})`);
+          this.logger.debug(`IPC server stopped (${transportType})`);
           resolve();
         });
       });

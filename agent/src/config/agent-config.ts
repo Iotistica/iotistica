@@ -55,13 +55,14 @@ export interface ModbusConfig {
 
 export interface OPCUAConfig {
   enabled?: boolean;
-  discoveryUrls?: string[];
+  connections?: string[]; // OPC UA server URLs (formerly discoveryUrls)
+  discoveryUrls?: string[]; // @deprecated - use connections
 }
 
 export interface SNMPConfig {
   enabled?: boolean;
   /**
-   * IP ranges for SNMP discovery
+   * IP addresses/ranges for SNMP discovery (formerly ipRanges)
    * 
    * IMPORTANT: Always specify explicit IP ranges to prevent network flooding
    * 
@@ -80,7 +81,8 @@ export interface SNMPConfig {
    * Default: [] (empty - SNMP discovery disabled)
    * Environment variable: SNMP_IP_RANGES (comma-separated)
    */
-  ipRanges?: string[];
+  connections?: string[];
+  ipRanges?: string[]; // @deprecated - use connections
   port?: number;
 }
 
@@ -236,6 +238,7 @@ export class AgentConfig extends EventEmitter {
           name: conn.name,
           host: conn.host,
           port: conn.port ?? 502,
+          enabled: conn.enabled ?? false, // Connection-level enabled flag
           timeoutMs: conn.timeoutMs ?? cloudConnection?.timeoutMs ?? 2000,
           profile: connProfile,
           addressing: conn.addressing,  // Optional override
@@ -269,7 +272,8 @@ export class AgentConfig extends EventEmitter {
 
     return {
       enabled: cloudProtocol?.enabled ?? false,
-      discoveryUrls: cloudProtocol?.discoveryUrls ?? []
+      connections: cloudProtocol?.connections ?? cloudProtocol?.discoveryUrls ?? [],
+      discoveryUrls: cloudProtocol?.discoveryUrls // Keep for backward compatibility
     };
   }
 
@@ -283,7 +287,8 @@ export class AgentConfig extends EventEmitter {
 
     return {
       enabled: cloudProtocol?.enabled ?? false,
-      ipRanges: cloudProtocol?.ipRanges ?? [],
+      connections: cloudProtocol?.connections ?? cloudProtocol?.ipRanges ?? [],
+      ipRanges: cloudProtocol?.ipRanges, // Keep for backward compatibility
       port: cloudProtocol?.port ?? 161,
     };
   }
@@ -463,7 +468,7 @@ export class AgentConfig extends EventEmitter {
 
   /**
    * Handle protocol configuration changes
-   * Updates endpoint enabled status in database
+   * Updates endpoint enabled status in database based on connection-level enabled flags
    */
   private async handleProtocolConfigChanges(change: { old: any; new: any }): Promise<void> {
     try {
@@ -480,30 +485,39 @@ export class AgentConfig extends EventEmitter {
         let shouldBeEnabled: boolean | undefined;
 
         switch (endpoint.protocol) {
-          case 'modbus':
-            shouldBeEnabled = modbusConfig.enabled ?? false;
+          case 'modbus': {
+            // Check connection-level enabled flag
+            const connectionName = this.getConnectionNameFromEndpoint(endpoint.name);
+            const connection = modbusConfig.connections?.find(c => c.name === connectionName);
+            shouldBeEnabled = connection?.enabled ?? false;
             break;
-          case 'opcua':
+          }
+          case 'opcua': {
+            // OPC UA uses protocol-level enabled (no per-connection enabled yet)
             shouldBeEnabled = opcuaConfig.enabled ?? false;
             break;
-          case 'snmp':
+          }
+          case 'snmp': {
+            // SNMP uses protocol-level enabled (no per-connection enabled yet)
             shouldBeEnabled = snmpConfig.enabled ?? false;
             break;
+          }
           case 'can':
             // TODO: Add getCANConfig() when available
             shouldBeEnabled = !!process.env.CAN_INTERFACE;
             break;
         }
 
-        // Update if status changed
-        if (shouldBeEnabled !== undefined && endpoint.enabled !== shouldBeEnabled) {
+        // Update if status changed (convert to boolean for comparison since SQLite stores as 0/1)
+        if (shouldBeEnabled !== undefined && !!endpoint.enabled !== shouldBeEnabled) {
           await DeviceEndpointModel.update(endpoint.name, { enabled: shouldBeEnabled });
           updatedCount++;
 
           this.logger?.infoSync(`Updated endpoint "${endpoint.name}" enabled status`, {
             component: LogComponents.agent,
             protocol: endpoint.protocol,
-            enabled: shouldBeEnabled,
+            oldEnabled: !!endpoint.enabled,
+            newEnabled: shouldBeEnabled,
           });
         }
       }
@@ -521,6 +535,34 @@ export class AgentConfig extends EventEmitter {
         { component: LogComponents.agent }
       );
     }
+  }
+
+  /**
+   * Extract connection name from endpoint name
+   * Examples:
+   *   "modbus-sim-1_slave_2" -> "modbus-sim-1"
+   *   "opcua-server-1_node_123" -> "opcua-server-1"
+   *   "snmp-host-1" -> "snmp-host-1"
+   */
+  private getConnectionNameFromEndpoint(endpointName: string): string {
+    // Split on underscore and take everything before _slave_, _node_, etc.
+    const parts = endpointName.split('_');
+    
+    // For Modbus: "modbus-sim-1_slave_2" -> "modbus-sim-1"
+    // For OPC UA: "opcua-server-1_node_123" -> "opcua-server-1"  
+    // For SNMP: "snmp-host-1" -> "snmp-host-1" (no suffix)
+    
+    // Find index of protocol-specific suffixes
+    const suffixIndex = parts.findIndex(part => 
+      part === 'slave' || part === 'node' || part === 'oid'
+    );
+    
+    if (suffixIndex !== -1) {
+      return parts.slice(0, suffixIndex).join('_');
+    }
+    
+    // No suffix found, return full name
+    return endpointName;
   }
 
   /**

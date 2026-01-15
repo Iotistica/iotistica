@@ -125,13 +125,15 @@ export interface CANProtocolConfig {
 export interface SNMPProtocolConfig {
   enabled: boolean;
   port: number;
-  ipRanges: string[];
+  connections: string[]; // IP addresses/ranges (formerly ipRanges)
+  ipRanges?: string[]; // @deprecated - use connections
   bufferCapacity?: number; // Buffer size in bytes for SNMP trap messages
 }
 
 export interface OPCUAProtocolConfig {
   enabled: boolean;
-  discoveryUrls: string[];
+  connections: string[]; // OPC UA server URLs (formerly discoveryUrls)
+  discoveryUrls?: string[]; // @deprecated - use connections
   bufferCapacity?: number; // Buffer size in bytes for OPC UA messages
 }
 

@@ -65,28 +65,19 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
     
     // Multi-connection mode detection
     if (modbusConfig?.connections && modbusConfig.connections.length > 0) {
-      // Filter to only enabled connections
-      const enabledConnections = modbusConfig.connections.filter(c => c.enabled !== false);
+      // Discovery runs on ALL connections (enabled flag only affects adapter data collection)
+      const connections = modbusConfig.connections;
       
-      if (enabledConnections.length === 0) {
-        this.logger?.debugSync('All Modbus connections are disabled - skipping discovery', {
-          component: LogComponents.discovery + "] [" + this.protocol as any,
-          totalConnections: modbusConfig.connections.length,
-          enabledConnections: 0
-        });
-        return [];
-      }
-      
-      this.logger?.debugSync(`Starting multi-connection Modbus discovery (${enabledConnections.length} enabled / ${modbusConfig.connections.length} total)`, {
+      this.logger?.debugSync(`Starting multi-connection Modbus discovery (${connections.length} connections)`, {
         component: LogComponents.discovery + "] [" + this.protocol as any,
-        connectionCount: enabledConnections.length
+        connectionCount: connections.length
       });
 
       const allDiscovered: DiscoveredDevice[] = [];
 
       // Separate TCP and serial connections (TCP can be parallel, RTU must be sequential)
-      const tcpConnections = enabledConnections.filter(c => c.host);
-      const serialConnections = enabledConnections.filter(c => !c.host);
+      const tcpConnections = connections.filter(c => c.host);
+      const serialConnections = connections.filter(c => !c.host);
 
       // Parallel TCP scanning (controlled concurrency to avoid overwhelming network)
       if (tcpConnections.length > 0) {
@@ -175,15 +166,11 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
       return allDiscovered;
     }
 
-    // Legacy single-connection mode (backward compatibility)
-    const dataPoints: DataPoint[] = modbusConfig?.profileDataPoints || [];
-
-    this.logger?.debugSync('Starting single-connection Modbus discovery (legacy mode)', {
-      component: LogComponents.discovery + "] [" + this.protocol as any,
-      dataPointCount: dataPoints.length
+    // No connections configured
+    this.logger?.debugSync('No Modbus connections configured', {
+      component: LogComponents.discovery + "] [" + this.protocol as any
     });
-
-    return this.discoverOnBus(options || {}, dataPoints);
+    return [];
   }
 
   /**

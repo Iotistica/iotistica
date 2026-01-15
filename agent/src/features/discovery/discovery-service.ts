@@ -293,6 +293,14 @@ export class DiscoveryService extends EventEmitter {
     const { trigger, validate = false, forceRun = false, protocols } = options;
     const traceId = crypto.randomUUID();
 
+    this.logger?.infoSync('Discovery runDiscovery called', {
+      component: LogComponents.discovery,
+      trigger,
+      validate,
+      forceRun,
+      protocols: protocols || 'all'
+    });
+
     // Check rate limiting
     if (!forceRun && !this.shouldRunDiscovery(trigger)) {
       this.logger?.debugSync('Discovery skipped due to rate limiting', {
@@ -307,7 +315,7 @@ export class DiscoveryService extends EventEmitter {
 
     // Log special message for first boot discovery
     if (trigger === 'first_boot') {
-      this.logger?.debugSync('Running device discovery scan with full validation', {
+      this.logger?.infoSync('Running device discovery scan with full validation', {
         component: LogComponents.discovery,
         traceId,
         validate,
@@ -619,92 +627,27 @@ export class DiscoveryService extends EventEmitter {
 
   /**
    * Get Modbus discovery options from configuration
-   * Uses AgentConfig if available, otherwise falls back to direct env reads
+   * Returns empty object to trigger multi-connection mode discovery
    */
   private getModbusOptions(): ModbusDiscoveryOptions | undefined {
-    // Use config accessor if available (cloud → env fallback)
-    if (this.agentConfig) {
-      const config = this.agentConfig.getModbusConfig();
-      
-      // No connection configured
-      if (!config.tcpHost && !config.rtuPort) {
-        return undefined;
-      }
-
-      const options: ModbusDiscoveryOptions = {};
-
-      // TCP configuration
-      if (config.tcpHost) {
-        options.tcpHost = config.tcpHost;
-        options.tcpPort = config.tcpPort ?? 502;
-      }
-
-      // Serial/RTU configuration
-      if (config.rtuPort) {
-        options.serialPort = config.rtuPort;
-        options.baudRate = config.rtuBaudRate ?? 9600;
-      }
-
-      // Slave ID range
-      if (config.slaveRangeStart !== undefined && config.slaveRangeEnd !== undefined) {
-        options.slaveIdRange = [config.slaveRangeStart, config.slaveRangeEnd];
-      }
-
-      // Timeout
-      if (config.timeout !== undefined) {
-        options.timeout = config.timeout;
-      }
-
-      return options;
-    }
-
-    // Legacy: Direct env var reads (backward compatibility)
-    const tcpHost = process.env.MODBUS_TCP_HOST;
-    const serialPort = process.env.MODBUS_SERIAL_PORT;
-
-    // No connection configured
-    if (!tcpHost && !serialPort) {
+    if (!this.agentConfig) {
       return undefined;
     }
 
-    const options: ModbusDiscoveryOptions = {};
-
-    // TCP configuration
-    if (tcpHost) {
-      options.tcpHost = tcpHost;
-      options.tcpPort = process.env.MODBUS_TCP_PORT 
-        ? parseInt(process.env.MODBUS_TCP_PORT, 10) 
-        : 502;
+    const config = this.agentConfig.getModbusConfig();
+    
+    // Multi-connection mode: Return empty object to trigger discovery
+    // The Modbus discovery plugin handles connections array internally
+    if (config.connections && config.connections.length > 0) {
+      return {}; // Let plugin handle multi-connection logic
     }
 
-    // Serial configuration
-    if (serialPort) {
-      options.serialPort = serialPort;
-      options.baudRate = process.env.MODBUS_BAUD_RATE
-        ? parseInt(process.env.MODBUS_BAUD_RATE, 10)
-        : 9600;
-    }
-
-    // Slave ID range
-    const rangeStart = process.env.MODBUS_SLAVE_RANGE_START
-      ? parseInt(process.env.MODBUS_SLAVE_RANGE_START, 10)
-      : 1;
-    const rangeEnd = process.env.MODBUS_SLAVE_RANGE_END
-      ? parseInt(process.env.MODBUS_SLAVE_RANGE_END, 10)
-      : 10;
-    options.slaveIdRange = [rangeStart, rangeEnd];
-
-    // Timeout
-    if (process.env.MODBUS_TIMEOUT) {
-      options.timeout = parseInt(process.env.MODBUS_TIMEOUT, 10);
-    }
-
-    return options;
+    // No connections configured
+    return undefined;
   }
 
   /**
    * Get OPC-UA discovery options from configuration
-   * Uses AgentConfig if available, otherwise falls back to direct env reads
    */
   private getOPCUAOptions(): OPCUADiscoveryOptions | undefined {
     // Helper to format URL (convert bare IP to opc.tcp://IP:4840)
@@ -1084,6 +1027,13 @@ export class DiscoveryService extends EventEmitter {
 
     // Fetch existing sensors ONCE before loop (avoid O(N²) performance)
     const existingSensors = await DeviceEndpointModel.getAll();
+
+    this.logger?.infoSync('Checking for existing sensors in database', {
+      component: LogComponents.discovery,
+      existingCount: existingSensors.length,
+      discoveredCount: discovered.length,
+      existingNames: existingSensors.map(s => s.name)
+    });
 
     let saved = 0;
     let skipped = 0;

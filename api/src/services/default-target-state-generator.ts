@@ -127,7 +127,7 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
       snmp: {
         enabled: true,
         port: 161,
-        ipRanges: ["10.0.0.60"],
+        connections: ["10.0.0.60"],
         bufferCapacity: 128 * 1024,
       },
       mqtt: {
@@ -145,7 +145,7 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
       },
       opcua: {
         enabled: true,
-        discoveryUrls: ["opc.tcp://10.0.0.60:4840"],
+        connections: ["opc.tcp://10.0.0.60:4840"],
         bufferCapacity: 1024 * 1024,
       },
       modbus: {
@@ -246,7 +246,7 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
     snmp: {
       enabled: snmpRanges.length > 0,
       port: 161,
-      ipRanges: snmpRanges,
+      connections: snmpRanges,
       bufferCapacity: 128 * 1024,
     },
     mqtt: {
@@ -264,7 +264,7 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
     },
     opcua: {
       enabled: opcuaUrls.length > 0,
-      discoveryUrls: opcuaUrls,
+      connections: opcuaUrls,
       bufferCapacity: 1024 * 1024,
     },
     modbus: {

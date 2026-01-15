@@ -27,23 +27,14 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
     const discovered: DiscoveredDevice[] = [];
 
     // Default discovery URLs (empty array = skip discovery)
-    let discoveryUrls = options?.discoveryUrls || [
+    const discoveryUrls = options?.discoveryUrls || [
       'opc.tcp://10.0.0.60:4840',
       'opc.tcp://10.0.0.60:48010'
     ];
 
-    // Filter to only enabled servers if servers config exists
-    const opcuaConfig = (options as any)?.servers;
-    if (Array.isArray(opcuaConfig)) {
-      discoveryUrls = discoveryUrls.filter(url => {
-        const server = opcuaConfig.find((s: any) => s.url === url);
-        return !server || server.enabled !== false;
-      });
-    }
-
-    // Skip if no URLs configured or all disabled
+    // Discovery runs on ALL servers (enabled flag only affects adapter data collection)
     if (discoveryUrls.length === 0) {
-      this.logger?.debugSync('OPC-UA discovery skipped - no enabled URLs', {
+      this.logger?.debugSync('OPC-UA discovery skipped - no URLs configured', {
         component: LogComponents.discovery + "] [" + this.protocol as any,
         protocol: this.protocol
       });
