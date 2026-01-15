@@ -1,0 +1,30 @@
+$template = @'
+    agent-{AGENT_NUMBER}:
+            container_name: agent-{AGENT_NUMBER}
+            build:
+                context: ./agent
+                dockerfile: Dockerfile
+            restart: always
+            volumes:
+                - /var/run/docker.sock:/var/run/docker.sock
+                - agent-{AGENT_NUMBER}-data:/app/data
+            environment:
+                - DEVICE_API_PORT=4848{AGENT_NUMBER}
+                - CLOUD_API_ENDPOINT=http://host.docker.internal:4002
+                - NODE_ENV=development
+                - MQTT_PERSIST_TO_DB=true
+                - MQTT_DB_SYNC_INTERVAL=70000
+                - REPORT_INTERVAL_MS=2000
+                - METRICS_INTERVAL_MS=2000
+                - LOG_COMPRESSION=true
+                - USE_KEY_COMPACTION_POC=true
+                - REQUIRE_PROVISIONING=false
+                - PROVISIONING_API_KEY={PROVISIONING_API_KEY}
+                - ENABLE_FIRST_BOOT_DISCOVERY=true
+            depends_on:
+                api:
+                    condition: service_healthy
+            networks:
+                - iotistic-net
+
+'@
