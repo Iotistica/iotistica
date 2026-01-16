@@ -72,6 +72,12 @@ mosquitto:
 # MQTT Broker Configuration
 # Choose between local (self-hosted Mosquitto) or cloud (HiveMQ, AWS IoT Core)
 mqttBroker:
+
+  protocol: mqtt
+  host: "mqtt1.iotistica.com"
+  port: 1883
+  useTls: true
+
   # Broker type: 'local' or 'cloud'
   # - local: Uses Mosquitto deployment (above)
   # - cloud: Uses external managed MQTT service (HiveMQ Cloud, AWS IoT Core, etc.)
@@ -81,9 +87,10 @@ mqttBroker:
   local:
     # Internal service connection
     protocol: mqtt
-    host: "{{ include \"iotistic.fullname\" . }}-mosquitto"
+    host: "mqtt1.iotistica.com"
     port: 1883
     useTls: false
+    verifyCertificate: false
     
   # Cloud broker configuration (HiveMQ Cloud, AWS IoT Core, etc.)
   cloud:
@@ -165,12 +172,12 @@ api:
   #
   # Option 3: Pass via --set flag:
   #   helm install --set mqtt.username=admin --set mqtt.password=secret
-  mqtt:
-    # Reference existing Kubernetes secret (recommended for production)
-    SecretName: "mqtt-credentials-client1"
   sql:
     # Reference existing Kubernetes secret (recommended for production)
     SecretName: "sql-credentials-client1"
+  mqtt:
+    # Reference existing Kubernetes secret (recommended for production)
+    SecretName: "mqtt-credentials-client1"
   # License configuration (optional)
   license:
     publicKey: ""

@@ -81,7 +81,7 @@ spec:
             - name: DB_POOL_SIZE
               value: {{ .Values.mqttMonitor.env.DB_POOL_SIZE | quote }}
             - name: MQTT_BROKER_URL
-              value: {{ include "iotistic.mosquitto.url" . }}
+              value: "{{ include "mqtt.brokerUrl" . }}"
             {{- if .Values.mqttMonitor.mqtt.existingSecret }}
             # Read MQTT credentials from existing Kubernetes Secret
             - name: MQTT_USERNAME
