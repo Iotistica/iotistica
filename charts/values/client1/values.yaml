@@ -79,9 +79,8 @@ mqttBroker:
   
   # Local broker configuration (uses Mosquitto deployment)
   local:
-    # Internal service connection
+    # Internal service connection (hostname determined by template helper)
     protocol: mqtt
-    host: "{{ include \"iotistic.fullname\" . }}-mosquitto"
     port: 1883
     useTls: false
     
@@ -92,7 +91,7 @@ mqttBroker:
     # Provider: 'hivemq', 'aws-iot', 'azure-iot', 'custom'
     provider: hivemq
     # Connection details (must be configured if enabled)
-    host: "{{ include \"iotistic.fullname\" . }}-mosquitto"
+    host: ""  # Set to actual cloud broker hostname (e.g., xxx.hivemq.cloud)
     port: 8883
     protocol: mqtts
     username: ""

@@ -111,7 +111,8 @@ interface SimulatorOptions {
       ipRanges: string[];
     };
     bacnet?: {
-      broadcastAddress?: string;
+      discoveryTargets?: string[];  // Unicast discovery targets (recommended for containers)
+      broadcastAddress?: string;    // Legacy broadcast mode
       port?: number;
       timeout?: number;
     };
@@ -151,7 +152,8 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
       bacnet: {
         enabled: true,
         port: 47808,
-        broadcastAddress: '255.255.255.255',  // Both agent and simulator on host network
+        discoveryTargets: ['10.0.0.60'],  // Windows host IP (simulator on bridge with port mapping)
+        broadcastAddress: '',  // Empty - use unicast mode
         timeout: 5000,
         maxDevices: 100,
         bufferCapacity: 256 * 1024,
@@ -256,7 +258,8 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
   
   // BACnet configuration
   const bacnetConfig = simConfig.bacnet || {
-    broadcastAddress: '255.255.255.255',  // Both agent and simulator on host network
+    // discoveryTargets: undefined allows auto-detection fallback
+    // broadcastAddress: auto-detected by agent from network interface
     port: 47808,
     timeout: 5000
   };
@@ -288,7 +291,10 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
     bacnet: {
       enabled: true,
       port: bacnetConfig.port || 47808,
-      broadcastAddress: bacnetConfig.broadcastAddress || '255.255.255.255',
+      // Unicast discovery targets (preferred for Docker/containers)
+      ...(bacnetConfig.discoveryTargets && bacnetConfig.discoveryTargets.length > 0 && { discoveryTargets: bacnetConfig.discoveryTargets }),
+      // Broadcast address (legacy fallback, auto-detection if undefined)
+      ...(bacnetConfig.broadcastAddress && { broadcastAddress: bacnetConfig.broadcastAddress }),
       timeout: bacnetConfig.timeout || 5000,
       maxDevices: 100,
       bufferCapacity: 256 * 1024,

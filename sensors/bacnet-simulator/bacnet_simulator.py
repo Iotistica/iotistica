@@ -1,12 +1,59 @@
 import asyncio
 import random
 import math
+import os
+import socket
 from datetime import datetime
 from bacpypes3.local.device import DeviceObject
 from bacpypes3.local.analog import AnalogInputObject
 from bacpypes3.local.binary import BinaryInputObject
 from bacpypes3.app import Application
-from bacpypes3.primitivedata import Real
+from bacpypes3.primitivedata import Real, Enumerated
+from bacpypes3.pdu import Address
+from bacpypes3.debugging import bacpypes_debugging, ModuleLogger
+
+# Enable debug logging
+_debug = 1
+_log = ModuleLogger(globals())
+
+# Custom Application that responds to Who-Is requests
+@bacpypes_debugging
+class ResponsiveApplication(Application):
+    """BACnet application that explicitly handles Who-Is requests"""
+    
+    def indication(self, apdu):
+        """Log all incoming packets for debugging"""
+        if _debug:
+            _log.debug(f"[BACnet] Received packet: {apdu.__class__.__name__} from {apdu.pduSource}")
+        
+        # Call parent to handle normally
+        super().indication(apdu)
+    
+    def do_WhoIsRequest(self, apdu):
+        """Handle incoming Who-Is request and respond with I-Am"""
+        if _debug:
+            _log.debug(f"[BACnet] Processing Who-Is from {apdu.pduSource}")
+        
+        print(f"[BACnet] Received Who-Is request from {apdu.pduSource}")
+        
+        # Check if request is for our device ID or broadcast
+        device_id = self.device_object.objectIdentifier[1]
+        low_limit = apdu.deviceInstanceRangeLowLimit
+        high_limit = apdu.deviceInstanceRangeHighLimit
+        
+        # Respond if:
+        # 1. No range specified (broadcast Who-Is)
+        # 2. Our device ID is within the specified range
+        should_respond = (
+            (low_limit is None and high_limit is None) or
+            (low_limit is not None and high_limit is not None and low_limit <= device_id <= high_limit)
+        )
+        
+        if should_respond:
+            print(f"[BACnet] Sending I-Am response (device {device_id})")
+            self.i_am()
+        else:
+            print(f"[BACnet] Device {device_id} not in range {low_limit}-{high_limit}, ignoring")
 
 # Single BACnet device with all building points
 class CondoSimulator:
@@ -23,25 +70,51 @@ class CondoSimulator:
         """Initialize BACnet device with all points"""
         print("\nInitializing BACnet device...")
         
-        # Create application - simple constructor binds to 0.0.0.0:47808 by default
-        # Network config via environment: BACPYPES_IFACE=0.0.0.0:47808/24
-        self.app = Application()
+        # Get container's IP address or use 0.0.0.0
+        bind_addr = os.environ.get('BACPYPES_IFACE', '0.0.0.0:47808')
         
-        print(f"✓ BACnet listener ready on port 47808/udp")
+        # If on bridge network, get container IP
+        try:
+            hostname = socket.gethostname()
+            container_ip = socket.gethostbyname(hostname)
+            if container_ip and container_ip != '127.0.0.1':
+                bind_addr = f"{container_ip}:47808"
+                print(f"✓ Detected container IP: {container_ip}")
+        except:
+            pass
         
-        # Create main device object
+        print(f"✓ Binding to: {bind_addr}")
+        
+        # Create device object first
         self.device = DeviceObject(
             objectIdentifier="device,1001",
             objectName="Condo-Building-1",
             vendorIdentifier=999,
         )
-        self.app.add_object(self.device)
+        
+        # Create custom application that handles Who-Is requests
+        self.app = ResponsiveApplication(
+            self.device,
+            Address(bind_addr)
+        )
+        
+        # Wait for async initialization
+        await asyncio.sleep(0.1)
+        
+        print(f"✓ BACnet listener ready on {bind_addr}/udp")
+        print(f"✓ Created device 'Condo-Building-1' (device ID: 1001)")
+        
+        # Send initial I-Am announcement
+        self.app.i_am()
+        print(f"✓ Sent I-Am announcement (Who-Is handler active)")
+
+
         
         # Chiller points
         self.points['chiller_status'] = BinaryInputObject(
             objectIdentifier="binary-input,1",
             objectName="Chiller-1 Status",
-            presentValue=1
+            presentValue=Enumerated(1)
         )
         self.app.add_object(self.points['chiller_status'])
         
@@ -98,7 +171,7 @@ class CondoSimulator:
         self.points['ahu1_fan_status'] = BinaryInputObject(
             objectIdentifier="binary-input,14",
             objectName="AHU-1 Fan Status",
-            presentValue=1
+            presentValue=Enumerated(1)
         )
         self.app.add_object(self.points['ahu1_fan_status'])
         
@@ -134,7 +207,7 @@ class CondoSimulator:
         self.points['ahu2_fan_status'] = BinaryInputObject(
             objectIdentifier="binary-input,24",
             objectName="AHU-2 Fan Status",
-            presentValue=1
+            presentValue=Enumerated(1)
         )
         self.app.add_object(self.points['ahu2_fan_status'])
         
@@ -165,14 +238,14 @@ class CondoSimulator:
             self.points['ahu1_return_temp'].presentValue = Real(22.0 + (self.outdoor_temp - 25.0) * 0.2 + random.uniform(-0.5, 0.5))
             self.points['ahu1_airflow'].presentValue = Real(5000.0 + random.uniform(-200, 200))
             self.points['ahu1_cooling_valve'].presentValue = Real(max(0, min(100, 45 + (self.outdoor_temp - 25.0) * 2 + random.uniform(-5, 5))))
-            self.points['ahu1_fan_status'].presentValue = 1 if random.random() > 0.1 else 0
+            self.points['ahu1_fan_status'].presentValue = Enumerated(1 if random.random() > 0.1 else 0)
             
             # Update AHU-2 points
             self.points['ahu2_supply_temp'].presentValue = Real(18.0 + random.uniform(-1.0, 1.0))
             self.points['ahu2_return_temp'].presentValue = Real(22.0 + (self.outdoor_temp - 25.0) * 0.2 + random.uniform(-0.5, 0.5))
             self.points['ahu2_airflow'].presentValue = Real(5000.0 + random.uniform(-200, 200))
             self.points['ahu2_cooling_valve'].presentValue = Real(max(0, min(100, 45 + (self.outdoor_temp - 25.0) * 2 + random.uniform(-5, 5))))
-            self.points['ahu2_fan_status'].presentValue = 1 if random.random() > 0.1 else 0
+            self.points['ahu2_fan_status'].presentValue = Enumerated(1 if random.random() > 0.1 else 0)
             
             # Log every 30 seconds
             elapsed = (datetime.now() - self.start_time).total_seconds()
@@ -187,7 +260,13 @@ class CondoSimulator:
         print("\nStarting Condo BACnet Simulator...")
         
         await self.initialize()
-        await self.update_simulation()
+        
+        # Start continuous simulation updates
+        asyncio.create_task(self.update_simulation())
+        
+        # Keep running forever
+        while True:
+            await asyncio.sleep(1)
 
 # --- Run ---
 if __name__ == "__main__":

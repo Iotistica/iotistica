@@ -147,7 +147,7 @@ spec:
             - name: MQTT_BROKER_TYPE
               value: "local"
             - name: MQTT_BROKER_URL
-              value: {{ tpl (printf "%s://%s:%v" .Values.mqttBroker.local.protocol .Values.mqttBroker.local.host .Values.mqttBroker.local.port) . | quote }}
+              value: {{ printf "%s://%s:%v" .Values.mqttBroker.local.protocol (include "iotistic.mosquitto.host" .) .Values.mqttBroker.local.port | quote }}
             - name: MQTT_BROKER_HOST
               value: {{ include "iotistic.mosquitto.host" . }}
             - name: MQTT_BROKER_EXTERNAL_HOST

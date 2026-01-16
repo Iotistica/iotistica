@@ -19,12 +19,23 @@ import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, DiscoveredDevice, ValidationResult } from './base.discovery';
 import { generateBACnetFingerprint } from './fingerprint';
-import * as dgram from 'dgram';
-import { promisify } from 'util';
 
 export interface BACnetDiscoveryOptions {
+  /**
+   * Discovery targets for unicast mode (recommended for Docker/containers)
+   * 
+   * Supports:
+   * - Single IP: '192.168.65.4'
+   * - Multiple IPs: ['192.168.65.4', '192.168.65.5']
+   * - CIDR subnet: '192.168.65.0/24'
+   * - IP range: '192.168.65.1-192.168.65.10'
+   * - Hostname: 'bacnet-device.local'
+   * 
+   * If empty: Falls back to broadcast mode
+   */
+  discoveryTargets?: string[];
   networkInterfaces?: string[]; // Network interfaces to scan (e.g., ['eth0', 'wlan0'])
-  broadcastAddress?: string;    // Broadcast address (default: 255.255.255.255)
+  broadcastAddress?: string;    // Broadcast address for legacy mode (default: 255.255.255.255)
   port?: number;                // BACnet/IP port (default: 47808)
   timeout?: number;             // ms to wait for responses (default: 5000)
   maxDevices?: number;          // Max devices to discover (default: 100)
@@ -81,9 +92,107 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
   }
 
   /**
-   * Get or create BACnet client (reused across discovery and validation)
+   * Expand discovery target into individual IP addresses
+   * 
+   * Supports:
+   * - Single IP: '192.168.65.4' → ['192.168.65.4']
+   * - CIDR: '192.168.65.0/24' → ['192.168.65.1', ..., '192.168.65.254']
+   * - Range: '192.168.65.1-192.168.65.5' → ['192.168.65.1', ..., '192.168.65.5']
+   * - Hostname: 'bacnet-sim' → ['192.168.65.3'] (resolved via DNS)
+   */
+  private expandDiscoveryTarget(target: string): string[] {
+    // CIDR notation (e.g., 192.168.65.0/24)
+    if (target.includes('/')) {
+      const [baseIP, prefixStr] = target.split('/');
+      const prefix = parseInt(prefixStr, 10);
+      const [a, b, c, d] = baseIP.split('.').map(Number);
+      const ips: string[] = [];
+      
+      // Simple /24 subnet expansion (192.168.x.1-254)
+      if (prefix === 24) {
+        for (let i = 1; i <= 254; i++) {
+          ips.push(`${a}.${b}.${c}.${i}`);
+        }
+      }
+      return ips;
+    }
+
+    // IP range (e.g., 192.168.65.1-192.168.65.10)
+    if (target.includes('-')) {
+      const [startIP, endIP] = target.split('-').map(s => s.trim());
+      const startParts = startIP.split('.').map(Number);
+      const endParts = endIP.split('.').map(Number);
+      const ips: string[] = [];
+      
+      // Simple range within same /24 subnet
+      if (startParts[0] === endParts[0] && startParts[1] === endParts[1] && startParts[2] === endParts[2]) {
+        for (let i = startParts[3]; i <= endParts[3]; i++) {
+          ips.push(`${startParts[0]}.${startParts[1]}.${startParts[2]}.${i}`);
+        }
+      }
+      return ips;
+    }
+
+    // Single IP or hostname - return as-is (DNS resolution handled by bacstack)
+    return [target];
+  }
+
+  /**
+   * Derive subnet broadcast address from network interfaces
+   */
+  private deriveBroadcastAddress(): string {
+    const os = require('os');
+    const ifaces = os.networkInterfaces();
+    
+    // Find first non-loopback IPv4 interface that's NOT a /32 (point-to-point)
+    for (const [name, addrs] of Object.entries(ifaces)) {
+      if (!addrs) continue;
+      for (const addr of addrs as any[]) {
+        if (addr.family === 'IPv4' && !addr.internal && addr.address !== '127.0.0.1') {
+          // Skip /32 netmasks (Docker internal point-to-point interfaces)
+          if (addr.netmask === '255.255.255.255') {
+            this.logger?.debugSync('Skipping /32 interface (Docker internal)', {
+              component: LogComponents.discovery + "] [" + this.protocol as any,
+              interface: name,
+              ip: addr.address,
+              netmask: addr.netmask
+            });
+            continue;
+          }
+          
+          // Derive subnet broadcast (e.g., 192.168.56.1/24 -> 192.168.56.255)
+          const ip = addr.address.split('.');
+          const netmask = addr.netmask.split('.');
+          const broadcast = ip.map((octet: string, i: number) => 
+            (parseInt(octet) | (~parseInt(netmask[i]) & 255)).toString()
+          ).join('.');
+          
+          this.logger?.debugSync('Derived subnet broadcast from interface', {
+            component: LogComponents.discovery + "] [" + this.protocol as any,
+            interface: name,
+            ip: addr.address,
+            netmask: addr.netmask,
+            broadcast
+          });
+          
+          return broadcast;
+        }
+      }
+    }
+    
+    // Final fallback (but log warning - this rarely works in Docker)
+    this.logger?.warnSync('Using global broadcast (may not work in Docker)', {
+      component: LogComponents.discovery + "] [" + this.protocol as any,
+      broadcast: '255.255.255.255'
+    });
+    return '255.255.255.255';
+  }
+
+  /**
+   * Get or create BACnet client with pre-derived broadcast address
    */
   private async getClient(options?: BACnetDiscoveryOptions): Promise<any> {
+    // Reuse existing client
     if (this.client) {
       this.logger?.debugSync('Reusing existing BACnet client', {
         component: LogComponents.discovery + "] [" + this.protocol as any
@@ -91,39 +200,8 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
       return this.client;
     }
 
-    // Fix #2: Prefer subnet broadcast over global broadcast (more reliable)
-    let broadcastAddress = options?.broadcastAddress || '255.255.255.255';
-    
-    // If network interface specified, try to derive subnet broadcast
-    if (options?.networkInterfaces?.[0] && broadcastAddress === '255.255.255.255') {
-      // Try to get local IP and derive broadcast (e.g., 192.168.1.10 -> 192.168.1.255)
-      try {
-        const os = require('os');
-        const ifaces = os.networkInterfaces();
-        const ifaceName = options.networkInterfaces[0];
-        const ifaceAddrs = ifaces[ifaceName];
-        
-        if (ifaceAddrs) {
-          const ipv4 = ifaceAddrs.find((addr: any) => addr.family === 'IPv4' && !addr.internal);
-          if (ipv4?.address) {
-            broadcastAddress = ipv4.address.replace(/\.\d+$/, '.255');
-            this.logger?.debugSync('Derived subnet broadcast from interface', {
-              component: LogComponents.discovery + "] [" + this.protocol as any,
-              interface: ifaceName,
-              ip: ipv4.address,
-              broadcast: broadcastAddress
-            });
-          }
-        }
-      } catch (err) {
-        // Fall back to global broadcast
-        this.logger?.debugSync('Failed to derive subnet broadcast, using global', {
-          component: LogComponents.discovery + "] [" + this.protocol as any,
-          error: err instanceof Error ? err.message : String(err)
-        });
-      }
-    }
-
+    // Use pre-derived broadcast address (passed from discover())
+    const broadcastAddress = options?.broadcastAddress || '255.255.255.255';
     const timeout = options?.timeout || 5000;
 
     this.logger?.debugSync('Creating new BACnet client', {
@@ -193,7 +271,21 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
   }
 
   /**
-   * Phase 1: Fast Who-Is broadcast for BACnet device discovery
+   * Phase 1: BACnet device discovery (supports unicast and broadcast modes)
+   * 
+   * Mode Selection (smart switching):
+   *   - If discoveryTargets provided and non-empty → Unicast mode
+   *   - Else if broadcastAddress provided → Broadcast mode (explicit)
+   *   - Else → Broadcast mode (auto-detect broadcast address)
+   * 
+   * Unicast mode (recommended for Docker/containers):
+   *   - Sends Who-Is to specific IP addresses from discoveryTargets
+   *   - Bypasses UDP broadcast limitations in Docker Desktop
+   *   - More reliable in containerized environments
+   * 
+   * Broadcast mode:
+   *   - Sends Who-Is to broadcast address
+   *   - May not work in Docker Desktop (use unicast instead)
    */
   async discover(options?: BACnetDiscoveryOptions): Promise<DiscoveredDevice[]> {
     const discovered: DiscoveredDevice[] = [];
@@ -204,8 +296,20 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
       phase: 'discovery'
     });
 
+    // Smart mode selection based on configuration
+    const discoveryTargets = options?.discoveryTargets || [];
+    const hasTargets = discoveryTargets.length > 0;
+    const hasBroadcast = !!options?.broadcastAddress;
+    const useUnicast = hasTargets;  // Prefer unicast if targets provided
+
+    // Determine broadcast address
+    let broadcastAddress = options?.broadcastAddress;
+    if (!useUnicast && !broadcastAddress) {
+      // Auto-detect broadcast if neither unicast nor explicit broadcast configured
+      broadcastAddress = this.deriveBroadcastAddress();
+    }
+
     // Default options
-    const broadcastAddress = options?.broadcastAddress || '255.255.255.255';
     const port = options?.port || 47808;
     const timeout = options?.timeout || 5000;
     const maxDevices = options?.maxDevices || 100;
@@ -213,7 +317,11 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 
     this.logger?.debugSync('BACnet discovery configuration', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
-      broadcastAddress,
+      mode: useUnicast ? 'unicast' : 'broadcast',
+      modeReason: useUnicast 
+        ? 'discoveryTargets provided' 
+        : (hasBroadcast ? 'broadcastAddress explicit' : 'broadcastAddress auto-detected'),
+      ...(useUnicast ? { discoveryTargets } : { broadcastAddress }),
       port,
       timeout,
       maxDevices
@@ -221,7 +329,7 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 
     try {
       // Get reusable BACnet client (waits for socket to bind)
-      const client = await this.getClient(options);
+      const client = await this.getClient({ ...options, broadcastAddress, timeout });
       const devices = new Map<number, BACnetDeviceInfo>();
 
       this.logger?.debugSync('Attaching I-Am event listener', {
@@ -284,29 +392,101 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
         });
       });
 
-      // Send Who-Is broadcast
-      this.logger?.debugSync('Sending BACnet Who-Is broadcast', {
-        component: LogComponents.discovery + "] [" + this.protocol as any,
-        broadcastAddress,
-        port,
-        method: 'whoIs'
-      });
-
-      try {
-        // Use device ID range if specified (required for large BACnet systems)
-        client.whoIs({
-          lowLimit: deviceIdRange[0],
-          highLimit: deviceIdRange[1]
-        });
-        this.logger?.debugSync('Who-Is broadcast sent successfully', {
+      // Send Who-Is (unicast or broadcast mode)
+      if (useUnicast) {
+        // Unicast mode: Send Who-Is to each discovery target
+        // NOTE: bacstack v0.0.1-beta.14 ignores receiver parameter, so we create
+        // a separate client for each target with that IP as broadcastAddress
+        this.logger?.debugSync('Sending BACnet Who-Is via unicast', {
           component: LogComponents.discovery + "] [" + this.protocol as any,
-          lowLimit: deviceIdRange[0],
-          highLimit: deviceIdRange[1]
+          targets: discoveryTargets,
+          count: discoveryTargets.length
         });
-      } catch (whoIsError) {
-        this.logger?.errorSync('Failed to send Who-Is broadcast', whoIsError instanceof Error ? whoIsError : new Error(String(whoIsError)), {
-          component: LogComponents.discovery + "] [" + this.protocol as any
+
+        for (const target of discoveryTargets) {
+          try {
+            // Expand CIDR ranges or IP ranges to individual IPs
+            const targetIPs = this.expandDiscoveryTarget(target);
+            
+            for (const targetIP of targetIPs) {
+              this.logger?.debugSync('Sending Who-Is to unicast target', {
+                component: LogComponents.discovery + "] [" + this.protocol as any,
+                target: targetIP,
+                port
+              });
+
+              // Create temporary client with target IP as broadcast address
+              // Use random port (undefined) to avoid conflict with main client
+              const BACnet = require('bacstack');
+              const unicastClient = new BACnet({
+                apduTimeout: timeout,
+                // port: undefined,  // Let OS assign random port
+                broadcastAddress: targetIP,  // Use target as "broadcast" to force unicast
+                deviceId: this.AGENT_DEVICE_ID + 1  // Different device ID
+              });
+
+              // Attach I-Am listener to this client to receive responses
+              unicastClient.on('iAm', (device: any) => {
+                client.emit('iAm', device);  // Forward to main client's listener
+              });
+
+              unicastClient.whoIs({
+                lowLimit: deviceIdRange[0],
+                highLimit: deviceIdRange[1]
+              });
+              
+              this.logger?.debugSync('Created unicast client and sent Who-Is', {
+                component: LogComponents.discovery + "] [" + this.protocol as any,
+                target: targetIP
+              });
+              
+              // Clean up temporary client after timeout
+              setTimeout(() => {
+                try {
+                  unicastClient.close();
+                } catch (err) {
+                  // Ignore cleanup errors
+                }
+              }, timeout + 1000);
+            }
+          } catch (err) {
+            this.logger?.errorSync('Failed to send Who-Is to target', err instanceof Error ? err : new Error(String(err)), {
+              component: LogComponents.discovery + "] [" + this.protocol as any,
+              target
+            });
+          }
+        }
+
+        this.logger?.debugSync('Unicast Who-Is packets sent', {
+          component: LogComponents.discovery + "] [" + this.protocol as any,
+          targetCount: discoveryTargets.length
         });
+      } else {
+        // Broadcast mode: Send Who-Is to broadcast address (legacy)
+        this.logger?.debugSync('Sending BACnet Who-Is broadcast', {
+          component: LogComponents.discovery + "] [" + this.protocol as any,
+          broadcastAddress,
+          port,
+          method: 'whoIs'
+        });
+
+        try {
+          client.whoIs({
+            lowLimit: deviceIdRange[0],
+            highLimit: deviceIdRange[1],
+            receiver: { address: broadcastAddress!, port: 47808 }  // Explicit broadcast target
+          });
+          this.logger?.debugSync('Who-Is broadcast sent successfully', {
+            component: LogComponents.discovery + "] [" + this.protocol as any,
+            lowLimit: deviceIdRange[0],
+            highLimit: deviceIdRange[1],
+            broadcast: broadcastAddress
+          });
+        } catch (whoIsError) {
+          this.logger?.errorSync('Failed to send Who-Is broadcast', whoIsError instanceof Error ? whoIsError : new Error(String(whoIsError)), {
+            component: LogComponents.discovery + "] [" + this.protocol as any
+          });
+        }
       }
 
       // Wait for responses

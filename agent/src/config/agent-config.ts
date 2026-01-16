@@ -99,6 +99,33 @@ export interface MQTTConfig {
 export interface BACnetConfig {
   enabled?: boolean;
   port?: number;
+  /**
+   * BACnet discovery targets (unicast mode - recommended for Docker/containers)
+   * 
+   * Unicast discovery bypasses UDP broadcast limitations in Docker Desktop Windows/macOS
+   * by sending Who-Is packets directly to specific IP addresses.
+   * 
+   * Supported formats:
+   * - Single IP: '192.168.65.4'
+   * - Multiple IPs: ['192.168.65.4', '192.168.65.5']
+   * - CIDR subnet: '192.168.65.0/24' (auto-scans range)
+   * - IP range: '192.168.65.1-192.168.65.10'
+   * - Hostname: 'bacnet-device.local'
+   * 
+   * If empty/undefined: Falls back to broadcast mode (broadcastAddress)
+   * 
+   * Examples:
+   * - Docker containers: ['bacnet-simulator', '192.168.65.3']
+   * - Provisioned devices: ['10.0.1.100', '10.0.1.101']
+   * - Subnet sweep: ['192.168.1.0/24']
+   * 
+   * Environment variable: BACNET_DISCOVERY_TARGETS (comma-separated)
+   */
+  discoveryTargets?: string[];
+  /**
+   * @deprecated Use discoveryTargets for unicast discovery (more reliable in containers)
+   * Broadcast address for legacy broadcast mode (may not work in Docker Desktop)
+   */
   broadcastAddress?: string;
   timeout?: number;
   maxDevices?: number;
@@ -323,15 +350,22 @@ export class AgentConfig extends EventEmitter {
   /**
    * Get BACnet protocol adapter configuration
    * 
-   * Fallback: Cloud config.protocols.bacnet → hardcoded defaults
+   * Fallback: Cloud config.protocols.bacnet → environment variables → hardcoded defaults
    */
   getBACnetConfig(): BACnetConfig {
     const cloudProtocol = this.getTargetConfig().protocols?.bacnet;
 
+    // Parse discovery targets from environment or cloud config
+    const envTargets = process.env.BACNET_DISCOVERY_TARGETS?.split(',').map(t => t.trim()).filter(Boolean);
+    const discoveryTargets = cloudProtocol?.discoveryTargets || envTargets;
+
     return {
       enabled: cloudProtocol?.enabled ?? false,
       port: cloudProtocol?.port ?? 47808,
-      broadcastAddress: cloudProtocol?.broadcastAddress ?? '255.255.255.255',
+      // Unicast discovery targets (preferred for Docker/containers)
+      ...(discoveryTargets && discoveryTargets.length > 0 && { discoveryTargets }),
+      // Broadcast address (legacy fallback, auto-detection if undefined)
+      ...(cloudProtocol?.broadcastAddress && { broadcastAddress: cloudProtocol.broadcastAddress }),
       timeout: cloudProtocol?.timeout ?? 5000,
       maxDevices: cloudProtocol?.maxDevices ?? 100,
     };

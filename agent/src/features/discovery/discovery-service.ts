@@ -947,9 +947,11 @@ export class DiscoveryService extends EventEmitter {
     }
 
     // Return configuration for BACnet discovery
-    // The plugin will use broadcastAddress, port, timeout, maxDevices
+    // discoveryTargets: Unicast mode (preferred for Docker/containers)
+    // broadcastAddress: undefined allows plugin to auto-detect subnet broadcast
     return {
-      broadcastAddress: config.broadcastAddress || '255.255.255.255',
+      ...(config.discoveryTargets && config.discoveryTargets.length > 0 && { discoveryTargets: config.discoveryTargets }),
+      ...(config.broadcastAddress && { broadcastAddress: config.broadcastAddress }),
       port: config.port || 47808,
       timeout: config.timeout || 5000,
       maxDevices: config.maxDevices || 100

@@ -324,7 +324,9 @@ services:
             dockerfile: Dockerfile
         container_name: bacnet-sim
         restart: unless-stopped
-        network_mode: host  # Same network as agent for BACnet broadcast discovery
+        # Bridge network with port mapping - accessible from Windows host IP
+        ports:
+            - "47808:47808/udp"
         environment:
             - BACPYPES_IFACE=0.0.0.0:47808/24  # Bind to all interfaces on port 47808
         logging:
