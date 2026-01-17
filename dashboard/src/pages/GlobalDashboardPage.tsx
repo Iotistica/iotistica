@@ -237,7 +237,9 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       });
 
       if (!response.ok) {
-        throw new Error('Failed to save layout to server');
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('Server error:', response.status, errorData);
+        throw new Error(`Failed to save layout: ${response.status} - ${errorData.error || errorData.message || 'Unknown error'}`);
       }
 
       const data = await response.json();

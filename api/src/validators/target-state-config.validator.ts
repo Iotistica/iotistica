@@ -378,18 +378,13 @@ export function validateTargetStateConfig(config: any): ValidationResult {
         if (opcua.discoveryUrls.length === 0) {
           errors.push({
             field: 'protocols.opcua.discoveryUrls',
-            message: 'Required when OPC-UA is enabled (at least one URL)',
+            message: 'Must contain at least one URL if provided',
             value: opcua.discoveryUrls
           });
         }
       }
-    } else {
-      errors.push({
-        field: 'protocols.opcua.discoveryUrls',
-        message: 'Required when OPC-UA is enabled',
-        value: undefined
-      });
     }
+    // Note: discoveryUrls is optional even when enabled
   }
 
   // --- SNMP Configuration ---
@@ -425,18 +420,13 @@ export function validateTargetStateConfig(config: any): ValidationResult {
         if (snmp.ipRanges.length === 0) {
           errors.push({
             field: 'protocols.snmp.ipRanges',
-            message: 'Required when SNMP is enabled (at least one IP range)',
+            message: 'Must contain at least one IP range if provided',
             value: snmp.ipRanges
           });
         }
       }
-    } else {
-      errors.push({
-        field: 'protocols.snmp.ipRanges',
-        message: 'Required when SNMP is enabled',
-        value: undefined
-      });
     }
+    // Note: ipRanges is optional even when enabled
 
     if (snmp.port !== undefined) {
       if (!isValidPort(snmp.port)) {

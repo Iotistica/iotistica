@@ -365,7 +365,7 @@ app.use(API_BASE, eventsRoutes);
 app.use(API_BASE, mqttBrokerRoutes);
 app.use(API_BASE, trafficRoutes);
 app.use(API_BASE, deviceTagsRoutes);
-app.use(API_BASE, dashboardLayoutsRoutes);
+app.use(`${API_BASE}/dashboard-layouts`, dashboardLayoutsRoutes);
 app.use(API_BASE, alertsRoutes);
 app.use(API_BASE, anomalyRoutes);
 app.use(API_BASE, noderedStorageRoutes);

@@ -28,6 +28,722 @@
     "enableDeviceRemoteAccess": true,
     "enableDeviceSensorPublish": true
   },
+  "endpoints": [
+    {
+      "id": "80305fe4-36e5-4058-b771-2dddcca6c8da",
+      "name": "modbus-sim-2_slave_1",
+      "enabled": 1,
+      "metadata": {
+        "slaveId": 1,
+        "validated": true,
+        "confidence": "high",
+        "connectionName": "modbus-sim-2",
+        "discoveryMethod": "register_read",
+        "dataPointValidation": {
+          "state": "idle",
+          "result": "config_match",
+          "details": "5/5 addresses readable (all zeros)",
+          "guidance": "All values zero - device may be idle, at startup, or verify data point config",
+          "zeroCount": 5,
+          "errorCount": 0,
+          "totalPoints": 6,
+          "readableCount": 5,
+          "dataConfidence": 0,
+          "responseConfidence": 1
+        }
+      },
+      "protocol": "modbus",
+      "dataPoints": [
+        {
+          "base": 550,
+          "name": "humidity",
+          "type": "holding",
+          "unit": "%RH",
+          "scale": 0.1,
+          "address": 11,
+          "dataType": "uint16",
+          "noise_pct": 0.1,
+          "description": "Relative humidity (scaled ×10, e.g., 550 = 55.0%)"
+        },
+        {
+          "base": 1013,
+          "name": "pressure",
+          "type": "holding",
+          "unit": "hPa",
+          "address": 12,
+          "dataType": "uint16",
+          "noise_pct": 0.015,
+          "description": "Atmospheric pressure in hectopascals (1013 hPa = sea level)"
+        },
+        {
+          "base": 230,
+          "name": "temperature",
+          "type": "holding",
+          "unit": "°C",
+          "scale": 0.1,
+          "address": 10,
+          "dataType": "uint16",
+          "noise_pct": 0.08,
+          "description": "Ambient temperature (scaled ×10, e.g., 230 = 23.0°C)"
+        },
+        {
+          "base": 200,
+          "name": "holding_register_0",
+          "type": "holding",
+          "unit": "count",
+          "address": 1,
+          "dataType": "uint16",
+          "noise_pct": 0.1
+        },
+        {
+          "base": 100,
+          "name": "holding_register_1",
+          "type": "holding",
+          "unit": "count",
+          "address": 2,
+          "dataType": "uint16",
+          "noise_pct": 0.26
+        },
+        {
+          "base": 150,
+          "name": "holding_register_2",
+          "type": "holding",
+          "unit": "count",
+          "address": 3,
+          "dataType": "uint16",
+          "noise_pct": 0.15
+        }
+      ],
+      "pollInterval": 5000,
+      "connectionString": "{\"host\":\"10.0.0.60\",\"port\":503,\"type\":\"tcp\",\"slaveId\":1}"
+    },
+    {
+      "id": "d32dc698-b87a-4443-bb90-dfa9ba641263",
+      "name": "modbus-sim-2_slave_2",
+      "enabled": 1,
+      "metadata": {
+        "slaveId": 2,
+        "validated": true,
+        "confidence": "high",
+        "connectionName": "modbus-sim-2",
+        "discoveryMethod": "register_read",
+        "dataPointValidation": {
+          "state": "idle",
+          "result": "config_match",
+          "details": "5/5 addresses readable (all zeros)",
+          "guidance": "All values zero - device may be idle, at startup, or verify data point config",
+          "zeroCount": 5,
+          "errorCount": 0,
+          "totalPoints": 6,
+          "readableCount": 5,
+          "dataConfidence": 0,
+          "responseConfidence": 1
+        }
+      },
+      "protocol": "modbus",
+      "dataPoints": [
+        {
+          "base": 550,
+          "name": "humidity",
+          "type": "holding",
+          "unit": "%RH",
+          "scale": 0.1,
+          "address": 11,
+          "dataType": "uint16",
+          "noise_pct": 0.1,
+          "description": "Relative humidity (scaled ×10, e.g., 550 = 55.0%)"
+        },
+        {
+          "base": 1013,
+          "name": "pressure",
+          "type": "holding",
+          "unit": "hPa",
+          "address": 12,
+          "dataType": "uint16",
+          "noise_pct": 0.015,
+          "description": "Atmospheric pressure in hectopascals (1013 hPa = sea level)"
+        },
+        {
+          "base": 230,
+          "name": "temperature",
+          "type": "holding",
+          "unit": "°C",
+          "scale": 0.1,
+          "address": 10,
+          "dataType": "uint16",
+          "noise_pct": 0.08,
+          "description": "Ambient temperature (scaled ×10, e.g., 230 = 23.0°C)"
+        },
+        {
+          "base": 200,
+          "name": "holding_register_0",
+          "type": "holding",
+          "unit": "count",
+          "address": 1,
+          "dataType": "uint16",
+          "noise_pct": 0.1
+        },
+        {
+          "base": 100,
+          "name": "holding_register_1",
+          "type": "holding",
+          "unit": "count",
+          "address": 2,
+          "dataType": "uint16",
+          "noise_pct": 0.26
+        },
+        {
+          "base": 150,
+          "name": "holding_register_2",
+          "type": "holding",
+          "unit": "count",
+          "address": 3,
+          "dataType": "uint16",
+          "noise_pct": 0.15
+        }
+      ],
+      "pollInterval": 5000,
+      "connectionString": "{\"host\":\"10.0.0.60\",\"port\":503,\"type\":\"tcp\",\"slaveId\":2}"
+    },
+    {
+      "id": "006cef3d-21f9-4abf-83de-29a6f12b50f0",
+      "name": "modbus-sim-2_slave_3",
+      "enabled": 1,
+      "metadata": {
+        "slaveId": 3,
+        "validated": true,
+        "confidence": "high",
+        "connectionName": "modbus-sim-2",
+        "discoveryMethod": "register_read",
+        "dataPointValidation": {
+          "state": "idle",
+          "result": "config_match",
+          "details": "5/5 addresses readable (all zeros)",
+          "guidance": "All values zero - device may be idle, at startup, or verify data point config",
+          "zeroCount": 5,
+          "errorCount": 0,
+          "totalPoints": 6,
+          "readableCount": 5,
+          "dataConfidence": 0,
+          "responseConfidence": 1
+        }
+      },
+      "protocol": "modbus",
+      "dataPoints": [
+        {
+          "base": 550,
+          "name": "humidity",
+          "type": "holding",
+          "unit": "%RH",
+          "scale": 0.1,
+          "address": 11,
+          "dataType": "uint16",
+          "noise_pct": 0.1,
+          "description": "Relative humidity (scaled ×10, e.g., 550 = 55.0%)"
+        },
+        {
+          "base": 1013,
+          "name": "pressure",
+          "type": "holding",
+          "unit": "hPa",
+          "address": 12,
+          "dataType": "uint16",
+          "noise_pct": 0.015,
+          "description": "Atmospheric pressure in hectopascals (1013 hPa = sea level)"
+        },
+        {
+          "base": 230,
+          "name": "temperature",
+          "type": "holding",
+          "unit": "°C",
+          "scale": 0.1,
+          "address": 10,
+          "dataType": "uint16",
+          "noise_pct": 0.08,
+          "description": "Ambient temperature (scaled ×10, e.g., 230 = 23.0°C)"
+        },
+        {
+          "base": 200,
+          "name": "holding_register_0",
+          "type": "holding",
+          "unit": "count",
+          "address": 1,
+          "dataType": "uint16",
+          "noise_pct": 0.1
+        },
+        {
+          "base": 100,
+          "name": "holding_register_1",
+          "type": "holding",
+          "unit": "count",
+          "address": 2,
+          "dataType": "uint16",
+          "noise_pct": 0.26
+        },
+        {
+          "base": 150,
+          "name": "holding_register_2",
+          "type": "holding",
+          "unit": "count",
+          "address": 3,
+          "dataType": "uint16",
+          "noise_pct": 0.15
+        }
+      ],
+      "pollInterval": 5000,
+      "connectionString": "{\"host\":\"10.0.0.60\",\"port\":503,\"type\":\"tcp\",\"slaveId\":3}"
+    },
+    {
+      "id": "1d78df64-d455-4588-be70-b8e8e206ae5b",
+      "name": "modbus-sim-3_slave_1",
+      "enabled": 1,
+      "metadata": {
+        "slaveId": 1,
+        "validated": true,
+        "confidence": "high",
+        "connectionName": "modbus-sim-3",
+        "discoveryMethod": "register_read",
+        "dataPointValidation": {
+          "state": "idle",
+          "result": "config_match",
+          "details": "5/5 addresses readable (all zeros)",
+          "guidance": "All values zero - device may be idle, at startup, or verify data point config",
+          "zeroCount": 5,
+          "errorCount": 0,
+          "totalPoints": 6,
+          "readableCount": 5,
+          "dataConfidence": 0,
+          "responseConfidence": 1
+        }
+      },
+      "protocol": "modbus",
+      "dataPoints": [
+        {
+          "base": 550,
+          "name": "humidity",
+          "type": "holding",
+          "unit": "%RH",
+          "scale": 0.1,
+          "address": 11,
+          "dataType": "uint16",
+          "noise_pct": 0.1,
+          "description": "Relative humidity (scaled ×10, e.g., 550 = 55.0%)"
+        },
+        {
+          "base": 1013,
+          "name": "pressure",
+          "type": "holding",
+          "unit": "hPa",
+          "address": 12,
+          "dataType": "uint16",
+          "noise_pct": 0.015,
+          "description": "Atmospheric pressure in hectopascals (1013 hPa = sea level)"
+        },
+        {
+          "base": 230,
+          "name": "temperature",
+          "type": "holding",
+          "unit": "°C",
+          "scale": 0.1,
+          "address": 10,
+          "dataType": "uint16",
+          "noise_pct": 0.08,
+          "description": "Ambient temperature (scaled ×10, e.g., 230 = 23.0°C)"
+        },
+        {
+          "base": 200,
+          "name": "holding_register_0",
+          "type": "holding",
+          "unit": "count",
+          "address": 1,
+          "dataType": "uint16",
+          "noise_pct": 0.1
+        },
+        {
+          "base": 100,
+          "name": "holding_register_1",
+          "type": "holding",
+          "unit": "count",
+          "address": 2,
+          "dataType": "uint16",
+          "noise_pct": 0.26
+        },
+        {
+          "base": 150,
+          "name": "holding_register_2",
+          "type": "holding",
+          "unit": "count",
+          "address": 3,
+          "dataType": "uint16",
+          "noise_pct": 0.15
+        }
+      ],
+      "pollInterval": 5000,
+      "connectionString": "{\"host\":\"10.0.0.60\",\"port\":504,\"type\":\"tcp\",\"slaveId\":1}"
+    },
+    {
+      "id": "cdb35a1e-9b16-4c98-9ea3-d1fbe6a3b556",
+      "name": "modbus-sim-3_slave_2",
+      "enabled": 1,
+      "metadata": {
+        "slaveId": 2,
+        "validated": true,
+        "confidence": "high",
+        "connectionName": "modbus-sim-3",
+        "discoveryMethod": "register_read",
+        "dataPointValidation": {
+          "state": "idle",
+          "result": "config_match",
+          "details": "5/5 addresses readable (all zeros)",
+          "guidance": "All values zero - device may be idle, at startup, or verify data point config",
+          "zeroCount": 5,
+          "errorCount": 0,
+          "totalPoints": 6,
+          "readableCount": 5,
+          "dataConfidence": 0,
+          "responseConfidence": 1
+        }
+      },
+      "protocol": "modbus",
+      "dataPoints": [
+        {
+          "base": 550,
+          "name": "humidity",
+          "type": "holding",
+          "unit": "%RH",
+          "scale": 0.1,
+          "address": 11,
+          "dataType": "uint16",
+          "noise_pct": 0.1,
+          "description": "Relative humidity (scaled ×10, e.g., 550 = 55.0%)"
+        },
+        {
+          "base": 1013,
+          "name": "pressure",
+          "type": "holding",
+          "unit": "hPa",
+          "address": 12,
+          "dataType": "uint16",
+          "noise_pct": 0.015,
+          "description": "Atmospheric pressure in hectopascals (1013 hPa = sea level)"
+        },
+        {
+          "base": 230,
+          "name": "temperature",
+          "type": "holding",
+          "unit": "°C",
+          "scale": 0.1,
+          "address": 10,
+          "dataType": "uint16",
+          "noise_pct": 0.08,
+          "description": "Ambient temperature (scaled ×10, e.g., 230 = 23.0°C)"
+        },
+        {
+          "base": 200,
+          "name": "holding_register_0",
+          "type": "holding",
+          "unit": "count",
+          "address": 1,
+          "dataType": "uint16",
+          "noise_pct": 0.1
+        },
+        {
+          "base": 100,
+          "name": "holding_register_1",
+          "type": "holding",
+          "unit": "count",
+          "address": 2,
+          "dataType": "uint16",
+          "noise_pct": 0.26
+        },
+        {
+          "base": 150,
+          "name": "holding_register_2",
+          "type": "holding",
+          "unit": "count",
+          "address": 3,
+          "dataType": "uint16",
+          "noise_pct": 0.15
+        }
+      ],
+      "pollInterval": 5000,
+      "connectionString": "{\"host\":\"10.0.0.60\",\"port\":504,\"type\":\"tcp\",\"slaveId\":2}"
+    },
+    {
+      "id": "d19b9f83-75a3-48bc-a624-d456fffd5b5b",
+      "name": "modbus-sim-3_slave_3",
+      "enabled": 1,
+      "metadata": {
+        "slaveId": 3,
+        "validated": true,
+        "confidence": "high",
+        "connectionName": "modbus-sim-3",
+        "discoveryMethod": "register_read",
+        "dataPointValidation": {
+          "state": "idle",
+          "result": "config_match",
+          "details": "5/5 addresses readable (all zeros)",
+          "guidance": "All values zero - device may be idle, at startup, or verify data point config",
+          "zeroCount": 5,
+          "errorCount": 0,
+          "totalPoints": 6,
+          "readableCount": 5,
+          "dataConfidence": 0,
+          "responseConfidence": 1
+        }
+      },
+      "protocol": "modbus",
+      "dataPoints": [
+        {
+          "base": 550,
+          "name": "humidity",
+          "type": "holding",
+          "unit": "%RH",
+          "scale": 0.1,
+          "address": 11,
+          "dataType": "uint16",
+          "noise_pct": 0.1,
+          "description": "Relative humidity (scaled ×10, e.g., 550 = 55.0%)"
+        },
+        {
+          "base": 1013,
+          "name": "pressure",
+          "type": "holding",
+          "unit": "hPa",
+          "address": 12,
+          "dataType": "uint16",
+          "noise_pct": 0.015,
+          "description": "Atmospheric pressure in hectopascals (1013 hPa = sea level)"
+        },
+        {
+          "base": 230,
+          "name": "temperature",
+          "type": "holding",
+          "unit": "°C",
+          "scale": 0.1,
+          "address": 10,
+          "dataType": "uint16",
+          "noise_pct": 0.08,
+          "description": "Ambient temperature (scaled ×10, e.g., 230 = 23.0°C)"
+        },
+        {
+          "base": 200,
+          "name": "holding_register_0",
+          "type": "holding",
+          "unit": "count",
+          "address": 1,
+          "dataType": "uint16",
+          "noise_pct": 0.1
+        },
+        {
+          "base": 100,
+          "name": "holding_register_1",
+          "type": "holding",
+          "unit": "count",
+          "address": 2,
+          "dataType": "uint16",
+          "noise_pct": 0.26
+        },
+        {
+          "base": 150,
+          "name": "holding_register_2",
+          "type": "holding",
+          "unit": "count",
+          "address": 3,
+          "dataType": "uint16",
+          "noise_pct": 0.15
+        }
+      ],
+      "pollInterval": 5000,
+      "connectionString": "{\"host\":\"10.0.0.60\",\"port\":504,\"type\":\"tcp\",\"slaveId\":3}"
+    },
+    {
+      "id": "afc4a612-2c79-4cf1-96db-91e1a1325465",
+      "name": "opcua_10.0.0.60_4840",
+      "enabled": 0,
+      "metadata": {
+        "validated": false,
+        "confidence": "medium",
+        "endpointUrl": "opc.tcp://10.0.0.60:4840",
+        "fingerprint": "9e75f9a8c028811d3835b6b8e52c0d93",
+        "discoveredAt": "2026-01-16T20:06:10.772Z",
+        "applicationUri": "urn:freeopcua:python:server",
+        "discoveryMethod": "endpoint_discovery",
+        "availableEndpoints": 1,
+        "serverCertificateThumbprint": "nocert"
+      },
+      "protocol": "opcua",
+      "dataPoints": [
+        {
+          "name": "myvariable",
+          "nodeId": "ns=2;s=MyVariable"
+        },
+        {
+          "name": "factory_temperature_sensor_1",
+          "nodeId": "ns=2;i=3"
+        },
+        {
+          "name": "factory_temperature_sensor_2",
+          "nodeId": "ns=2;i=4"
+        },
+        {
+          "name": "factory_temperature_sensor_3",
+          "nodeId": "ns=2;i=5"
+        },
+        {
+          "name": "factory_temperature_sensor_4",
+          "nodeId": "ns=2;i=6"
+        },
+        {
+          "name": "factory_temperature_sensor_5",
+          "nodeId": "ns=2;i=7"
+        },
+        {
+          "name": "factory_pressure_sensor_1",
+          "nodeId": "ns=2;i=9"
+        },
+        {
+          "name": "factory_pressure_sensor_2",
+          "nodeId": "ns=2;i=10"
+        },
+        {
+          "name": "factory_pressure_sensor_3",
+          "nodeId": "ns=2;i=11"
+        },
+        {
+          "name": "factory_pressure_sensor_4",
+          "nodeId": "ns=2;i=12"
+        },
+        {
+          "name": "factory_pressure_sensor_5",
+          "nodeId": "ns=2;i=13"
+        },
+        {
+          "name": "factory_flow_sensor_1",
+          "nodeId": "ns=2;i=15"
+        },
+        {
+          "name": "factory_flow_sensor_2",
+          "nodeId": "ns=2;i=16"
+        },
+        {
+          "name": "factory_flow_sensor_3",
+          "nodeId": "ns=2;i=17"
+        },
+        {
+          "name": "factory_flow_sensor_4",
+          "nodeId": "ns=2;i=18"
+        },
+        {
+          "name": "factory_flow_sensor_5",
+          "nodeId": "ns=2;i=19"
+        },
+        {
+          "name": "factory_level_tank_1",
+          "nodeId": "ns=2;i=21"
+        },
+        {
+          "name": "factory_level_tank_2",
+          "nodeId": "ns=2;i=22"
+        },
+        {
+          "name": "factory_level_tank_3",
+          "nodeId": "ns=2;i=23"
+        },
+        {
+          "name": "factory_vibration_motor_1",
+          "nodeId": "ns=2;i=25"
+        },
+        {
+          "name": "factory_vibration_motor_2",
+          "nodeId": "ns=2;i=26"
+        },
+        {
+          "name": "factory_vibration_motor_3",
+          "nodeId": "ns=2;i=27"
+        },
+        {
+          "name": "factory_vibration_motor_4",
+          "nodeId": "ns=2;i=28"
+        },
+        {
+          "name": "factory_power_line_1",
+          "nodeId": "ns=2;i=30"
+        },
+        {
+          "name": "factory_power_line_2",
+          "nodeId": "ns=2;i=31"
+        },
+        {
+          "name": "factory_power_line_3",
+          "nodeId": "ns=2;i=32"
+        },
+        {
+          "name": "serverinfo_profilename",
+          "nodeId": "ns=2;i=34"
+        },
+        {
+          "name": "serverinfo_profiledescription",
+          "nodeId": "ns=2;i=35"
+        },
+        {
+          "name": "serverinfo_sensorcount",
+          "nodeId": "ns=2;i=36"
+        },
+        {
+          "name": "serverinfo_sensortypes",
+          "nodeId": "ns=2;i=37"
+        }
+      ],
+      "pollInterval": 5000,
+      "connectionString": "{\"endpointUrl\":\"opc.tcp://10.0.0.60:4840\",\"securityMode\":\"None\",\"securityPolicy\":\"None\"}"
+    },
+    {
+      "id": "fcd3ba47-846b-4431-9237-9f0c004ccdc1",
+      "name": "snmp_device_60",
+      "enabled": 0,
+      "metadata": {
+        "port": 161,
+        "version": "v2c",
+        "sysDescr": "Iotistic SNMP Simulator v1.0.0",
+        "ipAddress": "10.0.0.60",
+        "validated": true,
+        "confidence": "high",
+        "deviceInfo": {
+          "sysName": "iotistic-snmp-simulator",
+          "sysDescr": "Iotistic SNMP Simulator v1.0.0",
+          "sysContact": "admin@iotistic.ca",
+          "sysLocation": "Iotistic Lab, Vancouver, BC",
+          "sysObjectID": "1.3.6.1.4.1.99999.1.1",
+          "sysServices": 72
+        },
+        "fingerprint": "4f9d4e1f622700701aa0454c794e827b",
+        "capabilities": [
+          "end-to-end",
+          "application"
+        ],
+        "discoveredAt": "2026-01-16T20:06:10.805Z",
+        "discoveryMethod": "sysDescr-read"
+      },
+      "protocol": "snmp",
+      "dataPoints": [
+        {
+          "oid": "1.3.6.1.2.1.1.5.0",
+          "name": "sysName",
+          "unit": "",
+          "dataType": "string"
+        },
+        {
+          "oid": "1.3.6.1.2.1.1.3.0",
+          "name": "sysUpTime",
+          "unit": "timeticks",
+          "dataType": "timeticks"
+        }
+      ],
+      "pollInterval": 5000,
+      "connectionString": "{\"host\":\"10.0.0.60\",\"port\":161,\"retries\":1,\"timeout\":2000,\"version\":\"v2c\",\"community\":\"public\"}"
+    }
+  ],
   "intervals": {
     "device": {
       "reportIntervalMs": 60000,
@@ -73,79 +789,20 @@
       ],
       "bufferCapacity": 1048576
     },
+    "bacnet": {
+      "port": 47808,
+      "enabled": true,
+      "timeout": 5000,
+      "maxDevices": 100,
+      "bufferCapacity": 262144,
+      "broadcastAddress": "",
+      "discoveryTargets": [
+        "host.docker.internal"
+      ]
+    },
     "modbus": {
       "enabled": true,
       "connections": [
-
-            {
-          "host": "10.0.0.60",
-          "name": "modbus-sim-1",
-          "port": 502,
-          "points": {
-            "humidity": {
-              "base": 550,
-              "type": "holding",
-              "unit": "%RH",
-              "scale": 0.1,
-              "address": 11,
-              "dataType": "uint16",
-              "noise_pct": 0.1,
-              "description": "Relative humidity (scaled ×10, e.g., 550 = 55.0%)"
-            },
-            "pressure": {
-              "base": 1013,
-              "type": "holding",
-              "unit": "hPa",
-              "address": 12,
-              "dataType": "uint16",
-              "noise_pct": 0.015,
-              "description": "Atmospheric pressure in hectopascals (1013 hPa = sea level)"
-            },
-            "temperature": {
-              "base": 230,
-              "type": "holding",
-              "unit": "°C",
-              "scale": 0.1,
-              "address": 10,
-              "dataType": "uint16",
-              "noise_pct": 0.08,
-              "description": "Ambient temperature (scaled ×10, e.g., 230 = 23.0°C)"
-            },
-            "holding_register_0": {
-              "base": 200,
-              "type": "holding",
-              "unit": "count",
-              "address": 1,
-              "dataType": "uint16",
-              "noise_pct": 0.1
-            },
-            "holding_register_1": {
-              "base": 100,
-              "type": "holding",
-              "unit": "count",
-              "address": 2,
-              "dataType": "uint16",
-              "noise_pct": 0.26
-            },
-            "holding_register_2": {
-              "base": 150,
-              "type": "holding",
-              "unit": "count",
-              "address": 3,
-              "dataType": "uint16",
-              "noise_pct": 0.15
-            }
-          },
-          "enabled": true,
-          "profile": "Generic",
-          "timeoutMs": 2000,
-          "addressing": {
-            "slaveRange": {
-              "end": 3,
-              "start": 1
-            }
-          }
-        },
         {
           "host": "10.0.0.60",
           "name": "modbus-sim-2",
@@ -205,7 +862,7 @@
               "noise_pct": 0.15
             }
           },
-          "enabled": true,
+          "enabled": false,
           "profile": "Generic",
           "timeoutMs": 2000,
           "addressing": {

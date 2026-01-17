@@ -229,7 +229,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
         <div className="p-6 border-b border-border flex-shrink-0">
         <div className="flex items-start justify-between mb-2">
           <div>
-            <h2 className="text-foreground mb-1">Devices</h2>
+            <h2 className="text-foreground mb-1">Nodes</h2>
             <p className="text-muted-foreground">
               {devices.filter(d => d.status === "online").length} of {devices.length} online
             </p>
@@ -247,7 +247,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <Input
             type="search"
-            placeholder="Search devices..."
+            placeholder="Search nodes..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10"
@@ -312,7 +312,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
         </div>
 
         <p className="text-muted-foreground">
-          Showing {filteredDevices.length} of {devices.length} devices
+          Showing {filteredDevices.length} of {devices.length} nodes
         </p>
       </div>
 

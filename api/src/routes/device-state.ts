@@ -387,7 +387,8 @@ router.put('/devices/:uuid/target-state', validateTargetStateConfigMiddleware, a
     // Get old state for diff
     const oldTargetState = await DeviceTargetStateModel.get(uuid);
 
-    const targetState = await DeviceTargetStateModel.set(uuid, apps, config || {});
+    // Set needs_deployment = true since config changed
+    const targetState = await DeviceTargetStateModel.set(uuid, apps, config || {}, true);
 
     //EVENT SOURCING: Publish target state updated event
     await eventPublisher.publish(
