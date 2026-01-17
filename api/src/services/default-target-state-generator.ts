@@ -152,7 +152,7 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
       bacnet: {
         enabled: true,
         port: 47808,
-        discoveryTargets: ['10.0.0.60'],  // Windows host IP (simulator on bridge with port mapping)
+        discoveryTargets: ['host.docker.internal'],  // Docker Desktop special hostname for Windows host
         broadcastAddress: '',  // Empty - use unicast mode
         timeout: 5000,
         maxDevices: 100,

@@ -70,18 +70,23 @@ class CondoSimulator:
         """Initialize BACnet device with all points"""
         print("\nInitializing BACnet device...")
         
-        # Get container's IP address or use 0.0.0.0
-        bind_addr = os.environ.get('BACPYPES_IFACE', '0.0.0.0:47808')
+        # Get bind address from environment variable or auto-detect
+        bind_addr = os.environ.get('BACPYPES_IFACE', None)
         
-        # If on bridge network, get container IP
-        try:
-            hostname = socket.gethostname()
-            container_ip = socket.gethostbyname(hostname)
-            if container_ip and container_ip != '127.0.0.1':
-                bind_addr = f"{container_ip}:47808"
-                print(f"✓ Detected container IP: {container_ip}")
-        except:
-            pass
+        if bind_addr:
+            print(f"✓ Using BACPYPES_IFACE from environment: {bind_addr}")
+        else:
+            # Auto-detect: try to get host IP
+            try:
+                hostname = socket.gethostname()
+                container_ip = socket.gethostbyname(hostname)
+                if container_ip and container_ip != '127.0.0.1':
+                    bind_addr = f"{container_ip}:47808"
+                    print(f"✓ Auto-detected IP: {container_ip}")
+                else:
+                    bind_addr = "0.0.0.0:47808"
+            except:
+                bind_addr = "0.0.0.0:47808"
         
         print(f"✓ Binding to: {bind_addr}")
         
