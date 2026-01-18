@@ -65,9 +65,13 @@ Redis connection string
 {{/*
 Mosquitto MQTT broker URL
 */}}
-{{- define "iotistic.mosquitto.url" -}}
-mqtt://{{ include "iotistic.fullname" . }}-mosquitto:{{ .Values.mosquitto.ports.mqtt }}
-{{- end }}
+{{- define "mqtt.brokerUrl" -}}
+{{- if .Values.mqttBroker.useTls -}}
+{{- printf "mqtts://%s:%d" .Values.mqttBroker.host (int .Values.mqttBroker.port) -}}
+{{- else -}}
+{{- printf "mqtt://%s:%d" .Values.mqttBroker.host (int .Values.mqttBroker.port) -}}
+{{- end -}}
+{{- end -}}
 
 {{/*
 Mosquitto host

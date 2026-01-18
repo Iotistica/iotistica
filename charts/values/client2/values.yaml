@@ -12,20 +12,20 @@ redis:
     repository: redis
     tag: "7-alpine"
   port: 6379
-  maxMemory: 256mb
-  maxMemoryPolicy: volatile-lru
+  maxMemory: 512mb
+  maxMemoryPolicy: allkeys-lru  # CRITICAL: Evict streams before OOM kill
   persistence:
     enabled: true
   storage:
     size: 5Gi
-    storageClass: ""
+    storageClass: "longhorn"
   resources:
     requests:
       cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 200m
       memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
 
 # Mosquitto MQTT broker
 mosquitto:
@@ -51,7 +51,6 @@ mosquitto:
   tlsCertName: mosquitto-client2
   tlsIssuer: selfsigned-issuer
   tlsCommonName: mqtt2.iotistica.com
-  externalHost: "10.27.27.160"  # Set to your K8s node IP
   resources:
     requests:
       cpu: 100m
@@ -72,41 +71,13 @@ mosquitto:
 # MQTT Broker Configuration
 # Choose between local (self-hosted Mosquitto) or cloud (HiveMQ, AWS IoT Core)
 mqttBroker:
-  # Broker type: 'local' or 'cloud'
-  # - local: Uses Mosquitto deployment (above)
-  # - cloud: Uses external managed MQTT service (HiveMQ Cloud, AWS IoT Core, etc.)
-  type: local
-  
-  # Local broker configuration (uses Mosquitto deployment)
-  local:
-    # Internal service connection
-    protocol: mqtt
-    host: "{{ include \"iotistic.fullname\" . }}-mosquitto"
-    port: 1883
-    useTls: false
-    
-  # Cloud broker configuration (HiveMQ Cloud, AWS IoT Core, etc.)
-  cloud:
-    # Enable cloud broker (requires configuration)
-    enabled: false
-    # Provider: 'hivemq', 'aws-iot', 'azure-iot', 'custom'
-    provider: hivemq
-    # Connection details (must be configured if enabled)
-    host: "{{ include \"iotistic.fullname\" . }}-mosquitto"
-    port: 8883
-    protocol: mqtts
-    username: ""
-    password: ""
-    # Cloud brokers always use TLS
-    useTls: true
-    verifyCertificate: true
-    # CA certificate (optional - most cloud providers use public CAs)
-    caCert: ""
-    # Connection options
-    keepAlive: 60
-    cleanSession: true
-    reconnectPeriod: 5000
-    connectTimeout: 30000
+
+  protocol: mqtt
+#  host: "mqtt2.iotistica.com"
+  host: "client2-release-iotistic-mosquitto"
+  port: 1883
+  useTls: false
+  verifyCertificate: false
 
 # API service
 api:
@@ -114,7 +85,7 @@ api:
   image:
     repository: iotistic/api
     tag: latest
-    pullPolicy: IfNotPresent  # Use local images only (prevents pulling from registry)
+    pullPolicy: Always  # Use local images only (prevents pulling from registry)
   replicas: 1  # Single replica for now
   port: 3002
   serviceType: ClusterIP
@@ -165,12 +136,12 @@ api:
   #
   # Option 3: Pass via --set flag:
   #   helm install --set mqtt.username=admin --set mqtt.password=secret
-  mqtt:
-    # Reference existing Kubernetes secret (recommended for production)
-    SecretName: "mqtt-credentials-client2"
   sql:
     # Reference existing Kubernetes secret (recommended for production)
     SecretName: "sql-credentials-client2"
+  mqtt:
+    # Reference existing Kubernetes secret (recommended for production)
+    SecretName: "mqtt-credentials-client2"
   # License configuration (optional)
   license:
     publicKey: ""
