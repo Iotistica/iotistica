@@ -944,49 +944,55 @@ export class CloudSync extends EventEmitter {
 		const osVersionChanged = deviceInfo.osVersion !== this.lastOsVersion;
 		const agentVersionChanged = deviceInfo.agentVersion !== this.lastAgentVersion;
 		
-		// Hash-based config change detection (bandwidth optimization)
-		const configHash = this.calculateHash(currentState.config);
-		const configChanged = configHash !== this.lastConfigHash || this.isFirstReport;
-		
-		// Collect endpoint health (dynamic runtime status) - now async
-		const endpointHealth = await this.collectEndpointHealth();
-		const healthHash = this.calculateHash(endpointHealth);
-		const healthChanged = healthHash !== this.lastEndpointHealthHash || this.isFirstReport;
-		
-		// Build base state report
-		const stateReport: DeviceStateReport = {
-			[deviceInfo.uuid]: {
-				apps: currentState.apps,
-				is_online: this.connectionMonitor.isOnline(),
-				version: this.currentVersion,
-			},
+	// Hash-based endpoints change detection (bandwidth optimization)
+	// Only track endpoints, not full config (static fields like protocols, intervals, logging, etc. are not reported)
+	const endpointsHash = this.calculateHash(currentState.config?.endpoints);
+	const endpointsChanged = endpointsHash !== this.lastConfigHash || this.isFirstReport;
+	
+	// Collect endpoint health (dynamic runtime status) - now async
+	const endpointHealth = await this.collectEndpointHealth();
+	const healthHash = this.calculateHash(endpointHealth);
+	const healthChanged = healthHash !== this.lastEndpointHealthHash || this.isFirstReport;
+	
+	// Build base state report
+	const stateReport: DeviceStateReport = {
+		[deviceInfo.uuid]: {
+			apps: currentState.apps,
+			is_online: this.connectionMonitor.isOnline(),
+			version: this.currentVersion,
+		},
+	};
+	
+	// Only include dynamic config (endpoints) if changed or first report
+	// Static config (protocols, intervals, logging, features, runtime, anomalyDetection) is not reported back
+	// since it's controlled by target state and should not be echoed in current state
+	// Note: version is already reported at root level (stateReport.version), not in config
+	if (endpointsChanged) {
+		stateReport[deviceInfo.uuid].config = {
+			endpoints: currentState.config?.endpoints || []
 		};
-		
-		// Only include config if changed or first report (HUGE bandwidth savings!)
-		if (configChanged) {
-			stateReport[deviceInfo.uuid].config = currentState.config;
-			this.logger?.infoSync('Config changed - including in report', {
-				component: LogComponents.cloudSync,
-				operation: 'config-change-detected',
-				configHash,
-				endpointCount: currentState.config?.endpoints?.length || 0
-			});
-		}
-		
-		// Only include endpoint health if changed, or always on metrics cycle
-		if (healthChanged || includeMetrics) {
-			(stateReport[deviceInfo.uuid] as any).endpoints_health = endpointHealth;
-		}
-		
-		// Only include static fields if changed (bandwidth optimization)
-		if (osVersionChanged || this.lastOsVersion === undefined) {
-			stateReport[deviceInfo.uuid].os_version = deviceInfo.osVersion;
-			this.lastOsVersion = deviceInfo.osVersion;
-		}
-		if (agentVersionChanged || this.lastAgentVersion === undefined) {
-			stateReport[deviceInfo.uuid].agent_version = deviceInfo.agentVersion;
-			this.lastAgentVersion = deviceInfo.agentVersion;
-		}
+		this.logger?.infoSync('Endpoints config changed - including in report', {
+			component: LogComponents.cloudSync,
+			operation: 'config-change-detected',
+			configHash: endpointsHash,
+			endpointCount: currentState.config?.endpoints?.length || 0
+		});
+	}
+	
+	// Only include endpoint health if changed, or always on metrics cycle
+	if (healthChanged || includeMetrics) {
+		(stateReport[deviceInfo.uuid] as any).endpoints_health = endpointHealth;
+	}
+	
+	// Only include static fields if changed (bandwidth optimization)
+	if (osVersionChanged || this.lastOsVersion === undefined) {
+		stateReport[deviceInfo.uuid].os_version = deviceInfo.osVersion;
+		this.lastOsVersion = deviceInfo.osVersion;
+	}
+	if (agentVersionChanged || this.lastAgentVersion === undefined) {
+		stateReport[deviceInfo.uuid].agent_version = deviceInfo.agentVersion;
+		this.lastAgentVersion = deviceInfo.agentVersion;
+	}
 		
 	// Add metrics if needed
 	if (includeMetrics) {
@@ -1080,7 +1086,7 @@ export class CloudSync extends EventEmitter {
 	};
 	
 	// Include config in state comparison only if it was included in stateReport
-	if (configChanged && stateReport[deviceInfo.uuid].config) {
+	if (endpointsChanged && stateReport[deviceInfo.uuid].config) {
 		stateOnlyReport[deviceInfo.uuid].config = stateReport[deviceInfo.uuid].config;
 	}
 	
@@ -1107,7 +1113,7 @@ export class CloudSync extends EventEmitter {
 	
 	// Determine if we should report
 	// Report if: there are changes in state OR we need to send metrics OR it's first report
-	const shouldReport = Object.keys(diff).length > 0 || includeMetrics || configChanged || healthChanged;
+	const shouldReport = Object.keys(diff).length > 0 || includeMetrics || endpointsChanged || healthChanged;
 	
 	if (!shouldReport) {
 		// No changes to report
@@ -1124,10 +1130,10 @@ export class CloudSync extends EventEmitter {
 		},
 	};
 	
-	// Add config only if it changed
-	//if (configChanged) {
-		reportToSend[deviceInfo.uuid].config = currentState.config;
-	//}
+	// Add config (endpoints only) if it changed
+	if (endpointsChanged && stateReport[deviceInfo.uuid].config) {
+		reportToSend[deviceInfo.uuid].config = stateReport[deviceInfo.uuid].config;
+	}
 	
 	// Add endpoint health only if it changed or metrics cycle
 	if (healthChanged || includeMetrics) {
@@ -1165,13 +1171,28 @@ export class CloudSync extends EventEmitter {
 	if (includeMetrics && (stateReport[deviceInfo.uuid] as any).vpn_health) {
 		(reportToSend[deviceInfo.uuid] as any).vpn_health = (stateReport[deviceInfo.uuid] as any).vpn_health;
 	}
+	
+	// Skip sending if report has no meaningful data (empty config, empty apps, no metrics)
+	const hasConfig = reportToSend[deviceInfo.uuid].config !== undefined;
+	const hasApps = reportToSend[deviceInfo.uuid].apps && Object.keys(reportToSend[deviceInfo.uuid].apps).length > 0;
+	
+	// Only skip if BOTH config and apps are empty (metrics/health alone are still valuable)
+	if (!hasConfig && !hasApps) {
+		this.logger?.infoSync('Skipping empty state report (no config or apps)', {
+			component: LogComponents.cloudSync,
+			operation: 'skip-empty-report',
+			isOnline: this.connectionMonitor.isOnline(),
+			version: this.currentVersion
+		});
+		return;
+	}
 		
 		// Send report to cloud
 		try {
 			await this.sendReport(reportToSend);
 
 			// Update hashes after successful send (ALWAYS, even if unchanged)
-			this.lastConfigHash = configHash;
+			this.lastConfigHash = endpointsHash;
 			this.lastEndpointHealthHash = healthHash;
 			
 			// Clear first report flag
@@ -1190,21 +1211,14 @@ export class CloudSync extends EventEmitter {
 				includeMetrics,
 				version: this.currentVersion,
 				reportedVersion: stateReport[deviceInfo.uuid].version,
-				configIncluded: configChanged,
-				endpointHealthIncluded: healthChanged || includeMetrics,
-				isFirstReport: this.isFirstReport
-			};
-			
-			// Track which static fields were included (for debugging)
-			if (osVersionChanged || agentVersionChanged || 
-			    (includeMetrics && stateReport[deviceInfo.uuid].local_ip !== undefined)) {
-				optimizationDetails.staticFieldsIncluded = {
-					osVersion: osVersionChanged,
-					agentVersion: agentVersionChanged,
-					localIp: includeMetrics && stateReport[deviceInfo.uuid].local_ip !== undefined
-				};
-			} else {
-				optimizationDetails.staticFieldsOptimized = true; // Saved bandwidth!
+			configIncluded: endpointsChanged,
+			endpointHealthIncluded: healthChanged || includeMetrics,
+			isFirstReport: this.isFirstReport
+		};
+		
+		// Track which static fields were included (for debugging)
+		if (osVersionChanged || agentVersionChanged || 
+			(includeMetrics && stateReport[deviceInfo.uuid].local_ip !== undefined)) {
 			}
 			
 			// Log what was actually sent

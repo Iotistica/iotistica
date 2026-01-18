@@ -110,6 +110,12 @@ interface SimulatorOptions {
     snmp?: {
       ipRanges: string[];
     };
+    bacnet?: {
+      discoveryTargets?: string[];  // Unicast discovery targets (recommended for containers)
+      broadcastAddress?: string;    // Legacy broadcast mode
+      port?: number;
+      timeout?: number;
+    };
   };
 }
 
@@ -142,6 +148,15 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
         monitorDurationMs: 30000,
         qos: 0 as 0 | 1 | 2,
         bufferCapacity: 512 * 1024,
+      },
+      bacnet: {
+        enabled: true,
+        port: 47808,
+        discoveryTargets: ['host.docker.internal'],  // Docker Desktop special hostname for Windows host
+        broadcastAddress: '',  // Empty - use unicast mode
+        timeout: 5000,
+        maxDevices: 100,
+        bufferCapacity: 256 * 1024,
       },
       opcua: {
         enabled: true,
@@ -241,6 +256,14 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
   // Generate SNMP IP ranges
   const snmpRanges = simConfig.snmp?.ipRanges || [];
   
+  // BACnet configuration
+  const bacnetConfig = simConfig.bacnet || {
+    // discoveryTargets: undefined allows auto-detection fallback
+    // broadcastAddress: auto-detected by agent from network interface
+    port: 47808,
+    timeout: 5000
+  };
+  
   return {
     can: {
       enabled: false,
@@ -264,6 +287,17 @@ function generateProtocolsConfig(simulatorOptions?: SimulatorOptions) {
       monitorDurationMs: 30000,
       qos: 0 as 0 | 1 | 2,
       bufferCapacity: 512 * 1024,
+    },
+    bacnet: {
+      enabled: true,
+      port: bacnetConfig.port || 47808,
+      // Unicast discovery targets (preferred for Docker/containers)
+      ...(bacnetConfig.discoveryTargets && bacnetConfig.discoveryTargets.length > 0 && { discoveryTargets: bacnetConfig.discoveryTargets }),
+      // Broadcast address (legacy fallback, auto-detection if undefined)
+      ...(bacnetConfig.broadcastAddress && { broadcastAddress: bacnetConfig.broadcastAddress }),
+      timeout: bacnetConfig.timeout || 5000,
+      maxDevices: 100,
+      bufferCapacity: 256 * 1024,
     },
     opcua: {
       enabled: opcuaUrls.length > 0,

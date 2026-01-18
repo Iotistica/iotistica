@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Server, User, LogIn, Settings, HelpCircle, LogOut, RefreshCw, XCircle, Save, MessageSquare, Tag, Building2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
@@ -13,7 +14,6 @@ import { toast } from "sonner";
 import { ThemeToggle } from "./theme-toggle";
 import { useDeviceState } from "../contexts/DeviceStateContext";
 import { AIChatWidget } from "./AIChatWidget";
-import { useState } from "react";
 
 interface HeaderProps {
   isAuthenticated?: boolean;
@@ -45,12 +45,31 @@ export function Header({
   // AI Chat state
   const [isChatOpen, setIsChatOpen] = useState(false);
   
+  // Force re-render when sensor config changes
+  const [, forceUpdate] = useState({});
+  
   // Get deployment status and functions from context
   const { syncTargetState, cancelDeployment, hasPendingChanges, saveTargetState, getDeviceState } = useDeviceState();
   
   const needsDeployment = deviceUuid ? hasPendingChanges(deviceUuid) : false;
   const deviceState = deviceUuid ? getDeviceState(deviceUuid) : null;
   const hasUnsavedChanges = deviceState?.isDirty || false;
+  
+  // Listen for sensor config changes (toggle events)
+  useEffect(() => {
+    const handleConfigChanged = (event: CustomEvent) => {
+      if (event.detail.deviceUuid === deviceUuid) {
+        console.log('Sensor config changed - refreshing Header state');
+        forceUpdate({}); // Trigger re-render to update needsDeployment
+      }
+    };
+    
+    window.addEventListener('sensor-config-changed', handleConfigChanged as EventListener);
+    
+    return () => {
+      window.removeEventListener('sensor-config-changed', handleConfigChanged as EventListener);
+    };
+  }, [deviceUuid]);
   
   const handleDeploy = async () => {
     if (!deviceUuid) {
@@ -62,15 +81,34 @@ export function Header({
       // If there are unsaved changes, save them first
       if (hasUnsavedChanges) {
         toast.info("Saving changes...");
-        await saveTargetState(deviceUuid);
+        try {
+          await saveTargetState(deviceUuid);
+          toast.success("Changes saved");
+        } catch (saveError: any) {
+          console.error("Save error:", saveError);
+          toast.error(`Failed to save changes: ${saveError.message || 'Unknown error'}`);
+          throw saveError; // Stop deployment if save fails
+        }
       }
       
       // Then deploy
-      await syncTargetState(deviceUuid, 'dashboard');
-      toast.success("Deployment successful");
-    } catch (error) {
-      toast.error("Deployment failed");
-      console.error("Deployment error:", error);
+      const toastId = toast.loading("Deploying changes...");
+      
+      try {
+        await syncTargetState(deviceUuid, 'dashboard');
+        
+        // Emit event so SensorsPage can refresh immediately
+        window.dispatchEvent(new CustomEvent('deployment-started', { detail: { deviceUuid } }));
+        
+        toast.success("Changes deployed - waiting for agent confirmation", { id: toastId });
+      } catch (deployError: any) {
+        console.error("Deployment error:", deployError);
+        toast.error(`Deployment failed: ${deployError.message || 'Unknown error'}`, { id: toastId });
+        throw deployError;
+      }
+    } catch (error: any) {
+      // Error already handled in nested try-catch blocks
+      // This outer catch is just to prevent unhandled promise rejection
     }
   };
   
@@ -113,7 +151,7 @@ export function Header({
             <Server className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h1 className="text-lg font-extrabold text-foreground leading-tight">Iotistic</h1>
+            <h1 className="text-lg font-extrabold text-foreground leading-tight">Iotistica</h1>
             <p className="text-xs text-muted-foreground hidden sm:block">Your Device Management Platform</p>
           </div>
         </div>

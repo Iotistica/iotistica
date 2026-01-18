@@ -11,7 +11,7 @@
  * 4. User clicks Sync → Calls /deploy API → Increments version → Device applies changes
  */
 
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { buildApiUrl } from '../config/api';
 
 // ============================================================================
@@ -134,6 +134,7 @@ interface DeviceStateContextValue {
   // State sync actions (hits API)
   fetchDeviceState: (deviceUuid: string) => Promise<void>;
   saveTargetState: (deviceUuid: string) => Promise<void>; // Save to device_target_state (draft)
+  saveTargetStateWithConfig: (deviceUuid: string, config: any) => Promise<void>; // Save with explicit config (bypasses pending state)
   syncTargetState: (deviceUuid: string, deployedBy: string) => Promise<void>; // Mark for deployment (Sync button)
   cancelDeployment: (deviceUuid: string) => Promise<void>; // Cancel pending deployment
   discardPendingChanges: (deviceUuid: string) => void;
@@ -423,10 +424,10 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
         id: sensor.id || crypto.randomUUID() // Use existing ID or generate new one
       };
       
-      // Add sensor to sensors array
+      // Add sensor to endpoints array
       const updatedConfig = { ...currentPending.config };
-      const existingDevices = updatedConfig.sensors || [];
-      updatedConfig.sensors = [...existingDevices, sensorWithId];
+      const existingDevices = updatedConfig.endpoints || [];
+      updatedConfig.endpoints = [...existingDevices, sensorWithId];
       
       return {
         ...prev,
@@ -444,9 +445,14 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
   
   // Update sensor in config (local only)
   const updatePendingSensor = useCallback((deviceUuid: string, sensorName: string, updates: any) => {
+    console.log(`[DeviceStateContext] updatePendingSensor called: ${sensorName}`, updates);
+    
     setDeviceStates(prev => {
       const deviceState = prev[deviceUuid];
-      if (!deviceState) return prev;
+      if (!deviceState) {
+        console.log('[DeviceStateContext] No device state found for', deviceUuid);
+        return prev;
+      }
       
       // Start with target state if no pending changes
       const currentPending = deviceState.pendingChanges || {
@@ -454,12 +460,16 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
         config: { ...deviceState.targetState?.config }
       };
       
-      // Update sensor in sensors array
+      console.log('[DeviceStateContext] Current pending config.endpoints:', (currentPending.config as any)?.endpoints?.map((e: any) => ({ name: e.name, enabled: e.enabled })));
+      
+      // Update sensor in endpoints array
       const updatedConfig = { ...currentPending.config };
-      const existingDevices = updatedConfig.sensors || [];
-      updatedConfig.sensors = existingDevices.map((device: any) =>
+      const existingDevices = updatedConfig.endpoints || [];
+      updatedConfig.endpoints = existingDevices.map((device: any) =>
         device.name === sensorName ? { ...device, ...updates } : device
       );
+      
+      console.log('[DeviceStateContext] Updated config.endpoints:', updatedConfig.endpoints.map((e: any) => ({ name: e.name, enabled: e.enabled })));
       
       return {
         ...prev,
@@ -487,10 +497,10 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
         config: { ...deviceState.targetState?.config }
       };
       
-      // Remove sensor from sensors array
+      // Remove sensor from endpoints array
       const updatedConfig = { ...currentPending.config };
-      const existingDevices = updatedConfig.sensors || [];
-      updatedConfig.sensors = existingDevices.filter((device: any) => device.name !== sensorName);
+      const existingDevices = updatedConfig.endpoints || [];
+      updatedConfig.endpoints = existingDevices.filter((device: any) => device.name !== sensorName);
       
       return {
         ...prev,
@@ -518,6 +528,12 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
     
     try {
       // Save to API (device_target_state table) - sets needs_deployment = true
+      console.log('[saveTargetState] Sending to API:', {
+        deviceUuid,
+        apps: deviceState.pendingChanges.apps,
+        configEndpoints: (deviceState.pendingChanges.config as any)?.endpoints?.map((e: any) => ({ name: e.name, enabled: e.enabled }))
+      });
+      
       const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/target-state`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -528,7 +544,69 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
       });
       
       if (!response.ok) {
-        throw new Error(`Failed to save target state: ${response.statusText}`);
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Save target state failed:', response.status, errorData);
+        console.error('Validation errors:', JSON.stringify(errorData.errors, null, 2));
+        console.error('Sent config:', JSON.stringify(deviceState.pendingChanges.config, null, 2));
+        throw new Error(errorData.message || `Failed to save target state: ${response.statusText}`);
+      }
+      
+      // Re-fetch to get updated state
+      await fetchDeviceState(deviceUuid);
+      
+      // Clear pending changes after successful save
+      setDeviceStates(prev => ({
+        ...prev,
+        [deviceUuid]: {
+          ...prev[deviceUuid],
+          pendingChanges: null,
+          isDirty: false,
+          isSyncing: false
+        }
+      }));
+    } catch (error: any) {
+      setDeviceStates(prev => ({
+        ...prev,
+        [deviceUuid]: { 
+          ...prev[deviceUuid], 
+          isSyncing: false, 
+          lastSyncError: error.message 
+        }
+      }));
+      throw error;
+    }
+  }, [deviceStates, fetchDeviceState]);
+  
+  // Save target state with explicit config (bypasses pending state)
+  const saveTargetStateWithConfig = useCallback(async (deviceUuid: string, config: any) => {
+    const deviceState = deviceStates[deviceUuid];
+    if (!deviceState) return;
+    
+    setDeviceStates(prev => ({
+      ...prev,
+      [deviceUuid]: { ...prev[deviceUuid], isSyncing: true, lastSyncError: null }
+    }));
+    
+    try {
+      // Get apps from target state or pending changes
+      const apps = deviceState.pendingChanges?.apps || deviceState.targetState?.apps || {};
+      
+      console.log('[saveTargetStateWithConfig] Sending to API:', {
+        deviceUuid,
+        apps,
+        configEndpoints: config?.endpoints?.map((e: any) => ({ name: e.name, enabled: e.enabled }))
+      });
+      
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/target-state`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apps, config })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Save target state failed:', response.status, errorData);
+        throw new Error(errorData.message || `Failed to save target state: ${response.statusText}`);
       }
       
       // Re-fetch to get updated state
@@ -573,7 +651,9 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
       });
       
       if (!response.ok) {
-        throw new Error(`Failed to sync state: ${response.statusText}`);
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Deploy failed:', response.status, errorData);
+        throw new Error(errorData.message || `Failed to sync state: ${response.statusText}`);
       }
       
       // Re-fetch to update needsDeployment flag
@@ -713,12 +793,43 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
     removePendingSensor,
     fetchDeviceState,
     saveTargetState,
+    saveTargetStateWithConfig,
     syncTargetState,
     cancelDeployment,
     discardPendingChanges,
     hasPendingChanges,
     getSyncStatus,
   };
+  
+  // Listen for sensor config changes (toggle events) and mark as needs deployment
+  useEffect(() => {
+    const handleConfigChanged = (event: CustomEvent) => {
+      const deviceUuid = event.detail.deviceUuid;
+      console.log(`DeviceStateContext: Sensor config changed for device ${deviceUuid}`);
+      
+      setDeviceStates(prev => {
+        const deviceState = prev[deviceUuid];
+        if (!deviceState?.targetState) return prev;
+        
+        return {
+          ...prev,
+          [deviceUuid]: {
+            ...deviceState,
+            targetState: {
+              ...deviceState.targetState,
+              needsDeployment: true // Mark as needs deployment immediately
+            }
+          }
+        };
+      });
+    };
+    
+    window.addEventListener('sensor-config-changed', handleConfigChanged as EventListener);
+    
+    return () => {
+      window.removeEventListener('sensor-config-changed', handleConfigChanged as EventListener);
+    };
+  }, []);
   
   return (
     <DeviceStateContext.Provider value={value}>

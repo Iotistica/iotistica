@@ -593,7 +593,7 @@ export default function App() {
               onClick={() => setCurrentView('sensors')}
             >
               <Activity className="w-4 h-4 mr-2" />
-              Endpoints
+              Devices
             </Button>
             {/* <Button              variant={currentView === 'endpoints' ? 'default' : 'outline'}
               size="sm"
@@ -641,22 +641,22 @@ export default function App() {
               <Activity className="w-4 h-4 mr-2" />
               Event Debugger
             </Button> */}
-            <Button
+            {/* <Button
               variant={currentView === 'usage' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCurrentView('usage')}
             >
               <TrendingUp className="w-4 h-4 mr-2" />
               API Usage
-            </Button>
-            <Button
+            </Button> */}
+            {/* <Button
               variant={currentView === 'analytics' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCurrentView('analytics')}
             >
               <LineChart className="w-4 h-4 mr-2" />
               Traffic Monitor
-            </Button>
+            </Button> */}
             <Button
               variant={currentView === 'security' ? 'default' : 'outline'}
               size="sm"

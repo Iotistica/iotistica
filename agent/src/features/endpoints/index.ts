@@ -31,6 +31,10 @@ import type { OPCUAAdapterConfig } from './opcua/types.js';
 // SNMP imports
 import { SNMPAdapter } from './snmp/adapter.js';
 
+// BACnet imports
+import { BACnetAdapter } from './bacnet/adapter.js';
+import { BACnetAdapterConfig } from './bacnet/types.js';
+
 export interface SensorConfig extends FeatureConfig {
   modbus?: {
     enabled: boolean;
@@ -49,6 +53,10 @@ export interface SensorConfig extends FeatureConfig {
   mqtt?: {
     enabled: boolean;
     config?: MqttAdapterConfig; // Optional: provide config directly, otherwise load from database
+  };
+  bacnet?: {
+    enabled: boolean;
+    config?: BACnetAdapterConfig; // Optional: provide config directly, otherwise load from database
   };
 }
 
@@ -93,6 +101,11 @@ export class SensorsFeature extends BaseFeature {
      // Start MQTT adapter if enabled
     if ((this.config as SensorConfig).mqtt?.enabled) {
       await this.startMQTTAdapter();
+    }
+
+    // Start BACnet adapter if enabled
+    if ((this.config as SensorConfig).bacnet?.enabled) {
+      await this.startBACnetAdapter();
     }
 
     // TODO: Start CAN adapter when implemented
@@ -659,8 +672,116 @@ export class SensorsFeature extends BaseFeature {
   }
   
   /**
+   * Start BACnet adapter
+   */
+  private async startBACnetAdapter(): Promise<void> {
+    try {
+      let bacnetConfig: BACnetAdapterConfig;
+      let outputConfig: SocketOutput;
+
+      // Load config from provided config object or database
+      if (this.config.bacnet!.config) {
+        bacnetConfig = this.config.bacnet!.config;
+      } else {
+        // Load devices from database
+        const dbDevices = await DeviceEndpointModel.getEnabled('bacnet');
+        
+        if (dbDevices.length === 0) {
+          this.logger.info('BACnet ADAPTER: No BACnet devices in database - skipping adapter start');
+          return;
+        }
+        
+        this.logger.info(`BACnet ADAPTER: Found ${dbDevices.length} BACnet devices in database`);
+        
+        // Convert database format to BACnetAdapterConfig
+        bacnetConfig = {
+          enabled: true,
+          port: (this.config.bacnet as any)?.port || 47809,
+          devices: dbDevices.map(d => ({
+            name: d.name,
+            enabled: d.enabled,
+            ipAddress: d.connection.ipAddress || d.connection.host,
+            port: d.connection.port || 47808,
+            deviceInstance: d.connection.deviceInstance || 0,
+            pollIntervalMs: d.poll_interval || 5000,
+            maxConcurrentReads: d.connection.maxConcurrentReads || 5,
+            connectionTimeoutMs: d.connection.connectionTimeoutMs || 5000,
+            retryAttempts: d.connection.retryAttempts || 3,
+            retryDelayMs: d.connection.retryDelayMs || 1000,
+            objects: (d.connection.objects || []).map((obj: any) => ({
+              name: obj.name,
+              objectType: obj.objectType,
+              objectInstance: obj.objectInstance,
+              propertyId: obj.propertyId || 85, // 85 = PRESENT_VALUE
+              unit: obj.unit || '',
+              pollIntervalMs: obj.pollIntervalMs || 5000,
+              enabled: obj.enabled !== false,
+            })),
+          })),
+          globalPollIntervalMs: (this.config.bacnet as any)?.globalPollIntervalMs || 5000,
+          maxConcurrentDevices: (this.config.bacnet as any)?.maxConcurrentDevices || 10,
+        };
+      }
+
+      // Load output config from database
+      const dbOutput = await EndpointOutputModel.getOutput('bacnet');
+      if (!dbOutput) {
+        throw new Error('BACnet output configuration not found in database');
+      }
+      outputConfig = {
+        socketPath: dbOutput.socket_path,
+        dataFormat: dbOutput.data_format as 'json' | 'csv',
+        delimiter: dbOutput.delimiter,
+        includeTimestamp: dbOutput.include_timestamp,
+        includeDeviceName: dbOutput.include_device_name
+      };
+
+      // Create socket server for BACnet protocol
+      const bacnetSocket = new SocketServer(outputConfig, this.logger);
+      await bacnetSocket.start();
+      this.socketServers.set('bacnet', bacnetSocket);
+
+      // Create BACnet adapter (socket-agnostic)
+      const bacnetAdapter = new BACnetAdapter(bacnetConfig, this.logger);
+      this.adapters.set('bacnet', bacnetAdapter);
+
+      // Wire up event handlers
+      bacnetAdapter.on('started', () => {
+        this.logger.info('BACnet adapter started');
+      });
+
+      bacnetAdapter.on('data', (dataPoints: SensorDataPoint[]) => {
+        // Route data from adapter to socket server
+        bacnetSocket.sendData(dataPoints);
+      });
+
+      bacnetAdapter.on('device-connected', (deviceName: string) => {
+        this.logger.info(`BACnet device connected: ${deviceName}`);
+      });
+
+      bacnetAdapter.on('device-disconnected', (deviceName: string) => {
+        this.logger.warn(`BACnet device disconnected: ${deviceName}`);
+      });
+
+      bacnetAdapter.on('device-error', ({ deviceName, error }: { deviceName: string; error: string }) => {
+        this.logger.error(`BACnet error [${deviceName}]: ${error}`);
+      });
+
+      // Start adapter
+      await bacnetAdapter.start();
+      
+      this.logger.info(`BACnet adapter started with ${bacnetConfig.devices.length} device(s)`);
+      
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to start BACnet adapter: ${errorMessage}`);
+      throw error;
+    }
+  }
+
+  /**
    * Get a specific protocol adapter
-   * @param protocol - Protocol name ('modbus', 'opcua', 'snmp', 'mqtt')
+   * @param protocol - Protocol name ('modbus', 'opcua', 'snmp', 'mqtt', 'bacnet')
    * @returns The adapter instance or undefined if not running
    */
   getAdapter(protocol: string): any | undefined {

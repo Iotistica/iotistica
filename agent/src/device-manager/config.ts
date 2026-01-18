@@ -96,7 +96,7 @@ export class ConfigManager extends EventEmitter {
 			protocol: sensor.protocol,
 			connectionString: JSON.stringify(sensor.connection), // Serialize connection object
 			pollInterval: sensor.poll_interval,
-			enabled: sensor.enabled,
+			enabled: Boolean(sensor.enabled), // Convert SQLite integer (0/1) to boolean
 			metadata: sensor.metadata,
 			dataPoints: sensor.data_points // Include data point definitions for cloud reporting
 		}));

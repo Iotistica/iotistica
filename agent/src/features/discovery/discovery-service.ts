@@ -36,11 +36,12 @@ import { OPCUADiscoveryPlugin } from './opcua.discovery';
 import { CANDiscoveryPlugin } from './can.discovery';
 import { SNMPDiscoveryPlugin } from './snmp.discovery';
 import { MqttDiscoveryPlugin, MqttDiscoveryOptions } from './mqtt.discovery';
+import { BACnetDiscoveryPlugin } from './bacnet.discovery';
 import { autoDetectLocalSubnets } from '../../utils/network';
 import type { AgentConfig } from '../../config/agent-config.js';
 
 export type DiscoveryTrigger = 'first_boot' | 'manual' | 'scheduled';
-export type DiscoveryProtocol = 'modbus' | 'opcua' | 'can' | 'snmp' | 'mqtt';
+export type DiscoveryProtocol = 'modbus' | 'opcua' | 'can' | 'snmp' | 'mqtt' | 'bacnet';
 
 export interface DiscoveryOptions {
   trigger: DiscoveryTrigger;
@@ -186,6 +187,7 @@ export class DiscoveryService extends EventEmitter {
     plugins.set('can', new CANDiscoveryPlugin(this.logger));
     plugins.set('snmp', new SNMPDiscoveryPlugin(this.logger));
     plugins.set('mqtt', new MqttDiscoveryPlugin(this.logger));
+    plugins.set('bacnet', new BACnetDiscoveryPlugin(this.logger));
     
     return plugins;
   }
@@ -594,6 +596,8 @@ export class DiscoveryService extends EventEmitter {
         return this.agentConfig.getOPCUAConfig().enabled ?? false;
       case 'snmp':
         return this.agentConfig.getSNMPConfig().enabled ?? false;
+      case 'bacnet':
+        return this.agentConfig.getBACnetConfig().enabled ?? false;
       case 'can':
         // TODO: Add getCANConfig() when available
         return !!process.env.CAN_INTERFACE;
@@ -620,6 +624,8 @@ export class DiscoveryService extends EventEmitter {
         return this.getSNMPOptions();
       case 'mqtt':
         return this.getMqttOptions();
+      case 'bacnet':
+        return this.getBACnetOptions();
       default:
         return undefined;
     }
@@ -650,6 +656,27 @@ export class DiscoveryService extends EventEmitter {
    * Get OPC-UA discovery options from configuration
    */
   private getOPCUAOptions(): OPCUADiscoveryOptions | undefined {
+    // Use config accessor if available (cloud → env fallback)
+    if (this.agentConfig) {
+      const config = this.agentConfig.getOPCUAConfig();
+      
+      // No connections configured
+      if (!config.connections || config.connections.length === 0) {
+        return undefined;
+      }
+
+      return {
+        discoveryUrls: config.connections
+      };
+    }
+
+    // Legacy: Direct env var reads (backward compatibility)
+    const urls = process.env.OPCUA_DISCOVERY_URLS;
+    
+    if (!urls) {
+      return undefined; // Use plugin defaults
+    }
+
     // Helper to format URL (convert bare IP to opc.tcp://IP:4840)
     const formatOpcuaUrl = (url: string): string => {
       const trimmed = url.trim();
@@ -677,26 +704,6 @@ export class DiscoveryService extends EventEmitter {
       // Bare IP/hostname without port (e.g., 10.0.0.60) - add protocol and default port
       return `opc.tcp://${trimmed}:4840`;
     };
-
-    // Use config accessor if available (cloud → env fallback)
-    if (this.agentConfig) {
-      const config = this.agentConfig.getOPCUAConfig();
-      
-      if (!config.discoveryUrls || config.discoveryUrls.length === 0) {
-        return undefined; // Use plugin defaults
-      }
-
-      return {
-        discoveryUrls: config.discoveryUrls.map(formatOpcuaUrl)
-      };
-    }
-
-    // Legacy: Direct env var reads (backward compatibility)
-    const urls = process.env.OPCUA_DISCOVERY_URLS;
-    
-    if (!urls) {
-      return undefined; // Use plugin defaults
-    }
 
     return {
       discoveryUrls: urls.split(',').map(url => formatOpcuaUrl(url))
@@ -730,17 +737,16 @@ export class DiscoveryService extends EventEmitter {
     if (this.agentConfig) {
       const config = this.agentConfig.getSNMPConfig();
       
-      // CRITICAL: Only run SNMP discovery if explicitly configured
-      // Don't auto-detect subnets (causes massive IP scans)
-      if (!config.ipRanges || config.ipRanges.length === 0) {
-        this.logger?.debugSync('SNMP IP ranges not configured, skipping SNMP discovery', {
+      // CRITICAL: Only run SNMP discovery if connections are configured
+      if (!config.connections || config.connections.length === 0) {
+        this.logger?.debugSync('SNMP connections not configured, skipping SNMP discovery', {
           component: LogComponents.discovery,
           note: 'Configure via dashboard or set SNMP_IP_RANGES env var'
         });
         return undefined;
       }
 
-      const options: SNMPDiscoveryOptions = { ipRanges: config.ipRanges };
+      const options: SNMPDiscoveryOptions = { ipRanges: config.connections };
 
       // Optional: Port
       if (config.port !== undefined) {
@@ -926,6 +932,33 @@ export class DiscoveryService extends EventEmitter {
   }
 
   /**
+   * Get BACnet discovery options from configuration
+   */
+  private getBACnetOptions(): any {
+    if (!this.agentConfig) {
+      return undefined;
+    }
+
+    const config = this.agentConfig.getBACnetConfig();
+    
+    // BACnet not enabled
+    if (!config.enabled) {
+      return undefined;
+    }
+
+    // Return configuration for BACnet discovery
+    // discoveryTargets: Unicast mode (preferred for Docker/containers)
+    // broadcastAddress: undefined allows plugin to auto-detect subnet broadcast
+    return {
+      ...(config.discoveryTargets && config.discoveryTargets.length > 0 && { discoveryTargets: config.discoveryTargets }),
+      ...(config.broadcastAddress && { broadcastAddress: config.broadcastAddress }),
+      port: config.port || 47808,
+      timeout: config.timeout || 5000,
+      maxDevices: config.maxDevices || 100
+    };
+  }
+
+  /**
    * Load discovery metadata from persistent storage
    */
   private loadMetadata(): DiscoveryMetadata {
@@ -1028,7 +1061,7 @@ export class DiscoveryService extends EventEmitter {
     // Fetch existing sensors ONCE before loop (avoid O(N²) performance)
     const existingSensors = await DeviceEndpointModel.getAll();
 
-    this.logger?.infoSync('Checking for existing sensors in database', {
+    this.logger?.infoSync('Checking for existing endpoints in database', {
       component: LogComponents.discovery,
       existingCount: existingSensors.length,
       discoveredCount: discovered.length,

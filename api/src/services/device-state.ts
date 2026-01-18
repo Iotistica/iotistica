@@ -97,8 +97,8 @@ export async function processDeviceStateReport(
     );
 
     // 🔄 RECONCILIATION: Sync agent's current state to device_sensors table
-    // Only reconcile if config is present in the report (agent only sends config when changed)
-    if (deviceState.config) {
+    // Only reconcile if config.endpoints is present in the report
+    if (deviceState.config?.endpoints) {
         await deviceSensorSync.syncCurrentStateToTable(uuid, deviceState);
     }
 
