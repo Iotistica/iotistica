@@ -51,7 +51,6 @@ mosquitto:
   tlsCertName: mosquitto-client1
   tlsIssuer: selfsigned-issuer
   tlsCommonName: mqtt1.iotistica.com
-  externalHost: "mqtt1.iotistica.com"  # Set to your K8s node IP
   resources:
     requests:
       cpu: 100m
@@ -74,46 +73,11 @@ mosquitto:
 mqttBroker:
 
   protocol: mqtt
-  host: "mqtt1.iotistica.com"
+#  host: "mqtt2.iotistica.com"
+  host: "client1-release-iotistic-mosquitto"
   port: 1883
-  useTls: true
-
-  # Broker type: 'local' or 'cloud'
-  # - local: Uses Mosquitto deployment (above)
-  # - cloud: Uses external managed MQTT service (HiveMQ Cloud, AWS IoT Core, etc.)
-  type: local
-  
-  # Local broker configuration (uses Mosquitto deployment)
-  local:
-    # Internal service connection
-    protocol: mqtt
-    host: "mqtt1.iotistica.com"
-    port: 1883
-    useTls: false
-    verifyCertificate: false
-    
-  # Cloud broker configuration (HiveMQ Cloud, AWS IoT Core, etc.)
-  cloud:
-    # Enable cloud broker (requires configuration)
-    enabled: false
-    # Provider: 'hivemq', 'aws-iot', 'azure-iot', 'custom'
-    provider: hivemq
-    # Connection details (must be configured if enabled)
-    host: "{{ include \"iotistic.fullname\" . }}-mosquitto"
-    port: 8883
-    protocol: mqtts
-    username: ""
-    password: ""
-    # Cloud brokers always use TLS
-    useTls: true
-    verifyCertificate: true
-    # CA certificate (optional - most cloud providers use public CAs)
-    caCert: ""
-    # Connection options
-    keepAlive: 60
-    cleanSession: true
-    reconnectPeriod: 5000
-    connectTimeout: 30000
+  useTls: false
+  verifyCertificate: false
 
 # API service
 api:
