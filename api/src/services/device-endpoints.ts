@@ -15,6 +15,7 @@ import { query } from '../db/connection';
 import { EventPublisher } from './event-sourcing';
 import logger from '../utils/logger';
 import { v4 as uuidv4 } from 'uuid';
+import { DeviceTargetStateModel } from '../db/models';
 
 const eventPublisher = new EventPublisher();
 
@@ -49,21 +50,39 @@ export class DeviceSensorSyncService {
     logger.info(`Syncing ${configDevices.length} endpoints from config to table for device ${deviceUuid.substring(0, 8)}... (${isReconciliation ? 'RECONCILIATION' : 'DEPLOYMENT'})`);
 
     try {
-      // Get existing sensors from table
+      // Get existing sensors from table (fetch full records to compare changes AND health status)
       const existingResult = await query(
-        'SELECT name, uuid FROM device_sensors WHERE device_uuid = $1',
+        'SELECT name, uuid, enabled, poll_interval, connection, data_points, metadata, deployment_status, health_connected FROM device_sensors WHERE device_uuid = $1',
         [deviceUuid]
       );
+      const existingByUuid = new Map(existingResult.rows.map((r: any) => [r.uuid, r]));
       const existingUuids = new Set(existingResult.rows.map((r: any) => r.uuid).filter(Boolean));
       const configUuids = new Set(configDevices.map(d => d.uuid).filter(Boolean));
 
       // 1. Insert or update sensors from config
       for (const endpoint of configDevices) {
         if (endpoint.uuid && existingUuids.has(endpoint.uuid)) {
+          // Compare with existing record to detect changes
+          const existing = existingByUuid.get(endpoint.uuid);
+          const hasChanged = !existing || 
+            existing.enabled !== endpoint.enabled ||
+            existing.poll_interval !== endpoint.pollInterval ||
+            JSON.stringify(existing.connection) !== JSON.stringify(endpoint.connection) ||
+            JSON.stringify(existing.data_points) !== JSON.stringify(endpoint.dataPoints);
+          
+          // Detect out-of-sync: enabled state doesn't match agent's actual state
+          // - If we disabled but agent still has it connected → needs deployment
+          // - If we enabled but agent has it disconnected → needs deployment
+          const isOutOfSync = existing && existing.health_connected !== null && 
+            existing.enabled !== existing.health_connected;
+          
           // Update existing sensor by UUID (stable identifier)
           // If reconciliation from agent, mark as deployed
-          // Otherwise, mark as pending (just triggered deployment)
-          const deploymentStatus = isReconciliation ? 'deployed' : 'pending';
+          // If deployment and (changed OR out of sync), mark as pending
+          // If deployment but unchanged and in sync, keep existing status (don't reset to pending)
+          const deploymentStatus = isReconciliation 
+            ? 'deployed' 
+            : (hasChanged || isOutOfSync ? 'pending' : existing?.deployment_status || 'deployed');
           
           await query(
             `UPDATE device_sensors SET
@@ -91,7 +110,7 @@ export class DeviceSensorSyncService {
               userId || 'system',
               configVersion,
               deploymentStatus,
-              endpoint.id || null, // Populate config_id from config JSON
+              endpoint.uuid || null, // Use UUID (not numeric id) for config_id
               deviceUuid,
               endpoint.uuid
             ]
@@ -136,7 +155,7 @@ export class DeviceSensorSyncService {
               userId || 'system',
               configVersion,
               deploymentStatus,
-              endpoint.id || null // Populate config_id from config JSON
+              endpoint.uuid || null // Use UUID (not numeric id) for config_id
             ]
           );
           logger.info(`Upserted: ${endpoint.name} (${endpoint.protocol}) - ${deploymentStatus}`);
@@ -246,17 +265,30 @@ export class DeviceSensorSyncService {
       );
 
       // Convert to config format
-      const configDevices = result.rows.map((row: any) => ({
-        id: row.id.toString(), // Convert database id to string for consistency
-        uuid: row.uuid, // Include UUID for stable identifier
-        name: row.name,
-        protocol: row.protocol,
-        enabled: row.enabled,
-        pollInterval: row.poll_interval,
-        connection: typeof row.connection === 'string' ? JSON.parse(row.connection) : row.connection,
-        dataPoints: typeof row.data_points === 'string' ? JSON.parse(row.data_points) : row.data_points,
-        metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata
-      }));
+      const configDevices = result.rows.map((row: any) => {
+        // Ensure endpoint has a valid UUID (generate if missing)
+        const endpointUuid = row.uuid || uuidv4();
+        
+        // If UUID was just generated, update the table
+        if (!row.uuid) {
+          query(
+            'UPDATE device_sensors SET uuid = $1 WHERE id = $2',
+            [endpointUuid, row.id]
+          ).catch(err => logger.error('Failed to update sensor UUID:', err));
+        }
+        
+        return {
+          id: row.id.toString(), // Convert database id to string for consistency
+          uuid: endpointUuid, // Include UUID for stable identifier (always valid UUID)
+          name: row.name,
+          protocol: row.protocol,
+          enabled: row.enabled,
+          pollInterval: row.poll_interval,
+          connection: typeof row.connection === 'string' ? JSON.parse(row.connection) : row.connection,
+          dataPoints: typeof row.data_points === 'string' ? JSON.parse(row.data_points) : row.data_points,
+          metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata
+        };
+      });
 
       // Get current target state
       const stateResult = await query(
@@ -441,12 +473,26 @@ export class DeviceSensorSyncService {
    * Get sensor devices from TABLE (deployed state for UI)
    * Reads from device_sensors table which represents agent's actual running state
    * Table is kept in sync via reconciliation when agent reports current state
+   * 
+   * IMPORTANT: For 'enabled' field, we read from device_target_state.config.sensors
+   * to show user's DESIRED state, not actual state (which is in health_connected)
    */
   async getEndpoints(deviceUuid: string, protocol?: string): Promise<any[]> {
     try {
+      // Get target state to read desired 'enabled' values
+      const targetState = await DeviceTargetStateModel.get(deviceUuid);
+      const targetSensors: any[] = (targetState?.config as any)?.endpoints || [];
+      
+      logger.info(`[getEndpoints] Device ${deviceUuid.substring(0, 8)}: Found ${targetSensors.length} sensors in target state`);
+      logger.info(`[getEndpoints] Target state config.endpoints:`, targetSensors.map((s: any) => ({ name: s.name, enabled: s.enabled })));
+      
+      const targetSensorsByName = new Map(
+        targetSensors.map((s: any) => [s.name, s])
+      );
+      
       // Read from TABLE (deployed/running state)
       let sql = `
-        SELECT id, device_uuid, name, protocol, enabled, poll_interval,
+        SELECT id, uuid, device_uuid, name, protocol, enabled, poll_interval,
                connection, data_points, metadata, config_version, synced_to_config,
                deployment_status, last_deployed_at, deployment_error, deployment_attempts,
                config_id, created_at, updated_at, created_by, updated_by,
@@ -468,37 +514,47 @@ export class DeviceSensorSyncService {
       const result = await query(sql, params);
 
       // Return sensors in API format
-      return result.rows.map((row: any) => ({
-        id: row.id,
-        uuid: row.uuid, // Stable identifier for cloud/edge sync
-        configId: row.config_id, // UUID from config JSON
-        name: row.name,
-        protocol: row.protocol,
-        enabled: row.enabled,
-        pollInterval: row.poll_interval,
-        connection: typeof row.connection === 'string' ? JSON.parse(row.connection) : row.connection,
-        dataPoints: typeof row.data_points === 'string' ? JSON.parse(row.data_points) : row.data_points,
-        metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata,
-        configVersion: row.config_version,
-        syncedToConfig: row.synced_to_config,
-        deploymentStatus: row.deployment_status,
-        lastDeployedAt: row.last_deployed_at,
-        deploymentError: row.deployment_error,
-        deploymentAttempts: row.deployment_attempts,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        createdBy: row.created_by,
-        updatedBy: row.updated_by,
-        // Health data from agent reports
-        health: row.health_status ? {
-          status: row.health_status,
-          connected: row.health_connected,
-          lastPoll: row.health_last_poll,
-          errorCount: row.health_error_count,
-          lastError: row.health_last_error,
-          updatedAt: row.health_updated_at
-        } : null
-      }));
+      return result.rows.map((row: any) => {
+        // Get desired 'enabled' state from target, fallback to table value
+        const targetSensor: any = targetSensorsByName.get(row.name);
+        const enabledFromTarget = targetSensor?.enabled !== undefined 
+          ? targetSensor.enabled 
+          : row.enabled;
+        
+        logger.debug(`[getEndpoints] Sensor "${row.name}": target=${targetSensor?.enabled}, table=${row.enabled}, final=${enabledFromTarget}`);
+        
+        return {
+          id: row.id,
+          uuid: row.uuid, // Stable identifier for cloud/edge sync
+          configId: row.config_id, // UUID from config JSON
+          name: row.name,
+          protocol: row.protocol,
+          enabled: enabledFromTarget, // Read from target state (user's desired state)
+          pollInterval: row.poll_interval,
+          connection: typeof row.connection === 'string' ? JSON.parse(row.connection) : row.connection,
+          dataPoints: typeof row.data_points === 'string' ? JSON.parse(row.data_points) : row.data_points,
+          metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata,
+          configVersion: row.config_version,
+          syncedToConfig: row.synced_to_config,
+          deploymentStatus: row.deployment_status,
+          lastDeployedAt: row.last_deployed_at,
+          deploymentError: row.deployment_error,
+          deploymentAttempts: row.deployment_attempts,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          createdBy: row.created_by,
+          updatedBy: row.updated_by,
+          // Health data from agent reports (actual state)
+          health: row.health_status ? {
+            status: row.health_status,
+            connected: row.health_connected, // This is actual state from agent
+            lastPoll: row.health_last_poll,
+            errorCount: row.health_error_count,
+            lastError: row.health_last_error,
+            updatedAt: row.health_updated_at
+          } : null
+        };
+      });
     } catch (error) {
       logger.error('Error getting sensors from table:', error);
       throw error;
@@ -537,14 +593,27 @@ export class DeviceSensorSyncService {
       const existingEndpoint = tableResult.rows[0];
 
       // 2. Apply updates to table record
+      // Always stringify JSON columns (they might be objects from pg driver)
       const updatedEndpoint = {
         name: updates.name ?? existingEndpoint.name,
         protocol: updates.protocol ?? existingEndpoint.protocol,
         enabled: updates.enabled ?? existingEndpoint.enabled,
         poll_interval: updates.pollInterval ?? existingEndpoint.poll_interval,
-        connection: updates.connection ? JSON.stringify(updates.connection) : existingEndpoint.connection,
-        data_points: updates.dataPoints ? JSON.stringify(updates.dataPoints) : existingEndpoint.data_points,
-        metadata: updates.metadata ? JSON.stringify(updates.metadata) : existingEndpoint.metadata
+        connection: updates.connection 
+          ? JSON.stringify(updates.connection) 
+          : (typeof existingEndpoint.connection === 'string' 
+              ? existingEndpoint.connection 
+              : JSON.stringify(existingEndpoint.connection)),
+        data_points: updates.dataPoints 
+          ? JSON.stringify(updates.dataPoints) 
+          : (typeof existingEndpoint.data_points === 'string' 
+              ? existingEndpoint.data_points 
+              : JSON.stringify(existingEndpoint.data_points)),
+        metadata: updates.metadata 
+          ? JSON.stringify(updates.metadata) 
+          : (typeof existingEndpoint.metadata === 'string' 
+              ? existingEndpoint.metadata 
+              : JSON.stringify(existingEndpoint.metadata))
       };
 
       // 3. Update table directly (source of truth)
@@ -723,7 +792,7 @@ export class DeviceSensorSyncService {
         const { status, connected, lastPoll, errorCount, lastError } = health;
 
         // Update health columns in device_sensors table (match by name)
-        // Note: For disabled endpoints, set connected to NULL instead of false (less confusing)
+        // Note: Store actual boolean state even for disabled sensors (needed for out-of-sync detection)
         const result = await query(
           `UPDATE device_sensors SET
              health_status = $1,
@@ -735,7 +804,7 @@ export class DeviceSensorSyncService {
            WHERE device_uuid = $6 AND name = $7`,
           [
             status,
-            status === 'disabled' ? null : connected,
+            connected, // Always store boolean value (true/false), not null
             lastPoll ? new Date(lastPoll) : null,
             errorCount || 0,
             lastError || null,

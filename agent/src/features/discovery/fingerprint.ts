@@ -107,3 +107,23 @@ export function generateMqttFingerprint(topic: string): string {
     .digest('hex')
     .substring(0, 32);
 }
+
+/**
+ * Generate BACnet fingerprint
+ * Based on IP address + device instance number (stable BACnet identifier)
+ * 
+ * @param ipAddress - Device IP address
+ * @param deviceInstance - BACnet device instance number (0-4194303)
+ */
+export function generateBACnetFingerprint(
+  ipAddress: string,
+  deviceInstance: number
+): string {
+  const identity = `${ipAddress}:${deviceInstance}`;
+  
+  return crypto
+    .createHash('sha256')
+    .update(`bacnet:${identity}`)
+    .digest('hex')
+    .substring(0, 32);
+}
