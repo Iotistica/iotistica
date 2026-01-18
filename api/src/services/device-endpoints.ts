@@ -163,8 +163,13 @@ export class DeviceSensorSyncService {
       }
 
       // 2. Delete endpoints removed from config (by UUID)
+      logger.info(`[DELETE CHECK] Device ${deviceUuid.substring(0, 8)}: Config UUIDs: [${Array.from(configUuids).join(', ')}]`);
+      logger.info(`[DELETE CHECK] Device ${deviceUuid.substring(0, 8)}: Existing table UUIDs: [${existingResult.rows.map(r => r.uuid).filter(Boolean).join(', ')}]`);
+      logger.info(`[DELETE CHECK] Device ${deviceUuid.substring(0, 8)}: Will delete endpoints NOT in config set`);
+      
       for (const row of existingResult.rows) {
         if (row.uuid && !configUuids.has(row.uuid)) {
+          logger.warn(`[DELETE] Device ${deviceUuid.substring(0, 8)}: Deleting "${row.name}" (UUID: ${row.uuid}) - not found in config UUIDs`);
           await query(
             'DELETE FROM device_sensors WHERE device_uuid = $1 AND uuid = $2',
             [deviceUuid, row.uuid]
@@ -204,8 +209,21 @@ export class DeviceSensorSyncService {
       }
 
       const state = stateResult.rows[0];
+      
+      // DEBUG: Log what we read from database
+      logger.info(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: Raw config from DB (type: ${typeof state.config})`);
+      logger.info(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: Config preview: ${typeof state.config === 'string' ? state.config.substring(0, 200) : JSON.stringify(state.config).substring(0, 200)}`);
+      
       const config = typeof state.config === 'string' ? JSON.parse(state.config) : state.config;
       const endpoints: EndpointDeviceConfig[] = config.endpoints || [];
+      
+      // DEBUG: Log what endpoints we extracted
+      logger.info(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: Extracted ${endpoints.length} endpoints from config`);
+      logger.info(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: Endpoint UUIDs: [${endpoints.map(e => e.uuid).filter(Boolean).join(', ')}]`);
+      if (endpoints.length === 0) {
+        logger.warn(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: WARNING - Config has 0 endpoints! This will DELETE all table endpoints!`);
+        logger.warn(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: Full config object:`, JSON.stringify(config, null, 2));
+      }
 
       // 2. Increment version and set needs_deployment flag
       const updateResult = await query(
@@ -438,7 +456,10 @@ export class DeviceSensorSyncService {
         return;
       }
 
-      logger.info(`Agent reports ${agentEndpoints.length} running endpoints (version ${currentVersion})`);
+      if (agentEndpoints.length === 0) {
+        logger.info(`Agent reports 0 endpoints - skipping reconciliation (device may not have discovered anything yet)`);
+        return;
+      }
 
       // Convert agent format (ProtocolAdapterDevice) to API format (SensorDeviceConfig)
       // Agent sends: { id, name, protocol, connectionString (JSON string), pollInterval, enabled (number 0/1), metadata }
@@ -456,8 +477,6 @@ export class DeviceSensorSyncService {
         dataPoints: endpoint.dataPoints || [],
         metadata: endpoint.metadata || {}
       }));
-
-      logger.info(`Converted ${runningEndpoints.length} endpoints from agent format to API format`);
 
       // Sync table to match agent's reality (not desired state!)
       await this.syncConfigToTable(deviceUuid, runningEndpoints, currentVersion, 'agent-reconciliation');
@@ -483,7 +502,7 @@ export class DeviceSensorSyncService {
       const targetState = await DeviceTargetStateModel.get(deviceUuid);
       const targetSensors: any[] = (targetState?.config as any)?.endpoints || [];
       
-      logger.info(`[getEndpoints] Device ${deviceUuid.substring(0, 8)}: Found ${targetSensors.length} sensors in target state`);
+      logger.info(`[getEndpoints] Device ${deviceUuid.substring(0, 8)}: Found ${targetSensors.length} devices in target state`);
       logger.info(`[getEndpoints] Target state config.endpoints:`, targetSensors.map((s: any) => ({ name: s.name, enabled: s.enabled })));
       
       const targetSensorsByName = new Map(
@@ -521,7 +540,7 @@ export class DeviceSensorSyncService {
           ? targetSensor.enabled 
           : row.enabled;
         
-        logger.debug(`[getEndpoints] Sensor "${row.name}": target=${targetSensor?.enabled}, table=${row.enabled}, final=${enabledFromTarget}`);
+        logger.debug(`[getEndpoints] Device "${row.name}": target=${targetSensor?.enabled}, table=${row.enabled}, final=${enabledFromTarget}`);
         
         return {
           id: row.id,
@@ -556,7 +575,7 @@ export class DeviceSensorSyncService {
         };
       });
     } catch (error) {
-      logger.error('Error getting sensors from table:', error);
+      logger.error('Error getting devices from table:', error);
       throw error;
     }
   }
@@ -575,7 +594,7 @@ export class DeviceSensorSyncService {
     updates: Partial<EndpointDeviceConfig>,
     userId?: string
   ): Promise<any> {
-    logger.info(`Updating endpoint "${endpointIdentifier}" for device ${deviceUuid.substring(0, 8)}...`);
+    logger.info(`Updating device "${endpointIdentifier}" for node ${deviceUuid.substring(0, 8)}...`);
 
     try {
       // 1. Check if endpoint exists in device_sensors table (source of truth)
@@ -587,7 +606,7 @@ export class DeviceSensorSyncService {
       );
 
       if (tableResult.rows.length === 0) {
-        throw new Error(`Endpoint "${endpointIdentifier}" not found`);
+        throw new Error(`Device "${endpointIdentifier}" not found`);
       }
 
       const existingEndpoint = tableResult.rows[0];
@@ -814,7 +833,7 @@ export class DeviceSensorSyncService {
         );
 
         if (result.rowCount === 0) {
-          logger.warn(`Endpoint "${endpointName}" not found in device_sensors table (device ${deviceUuid.substring(0, 8)}...)`);
+          logger.warn(`Endpoint "${endpointName}" not found in device_sensors table`);
         }
       }
 

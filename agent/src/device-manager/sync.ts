@@ -982,6 +982,22 @@ export class CloudSync extends EventEmitter {
 	// Only include endpoint health if changed, or always on metrics cycle
 	if (healthChanged || includeMetrics) {
 		(stateReport[deviceInfo.uuid] as any).endpoints_health = endpointHealth;
+		this.logger?.debugSync('Including endpoint health in report', {
+			component: LogComponents.cloudSync,
+			operation: 'add-endpoint-health',
+			healthChanged,
+			includeMetrics,
+			endpointCount: Object.keys(endpointHealth).length
+		});
+	} else {
+		this.logger?.debugSync('Skipping endpoint health (not changed and not metrics cycle)', {
+			component: LogComponents.cloudSync,
+			operation: 'skip-endpoint-health',
+			healthChanged,
+			includeMetrics,
+			lastHash: this.lastEndpointHealthHash?.substring(0, 8),
+			currentHash: healthHash.substring(0, 8)
+		});
 	}
 	
 	// Only include static fields if changed (bandwidth optimization)
@@ -1425,10 +1441,14 @@ export class CloudSync extends EventEmitter {
 	 * Returns dynamic runtime status (NOT static metadata)
 	 */
 	private async collectEndpointHealth(): Promise<Record<string, any>> {
-		if (!this.endpoints) {
+		// Check if endpoints service exists AND has the required method
+		if (!this.endpoints || typeof this.endpoints.getAllDeviceStatuses !== 'function') {
 			this.logger?.debugSync('No endpoints service available for health collection', {
 				component: LogComponents.cloudSync,
-				operation: 'collect-endpoint-health'
+				operation: 'collect-endpoint-health',
+				hasEndpoints: !!this.endpoints,
+				endpointsType: this.endpoints ? typeof this.endpoints : 'undefined',
+				hasMethod: this.endpoints ? typeof this.endpoints.getAllDeviceStatuses : 'N/A'
 			});
 			return {};
 		}

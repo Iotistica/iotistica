@@ -93,22 +93,36 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
       concurrency
     });
 
-    // Expand IP ranges to individual IPs (resolve hostnames)
-    let ips = await this.expandIPRanges(ipRanges);
+    // Build list of hosts to scan with their connection metadata
+    const hostsToScan: Array<{ ip: string; connectionName?: string; connectionUuid?: string }> = [];
+    
+    for (const item of ipRanges) {
+      if (typeof item === 'string') {
+        const ips = await this.expandIPRanges([item]);
+        ips.forEach(ip => hostsToScan.push({ ip }));
+      } else {
+        const conn = item as any;
+        const ips = await this.expandIPRanges([conn.host]);
+        ips.forEach(ip => hostsToScan.push({ 
+          ip, 
+          connectionName: conn.name,
+          connectionUuid: conn.uuid
+        }));
+      }
+    }
 
-    // --- skip gateway IPs ---
-    const gatewayIPs = ips.filter(ip => ip.endsWith('.1'));
-    if (gatewayIPs.length) {
-      this.logger?.debugSync(`Skipping gateway IPs: ${gatewayIPs.join(', ')}`, {
+    // Filter out gateway IPs
+    const nonGatewayHosts = hostsToScan.filter(h => !h.ip.endsWith('.1'));
+    const gatewayCount = hostsToScan.length - nonGatewayHosts.length;
+    if (gatewayCount > 0) {
+      this.logger?.debugSync(`Skipped ${gatewayCount} gateway IPs`, {
         component: LogComponents.discovery + "] [" + this.protocol as any
       });
-      ips = ips.filter(ip => !ip.endsWith('.1'));
     }
- 
 
-    this.logger?.debugSync(`Scanning ${ips.length} IP addresses for SNMP devices`, {
+    this.logger?.debugSync(`Scanning ${nonGatewayHosts.length} IP addresses for SNMP devices`, {
       component: LogComponents.discovery + "] [" + this.protocol as any,
-      totalIPs: ips.length
+      totalIPs: nonGatewayHosts.length
     });
 
     // Concurrent scanning with rate limiting
@@ -116,7 +130,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
     const limit = pLimit(concurrency);
 
     const scanResults = await Promise.allSettled(
-      ips.map(ip =>
+      nonGatewayHosts.map(({ ip, connectionName, connectionUuid }) =>
         limit(async () => {
           try {
             const deviceInfo = await this.testSNMPDevice(
@@ -196,7 +210,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
 
     this.logger?.debugSync(`SNMP discovery complete: ${discovered.length} devices found`, {
       component: LogComponents.discovery + "] [" + this.protocol as any,
-      totalScanned: ips.length,
+      totalScanned: nonGatewayHosts.length,
       discovered: discovered.length
     });
 

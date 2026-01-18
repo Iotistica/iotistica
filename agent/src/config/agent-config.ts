@@ -23,6 +23,7 @@ import type { LogLevel } from '../logging/types.js';
 import { LogComponents } from '../logging/types.js';
 
 export interface ModbusConnectionConfig {
+  uuid?: string;                    // Unique identifier for connection
   name?: string;                    // Connection identifier (e.g., 'gen-502')
   host: string;                     // IP address or hostname
   port: number;                     // Modbus TCP port (default 502)

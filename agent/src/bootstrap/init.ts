@@ -469,21 +469,23 @@ export class FeatureInitializer {
 
       const enabledProtocols = [...new Set([...configEnabledProtocols, ...dbProtocolsWithDevices])];
       
-      if (enabledProtocols.length === 0) {
-        logger.debugSync('No protocols enabled, skipping Protocol Adapters initialization', {
-          component: LogComponents.agent
-        });
-        return;
-      }
-
-
+      // ALWAYS create SensorsFeature even if no protocols are enabled initially
+      // This ensures health reporting works when endpoints are discovered later
       this.features.sensors = new SensorsFeature(
         sensorsConfig,
         logger,
         deviceInfo.uuid
       );
 
-      await this.features.sensors.start();
+      if (enabledProtocols.length === 0) {
+        logger.debugSync('No protocols enabled initially, SensorsFeature created but not started', {
+          component: LogComponents.agent,
+          note: 'Will be started when protocols are enabled or endpoints discovered'
+        });
+        // Don't return - we still need to set up listeners and make feature available
+      } else {
+        await this.features.sensors.start();
+      }
       
       // Make sensors feature available to device API
       const { setSensorsFeature } = await import('../api/actions.js');

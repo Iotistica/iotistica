@@ -1124,6 +1124,15 @@ export default class DeviceAgent {
 
     // Get features for CloudSync (endpoints service for health reporting)
     const features = this.featureInitializer?.getFeatures() || {};
+    
+    console.log('[AGENT INIT] CloudSync initialization - checking endpoints service:', {
+      hasFeatures: !!features,
+      hasSensors: !!features.sensors,
+      sensorsType: features.sensors ? typeof features.sensors : 'undefined',
+      hasGetAllDeviceStatuses: features.sensors && typeof features.sensors.getAllDeviceStatuses === 'function',
+      featureKeys: Object.keys(features),
+      sensorsKeys: features.sensors ? Object.keys(features.sensors) : []
+    });
 
     this.cloudSync = new CloudSync(
       this.stateReconciler, // Use StateReconciler instead of ContainerManager
