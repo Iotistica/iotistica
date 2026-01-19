@@ -113,10 +113,9 @@ export class ConfigManager extends EventEmitter {
 	 * Main reconciliation logic
 	 */
 	public async reconcile(): Promise<ConfigReconciliationResult> {
-		this.logger?.infoSync('🔄 Starting config reconciliation', {
+		this.logger?.infoSync('Starting config reconciliation', {
 			component: LogComponents.configManager,
 			operation: 'reconcile',
-			targetEndpointsCount: this.targetConfig.endpoints?.length || 0,
 		});
 
 		const result: ConfigReconciliationResult = {
@@ -169,18 +168,11 @@ export class ConfigManager extends EventEmitter {
 				});
 			}
 			
-			// Calculate steps for sensor reconciliation (async now - merges DB + overrides)
-			const steps = await this.calculateSteps();
-
-			this.logger?.infoSync('📋 Reconciliation steps calculated', {
-				component: LogComponents.configManager,
-				operation: 'reconcile',
-				stepsCount: steps.length,
-				stepTypes: steps.map(s => s.action)
-			});
+			// Calculate steps for sensor reconciliation
+			const steps = this.calculateSteps();
 
 			if (steps.length === 0) {
-				this.logger?.infoSync('✅ No sensor config changes needed', {
+				this.logger?.infoSync('No sensor config changes needed', {
 					component: LogComponents.configManager,
 					operation: 'reconcile',
 				});
@@ -261,137 +253,12 @@ export class ConfigManager extends EventEmitter {
 	}
 
 	/**
-	 * Merge database endpoints with config overrides (OVERRIDE-ONLY PATTERN)
-	 * 
-	 * Database (endpoints) = Source of truth for discovered baseline
-	 * Config (endpoints) = Source of truth for user overrides
-	 * Result = Merged endpoints for protocol adapters
-	 */
-	private async mergeEndpointsWithOverrides(): Promise<ProtocolAdapterDevice[]> {
-		// Get all endpoints from database (discovered baseline)
-		const dbEndpoints = await DeviceEndpointModel.getAll();
-		
-		// Get overrides from config
-		const configOverrides = this.targetConfig.endpoints || [];
-		
-		// Build override map by UUID for fast lookup
-		const overrideMap = new Map(configOverrides.map(o => [o.id, o]));
-		
-		this.logger?.infoSync('🔄 Starting endpoint merge (baseline + overrides)', {
-			component: LogComponents.configManager,
-			operation: 'mergeEndpointsWithOverrides',
-			dbEndpointsCount: dbEndpoints.length,
-			configOverridesCount: configOverrides.length,
-		});
-		
-		// Log baseline endpoints (from database)
-		dbEndpoints.forEach(ep => {
-			this.logger?.debugSync('📋 Baseline endpoint from DB', {
-				component: LogComponents.configManager,
-				uuid: ep.uuid,
-				name: ep.name,
-				protocol: ep.protocol,
-				enabled: ep.enabled,
-				pollInterval: ep.poll_interval,
-			});
-		});
-		
-		// Log config overrides
-		configOverrides.forEach(override => {
-			const overrideKeys = Object.keys(override).filter(k => k !== 'id' && (override as any)[k] !== undefined);
-			this.logger?.infoSync('⚡ Config override detected', {
-				component: LogComponents.configManager,
-				uuid: override.id,
-				overrides: overrideKeys
-			});
-		});
-		
-		// Merge: baseline + overrides, converting to ProtocolAdapterDevice format
-		const merged: ProtocolAdapterDevice[] = dbEndpoints.map(dbEndpoint => {
-			// Convert database format to runtime format
-			const device: ProtocolAdapterDevice = {
-				id: dbEndpoint.uuid || dbEndpoint.name, // Use UUID as id (stable identifier)
-				name: dbEndpoint.name,
-				protocol: dbEndpoint.protocol,
-				enabled: dbEndpoint.enabled,
-				pollInterval: dbEndpoint.poll_interval,
-				connectionString: JSON.stringify(dbEndpoint.connection),
-				dataPoints: dbEndpoint.data_points || [],
-				metadata: dbEndpoint.metadata,
-			};
-			
-			// Apply overrides if present
-			const override = overrideMap.get(device.id);
-			if (override) {
-				// Track what changed for detailed logging
-				const changes: string[] = [];
-				const before: any = {};
-				const after: any = {};
-				
-				if (override.enabled !== undefined && override.enabled !== device.enabled) {
-					before.enabled = device.enabled;
-					device.enabled = override.enabled;
-					after.enabled = override.enabled;
-					changes.push('enabled');
-				}
-				if (override.pollInterval !== undefined && override.pollInterval !== device.pollInterval) {
-					before.pollInterval = device.pollInterval;
-					device.pollInterval = override.pollInterval;
-					after.pollInterval = override.pollInterval;
-					changes.push('pollInterval');
-				}
-				if (override.connectionString !== undefined && override.connectionString !== device.connectionString) {
-					before.connectionString = device.connectionString;
-					device.connectionString = override.connectionString;
-					after.connectionString = override.connectionString;
-					changes.push('connectionString');
-				}
-				if (override.dataPoints !== undefined) {
-					before.dataPointsCount = device.dataPoints?.length || 0;
-					device.dataPoints = override.dataPoints;
-					after.dataPointsCount = override.dataPoints.length;
-					changes.push('dataPoints');
-				}
-				
-				if (changes.length > 0) {
-					this.logger?.infoSync('✅ Override applied to endpoint', {
-						component: LogComponents.configManager,
-						uuid: device.id,
-						endpointName: device.name,
-						changes,
-						before,
-						after
-					});
-				} else {
-					this.logger?.debugSync('Override present but no changes', {
-						component: LogComponents.configManager,
-						endpointName: device.name
-					});
-				}
-			}
-			
-			return device;
-		});
-		
-		this.logger?.infoSync('✅ Endpoint merge complete', {
-			component: LogComponents.configManager,
-			operation: 'mergeEndpointsWithOverrides',
-			mergedCount: merged.length,
-			enabledCount: merged.filter(d => d.enabled).length,
-			disabledCount: merged.filter(d => !d.enabled).length
-		});
-		
-		return merged;
-	}
-	
-	/**
 	 * Calculate what config changes are needed
 	 */
-	private async calculateSteps(): Promise<ConfigStep[]> {
+	private calculateSteps(): ConfigStep[] {
 		const steps: ConfigStep[] =[];
 		
-		// OVERRIDE-ONLY PATTERN: Merge database baselines with config overrides
-		const targetDevices = await this.mergeEndpointsWithOverrides();
+		const targetDevices = this.targetConfig.endpoints || [];
 		const currentDevices = this.currentConfig.endpoints || [];
 		
 		// Build maps for easier comparison
@@ -628,43 +495,21 @@ export class ConfigManager extends EventEmitter {
 			
 			if (existing) {
 				// Device exists - update it
-				this.logger?.infoSync('💾 Saving endpoint to database (UPDATE)', {
-					component: LogComponents.configManager,
-					operation: 'updateDevice',
-					deviceName: device.name,
-					uuid: existing.uuid,
-					protocol: normalizedDevice.protocol,
-					enabled: normalizedDevice.enabled,
-					pollInterval: normalizedDevice.poll_interval,
-					dataPointsCount: normalizedDevice.data_points?.length || 0,
-					previousEnabled: existing.enabled
-				});
-				
 				await DeviceSensorModel.update(device.name, normalizedDevice);
 				
-				this.logger?.infoSync('✅ Device updated in sensors table', {
+				this.logger?.infoSync('Device updated in sensors table', {
 					component: LogComponents.configManager,
 					operation: 'updateDevice',
 					deviceName: device.name,
 				});
 			} else {
 				// Device doesn't exist - create it (upsert behavior)
-				this.logger?.infoSync('💾 Saving endpoint to database (CREATE)', {
-					component: LogComponents.configManager,
-					operation: 'updateDevice',
-					deviceName: device.name,
-					protocol: normalizedDevice.protocol,
-					enabled: normalizedDevice.enabled,
-					pollInterval: normalizedDevice.poll_interval,
-					dataPointsCount: normalizedDevice.data_points?.length || 0
-				});
-				
 				await DeviceSensorModel.create({
 					name: device.name,
 					...normalizedDevice
 				});
 				
-				this.logger?.infoSync('✅ Device created in sensors table', {
+				this.logger?.infoSync('Device created in sensors table (was missing)', {
 					component: LogComponents.configManager,
 					operation: 'updateDevice',
 					deviceName: device.name,

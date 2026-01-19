@@ -390,12 +390,6 @@ router.put('/devices/:uuid/target-state', validateTargetStateConfigMiddleware, a
     // Set needs_deployment = true since config changed
     const targetState = await DeviceTargetStateModel.set(uuid, apps, config || {}, true);
 
-    // Note: device_sensors.deployment_status is NOT updated on config save
-    // Dashboard shows "Needs Sync" badge by comparing sensor.enabled vs sensor.health.connected
-    // deployment_status only updates on:
-    // 1. POST /deploy → 'pending' (via syncConfigToTable with isDeployment=true)
-    // 2. Agent reports state → 'deployed' (via syncCurrentStateToTable)
-
     //EVENT SOURCING: Publish target state updated event
     await eventPublisher.publish(
       'target_state.updated',

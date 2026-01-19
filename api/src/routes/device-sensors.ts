@@ -54,35 +54,84 @@ router.get('/devices/:uuid/sensors', async (req, res) => {
 });
 
 /**
- * DEPRECATED ROUTES - Use PUT /target-state instead
- * 
- * The override-only pattern requires all endpoint edits to go through
- * device_target_state.config.endpoints. These routes are kept for backward
- * compatibility but should not be used. They will return 501 Not Implemented.
- */
-
-/**
- * Update sensor (DEPRECATED)
+ * Update sensor
  * PUT /api/v1/devices/:uuid/sensors/:name
+ * 
+ * Dual-write: table + config (sync service handles both)
  */
 router.put('/devices/:uuid/sensors/:name', async (req, res) => {
-  res.status(501).json({
-    error: 'Not Implemented',
-    message: 'Use PUT /api/v1/devices/:uuid/target-state to update endpoint configuration',
-    hint: 'Update config.endpoints array with override for this endpoint (uuid + enabled/pollInterval/etc.)'
-  });
+  try {
+    const { uuid, name } = req.params;
+    const updates = req.body;
+
+    // Update sensor using sync service (handles dual-write)
+    const result = await deviceSensorSync.updateEndpoint(
+      uuid,
+      name,
+      updates,
+      (req as any).user?.id || 'system'
+    );
+
+    res.json({
+      status: 'ok',
+      message: 'Sensor updated',
+      device: result.sensor, // Keep "device" for backward compatibility
+      version: result.version
+    });
+  } catch (error: any) {
+    logger.error('Error updating sensor:', error);
+    
+    if (error.message?.includes('not found')) {
+      return res.status(404).json({
+        error: 'Sensor not found',
+        message: error.message
+      });
+    }
+    
+    res.status(500).json({
+      error: 'Failed to update sensor',
+      message: error.message
+    });
+  }
 });
 
 /**
- * Delete sensor (DEPRECATED)
+ * Delete sensor
  * DELETE /api/v1/devices/:uuid/sensors/:name
+ * 
+ * Dual-write: table + config (sync service handles both)
  */
 router.delete('/devices/:uuid/sensors/:name', async (req, res) => {
-  res.status(501).json({
-    error: 'Not Implemented',
-    message: 'Use PUT /api/v1/devices/:uuid/target-state to remove endpoint from config.endpoints',
-    hint: 'Remove the endpoint override from config.endpoints array'
-  });
+  try {
+    const { uuid, name } = req.params;
+
+    // Delete sensor using sync service (handles dual-write)
+    const result = await deviceSensorSync.deleteEndpoint(
+      uuid,
+      name,
+      (req as any).user?.id || 'system'
+    );
+
+    res.json({
+      status: 'ok',
+      message: 'Sensor deleted',
+      version: result.version
+    });
+  } catch (error: any) {
+    logger.error('Error deleting sensor:', error);
+    
+    if (error.message?.includes('not found')) {
+      return res.status(404).json({
+        error: 'Sensor not found',
+        message: error.message
+      });
+    }
+    
+    res.status(500).json({
+      error: 'Failed to delete sensor',
+      message: error.message
+    });
+  }
 });
 
 // ============================================================================

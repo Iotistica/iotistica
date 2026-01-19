@@ -28,20 +28,6 @@
     "enableDeviceRemoteAccess": true,
     "enableDeviceSensorPublish": true
   },
-  "endpoints": [
-    {
-      "uuid": "904b36e8-a30c-45e2-9dcb-5b4ac4474921",
-      "enabled": true
-    },
-    {
-      "uuid": "49605599-caa7-4530-849f-6cca0001db1c",
-      "enabled": true
-    },
-    {
-      "uuid": "64c1be79-d1ab-46bc-9b55-ad21826082f5",
-      "enabled": true
-    }
-  ],
   "intervals": {
     "device": {
       "reportIntervalMs": 60000,
@@ -76,14 +62,29 @@
       "port": 161,
       "enabled": true,
       "connections": [
-        "10.0.0.60"
+        {
+          "host": "10.0.0.60",
+          "name": "snmp-10-0-0-60",
+          "port": 161,
+          "uuid": "007b39e9-93e4-428a-b83a-4c0e51c204e7",
+          "enabled": true,
+          "version": "2c",
+          "community": "public"
+        }
       ],
       "bufferCapacity": 131072
     },
     "opcua": {
       "enabled": true,
       "connections": [
-        "opc.tcp://10.0.0.60:4840"
+        {
+          "url": "opc.tcp://10.0.0.60:4840",
+          "name": "opcua-10-0-0-60-4840",
+          "uuid": "dece943d-5d45-49a2-ba87-423ed9c6f45e",
+          "enabled": true,
+          "securityMode": "None",
+          "securityPolicy": "None"
+        }
       ],
       "bufferCapacity": 1048576
     },
@@ -105,6 +106,7 @@
           "host": "10.0.0.60",
           "name": "modbus-sim-2",
           "port": 503,
+          "uuid": "74d4bc8b-087a-4312-9286-dd43a62cd643",
           "points": {
             "humidity": {
               "base": 550,
@@ -174,6 +176,7 @@
           "host": "10.0.0.60",
           "name": "modbus-sim-3",
           "port": 504,
+          "uuid": "d4209082-64e7-4fbb-9f19-1a24b00c7c47",
           "points": {
             "humidity": {
               "base": 550,

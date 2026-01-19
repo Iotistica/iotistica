@@ -66,25 +66,6 @@ export class DeviceEndpointModel {
   }
 
   /**
-   * Get device by UUID (stable identifier for cloud/edge sync)
-   */
-  static async getByUuid(uuid: string): Promise<DeviceEndpoint | null> {
-    const device = await models(this.table)
-      .where('uuid', uuid)
-      .first();
-    
-    if (!device) return null;
-    
-    // Parse JSON fields (SQLite stores as TEXT)
-    return {
-      ...device,
-      connection: typeof device.connection === 'string' ? JSON.parse(device.connection) : device.connection,
-      data_points: device.data_points ? (typeof device.data_points === 'string' ? JSON.parse(device.data_points) : device.data_points) : null,
-      metadata: device.metadata ? (typeof device.metadata === 'string' ? JSON.parse(device.metadata) : device.metadata) : null,
-    };
-  }
-
-  /**
    * Get device by fingerprint (cryptographic hash of physical identity)
    * This is the RECOMMENDED lookup method for discovery - survives name changes
    */
@@ -172,9 +153,6 @@ export class DeviceEndpointModel {
       updated_at: new Date(),
     };
 
-    if (updates.enabled !== undefined) {
-      updateData.enabled = updates.enabled;
-    }
     if (updates.connection) {
       updateData.connection = JSON.stringify(updates.connection);
     }
@@ -193,36 +171,6 @@ export class DeviceEndpointModel {
       .update(updateData);
 
     return await this.getByName(name);
-  }
-
-
-   static async updateByUuid(uuid: string, updates: Partial<DeviceEndpoint>): Promise<DeviceEndpoint | null> {
-    const updateData: any = {
-      ...updates,
-      updated_at: new Date(),
-    };
-
-    if (updates.enabled !== undefined) {
-      updateData.enabled = updates.enabled;
-    }
-    if (updates.connection) {
-      updateData.connection = JSON.stringify(updates.connection);
-    }
-    if (updates.data_points) {
-      updateData.data_points = JSON.stringify(updates.data_points);
-    }
-    if (updates.metadata) {
-      updateData.metadata = JSON.stringify(updates.metadata);
-    }
-    if (updates.lastSeenAt) {
-      updateData.lastSeenAt = updates.lastSeenAt instanceof Date ? updates.lastSeenAt.toISOString() : updates.lastSeenAt;
-    }
-
-    await models(this.table)
-      .where('uuid', uuid)
-      .update(updateData);
-
-    return await this.getByUuid(uuid);
   }
 
   /**

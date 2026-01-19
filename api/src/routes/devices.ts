@@ -28,7 +28,6 @@ import logger from '../utils/logger';
 import { SystemConfig } from '../config/system-config';
 import deviceAuth from '../middleware/device-auth';
 import { jwtAuth } from '../middleware/jwt-auth';
-import { deviceSensorSync } from '../services/device-endpoints';
 
 console.log('[DEVICES-ROUTES] jwtAuth imported:', typeof jwtAuth, jwtAuth.name);
 
@@ -1083,18 +1082,8 @@ router.post('/devices/:uuid/deploy', async (req, res) => {
       });
     }
 
-    // Deploy config using service (includes filtering logic)
-    const result = await deviceSensorSync.deployConfig(uuid, deployedBy);
-
-    // Update deployment metadata
-    await query(
-      `UPDATE device_target_state SET
-         needs_deployment = false,
-         last_deployed_at = CURRENT_TIMESTAMP,
-         deployed_by = $2
-       WHERE device_uuid = $1`,
-      [uuid, deployedBy]
-    );
+    // Deploy target state (increments version)
+    const deployedState = await DeviceTargetStateModel.deploy(uuid, deployedBy);
 
     await logAuditEvent({
       eventType: AuditEventType.DEVICE_CONFIG_UPDATE,
@@ -1102,26 +1091,27 @@ router.post('/devices/:uuid/deploy', async (req, res) => {
       severity: AuditSeverity.INFO,
       details: {
         action: 'deploy',
-        version: result.version,
+        version: deployedState.version,
         deployedBy,
-        endpointsCount: result.config?.endpoints?.length || 0
+        appsCount: Object.keys(deployedState.apps || {}).length
       }
     });
 
     logger.info('Target state deployed successfully', {
       deviceId: uuid.substring(0, 8),
-      version: result.version,
-      endpointsCount: result.config?.endpoints?.length || 0,
+      version: deployedState.version,
+      appsCount: Object.keys(deployedState.apps || {}).length,
       deployedBy
     });
 
     res.json({
       status: 'ok',
-      message: result.message,
+      message: 'Target state deployed successfully',
       deviceUuid: uuid,
-      version: result.version,
+      version: deployedState.version,
       deployedBy,
-      endpointsCount: result.config?.endpoints?.length || 0
+      deployedAt: deployedState.last_deployed_at,
+      appsCount: Object.keys(deployedState.apps || {}).length
     });
 
   } catch (error: any) {

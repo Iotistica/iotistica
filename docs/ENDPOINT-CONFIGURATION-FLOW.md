@@ -459,11 +459,10 @@ for (const endpoint of currentEndpoints) {
 - ✅ `poll_interval` - User override (custom polling interval)
 - ✅ `alias` - User override (friendly name, overrides discovered name)
 - ✅ `tags` - User categorization
-- ✅ `connection` - User override (can modify IP, port, etc. after discovery)
-- ✅ `data_points` - User override (can add/remove/modify data points)
-- ❌ `name` - Discovery data, read-only! (e.g., "modbus-sim-2_slave_1")
-- ❌ `protocol` - Discovery data, read-only!
-- ❌ `metadata` - Discovery data, read-only!
+- ❌ `name` - Discovery data, don't touch! (e.g., "modbus-sim-2_slave_1")
+- ❌ `connection` - Discovery data, don't touch!
+- ❌ `data_points` - Discovery data, don't touch!
+- ❌ `metadata` - Discovery data, don't touch!
 
 ---
 
@@ -514,16 +513,14 @@ interface TargetState {
   };
   config: {
     // ENDPOINTS CONFIGURATION (overrides only!)
-    // Only include fields that USER configured/modified (not discovery metadata)
+    // Only include fields that USER configured (not discovered)
     endpoints?: Array<{
       uuid: string;          // UUID - references device_sensors table entry
       enabled?: boolean;     // User override: enable/disable device
       pollInterval?: number; // User override: custom poll interval
       alias?: string;        // User override: friendly name (overrides discovered name)
       tags?: string[];       // User override: custom tags/categories
-      connection?: any;      // User override: modified connection settings (IP, port, etc.)
-      dataPoints?: any[];    // User override: modified/added data points
-      // NO name, protocol, metadata! Those are read-only discovery data
+      // NO name, connection, dataPoints, metadata! Those live in device_sensors table
     }>;
     
     // PROTOCOL DISCOVERY SECTION (scanning config)
@@ -652,11 +649,8 @@ config.endpoints = [
     uuid: "abc-123",
     enabled: true,           // ✅ User override
     pollInterval: 10000,     // ✅ User override (custom interval)
-    alias: "My Custom Name",  // ✅ User override (friendly name, optional)
-    dataPoints: [            // ✅ User override (modified data points)
-      { name: "temp", address: 100, type: "holding", dataType: "float32" }
-    ]
-    // NO name, protocol, metadata (read-only discovery data)!
+    alias: "My Custom Name"  // ✅ User override (friendly name, optional)
+    // NO name, connection, dataPoints, metadata!
   }
 ];
 
@@ -826,21 +820,18 @@ const enabledFromTarget = targetSensor?.enabled ?? row.enabled;
 
 ### Architecture Principles
 
-1. **device_sensors table** = Source of truth for **baseline data**
-   - Device name (discovered, read-only)
-   - Protocol (discovered, read-only)
-   - Connection details (discovered baseline, user-editable)
-   - Data points (discovered baseline, user-editable)
-   - Metadata (discovery time, read-only)
+1. **Device name (e.g., "modbus-sim-2_slave_1")
+   - Connection details (host, port, slaveId)
+   - Data points (registers, nodes)
+   - Metadata (discovery time, protocol version)
 
-2. **config.endpoints** = Source of truth for **user modifications**
+2. **config.endpoints** = Source of truth for **user configuration overrides**
    - Enabled/disabled state
    - Custom poll intervals
    - Alias (friendly name override)
-   - Tags and categories
-   - Connection (if user modified from discovery)
-   - Data points (if user added/modified from discovery)
-   - **ONLY stores fields modified by user, NOT read-only discovery metadata!**
+   - Tags and categorieervals
+   - Aliases and tags
+   - **ONLY stores overrides, NOT discovery data!**
 
 3. **Agent reconciliation** = Merge pattern
    - Read base from device_sensors table

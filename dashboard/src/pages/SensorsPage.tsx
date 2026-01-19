@@ -260,47 +260,37 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       
       console.log(`[Toggle] Step 1: Toggling sensor "${sensor.name}" (UUID: ${sensor.uuid}) from ${currentEnabled} to ${newEnabled}`);
       
-      if (!sensor.uuid) {
-        toast.error('Cannot toggle sensor: missing UUID');
-        return;
-      }
-      
-      // Get current config from target state
+      // Get current config from target state (source of truth for config data)
       const currentConfig = getPendingConfig(deviceUuid) || getTargetConfig(deviceUuid) || {};
       
-      // OVERRIDE PATTERN: config.endpoints should only contain override fields (uuid + enabled/pollInterval/alias/tags)
-      // Find or create override for this sensor
-      const existingEndpoints = currentConfig.endpoints || [];
-      const existingOverrideIndex = existingEndpoints.findIndex((e: any) => e.uuid === sensor.uuid);
+      // Build UUID lookup from fetched sensors (table data - has UUIDs)
+      const uuidBySensorName = new Map(
+        sensors.map((s: Sensor) => [s.name, s.uuid])
+      );
       
-      let updatedEndpoints;
-      if (existingOverrideIndex >= 0) {
-        // Update existing override
-        updatedEndpoints = [...existingEndpoints];
-        updatedEndpoints[existingOverrideIndex] = {
-          ...updatedEndpoints[existingOverrideIndex],
-          uuid: sensor.uuid,
-          enabled: newEnabled
-        };
-      } else {
-        // Create new override (minimal: just uuid + enabled)
-        updatedEndpoints = [
-          ...existingEndpoints,
-          {
-            uuid: sensor.uuid,
-            enabled: newEnabled
-          }
-        ];
-      }
+      // Update config endpoints: toggle enabled + inject UUIDs from table
+      const updatedEndpoints = (currentConfig.endpoints || []).map((endpoint: any) => {
+        // Get UUID from table if sensor exists there, otherwise keep config UUID
+        const uuid = uuidBySensorName.get(endpoint.name) || endpoint.uuid;
+        
+        if (endpoint.name === sensor.name) {
+          // Toggle this sensor + ensure UUID
+          return { ...endpoint, enabled: newEnabled, uuid };
+        } else {
+          // Other sensors - inject UUID if available from table
+          return uuid && !endpoint.uuid ? { ...endpoint, uuid } : endpoint;
+        }
+      });
       
       const updatedConfig = {
         ...currentConfig,
         endpoints: updatedEndpoints
       };
       
-      console.log('[Toggle] Step 2: Updated config with override-only pattern');
-      console.log('[Toggle] Override count:', updatedEndpoints.length);
-      console.log('[Toggle] Overrides:', updatedEndpoints);
+      console.log('[Toggle] Step 2: Updated config, injected UUIDs from table where available');
+      console.log('[Toggle] Endpoint count:', updatedEndpoints.length);
+      console.log('[Toggle] Endpoint UUIDs:', updatedEndpoints.map((e: any) => e.uuid || 'NO-UUID'));
+      console.log('[Toggle] Updated sensor:', updatedEndpoints.find((e: any) => e.name === sensor.name));
       
       // Save directly with the updated config
       console.log('[Toggle] Step 3: Saving target state to API...');
