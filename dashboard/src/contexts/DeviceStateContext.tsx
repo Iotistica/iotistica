@@ -462,14 +462,39 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
       
       console.log('[DeviceStateContext] Current pending config.endpoints:', (currentPending.config as any)?.endpoints?.map((e: any) => ({ name: e.name, enabled: e.enabled })));
       
-      // Update sensor in endpoints array
+      // OVERRIDE PATTERN: config.endpoints should only contain overrides (changed fields)
+      // Don't include ALL endpoints, only the ones with overrides
       const updatedConfig = { ...currentPending.config };
-      const existingDevices = updatedConfig.endpoints || [];
-      updatedConfig.endpoints = existingDevices.map((device: any) =>
-        device.name === sensorName ? { ...device, ...updates } : device
-      );
+      const existingOverrides = (updatedConfig as any).endpoints || [];
       
-      console.log('[DeviceStateContext] Updated config.endpoints:', updatedConfig.endpoints.map((e: any) => ({ name: e.name, enabled: e.enabled })));
+      // UUID must be provided in updates for override pattern to work
+      if (!updates.uuid) {
+        console.warn('[DeviceStateContext] Cannot update sensor without UUID in updates:', sensorName, updates);
+        return prev;
+      }
+      
+      // Find existing override by UUID
+      const existingOverrideIndex = existingOverrides.findIndex((e: any) => e.uuid === updates.uuid);
+      
+      let updatedEndpoints;
+      if (existingOverrideIndex >= 0) {
+        // Update existing override
+        updatedEndpoints = [...existingOverrides];
+        updatedEndpoints[existingOverrideIndex] = {
+          ...updatedEndpoints[existingOverrideIndex],
+          ...updates
+        };
+      } else {
+        // Create new override (minimal: just uuid + changed fields)
+        updatedEndpoints = [
+          ...existingOverrides,
+          updates
+        ];
+      }
+      
+      (updatedConfig as any).endpoints = updatedEndpoints;
+      
+      console.log('[DeviceStateContext] Updated config.endpoints (overrides only):', updatedEndpoints.map((e: any) => ({ uuid: e.uuid, enabled: e.enabled })));
       
       return {
         ...prev,

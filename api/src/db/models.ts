@@ -427,6 +427,17 @@ export class DeviceTargetStateModel {
   }
 
   /**
+   * Clear target state
+   */
+  static async clear(deviceUuid: string): Promise<void> {
+    await query(
+      `UPDATE device_target_state SET apps = '{}', config = '{}', updated_at = CURRENT_TIMESTAMP
+       WHERE device_uuid = $1`,
+      [deviceUuid]
+    );
+  }
+
+  /**
    * Deploy target state to device
    * This increments version so device will pick up changes
    * Also syncs config.endpoints to device_sensors table
@@ -453,10 +464,10 @@ export class DeviceTargetStateModel {
 
     const deployedState = result.rows[0];
 
-    // Sync config.endpoints to device_sensors table
+    // Mark endpoints as pending deployment (only updates deployment_status)
     if (deployedState.config && deployedState.config.endpoints) {
       const syncService = new DeviceSensorSyncService();
-      await syncService.syncConfigToTable(
+      await syncService.markEndpointsAsPending(
         deviceUuid,
         deployedState.config.endpoints,
         deployedState.version,
@@ -465,17 +476,6 @@ export class DeviceTargetStateModel {
     }
 
     return deployedState;
-  }
-
-  /**
-   * Clear target state
-   */
-  static async clear(deviceUuid: string): Promise<void> {
-    await query(
-      `UPDATE device_target_state SET apps = '{}', config = '{}', updated_at = CURRENT_TIMESTAMP
-       WHERE device_uuid = $1`,
-      [deviceUuid]
-    );
   }
 
   /**
