@@ -66,6 +66,25 @@ export class DeviceEndpointModel {
   }
 
   /**
+   * Get device by UUID (stable identifier for cloud/edge sync)
+   */
+  static async getByUuid(uuid: string): Promise<DeviceEndpoint | null> {
+    const device = await models(this.table)
+      .where('uuid', uuid)
+      .first();
+
+    if (!device) return null;
+
+    // Parse JSON fields (SQLite stores as TEXT)
+    return {
+      ...device,
+      connection: typeof device.connection === 'string' ? JSON.parse(device.connection) : device.connection,
+      data_points: device.data_points ? (typeof device.data_points === 'string' ? JSON.parse(device.data_points) : device.data_points) : null,
+      metadata: device.metadata ? (typeof device.metadata === 'string' ? JSON.parse(device.metadata) : device.metadata) : null,
+    };
+  }
+
+  /**
    * Get device by fingerprint (cryptographic hash of physical identity)
    * This is the RECOMMENDED lookup method for discovery - survives name changes
    */
@@ -149,19 +168,33 @@ export class DeviceEndpointModel {
    */
   static async update(name: string, updates: Partial<DeviceEndpoint>): Promise<DeviceEndpoint | null> {
     const updateData: any = {
-      ...updates,
       updated_at: new Date(),
     };
 
-    if (updates.connection) {
+    // Only update enabled if explicitly provided
+    if (updates.enabled !== undefined) {
+      updateData.enabled = updates.enabled;
+    }
+    
+    // Only update connection if provided and non-empty
+    if (updates.connection && Object.keys(updates.connection).length > 0) {
       updateData.connection = JSON.stringify(updates.connection);
     }
-    if (updates.data_points) {
+    
+    // Only update data_points if provided and non-empty
+    if (updates.data_points && updates.data_points.length > 0) {
       updateData.data_points = JSON.stringify(updates.data_points);
     }
-    if (updates.metadata) {
+    
+    // Only update metadata if provided and non-empty
+    if (updates.metadata && Object.keys(updates.metadata).length > 0) {
       updateData.metadata = JSON.stringify(updates.metadata);
     }
+    
+    // Update other fields if explicitly provided
+    if (updates.name !== undefined) updateData.name = updates.name;
+    if (updates.fingerprint !== undefined) updateData.fingerprint = updates.fingerprint;
+    if (updates.protocol !== undefined) updateData.protocol = updates.protocol;
     if (updates.lastSeenAt) {
       updateData.lastSeenAt = updates.lastSeenAt instanceof Date ? updates.lastSeenAt.toISOString() : updates.lastSeenAt;
     }
@@ -174,24 +207,87 @@ export class DeviceEndpointModel {
   }
 
   /**
+   * Update endpoint by UUID (for cloud override-only pattern)
+   * Only updates fields that are explicitly provided and non-empty
+   */
+  static async updateByUuid(uuid: string, updates: Partial<DeviceEndpoint>): Promise<DeviceEndpoint | null> {
+    const updateData: any = {
+      updated_at: new Date(),
+    };
+
+    // Only update enabled if explicitly provided
+    if (updates.enabled !== undefined) {
+      updateData.enabled = updates.enabled;
+    }
+    
+    // Only update connection if provided and non-empty
+    if (updates.connection && Object.keys(updates.connection).length > 0) {
+      updateData.connection = JSON.stringify(updates.connection);
+    }
+    
+    // Only update data_points if provided and non-empty
+    if (updates.data_points && updates.data_points.length > 0) {
+      updateData.data_points = JSON.stringify(updates.data_points);
+    }
+    
+    // Only update metadata if provided and non-empty
+    if (updates.metadata && Object.keys(updates.metadata).length > 0) {
+      updateData.metadata = JSON.stringify(updates.metadata);
+    }
+    
+    // Only update other fields if explicitly provided
+    if (updates.name !== undefined) {
+      updateData.name = updates.name;
+    }
+    if (updates.protocol !== undefined) {
+      updateData.protocol = updates.protocol;
+    }
+    if (updates.poll_interval !== undefined) {
+      updateData.poll_interval = updates.poll_interval;
+    }
+    if (updates.lastSeenAt) {
+      updateData.lastSeenAt = updates.lastSeenAt instanceof Date ? updates.lastSeenAt.toISOString() : updates.lastSeenAt;
+    }
+
+    await models(this.table)
+      .where('uuid', uuid)
+      .update(updateData);
+
+    return await this.getByUuid(uuid);
+  }
+
+  /**
    * Update endpoint by fingerprint (recommended method)
    * Uses fingerprint for lookup, preserves UUID and other stable fields
    */
   static async updateByFingerprint(fingerprint: string, updates: Partial<DeviceEndpoint>): Promise<DeviceEndpoint | null> {
     const updateData: any = {
-      ...updates,
       updated_at: new Date(),
     };
 
-    if (updates.connection) {
+    // Only update enabled if explicitly provided
+    if (updates.enabled !== undefined) {
+      updateData.enabled = updates.enabled;
+    }
+    
+    // Only update connection if provided and non-empty
+    if (updates.connection && Object.keys(updates.connection).length > 0) {
       updateData.connection = JSON.stringify(updates.connection);
     }
-    if (updates.data_points) {
+    
+    // Only update data_points if provided and non-empty
+    if (updates.data_points && updates.data_points.length > 0) {
       updateData.data_points = JSON.stringify(updates.data_points);
     }
-    if (updates.metadata) {
+    
+    // Only update metadata if provided and non-empty
+    if (updates.metadata && Object.keys(updates.metadata).length > 0) {
       updateData.metadata = JSON.stringify(updates.metadata);
     }
+    
+    // Update other fields if explicitly provided
+    if (updates.name !== undefined) updateData.name = updates.name;
+    if (updates.protocol !== undefined) updateData.protocol = updates.protocol;
     if (updates.lastSeenAt) {
       updateData.lastSeenAt = updates.lastSeenAt instanceof Date ? updates.lastSeenAt.toISOString() : updates.lastSeenAt;
     }

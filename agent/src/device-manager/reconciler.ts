@@ -38,6 +38,7 @@ interface StateReconcilerEvents {
 	'reconciliation-complete': () => void;
 	'logging-config-changed': (change: { old: any; new: any }) => void;
 	'protocol-config-changed': (change: { old: any; new: any }) => void;
+	'endpoints-config-changed': (change: { old: any; new: any }) => void;
 	'intervals-changed': (change: { old: any; new: any }) => void;
 	'memory-config-changed': (change: { old: any; new: any }) => void;
 	'scheduled-restart-changed': (change: { old: any; new: any }) => void;
@@ -597,6 +598,18 @@ export class StateReconciler extends EventEmitter {
 			this.emit('protocol-config-changed', {
 				old: oldConfig.protocols,
 				new: newConfig.protocols,
+			});
+		}
+
+		// Check endpoints config changes (override-only pattern)
+		if (!_.isEqual(oldConfig.endpoints, newConfig.endpoints)) {
+			this.logger?.debugSync('Endpoints configuration changed', {
+				component: LogComponents.stateReconciler,
+				operation: 'emitConfigChangeEvents',
+			});
+			this.emit('endpoints-config-changed', {
+				old: oldConfig.endpoints,
+				new: newConfig.endpoints,
 			});
 		}
 

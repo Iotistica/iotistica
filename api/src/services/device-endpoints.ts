@@ -33,12 +33,47 @@ export interface EndpointDeviceConfig {
 
 export class DeviceSensorSyncService {
   /**
+   * Mark endpoints as pending deployment
+   * Called when user clicks Sync button (POST /deploy)
+   * Updates ONLY deployment_status='pending' by UUID
+   */
+  async markEndpointsAsPending(
+    deviceUuid: string,
+    endpointOverrides: EndpointDeviceConfig[],
+    configVersion: number,
+    userId?: string
+  ): Promise<void> {
+    try {
+      const uuids = endpointOverrides.map(e => e.uuid).filter(Boolean);
+      
+      if (uuids.length === 0) {
+        return;
+      }
+
+      const result = await query(
+        `UPDATE device_sensors 
+         SET deployment_status = 'pending',
+             config_version = $1,
+             updated_by = $2,
+             updated_at = NOW()
+         WHERE device_uuid = $3 AND uuid = ANY($4)`,
+        [configVersion, userId || 'system', deviceUuid, uuids]
+      );
+
+      logger.info(`Marked ${result.rowCount} endpoints as pending deployment`);
+    } catch (error) {
+      logger.error('Failed to mark endpoints as pending:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Sync sensor devices from config to database table
    * Called during deployment or reconciliation
    * 
    * Flow:
    * - During deployment (userId != 'agent-reconciliation'): Add sensors with deployment_status='pending'
-   * - During reconciliation (userId === 'agent-reconciliation'): Update sensors with deployment_status='deployed'
+   * - During reconciliation (userId === 'agent-reconciliation'): New sensors='discovered', existing='deployed'
    */
   async syncConfigToTable(
     deviceUuid: string,
@@ -77,12 +112,17 @@ export class DeviceSensorSyncService {
             existing.enabled !== existing.health_connected;
           
           // Update existing sensor by UUID (stable identifier)
-          // If reconciliation from agent, mark as deployed
-          // If deployment and (changed OR out of sync), mark as pending
-          // If deployment but unchanged and in sync, keep existing status (don't reset to pending)
+          // CRITICAL: Deployment status state machine during reconciliation
+          // - If 'pending': Keep pending (user made changes agent hasn't seen yet)
+          // - If 'reconciling': Mark as deployed (agent confirms changes applied)
+          // - If 'discovered': Keep discovered (no user changes yet)
+          // - If 'deployed': Keep deployed (already confirmed)
+          // - During deployment (not reconciliation): Mark as pending if changed
           const deploymentStatus = isReconciliation 
-            ? 'deployed' 
-            : (hasChanged || isOutOfSync ? 'pending' : existing?.deployment_status || 'deployed');
+            ? (existing?.deployment_status === 'pending' ? 'pending' : 
+               existing?.deployment_status === 'reconciling' ? 'deployed' :
+               existing?.deployment_status || 'discovered')
+            : (hasChanged || isOutOfSync ? 'pending' : existing?.deployment_status || 'discovered');
           
           await query(
             `UPDATE device_sensors SET
@@ -118,9 +158,9 @@ export class DeviceSensorSyncService {
           logger.info(`Updated: ${endpoint.name} (${endpoint.protocol}) - ${deploymentStatus}`);
         } else {
           // Insert new sensor into table (or update if name collision exists)
-          // If reconciliation from agent, mark as deployed (agent confirms it's running)
+          // If reconciliation from agent, mark as discovered (agent found it running, initial state)
           // Otherwise, mark as pending (deployment just triggered, waiting for agent confirmation)
-          const deploymentStatus = isReconciliation ? 'deployed' : 'pending';
+          const deploymentStatus = isReconciliation ? 'discovered' : 'pending';
           
           await query(
             `INSERT INTO device_sensors (
@@ -162,21 +202,6 @@ export class DeviceSensorSyncService {
         }
       }
 
-      // 2. Delete endpoints removed from config (by UUID)
-      logger.info(`[DELETE CHECK] Device ${deviceUuid.substring(0, 8)}: Config UUIDs: [${Array.from(configUuids).join(', ')}]`);
-      logger.info(`[DELETE CHECK] Device ${deviceUuid.substring(0, 8)}: Existing table UUIDs: [${existingResult.rows.map(r => r.uuid).filter(Boolean).join(', ')}]`);
-      logger.info(`[DELETE CHECK] Device ${deviceUuid.substring(0, 8)}: Will delete endpoints NOT in config set`);
-      
-      for (const row of existingResult.rows) {
-        if (row.uuid && !configUuids.has(row.uuid)) {
-          logger.warn(`[DELETE] Device ${deviceUuid.substring(0, 8)}: Deleting "${row.name}" (UUID: ${row.uuid}) - not found in config UUIDs`);
-          await query(
-            'DELETE FROM device_sensors WHERE device_uuid = $1 AND uuid = $2',
-            [deviceUuid, row.uuid]
-          );
-          logger.info(`   Deleted: ${row.name} (removed from config)`);
-        }
-      }
 
       logger.info(`Sync complete: config → table (version ${configVersion}) - ${isReconciliation ? 'DEPLOYED' : 'PENDING'}`);
     } catch (error) {
@@ -186,13 +211,13 @@ export class DeviceSensorSyncService {
   }
 
   /**
-   * Deploy config changes (increment version and sync to table)
+   * Deploy config changes (increment version and mark endpoints as pending)
    * Called when user clicks "Deploy" button
    * 
    * This triggers:
    * 1. Version increment (tells agent to pick up changes)
-   * 2. Sync config → table with deployment_status='pending'
-   * 3. Agent will report current state, triggering reconciliation to 'deployed'
+   * 2. Mark ONLY changed endpoints as 'pending' (config.endpoints are OVERRIDES, not full records)
+   * 3. Agent will pick up changes and report back
    */
   async deployConfig(deviceUuid: string, userId?: string): Promise<any> {
     logger.info(`Deploying config changes for device ${deviceUuid.substring(0, 8)}...`);
@@ -209,28 +234,14 @@ export class DeviceSensorSyncService {
       }
 
       const state = stateResult.rows[0];
-      
-      // DEBUG: Log what we read from database
-      logger.info(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: Raw config from DB (type: ${typeof state.config})`);
-      logger.info(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: Config preview: ${typeof state.config === 'string' ? state.config.substring(0, 200) : JSON.stringify(state.config).substring(0, 200)}`);
-      
       const config = typeof state.config === 'string' ? JSON.parse(state.config) : state.config;
-      const endpoints: EndpointDeviceConfig[] = config.endpoints || [];
-      
-      // DEBUG: Log what endpoints we extracted
-      logger.info(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: Extracted ${endpoints.length} endpoints from config`);
-      logger.info(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: Endpoint UUIDs: [${endpoints.map(e => e.uuid).filter(Boolean).join(', ')}]`);
-      if (endpoints.length === 0) {
-        logger.warn(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: WARNING - Config has 0 endpoints! This will DELETE all table endpoints!`);
-        logger.warn(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: Full config object:`, JSON.stringify(config, null, 2));
-      }
+      const endpointOverrides: EndpointDeviceConfig[] = config.endpoints || [];
 
-      // 2. Increment version and set needs_deployment flag
+      // 2. Increment version (tells agent to pick up changes)
       const updateResult = await query(
         `UPDATE device_target_state SET
            version = version + 1,
-           updated_at = NOW(),
-           needs_deployment = true
+           updated_at = NOW()
          WHERE device_uuid = $1
          RETURNING version`,
         [deviceUuid]
@@ -238,8 +249,23 @@ export class DeviceSensorSyncService {
 
       const newVersion = updateResult.rows[0].version;
 
-      // 3. Sync config → table with deployment_status='pending'
-      await this.syncConfigToTable(deviceUuid, endpoints, newVersion, userId);
+      // 3. Mark ONLY endpoints with overrides as 'pending'
+      // Note: config.endpoints are OVERRIDE objects (just uuid + enabled), NOT full endpoint records
+      if (endpointOverrides.length > 0) {
+        const uuidsToMarkPending = endpointOverrides.map(e => e.uuid).filter(Boolean);
+        
+        if (uuidsToMarkPending.length > 0) {
+          const result = await query(
+            `UPDATE device_sensors 
+             SET deployment_status = 'pending',
+                 config_version = $1,
+                 updated_by = $2,
+                 updated_at = NOW()
+             WHERE device_uuid = $3 AND uuid = ANY($4)`,
+            [newVersion, userId || 'system', deviceUuid, uuidsToMarkPending]
+          );
+        }
+      }
 
       // 4. Publish event
       await eventPublisher.publish(
@@ -248,11 +274,11 @@ export class DeviceSensorSyncService {
         deviceUuid,
         {
           version: newVersion,
-          endpoints_count: endpoints.length
+          endpoints_count: endpointOverrides.length
         }
       );
 
-      logger.info(`Deployed config (version: ${newVersion}) - sensors marked as 'pending'`);
+      logger.info(`Deployed config (version: ${newVersion})`);
 
       return {
         version: newVersion,
