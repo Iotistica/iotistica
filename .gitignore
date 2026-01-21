@@ -85,3 +85,6 @@ agent/src/features/protocol-adapters/
 values-secret.yaml
 **/values-secret.yaml
 k8s/**/values-secret.yaml
+agent/data/device.sqlite-shm
+agent/data/device.sqlite-shm
+agent/data/device.sqlite-wal
