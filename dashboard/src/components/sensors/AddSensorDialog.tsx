@@ -147,7 +147,6 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
 
           <TabsContent value="modbus" className="flex-1 overflow-y-auto space-y-6 mt-4">
             <ModbusConfigForm 
-              value={modbusConfig || undefined}
               onChange={setModbusConfig}
               onValidationChange={setModbusFormValid}
             />
@@ -160,7 +159,6 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
 
           <TabsContent value="opcua" className="flex-1 overflow-y-auto space-y-6 mt-4">
             <OPCUAConfigForm 
-              value={opcuaConfig || undefined}
               onChange={setOpcuaConfig}
               onValidationChange={setOpcuaFormValid}
             />

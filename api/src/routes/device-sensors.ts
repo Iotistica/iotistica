@@ -54,6 +54,47 @@ router.get('/devices/:uuid/sensors', async (req, res) => {
 });
 
 /**
+ * Add new sensor
+ * POST /api/v1/devices/:uuid/sensors
+ * 
+ * Dual-write: table + config (sync service handles both)
+ */
+router.post('/devices/:uuid/sensors', async (req, res) => {
+  try {
+    const { uuid } = req.params;
+    const sensorConfig = req.body;
+
+    // Add sensor using sync service (handles dual-write)
+    const result = await deviceSensorSync.addEndpoint(
+      uuid,
+      sensorConfig,
+      (req as any).user?.id || 'system'
+    );
+
+    res.status(201).json({
+      status: 'ok',
+      message: 'Sensor added',
+      device: result.sensor,
+      version: result.version
+    });
+  } catch (error: any) {
+    logger.error('Error adding sensor:', error);
+    
+    if (error.message?.includes('already exists')) {
+      return res.status(409).json({
+        error: 'Sensor already exists',
+        message: error.message
+      });
+    }
+    
+    res.status(500).json({
+      error: 'Failed to add sensor',
+      message: error.message
+    });
+  }
+});
+
+/**
  * Update sensor
  * PUT /api/v1/devices/:uuid/sensors/:name
  * 
