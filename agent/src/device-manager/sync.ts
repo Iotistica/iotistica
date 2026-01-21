@@ -1188,13 +1188,18 @@ export class CloudSync extends EventEmitter {
 		(reportToSend[deviceInfo.uuid] as any).vpn_health = (stateReport[deviceInfo.uuid] as any).vpn_health;
 	}
 	
-	// Skip sending if report has no meaningful data (empty config, empty apps, no metrics)
+	// Skip sending if report has no meaningful data (empty config, empty apps, no metrics, no health)
 	const hasConfig = reportToSend[deviceInfo.uuid].config !== undefined;
 	const hasApps = reportToSend[deviceInfo.uuid].apps && Object.keys(reportToSend[deviceInfo.uuid].apps).length > 0;
+	const hasMetrics = reportToSend[deviceInfo.uuid].cpu_usage !== undefined || 
+	                   reportToSend[deviceInfo.uuid].memory_usage !== undefined;
+	const hasEndpointHealth = (reportToSend[deviceInfo.uuid] as any).endpoints_health !== undefined;
+	const hasSensorHealth = (reportToSend[deviceInfo.uuid] as any).sensor_health !== undefined;
+	const hasVpnHealth = (reportToSend[deviceInfo.uuid] as any).vpn_health !== undefined;
 	
-	// Only skip if BOTH config and apps are empty (metrics/health alone are still valuable)
-	if (!hasConfig && !hasApps) {
-		this.logger?.infoSync('Skipping empty state report (no config or apps)', {
+	// Only skip if nothing meaningful to report
+	if (!hasConfig && !hasApps && !hasMetrics && !hasEndpointHealth && !hasSensorHealth && !hasVpnHealth) {
+		this.logger?.infoSync('Skipping empty state report (no meaningful data)', {
 			component: LogComponents.cloudSync,
 			operation: 'skip-empty-report',
 			isOnline: this.connectionMonitor.isOnline(),

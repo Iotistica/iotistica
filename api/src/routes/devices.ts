@@ -24,6 +24,7 @@ import {
   AuditSeverity
 } from '../utils/audit-logger';
 import { EventPublisher } from '../services/event-sourcing';
+import { deviceSensorSync } from '../services/device-endpoints';
 import logger from '../utils/logger';
 import { SystemConfig } from '../config/system-config';
 import deviceAuth from '../middleware/device-auth';
@@ -1082,7 +1083,7 @@ router.post('/devices/:uuid/deploy', async (req, res) => {
       });
     }
 
-    // Deploy target state (increments version)
+    // Deploy target state (increments version and marks endpoints as pending)
     const deployedState = await DeviceTargetStateModel.deploy(uuid, deployedBy);
 
     await logAuditEvent({

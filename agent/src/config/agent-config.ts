@@ -208,6 +208,7 @@ export class AgentConfig extends EventEmitter {
     // Listen to StateReconciler events
     this.stateReconciler.on('logging-config-changed', this.handleLoggingConfigChanges.bind(this));
     this.stateReconciler.on('protocol-config-changed', this.handleProtocolConfigChanges.bind(this));
+    this.stateReconciler.on('endpoints-config-changed', this.handleEndpointsConfigChanges.bind(this));
     this.stateReconciler.on('intervals-changed', this.handleIntervalsChanges.bind(this));
     this.stateReconciler.on('memory-config-changed', this.handleMemoryConfigChanges.bind(this));
     this.stateReconciler.on('scheduled-restart-changed', this.handleScheduledRestartConfig.bind(this));
@@ -591,6 +592,82 @@ export class AgentConfig extends EventEmitter {
     } catch (error) {
       this.logger?.errorSync(
         'Failed to update endpoint enabled status',
+        error as Error,
+        { component: LogComponents.agent }
+      );
+    }
+  }
+
+  /**
+   * Handle endpoints configuration changes
+   * Updates endpoint enabled status in database based on target config overrides (OVERRIDE-ONLY PATTERN)
+   *
+   * Target config.endpoints contains overrides with UUIDs:
+   * [{ uuid: string, enabled: boolean, ... }]
+   */
+  private async handleEndpointsConfigChanges(change: { old: any; new: any }): Promise<void> {
+    try {
+      const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
+
+      // Get all endpoints from database (baseline)
+      const dbEndpoints = await DeviceEndpointModel.getAll();
+
+      // Get endpoint overrides from target config
+      const targetEndpoints = this.getTargetConfig().endpoints || [];
+
+      // Build UUID → override map for fast lookup
+      const overrideMap = new Map<string, any>(
+        targetEndpoints.map((ep: any) => [ep.uuid, ep])
+      );
+
+      let updatedCount = 0;
+
+      // Apply overrides to database endpoints
+      for (const dbEndpoint of dbEndpoints) {
+        // Skip if endpoint has no UUID (shouldn't happen for discovered endpoints)
+        if (!dbEndpoint.uuid) {
+          continue;
+        }
+
+        const override = overrideMap.get(dbEndpoint.uuid);
+
+        if (override && override.enabled !== undefined) {
+          // Override specifies enabled status - check if it changed
+          const shouldBeEnabled = override.enabled;
+
+          // Convert to boolean for comparison (SQLite stores as 0/1)
+          if (!!dbEndpoint.enabled !== shouldBeEnabled) {
+            this.logger?.debugSync('Applying endpoint override', {
+              component: LogComponents.agent,
+              uuid: dbEndpoint.uuid,
+              name: dbEndpoint.name,
+              oldEnabled: !!dbEndpoint.enabled,
+              newEnabled: shouldBeEnabled,
+              hasConnection: !!dbEndpoint.connection,
+              connectionType: dbEndpoint.connection?.type
+            });
+            await DeviceEndpointModel.updateByUuid(dbEndpoint.uuid, { enabled: shouldBeEnabled });
+            updatedCount++;
+          }
+        }
+      }
+
+      if (updatedCount > 0) {
+        this.logger?.infoSync('Endpoint configuration changes applied', {
+          component: LogComponents.agent,
+          updatedEndpoints: updatedCount,
+          totalOverrides: targetEndpoints.length,
+        });
+      } else {
+        this.logger?.debugSync('No endpoint enabled status changes detected', {
+          component: LogComponents.agent,
+          overrideCount: targetEndpoints.length,
+          dbEndpointCount: dbEndpoints.length,
+        });
+      }
+    } catch (error) {
+      this.logger?.errorSync(
+        'Failed to apply endpoint configuration changes',
         error as Error,
         { component: LogComponents.agent }
       );
