@@ -10,14 +10,13 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
+import { SimpleToggle } from '@/components/ui/simple-toggle';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AddSensorDialog } from '@/components/sensors/AddSensorDialog';
 import { SensorSummaryCards } from '@/components/sensors/SensorSummaryCards';
 import { DataPointsViewer } from '@/components/sensors/DataPointsViewer';
 import { toast } from 'sonner';
 import { buildApiUrl } from '@/config/api';
-import { canPerformDeviceActions } from "@/utils/devicePermissions";
 import { Device } from "../components/DeviceSidebar";
 import { useDeviceState } from '@/contexts/DeviceStateContext';
 
@@ -61,7 +60,7 @@ interface Sensor {
   connected?: boolean;
   dataPoints?: ModbusDataPoint[] | OPCUADataPoint[]; // Protocol-specific data points
   // Deployment tracking fields
-  deploymentStatus?: 'pending' | 'deployed' | 'failed' | 'reconciling' | 'draft' | 'saved-draft';
+  deploymentStatus?: 'pending' | 'deployed' | 'deploying' | 'failed' | 'reconciling' | 'draft' | 'saved-draft';
   lastDeployedAt?: string | null;
   deploymentError?: string | null;
   deploymentAttempts?: number;
@@ -77,10 +76,7 @@ interface Sensor {
 }
 
 export const SensorsPage: React.FC<SensorsPageProps> = ({ 
-  deviceUuid, 
-  deviceStatus,
-  debugMode = false, 
-  onDebugModeChange 
+  deviceUuid
 }) => {
   const [sensors, setSensors] = useState<Sensor[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,8 +86,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [selectedProtocol, setSelectedProtocol] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
-  const canAddApp = canPerformDeviceActions(deviceStatus);
-  const { addPendingSensor, getPendingConfig, getTargetConfig, updatePendingSensor, saveTargetState, saveTargetStateWithConfig } = useDeviceState();
+  const { addPendingSensor, getPendingConfig, getTargetConfig, updatePendingSensor, saveTargetState } = useDeviceState();
 
   const fetchSensors = async () => {
     try {
@@ -214,7 +209,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     fetchSensors();
     
     // Auto-refresh every 10 seconds
-    const interval = setInterval(fetchSensors, 10000);
+    // const interval = setInterval(fetchSensors, 10000);
     
     // Listen for deployment events from Header (Sync button)
     const handleDeploymentStarted = (event: CustomEvent) => {
@@ -231,7 +226,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     window.addEventListener('deployment-started', handleDeploymentStarted as EventListener);
     
     return () => {
-      clearInterval(interval);
+      // clearInterval(interval);
       window.removeEventListener('deployment-started', handleDeploymentStarted as EventListener);
     };
   }, [deviceUuid, getPendingConfig(deviceUuid), getTargetConfig(deviceUuid)]);
@@ -258,54 +253,28 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     try {
       const newEnabled = !currentEnabled;
       
-      console.log(`[Toggle] Step 1: Toggling sensor "${sensor.name}" (UUID: ${sensor.uuid}) from ${currentEnabled} to ${newEnabled}`);
+      console.log(`[Toggle] Toggling sensor "${sensor.name}" (UUID: ${sensor.uuid}) from ${currentEnabled} to ${newEnabled}`);
       
-      // Get current config from target state (source of truth for config data)
-      const currentConfig = getPendingConfig(deviceUuid) || getTargetConfig(deviceUuid) || {};
-      
-      // Build UUID lookup from fetched sensors (table data - has UUIDs)
-      const uuidBySensorName = new Map(
-        sensors.map((s: Sensor) => [s.name, s.uuid])
-      );
-      
-      // Update config endpoints: toggle enabled + inject UUIDs from table
-      const updatedEndpoints = (currentConfig.endpoints || []).map((endpoint: any) => {
-        // Get UUID from table if sensor exists there, otherwise keep config UUID
-        const uuid = uuidBySensorName.get(endpoint.name) || endpoint.uuid;
-        
-        if (endpoint.name === sensor.name) {
-          // Toggle this sensor + ensure UUID
-          return { ...endpoint, enabled: newEnabled, uuid };
-        } else {
-          // Other sensors - inject UUID if available from table
-          return uuid && !endpoint.uuid ? { ...endpoint, uuid } : endpoint;
-        }
-      });
-      
-      const updatedConfig = {
-        ...currentConfig,
-        endpoints: updatedEndpoints
+      // Build the update payload
+      const updates = {
+        uuid: sensor.uuid,
+        name: sensor.name,
+        enabled: newEnabled
       };
       
-      console.log('[Toggle] Step 2: Updated config, injected UUIDs from table where available');
-      console.log('[Toggle] Endpoint count:', updatedEndpoints.length);
-      console.log('[Toggle] Endpoint UUIDs:', updatedEndpoints.map((e: any) => e.uuid || 'NO-UUID'));
-      console.log('[Toggle] Updated sensor:', updatedEndpoints.find((e: any) => e.name === sensor.name));
+      // OVERRIDE-ONLY PATTERN: Update pending changes with just {uuid, name, enabled}
+      // Now returns a promise to ensure state is updated before saveTargetState
+      await updatePendingSensor(deviceUuid, sensor.name, updates);
       
-      // Save directly with the updated config
-      console.log('[Toggle] Step 3: Saving target state to API...');
-      await saveTargetStateWithConfig(deviceUuid, updatedConfig);
-      console.log('[Toggle] Step 4: Target state saved successfully');
+      // Auto-save to persist to database (now uses functional state update - no closure issue)
+      console.log('[Toggle] Auto-saving to database...');
+      await saveTargetState(deviceUuid);
+      console.log('[Toggle] Saved successfully');
       
       // Refresh sensor list to show updated state
-      console.log('[Toggle] Step 5: Fetching devices from API...');
       await fetchSensors();
-      console.log('[Toggle] Step 6: Devices fetched');
-      
-      // Emit event so DeviceStateContext and Header know there are pending changes
-      window.dispatchEvent(new CustomEvent('sensor-config-changed', { detail: { deviceUuid } }));
 
-      toast.success(`Device "${sensor.name}" ${newEnabled ? 'enabled' : 'disabled'} - Click Sync to apply`);
+      toast.success(`Device "${sensor.name}" ${newEnabled ? 'enabled' : 'disabled'} - Click Sync to deploy`);
     } catch (error: any) {
       console.error('Toggle device error:', error);
       toast.error(`Failed to toggle device: ${error.message}`);
@@ -327,37 +296,10 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       return <Badge className="bg-zinc-700 dark:bg-zinc-600 text-white border border-zinc-800 dark:border-zinc-500">Draft (Saved)</Badge>;
     }
     
-    // CRITICAL: Deploying state MUST be checked BEFORE needsSync check
-    // When user clicks Sync, deploymentStatus becomes 'pending' immediately
-    // We should show "Deploying" even if enabled !== health.connected
-    if (deploymentStatus === 'pending' || sensor.state === 'PENDING') {
-      console.log(`[Badge] "${sensor.name}" - Showing "Deploying" (deploymentStatus=${deploymentStatus})`);
-      return <Badge className="bg-blue-500 dark:bg-blue-600 text-white border border-blue-600 dark:border-blue-500 font-semibold">Deploying</Badge>;
-    }
-    
-    if (deploymentStatus === 'failed') {
-      return <Badge className="bg-red-600 dark:bg-red-700 text-white border border-red-700 dark:border-red-600 font-semibold">Deploy Failed</Badge>;
-    }
-    
-    if (deploymentStatus === 'reconciling') {
-      return <Badge className="bg-teal-500 dark:bg-teal-600 text-white border border-teal-600 dark:border-teal-500 font-semibold">Reconciling</Badge>;
-    }
-    
-    // Out-of-sync detection (config changed, needs sync)
-    // Compare desired state (enabled) with actual state (health.connected)
-    // ONLY check this if NOT deploying (deploymentStatus would be 'pending' if deploying)
-    console.log(`[Badge] Device "${sensor.name}":`, {
-      enabled: sensor.enabled,
-      healthConnected: sensor.health?.connected,
-      deploymentStatus,
-      needsSync: sensor.health?.connected !== undefined && sensor.enabled !== sensor.health.connected
-    });
-    
-    const needsSync = sensor.health?.connected !== undefined && 
-      sensor.enabled !== sensor.health.connected;
-    
-    if (needsSync) {
-      console.log(`[Badge] "${sensor.name}" - Showing "Needs Sync" badge`);
+
+    // When user toggles, deploymentStatus becomes 'pending' to prevent overwrite
+    if (deploymentStatus === 'pending') {
+      console.log(`[Badge] "${sensor.name}" - Showing "Needs Sync" (deploymentStatus=${deploymentStatus})`);
       return (
         <span 
           className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold border"
@@ -366,6 +308,20 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           Needs Sync
         </span>
       );
+    }
+    
+    
+    if (deploymentStatus === 'failed') {
+      return <Badge className="bg-red-600 dark:bg-red-700 text-white border border-red-700 dark:border-red-600 font-semibold">Deploy Failed</Badge>;
+    }
+    
+    if (deploymentStatus === 'reconciling') {
+      return <Badge className="bg-blue-500 dark:bg-blue-600 text-white border border-blue-600 dark:border-blue-500 font-semibold">Reconciling</Badge>;
+    }
+    
+    // Discovered (agent found it, initial state)
+    if ((deploymentStatus as any) === 'discovered') {
+      return <Badge className="bg-slate-500 dark:bg-slate-600 text-white border border-slate-600 dark:border-slate-500">Discovered</Badge>;
     }
     
     // 2. Disabled state (toggle is off - don't show health indicators)
@@ -604,14 +560,18 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                       
                       {/* Action Buttons */}
                       <div className="flex items-center gap-3 ml-4">
-                        {/* Enable/Disable Toggle - only show for deployed sensors */}
+                        {/* Enable/Disable Select - only show for deployed sensors */}
                         {sensor.type === 'device' && 
                          sensor.deploymentStatus !== 'draft' && 
                          sensor.deploymentStatus !== 'saved-draft' && (
-                          <Switch
-                            checked={sensor.enabled !== undefined ? sensor.enabled : true}
-                            onCheckedChange={() => handleToggleSensorEnabled(sensor, sensor.enabled !== undefined ? sensor.enabled : true)}
-                          />
+                          <select
+                            value={sensor.enabled !== undefined ? (sensor.enabled ? 'enabled' : 'disabled') : 'enabled'}
+                            onChange={(e) => handleToggleSensorEnabled(sensor, e.target.value === 'enabled')}
+                            className="h-8 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                          >
+                            <option value="enabled">Enabled</option>
+                            <option value="disabled">Disabled</option>
+                          </select>
                         )}
                         
                         {/* View Details Button */}
