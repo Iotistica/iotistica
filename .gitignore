@@ -70,7 +70,10 @@ balena/
 
 # Agent database (local development data)
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
 agent/data/database.sqlite
+agent/data/*.sqlite*
 
 # Modbus adapter
 modbus-adapter/
