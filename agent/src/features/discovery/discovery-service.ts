@@ -633,81 +633,42 @@ export class DiscoveryService extends EventEmitter {
 
   /**
    * Get Modbus discovery options from configuration
-   * Returns empty object to trigger multi-connection mode discovery
+   * Returns empty object if discovery targets found (slaveRange endpoints)
    */
   private getModbusOptions(): ModbusDiscoveryOptions | undefined {
     if (!this.agentConfig) {
       return undefined;
     }
 
-    const config = this.agentConfig.getModbusConfig();
+    // Check for discovery targets (endpoints with slaveRange)
+    const discoveryTargets = this.agentConfig.getDiscoveryTargets?.('modbus') || [];
     
-    // Multi-connection mode: Return empty object to trigger discovery
-    // The Modbus discovery plugin handles connections array internally
-    if (config.connections && config.connections.length > 0) {
-      return {}; // Let plugin handle multi-connection logic
+    if (discoveryTargets.length > 0) {
+      return {}; // Let plugin handle discovery targets via getDiscoveryTargets()
     }
 
-    // No connections configured
+    // No discovery targets configured
     return undefined;
   }
 
   /**
    * Get OPC-UA discovery options from configuration
+   * Returns empty object if discovery targets found (endpointUrl without dataPoints)
    */
   private getOPCUAOptions(): OPCUADiscoveryOptions | undefined {
-    // Use config accessor if available (cloud → env fallback)
-    if (this.agentConfig) {
-      const config = this.agentConfig.getOPCUAConfig();
-      
-      // No connections configured
-      if (!config.connections || config.connections.length === 0) {
-        return undefined;
-      }
-
-      return {
-        discoveryUrls: config.connections
-      };
+    if (!this.agentConfig) {
+      return undefined;
     }
 
-    // Legacy: Direct env var reads (backward compatibility)
-    const urls = process.env.OPCUA_DISCOVERY_URLS;
+    // Check for discovery targets (endpoints with endpointUrl but no dataPoints)
+    const discoveryTargets = this.agentConfig.getDiscoveryTargets?.('opcua') || [];
     
-    if (!urls) {
-      return undefined; // Use plugin defaults
+    if (discoveryTargets.length > 0) {
+      return {}; // Let plugin handle discovery targets via getDiscoveryTargets()
     }
 
-    // Helper to format URL (convert bare IP to opc.tcp://IP:4840)
-    const formatOpcuaUrl = (url: string): string => {
-      const trimmed = url.trim();
-      
-      // Already a full URL with port (e.g., opc.tcp://10.0.0.60:4840)
-      if ((trimmed.startsWith('opc.tcp://') || trimmed.startsWith('opc.https://')) && trimmed.includes(':', 10)) {
-        return trimmed;
-      }
-      
-      // Has protocol but missing port (e.g., opc.tcp://10.0.0.60) - add default
-      if (trimmed.startsWith('opc.tcp://')) {
-        const host = trimmed.substring(10); // Remove 'opc.tcp://'
-        return `opc.tcp://${host}:4840`;
-      }
-      if (trimmed.startsWith('opc.https://')) {
-        const host = trimmed.substring(12); // Remove 'opc.https://'
-        return `opc.https://${host}:4840`;
-      }
-      
-      // Bare IP/hostname with port (e.g., 10.0.0.60:4840) - add protocol only
-      if (trimmed.includes(':')) {
-        return `opc.tcp://${trimmed}`;
-      }
-      
-      // Bare IP/hostname without port (e.g., 10.0.0.60) - add protocol and default port
-      return `opc.tcp://${trimmed}:4840`;
-    };
-
-    return {
-      discoveryUrls: urls.split(',').map(url => formatOpcuaUrl(url))
-    };
+    // No discovery targets configured
+    return undefined;
   }
 
   /**
@@ -730,114 +691,22 @@ export class DiscoveryService extends EventEmitter {
 
   /**
    * Get SNMP discovery options from configuration
-   * Uses AgentConfig if available, otherwise falls back to direct env reads
+   * Returns empty object if discovery targets found (community without dataPoints)
    */
   private getSNMPOptions(): SNMPDiscoveryOptions | undefined {
-    // Use config accessor if available (cloud → env fallback)
-    if (this.agentConfig) {
-      const config = this.agentConfig.getSNMPConfig();
-      
-      // CRITICAL: Only run SNMP discovery if connections are configured
-      if (!config.connections || config.connections.length === 0) {
-        this.logger?.debugSync('SNMP connections not configured, skipping SNMP discovery', {
-          component: LogComponents.discovery,
-          note: 'Configure via dashboard or set SNMP_IP_RANGES env var'
-        });
-        return undefined;
-      }
-
-      const options: SNMPDiscoveryOptions = { ipRanges: config.connections };
-
-      // Optional: Port
-      if (config.port !== undefined) {
-        options.port = config.port;
-      }
-      
-      // Note: SNMPv3 auth not yet in cloud config schema (future enhancement)
-      // For now, v3 auth still comes from env vars
-      if (process.env.SNMP_COMMUNITY) {
-        options.community = process.env.SNMP_COMMUNITY;
-      }
-      
-      if (process.env.SNMP_VERSION) {
-        options.version = process.env.SNMP_VERSION as 'v1' | 'v2c' | 'v3';
-      }
-      
-      if (process.env.SNMP_TIMEOUT) {
-        options.timeout = parseInt(process.env.SNMP_TIMEOUT, 10);
-      }
-      
-      if (process.env.SNMP_RETRIES) {
-        options.retries = parseInt(process.env.SNMP_RETRIES, 10);
-      }
-      
-      if (process.env.SNMP_CONCURRENCY) {
-        options.concurrency = parseInt(process.env.SNMP_CONCURRENCY, 10);
-      }
-
-      // SNMPv3 authentication (env vars only for now)
-      if (options.version === 'v3') {
-        options.v3Username = process.env.SNMP_V3_USERNAME;
-        options.v3AuthProtocol = process.env.SNMP_V3_AUTH_PROTOCOL as 'MD5' | 'SHA';
-        options.v3AuthKey = process.env.SNMP_V3_AUTH_KEY;
-        options.v3PrivProtocol = process.env.SNMP_V3_PRIV_PROTOCOL as 'DES' | 'AES';
-        options.v3PrivKey = process.env.SNMP_V3_PRIV_KEY;
-      }
-
-      return options;
-    }
-
-    // Legacy: Direct env var reads (backward compatibility)
-    const ipRanges = process.env.SNMP_IP_RANGES;
-    
-    // CRITICAL: Only run SNMP discovery if explicitly configured
-    // Don't auto-detect subnets (causes massive IP scans)
-    if (!ipRanges) {
-      this.logger?.debugSync('SNMP_IP_RANGES not configured, skipping SNMP discovery', {
-        component: LogComponents.discovery,
-        note: 'Set SNMP_IP_RANGES env var to enable (e.g., "snmp-simulator-1,192.168.1.100")'
-      });
+    if (!this.agentConfig) {
       return undefined;
     }
 
-    const ranges = ipRanges.split(',').map(r => r.trim());
-    const options: SNMPDiscoveryOptions = { ipRanges: ranges };
-
-    // Optional: Port, community, version
-    if (process.env.SNMP_PORT) {
-      options.port = parseInt(process.env.SNMP_PORT, 10);
-    }
+    // Check for discovery targets (endpoints with community but no dataPoints)
+    const discoveryTargets = this.agentConfig.getDiscoveryTargets?.('snmp') || [];
     
-    if (process.env.SNMP_COMMUNITY) {
-      options.community = process.env.SNMP_COMMUNITY;
-    }
-    
-    if (process.env.SNMP_VERSION) {
-      options.version = process.env.SNMP_VERSION as 'v1' | 'v2c' | 'v3';
-    }
-    
-    if (process.env.SNMP_TIMEOUT) {
-      options.timeout = parseInt(process.env.SNMP_TIMEOUT, 10);
-    }
-    
-    if (process.env.SNMP_RETRIES) {
-      options.retries = parseInt(process.env.SNMP_RETRIES, 10);
-    }
-    
-    if (process.env.SNMP_CONCURRENCY) {
-      options.concurrency = parseInt(process.env.SNMP_CONCURRENCY, 10);
+    if (discoveryTargets.length > 0) {
+      return {}; // Let plugin handle discovery targets via getDiscoveryTargets()
     }
 
-    // SNMPv3 authentication
-    if (options.version === 'v3') {
-      options.v3Username = process.env.SNMP_V3_USERNAME;
-      options.v3AuthProtocol = process.env.SNMP_V3_AUTH_PROTOCOL as 'MD5' | 'SHA';
-      options.v3AuthKey = process.env.SNMP_V3_AUTH_KEY;
-      options.v3PrivProtocol = process.env.SNMP_V3_PRIV_PROTOCOL as 'DES' | 'AES';
-      options.v3PrivKey = process.env.SNMP_V3_PRIV_KEY;
-    }
-
-    return options;
+    // No discovery targets configured
+    return undefined;
   }
 
   /**
