@@ -4,16 +4,20 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Activity, Pencil } from 'lucide-react';
+import { Activity, Eye } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AddSensorDialog } from '@/components/sensors/AddSensorDialog';
-import { EditSensorDialog } from '@/components/sensors/EditSensorDialog';
 import { SensorSummaryCards } from '@/components/sensors/SensorSummaryCards';
+import { DataPointsViewer } from '@/components/sensors/DataPointsViewer';
 import { toast } from 'sonner';
 import { buildApiUrl } from '@/config/api';
+import { canPerformDeviceActions } from "@/utils/devicePermissions";
 import { Device } from "../components/DeviceSidebar";
 import { useDeviceState } from '@/contexts/DeviceStateContext';
 
@@ -57,7 +61,7 @@ interface Sensor {
   connected?: boolean;
   dataPoints?: ModbusDataPoint[] | OPCUADataPoint[]; // Protocol-specific data points
   // Deployment tracking fields
-  deploymentStatus?: 'pending' | 'deployed' | 'deploying' | 'failed' | 'reconciling' | 'draft' | 'saved-draft';
+  deploymentStatus?: 'pending' | 'deployed' | 'failed' | 'reconciling' | 'draft' | 'saved-draft';
   lastDeployedAt?: string | null;
   deploymentError?: string | null;
   deploymentAttempts?: number;
@@ -73,7 +77,10 @@ interface Sensor {
 }
 
 export const SensorsPage: React.FC<SensorsPageProps> = ({ 
-  deviceUuid
+  deviceUuid, 
+  deviceStatus,
+  debugMode = false, 
+  onDebugModeChange 
 }) => {
   const [sensors, setSensors] = useState<Sensor[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,7 +90,8 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [selectedProtocol, setSelectedProtocol] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
-  const { getPendingConfig, getTargetConfig, updatePendingSensor, saveTargetState } = useDeviceState();
+  const canAddApp = canPerformDeviceActions(deviceStatus);
+  const { addPendingSensor, getPendingConfig, getTargetConfig, updatePendingSensor, saveTargetState, saveTargetStateWithConfig } = useDeviceState();
 
   const fetchSensors = async () => {
     try {
@@ -141,9 +149,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           type: 'device' as const,
           protocol: d.protocol,
           connected: isConnected,
-          connection: d.connection, // Full connection configuration
-          dataPoints: d.dataPoints || d.data_points || [], // Data points configuration
-          pollInterval: d.pollInterval, // Poll interval
+          dataPoints: d.data_points || d.dataPoints || [], // Include data points from API
           // Deployment tracking
           deploymentStatus: d.deploymentStatus,
           lastDeployedAt: d.lastDeployedAt,
@@ -208,7 +214,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     fetchSensors();
     
     // Auto-refresh every 10 seconds
-    // const interval = setInterval(fetchSensors, 10000);
+    const interval = setInterval(fetchSensors, 10000);
     
     // Listen for deployment events from Header (Sync button)
     const handleDeploymentStarted = (event: CustomEvent) => {
@@ -225,103 +231,25 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     window.addEventListener('deployment-started', handleDeploymentStarted as EventListener);
     
     return () => {
-      // clearInterval(interval);
+      clearInterval(interval);
       window.removeEventListener('deployment-started', handleDeploymentStarted as EventListener);
     };
   }, [deviceUuid, getPendingConfig(deviceUuid), getTargetConfig(deviceUuid)]);
 
   const handleAddProtocolDevice = async (device: any) => {
     try {
-      console.log('📝 Saving new sensor via API:', device);
+      console.log('📝 Adding sensor to local state (draft mode):', device);
       
-      // Call POST /api/v1/devices/:uuid/sensors API endpoint
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors`), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(device),
-      });
+      // Add sensor to config in React state only (matches app pattern)
+      // User must click "Save Draft" to persist to device_target_state
+      addPendingSensor(deviceUuid, device);
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Failed to add sensor: ${response.status}`);
-      }
-
-      const result = await response.json();
-      console.log('✅ Sensor added successfully:', result);
-
-      // Refresh sensor list to show the new sensor
+      // Refresh sensor list to show the new pending sensor immediately
       await fetchSensors();
 
-      toast.success(`Sensor "${device.name}" added - Click Sync to deploy to agent`);
+      toast.success(`Sensor "${device.name}" added (not saved yet - click Save Draft)`);
     } catch (error: any) {
-      console.error('❌ Failed to add sensor:', error);
       toast.error(`Failed to add sensor: ${error.message}`);
-      throw error;
-    }
-  };
-
-  const handleUpdateProtocolDevice = async (deviceName: string, updates: any) => {
-    try {
-      console.log('📝 Updating sensor via API:', deviceName, updates);
-      
-      // Call PUT /api/v1/devices/:uuid/sensors/:name API endpoint
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors/${encodeURIComponent(deviceName)}`), {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(updates),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Failed to update sensor: ${response.status}`);
-      }
-
-      const result = await response.json();
-      console.log('✅ Sensor updated successfully:', result);
-
-      // Refresh sensor list to show the updated sensor
-      await fetchSensors();
-
-      toast.success(`Sensor "${deviceName}" updated - Click Sync to deploy to agent`);
-    } catch (error: any) {
-      console.error('❌ Failed to update sensor:', error);
-      toast.error(`Failed to update sensor: ${error.message}`);
-      throw error;
-    }
-  };
-
-  const handleDeleteProtocolDevice = async (deviceName: string) => {
-    try {
-      console.log('🗑️ Marking sensor for deletion via API:', deviceName);
-      
-      // Call DELETE /api/v1/devices/:uuid/sensors/:name API endpoint
-      // This performs a SOFT DELETE - marks for deletion, waits for agent confirmation
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors/${encodeURIComponent(deviceName)}`), {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Failed to delete sensor: ${response.status}`);
-      }
-
-      const result = await response.json();
-      console.log('✅ Sensor marked for deletion:', result);
-
-      // Refresh sensor list to show pending_deletion status
-      await fetchSensors();
-
-      toast.success(`Sensor "${deviceName}" marked for deletion - Click Sync to confirm on agent`);
-    } catch (error: any) {
-      console.error('❌ Failed to delete sensor:', error);
-      toast.error(`Failed to delete sensor: ${error.message}`);
       throw error;
     }
   };
@@ -330,28 +258,54 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     try {
       const newEnabled = !currentEnabled;
       
-      console.log(`[Toggle] Toggling sensor "${sensor.name}" (UUID: ${sensor.uuid}) from ${currentEnabled} to ${newEnabled}`);
+      console.log(`[Toggle] Step 1: Toggling sensor "${sensor.name}" (UUID: ${sensor.uuid}) from ${currentEnabled} to ${newEnabled}`);
       
-      // Build the update payload
-      const updates = {
-        uuid: sensor.uuid,
-        name: sensor.name,
-        enabled: newEnabled
+      // Get current config from target state (source of truth for config data)
+      const currentConfig = getPendingConfig(deviceUuid) || getTargetConfig(deviceUuid) || {};
+      
+      // Build UUID lookup from fetched sensors (table data - has UUIDs)
+      const uuidBySensorName = new Map(
+        sensors.map((s: Sensor) => [s.name, s.uuid])
+      );
+      
+      // Update config endpoints: toggle enabled + inject UUIDs from table
+      const updatedEndpoints = (currentConfig.endpoints || []).map((endpoint: any) => {
+        // Get UUID from table if sensor exists there, otherwise keep config UUID
+        const uuid = uuidBySensorName.get(endpoint.name) || endpoint.uuid;
+        
+        if (endpoint.name === sensor.name) {
+          // Toggle this sensor + ensure UUID
+          return { ...endpoint, enabled: newEnabled, uuid };
+        } else {
+          // Other sensors - inject UUID if available from table
+          return uuid && !endpoint.uuid ? { ...endpoint, uuid } : endpoint;
+        }
+      });
+      
+      const updatedConfig = {
+        ...currentConfig,
+        endpoints: updatedEndpoints
       };
       
-      // OVERRIDE-ONLY PATTERN: Update pending changes with just {uuid, name, enabled}
-      // Now returns a promise to ensure state is updated before saveTargetState
-      await updatePendingSensor(deviceUuid, sensor.name, updates);
+      console.log('[Toggle] Step 2: Updated config, injected UUIDs from table where available');
+      console.log('[Toggle] Endpoint count:', updatedEndpoints.length);
+      console.log('[Toggle] Endpoint UUIDs:', updatedEndpoints.map((e: any) => e.uuid || 'NO-UUID'));
+      console.log('[Toggle] Updated sensor:', updatedEndpoints.find((e: any) => e.name === sensor.name));
       
-      // Auto-save to persist to database (now uses functional state update - no closure issue)
-      console.log('[Toggle] Auto-saving to database...');
-      await saveTargetState(deviceUuid);
-      console.log('[Toggle] Saved successfully');
+      // Save directly with the updated config
+      console.log('[Toggle] Step 3: Saving target state to API...');
+      await saveTargetStateWithConfig(deviceUuid, updatedConfig);
+      console.log('[Toggle] Step 4: Target state saved successfully');
       
       // Refresh sensor list to show updated state
+      console.log('[Toggle] Step 5: Fetching devices from API...');
       await fetchSensors();
+      console.log('[Toggle] Step 6: Devices fetched');
+      
+      // Emit event so DeviceStateContext and Header know there are pending changes
+      window.dispatchEvent(new CustomEvent('sensor-config-changed', { detail: { deviceUuid } }));
 
-      toast.success(`Device "${sensor.name}" ${newEnabled ? 'enabled' : 'disabled'} - Click Sync to deploy`);
+      toast.success(`Device "${sensor.name}" ${newEnabled ? 'enabled' : 'disabled'} - Click Sync to apply`);
     } catch (error: any) {
       console.error('Toggle device error:', error);
       toast.error(`Failed to toggle device: ${error.message}`);
@@ -366,16 +320,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     const deploymentStatus = sensor.deploymentStatus;
     
     // 1. Deployment lifecycle states (require user action - highest priority)
-    
-    // Pending deletion (soft delete - waiting for agent confirmation)
-    if (deploymentStatus === 'pending_deletion') {
-      return (
-        <Badge className="bg-orange-600 dark:bg-orange-700 text-white border border-orange-700 dark:border-orange-600 font-semibold">
-          Pending Deletion
-        </Badge>
-      );
-    }
-    
     if (deploymentStatus === 'draft') {
       return <Badge className="bg-zinc-700 dark:bg-zinc-600 text-white border border-zinc-800 dark:border-zinc-500">Draft</Badge>;
     }
@@ -383,10 +327,37 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       return <Badge className="bg-zinc-700 dark:bg-zinc-600 text-white border border-zinc-800 dark:border-zinc-500">Draft (Saved)</Badge>;
     }
     
-
-    // When user toggles, deploymentStatus becomes 'pending' to prevent overwrite
-    if (deploymentStatus === 'pending') {
-      console.log(`[Badge] "${sensor.name}" - Showing "Needs Sync" (deploymentStatus=${deploymentStatus})`);
+    // CRITICAL: Deploying state MUST be checked BEFORE needsSync check
+    // When user clicks Sync, deploymentStatus becomes 'pending' immediately
+    // We should show "Deploying" even if enabled !== health.connected
+    if (deploymentStatus === 'pending' || sensor.state === 'PENDING') {
+      console.log(`[Badge] "${sensor.name}" - Showing "Deploying" (deploymentStatus=${deploymentStatus})`);
+      return <Badge className="bg-blue-500 dark:bg-blue-600 text-white border border-blue-600 dark:border-blue-500 font-semibold">Deploying</Badge>;
+    }
+    
+    if (deploymentStatus === 'failed') {
+      return <Badge className="bg-red-600 dark:bg-red-700 text-white border border-red-700 dark:border-red-600 font-semibold">Deploy Failed</Badge>;
+    }
+    
+    if (deploymentStatus === 'reconciling') {
+      return <Badge className="bg-teal-500 dark:bg-teal-600 text-white border border-teal-600 dark:border-teal-500 font-semibold">Reconciling</Badge>;
+    }
+    
+    // Out-of-sync detection (config changed, needs sync)
+    // Compare desired state (enabled) with actual state (health.connected)
+    // ONLY check this if NOT deploying (deploymentStatus would be 'pending' if deploying)
+    console.log(`[Badge] Device "${sensor.name}":`, {
+      enabled: sensor.enabled,
+      healthConnected: sensor.health?.connected,
+      deploymentStatus,
+      needsSync: sensor.health?.connected !== undefined && sensor.enabled !== sensor.health.connected
+    });
+    
+    const needsSync = sensor.health?.connected !== undefined && 
+      sensor.enabled !== sensor.health.connected;
+    
+    if (needsSync) {
+      console.log(`[Badge] "${sensor.name}" - Showing "Needs Sync" badge`);
       return (
         <span 
           className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold border"
@@ -395,20 +366,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           Needs Sync
         </span>
       );
-    }
-    
-    
-    if (deploymentStatus === 'failed') {
-      return <Badge className="bg-red-600 dark:bg-red-700 text-white border border-red-700 dark:border-red-600 font-semibold">Deploy Failed</Badge>;
-    }
-    
-    if (deploymentStatus === 'reconciling') {
-      return <Badge className="bg-blue-500 dark:bg-blue-600 text-white border border-blue-600 dark:border-blue-500 font-semibold">Reconciling</Badge>;
-    }
-    
-    // Discovered (agent found it, initial state)
-    if ((deploymentStatus as any) === 'discovered') {
-      return <Badge className="bg-slate-500 dark:bg-slate-600 text-white border border-slate-600 dark:border-slate-500">Discovered</Badge>;
     }
     
     // 2. Disabled state (toggle is off - don't show health indicators)
@@ -457,9 +414,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
               Monitor your connected devices
             </p>
           </div>
-          <Button onClick={() => setAddSensorDialogOpen(true)}>
-            Add Device
-          </Button>
         </div>
 
         {/* Error Alert */}
@@ -646,32 +600,21 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                             <span className="font-medium">Status:</span> Waiting for agent to initialize sensor...
                           </div>
                         )}
-                        
-                        {sensor.deploymentStatus === 'pending_deletion' && (
-                          <div className="mt-2 text-sm text-orange-600">
-                            <span className="font-medium">Status:</span> Marked for deletion - Click Sync to confirm removal on agent
-                          </div>
-                        )}
                       </div>
                       
                       {/* Action Buttons */}
                       <div className="flex items-center gap-3 ml-4">
-                        {/* Enable/Disable Select - only show for deployed sensors, not for pending deletion */}
+                        {/* Enable/Disable Toggle - only show for deployed sensors */}
                         {sensor.type === 'device' && 
                          sensor.deploymentStatus !== 'draft' && 
-                         sensor.deploymentStatus !== 'saved-draft' &&
-                         sensor.deploymentStatus !== 'pending_deletion' && (
-                          <select
-                            value={sensor.enabled !== undefined ? (sensor.enabled ? 'enabled' : 'disabled') : 'enabled'}
-                            onChange={(e) => handleToggleSensorEnabled(sensor, e.target.value === 'enabled')}
-                            className="h-8 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                          >
-                            <option value="enabled">Enabled</option>
-                            <option value="disabled">Disabled</option>
-                          </select>
+                         sensor.deploymentStatus !== 'saved-draft' && (
+                          <Switch
+                            checked={sensor.enabled !== undefined ? sensor.enabled : true}
+                            onCheckedChange={() => handleToggleSensorEnabled(sensor, sensor.enabled !== undefined ? sensor.enabled : true)}
+                          />
                         )}
                         
-                        {/* Edit Button - disabled for pending deletion */}
+                        {/* View Details Button */}
                         <Button
                           variant="outline"
                           size="sm"
@@ -679,10 +622,9 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                             setSelectedSensor(sensor);
                             setDetailsDialogOpen(true);
                           }}
-                          disabled={sensor.deploymentStatus === 'pending_deletion'}
                         >
-                          <Pencil className="h-4 w-4 mr-2" />
-                          Edit
+                          <Eye className="h-4 w-4 mr-2" />
+                          View Details
                         </Button>
                       </div>
                     </div>
@@ -701,14 +643,189 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           deviceUuid={deviceUuid}
         />
 
-        {/* Edit Sensor Dialog */}
-        <EditSensorDialog
-          open={detailsDialogOpen}
-          onOpenChange={setDetailsDialogOpen}
-          onUpdateDevice={handleUpdateProtocolDevice}
-          onDeleteDevice={handleDeleteProtocolDevice}
-          device={selectedSensor}
-        />
+        {/* Sensor Details Dialog */}
+        <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <DialogHeader>
+              <DialogTitle>Sensor Details: {selectedSensor?.name}</DialogTitle>
+              <DialogDescription>
+                {selectedSensor?.protocol && `${selectedSensor.protocol.toUpperCase()} sensor`}
+              </DialogDescription>
+            </DialogHeader>
+            
+            {selectedSensor && (
+              <Tabs defaultValue="overview" className="flex-1 overflow-hidden flex flex-col">
+                <TabsList className="w-full justify-start">
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="datapoints">
+                    Data Points {selectedSensor.dataPoints && selectedSensor.dataPoints.length > 0 && (
+                      <Badge variant="secondary" className="ml-2 text-xs">
+                        {selectedSensor.dataPoints.length}
+                      </Badge>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger value="anomaly">Anomaly Detection</TabsTrigger>
+                </TabsList>
+
+                {/* Overview Tab */}
+                <TabsContent value="overview" className="flex-1 overflow-y-auto space-y-6 mt-4">
+                  {/* Status Section */}
+                  <div>
+                    <h3 className="text-sm font-semibold mb-3 text-foreground">Status</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-sm text-muted-foreground">State</p>
+                        <div className="mt-1">{getStatusBadge(selectedSensor)}</div>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Health</p>
+                        <p className="text-sm font-medium mt-1">{selectedSensor.healthy ? '✓ Healthy' : '✗ Unhealthy'}</p>
+                      </div>
+                      {selectedSensor.protocol && (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Protocol</p>
+                          <Badge variant="outline" className="mt-1">{selectedSensor.protocol.toUpperCase()}</Badge>
+                        </div>
+                      )}
+                      {selectedSensor.connected !== undefined && (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Connected</p>
+                          <p className="text-sm font-medium mt-1">{selectedSensor.connected ? '✓ Yes' : '✗ No'}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Deployment Section */}
+                  {selectedSensor.type === 'device' && (
+                    <div>
+                      <h3 className="text-sm font-semibold mb-3 text-foreground">Deployment</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        {selectedSensor.lastDeployedAt && (
+                          <div>
+                            <p className="text-sm text-muted-foreground">Last Deployed</p>
+                            <p className="text-sm font-medium mt-1">
+                              {new Date(selectedSensor.lastDeployedAt).toLocaleString()}
+                            </p>
+                          </div>
+                        )}
+                        {selectedSensor.deploymentAttempts !== undefined && (
+                          <div>
+                            <p className="text-sm text-muted-foreground">Deploy Attempts</p>
+                            <p className="text-sm font-medium mt-1">{selectedSensor.deploymentAttempts}</p>
+                          </div>
+                        )}
+                      </div>
+                      {selectedSensor.deploymentError && (
+                        <Alert variant="destructive" className="mt-4">
+                          <AlertDescription>
+                            <span className="font-medium">Deployment Error:</span> {selectedSensor.deploymentError}
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Activity Section */}
+                  <div>
+                    <h3 className="text-sm font-semibold mb-3 text-foreground">Activity</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      {selectedSensor.type === 'pipeline' && (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Messages Published</p>
+                          <p className="text-sm font-medium mt-1">
+                            {selectedSensor.messagesPublished.toLocaleString()}
+                          </p>
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-sm text-muted-foreground">Last Activity</p>
+                        <p className="text-sm font-medium mt-1">
+                          {selectedSensor.lastActivity 
+                            ? new Date(selectedSensor.lastActivity).toLocaleString()
+                            : 'Never'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Error Section */}
+                  {selectedSensor.lastError && selectedSensor.state !== 'PENDING' && (
+                    <Alert variant="destructive">
+                      <AlertDescription>
+                        <span className="font-medium">Last Error:</span> {selectedSensor.lastError}
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  {/* Configuration Section */}
+                  <div>
+                    <h3 className="text-sm font-semibold mb-3 text-foreground">Configuration</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Type</p>
+                        <p className="text-sm font-medium mt-1 capitalize">{selectedSensor.type || 'Unknown'}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Configured</p>
+                        <p className="text-sm font-medium mt-1">{selectedSensor.configured ? '✓ Yes' : '✗ No'}</p>
+                      </div>
+                    </div>
+                  </div>
+                </TabsContent>
+
+                {/* Data Points Tab */}
+                <TabsContent value="datapoints" className="flex-1 overflow-y-auto mt-4">
+                  {selectedSensor.dataPoints && selectedSensor.dataPoints.length > 0 ? (
+                    <div>
+                      <div className="mb-4">
+                        <p className="text-sm text-muted-foreground">
+                          Configured data points for this {selectedSensor.protocol?.toUpperCase()} sensor
+                        </p>
+                      </div>
+                      <DataPointsViewer 
+                        protocol={selectedSensor.protocol || 'unknown'} 
+                        dataPoints={selectedSensor.dataPoints}
+                      />
+                    </div>
+                  ) : (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <p className="text-lg font-medium mb-2">No data points configured</p>
+                      <p className="text-sm">Add data points to start collecting metrics from this sensor</p>
+                    </div>
+                  )}
+                </TabsContent>
+
+                {/* Anomaly Detection Tab */}
+                <TabsContent value="anomaly" className="flex-1 overflow-y-auto mt-4">
+                  <div className="space-y-4">
+                    <div className="mb-4">
+                      <p className="text-sm text-muted-foreground">
+                        Configure anomaly detection rules for data points
+                      </p>
+                    </div>
+                    
+                    {selectedSensor.dataPoints && selectedSensor.dataPoints.length > 0 ? (
+                      <div className="border border-border rounded-lg p-6 text-center">
+                        <p className="text-sm font-medium text-muted-foreground mb-2">
+                          Anomaly Detection (Coming Soon)
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Select data points from the list and configure threshold-based or ML-based anomaly detection rules
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="text-center py-12 text-muted-foreground">
+                        <p className="text-lg font-medium mb-2">No data points available</p>
+                        <p className="text-sm">Configure data points first to enable anomaly detection</p>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+              </Tabs>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

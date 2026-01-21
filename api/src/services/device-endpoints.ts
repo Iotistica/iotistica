@@ -33,47 +33,12 @@ export interface EndpointDeviceConfig {
 
 export class DeviceSensorSyncService {
   /**
-   * Mark endpoints as pending deployment
-   * Called when user clicks Sync button (POST /deploy)
-   * Updates ONLY deployment_status='pending' by UUID
-   */
-  async markEndpointsAsPending(
-    deviceUuid: string,
-    endpointOverrides: EndpointDeviceConfig[],
-    configVersion: number,
-    userId?: string
-  ): Promise<void> {
-    try {
-      const uuids = endpointOverrides.map(e => e.uuid).filter(Boolean);
-      
-      if (uuids.length === 0) {
-        return;
-      }
-
-      const result = await query(
-        `UPDATE device_sensors 
-         SET deployment_status = 'pending',
-             config_version = $1,
-             updated_by = $2,
-             updated_at = NOW()
-         WHERE device_uuid = $3 AND uuid = ANY($4)`,
-        [configVersion, userId || 'system', deviceUuid, uuids]
-      );
-
-      logger.info(`Marked ${result.rowCount} endpoints as pending deployment`);
-    } catch (error) {
-      logger.error('Failed to mark endpoints as pending:', error);
-      throw error;
-    }
-  }
-
-  /**
    * Sync sensor devices from config to database table
    * Called during deployment or reconciliation
    * 
    * Flow:
    * - During deployment (userId != 'agent-reconciliation'): Add sensors with deployment_status='pending'
-   * - During reconciliation (userId === 'agent-reconciliation'): New sensors='discovered', existing='deployed'
+   * - During reconciliation (userId === 'agent-reconciliation'): Update sensors with deployment_status='deployed'
    */
   async syncConfigToTable(
     deviceUuid: string,
@@ -112,17 +77,12 @@ export class DeviceSensorSyncService {
             existing.enabled !== existing.health_connected;
           
           // Update existing sensor by UUID (stable identifier)
-          // CRITICAL: Deployment status state machine during reconciliation
-          // - If 'pending': Keep pending (user made changes agent hasn't seen yet)
-          // - If 'reconciling': Mark as deployed (agent confirms changes applied)
-          // - If 'discovered': Keep discovered (no user changes yet)
-          // - If 'deployed': Keep deployed (already confirmed)
-          // - During deployment (not reconciliation): Mark as pending if changed
+          // If reconciliation from agent, mark as deployed
+          // If deployment and (changed OR out of sync), mark as pending
+          // If deployment but unchanged and in sync, keep existing status (don't reset to pending)
           const deploymentStatus = isReconciliation 
-            ? (existing?.deployment_status === 'pending' ? 'pending' : 
-               existing?.deployment_status === 'reconciling' ? 'deployed' :
-               existing?.deployment_status || 'discovered')
-            : (hasChanged || isOutOfSync ? 'pending' : existing?.deployment_status || 'discovered');
+            ? 'deployed' 
+            : (hasChanged || isOutOfSync ? 'pending' : existing?.deployment_status || 'deployed');
           
           await query(
             `UPDATE device_sensors SET
@@ -158,9 +118,9 @@ export class DeviceSensorSyncService {
           logger.info(`Updated: ${endpoint.name} (${endpoint.protocol}) - ${deploymentStatus}`);
         } else {
           // Insert new sensor into table (or update if name collision exists)
-          // If reconciliation from agent, mark as discovered (agent found it running, initial state)
+          // If reconciliation from agent, mark as deployed (agent confirms it's running)
           // Otherwise, mark as pending (deployment just triggered, waiting for agent confirmation)
-          const deploymentStatus = isReconciliation ? 'discovered' : 'pending';
+          const deploymentStatus = isReconciliation ? 'deployed' : 'pending';
           
           await query(
             `INSERT INTO device_sensors (
@@ -202,6 +162,21 @@ export class DeviceSensorSyncService {
         }
       }
 
+      // 2. Delete endpoints removed from config (by UUID)
+      logger.info(`[DELETE CHECK] Device ${deviceUuid.substring(0, 8)}: Config UUIDs: [${Array.from(configUuids).join(', ')}]`);
+      logger.info(`[DELETE CHECK] Device ${deviceUuid.substring(0, 8)}: Existing table UUIDs: [${existingResult.rows.map(r => r.uuid).filter(Boolean).join(', ')}]`);
+      logger.info(`[DELETE CHECK] Device ${deviceUuid.substring(0, 8)}: Will delete endpoints NOT in config set`);
+      
+      for (const row of existingResult.rows) {
+        if (row.uuid && !configUuids.has(row.uuid)) {
+          logger.warn(`[DELETE] Device ${deviceUuid.substring(0, 8)}: Deleting "${row.name}" (UUID: ${row.uuid}) - not found in config UUIDs`);
+          await query(
+            'DELETE FROM device_sensors WHERE device_uuid = $1 AND uuid = $2',
+            [deviceUuid, row.uuid]
+          );
+          logger.info(`   Deleted: ${row.name} (removed from config)`);
+        }
+      }
 
       logger.info(`Sync complete: config → table (version ${configVersion}) - ${isReconciliation ? 'DEPLOYED' : 'PENDING'}`);
     } catch (error) {
@@ -211,13 +186,13 @@ export class DeviceSensorSyncService {
   }
 
   /**
-   * Deploy config changes (increment version and mark endpoints as pending)
+   * Deploy config changes (increment version and sync to table)
    * Called when user clicks "Deploy" button
    * 
    * This triggers:
    * 1. Version increment (tells agent to pick up changes)
-   * 2. Mark ONLY changed endpoints as 'pending' (config.endpoints are OVERRIDES, not full records)
-   * 3. Agent will pick up changes and report back
+   * 2. Sync config → table with deployment_status='pending'
+   * 3. Agent will report current state, triggering reconciliation to 'deployed'
    */
   async deployConfig(deviceUuid: string, userId?: string): Promise<any> {
     logger.info(`Deploying config changes for device ${deviceUuid.substring(0, 8)}...`);
@@ -234,14 +209,28 @@ export class DeviceSensorSyncService {
       }
 
       const state = stateResult.rows[0];
+      
+      // DEBUG: Log what we read from database
+      logger.info(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: Raw config from DB (type: ${typeof state.config})`);
+      logger.info(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: Config preview: ${typeof state.config === 'string' ? state.config.substring(0, 200) : JSON.stringify(state.config).substring(0, 200)}`);
+      
       const config = typeof state.config === 'string' ? JSON.parse(state.config) : state.config;
-      const endpointOverrides: EndpointDeviceConfig[] = config.endpoints || [];
+      const endpoints: EndpointDeviceConfig[] = config.endpoints || [];
+      
+      // DEBUG: Log what endpoints we extracted
+      logger.info(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: Extracted ${endpoints.length} endpoints from config`);
+      logger.info(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: Endpoint UUIDs: [${endpoints.map(e => e.uuid).filter(Boolean).join(', ')}]`);
+      if (endpoints.length === 0) {
+        logger.warn(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: WARNING - Config has 0 endpoints! This will DELETE all table endpoints!`);
+        logger.warn(`[DEPLOY] Device ${deviceUuid.substring(0, 8)}: Full config object:`, JSON.stringify(config, null, 2));
+      }
 
-      // 2. Increment version (tells agent to pick up changes)
+      // 2. Increment version and set needs_deployment flag
       const updateResult = await query(
         `UPDATE device_target_state SET
            version = version + 1,
-           updated_at = NOW()
+           updated_at = NOW(),
+           needs_deployment = true
          WHERE device_uuid = $1
          RETURNING version`,
         [deviceUuid]
@@ -249,23 +238,8 @@ export class DeviceSensorSyncService {
 
       const newVersion = updateResult.rows[0].version;
 
-      // 3. Mark ONLY endpoints with overrides as 'pending'
-      // Note: config.endpoints are OVERRIDE objects (just uuid + enabled), NOT full endpoint records
-      if (endpointOverrides.length > 0) {
-        const uuidsToMarkPending = endpointOverrides.map(e => e.uuid).filter(Boolean);
-        
-        if (uuidsToMarkPending.length > 0) {
-          const result = await query(
-            `UPDATE device_sensors 
-             SET deployment_status = 'pending',
-                 config_version = $1,
-                 updated_by = $2,
-                 updated_at = NOW()
-             WHERE device_uuid = $3 AND uuid = ANY($4)`,
-            [newVersion, userId || 'system', deviceUuid, uuidsToMarkPending]
-          );
-        }
-      }
+      // 3. Sync config → table with deployment_status='pending'
+      await this.syncConfigToTable(deviceUuid, endpoints, newVersion, userId);
 
       // 4. Publish event
       await eventPublisher.publish(
@@ -274,11 +248,11 @@ export class DeviceSensorSyncService {
         deviceUuid,
         {
           version: newVersion,
-          endpoints_count: endpointOverrides.length
+          endpoints_count: endpoints.length
         }
       );
 
-      logger.info(`Deployed config (version: ${newVersion})`);
+      logger.info(`Deployed config (version: ${newVersion}) - sensors marked as 'pending'`);
 
       return {
         version: newVersion,
@@ -464,9 +438,6 @@ export class DeviceSensorSyncService {
    * Sync agent's current state to table (RECONCILIATION)
    * Called when agent reports its actual running configuration
    * This closes the Event Sourcing loop: config → agent → current state → table
-   * 
-   * CRITICAL: Also handles cleanup of devices marked pending_deletion:
-   * - If device is pending_deletion and NOT in agent's current state → hard delete
    */
   async syncCurrentStateToTable(deviceUuid: string, currentState: any): Promise<void> {
     logger.info(`Reconciling current state from agent for device ${deviceUuid.substring(0, 8)}...`);
@@ -509,25 +480,6 @@ export class DeviceSensorSyncService {
 
       // Sync table to match agent's reality (not desired state!)
       await this.syncConfigToTable(deviceUuid, runningEndpoints, currentVersion, 'agent-reconciliation');
-
-      // CRITICAL: Check for devices pending deletion that agent has stopped
-      // If device is pending_deletion and NOT in agent's current state → hard delete
-      const agentEndpointNames = new Set(runningEndpoints.map(e => e.name));
-      
-      const pendingDeletionResult = await query(
-        `SELECT uuid, name FROM device_sensors 
-         WHERE device_uuid = $1 AND deployment_status = 'pending_deletion'`,
-        [deviceUuid]
-      );
-
-      for (const row of pendingDeletionResult.rows) {
-        if (!agentEndpointNames.has(row.name)) {
-          logger.info(`Device "${row.name}" is pending_deletion and NOT in agent's state → hard deleting`);
-          await this.hardDeleteEndpoint(deviceUuid, row.uuid, 'agent-reconciliation');
-        } else {
-          logger.warn(`Device "${row.name}" is pending_deletion but STILL in agent's state - agent hasn't stopped it yet`);
-        }
-      }
 
       logger.info(`Reconciliation complete: agent reality → table (version ${currentVersion})`);
     } catch (error) {
@@ -758,202 +710,15 @@ export class DeviceSensorSyncService {
   }
 
   /**
-   * Add new sensor device (Adds to config, then syncs to table)
-   */
-  async addEndpoint(
-    deviceUuid: string,
-    sensorConfig: EndpointDeviceConfig,
-    userId?: string
-  ): Promise<any> {
-    logger.info(`Adding endpoint "${sensorConfig.name}" for device ${deviceUuid.substring(0, 8)}...`);
-
-    try {
-      // 1. Generate UUID if not provided
-      if (!sensorConfig.uuid) {
-        sensorConfig.uuid = uuidv4();
-      }
-
-      // 2. Get current target state
-      const stateResult = await query(
-        'SELECT apps, config, version FROM device_target_state WHERE device_uuid = $1',
-        [deviceUuid]
-      );
-
-      if (stateResult.rows.length === 0) {
-        throw new Error('Device not found');
-      }
-
-      const state = stateResult.rows[0];
-      const apps = typeof state.apps === 'string' ? JSON.parse(state.apps) : state.apps;
-      const config = typeof state.config === 'string' ? JSON.parse(state.config) : state.config;
-      const existingDevices: EndpointDeviceConfig[] = config.endpoints || [];
-
-      // Clean up incomplete sensors (legacy discovery entries without required fields)
-      const validExistingDevices = existingDevices.filter(d => {
-        const isValid = d.protocol && d.connection && d.name;
-        if (!isValid) {
-          logger.warn(`Removing incomplete sensor from config: ${d.name || 'unnamed'} (missing protocol/connection)`);
-          return false;
-        }
-        
-        // Generate UUID if missing (legacy entries may have "id" instead of "uuid")
-        if (!d.uuid) {
-          if ((d as any).id) {
-            d.uuid = (d as any).id; // Use existing id as uuid
-            delete (d as any).id;
-            logger.info(`Migrated sensor "${d.name}": id → uuid`);
-          } else {
-            d.uuid = uuidv4(); // Generate new UUID
-            logger.info(`Generated UUID for sensor "${d.name}": ${d.uuid}`);
-          }
-        }
-        
-        return true;
-      });
-
-      // 3. Check for duplicate name
-      const duplicate = validExistingDevices.find(d => d.name === sensorConfig.name);
-      if (duplicate) {
-        throw new Error(`Sensor with name "${sensorConfig.name}" already exists`);
-      }
-
-      // 4. Add sensor to config (SOURCE OF TRUTH)
-      validExistingDevices.push(sensorConfig);
-      config.endpoints = validExistingDevices;
-
-      // 5. Save updated target state
-      const updateResult = await query(
-        `UPDATE device_target_state SET
-           apps = $1,
-           config = $2,
-           version = version + 1,
-           updated_at = NOW(),
-           needs_deployment = true
-         WHERE device_uuid = $3
-         RETURNING version`,
-        [JSON.stringify(apps), JSON.stringify(config), deviceUuid]
-      );
-
-      const newVersion = updateResult.rows[0].version;
-
-      // 6. Sync config → table (will insert into table with deployment_status='pending')
-      await this.syncConfigToTable(deviceUuid, validExistingDevices, newVersion, userId);
-
-      // 7. Publish event
-      await eventPublisher.publish(
-        'device_sensor.added',
-        'device',
-        deviceUuid,
-        {
-          sensor_name: sensorConfig.name,
-          sensor_uuid: sensorConfig.uuid,
-          protocol: sensorConfig.protocol,
-          version: newVersion
-        }
-      );
-
-      logger.info(`Added sensor "${sensorConfig.name}" to config (version: ${newVersion})`);
-
-      return {
-        sensor: sensorConfig,
-        version: newVersion
-      };
-    } catch (error) {
-      logger.error('Error adding sensor:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Delete sensor device (SOFT DELETE PATTERN - Reconciliation Required)
+   * Delete sensor device (CORRECT PATTERN: Delete from config first)
    * NOTE: sensorIdentifier can be either UUID (preferred) or name (backward compatibility)
-   * 
-   * CRITICAL: This is a SOFT DELETE that requires agent reconciliation:
-   * 1. Mark sensor with deployment_status='pending_deletion' in database
-   * 2. Keep in config.endpoints but marked for deletion
-   * 3. Agent sees it in target state and stops polling it
-   * 4. Agent reports it stopped in current state
-   * 5. Hard delete happens later when agent confirms (via reconciliation or separate cleanup job)
    */
   async deleteEndpoint(
     deviceUuid: string,
     sensorIdentifier: string,
     userId?: string
   ): Promise<any> {
-    logger.info(`Marking endpoint "${sensorIdentifier}" for deletion (device ${deviceUuid.substring(0, 8)}...)`);
-
-    try {
-      // 1. Check if sensor exists in database first (may not be in target state config yet)
-      const sensorCheck = await query(
-        'SELECT uuid, name FROM device_sensors WHERE device_uuid = $1 AND (uuid::text = $2 OR name = $2)',
-        [deviceUuid, sensorIdentifier]
-      );
-
-      if (sensorCheck.rows.length === 0) {
-        throw new Error(`Sensor "${sensorIdentifier}" not found`);
-      }
-
-      const sensorToDelete = sensorCheck.rows[0];
-
-      // 2. SOFT DELETE: Mark in database (sensor may or may not be in config)
-      // Update deployment_status to 'pending_deletion' in device_sensors table
-      await query(
-        `UPDATE device_sensors 
-         SET deployment_status = 'pending_deletion',
-             enabled = false,
-             updated_at = NOW()
-         WHERE device_uuid = $1 AND (uuid::text = $2 OR name = $2)`,
-        [deviceUuid, sensorIdentifier]
-      );
-
-      // 3. Update target state version (triggers deployment)
-      const updateResult = await query(
-        `UPDATE device_target_state SET
-           version = version + 1,
-           updated_at = NOW(),
-           needs_deployment = true
-         WHERE device_uuid = $1
-         RETURNING version`,
-        [deviceUuid]
-      );
-
-      const newVersion = updateResult.rows[0].version;
-
-      // 4. Publish event
-      await eventPublisher.publish(
-        'device_sensor.pending_deletion',
-        'device',
-        deviceUuid,
-        {
-          sensor_name: sensorToDelete.name,
-          sensor_uuid: sensorToDelete.uuid,
-          version: newVersion
-        }
-      );
-
-      logger.info(`Marked sensor "${sensorToDelete.name}" for deletion (version: ${newVersion}) - waiting for agent reconciliation`);
-
-      return {
-        version: newVersion,
-        status: 'pending_deletion',
-        message: 'Sensor marked for deletion - will be removed after agent confirmation'
-      };
-    } catch (error) {
-      logger.error('Error marking sensor for deletion:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Hard delete sensor after agent confirmation (called during reconciliation)
-   * Only called when agent reports sensor is stopped in current state
-   */
-  async hardDeleteEndpoint(
-    deviceUuid: string,
-    sensorIdentifier: string,
-    userId?: string
-  ): Promise<any> {
-    logger.info(`Hard deleting endpoint "${sensorIdentifier}" for device ${deviceUuid.substring(0, 8)}...`);
+    logger.info(`Deleting endpoint "${sensorIdentifier}" for device ${deviceUuid.substring(0, 8)}...`);
 
     try {
       // 1. Get current target state
@@ -975,8 +740,11 @@ export class DeviceSensorSyncService {
       const sensorToDelete = existingDevices.find(d => 
         d.uuid === sensorIdentifier || d.name === sensorIdentifier
       );
+      if (!sensorToDelete) {
+        throw new Error(`Sensor "${sensorIdentifier}" not found`);
+      }
 
-      // 3. Remove sensor from config (SOURCE OF TRUTH)
+      // 3. Remove sensor from config (SOURCE OF TRUTH) by UUID if available, otherwise by name
       existingDevices = existingDevices.filter(d => 
         d.uuid !== sensorIdentifier && d.name !== sensorIdentifier
       );
@@ -988,7 +756,8 @@ export class DeviceSensorSyncService {
            apps = $1,
            config = $2,
            version = version + 1,
-           updated_at = NOW()
+           updated_at = NOW(),
+           needs_deployment = true
          WHERE device_uuid = $3
          RETURNING version`,
         [JSON.stringify(apps), JSON.stringify(config), deviceUuid]
@@ -996,33 +765,28 @@ export class DeviceSensorSyncService {
 
       const newVersion = updateResult.rows[0].version;
 
-      // 5. Hard delete from database
-      await query(
-        'DELETE FROM device_sensors WHERE device_uuid = $1 AND (uuid = $2 OR name = $2)',
-        [deviceUuid, sensorIdentifier]
-      );
+      // 5. Sync config → table (will delete from table)
+      await this.syncConfigToTable(deviceUuid, existingDevices, newVersion, userId);
 
       // 6. Publish event
-      if (sensorToDelete) {
-        await eventPublisher.publish(
-          'device_sensor.deleted',
-          'device',
-          deviceUuid,
-          {
-            sensor_name: sensorToDelete.name,
-            sensor_uuid: sensorToDelete.uuid,
-            version: newVersion
-          }
-        );
-      }
+      await eventPublisher.publish(
+        'device_sensor.deleted',
+        'device',
+        deviceUuid,
+        {
+          sensor_name: sensorToDelete.name,
+          sensor_uuid: sensorToDelete.uuid,
+          version: newVersion
+        }
+      );
 
-      logger.info(`Hard deleted sensor "${sensorToDelete?.name || sensorIdentifier}" from config and database (version: ${newVersion})`);
+      logger.info(`Deleted sensor "${sensorToDelete.name}" from config (version: ${newVersion})`);
 
       return {
         version: newVersion
       };
     } catch (error) {
-      logger.error('Error hard deleting sensor:', error);
+      logger.error('Error deleting sensor:', error);
       throw error;
     }
   }

@@ -19,7 +19,7 @@
         "!**/node_modules/**"
       ],
       "env": {
-			"PROVISIONING_KEY": "95660cc4aec1d21204edae33d5322f65d162a594e8e8f912c7a0c2f407ffa1f4"
+			"PROVISIONING_KEY": "ff88ec193b85cab8aa2dec9687473f4aabe7c34bd1adbb2374e845c6b413f1c3"
       }
     },
     {

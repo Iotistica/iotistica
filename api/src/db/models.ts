@@ -429,7 +429,7 @@ export class DeviceTargetStateModel {
   /**
    * Deploy target state to device
    * This increments version so device will pick up changes
-   * Also marks endpoints with overrides as 'reconciling'
+   * Also syncs config.endpoints to device_sensors table
    */
   static async deploy(
     deviceUuid: string,
@@ -453,27 +453,15 @@ export class DeviceTargetStateModel {
 
     const deployedState = result.rows[0];
 
-    // Mark endpoints with 'pending' status as 'reconciling' (sync in progress)
-    const config = typeof deployedState.config === 'string' 
-      ? JSON.parse(deployedState.config) 
-      : deployedState.config;
-    
-    const endpointOverrides = config?.endpoints || [];
-    
-    if (endpointOverrides.length > 0) {
-      const uuids = endpointOverrides.map((e: any) => e.uuid).filter(Boolean);
-      
-      if (uuids.length > 0) {
-        await query(
-          `UPDATE device_sensors 
-           SET deployment_status = 'reconciling',
-               config_version = $1,
-               updated_by = $2,
-               updated_at = NOW()
-           WHERE device_uuid = $3 AND uuid = ANY($4) AND deployment_status = 'pending'`,
-          [deployedState.version, deployedBy, deviceUuid, uuids]
-        );
-      }
+    // Sync config.endpoints to device_sensors table
+    if (deployedState.config && deployedState.config.endpoints) {
+      const syncService = new DeviceSensorSyncService();
+      await syncService.syncConfigToTable(
+        deviceUuid,
+        deployedState.config.endpoints,
+        deployedState.version,
+        deployedBy
+      );
     }
 
     return deployedState;
