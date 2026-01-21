@@ -201,10 +201,6 @@ router.patch('/device/state', deviceAuthFromBody, async (req, res) => {
 /**
  * Get device target state
  * GET /api/v1/devices/:uuid/target-state
- * 
- * Returns config with OVERRIDES ONLY (not full endpoint configs)
- * - config.endpoints = [{uuid, enabled}] - Just the overrides from dashboard
- * - Agent merges these with its local SQLite baseline (full connection configs)
  */
 router.get('/devices/:uuid/target-state', deviceAuth, async (req, res) => {
   try {
@@ -376,7 +372,7 @@ router.put('/devices/:uuid/target-state', validateTargetStateConfigMiddleware, a
       });
     }
 
-   
+    // 🎯 RESOLVE IMAGE DIGESTS
     // Convert all :latest and floating tags to @sha256:... digests
     logger.debug('Resolving image digests (PUT)', { deviceId: uuid.substring(0, 8) });
     try {
@@ -393,17 +389,6 @@ router.put('/devices/:uuid/target-state', validateTargetStateConfigMiddleware, a
 
     // Set needs_deployment = true since config changed
     const targetState = await DeviceTargetStateModel.set(uuid, apps, config || {}, true);
-
-    // Mark changed endpoints as pending in device_sensors table
-    if (config?.endpoints && Array.isArray(config.endpoints) && config.endpoints.length > 0) {
-      const { deviceSensorSync } = await import('../services/device-endpoints.js');
-      await deviceSensorSync.markEndpointsAsPending(
-        uuid,
-        config.endpoints,
-        targetState.version,
-        'dashboard'
-      );
-    }
 
     //EVENT SOURCING: Publish target state updated event
     await eventPublisher.publish(

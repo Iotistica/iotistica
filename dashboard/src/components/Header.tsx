@@ -55,6 +55,22 @@ export function Header({
   const deviceState = deviceUuid ? getDeviceState(deviceUuid) : null;
   const hasUnsavedChanges = deviceState?.isDirty || false;
   
+  // Listen for sensor config changes (toggle events)
+  useEffect(() => {
+    const handleConfigChanged = (event: CustomEvent) => {
+      if (event.detail.deviceUuid === deviceUuid) {
+        console.log('Sensor config changed - refreshing Header state');
+        forceUpdate({}); // Trigger re-render to update needsDeployment
+      }
+    };
+    
+    window.addEventListener('sensor-config-changed', handleConfigChanged as EventListener);
+    
+    return () => {
+      window.removeEventListener('sensor-config-changed', handleConfigChanged as EventListener);
+    };
+  }, [deviceUuid]);
+  
   const handleDeploy = async () => {
     if (!deviceUuid) {
       toast.error("No device selected");
