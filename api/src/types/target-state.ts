@@ -210,7 +210,7 @@ export interface TargetState {
   runtime: RuntimeConfig;
   agent?: AgentUpdateConfig;  // Cloud-controlled agent version policy
   intervals: IntervalsConfig;
-  protocols: ProtocolsConfig;
+  //protocols: ProtocolsConfig;
 }
 
 // ============================================================================

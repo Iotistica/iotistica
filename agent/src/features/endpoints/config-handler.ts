@@ -25,6 +25,8 @@ export interface ProtocolAdapterDevice {
 	data_points?: any[]; // snake_case for SQLite
 	registers?: any[]; // Deprecated: kept for backward compatibility
 	metadata?: Record<string, any>;
+	deploymentStatus?: 'pending' | 'deployed' | 'failed' | 'reconciling' | 'discovered' | 'pending_deletion' | 'virtual';
+	deployment_status?: 'pending' | 'deployed' | 'failed' | 'reconciling' | 'discovered' | 'pending_deletion' | 'virtual';
 }
 
 export interface ProtocolAdaptersManager {

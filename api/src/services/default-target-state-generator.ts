@@ -405,8 +405,8 @@ export function generateDefaultTargetStateConfig(
         fullIntervalMs: 86400000,  // 24 hours
         lightIntervalMs: 14400000,  // 4 hours
       },
-    },
-    protocols: generateProtocolsConfig(simulatorOptions),
+    }
+    //protocols: generateProtocolsConfig(simulatorOptions),
   };
 
   // If no license data, return default
@@ -460,16 +460,16 @@ export async function generateDefaultTargetState(
   // Generate config with connection profiles defined
   const config = generateDefaultTargetStateConfig(licenseData, [], simulatorOptions);
   
-  // Load points for each connection based on its profile
-  if (config.protocols.modbus.connections) {
-    for (const connection of config.protocols.modbus.connections) {
-      if (connection.profile) {
-        const profileDataPoints = await getProfileDataPoints(connection.profile, 'modbus');
-        connection.points = profileDataPointsToPointsObject(profileDataPoints as ModbusProfileDataPoint[]);
-        logger.info(`Loaded ${Object.keys(connection.points).length} points for ${connection.name} (${connection.profile})`);
-      }
-    }
-  }
+  // // Load points for each connection based on its profile
+  // if (config.protocols.modbus.connections) {
+  //   for (const connection of config.protocols.modbus.connections) {
+  //     if (connection.profile) {
+  //       const profileDataPoints = await getProfileDataPoints(connection.profile, 'modbus');
+  //       connection.points = profileDataPointsToPointsObject(profileDataPoints as ModbusProfileDataPoint[]);
+  //       logger.info(`Loaded ${Object.keys(connection.points).length} points for ${connection.name} (${connection.profile})`);
+  //     }
+  //   }
+  // }
   
   return {
     apps: {
