@@ -223,6 +223,51 @@ export class AgentConfig extends EventEmitter {
   }
 
   /**
+   * Get discovery targets for a specific protocol
+   * 
+   * Discovery targets are endpoints configured for device scanning (not operational data collection):
+   * - Modbus: Has slaveRange (not single slaveId)
+   * - OPC-UA: Has endpointUrl but no dataPoints
+   * - SNMP: Has community but no dataPoints (or no OIDs)
+   * - BACnet: Has discoveryTargets array
+   * 
+   * @param protocol - Protocol name ('modbus', 'opcua', 'snmp', 'bacnet')
+   * @returns Filtered endpoints for discovery
+   */
+  getDiscoveryTargets(protocol: string): any[] {
+    const targetState = this.stateReconciler.getTargetState();
+    const endpoints = targetState?.endpoints || [];
+
+    return endpoints.filter((endpoint: any) => {
+      if (endpoint.protocol !== protocol) return false;
+
+      switch (protocol) {
+        case 'modbus':
+          // Discovery target if has slaveRange (not single slaveId)
+          return endpoint.connection?.slaveRange !== undefined;
+
+        case 'opcua':
+          // Discovery target if has endpointUrl but no dataPoints
+          return endpoint.connection?.endpointUrl && 
+                 (!endpoint.dataPoints || endpoint.dataPoints.length === 0);
+
+        case 'snmp':
+          // Discovery target if has community but no dataPoints/OIDs
+          return endpoint.connection?.community && 
+                 (!endpoint.dataPoints || endpoint.dataPoints.length === 0);
+
+        case 'bacnet':
+          // Discovery target if has discoveryTargets array
+          return Array.isArray(endpoint.connection?.discoveryTargets) && 
+                 endpoint.connection.discoveryTargets.length > 0;
+
+        default:
+          return false;
+      }
+    });
+  }
+
+  /**
    * Get Modbus protocol adapter configuration
    * 
    * Supports multiple connection formats:

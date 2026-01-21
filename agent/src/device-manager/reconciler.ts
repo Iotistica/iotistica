@@ -30,6 +30,7 @@ import semver from 'semver';
 export interface DeviceState {
 	apps: Record<number, any>;
 	config?: DeviceConfig;
+	endpoints?: any[]; // Protocol device endpoints (Modbus, OPC-UA, SNMP, etc.)
 }
 
 interface StateReconcilerEvents {

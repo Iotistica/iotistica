@@ -224,9 +224,66 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
               placeholder="1"
               min="1"
               max="247"
+              disabled={!!watch('connection.slaveRange')}
             />
             <p className="text-xs text-muted-foreground">
               Modbus device address (1-247, default: 1)
+            </p>
+          </div>
+
+          {/* Slave Range for Discovery */}
+          <div className="space-y-2">
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="tcp-useSlaveRange"
+                checked={!!watch('connection.slaveRange')}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setValue('connection.slaveRange', { start: 1, end: 247 });
+                    setValue('connection.slaveId', undefined as any);
+                  } else {
+                    setValue('connection.slaveRange', undefined as any);
+                    setValue('connection.slaveId', 1);
+                  }
+                }}
+              />
+              <Label htmlFor="tcp-useSlaveRange" className="cursor-pointer">
+                Use as Discovery Target (scan slave range)
+              </Label>
+            </div>
+            {watch('connection.slaveRange') && (
+              <div className="grid grid-cols-2 gap-4 ml-6">
+                <div className="space-y-2">
+                  <Label htmlFor="tcp-slaveRange-start">
+                    Start Slave ID
+                  </Label>
+                  <Input
+                    id="tcp-slaveRange-start"
+                    type="number"
+                    {...register('connection.slaveRange.start', { valueAsNumber: true })}
+                    placeholder="1"
+                    min="1"
+                    max="247"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="tcp-slaveRange-end">
+                    End Slave ID
+                  </Label>
+                  <Input
+                    id="tcp-slaveRange-end"
+                    type="number"
+                    {...register('connection.slaveRange.end', { valueAsNumber: true })}
+                    placeholder="247"
+                    min="1"
+                    max="247"
+                  />
+                </div>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Discovery targets scan a range of slave IDs to find devices
             </p>
           </div>
         </div>
@@ -332,9 +389,66 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
                 placeholder="1"
                 min="1"
                 max="247"
+                disabled={!!watch('connection.slaveRange')}
               />
               <p className="text-xs text-muted-foreground">
                 Modbus device address (1-247, default: 1)
+              </p>
+            </div>
+
+            {/* Slave Range for Discovery */}
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="rtu-useSlaveRange"
+                  checked={!!watch('connection.slaveRange')}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setValue('connection.slaveRange', { start: 1, end: 247 });
+                      setValue('connection.slaveId', undefined as any);
+                    } else {
+                      setValue('connection.slaveRange', undefined as any);
+                      setValue('connection.slaveId', 1);
+                    }
+                  }}
+                />
+                <Label htmlFor="rtu-useSlaveRange" className="cursor-pointer">
+                  Use as Discovery Target (scan slave range)
+                </Label>
+              </div>
+              {watch('connection.slaveRange') && (
+                <div className="grid grid-cols-2 gap-4 ml-6">
+                  <div className="space-y-2">
+                    <Label htmlFor="rtu-slaveRange-start">
+                      Start Slave ID
+                    </Label>
+                    <Input
+                      id="rtu-slaveRange-start"
+                      type="number"
+                      {...register('connection.slaveRange.start', { valueAsNumber: true })}
+                      placeholder="1"
+                      min="1"
+                      max="247"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="rtu-slaveRange-end">
+                      End Slave ID
+                    </Label>
+                    <Input
+                      id="rtu-slaveRange-end"
+                      type="number"
+                      {...register('connection.slaveRange.end', { valueAsNumber: true })}
+                      placeholder="247"
+                      min="1"
+                      max="247"
+                    />
+                  </div>
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Discovery targets scan a range of slave IDs to find devices
               </p>
             </div>
           </div>

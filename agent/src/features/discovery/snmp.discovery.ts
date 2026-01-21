@@ -19,6 +19,7 @@ import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, DiscoveredDevice, ValidationResult } from './base.discovery';
 import { generateSNMPFingerprint } from './fingerprint';
+import type { AgentConfig } from '../../config/agent-config.js';
 import * as net from 'net';
 import * as dns from 'dns';
 import { promisify } from 'util';
@@ -51,8 +52,11 @@ interface SNMPDeviceInfo {
 }
 
 export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
-  constructor(logger?: AgentLogger) {
+  private agentConfig?: AgentConfig;
+
+  constructor(logger?: AgentLogger, agentConfig?: AgentConfig) {
     super('snmp', logger);
+    this.agentConfig = agentConfig;
   }
 
   /**
@@ -61,54 +65,49 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
   async discover(options?: SNMPDiscoveryOptions): Promise<DiscoveredDevice[]> {
     const discovered: DiscoveredDevice[] = [];
 
-    this.logger?.debugSync('Starting SNMP discovery', {
-      component: LogComponents.discovery + "] [" + this.protocol as any,
-      protocol: this.protocol,
-      phase: 'discovery'
-    });
-
-    // Default options
-    const ipRanges = options?.ipRanges || [];
-    const port = options?.port || 161;
-    const community = options?.community || 'public';
-    const version = options?.version || 'v2c';
-    const timeout = options?.timeout || 2000;
-    const retries = options?.retries || 1;
-    const concurrency = options?.concurrency || 10;
-
-    // Discovery runs on ALL hosts (enabled flag only affects adapter data collection)
-    if (ipRanges.length === 0) {
-      this.logger?.warnSync('No IP ranges configured for SNMP discovery - skipping', {
+    // Get discovery targets from endpoints (those with community but no dataPoints)
+    const discoveryTargets = this.agentConfig?.getDiscoveryTargets?.('snmp') || [];
+    
+    if (discoveryTargets.length === 0) {
+      this.logger?.debugSync('No SNMP discovery targets configured (need community without dataPoints)', {
         component: LogComponents.discovery + "] [" + this.protocol as any,
-        note: 'Configure SNMP IP ranges via dashboard or set SNMP_IP_RANGES env var'
+        protocol: this.protocol
       });
       return [];
     }
 
-    this.logger?.debugSync('SNMP discovery configuration', {
+    this.logger?.debugSync(`Starting SNMP discovery (${discoveryTargets.length} targets)`, {
       component: LogComponents.discovery + "] [" + this.protocol as any,
-      ipRanges,
-      port,
-      version,
-      concurrency
+      protocol: this.protocol,
+      phase: 'discovery',
+      targetCount: discoveryTargets.length
     });
 
     // Build list of hosts to scan with their connection metadata
-    const hostsToScan: Array<{ ip: string; connectionName?: string; connectionUuid?: string }> = [];
+    const hostsToScan: Array<{ 
+      ip: string; 
+      port: number;
+      community: string;
+      connectionName?: string; 
+      connectionUuid?: string;
+      timeout?: number;
+      retries?: number;
+    }> = [];
     
-    for (const item of ipRanges) {
-      if (typeof item === 'string') {
-        const ips = await this.expandIPRanges([item]);
-        ips.forEach(ip => hostsToScan.push({ ip }));
-      } else {
-        const conn = item as any;
-        const ips = await this.expandIPRanges([conn.host]);
-        ips.forEach(ip => hostsToScan.push({ 
-          ip, 
-          connectionName: conn.name,
-          connectionUuid: conn.uuid
-        }));
-      }
+    for (const endpoint of discoveryTargets) {
+      const conn = endpoint.connection;
+      if (!conn?.host || !conn?.community) continue;
+
+      const ips = await this.expandIPRanges([conn.host]);
+      ips.forEach(ip => hostsToScan.push({ 
+        ip,
+        port: conn.port || 161,
+        community: conn.community,
+        connectionName: endpoint.name,
+        connectionUuid: endpoint.uuid,
+        timeout: conn.timeout || 2000,
+        retries: conn.retries || 1
+      }));
     }
 
     // Filter out gateway IPs
@@ -126,20 +125,21 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
     });
 
     // Concurrent scanning with rate limiting
+    const concurrency = options?.concurrency || 10;
     const { default: pLimit } = await import('p-limit');
     const limit = pLimit(concurrency);
 
     const scanResults = await Promise.allSettled(
-      nonGatewayHosts.map(({ ip, connectionName, connectionUuid }) =>
+      nonGatewayHosts.map(({ ip, port, community, connectionName, connectionUuid, timeout, retries }) =>
         limit(async () => {
           try {
             const deviceInfo = await this.testSNMPDevice(
               ip,
               port,
               community,
-              version,
-              timeout,
-              retries
+              'v2c', // Default to v2c
+              timeout || 2000,
+              retries || 1
             );
 
             if (deviceInfo) {
@@ -153,18 +153,11 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
                 connection: {
                   host: ip,
                   port,
-                  version,
-                  community: version === 'v3' ? undefined : community,
+                  community, // Always use from endpoint
                   timeout,
                   retries,
-                  // SNMPv3 auth (if configured)
-                  ...(version === 'v3' && options?.v3Username && {
-                    username: options.v3Username,
-                    authProtocol: options.v3AuthProtocol,
-                    authKey: options.v3AuthKey,
-                    privProtocol: options.v3PrivProtocol,
-                    privKey: options.v3PrivKey
-                  })
+                  connectionName,
+                  connectionUuid
                 },
                 dataPoints: this.generateDefaultDataPoints(deviceInfo),
                 confidence: 'medium',
@@ -173,7 +166,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
                 metadata: {
                   ipAddress: ip,
                   port,
-                  version,
+                  community,
                   sysDescr: deviceInfo.sysDescr,
                   sysObjectID: deviceInfo.sysObjectID,
                   discoveryMethod: 'sysDescr-read'

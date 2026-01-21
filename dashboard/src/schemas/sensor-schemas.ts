@@ -36,7 +36,8 @@ export interface ModbusTCPConnection {
   type: 'tcp';
   host: string;
   port: number;
-  slaveId: number; // Unit ID (1-247)
+  slaveId?: number; // Unit ID (1-247) for operational devices
+  slaveRange?: { start: number; end: number }; // For discovery targets
   timeout: number;
 }
 
@@ -50,7 +51,8 @@ export interface ModbusRTUConnection {
   dataBits: number;
   stopBits: number;
   parity: 'none' | 'even' | 'odd';
-  slaveId: number; // Unit ID (1-247)
+  slaveId?: number; // Unit ID (1-247) for operational devices
+  slaveRange?: { start: number; end: number }; // For discovery targets
   timeout: number;
 }
 

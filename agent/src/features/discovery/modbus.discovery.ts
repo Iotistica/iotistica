@@ -60,28 +60,30 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
    */
   async discover(options?: ModbusDiscoveryOptions): Promise<DiscoveredDevice[]> {
 
-    // Get profile data points from target state (pushed via CloudSync)
-    const modbusConfig = this.agentConfig?.getModbusConfig();
+    // Get discovery targets from endpoints (those with slaveRange)
+    const discoveryTargets = this.agentConfig?.getDiscoveryTargets?.('modbus') || [];
     
-    // Multi-connection mode detection
-    if (modbusConfig?.connections && modbusConfig.connections.length > 0) {
-      // Discovery runs on ALL connections (enabled flag only affects adapter data collection)
-      const connections = modbusConfig.connections;
-      
-      this.logger?.debugSync(`Starting multi-connection Modbus discovery (${connections.length} connections)`, {
-        component: LogComponents.discovery + "] [" + this.protocol as any,
-        connectionCount: connections.length
+    if (discoveryTargets.length === 0) {
+      this.logger?.debugSync('No Modbus discovery targets configured (need slaveRange)', {
+        component: LogComponents.discovery + "] [" + this.protocol as any
       });
+      return [];
+    }
 
-      const allDiscovered: DiscoveredDevice[] = [];
+    this.logger?.debugSync(`Starting Modbus discovery (${discoveryTargets.length} targets with slaveRange)`, {
+      component: LogComponents.discovery + "] [" + this.protocol as any,
+      targetCount: discoveryTargets.length
+    });
 
-      // Separate TCP and serial connections (TCP can be parallel, RTU must be sequential)
-      const tcpConnections = connections.filter(c => c.host);
-      const serialConnections = connections.filter(c => !c.host);
+    const allDiscovered: DiscoveredDevice[] = [];
+
+    // Separate TCP and serial connections (TCP can be parallel, RTU must be sequential)
+    const tcpConnections = discoveryTargets.filter((t: any) => t.connection?.type === 'tcp');
+    const serialConnections = discoveryTargets.filter((t: any) => t.connection?.type === 'rtu');
 
       // Parallel TCP scanning (controlled concurrency to avoid overwhelming network)
       if (tcpConnections.length > 0) {
-        this.logger?.debugSync(`Scanning ${tcpConnections.length} TCP connections (max 3 parallel)`, {
+        this.logger?.debugSync(`Scanning ${tcpConnections.length} TCP targets (max 3 parallel)`, {
           component: LogComponents.discovery + "] [" + this.protocol as any
         });
 
@@ -93,29 +95,28 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 
         for (const chunk of chunks) {
           const results = await Promise.all(
-            chunk.map(async (conn) => {
+            chunk.map(async (endpoint: any) => {
               const connOptions: ModbusDiscoveryOptions = {
-                tcpHost: conn.host,
-                tcpPort: conn.port,
-                timeout: conn.timeoutMs,
-                slaveIdRange: conn.addressing?.slaveRange 
-                  ? [conn.addressing.slaveRange.start, conn.addressing.slaveRange.end]
-                  : [1, 10]
+                tcpHost: endpoint.connection.host,
+                tcpPort: endpoint.connection.port || 502,
+                timeout: endpoint.connection.timeout || 5000,
+                slaveIdRange: endpoint.connection.slaveRange 
+                  ? [endpoint.connection.slaveRange.start, endpoint.connection.slaveRange.end]
+                  : [1, 247]
               };
 
-              // Convert points object to array (API sends Record<string, ModbusDataPoint>)
-              const dataPoints = conn.points 
-                ? Object.values(conn.points) 
-                : (modbusConfig.profileDataPoints || []);
+              // Discovery targets may have sample dataPoints to test read
+              const dataPoints = endpoint.dataPoints || [];
 
-              this.logger?.debugSync(`Scanning TCP connection '${conn.name || conn.host}' (${dataPoints.length} data points)`, {
+              this.logger?.debugSync(`Scanning TCP target '${endpoint.name}' (${dataPoints.length} test data points)`, {
                 component: LogComponents.discovery + "] [" + this.protocol as any,
-                connection: conn.name,
-                host: conn.host,
-                port: conn.port
+                name: endpoint.name,
+                host: endpoint.connection.host,
+                port: endpoint.connection.port,
+                slaveRange: `${endpoint.connection.slaveRange.start}-${endpoint.connection.slaveRange.end}`
               });
 
-              return await this.discoverOnBus(connOptions, dataPoints, conn.name);
+              return await this.discoverOnBus(connOptions, dataPoints, endpoint.name);
             })
           );
 
@@ -125,52 +126,44 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 
       // Sequential serial scanning (RTU bus requires sequential access)
       if (serialConnections.length > 0) {
-        this.logger?.debugSync(`Scanning ${serialConnections.length} serial connections (sequential - shared bus)`, {
+        this.logger?.debugSync(`Scanning ${serialConnections.length} serial targets (sequential - shared bus)`, {
           component: LogComponents.discovery + "] [" + this.protocol as any
         });
 
-        for (const conn of serialConnections) {
+        for (const endpoint of serialConnections) {
           const connOptions: ModbusDiscoveryOptions = {
-            serialPort: (conn as any).serialPort,  // Serial config uses serialPort field
-            baudRate: (conn as any).baudRate,
-            timeout: conn.timeoutMs,
-            slaveIdRange: conn.addressing?.slaveRange 
-              ? [conn.addressing.slaveRange.start, conn.addressing.slaveRange.end]
-              : [1, 10]
+            serialPort: endpoint.connection.serialPort,
+            baudRate: endpoint.connection.baudRate || 9600,
+            timeout: endpoint.connection.timeout || 5000,
+            slaveIdRange: endpoint.connection.slaveRange 
+              ? [endpoint.connection.slaveRange.start, endpoint.connection.slaveRange.end]
+              : [1, 247]
           };
 
-          // Convert points object to array (API sends Record<string, ModbusDataPoint>)
-          const dataPoints = conn.points 
-            ? Object.values(conn.points) 
-            : (modbusConfig.profileDataPoints || []);
+          // Discovery targets may have sample dataPoints to test read
+          const dataPoints = endpoint.dataPoints || [];
 
-          this.logger?.debugSync(`Scanning serial connection '${conn.name || (conn as any).serialPort}' (${dataPoints.length} data points)`, {
+          this.logger?.debugSync(`Scanning serial target '${endpoint.name}' (${dataPoints.length} test data points)`, {
             component: LogComponents.discovery + "] [" + this.protocol as any,
-            connection: conn.name,
-            port: (conn as any).serialPort
+            name: endpoint.name,
+            port: endpoint.connection.serialPort,
+            slaveRange: `${endpoint.connection.slaveRange.start}-${endpoint.connection.slaveRange.end}`
           });
 
-          const discovered = await this.discoverOnBus(connOptions, dataPoints, conn.name);
+          const discovered = await this.discoverOnBus(connOptions, dataPoints, endpoint.name);
           allDiscovered.push(...discovered);
         }
       }
 
-      this.logger?.debugSync(`Multi-connection discovery complete: ${allDiscovered.length} devices across ${modbusConfig.connections.length} connections`, {
+      this.logger?.debugSync(`Modbus discovery complete: ${allDiscovered.length} devices across ${discoveryTargets.length} targets`, {
         component: LogComponents.discovery + "] [" + this.protocol as any,
         totalDevices: allDiscovered.length,
-        connectionCount: modbusConfig.connections.length,
+        targetCount: discoveryTargets.length,
         tcpCount: tcpConnections.length,
         serialCount: serialConnections.length
       });
 
       return allDiscovered;
-    }
-
-    // No connections configured
-    this.logger?.debugSync('No Modbus connections configured', {
-      component: LogComponents.discovery + "] [" + this.protocol as any
-    });
-    return [];
   }
 
   /**

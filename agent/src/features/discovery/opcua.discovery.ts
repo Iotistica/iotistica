@@ -9,6 +9,7 @@ import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, DiscoveredDevice } from './base.discovery';
 import { generateOPCUAFingerprint } from './fingerprint';
+import type { AgentConfig } from '../../config/agent-config.js';
 
 export interface OPCUADiscoveryOptions {
   discoveryUrls?: string[]; // e.g., ['opc.tcp://localhost:4840']
@@ -16,8 +17,11 @@ export interface OPCUADiscoveryOptions {
 }
 
 export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
-  constructor(logger?: AgentLogger) {
+  private agentConfig?: AgentConfig;
+
+  constructor(logger?: AgentLogger, agentConfig?: AgentConfig) {
     super('opcua', logger);
+    this.agentConfig = agentConfig;
   }
 
   /**
@@ -26,29 +30,28 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
   async discover(options?: OPCUADiscoveryOptions): Promise<DiscoveredDevice[]> {
     const discovered: DiscoveredDevice[] = [];
 
-    // Default discovery URLs (empty array = skip discovery)
-    const discoveryUrls = options?.discoveryUrls || [
-      'opc.tcp://10.0.0.60:4840',
-      'opc.tcp://10.0.0.60:48010'
-    ];
-
-    // Discovery runs on ALL servers (enabled flag only affects adapter data collection)
-    if (discoveryUrls.length === 0) {
-      this.logger?.debugSync('OPC-UA discovery skipped - no URLs configured', {
+    // Get discovery targets from endpoints (those with endpointUrl but no dataPoints)
+    const discoveryTargets = this.agentConfig?.getDiscoveryTargets?.('opcua') || [];
+    
+    if (discoveryTargets.length === 0) {
+      this.logger?.debugSync('No OPC-UA discovery targets configured (need endpointUrl without dataPoints)', {
         component: LogComponents.discovery + "] [" + this.protocol as any,
         protocol: this.protocol
       });
       return [];
     }
 
-    this.logger?.debugSync('Starting OPC-UA discovery', {
+    this.logger?.debugSync(`Starting OPC-UA discovery (${discoveryTargets.length} targets)`, {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       protocol: this.protocol,
       phase: 'discovery',
-      urlCount: discoveryUrls.length
+      targetCount: discoveryTargets.length
     });
 
-    for (const url of discoveryUrls) {
+    for (const endpoint of discoveryTargets) {
+      const url = endpoint.connection?.endpointUrl;
+      if (!url) continue;
+
       try {
         const { OPCUAClient } = await import('node-opcua-client');
 

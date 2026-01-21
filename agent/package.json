@@ -93,7 +93,7 @@
     "@types/memoizee": "^0.4.12",
     "@types/msgpack-lite": "^0.1.12",
     "@types/net-snmp": "^3.23.0",
-    "@types/node": "^22.18.9",
+    "@types/node": "^22.19.7",
     "@types/sinon": "^17.0.4",
     "@types/sinon-chai": "^4.0.0",
     "@types/yargs": "^17.0.32",
