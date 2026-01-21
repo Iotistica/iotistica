@@ -45,7 +45,7 @@ router.get('/devices/:uuid/sensors', async (req, res) => {
       count: sensors.length
     });
   } catch (error: any) {
-    logger.error('Error deleting sensor:', error);
+    logger.error('Error getting sensors:', error);
     res.status(500).json({
       error: 'Failed to get sensors',
       message: error.message
@@ -57,24 +57,57 @@ router.get('/devices/:uuid/sensors', async (req, res) => {
  * Add new sensor
  * POST /api/v1/devices/:uuid/sensors
  * 
- * Dual-write: table + config (sync service handles both)
+ * Dual-write: config + table (sync service handles both)
  */
 router.post('/devices/:uuid/sensors', async (req, res) => {
   try {
     const { uuid } = req.params;
     const sensorConfig = req.body;
 
+    // Debug logging
+    logger.info('Received sensor config:', JSON.stringify(sensorConfig, null, 2));
+
+    // Basic validation
+    if (!sensorConfig.name) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        message: 'Sensor name is required'
+      });
+    }
+
+    if (!sensorConfig.protocol) {
+      logger.error('Protocol missing in request:', sensorConfig);
+      return res.status(400).json({
+        error: 'Validation failed',
+        message: 'Protocol is required'
+      });
+    }
+
+    if (!sensorConfig.connection) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        message: 'Connection configuration is required'
+      });
+    }
+
+    if (!sensorConfig.dataPoints || sensorConfig.dataPoints.length === 0) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        message: 'At least one data point is required'
+      });
+    }
+
     // Add sensor using sync service (handles dual-write)
     const result = await deviceSensorSync.addEndpoint(
       uuid,
       sensorConfig,
-      (req as any).user?.id || 'system'
+      (req as any).user?.username || (req as any).user?.email || 'dashboard'
     );
 
     res.status(201).json({
       status: 'ok',
-      message: 'Sensor added',
-      device: result.sensor,
+      message: 'Sensor added. Click Sync to deploy.',
+      device: result.sensor, // Keep "device" for backward compatibility
       version: result.version
     });
   } catch (error: any) {
@@ -82,7 +115,14 @@ router.post('/devices/:uuid/sensors', async (req, res) => {
     
     if (error.message?.includes('already exists')) {
       return res.status(409).json({
-        error: 'Sensor already exists',
+        error: 'Duplicate sensor',
+        message: error.message
+      });
+    }
+    
+    if (error.message?.includes('not found')) {
+      return res.status(404).json({
+        error: 'Device not found',
         message: error.message
       });
     }
@@ -110,7 +150,7 @@ router.put('/devices/:uuid/sensors/:name', async (req, res) => {
       uuid,
       name,
       updates,
-      (req as any).user?.id || 'system'
+      (req as any).user?.username || (req as any).user?.email || 'dashboard'
     );
 
     res.json({
@@ -150,7 +190,7 @@ router.delete('/devices/:uuid/sensors/:name', async (req, res) => {
     const result = await deviceSensorSync.deleteEndpoint(
       uuid,
       name,
-      (req as any).user?.id || 'system'
+      (req as any).user?.username || (req as any).user?.email || 'dashboard'
     );
 
     res.json({
