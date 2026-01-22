@@ -189,8 +189,8 @@ export function Header({
                   }}
                   className="font-semibold shadow-md"
                 >
-                  <RefreshCw className="w-6 h-6 mr-2" />
-                  Sync
+                  
+                  Deploy
                 </Button>
                 {needsDeployment && (
                   <Button 
