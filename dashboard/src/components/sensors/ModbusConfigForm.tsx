@@ -334,7 +334,7 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
 
           {/* Slave Range for Discovery - Compact */}
           <div className="space-y-2 pt-2 border-t">
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center gap-1.5">
               <input
                 type="checkbox"
                 id="tcp-useSlaveRange"
@@ -553,7 +553,7 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
 
       {/* Status Toggle - Compact */}
       <div className="flex items-center justify-between p-3 border border-border rounded-lg">
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center gap-1.5">
           <Controller
             name="enabled"
             control={control}

@@ -35,7 +35,7 @@ export class DeviceSensorSyncService {
   /**
    * Mark endpoints as pending deployment
    * Called when user clicks Sync button (POST /deploy)
-   * Updates ONLY deployment_status='pending' by UUID
+   * Updates ONLY devices that are already 'pending' - doesn't touch 'deployed' devices
    */
   async markEndpointsAsPending(
     deviceUuid: string,
@@ -50,17 +50,17 @@ export class DeviceSensorSyncService {
         return;
       }
 
+      // Only update devices that are already 'pending' - don't touch 'deployed' or 'reconciling' devices
       const result = await query(
         `UPDATE device_sensors 
-         SET deployment_status = 'pending',
-             config_version = $1,
+         SET config_version = $1,
              updated_by = $2,
              updated_at = NOW()
-         WHERE device_uuid = $3 AND uuid = ANY($4)`,
+         WHERE device_uuid = $3 AND uuid = ANY($4) AND deployment_status = 'pending'`,
         [configVersion, userId || 'system', deviceUuid, uuids]
       );
 
-      logger.info(`Marked ${result.rowCount} endpoints as pending deployment`);
+      logger.info(`Updated ${result.rowCount} pending endpoints (marked for deployment)`);
     } catch (error) {
       logger.error('Failed to mark endpoints as pending:', error);
       throw error;
@@ -123,11 +123,12 @@ export class DeviceSensorSyncService {
         if (endpoint.uuid && existingUuids.has(endpoint.uuid)) {
           // Compare with existing record to detect changes
           const existing = existingByUuid.get(endpoint.uuid);
-          const hasChanged = !existing || 
+          const hasChanged = existing && (
             existing.enabled !== endpoint.enabled ||
             existing.poll_interval !== endpoint.pollInterval ||
             JSON.stringify(existing.connection) !== JSON.stringify(endpoint.connection) ||
-            JSON.stringify(existing.data_points) !== JSON.stringify(endpoint.dataPoints);
+            JSON.stringify(existing.data_points) !== JSON.stringify(endpoint.dataPoints)
+          );
           
           // Detect out-of-sync: enabled state doesn't match agent's actual state
           // - If we disabled but agent still has it connected → needs deployment
@@ -141,12 +142,12 @@ export class DeviceSensorSyncService {
           // - If 'reconciling': Mark as deployed (agent confirms changes applied)
           // - If 'discovered': Keep discovered (no user changes yet)
           // - If 'deployed': Keep deployed (already confirmed)
-          // - During deployment (not reconciliation): Mark as pending if changed
+          // - During deployment (not reconciliation): Mark as pending ONLY if changed or out of sync
           const deploymentStatus = isReconciliation 
             ? (existing?.deployment_status === 'pending' ? 'pending' : 
                existing?.deployment_status === 'reconciling' ? 'deployed' :
                existing?.deployment_status || 'discovered')
-            : (hasChanged || isOutOfSync ? 'pending' : existing?.deployment_status || 'discovered');
+            : (hasChanged || isOutOfSync ? 'pending' : existing?.deployment_status || 'deployed');
           
           await query(
             `UPDATE device_sensors SET
@@ -860,8 +861,8 @@ export class DeviceSensorSyncService {
 
       const newVersion = updateResult.rows[0].version;
 
-      // 6. Sync config → table (will insert into table with deployment_status='pending')
-      await this.syncConfigToTable(deviceUuid, validExistingDevices, newVersion, userId);
+      // 6. Insert ONLY the new sensor into table (don't touch existing sensors)
+      await this.syncConfigToTable(deviceUuid, [sensorConfig], newVersion, userId);
 
       // 7. Publish event
       await eventPublisher.publish(
