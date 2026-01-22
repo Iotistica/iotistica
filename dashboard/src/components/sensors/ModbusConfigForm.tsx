@@ -45,6 +45,7 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<string>('');
   const [loadingProfiles, setLoadingProfiles] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const {
     register,
@@ -137,6 +138,9 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
     // Handle "None" selection
     if (!profileName || profileName === '__none__') {
       setValue('dataPoints', []);
+      if (onDataPointsChange) {
+        onDataPointsChange([]);
+      }
       return;
     }
 
@@ -196,36 +200,37 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       {/* Device Name */}
-      <div className="space-y-2">
-        <Label htmlFor="name">
+      <div className="space-y-1.5">
+        <Label htmlFor="name" className="text-sm">
           Device Name <span className="text-red-500">*</span>
         </Label>
         <Input
           id="name"
           {...register('name')}
           placeholder="e.g., power_meter_1"
+          className="h-9"
         />
         {errors.name && (
-          <p className="text-sm text-red-500">{errors.name.message}</p>
+          <p className="text-xs text-red-500">{errors.name.message}</p>
         )}
         <p className="text-xs text-muted-foreground">
           Unique identifier (letters, numbers, hyphens, underscores only)
         </p>
       </div>
 
-      {/* Profile Selector */}
-      <div className="space-y-2">
-        <Label htmlFor="profile">Load From Profile (Optional)</Label>
+      {/* Profile Selector - Prominent */}
+      <div className="space-y-2 p-3 bg-muted/50 rounded-lg">
+        <Label htmlFor="profile" className="text-sm font-medium">Quick Start: Load Configuration Profile</Label>
         <Select value={selectedProfile} onValueChange={handleProfileSelect} disabled={loadingProfiles}>
           <SelectTrigger id="profile">
-            <SelectValue placeholder={loadingProfiles ? "Loading profiles..." : "Select a profile..."} />
+            <SelectValue placeholder={loadingProfiles ? "Loading profiles..." : "Select a profile to auto-configure..."} />
           </SelectTrigger>
           <SelectContent>
             {profiles.length > 0 ? (
               <>
-                <SelectItem value="__none__">-- None (Manual Configuration) --</SelectItem>
+                <SelectItem value="__none__">Manual Configuration</SelectItem>
                 {profiles.map((profile) => (
                   <SelectItem key={profile.id} value={profile.profile_name}>
                     {profile.profile_name} ({profile.data_points?.length || 0} data points)
@@ -239,9 +244,9 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
             )}
           </SelectContent>
         </Select>
-        <p className="text-xs text-muted-foreground">
-          Pre-populate data points from a saved configuration profile
-        </p>
+        {selectedProfile && selectedProfile !== '__none__' && (
+          <p className="text-xs text-green-600">✓ Profile applied: {selectedProfile}</p>
+        )}
       </div>
 
       {/* Connection Type */}
@@ -261,13 +266,13 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
               }}
               className="flex gap-4"
             >
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-3">
                 <RadioGroupItem value="tcp" id="tcp" />
                 <Label htmlFor="tcp" className="font-normal cursor-pointer">
                   Modbus TCP
                 </Label>
               </div>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-3">
                 <RadioGroupItem value="rtu" id="rtu" />
                 <Label htmlFor="rtu" className="font-normal cursor-pointer">
                   Modbus RTU (Serial)
@@ -280,27 +285,25 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
 
       {/* TCP Connection Fields */}
       {connectionType === 'tcp' && (
-        <div className="space-y-4 p-4 border border-border rounded-lg">
-          <h3 className="text-sm font-semibold">TCP Connection Settings</h3>
+        <div className="space-y-3 p-3 border border-border rounded-lg">
+          <h3 className="text-sm font-semibold">TCP Connection</h3>
           
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="host">
+          {/* Single row for Host, Port, Slave ID - truly horizontal */}
+          <div className="flex items-end gap-3">
+            <div className="flex-1 space-y-1.5">
+              <Label htmlFor="host" className="text-xs">
                 Host <span className="text-red-500">*</span>
               </Label>
               <Input
                 id="host"
                 {...register('connection.host')}
                 placeholder="192.168.1.100"
+                className="h-9"
               />
-
-              <p className="text-xs text-muted-foreground">
-                IP address or hostname
-              </p>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="port">
+            <div className="w-24 space-y-1.5">
+              <Label htmlFor="port" className="text-xs">
                 Port <span className="text-red-500">*</span>
               </Label>
               <Input
@@ -308,35 +311,30 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
                 type="number"
                 {...register('connection.port', { valueAsNumber: true })}
                 placeholder="502"
+                className="h-9"
               />
+            </div>
 
-              <p className="text-xs text-muted-foreground">
-                Default: 502
-              </p>
+            <div className="w-24 space-y-1.5">
+              <Label htmlFor="tcp-slaveId" className="text-xs">
+                Slave ID <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="tcp-slaveId"
+                type="number"
+                {...register('connection.slaveId', { valueAsNumber: true })}
+                placeholder="1"
+                min="1"
+                max="247"
+                disabled={!!watch('connection.slaveRange')}
+                className="h-9"
+              />
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="tcp-slaveId">
-              Slave ID (Unit ID) <span className="text-red-500">*</span>
-            </Label>
-            <Input
-              id="tcp-slaveId"
-              type="number"
-              {...register('connection.slaveId', { valueAsNumber: true })}
-              placeholder="1"
-              min="1"
-              max="247"
-              disabled={!!watch('connection.slaveRange')}
-            />
-            <p className="text-xs text-muted-foreground">
-              Modbus device address (1-247, default: 1)
-            </p>
-          </div>
-
-          {/* Slave Range for Discovery */}
-          <div className="space-y-2">
-            <div className="flex items-center space-x-2">
+          {/* Slave Range for Discovery - Compact */}
+          <div className="space-y-2 pt-2 border-t">
+            <div className="flex items-center space-x-3">
               <input
                 type="checkbox"
                 id="tcp-useSlaveRange"
@@ -351,16 +349,14 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
                   }
                 }}
               />
-              <Label htmlFor="tcp-useSlaveRange" className="cursor-pointer">
-                Use as Discovery Target (scan slave range)
+              <Label htmlFor="tcp-useSlaveRange" className="text-xs cursor-pointer">
+                Discovery Target (scan slave range)
               </Label>
             </div>
             {watch('connection.slaveRange') && (
-              <div className="grid grid-cols-2 gap-4 ml-6">
-                <div className="space-y-2">
-                  <Label htmlFor="tcp-slaveRange-start">
-                    Start Slave ID
-                  </Label>
+              <div className="grid grid-cols-2 gap-3 ml-6">
+                <div className="space-y-1.5">
+                  <Label htmlFor="tcp-slaveRange-start" className="text-xs">Start ID</Label>
                   <Input
                     id="tcp-slaveRange-start"
                     type="number"
@@ -368,12 +364,11 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
                     placeholder="1"
                     min="1"
                     max="247"
+                    className="h-9"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="tcp-slaveRange-end">
-                    End Slave ID
-                  </Label>
+                <div className="space-y-1.5">
+                  <Label htmlFor="tcp-slaveRange-end" className="text-xs">End ID</Label>
                   <Input
                     id="tcp-slaveRange-end"
                     type="number"
@@ -381,13 +376,11 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
                     placeholder="247"
                     min="1"
                     max="247"
+                    className="h-9"
                   />
                 </div>
               </div>
             )}
-            <p className="text-xs text-muted-foreground">
-              Discovery targets scan a range of slave IDs to find devices
-            </p>
           </div>
         </div>
       )}
@@ -483,7 +476,7 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
 
             <div className="space-y-2">
               <Label htmlFor="rtu-slaveId">
-                Slave ID (Unit ID) <span className="text-red-500">*</span>
+                Slave ID <span className="text-red-500">*</span>
               </Label>
               <Input
                 id="rtu-slaveId"
@@ -495,13 +488,13 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
                 disabled={!!watch('connection.slaveRange')}
               />
               <p className="text-xs text-muted-foreground">
-                Modbus device address (1-247, default: 1)
+                Modbus device address (1-247)
               </p>
             </div>
 
             {/* Slave Range for Discovery */}
             <div className="space-y-2">
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-3">
                 <input
                   type="checkbox"
                   id="rtu-useSlaveRange"
@@ -558,45 +551,9 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
         </div>
       )}
 
-      {/* Common Connection Settings */}
-      <div className="space-y-4 p-4 border border-border rounded-lg">
-        <h3 className="text-sm font-semibold">Common Settings</h3>
-        
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="timeout">Timeout (ms)</Label>
-            <Input
-              id="timeout"
-              type="number"
-              {...register('connection.timeout', { valueAsNumber: true })}
-              placeholder="5000"
-            />
-            {errors.connection?.timeout && (
-              <p className="text-sm text-red-500">{errors.connection.timeout.message}</p>
-            )}
-            <p className="text-xs text-muted-foreground">
-              Connection timeout (100-30000ms)
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="pollInterval">Poll Interval (ms)</Label>
-            <Input
-              id="pollInterval"
-              type="number"
-              {...register('pollInterval', { valueAsNumber: true })}
-              placeholder="5000"
-            />
-            {errors.pollInterval && (
-              <p className="text-sm text-red-500">{errors.pollInterval.message}</p>
-            )}
-            <p className="text-xs text-muted-foreground">
-              How often to read registers (100-300000ms)
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center space-x-2">
+      {/* Status Toggle - Compact */}
+      <div className="flex items-center justify-between p-3 border border-border rounded-lg">
+        <div className="flex items-center space-x-3">
           <Controller
             name="enabled"
             control={control}
@@ -608,11 +565,63 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
               />
             )}
           />
-          <Label htmlFor="enabled" className="font-normal cursor-pointer">
-            Enabled
+          <Label htmlFor="enabled" className="font-normal cursor-pointer text-sm">
+            Device Enabled
           </Label>
         </div>
+        
+        {/* Advanced Settings Toggle */}
+        <button
+          type="button"
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+        >
+          Advanced {showAdvanced ? '▼' : '▶'}
+        </button>
       </div>
+
+      {/* Advanced Settings - Collapsible */}
+      {showAdvanced && (
+        <div className="space-y-3 p-3 border border-border rounded-lg bg-muted/30">
+          <h3 className="text-xs font-semibold text-muted-foreground">Advanced Settings</h3>
+          
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="timeout" className="text-xs">Timeout</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="timeout"
+                  type="number"
+                  {...register('connection.timeout', { valueAsNumber: true })}
+                  placeholder="5000"
+                  className="h-9"
+                />
+                <span className="text-xs text-muted-foreground">ms</span>
+              </div>
+              {errors.connection?.timeout && (
+                <p className="text-xs text-red-500">{errors.connection.timeout.message}</p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="pollInterval" className="text-xs">Poll Interval</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="pollInterval"
+                  type="number"
+                  {...register('pollInterval', { valueAsNumber: true })}
+                  placeholder="5000"
+                  className="h-9"
+                />
+                <span className="text-xs text-muted-foreground">ms</span>
+              </div>
+              {errors.pollInterval && (
+                <p className="text-xs text-red-500">{errors.pollInterval.message}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

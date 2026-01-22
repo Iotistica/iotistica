@@ -140,6 +140,15 @@ router.get('/device/:uuid/state', deviceAuth, async (req, res) => {
       deviceId: uuid.substring(0, 8) 
     });
 
+    // Mark any pending endpoints as reconciling (agent is fetching state to apply changes)
+    // Only do this when we're actually sending new state (not 304)
+    try {
+      await deviceSensorSync.markPendingAsReconciling(uuid);
+    } catch (error) {
+      logger.warn('Failed to mark endpoints as reconciling', { error });
+      // Non-fatal - continue returning target state
+    }
+
     // Return target state
     res.set('ETag', etag).json(response);
   } catch (error: any) {
@@ -206,6 +215,14 @@ router.get('/devices/:uuid/target-state', deviceAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     const targetState = await DeviceTargetStateModel.get(uuid);
+
+    // Mark any pending endpoints as reconciling (agent is fetching state to apply changes)
+    try {
+      await deviceSensorSync.markPendingAsReconciling(uuid);
+    } catch (error) {
+      logger.warn('Failed to mark endpoints as reconciling', { error });
+      // Non-fatal - continue returning target state
+    }
 
     res.json({
       uuid,

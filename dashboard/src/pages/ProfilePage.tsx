@@ -30,7 +30,7 @@ export function ProfilePage() {
   // Load user data
   useEffect(() => {
     if (user) {
-      setFullName(user.full_name || '');
+      setFullName(user.username || '');
       setEmail(user.email || '');
     }
   }, [user]);

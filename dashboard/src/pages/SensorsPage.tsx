@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Activity, Pencil } from 'lucide-react';
+import { Activity, Pencil, Plus } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -367,15 +367,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     
     // 1. Deployment lifecycle states (require user action - highest priority)
     
-    // Pending deletion (soft delete - waiting for agent confirmation)
-    if (deploymentStatus === 'pending_deletion') {
-      return (
-        <Badge className="bg-orange-600 dark:bg-orange-700 text-white border border-orange-700 dark:border-orange-600 font-semibold">
-          Pending Deletion
-        </Badge>
-      );
-    }
-    
     if (deploymentStatus === 'draft') {
       return <Badge className="bg-zinc-700 dark:bg-zinc-600 text-white border border-zinc-800 dark:border-zinc-500">Draft</Badge>;
     }
@@ -457,9 +448,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
               Monitor your connected devices
             </p>
           </div>
-          <Button onClick={() => setAddSensorDialogOpen(true)}>
-            Add Device
-          </Button>
         </div>
 
         {/* Error Alert */}
@@ -481,56 +469,65 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           />
         )}
 
-        {/* Protocol Filter */}
-        {sensors.length > 0 && (
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-foreground">Protocol:</label>
-              <select 
-                value={selectedProtocol} 
-                onChange={(e) => setSelectedProtocol(e.target.value)}
-                className="border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="all">All ({sensors.length})</option>
-                {Array.from(new Set(sensors.map(s => s.protocol).filter(Boolean))).sort().map(protocol => (
-                  <option key={protocol} value={protocol}>
-                    {protocol?.toUpperCase()} ({sensors.filter(s => s.protocol === protocol).length})
-                  </option>
-                ))}
-              </select>
-            </div>
+        {/* Protocol Filter with Add Device Button */}
+        <div className="flex items-center justify-between gap-4">
+          {sensors.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-foreground">Protocol:</label>
+                <select 
+                  value={selectedProtocol} 
+                  onChange={(e) => setSelectedProtocol(e.target.value)}
+                  className="border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="all">All ({sensors.length})</option>
+                  {Array.from(new Set(sensors.map(s => s.protocol).filter(Boolean))).sort().map(protocol => (
+                    <option key={protocol} value={protocol}>
+                      {protocol?.toUpperCase()} ({sensors.filter(s => s.protocol === protocol).length})
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-foreground">Status:</label>
-              <select 
-                value={selectedStatus} 
-                onChange={(e) => setSelectedStatus(e.target.value)}
-                className="border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="all">All ({sensors.length})</option>
-                <option value="CONNECTED">Connected ({sensors.filter(s => s.state === 'CONNECTED').length})</option>
-                <option value="DISCONNECTED">Disconnected ({sensors.filter(s => s.state === 'DISCONNECTED').length})</option>
-                <option value="PENDING">Pending ({sensors.filter(s => s.state === 'PENDING').length})</option>
-                <option value="healthy">Healthy ({sensors.filter(s => s.healthy).length})</option>
-                <option value="unhealthy">Unhealthy ({sensors.filter(s => !s.healthy && s.state !== 'PENDING').length})</option>
-              </select>
-            </div>
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-foreground">Status:</label>
+                <select 
+                  value={selectedStatus} 
+                  onChange={(e) => setSelectedStatus(e.target.value)}
+                  className="border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="all">All ({sensors.length})</option>
+                  <option value="CONNECTED">Connected ({sensors.filter(s => s.state === 'CONNECTED').length})</option>
+                  <option value="DISCONNECTED">Disconnected ({sensors.filter(s => s.state === 'DISCONNECTED').length})</option>
+                  <option value="PENDING">Pending ({sensors.filter(s => s.state === 'PENDING').length})</option>
+                  <option value="healthy">Healthy ({sensors.filter(s => s.healthy).length})</option>
+                  <option value="unhealthy">Unhealthy ({sensors.filter(s => !s.healthy && s.state !== 'PENDING').length})</option>
+                </select>
+              </div>
 
-            {(selectedProtocol !== 'all' || selectedStatus !== 'all') && (
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => {
-                  setSelectedProtocol('all');
-                  setSelectedStatus('all');
-                }}
-                className="text-sm"
-              >
-                Clear Filters
-              </Button>
-            )}
-          </div>
-        )}
+              {(selectedProtocol !== 'all' || selectedStatus !== 'all') && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => {
+                    setSelectedProtocol('all');
+                    setSelectedStatus('all');
+                  }}
+                  className="text-sm"
+                >
+                  Clear Filters
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div></div>
+          )}
+          
+          <Button onClick={() => setAddSensorDialogOpen(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            Add Device
+          </Button>
+        </div>
 
        
         {/* Sensors List */}
@@ -561,7 +558,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             {sensors.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
                 <Activity className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                <p className="text-lg font-medium mb-2">No endpoints yet</p>
+                <p className="text-lg font-medium mb-2">No devices yet</p>
                
               </div>
             ) : (
@@ -646,21 +643,14 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                             <span className="font-medium">Status:</span> Waiting for agent to initialize sensor...
                           </div>
                         )}
-                        
-                        {sensor.deploymentStatus === 'pending_deletion' && (
-                          <div className="mt-2 text-sm text-orange-600">
-                            <span className="font-medium">Status:</span> Marked for deletion - Click Sync to confirm removal on agent
-                          </div>
-                        )}
                       </div>
                       
                       {/* Action Buttons */}
                       <div className="flex items-center gap-3 ml-4">
-                        {/* Enable/Disable Select - only show for deployed sensors, not for pending deletion */}
+                        {/* Enable/Disable Select - only show for deployed sensors */}
                         {sensor.type === 'device' && 
                          sensor.deploymentStatus !== 'draft' && 
-                         sensor.deploymentStatus !== 'saved-draft' &&
-                         sensor.deploymentStatus !== 'pending_deletion' && (
+                         sensor.deploymentStatus !== 'saved-draft' && (
                           <select
                             value={sensor.enabled !== undefined ? (sensor.enabled ? 'enabled' : 'disabled') : 'enabled'}
                             onChange={(e) => handleToggleSensorEnabled(sensor, e.target.value === 'enabled')}
@@ -671,7 +661,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                           </select>
                         )}
                         
-                        {/* Edit Button - disabled for pending deletion */}
+                        {/* Edit Button */}
                         <Button
                           variant="outline"
                           size="sm"
@@ -679,7 +669,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                             setSelectedSensor(sensor);
                             setDetailsDialogOpen(true);
                           }}
-                          disabled={sensor.deploymentStatus === 'pending_deletion'}
                         >
                           <Pencil className="h-4 w-4 mr-2" />
                           Edit
