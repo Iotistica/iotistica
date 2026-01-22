@@ -149,6 +149,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
             <ModbusConfigForm 
               onChange={setModbusConfig}
               onValidationChange={setModbusFormValid}
+              onDataPointsChange={setModbusDataPoints}
             />
 
             <DataPointsTable

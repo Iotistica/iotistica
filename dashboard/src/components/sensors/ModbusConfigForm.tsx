@@ -5,7 +5,7 @@
  * Provides validated input fields with real-time error feedback.
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import {
   type ModbusDeviceConfig,
@@ -19,18 +19,33 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Info } from 'lucide-react';
+import { buildApiUrl } from '@/config/api';
+
+interface Profile {
+  id: number;
+  profile_name: string;
+  protocol: string;
+  data_points: any[];
+  metadata?: any;
+}
 
 interface ModbusConfigFormProps {
   value?: ModbusDeviceConfig;
   onChange?: (config: ModbusDeviceConfig) => void;
   onValidationChange?: (isValid: boolean) => void;
+  onDataPointsChange?: (dataPoints: any[]) => void;
 }
 
 export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
   value,
   onChange,
   onValidationChange,
+  onDataPointsChange,
 }) => {
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [selectedProfile, setSelectedProfile] = useState<string>('');
+  const [loadingProfiles, setLoadingProfiles] = useState(false);
+
   const {
     register,
     control,
@@ -96,6 +111,65 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
     };
   }, [watch, onChange, getValues]);
 
+  // Fetch available Modbus profiles
+  useEffect(() => {
+    const fetchProfiles = async () => {
+      try {
+        setLoadingProfiles(true);
+        const response = await fetch(buildApiUrl('/api/v1/profiles?protocol=modbus'));
+        if (!response.ok) throw new Error('Failed to fetch profiles');
+        const data = await response.json();
+        console.log('Fetched profiles:', data);
+        setProfiles(data);
+      } catch (error) {
+        console.error('Failed to load Modbus profiles:', error);
+      } finally {
+        setLoadingProfiles(false);
+      }
+    };
+    fetchProfiles();
+  }, []);
+
+  // Handle profile selection
+  const handleProfileSelect = (profileName: string) => {
+    setSelectedProfile(profileName);
+    
+    // Handle "None" selection
+    if (!profileName || profileName === '__none__') {
+      setValue('dataPoints', []);
+      return;
+    }
+
+    const profile = profiles.find(p => p.profile_name === profileName);
+    console.log('Selected profile:', profile);
+    if (!profile) {
+      console.warn(`Profile '${profileName}' not found`);
+      return;
+    }
+
+    // data_points might be a JSON string from database, parse if needed
+    let dataPoints = profile.data_points;
+    if (typeof dataPoints === 'string') {
+      try {
+        dataPoints = JSON.parse(dataPoints);
+      } catch (e) {
+        console.error('Failed to parse data_points:', e);
+        dataPoints = [];
+      }
+    }
+
+    console.log('Setting dataPoints:', dataPoints);
+    // Pre-populate dataPoints from profile
+    setValue('dataPoints', dataPoints || []);
+    
+    // Notify parent of dataPoints change
+    if (onDataPointsChange) {
+      onDataPointsChange(dataPoints || []);
+    }
+    
+    console.log(`Loaded profile '${profileName}' with ${dataPoints?.length || 0} data points`);
+  };
+
   const handleConnectionTypeChange = (type: ModbusConnectionType) => {
     const currentConnection = getValues('connection');
     
@@ -138,6 +212,35 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
         )}
         <p className="text-xs text-muted-foreground">
           Unique identifier (letters, numbers, hyphens, underscores only)
+        </p>
+      </div>
+
+      {/* Profile Selector */}
+      <div className="space-y-2">
+        <Label htmlFor="profile">Load From Profile (Optional)</Label>
+        <Select value={selectedProfile} onValueChange={handleProfileSelect} disabled={loadingProfiles}>
+          <SelectTrigger id="profile">
+            <SelectValue placeholder={loadingProfiles ? "Loading profiles..." : "Select a profile..."} />
+          </SelectTrigger>
+          <SelectContent>
+            {profiles.length > 0 ? (
+              <>
+                <SelectItem value="__none__">-- None (Manual Configuration) --</SelectItem>
+                {profiles.map((profile) => (
+                  <SelectItem key={profile.id} value={profile.profile_name}>
+                    {profile.profile_name} ({profile.data_points?.length || 0} data points)
+                  </SelectItem>
+                ))}
+              </>
+            ) : (
+              <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                {loadingProfiles ? "Loading..." : "No profiles available"}
+              </div>
+            )}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          Pre-populate data points from a saved configuration profile
         </p>
       </div>
 

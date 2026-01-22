@@ -162,16 +162,16 @@ publicRouter.post('/', async (req, res) => {
 /**
  * List all profile configurations for a protocol
  * GET /api/v1/profiles?protocol=modbus
+ * 
+ * PUBLIC ENDPOINT - No authentication required
+ * Used by dashboard to show available profiles in device configuration
  */
-router.get('/', async (req, res) => {
+publicRouter.get('/', async (req, res) => {
   try {
     const protocol = (req.query.protocol as string) || 'modbus';
     const profiles = await ProfileConfigModel.listByProtocol(protocol);
 
-    res.json({
-      profiles,
-      count: profiles.length
-    });
+    res.json(profiles); // Return array directly for simplicity
   } catch (error: any) {
     logger.error('Error listing profiles', { error: error.message });
     res.status(500).json({
