@@ -569,9 +569,50 @@ export class AnomalyDetectionService {
 	
 	/**
 	 * Get metric configuration by name
+	 * Returns undefined if metric not found in config.metrics
 	 */
 	private getMetricConfig(metricName: string): MetricConfig | undefined {
 		return this.config.metrics.find(m => m.name === metricName);
+	}
+	
+	/**
+	 * Get effective config for a metric by merging defaults with overrides
+	 * Used for per-datapoint anomaly detection with inheritance
+	 * 
+	 * @param metricName - Metric identifier (e.g., "device_uuid_endpoint_datapoint")
+	 * @param override - Per-datapoint anomaly config (optional, can be partial)
+	 * @returns Effective MetricConfig with all fields populated
+	 */
+	public getEffectiveConfig(
+		metricName: string,
+		override?: Partial<{
+			enabled: boolean;
+			methods: DetectionMethod[];
+			threshold: number;
+			expectedRange: [number, number];
+			windowSize: number;
+			minConfidence: number;
+		}>
+	): MetricConfig {
+		const defaults = this.config.defaults || {
+			methods: ['mad'] as DetectionMethod[],
+			threshold: 3.0,
+			windowSize: 120,
+			minSamples: 5
+		};
+		
+		// Build effective config by merging defaults with overrides
+		const effectiveConfig: MetricConfig = {
+			name: metricName,
+			enabled: override?.enabled !== undefined ? override.enabled : true,
+			methods: override?.methods || defaults.methods,
+			threshold: override?.threshold ?? defaults.threshold,
+			windowSize: override?.windowSize ?? defaults.windowSize,
+			expectedRange: override?.expectedRange,
+			minConfidence: override?.minConfidence ?? 0.7,
+		};
+		
+		return effectiveConfig;
 	}
 	
 	/**

@@ -10,39 +10,46 @@ import type { AnomalyConfig, MetricConfig, DataPoint, DetectionMethod } from './
 /**
  * Load configuration from cloud target state (preferred) or environment variables (fallback)
  * 
- * Supports V2 format (anomalyDetection), V1.5 format (anomaly), and V1 format (config.anomaly)
+ * Two-level schema: defaults + systemMetrics + per-datapoint configs
  */
 export function loadConfigFromTargetState(targetStateConfig?: any): AnomalyConfig {
-	// V2 format: Top-level anomalyDetection section
-	if (targetStateConfig?.anomalyDetection) {
-		const config = targetStateConfig.anomalyDetection as AnomalyConfig;
-		// Ensure warmupPeriodMs has default if not specified
-		if (config.warmupPeriodMs === undefined) {
-			config.warmupPeriodMs = 15 * 60 * 1000; // 15 minutes default
-		}
-		return config;
+	if (!targetStateConfig?.anomalyDetection) {
+		return loadConfigFromEnv();
 	}
 	
-	// V1.5 format: Top-level anomaly section (backward compat)
-	if (targetStateConfig?.anomaly) {
-		const config = targetStateConfig.anomaly as AnomalyConfig;
-		if (config.warmupPeriodMs === undefined) {
-			config.warmupPeriodMs = 15 * 60 * 1000;
-		}
-		return config;
-	}
+	const rawConfig = targetStateConfig.anomalyDetection;
 	
-	// V1 format: config.anomaly (legacy)
-	if (targetStateConfig?.config?.anomaly) {
-		const config = targetStateConfig.config.anomaly as AnomalyConfig;
-		if (config.warmupPeriodMs === undefined) {
-			config.warmupPeriodMs = 15 * 60 * 1000;
-		}
-		return config;
-	}
+	// Build unified metrics array from systemMetrics
+	const unifiedMetrics: MetricConfig[] = rawConfig.systemMetrics || [];
 	
-	// Fallback to environment variables
-	return loadConfigFromEnv();
+	const config: AnomalyConfig = {
+		enabled: rawConfig.enabled !== undefined ? rawConfig.enabled : true,
+		defaults: rawConfig.defaults || {
+			methods: ['mad'] as DetectionMethod[],
+			threshold: 3.0,
+			windowSize: 120,
+			minSamples: 5
+		},
+		systemMetrics: rawConfig.systemMetrics || [],
+		sensitivity: rawConfig.sensitivity || 5,
+		metrics: unifiedMetrics,  // Unified array for processing
+		alerts: rawConfig.alerts || {
+			mqtt: true,
+			cloud: true,
+			minConfidence: 0.7,
+			cooldownMs: 300000,
+			maxQueueSize: 1000
+		},
+		storage: rawConfig.storage || {
+			retention: 30,
+			minSamples: 5
+		},
+		ml: rawConfig.ml,
+		predictions: rawConfig.predictions,
+		warmupPeriodMs: rawConfig.warmupPeriodMs !== undefined ? rawConfig.warmupPeriodMs : 900000
+	};
+	
+	return config;
 }
 
 /**

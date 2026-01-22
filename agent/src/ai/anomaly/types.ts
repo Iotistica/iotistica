@@ -177,11 +177,28 @@ export interface PredictionCadenceConfig {
 }
 
 /**
+ * Default anomaly detection settings (inherited by all metrics)
+ */
+export interface AnomalyDefaults {
+	methods: DetectionMethod[];      // Default detection methods (e.g., ['zscore', 'mad'])
+	threshold: number;               // Default sensitivity threshold (e.g., 3.0)
+	windowSize: number;              // Default rolling window size (e.g., 120)
+	minSamples: number;              // Minimum samples before detection starts (e.g., 5)
+}
+
+/**
  * Anomaly detection configuration
+ * Supports two-level hierarchy:
+ * 1. Global defaults (shared settings)
+ * 2. System metrics (cpu, memory, temp)
+ * 3. Per-datapoint configs (in endpoint.dataPoints[].anomalyDetection)
  */
 export interface AnomalyConfig {
+	enabled?: boolean;               // Global anomaly detection toggle (default: true)
+	defaults?: AnomalyDefaults;      // Shared default settings (NEW)
+	systemMetrics?: MetricConfig[];  // System/agent health metrics (cpu, memory, temp)
 	sensitivity: number;             // 1-10 (higher = more sensitive)
-	metrics: MetricConfig[];
+	metrics: MetricConfig[];         // Unified metrics array (backward compat + merged runtime)
 	alerts: {
 		mqtt: boolean;
 		cloud: boolean;

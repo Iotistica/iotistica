@@ -119,6 +119,14 @@ export const OPCUADataPointsTable: React.FC<OPCUADataPointsTableProps> = ({
   const onSubmit = (data: OPCUADataPoint) => {
     // Clean up anomaly detection data
     if (data.anomalyDetection) {
+      // Convert methods object to array of enabled methods
+      if (data.anomalyDetection.methods && typeof data.anomalyDetection.methods === 'object' && !Array.isArray(data.anomalyDetection.methods)) {
+        const enabledMethods = Object.entries(data.anomalyDetection.methods)
+          .filter(([_, enabled]) => enabled)
+          .map(([method]) => method);
+        data.anomalyDetection.methods = enabledMethods.length > 0 ? enabledMethods : undefined;
+      }
+      
       // Set default threshold if not provided
       if (!data.anomalyDetection.threshold) {
         data.anomalyDetection.threshold = 5.0;

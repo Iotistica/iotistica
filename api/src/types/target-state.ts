@@ -28,9 +28,22 @@ export interface AnomalyStorage {
   minSamples: number;
 }
 
+/**
+ * Default anomaly detection settings
+ * Inherited by all metrics unless overridden at metric or data point level
+ */
+export interface AnomalyDetectionDefaults {
+  methods: string[];       // Default detection methods (e.g., ['zscore', 'mad'])
+  threshold: number;       // Default sensitivity threshold (e.g., 3.0)
+  windowSize: number;      // Default rolling window size (e.g., 120)
+  minSamples: number;      // Minimum samples before detection starts (e.g., 5)
+}
+
 export interface AnomalyDetectionConfig {
+  enabled: boolean;        // Global anomaly detection enable/disable toggle
+  defaults: AnomalyDetectionDefaults;  // Shared default settings
   alerts: AnomalyAlerts;
-  metrics: AnomalyMetric[];
+  systemMetrics: AnomalyMetric[];  // System/agent health metrics (cpu, memory, temp)
   storage: AnomalyStorage;
   sensitivity: number;
   warmupPeriodMs: number;  // Suppress alerts during agent initialization (default: 900000 = 15 min)

@@ -28,6 +28,299 @@
     "enableDeviceRemoteAccess": true,
     "enableDeviceSensorPublish": true
   },
+  "endpoints": [
+    {
+      "name": "power_meter_1",
+      "uuid": "6815df74-fecf-4d4a-a237-7c83f09b8403",
+      "enabled": true,
+      "protocol": "modbus",
+      "connection": {
+        "host": "192.168.1.100",
+        "port": 502,
+        "type": "tcp",
+        "slaveId": 1,
+        "timeout": 5000
+      },
+      "dataPoints": [
+        {
+          "base": 200,
+          "name": "holding_register_0",
+          "type": "holding",
+          "unit": "count",
+          "count": 1,
+          "scale": null,
+          "offset": null,
+          "address": 3,
+          "dataType": "uint16",
+          "noise_pct": 0.1,
+          "description": "",
+          "anomalyDetection": {
+            "enabled": true,
+            "methods": {
+              "zscore": true
+            },
+            "threshold": 5
+          }
+        },
+        {
+          "base": 200,
+          "name": "holding_register_0",
+          "type": "holding",
+          "unit": "count",
+          "address": 1,
+          "dataType": "uint16",
+          "noise_pct": 0.1
+        },
+        {
+          "base": 100,
+          "name": "holding_register_1",
+          "type": "holding",
+          "unit": "count",
+          "address": 2,
+          "dataType": "uint16",
+          "noise_pct": 0.26
+        },
+        {
+          "base": 100,
+          "name": "holding_register_1",
+          "type": "holding",
+          "unit": "count",
+          "address": 2,
+          "dataType": "uint16",
+          "noise_pct": 0.26
+        },
+        {
+          "base": 150,
+          "name": "holding_register_2",
+          "type": "holding",
+          "unit": "count",
+          "address": 3,
+          "dataType": "uint16",
+          "noise_pct": 0.15
+        },
+        {
+          "base": 150,
+          "name": "holding_register_2",
+          "type": "holding",
+          "unit": "count",
+          "address": 3,
+          "dataType": "uint16",
+          "noise_pct": 0.15
+        },
+        {
+          "base": 230,
+          "name": "temperature",
+          "type": "holding",
+          "unit": "°C",
+          "scale": 0.1,
+          "address": 10,
+          "dataType": "uint16",
+          "noise_pct": 0.08,
+          "description": "Ambient temperature (scaled ×10, e.g., 230 = 23.0°C)"
+        },
+        {
+          "base": 230,
+          "name": "temperature",
+          "type": "holding",
+          "unit": "°C",
+          "scale": 0.1,
+          "address": 10,
+          "dataType": "uint16",
+          "noise_pct": 0.08,
+          "description": "Ambient temperature (scaled ×10, e.g., 230 = 23.0°C)"
+        },
+        {
+          "base": 550,
+          "name": "humidity",
+          "type": "holding",
+          "unit": "%RH",
+          "scale": 0.1,
+          "address": 11,
+          "dataType": "uint16",
+          "noise_pct": 0.1,
+          "description": "Relative humidity (scaled ×10, e.g., 550 = 55.0%)"
+        },
+        {
+          "base": 550,
+          "name": "humidity",
+          "type": "holding",
+          "unit": "%RH",
+          "scale": 0.1,
+          "address": 11,
+          "dataType": "uint16",
+          "noise_pct": 0.1,
+          "description": "Relative humidity (scaled ×10, e.g., 550 = 55.0%)"
+        },
+        {
+          "base": 1013,
+          "name": "pressure",
+          "type": "holding",
+          "unit": "hPa",
+          "address": 12,
+          "dataType": "uint16",
+          "noise_pct": 0.015,
+          "description": "Atmospheric pressure in hectopascals (1013 hPa = sea level)"
+        },
+        {
+          "base": 1013,
+          "name": "pressure",
+          "type": "holding",
+          "unit": "hPa",
+          "address": 12,
+          "dataType": "uint16",
+          "noise_pct": 0.015,
+          "description": "Atmospheric pressure in hectopascals (1013 hPa = sea level)"
+        }
+      ],
+      "pollInterval": 5000
+    },
+    {
+      "name": "power_meter_2",
+      "uuid": "ecd7cfb2-93b5-4b03-9e1b-eff4631a0d0d",
+      "enabled": true,
+      "protocol": "modbus",
+      "connection": {
+        "host": "192.168.1.100",
+        "port": 503,
+        "type": "tcp",
+        "slaveId": 1,
+        "timeout": 5000
+      },
+      "dataPoints": [
+        {
+          "base": 200,
+          "name": "holding_register_0",
+          "type": "holding",
+          "unit": "count",
+          "count": 1,
+          "scale": null,
+          "offset": null,
+          "address": 1,
+          "dataType": "uint16",
+          "noise_pct": 0.1,
+          "description": "",
+          "anomalyDetection": {
+            "enabled": true,
+            "methods": [
+              "mad",
+              "iqr"
+            ],
+            "threshold": 5
+          }
+        },
+        {
+          "base": 200,
+          "name": "holding_register_0",
+          "type": "holding",
+          "unit": "count",
+          "address": 1,
+          "dataType": "uint16",
+          "noise_pct": 0.1
+        },
+        {
+          "base": 100,
+          "name": "holding_register_1",
+          "type": "holding",
+          "unit": "count",
+          "address": 2,
+          "dataType": "uint16",
+          "noise_pct": 0.26
+        },
+        {
+          "base": 100,
+          "name": "holding_register_1",
+          "type": "holding",
+          "unit": "count",
+          "address": 2,
+          "dataType": "uint16",
+          "noise_pct": 0.26
+        },
+        {
+          "base": 150,
+          "name": "holding_register_2",
+          "type": "holding",
+          "unit": "count",
+          "address": 3,
+          "dataType": "uint16",
+          "noise_pct": 0.15
+        },
+        {
+          "base": 150,
+          "name": "holding_register_2",
+          "type": "holding",
+          "unit": "count",
+          "address": 3,
+          "dataType": "uint16",
+          "noise_pct": 0.15
+        },
+        {
+          "base": 230,
+          "name": "temperature",
+          "type": "holding",
+          "unit": "°C",
+          "scale": 0.1,
+          "address": 10,
+          "dataType": "uint16",
+          "noise_pct": 0.08,
+          "description": "Ambient temperature (scaled ×10, e.g., 230 = 23.0°C)"
+        },
+        {
+          "base": 230,
+          "name": "temperature",
+          "type": "holding",
+          "unit": "°C",
+          "scale": 0.1,
+          "address": 10,
+          "dataType": "uint16",
+          "noise_pct": 0.08,
+          "description": "Ambient temperature (scaled ×10, e.g., 230 = 23.0°C)"
+        },
+        {
+          "base": 550,
+          "name": "humidity",
+          "type": "holding",
+          "unit": "%RH",
+          "scale": 0.1,
+          "address": 11,
+          "dataType": "uint16",
+          "noise_pct": 0.1,
+          "description": "Relative humidity (scaled ×10, e.g., 550 = 55.0%)"
+        },
+        {
+          "base": 550,
+          "name": "humidity",
+          "type": "holding",
+          "unit": "%RH",
+          "scale": 0.1,
+          "address": 11,
+          "dataType": "uint16",
+          "noise_pct": 0.1,
+          "description": "Relative humidity (scaled ×10, e.g., 550 = 55.0%)"
+        },
+        {
+          "base": 1013,
+          "name": "pressure",
+          "type": "holding",
+          "unit": "hPa",
+          "address": 12,
+          "dataType": "uint16",
+          "noise_pct": 0.015,
+          "description": "Atmospheric pressure in hectopascals (1013 hPa = sea level)"
+        },
+        {
+          "base": 1013,
+          "name": "pressure",
+          "type": "holding",
+          "unit": "hPa",
+          "address": 12,
+          "dataType": "uint16",
+          "noise_pct": 0.015,
+          "description": "Atmospheric pressure in hectopascals (1013 hPa = sea level)"
+        }
+      ],
+      "pollInterval": 5000
+    }
+  ],
   "intervals": {
     "device": {
       "reportIntervalMs": 60000,
@@ -40,218 +333,26 @@
       "lightIntervalMs": 14400000
     }
   },
-  "protocols": {
-    "can": {
-      "enabled": false,
-      "bufferCapacity": 65536
-    },
-    "mqtt": {
-      "qos": 0,
-      "enabled": false,
-      "connection": {
-        "brokerUrl": "mqtt://10.0.0.60:1883"
-      },
-      "bufferCapacity": 524288,
-      "discoveryRoots": [
-        "edge/+",
-        "sensor/+/data"
-      ],
-      "monitorDurationMs": 30000
-    },
-    "snmp": {
-      "port": 161,
-      "enabled": true,
-      "connections": [
-        {
-          "host": "10.0.0.60",
-          "name": "snmp-10-0-0-60",
-          "port": 161,
-          "uuid": "007b39e9-93e4-428a-b83a-4c0e51c204e7",
-          "enabled": true,
-          "version": "2c",
-          "community": "public"
-        }
-      ],
-      "bufferCapacity": 131072
-    },
-    "opcua": {
-      "enabled": true,
-      "connections": [
-        {
-          "url": "opc.tcp://10.0.0.60:4840",
-          "name": "opcua-10-0-0-60-4840",
-          "uuid": "dece943d-5d45-49a2-ba87-423ed9c6f45e",
-          "enabled": true,
-          "securityMode": "None",
-          "securityPolicy": "None"
-        }
-      ],
-      "bufferCapacity": 1048576
-    },
-    "bacnet": {
-      "port": 47808,
-      "enabled": true,
-      "timeout": 5000,
-      "maxDevices": 100,
-      "bufferCapacity": 262144,
-      "broadcastAddress": "",
-      "discoveryTargets": [
-        "host.docker.internal"
-      ]
-    },
-    "modbus": {
-      "enabled": true,
-      "connections": [
-        {
-          "host": "10.0.0.60",
-          "name": "modbus-sim-2",
-          "port": 503,
-          "uuid": "74d4bc8b-087a-4312-9286-dd43a62cd643",
-          "points": {
-            "humidity": {
-              "base": 550,
-              "type": "holding",
-              "unit": "%RH",
-              "scale": 0.1,
-              "address": 11,
-              "dataType": "uint16",
-              "noise_pct": 0.1,
-              "description": "Relative humidity (scaled ×10, e.g., 550 = 55.0%)"
-            },
-            "pressure": {
-              "base": 1013,
-              "type": "holding",
-              "unit": "hPa",
-              "address": 12,
-              "dataType": "uint16",
-              "noise_pct": 0.015,
-              "description": "Atmospheric pressure in hectopascals (1013 hPa = sea level)"
-            },
-            "temperature": {
-              "base": 230,
-              "type": "holding",
-              "unit": "°C",
-              "scale": 0.1,
-              "address": 10,
-              "dataType": "uint16",
-              "noise_pct": 0.08,
-              "description": "Ambient temperature (scaled ×10, e.g., 230 = 23.0°C)"
-            },
-            "holding_register_0": {
-              "base": 200,
-              "type": "holding",
-              "unit": "count",
-              "address": 1,
-              "dataType": "uint16",
-              "noise_pct": 0.1
-            },
-            "holding_register_1": {
-              "base": 100,
-              "type": "holding",
-              "unit": "count",
-              "address": 2,
-              "dataType": "uint16",
-              "noise_pct": 0.26
-            },
-            "holding_register_2": {
-              "base": 150,
-              "type": "holding",
-              "unit": "count",
-              "address": 3,
-              "dataType": "uint16",
-              "noise_pct": 0.15
-            }
-          },
-          "enabled": false,
-          "profile": "Generic",
-          "timeoutMs": 2000,
-          "addressing": {
-            "slaveRange": {
-              "end": 3,
-              "start": 1
-            }
-          }
-        },
-        {
-          "host": "10.0.0.60",
-          "name": "modbus-sim-3",
-          "port": 504,
-          "uuid": "d4209082-64e7-4fbb-9f19-1a24b00c7c47",
-          "points": {
-            "humidity": {
-              "base": 550,
-              "type": "holding",
-              "unit": "%RH",
-              "scale": 0.1,
-              "address": 11,
-              "dataType": "uint16",
-              "noise_pct": 0.1,
-              "description": "Relative humidity (scaled ×10, e.g., 550 = 55.0%)"
-            },
-            "pressure": {
-              "base": 1013,
-              "type": "holding",
-              "unit": "hPa",
-              "address": 12,
-              "dataType": "uint16",
-              "noise_pct": 0.015,
-              "description": "Atmospheric pressure in hectopascals (1013 hPa = sea level)"
-            },
-            "temperature": {
-              "base": 230,
-              "type": "holding",
-              "unit": "°C",
-              "scale": 0.1,
-              "address": 10,
-              "dataType": "uint16",
-              "noise_pct": 0.08,
-              "description": "Ambient temperature (scaled ×10, e.g., 230 = 23.0°C)"
-            },
-            "holding_register_0": {
-              "base": 200,
-              "type": "holding",
-              "unit": "count",
-              "address": 1,
-              "dataType": "uint16",
-              "noise_pct": 0.1
-            },
-            "holding_register_1": {
-              "base": 100,
-              "type": "holding",
-              "unit": "count",
-              "address": 2,
-              "dataType": "uint16",
-              "noise_pct": 0.26
-            },
-            "holding_register_2": {
-              "base": 150,
-              "type": "holding",
-              "unit": "count",
-              "address": 3,
-              "dataType": "uint16",
-              "noise_pct": 0.15
-            }
-          },
-          "enabled": false,
-          "profile": "Generic",
-          "timeoutMs": 2000,
-          "addressing": {
-            "slaveRange": {
-              "end": 3,
-              "start": 1
-            }
-          }
-        }
-      ],
-      "bufferCapacity": 131072
-    }
-  },
   "anomalyDetection": {
     "alerts": {
       "cooldownMs": 300000,
       "maxQueueSize": 1000
     },
-    "metrics": [
+    "enabled": true,
+    "storage": {
+      "retention": 30,
+      "minSamples": 5
+    },
+    "defaults": {
+      "methods": [
+        "mad"
+      ],
+      "threshold": 3,
+      "minSamples": 5,
+      "windowSize": 120
+    },
+    "sensitivity": 5,
+    "systemMetrics": [
       {
         "name": "cpu_usage",
         "enabled": true,
@@ -296,11 +397,6 @@
         ]
       }
     ],
-    "storage": {
-      "retention": 30,
-      "minSamples": 5
-    },
-    "sensitivity": 5,
     "warmupPeriodMs": 900000
   }
 }

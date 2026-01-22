@@ -10,7 +10,7 @@
 // ============================================================================
 
 /**
- * Anomaly detection methods
+ * Anomaly detection methods (checkbox format for form)
  */
 export interface AnomalyDetectionMethods {
   zscore?: boolean;    // Z-Score (Standard Deviation)
@@ -30,10 +30,11 @@ export interface AnomalyExpectedRange {
 
 /**
  * Anomaly detection configuration for a data point
+ * Supports both checkbox object (form) and string array (API) formats
  */
 export interface AnomalyDetectionConfig {
   enabled?: boolean;
-  methods?: AnomalyDetectionMethods;
+  methods?: AnomalyDetectionMethods | string[];  // Object for form, array for API
   threshold?: number;
   expectedRange?: AnomalyExpectedRange;
 }

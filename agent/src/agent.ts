@@ -919,40 +919,20 @@ export default class DeviceAgent {
       const { getKnex } = await import('./db/connection.js');
       const dbInstance = getKnex();
       
-      // Auto-discover endpoint metrics and merge with cloud config
-      const { discoverEndpointMetrics, mergeMetricConfigs } = await import('./ai/anomaly/endpoint-sync.js');
-      const discoveredMetrics = await discoverEndpointMetrics(dbInstance, this.deviceInfo.uuid, this.agentLogger);
-      const cloudMetricsCount = config.metrics?.length || 0;
-      const mergedMetrics = mergeMetricConfigs(config.metrics, discoveredMetrics);
+      // Build unified metrics array from system metrics + endpoint datapoint configs
+      const systemMetrics = config.systemMetrics || [];
+      const endpointMetrics = this.buildEndpointMetrics(targetStateConfig, config.defaults);
       
-      // Update config with merged metrics
-      config.metrics = mergedMetrics;
+      // Merge system metrics with endpoint metrics
+      config.metrics = [...systemMetrics, ...endpointMetrics];
       
-      const mode = cloudMetricsCount > 0 ? 'whitelist' : 'auto-discovery';
-      this.agentLogger?.infoSync(`Anomaly metrics configured (${mode} mode)`, {
+      this.agentLogger?.infoSync('Anomaly metrics configured (two-level inheritance)', {
         component: LogComponents.agent,
-        mode,
-        cloudMetrics: cloudMetricsCount,
-        discoveredMetrics: discoveredMetrics.length,
-        activeMetrics: mergedMetrics.length,
+        systemMetrics: systemMetrics.length,
+        endpointMetrics: endpointMetrics.length,
+        totalMetrics: config.metrics.length,
+        defaults: config.defaults,
       });
-      
-      // Save merged config back to target state (will be reported to cloud)
-      if (discoveredMetrics.length > 0 && targetStateConfig) {
-        const currentTargetState = this.stateReconciler.getTargetState();
-        if (currentTargetState?.config) {
-          // Update target state with merged anomaly config
-          currentTargetState.config.anomaly = config;
-          
-          // Save to database quietly (without triggering reconciliation loop)
-          await this.stateReconciler.updateTargetStateQuietly(currentTargetState);
-          
-          this.agentLogger?.infoSync("Saved merged anomaly config to target state", {
-            component: LogComponents.agent,
-            totalMetrics: mergedMetrics.length,
-          });
-        }
-      }
       
       // Create anomaly detection service with database storage and MQTT publishing
       this.anomalyService = new AnomalyDetectionService(
@@ -963,9 +943,9 @@ export default class DeviceAgent {
         this.deviceInfo.uuid
       );
       
-      // Profile no longer used for baseline filtering - baselines are per-metric only
-      this.agentLogger?.infoSync("Anomaly detection initialized (profile-agnostic)", {
+      this.agentLogger?.infoSync('Anomaly detection initialized with inheritance support', {
         component: LogComponents.agent,
+        enabledMetrics: config.metrics.filter(m => m.enabled).length,
       });
       
       // Wire anomaly service to system metrics and sensor-publish
@@ -979,6 +959,51 @@ export default class DeviceAgent {
       // Don't fail startup - anomaly detection is optional
       this.anomalyService = undefined;
     }
+  }
+  
+  /**
+   * Build endpoint metrics from datapoint anomaly configs
+   * Applies inheritance: defaults → datapoint overrides
+   */
+  private buildEndpointMetrics(targetStateConfig: any, defaults: any): any[] {
+    const metrics: any[] = [];
+    const endpoints = targetStateConfig?.endpoints || [];
+    
+    for (const endpoint of endpoints) {
+      if (!endpoint.enabled || !endpoint.dataPoints) continue;
+      
+      for (const dp of endpoint.dataPoints) {
+        const anomalyConfig = dp.anomalyDetection;
+        
+        // Skip if anomaly detection not enabled for this data point
+        if (!anomalyConfig?.enabled) continue;
+        
+        // Build metric name: {deviceUuid}_{endpointName}_{dataPointName}
+        const metricName = `${this.deviceInfo.uuid}_${endpoint.name}_${dp.name}`;
+        
+        // Merge defaults with datapoint overrides
+        const metric: any = {
+          name: metricName,
+          enabled: true,
+          methods: anomalyConfig.methods || defaults?.methods || ['mad'],
+          threshold: anomalyConfig.threshold ?? defaults?.threshold ?? 3.0,
+          windowSize: anomalyConfig.windowSize ?? defaults?.windowSize ?? 120,
+          minConfidence: anomalyConfig.minConfidence ?? 0.7,
+        };
+        
+        // Add expected range if provided
+        if (anomalyConfig.expectedRange) {
+          const range = anomalyConfig.expectedRange;
+          if (range.min !== undefined && range.max !== undefined) {
+            metric.expectedRange = [range.min, range.max];
+          }
+        }
+        
+        metrics.push(metric);
+      }
+    }
+    
+    return metrics;
   }
   
   /**

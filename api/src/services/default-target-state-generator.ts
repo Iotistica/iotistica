@@ -331,15 +331,22 @@ export function generateDefaultTargetStateConfig(
   // Default config
   const defaultConfig: TargetState = {
     anomalyDetection: {
+      enabled: true,  // Global anomaly detection toggle
+      defaults: {
+        methods: ['mad'],  // Default detection method (robust for noisy data)
+        threshold: 3.0,    // Default sensitivity threshold
+        windowSize: 120,   // Default rolling window size
+        minSamples: 5,     // Minimum samples before detection starts
+      },
       alerts: {
         cooldownMs: 300000,  // 5 minutes (agent-side alert deduplication)
         maxQueueSize: 1000,  // Max alerts in agent memory queue
       },
-      metrics: [
+      systemMetrics: [
         {
           name: 'cpu_usage',
           enabled: true,
-          methods: ['zscore', 'ewma'],
+          methods: ['zscore', 'ewma'],  // Override default methods for CPU
           threshold: 3.0,
           windowSize: 100,
           expectedRange: [0, 85],
@@ -347,7 +354,7 @@ export function generateDefaultTargetStateConfig(
         {
           name: 'memory_percent',
           enabled: true,
-          methods: ['zscore', 'ewma', 'rate_change'],
+          methods: ['zscore', 'ewma', 'rate_change'],  // Override default methods for memory
           threshold: 3.0,
           windowSize: 200,
           expectedRange: [0, 85],
@@ -355,7 +362,7 @@ export function generateDefaultTargetStateConfig(
         {
           name: 'cpu_temp',
           enabled: true,
-          methods: ['zscore', 'mad'],
+          methods: ['zscore', 'mad'],  // Override default methods for temperature
           threshold: 3.0,
           windowSize: 300,
           expectedRange: [30, 80],
