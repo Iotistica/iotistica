@@ -24,6 +24,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Plus, Edit, Trash2, Info } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Checkbox } from '@/components/ui/checkbox';
 
 interface DataPointsTableProps {
   value: ModbusDataPoint[];
@@ -70,6 +72,33 @@ export const DataPointsTable: React.FC<DataPointsTableProps> = ({
     // Auto-set count based on data type if not string
     if (data.dataType !== 'string') {
       data.count = getRegisterCount(data.dataType);
+    }
+
+    // Clean up anomaly detection data
+    if (data.anomalyDetection) {
+      // Set default threshold if not provided
+      if (!data.anomalyDetection.threshold) {
+        data.anomalyDetection.threshold = 5.0;
+      }
+      
+      // Remove null values from expectedRange
+      if (data.anomalyDetection.expectedRange) {
+        if (data.anomalyDetection.expectedRange.min === null || data.anomalyDetection.expectedRange.min === undefined) {
+          delete data.anomalyDetection.expectedRange.min;
+        }
+        if (data.anomalyDetection.expectedRange.max === null || data.anomalyDetection.expectedRange.max === undefined) {
+          delete data.anomalyDetection.expectedRange.max;
+        }
+        // Remove expectedRange if both min and max are undefined
+        if (!data.anomalyDetection.expectedRange.min && !data.anomalyDetection.expectedRange.max) {
+          delete data.anomalyDetection.expectedRange;
+        }
+      }
+      
+      // Remove anomalyDetection if not enabled
+      if (!data.anomalyDetection.enabled) {
+        delete data.anomalyDetection;
+      }
     }
 
     if (editingIndex !== null) {
@@ -181,7 +210,7 @@ export const DataPointsTable: React.FC<DataPointsTableProps> = ({
 
       {/* Add/Edit Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>
               {editingIndex !== null ? 'Edit Data Point' : 'Add Data Point'}
@@ -191,7 +220,15 @@ export const DataPointsTable: React.FC<DataPointsTableProps> = ({
             </DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <form onSubmit={handleSubmit(onSubmit)} className="flex-1 flex flex-col overflow-hidden">
+            <Tabs defaultValue="basic" className="flex-1 flex flex-col overflow-hidden">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="basic">Basic Configuration</TabsTrigger>
+                <TabsTrigger value="anomaly">Anomaly Detection</TabsTrigger>
+              </TabsList>
+
+              <div className="flex-1 overflow-y-auto pr-2">
+              <TabsContent value="basic" className="space-y-4 mt-4">
             {/* Name */}
             <div className="space-y-2">
               <Label htmlFor="dp-name">
@@ -403,8 +440,180 @@ export const DataPointsTable: React.FC<DataPointsTableProps> = ({
                 />
               </div>
             )}
+              </TabsContent>
 
-            <DialogFooter>
+              <TabsContent value="anomaly" className="space-y-6 mt-4">
+                {/* Anomaly Detection Configuration */}
+                <div className="space-y-6">
+                  <div className="flex items-start space-x-2">
+                    <Controller
+                      name="anomalyDetection.enabled"
+                      control={control}
+                      render={({ field }) => (
+                        <Checkbox
+                          id="anomaly-enabled"
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      )}
+                    />
+                    <div className="grid gap-1.5 leading-none">
+                      <Label
+                        htmlFor="anomaly-enabled"
+                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                      >
+                        Enable anomaly detection for this data point
+                      </Label>
+                      <p className="text-sm text-muted-foreground">
+                        Monitor this metric for unusual patterns and alert on anomalies
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Detection Methods */}
+                  <div className="space-y-3">
+                    <Label>Detection Methods</Label>
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <Controller
+                          name="anomalyDetection.methods.zscore"
+                          control={control}
+                          render={({ field }) => (
+                            <Checkbox
+                              id="method-zscore"
+                              checked={field.value || false}
+                              onCheckedChange={field.onChange}
+                            />
+                          )}
+                        />
+                        <Label htmlFor="method-zscore" className="text-sm font-normal cursor-pointer">
+                          Z-Score (statistical deviation)
+                        </Label>
+                      </div>
+                      
+                      <div className="flex items-center space-x-2">
+                        <Controller
+                          name="anomalyDetection.methods.mad"
+                          control={control}
+                          render={({ field }) => (
+                            <Checkbox
+                              id="method-mad"
+                              checked={field.value || false}
+                              onCheckedChange={field.onChange}
+                            />
+                          )}
+                        />
+                        <Label htmlFor="method-mad" className="text-sm font-normal cursor-pointer">
+                          MAD (median absolute deviation)
+                        </Label>
+                      </div>
+                      
+                      <div className="flex items-center space-x-2">
+                        <Controller
+                          name="anomalyDetection.methods.iqr"
+                          control={control}
+                          render={({ field }) => (
+                            <Checkbox
+                              id="method-iqr"
+                              checked={field.value || false}
+                              onCheckedChange={field.onChange}
+                            />
+                          )}
+                        />
+                        <Label htmlFor="method-iqr" className="text-sm font-normal cursor-pointer">
+                          IQR (interquartile range)
+                        </Label>
+                      </div>
+                      
+                      <div className="flex items-center space-x-2">
+                        <Controller
+                          name="anomalyDetection.methods.roc"
+                          control={control}
+                          render={({ field }) => (
+                            <Checkbox
+                              id="method-roc"
+                              checked={field.value || false}
+                              onCheckedChange={field.onChange}
+                            />
+                          )}
+                        />
+                        <Label htmlFor="method-roc" className="text-sm font-normal cursor-pointer">
+                          Rate of Change (sudden spikes)
+                        </Label>
+                      </div>
+                      
+                      <div className="flex items-center space-x-2">
+                        <Controller
+                          name="anomalyDetection.methods.ewma"
+                          control={control}
+                          render={({ field }) => (
+                            <Checkbox
+                              id="method-ewma"
+                              checked={field.value || false}
+                              onCheckedChange={field.onChange}
+                            />
+                          )}
+                        />
+                        <Label htmlFor="method-ewma" className="text-sm font-normal cursor-pointer">
+                          EWMA (exponentially weighted moving average)
+                        </Label>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Select one or more detection methods. MAD is recommended for noisy data.
+                    </p>
+                  </div>
+
+                      {/* Threshold */}
+                      <div className="space-y-2">
+                        <Label htmlFor="anomaly-threshold">Threshold</Label>
+                        <Input
+                          id="anomaly-threshold"
+                          type="number"
+                          step="0.1"
+                          {...register('anomalyDetection.threshold', { valueAsNumber: true })}
+                          placeholder="5.0"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Sensitivity threshold (higher = less sensitive, fewer alerts)
+                        </p>
+                      </div>
+
+                      {/* Expected Range */}
+                      <div className="space-y-2">
+                        <Label>Expected Range (Optional)</Label>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="range-min" className="text-xs">Minimum</Label>
+                            <Input
+                              id="range-min"
+                              type="number"
+                              step="any"
+                              {...register('anomalyDetection.expectedRange.min', { valueAsNumber: true })}
+                              placeholder="e.g., 0"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="range-max" className="text-xs">Maximum</Label>
+                            <Input
+                              id="range-max"
+                              type="number"
+                              step="any"
+                              {...register('anomalyDetection.expectedRange.max', { valueAsNumber: true })}
+                              placeholder="e.g., 100"
+                            />
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Define the normal operating range for this metric
+                        </p>
+                      </div>
+                </div>
+              </TabsContent>
+              </div>
+            </Tabs>
+
+            <DialogFooter className="mt-4 pt-4 border-t">
               <Button
                 type="button"
                 variant="outline"

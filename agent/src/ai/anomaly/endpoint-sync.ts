@@ -43,6 +43,7 @@ interface DataPoint {
  */
 export async function discoverEndpointMetrics(
 	db: Knex,
+	deviceUuid: string,
 	logger?: AgentLogger
 ): Promise<MetricConfig[]> {
 	try {
@@ -80,8 +81,9 @@ export async function discoverEndpointMetrics(
 					continue;
 				}
 				
-				// Generate metric name: {endpoint_name}_{data_point_name}
-				const metricName = `${endpoint.name}_${dp.name}`;
+				// Generate metric name: {device_uuid}_{endpoint_name}_{data_point_name}
+				// This ensures global uniqueness across all devices
+				const metricName = `${deviceUuid}_${endpoint.name}_${dp.name}`;
 				
 				// Infer expectedRange from base value and noise
 				let expectedRange: [number, number] | undefined;

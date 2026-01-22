@@ -317,17 +317,17 @@ export function AddEditDeviceDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[95vh] overflow-hidden flex flex-col">
         <DialogHeader className="flex-shrink-0">
-          <DialogTitle>{isEditMode ? "Edit Device" : "Add New Device"}</DialogTitle>
+          <DialogTitle>{isEditMode ? "Edit Device" : "Add New Agent"}</DialogTitle>
           <DialogDescription>
             {isEditMode
-              ? "Update device information and settings"
-              : "Configure a new device to add to your management dashboard"}
+              ? "Update agent information and settings"
+              : "Configure a new agent to add to your management dashboard"}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="device-name">Device Name *</Label>
+            <Label htmlFor="device-name">Agent Name *</Label>
             <Input
               id="device-name"
               placeholder="Raspberry-01"
@@ -340,7 +340,7 @@ export function AddEditDeviceDialog({
             <Label htmlFor="description">Description</Label>
             <Textarea
               id="description"
-              placeholder="Enter device description (optional)"
+              placeholder="Enter agent description (optional)"
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               rows={3}

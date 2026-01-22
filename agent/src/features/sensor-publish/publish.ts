@@ -407,7 +407,7 @@ export class Sensor extends EventEmitter {
     if (typeof data === 'number') {
       // Direct numeric value
       const metricName = prefix || 'value';
-      const fullMetricName = `${sensorName}_${metricName}`;
+      const fullMetricName = `${this.deviceUuid}_${sensorName}_${metricName}`;
       
       // Skip if already processed (use batch-level Set)
       if (this.batchProcessedMetrics.has(fullMetricName)) {
@@ -444,7 +444,7 @@ export class Sensor extends EventEmitter {
         
         // Feed if numeric value
         if (typeof value === 'number') {
-          const fullMetricName = `${deviceName}_${fieldName}`;
+          const fullMetricName = `${this.deviceUuid}_${deviceName}_${fieldName}`;
           
           // Skip if already processed (use batch-level Set)
           if (this.batchProcessedMetrics.has(fullMetricName)) {
@@ -454,7 +454,7 @@ export class Sensor extends EventEmitter {
           
           anomalyService.processDataPoint({
             source: 'endpoint',
-            metric: `${deviceName}_${fieldName}`,
+            metric: `${this.deviceUuid}_${deviceName}_${fieldName}`,
             value: value,
             unit: data.unit || this.inferUnit(fieldName),
             timestamp: timestampMs,
@@ -483,7 +483,7 @@ export class Sensor extends EventEmitter {
             
             // Feed if we have both fieldName and numeric value
             if (fieldName && typeof value === 'number') {
-              const fullMetricName = `${deviceName}_${fieldName}`;
+              const fullMetricName = `${this.deviceUuid}_${deviceName}_${fieldName}`;
               
               // Skip if already processed (use batch-level Set)
               if (this.batchProcessedMetrics.has(fullMetricName)) {
@@ -493,7 +493,7 @@ export class Sensor extends EventEmitter {
               
               anomalyService.processDataPoint({
                 source: 'endpoint',
-                metric: `${deviceName}_${fieldName}`,
+                metric: `${this.deviceUuid}_${deviceName}_${fieldName}`,
                 value: value,
                 unit: this.inferUnit(fieldName),
                 timestamp: timestampMs,
@@ -516,7 +516,7 @@ export class Sensor extends EventEmitter {
         if (typeof value === 'number') {
           // Feed numeric field
           const metricName = prefix ? `${prefix}_${key}` : key;
-          const fullMetricName = `${sensorName}_${metricName}`;
+          const fullMetricName = `${this.deviceUuid}_${sensorName}_${metricName}`;
           
           // Skip if already processed (use batch-level Set)
           if (this.batchProcessedMetrics.has(fullMetricName)) {
@@ -526,7 +526,7 @@ export class Sensor extends EventEmitter {
           
           anomalyService.processDataPoint({
             source: 'sensor',
-            metric: `${sensorName}_${metricName}`,
+            metric: `${this.deviceUuid}_${sensorName}_${metricName}`,
             value: value,
             unit: this.inferUnit(key),
             timestamp: timestampMs,
@@ -866,7 +866,7 @@ export class Sensor extends EventEmitter {
               
               // Get anomaly score and metadata for this metric
               if (fieldName) {
-                const metricName = `${deviceName}_${fieldName}`;
+                const metricName = `${this.deviceUuid}_${deviceName}_${fieldName}`;
                 const score = anomalyService.getAnomalyScore(metricName);
                 const metadata = anomalyService.getAnomalyMetadata(metricName);
                 
@@ -903,7 +903,7 @@ export class Sensor extends EventEmitter {
         else if (data.deviceName && (data.registerName || data.metric) && data.value !== undefined) {
           const deviceName = data.deviceName;
           const fieldName = data.registerName || data.metric;
-          const metricName = `${deviceName}_${fieldName}`;
+          const metricName = `${this.deviceUuid}_${deviceName}_${fieldName}`;
           const score = anomalyService.getAnomalyScore(metricName);
           const metadata = anomalyService.getAnomalyMetadata(metricName);
           

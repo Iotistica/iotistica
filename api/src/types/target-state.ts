@@ -36,6 +36,21 @@ export interface AnomalyDetectionConfig {
   warmupPeriodMs: number;  // Suppress alerts during agent initialization (default: 900000 = 15 min)
 }
 
+/**
+ * Per-Data-Point Anomaly Detection Configuration
+ * Stored in device_sensors.data_points JSONB field
+ * Used by API to build AnomalyMetric[] array in target state
+ */
+export interface AnomalyDetectionDataPointConfig {
+  enabled: boolean;
+  methods?: ('zscore' | 'mad' | 'iqr' | 'roc' | 'ewma')[];
+  threshold?: number;
+  expectedRange?: {
+    min: number;
+    max: number;
+  };
+}
+
 // ============================================================================
 // Logging
 // ============================================================================
@@ -164,6 +179,23 @@ export interface ModbusDataPoint {
   scale?: number;
   noisePct?: number;
   description?: string;
+  anomalyDetection?: AnomalyDetectionDataPointConfig;  // Per-data-point anomaly config
+}
+
+/**
+ * OPC-UA Data Point Configuration
+ * Stored in device_sensors.data_points JSONB field
+ */
+export interface OPCUADataPoint {
+  name: string;
+  nodeId: string;
+  semantic?: 'metric' | 'metadata';
+  nodeType?: 'metric' | 'metadata';
+  dataType?: 'number' | 'string' | 'boolean' | 'object';
+  unit?: string;
+  scalingFactor?: number;
+  offset?: number;
+  anomalyDetection?: AnomalyDetectionDataPointConfig;  // Per-data-point anomaly config
 }
 
 export interface ModbusProtocolConfig {

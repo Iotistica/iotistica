@@ -229,7 +229,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
         <div className="p-6 border-b border-border flex-shrink-0">
         <div className="flex items-start justify-between mb-2">
           <div>
-            <h2 className="text-foreground mb-1">Nodes</h2>
+            <h2 className="text-foreground mb-1">Agents</h2>
             <p className="text-muted-foreground">
               {devices.filter(d => d.status === "online").length} of {devices.length} online
             </p>

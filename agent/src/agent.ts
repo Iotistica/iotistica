@@ -921,7 +921,7 @@ export default class DeviceAgent {
       
       // Auto-discover endpoint metrics and merge with cloud config
       const { discoverEndpointMetrics, mergeMetricConfigs } = await import('./ai/anomaly/endpoint-sync.js');
-      const discoveredMetrics = await discoverEndpointMetrics(dbInstance, this.agentLogger);
+      const discoveredMetrics = await discoverEndpointMetrics(dbInstance, this.deviceInfo.uuid, this.agentLogger);
       const cloudMetricsCount = config.metrics?.length || 0;
       const mergedMetrics = mergeMetricConfigs(config.metrics, discoveredMetrics);
       

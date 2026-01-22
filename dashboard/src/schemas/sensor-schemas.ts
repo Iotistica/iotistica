@@ -6,6 +6,39 @@
  */
 
 // ============================================================================
+// Anomaly Detection Types
+// ============================================================================
+
+/**
+ * Anomaly detection methods
+ */
+export interface AnomalyDetectionMethods {
+  zscore?: boolean;    // Z-Score (Standard Deviation)
+  mad?: boolean;       // Median Absolute Deviation
+  iqr?: boolean;       // Interquartile Range
+  roc?: boolean;       // Rate of Change
+  ewma?: boolean;      // Exponentially Weighted Moving Average
+}
+
+/**
+ * Expected range for anomaly detection
+ */
+export interface AnomalyExpectedRange {
+  min?: number;
+  max?: number;
+}
+
+/**
+ * Anomaly detection configuration for a data point
+ */
+export interface AnomalyDetectionConfig {
+  enabled?: boolean;
+  methods?: AnomalyDetectionMethods;
+  threshold?: number;
+  expectedRange?: AnomalyExpectedRange;
+}
+
+// ============================================================================
 // Modbus Types
 // ============================================================================
 
@@ -76,6 +109,7 @@ export interface ModbusDataPoint {
   unit?: string;
   encoding?: 'ascii' | 'utf8' | 'utf-8' | 'latin1';
   description?: string;
+  anomalyDetection?: AnomalyDetectionConfig;
 }
 
 /**
@@ -158,6 +192,7 @@ export interface OPCUADataPoint {
   scale?: number;
   offset?: number;
   unit?: string;
+  anomalyDetection?: AnomalyDetectionConfig;
 }
 
 /**

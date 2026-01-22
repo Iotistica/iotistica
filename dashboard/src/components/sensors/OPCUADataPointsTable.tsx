@@ -6,11 +6,12 @@
  */
 
 import React, { useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import type { OPCUADataPoint } from '@/schemas/sensor-schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table,
   TableBody,
@@ -27,6 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface OPCUADataPointsTableProps {
   dataPoints: OPCUADataPoint[];
@@ -44,6 +46,7 @@ export const OPCUADataPointsTable: React.FC<OPCUADataPointsTableProps> = ({
     register,
     handleSubmit,
     reset,
+    control,
     formState: { errors },
   } = useForm<OPCUADataPoint>({
     defaultValues: {
@@ -54,6 +57,21 @@ export const OPCUADataPointsTable: React.FC<OPCUADataPointsTableProps> = ({
       scale: 1,
       offset: 0,
       unit: '',
+      anomalyDetection: {
+        enabled: false,
+        methods: {
+          zscore: false,
+          mad: false,
+          iqr: false,
+          roc: false,
+          ewma: false,
+        },
+        threshold: 5.0,
+        expectedRange: {
+          min: undefined,
+          max: undefined,
+        },
+      },
     },
   });
 
@@ -66,6 +84,21 @@ export const OPCUADataPointsTable: React.FC<OPCUADataPointsTableProps> = ({
       scale: 1,
       offset: 0,
       unit: '',
+      anomalyDetection: {
+        enabled: false,
+        methods: {
+          zscore: false,
+          mad: false,
+          iqr: false,
+          roc: false,
+          ewma: false,
+        },
+        threshold: 5.0,
+        expectedRange: {
+          min: undefined,
+          max: undefined,
+        },
+      },
     });
     setEditingIndex(null);
     setIsDialogOpen(true);
@@ -84,6 +117,33 @@ export const OPCUADataPointsTable: React.FC<OPCUADataPointsTableProps> = ({
   };
 
   const onSubmit = (data: OPCUADataPoint) => {
+    // Clean up anomaly detection data
+    if (data.anomalyDetection) {
+      // Set default threshold if not provided
+      if (!data.anomalyDetection.threshold) {
+        data.anomalyDetection.threshold = 5.0;
+      }
+      
+      // Remove null values from expectedRange
+      if (data.anomalyDetection.expectedRange) {
+        if (data.anomalyDetection.expectedRange.min === null || data.anomalyDetection.expectedRange.min === undefined) {
+          delete data.anomalyDetection.expectedRange.min;
+        }
+        if (data.anomalyDetection.expectedRange.max === null || data.anomalyDetection.expectedRange.max === undefined) {
+          delete data.anomalyDetection.expectedRange.max;
+        }
+        // Remove expectedRange if both min and max are undefined
+        if (!data.anomalyDetection.expectedRange.min && !data.anomalyDetection.expectedRange.max) {
+          delete data.anomalyDetection.expectedRange;
+        }
+      }
+      
+      // Remove anomalyDetection if not enabled
+      if (!data.anomalyDetection.enabled) {
+        delete data.anomalyDetection;
+      }
+    }
+
     let updated: OPCUADataPoint[];
     
     if (editingIndex !== null) {
@@ -174,31 +234,39 @@ export const OPCUADataPointsTable: React.FC<OPCUADataPointsTableProps> = ({
 
       {/* Add/Edit Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>
               {editingIndex !== null ? 'Edit Node' : 'Add Node'}
             </DialogTitle>
           </DialogHeader>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-            {/* Name */}
-            <div className="space-y-2">
-              <Label htmlFor="node-name">
-                Name <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                id="node-name"
-                {...register('name', { required: 'Name is required' })}
-                placeholder="e.g., temperature"
-              />
-              {errors.name && (
-                <p className="text-sm text-red-500">{errors.name.message}</p>
-              )}
-              <p className="text-xs text-muted-foreground">
-                Variable identifier (letters, numbers, underscores)
-              </p>
-            </div>
+          <form onSubmit={handleSubmit(onSubmit)} className="flex-1 flex flex-col overflow-hidden">
+            <Tabs defaultValue="basic" className="flex-1 flex flex-col overflow-hidden">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="basic">Basic Configuration</TabsTrigger>
+                <TabsTrigger value="anomaly">Anomaly Detection</TabsTrigger>
+              </TabsList>
+
+              <div className="flex-1 overflow-y-auto pr-2">
+              <TabsContent value="basic" className="space-y-4 mt-4">
+                {/* Name */}
+                <div className="space-y-2">
+                  <Label htmlFor="node-name">
+                    Name <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="node-name"
+                    {...register('name', { required: 'Name is required' })}
+                    placeholder="e.g., temperature"
+                  />
+                  {errors.name && (
+                    <p className="text-sm text-red-500">{errors.name.message}</p>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Variable identifier (letters, numbers, underscores)
+                  </p>
+                </div>
 
             {/* Node ID and Namespace */}
             <div className="grid grid-cols-3 gap-4">
@@ -314,8 +382,186 @@ export const OPCUADataPointsTable: React.FC<OPCUADataPointsTableProps> = ({
                 Optional unit of measurement
               </p>
             </div>
+              </TabsContent>
 
-            <DialogFooter>
+              <TabsContent value="anomaly" className="space-y-6 mt-4">
+                {/* Anomaly Detection Enable */}
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <Controller
+                      name="anomalyDetection.enabled"
+                      control={control}
+                      defaultValue={false}
+                      render={({ field }) => (
+                        <Checkbox
+                          id="anomaly-enabled"
+                          checked={field.value || false}
+                          onCheckedChange={field.onChange}
+                        />
+                      )}
+                    />
+                    <Label htmlFor="anomaly-enabled" className="font-semibold">
+                      Enable Anomaly Detection
+                    </Label>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Monitor this data point for statistical anomalies using machine learning algorithms
+                  </p>
+                </div>
+
+                {/* Detection Methods */}
+                  <div className="space-y-3">
+                  <Label>Detection Methods</Label>
+                  <div className="space-y-2">
+                    <div className="flex items-center space-x-2">
+                      <Controller
+                        name="anomalyDetection.methods.zscore"
+                        control={control}
+                        defaultValue={false}
+                        render={({ field }) => (
+                          <Checkbox
+                            id="method-zscore"
+                            checked={field.value || false}
+                            onCheckedChange={field.onChange}
+                          />
+                        )}
+                      />
+                      <Label htmlFor="method-zscore" className="text-sm font-normal cursor-pointer">
+                        Z-Score (Standard Deviation)
+                      </Label>
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      <Controller
+                        name="anomalyDetection.methods.mad"
+                        control={control}
+                        defaultValue={false}
+                        render={({ field }) => (
+                          <Checkbox
+                            id="method-mad"
+                            checked={field.value || false}
+                            onCheckedChange={field.onChange}
+                          />
+                        )}
+                      />
+                      <Label htmlFor="method-mad" className="text-sm font-normal cursor-pointer">
+                        MAD (Median Absolute Deviation)
+                      </Label>
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      <Controller
+                        name="anomalyDetection.methods.iqr"
+                        control={control}
+                        defaultValue={false}
+                        render={({ field }) => (
+                          <Checkbox
+                            id="method-iqr"
+                            checked={field.value || false}
+                            onCheckedChange={field.onChange}
+                          />
+                        )}
+                      />
+                      <Label htmlFor="method-iqr" className="text-sm font-normal cursor-pointer">
+                        IQR (Interquartile Range)
+                      </Label>
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      <Controller
+                        name="anomalyDetection.methods.roc"
+                        control={control}
+                        defaultValue={false}
+                        render={({ field }) => (
+                          <Checkbox
+                            id="method-roc"
+                            checked={field.value || false}
+                            onCheckedChange={field.onChange}
+                          />
+                        )}
+                      />
+                      <Label htmlFor="method-roc" className="text-sm font-normal cursor-pointer">
+                        Rate of Change
+                      </Label>
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      <Controller
+                        name="anomalyDetection.methods.ewma"
+                        control={control}
+                        defaultValue={false}
+                        render={({ field }) => (
+                          <Checkbox
+                            id="method-ewma"
+                            checked={field.value || false}
+                            onCheckedChange={field.onChange}
+                          />
+                        )}
+                      />
+                      <Label htmlFor="method-ewma" className="text-sm font-normal cursor-pointer">
+                        EWMA (Exponentially Weighted Moving Average)
+                      </Label>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Select one or more statistical methods to detect anomalies
+                  </p>
+                </div>
+
+                    {/* Threshold */}
+                    <div className="space-y-2">
+                      <Label htmlFor="anomaly-threshold">Sensitivity Threshold</Label>
+                      <Input
+                        id="anomaly-threshold"
+                        type="number"
+                        step="0.1"
+                        {...register('anomalyDetection.threshold', { valueAsNumber: true })}
+                        placeholder="5.0"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Higher values = less sensitive (fewer alerts). Default: 5.0 for Z-Score/MAD methods
+                      </p>
+                    </div>
+
+                    {/* Expected Range */}
+                    <div className="space-y-2">
+                      <Label className="font-semibold">Expected Range (Optional)</Label>
+                      <p className="text-xs text-muted-foreground mb-2">
+                        Set normal operating bounds for this data point
+                      </p>
+                      
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="expected-min">Minimum</Label>
+                          <Input
+                            id="expected-min"
+                            type="number"
+                            step="any"
+                            {...register('anomalyDetection.expectedRange.min', { valueAsNumber: true })}
+                            placeholder="e.g., 0"
+                          />
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <Label htmlFor="expected-max">Maximum</Label>
+                          <Input
+                            id="expected-max"
+                            type="number"
+                            step="any"
+                            {...register('anomalyDetection.expectedRange.max', { valueAsNumber: true })}
+                            placeholder="e.g., 100"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Values outside this range will be flagged immediately
+                      </p>
+                    </div>
+              </TabsContent>
+              </div>
+            </Tabs>
+
+            <DialogFooter className="mt-4 pt-4 border-t">
               <Button
                 type="button"
                 variant="outline"

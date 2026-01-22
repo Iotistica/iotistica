@@ -16,6 +16,7 @@ import { EventPublisher } from './event-sourcing';
 import logger from '../utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { DeviceTargetStateModel } from '../db/models';
+import type { ModbusDataPoint, OPCUADataPoint, AnomalyDetectionDataPointConfig, AnomalyMetric } from '../types/target-state';
 
 const eventPublisher = new EventPublisher();
 
@@ -27,8 +28,59 @@ export interface EndpointDeviceConfig {
   enabled: boolean;
   pollInterval: number;
   connection: any;
-  dataPoints: any[];
+  dataPoints: (ModbusDataPoint | OPCUADataPoint | any)[];  // Typed for Modbus/OPC-UA, any for other protocols
   metadata?: any;
+}
+
+/**
+ * Build anomaly detection metrics from endpoint data points
+ * Extracts data points with anomalyDetection enabled and creates AnomalyMetric entries
+ * Metric names are UUID-prefixed: {deviceUuid}_{endpointName}_{dataPointName}
+ */
+function buildAnomalyMetricsFromEndpoints(
+  deviceUuid: string,
+  endpoints: EndpointDeviceConfig[]
+): AnomalyMetric[] {
+  const metrics: AnomalyMetric[] = [];
+  
+  for (const endpoint of endpoints) {
+    if (!endpoint.enabled || !endpoint.dataPoints) continue;
+    
+    for (const dp of endpoint.dataPoints) {
+      const anomalyConfig = (dp as ModbusDataPoint | OPCUADataPoint).anomalyDetection;
+      
+      if (!anomalyConfig?.enabled) continue;
+      
+      // Build metric name: {deviceUuid}_{endpointName}_{dataPointName}
+      const metricName = `${deviceUuid}_${endpoint.name}_${dp.name}`;
+      
+      // Convert data point anomaly config to AnomalyMetric format
+      const metric: AnomalyMetric = {
+        name: metricName,
+        enabled: true,
+        methods: anomalyConfig.methods || ['mad'],  // Default to MAD if not specified
+        threshold: anomalyConfig.threshold || 5.0,  // Default threshold
+        windowSize: 100,  // Default window size
+      };
+      
+      // Add expected range if provided
+      if (anomalyConfig.expectedRange) {
+        metric.expectedRange = [
+          anomalyConfig.expectedRange.min,
+          anomalyConfig.expectedRange.max
+        ];
+      }
+      
+      metrics.push(metric);
+    }
+  }
+  
+  logger.debug(`Built ${metrics.length} anomaly metrics from endpoints`, {
+    deviceId: deviceUuid.substring(0, 8),
+    metrics: metrics.map(m => m.name)
+  });
+  
+  return metrics;
 }
 
 export class DeviceSensorSyncService {
@@ -376,6 +428,36 @@ export class DeviceSensorSyncService {
 
       // Update config with endpoints from table
       config.endpoints = configDevices;
+      
+      // Build anomaly detection metrics from endpoint data points
+      if (!config.anomalyDetection) {
+        config.anomalyDetection = {
+          alerts: { cooldownMs: 300000, maxQueueSize: 1000 },
+          metrics: [],
+          storage: { retention: 30, minSamples: 5 },
+          sensitivity: 5,
+          warmupPeriodMs: 900000
+        };
+      }
+      
+      // Extract endpoint metrics (data points with anomaly detection enabled)
+      const endpointMetrics = buildAnomalyMetricsFromEndpoints(deviceUuid, configDevices);
+      
+      // Merge with existing system metrics (cpu_usage, memory_percent, etc.)
+      // Keep existing metrics that don't start with device UUID (system metrics)
+      const systemMetrics = (config.anomalyDetection.metrics || []).filter(
+        (m: AnomalyMetric) => !m.name.startsWith(deviceUuid)
+      );
+      
+      // Combine system metrics + endpoint metrics
+      config.anomalyDetection.metrics = [...systemMetrics, ...endpointMetrics];
+      
+      logger.info(`Anomaly metrics updated`, {
+        deviceId: deviceUuid.substring(0, 8),
+        systemMetrics: systemMetrics.length,
+        endpointMetrics: endpointMetrics.length,
+        total: config.anomalyDetection.metrics.length
+      });
 
       // 🔄 SYNC: Propagate enabled flags to all protocol connections
       // This ensures agent reads the correct enabled state from target state
