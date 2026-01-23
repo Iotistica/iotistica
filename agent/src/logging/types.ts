@@ -85,7 +85,6 @@ export const LogComponents = {
   remoteAccess: 'RemoteAccess',
   sensor: 'Sensor',
   sensorPublish: 'Publish',
-  sensorConfigHandler: 'SensorConfigHandler',
 } as const;
 
 export type LogComponent = typeof LogComponents[keyof typeof LogComponents];

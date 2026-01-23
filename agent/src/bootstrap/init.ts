@@ -11,7 +11,6 @@ import { LogComponents } from '../logging/types';
 import { JobsFeature } from '../features/jobs/src/monitor.js';
 import { SensorPublishFeature } from '../features/publish/index.js';
 import { SensorsFeature, type SensorConfig } from '../features/endpoints/index.js';
-import { SensorConfigHandler } from '../features/publish/config-handler.js';
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
 import { MqttManager } from '../mqtt/manager.js';
@@ -40,7 +39,6 @@ export interface InitializedFeatures {
   jobs?: JobsFeature;
   sensorPublish?: SensorPublishFeature;
   sensors?: SensorsFeature;
-  sensorConfigHandler?: SensorConfigHandler;
   updater?: AgentUpdater;
   firewall?: AgentFirewall;
   discoveryService?: any; // Discovery service (passed from Agent)
@@ -106,8 +104,7 @@ export class FeatureInitializer {
   async initSupportingFeatures(): Promise<void> {
     await Promise.all([
       this.initAgentUpdater(),
-      this.initFirewall(),
-      this.initSensorConfigHandler()
+      this.initFirewall()
     ]);
   }
 
@@ -772,73 +769,6 @@ export class FeatureInitializer {
     return cloned;
   }
 
-  private async initSensorConfigHandler(): Promise<void> {
-    const { logger } = this.context;
-
-    // Only initialize if Sensor Publish is enabled
-    if (!this.features.sensorPublish) {
-      return;
-    }
-
-    logger.debugSync('Initializing Sensor Config Handler', {
-      component: LogComponents.agent
-    });
-
-    try {
-      this.features.sensorConfigHandler = new SensorConfigHandler(
-        this.features.sensorPublish,
-        logger as any
-      );
-
-      this.features.sensorConfigHandler.start();
-
-      // Report initial sensor state
-      try {
-        const sensors = this.features.sensorPublish.getSensors();
-        const sensorStates: Record<string, any> = {};
-
-        // Add sensor-publish sensors
-        sensors.forEach((sensor) => {
-          sensorStates[sensor.name] = {
-            enabled: sensor.enabled,
-            addr: sensor.addr,
-            publishInterval: sensor.publishInterval,
-          };
-        });
-
-        // Add protocol adapter device statuses
-        if (this.features.sensors) {
-          const allDeviceStatuses = await this.features.sensors.getAllDeviceStatuses();
-
-          Object.entries(allDeviceStatuses).forEach(([deviceName, device]) => {
-            sensorStates[deviceName] = {
-              type: device.protocol || 'unknown',
-              deviceName: device.name || deviceName,
-              connected: device.status === 'online',
-              lastPoll: device.lastSeenAt || null,
-              errorCount: 0,
-              lastError: null,
-            };
-          });
-        }
-      } catch (error) {
-        logger.errorSync('Failed to report initial sensor state', error as Error, {
-          component: LogComponents.agent
-        });
-      }
-
-      logger.debugSync('Sensor Config Handler initialized', {
-        component: LogComponents.agent
-      });
-    } catch (error) {
-      logger.errorSync('Failed to initialize Sensor Config Handler', error as Error, {
-        component: LogComponents.agent,
-        note: 'Continuing without remote sensor configuration'
-      });
-      this.features.sensorConfigHandler = undefined;
-    }
-  }
-
   private async initAgentUpdater(): Promise<void> {
     const { logger, deviceInfo } = this.context;
 
@@ -942,14 +872,6 @@ export class FeatureInitializer {
     if (this.features.sensors) {
       await this.features.sensors.stop();
       logger.debugSync('Protocol Adapters stopped', {
-        component: LogComponents.agent,
-      });
-    }
-
-    // Stop Sensor Config Handler
-    if (this.features.sensorConfigHandler) {
-      // No explicit stop method, just clear reference
-      logger.debugSync('Sensor Config Handler cleanup', {
         component: LogComponents.agent,
       });
     }
