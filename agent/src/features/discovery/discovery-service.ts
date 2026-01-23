@@ -38,7 +38,7 @@ import { SNMPDiscoveryPlugin } from './snmp.discovery';
 import { MqttDiscoveryPlugin, MqttDiscoveryOptions } from './mqtt.discovery';
 import { BACnetDiscoveryPlugin } from './bacnet.discovery';
 import { autoDetectLocalSubnets } from '../../utils/network';
-import type { AgentConfig } from '../../config/agent-config.js';
+import type { ConfigManager } from '../../device-manager/config.js';
 
 export type DiscoveryTrigger = 'first_boot' | 'manual' | 'scheduled';
 export type DiscoveryProtocol = 'modbus' | 'opcua' | 'can' | 'snmp' | 'mqtt' | 'bacnet';
@@ -116,7 +116,7 @@ export interface SNMPDiscoveryOptions {
  */
 export class DiscoveryService extends EventEmitter {
   private logger?: AgentLogger;
-  private agentConfig?: AgentConfig;
+  private configManager?: ConfigManager;
   private metadata: DiscoveryMetadata;
   private readonly MIN_DISCOVERY_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
   private readonly VALIDATION_CONCURRENCY = 3; // Concurrent validations (avoid overwhelming network/CPU)
@@ -138,13 +138,13 @@ export class DiscoveryService extends EventEmitter {
    * Create discovery service
    * 
    * IMPORTANT: Call init() after construction to load persisted metadata:
-   *   const discovery = new DiscoveryService(logger, agentConfig);
+   *   const discovery = new DiscoveryService(logger, configManager);
    *   await discovery.init();
    */
-  constructor(logger?: AgentLogger, agentConfig?: AgentConfig) {
+  constructor(logger?: AgentLogger, configManager?: ConfigManager) {
     super();
     this.logger = logger;
-    this.agentConfig = agentConfig;
+    this.configManager = configManager;
     this.metadata = this.loadMetadata();
     this.plugins = this.initializePlugins();
   }
@@ -182,10 +182,10 @@ export class DiscoveryService extends EventEmitter {
   private initializePlugins(): Map<string, BaseDiscoveryPlugin> {
     const plugins = new Map<string, BaseDiscoveryPlugin>();
     
-    plugins.set('modbus', new ModbusDiscoveryPlugin(this.logger, this.agentConfig));
-    plugins.set('opcua', new OPCUADiscoveryPlugin(this.logger, this.agentConfig));
+    plugins.set('modbus', new ModbusDiscoveryPlugin(this.logger, this.configManager));
+    plugins.set('opcua', new OPCUADiscoveryPlugin(this.logger, this.configManager));
     plugins.set('can', new CANDiscoveryPlugin(this.logger));
-    plugins.set('snmp', new SNMPDiscoveryPlugin(this.logger, this.agentConfig));
+    plugins.set('snmp', new SNMPDiscoveryPlugin(this.logger, this.configManager));
     plugins.set('mqtt', new MqttDiscoveryPlugin(this.logger));
     plugins.set('bacnet', new BACnetDiscoveryPlugin(this.logger));
     
@@ -210,9 +210,9 @@ export class DiscoveryService extends EventEmitter {
     // Stop any existing timers first
     this.stopPeriodicDiscovery();
     
-    const intervals = this.agentConfig?.getIntervalConfig();
+    const intervals = this.configManager?.getIntervalConfig();
     if (!intervals) {
-      this.logger?.warnSync('Cannot start periodic discovery - agentConfig not available', {
+      this.logger?.warnSync('Cannot start periodic discovery - configManager not available', {
         component: LogComponents.discovery,
       });
       return;
@@ -539,7 +539,7 @@ export class DiscoveryService extends EventEmitter {
    * If no config available, returns all available protocols
    */
   private getEnabledProtocols(): DiscoveryProtocol[] {
-    if (!this.agentConfig) {
+    if (!this.configManager) {
       // No config available, return all protocols
       return Array.from(this.plugins.keys()) as DiscoveryProtocol[];
     }
@@ -547,19 +547,19 @@ export class DiscoveryService extends EventEmitter {
     const enabledProtocols: DiscoveryProtocol[] = [];
 
     // Check Modbus
-    const modbusConfig = this.agentConfig.getModbusConfig();
+    const modbusConfig = this.configManager.getModbusConfig();
     if (modbusConfig.enabled) {
       enabledProtocols.push('modbus');
     }
 
     // Check OPC-UA
-    const opcuaConfig = this.agentConfig.getOPCUAConfig();
+    const opcuaConfig = this.configManager.getOPCUAConfig();
     if (opcuaConfig.enabled) {
       enabledProtocols.push('opcua');
     }
 
     // Check SNMP
-    const snmpConfig = this.agentConfig.getSNMPConfig();
+    const snmpConfig = this.configManager.getSNMPConfig();
     if (snmpConfig.enabled) {
       enabledProtocols.push('snmp');
     }
@@ -584,20 +584,20 @@ export class DiscoveryService extends EventEmitter {
   private isProtocolEnabled(protocol: string): boolean {
     // Default: Save all discovered devices as disabled
     
-    if (!this.agentConfig) {
+    if (!this.configManager) {
       // No config available, default to enabled
       return true;
     }
 
     switch (protocol) {
       case 'modbus':
-        return this.agentConfig.getModbusConfig().enabled ?? false;
+        return this.configManager.getModbusConfig().enabled ?? false;
       case 'opcua':
-        return this.agentConfig.getOPCUAConfig().enabled ?? false;
+        return this.configManager.getOPCUAConfig().enabled ?? false;
       case 'snmp':
-        return this.agentConfig.getSNMPConfig().enabled ?? false;
+        return this.configManager.getSNMPConfig().enabled ?? false;
       case 'bacnet':
-        return this.agentConfig.getBACnetConfig().enabled ?? false;
+        return this.configManager.getBACnetConfig().enabled ?? false;
       case 'can':
         // TODO: Add getCANConfig() when available
         return !!process.env.CAN_INTERFACE;
@@ -636,12 +636,12 @@ export class DiscoveryService extends EventEmitter {
    * Returns empty object if discovery targets found (slaveRange endpoints)
    */
   private getModbusOptions(): ModbusDiscoveryOptions | undefined {
-    if (!this.agentConfig) {
+    if (!this.configManager) {
       return undefined;
     }
 
     // Check for discovery targets (endpoints with slaveRange)
-    const discoveryTargets = this.agentConfig.getDiscoveryTargets?.('modbus') || [];
+    const discoveryTargets = this.configManager.getDiscoveryTargets?.('modbus') || [];
     
     if (discoveryTargets.length > 0) {
       return {}; // Let plugin handle discovery targets via getDiscoveryTargets()
@@ -656,12 +656,12 @@ export class DiscoveryService extends EventEmitter {
    * Returns empty object if discovery targets found (endpointUrl without dataPoints)
    */
   private getOPCUAOptions(): OPCUADiscoveryOptions | undefined {
-    if (!this.agentConfig) {
+    if (!this.configManager) {
       return undefined;
     }
 
     // Check for discovery targets (endpoints with endpointUrl but no dataPoints)
-    const discoveryTargets = this.agentConfig.getDiscoveryTargets?.('opcua') || [];
+    const discoveryTargets = this.configManager.getDiscoveryTargets?.('opcua') || [];
     
     if (discoveryTargets.length > 0) {
       return {}; // Let plugin handle discovery targets via getDiscoveryTargets()
@@ -694,12 +694,12 @@ export class DiscoveryService extends EventEmitter {
    * Returns empty object if discovery targets found (community without dataPoints)
    */
   private getSNMPOptions(): SNMPDiscoveryOptions | undefined {
-    if (!this.agentConfig) {
+    if (!this.configManager) {
       return undefined;
     }
 
     // Check for discovery targets (endpoints with community but no dataPoints)
-    const discoveryTargets = this.agentConfig.getDiscoveryTargets?.('snmp') || [];
+    const discoveryTargets = this.configManager.getDiscoveryTargets?.('snmp') || [];
     
     if (discoveryTargets.length > 0) {
       return {}; // Let plugin handle discovery targets via getDiscoveryTargets()
@@ -711,12 +711,12 @@ export class DiscoveryService extends EventEmitter {
 
   /**
    * Get MQTT discovery options from configuration
-   * Uses AgentConfig if available, otherwise falls back to direct env reads
+   * Uses ConfigManager if available, otherwise falls back to direct env reads
    */
   private getMqttOptions(): MqttDiscoveryOptions | undefined {
     // Use config accessor if available (cloud → env fallback)
-    if (this.agentConfig) {
-      const config = this.agentConfig.getMqttConfig();
+    if (this.configManager) {
+      const config = this.configManager.getMqttConfig();
       
       // MQTT not enabled or no broker URL
       if (!config.enabled || !config.brokerUrl) {
@@ -804,11 +804,11 @@ export class DiscoveryService extends EventEmitter {
    * Get BACnet discovery options from configuration
    */
   private getBACnetOptions(): any {
-    if (!this.agentConfig) {
+    if (!this.configManager) {
       return undefined;
     }
 
-    const config = this.agentConfig.getBACnetConfig();
+    const config = this.configManager.getBACnetConfig();
     
     // BACnet not enabled
     if (!config.enabled) {
@@ -1067,8 +1067,8 @@ export class DiscoveryService extends EventEmitter {
         // Convert to DeviceEndpoint format and save
         // Get enabled state from parent connection (if available)
         let endpointEnabled = false;
-        if (sensor.metadata?.connectionName && this.agentConfig) {
-          const modbusConfig = this.agentConfig.getModbusConfig();
+        if (sensor.metadata?.connectionName && this.configManager) {
+          const modbusConfig = this.configManager.getModbusConfig();
           const parentConn = modbusConfig.connections?.find(c => c.name === sensor.metadata?.connectionName);
           endpointEnabled = parentConn?.enabled ?? false;
         }

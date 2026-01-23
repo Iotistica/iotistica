@@ -25,7 +25,6 @@ CHECK (deployment_status IN (
   'deployed',          -- Successfully deployed and running
   'failed',            -- Deployment failed
   'reconciling',       -- Agent is applying changes
-  'discovered',        -- Agent found device (initial state from discovery)
   'pending_deletion',  -- Marked for deletion, waiting for agent confirmation
   'virtual'            -- Virtual/simulated device for testing
 ));

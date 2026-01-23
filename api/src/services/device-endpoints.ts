@@ -98,7 +98,7 @@ export class DeviceSensorSyncService {
    * 
    * Flow:
    * - During deployment (userId != 'agent-reconciliation'): Add sensors with deployment_status='pending'
-   * - During reconciliation (userId === 'agent-reconciliation'): New sensors='discovered', existing='deployed'
+   * - During reconciliation (userId === 'agent-reconciliation'): New sensors='deployed', existing='deployed'
    */
   async syncConfigToTable(
     deviceUuid: string,
@@ -141,13 +141,12 @@ export class DeviceSensorSyncService {
           // CRITICAL: Deployment status state machine during reconciliation
           // - If 'pending': Keep pending (user made changes agent hasn't seen yet)
           // - If 'reconciling': Mark as deployed (agent confirms changes applied)
-          // - If 'discovered': Keep discovered (no user changes yet)
           // - If 'deployed': Keep deployed (already confirmed)
           // - During deployment (not reconciliation): Mark as pending ONLY if changed or out of sync
           const deploymentStatus = isReconciliation 
             ? (existing?.deployment_status === 'pending' ? 'pending' : 
                existing?.deployment_status === 'reconciling' ? 'deployed' :
-               existing?.deployment_status || 'discovered')
+               existing?.deployment_status || 'deployed')
             : (hasChanged || isOutOfSync ? 'pending' : existing?.deployment_status || 'deployed');
           
           await query(
@@ -184,9 +183,9 @@ export class DeviceSensorSyncService {
           logger.info(`Updated: ${endpoint.name} (${endpoint.protocol}) - ${deploymentStatus}`);
         } else {
           // Insert new sensor into table (or update if name collision exists)
-          // If reconciliation from agent, mark as discovered (agent found it running, initial state)
+          // If reconciliation from agent, mark as deployed (agent found it running)
           // Otherwise, mark as pending (deployment just triggered, waiting for agent confirmation)
-          const deploymentStatus = isReconciliation ? 'discovered' : 'pending';
+          const deploymentStatus = isReconciliation ? 'deployed' : 'pending';
           
           await query(
             `INSERT INTO device_sensors (

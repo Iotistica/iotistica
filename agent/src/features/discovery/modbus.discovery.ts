@@ -15,7 +15,7 @@ import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, DiscoveredDevice, ValidationResult } from './base.discovery';
 import { generateModbusFingerprint } from './fingerprint';
-import type { AgentConfig } from '../../config/agent-config.js';
+import type { ConfigManager } from '../../device-manager/config.js';
 
 export interface ModbusDiscoveryOptions {
   serialPort?: string; // e.g., '/dev/ttyUSB0' or 'COM3'
@@ -47,11 +47,11 @@ interface ProfileMap {
 const PROFILE_ENV = process.env.MODBUS_PROFILE || 'Generic';
 
 export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
-  private agentConfig?: AgentConfig;
+  private configManager?: ConfigManager;
 
-  constructor(logger?: AgentLogger, agentConfig?: AgentConfig) {
+  constructor(logger?: AgentLogger, configManager?: ConfigManager) {
     super('modbus', logger);
-    this.agentConfig = agentConfig;
+    this.configManager = configManager;
   }
 
   /**
@@ -61,7 +61,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
   async discover(options?: ModbusDiscoveryOptions): Promise<DiscoveredDevice[]> {
 
     // Get discovery targets from endpoints (those with slaveRange)
-    const discoveryTargets = this.agentConfig?.getDiscoveryTargets?.('modbus') || [];
+    const discoveryTargets = this.configManager?.getDiscoveryTargets?.('modbus') || [];
     
     if (discoveryTargets.length === 0) {
       this.logger?.debugSync('No Modbus discovery targets configured (need slaveRange)', {

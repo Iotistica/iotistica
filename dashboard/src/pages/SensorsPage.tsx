@@ -397,10 +397,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       return <Badge className="bg-blue-500 dark:bg-blue-600 text-white border border-blue-600 dark:border-blue-500 font-semibold">Reconciling</Badge>;
     }
     
-    // Discovered (agent found it, initial state)
-    if ((deploymentStatus as any) === 'discovered') {
-      return <Badge className="bg-slate-500 dark:bg-slate-600 text-white border border-slate-600 dark:border-slate-500">Discovered</Badge>;
-    }
+
     
     // 2. Disabled state (toggle is off - don't show health indicators)
     if (!sensor.enabled) {

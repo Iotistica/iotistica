@@ -16,7 +16,7 @@ import type { DeviceInfo } from "./device-manager/types.js";
 import { DeviceAPI } from "./api/index.js";
 import { router as v1Router } from "./api/v1.js";
 import * as deviceActions from "./api/actions.js";
-import { CloudSync } from "./device-manager/sync.js";
+import { CloudSync } from "./device-manager/state.js";
 import { LocalLogBackend } from "./logging/local-backend.js";
 import { CloudLogBackend } from "./logging/cloud-backend.js";
 import { ContainerLogMonitor } from "./logging/docker-monitor.js";
@@ -45,7 +45,7 @@ import { loadConfigFromEnv, loadConfigFromTargetState } from "./ai/anomaly/utils
 import { SimulationOrchestrator, loadSimulationConfig } from "./simulation/index.js";
 import { DiscoveryService } from "./features/discovery/discovery-service.js";
 import { FeatureInitializer, type FeatureContext } from "./bootstrap/init.js";
-import { AgentConfig } from "./config/agent-config.js";
+import type { ConfigManager } from "./device-manager/config.js";
 
 /**
  * Load boot configuration from file
@@ -82,20 +82,20 @@ export default class DeviceAgent {
   private anomalyService?: AnomalyDetectionService; // Edge-based AI anomaly detection for metrics and sensors
   private simulationOrchestrator?: SimulationOrchestrator; // Simulation framework for testing
   private discoveryService?: DiscoveryService; // Protocol discovery (Modbus, OPC-UA, CAN, etc.)
-  private agentConfig!: AgentConfig; // Configuration accessor (cloud → hardcoded fallback)
+  private configManager!: ConfigManager; // Configuration manager (centralized config access)
   private dictionaryManager?: import('./dictionary/manager').DictionaryManager; // MQTT message key compaction (top-level service)
   private sharedHttpClient?: import('./lib/http-client').HttpClient; // Shared HTTP client for connection pooling
 
   // System settings (config-driven with env var defaults)
-  // Note: All settings now accessed via agentConfig getters (intervals, endpoints, ports, etc.)
+  // Note: All settings now accessed via configManager getters (intervals, endpoints, ports, etc.)
   // Scheduled restart timer (controlled from cloud config)
   private scheduledRestartTimer?: NodeJS.Timeout;
 
-  // Note: Configuration change handling moved to AgentConfig reactive layer
-  // AgentConfig listens to StateReconciler events and applies changes automatically
+  // Note: Configuration change handling done by ConfigManager reactive handlers
+  // ConfigManager listens to StateReconciler events and applies changes automatically
 
   constructor() {
-    // StateReconciler and AgentConfig will be initialized in init()
+    // StateReconciler and ConfigManager will be initialized in init()
     // (StateReconciler needs async init() to load target state from SQLite)
   }
 
@@ -104,12 +104,12 @@ export default class DeviceAgent {
       // Initialize database FIRST (needed by StateReconciler)
       await this.initDatabase();
 
-      // Initialize StateReconciler and AgentConfig EARLY (before logging setup)
-      // This ensures AgentConfig can read target state from SQLite database
+      // Initialize StateReconciler and ConfigManager EARLY (before logging setup)
+      // This ensures ConfigManager can read target state from SQLite database
       await this.initializeStateReconciler();
 
-      // Initialize logging (now AgentConfig is available)
-      const loggingConfig = this.agentConfig.getLoggingConfig();
+      // Initialize logging (now ConfigManager is available)
+      const loggingConfig = this.configManager.getLoggingConfig();
       const logLevel = (loggingConfig.logLevel as LogLevel) || "info";
       
       const localBackend = new LocalLogBackend({
@@ -128,7 +128,7 @@ export default class DeviceAgent {
 
       // Initialize shared HTTP client EARLY (before DeviceManager needs it)
       // Uses centralized factory for consistent TLS configuration
-      const cloudApiEndpoint = this.agentConfig.getCloudApiEndpoint();
+      const cloudApiEndpoint = this.configManager.getCloudApiEndpoint();
       this.sharedHttpClient = createHttpClient(cloudApiEndpoint);
 
       // Initialize device provisioning (uses sharedHttpClient)
@@ -188,10 +188,10 @@ export default class DeviceAgent {
         httpClient: this.sharedHttpClient,
         containerManager: this.containerManager,
         configSettings: targetState?.config?.settings || {},
-        configFeatures: this.agentConfig.getFeatures(),
+        configFeatures: this.configManager.getFeatures(),
         configProtocols: targetState?.config?.protocols || {},
-        cloudApiEndpoint: this.agentConfig.getCloudApiEndpoint(),
-        deviceApiPort: this.agentConfig.getDeviceApiPort(),
+        cloudApiEndpoint: this.configManager.getCloudApiEndpoint(),
+        deviceApiPort: this.configManager.getDeviceApiPort(),
         anomalyService: this.anomalyService,
         dictionaryManager: this.dictionaryManager
       };
@@ -269,21 +269,20 @@ export default class DeviceAgent {
       // 15. Start active memory monitoring (independent of healthcheck endpoint)
       this.startMemoryMonitoring();
 
-      // 16. Initialize reactive AgentConfig layer (handles all config changes automatically)
-      this.agentConfig.initialize({
-        logger: this.agentLogger,
+      // 16. Initialize reactive ConfigManager handlers (handles all config changes automatically)
+      this.configManager.setReactiveHandlers({
         containerManager: this.containerManager,
         cloudSync: this.cloudSync,
         discoveryService: this.discoveryService,
       });
 
-      // Setup AgentConfig event listeners for actions requiring Agent context
-      this.agentConfig.on('restart-discovery-timers', (intervals: any) => {
+      // Setup ConfigManager event listeners for actions requiring Agent context
+      this.configManager.on('restart-discovery-timers', (intervals: any) => {
         // Restart discovery timers with new intervals
         this.discoveryService?.startPeriodicDiscovery();
       });
 
-      this.agentConfig.on('schedule-restart', ({ restartTimeMs, restartConfig }: any) => {
+      this.configManager.on('schedule-restart', ({ restartTimeMs, restartConfig }: any) => {
         // Schedule the restart
         this.scheduledRestartTimer = setTimeout(async () => {
           this.agentLogger?.infoSync("Initiating scheduled restart", {
@@ -341,6 +340,54 @@ export default class DeviceAgent {
         }
       });
       
+      // Listen for endpoints-reload-required event from ConfigManager
+      // This triggers when reconcile() updates endpoints in the database
+      this.configManager.on('endpoints-reload-required', async (data: any) => {
+        this.agentLogger?.infoSync('Endpoint configuration changed, reloading protocol adapters', {
+          component: LogComponents.agent,
+          added: data.changeType?.added?.length || 0,
+          removed: data.changeType?.removed?.length || 0,
+          modified: data.changeType?.modified?.length || 0,
+          reason: data.reason
+        });
+
+        // Get SensorsFeature from FeatureInitializer
+        const features = this.featureInitializer?.getFeatures();
+        const sensorsFeature = features?.sensors;
+
+        if (sensorsFeature) {
+          try {
+            // Stop current adapters
+            this.agentLogger?.infoSync('Stopping protocol adapters for reload', {
+              component: LogComponents.agent
+            });
+            await sensorsFeature.stop();
+
+            // Restart adapters (they will reload endpoints from database)
+            this.agentLogger?.infoSync('Restarting protocol adapters with new endpoints', {
+              component: LogComponents.agent
+            });
+            await sensorsFeature.start();
+
+            this.agentLogger?.infoSync('Protocol adapters reloaded successfully', {
+              component: LogComponents.agent,
+              endpointCount: data.endpoints?.length || 0
+            });
+          } catch (error) {
+            this.agentLogger?.errorSync(
+              'Failed to reload protocol adapters',
+              error instanceof Error ? error : new Error(String(error)),
+              { component: LogComponents.agent }
+            );
+          }
+        } else {
+          this.agentLogger?.debugSync('SensorsFeature not available for reload', {
+            component: LogComponents.agent,
+            reason: 'Feature not initialized or disabled'
+          });
+        }
+      });
+
       // Listen for anomaly config changes from ConfigManager
       this.stateReconciler.on('anomaly-config-changed', (change: { old: any; new: any }) => {
         this.agentLogger?.infoSync('Anomaly configuration changed from cloud', {
@@ -356,54 +403,20 @@ export default class DeviceAgent {
           this.anomalyService.updateConfig(change.new);
         }
       });
-      
-      // Listen for protocol config changes
-      this.stateReconciler.on('protocol-config-changed', async (change: { old: any; new: any }) => {
-        // Profile changes no longer trigger baseline resets - profile is metadata only
-        // Data point changes will naturally update metrics as they're read
-        
-        // Trigger discovery for protocols with new connections
-        if (this.discoveryService) {
-          const protocolsToDiscover: string[] = [];
-          for (const protocol of ['modbus', 'opcua', 'snmp', 'mqtt', 'can']) {
-            const oldConns = change.old?.[protocol]?.connections?.length || 0;
-            const newConns = change.new?.[protocol]?.connections?.length || 0;
-            if (change.new?.[protocol]?.enabled && newConns > oldConns) {
-              protocolsToDiscover.push(protocol);
-            }
-          }
-          if (protocolsToDiscover.length > 0) {
-            this.agentLogger?.infoSync('New protocol connections detected - triggering discovery', {
-              component: LogComponents.agent,
-              protocols: protocolsToDiscover
-            });
-            this.discoveryService.runDiscovery({
-              trigger: 'manual',
-              validate: true,
-              forceRun: true,
-              protocols: protocolsToDiscover as any
-            }).catch(err => {
-              this.agentLogger?.errorSync('Discovery failed after protocol config change', err, {
-                component: LogComponents.agent
-              });
-            });
-          }
-        }
-      });
 
       //Final words
       const mode: "Cloud-connected" | "Standalone (not provisioned)" = this.deviceInfo.provisioned
         ? "Cloud-connected"
         : "Standalone (not provisioned)";
 
-      const intervals = this.agentConfig.getIntervalConfig();
+      const intervals = this.configManager.getIntervalConfig();
       
       this.agentLogger.debugSync("Device Agent initialized successfully", {
         component: LogComponents.agent,
         mode,
-        deviceApiPort: this.agentConfig.getDeviceApiPort(),
+        deviceApiPort: this.configManager.getDeviceApiPort(),
         reconciliationInterval: intervals.reconciliationIntervalMs,
-        cloudApiEndpoint: this.agentConfig.getCloudApiEndpoint(),
+        cloudApiEndpoint: this.configManager.getCloudApiEndpoint(),
         cloudFeaturesEnabled: this.deviceInfo.provisioned && !!this.cloudSync,
       });
 
@@ -411,7 +424,7 @@ export default class DeviceAgent {
   }
 
   private async initializeCloudLogging(): Promise<void> {
-    const cloudApiEndpoint = this.agentConfig.getCloudApiEndpoint();
+    const cloudApiEndpoint = this.configManager.getCloudApiEndpoint();
 
     // Only initialize cloud logging if device is provisioned
     if (
@@ -432,7 +445,7 @@ export default class DeviceAgent {
     }
 
     try {
-      const loggingConfig = this.agentConfig.getLoggingConfig();
+      const loggingConfig = this.configManager.getLoggingConfig();
       
       const cloudLogBackend = new CloudLogBackend(
         {
@@ -472,7 +485,7 @@ export default class DeviceAgent {
   }
 
   private async initializeDeviceManager(): Promise<void> {
-    const cloudApiEndpoint = this.agentConfig.getCloudApiEndpoint();
+    const cloudApiEndpoint = this.configManager.getCloudApiEndpoint();
     // Pass shared HTTP client for connection pooling
     this.deviceManager = new DeviceManager(this.agentLogger, this.sharedHttpClient, undefined, undefined, cloudApiEndpoint);
     await this.deviceManager.initialize();
@@ -488,7 +501,7 @@ export default class DeviceAgent {
     const provisioningApiKey = process.env.PROVISIONING_KEY || bootConfig?.provisioningKey;
     
     // Get API endpoint (environment takes priority over boot config)
-    const cloudEndpoint = process.env.CLOUD_API_ENDPOINT || bootConfig?.cloudApiEndpoint || this.agentConfig.getCloudApiEndpoint();
+    const cloudEndpoint = process.env.CLOUD_API_ENDPOINT || bootConfig?.cloudApiEndpoint || this.configManager.getCloudApiEndpoint();
     
     this.agentLogger.debugSync("Checking provisioning configuration", {
       component: LogComponents.agent,
@@ -561,14 +574,14 @@ export default class DeviceAgent {
         note: "Set PROVISIONING_KEY environment variable or provide /data/iotistic/boot-config.json",
       });
 
-    } else if (!deviceInfo.provisioned && !this.agentConfig.getCloudApiEndpoint()) {
+    } else if (!deviceInfo.provisioned && !this.configManager.getCloudApiEndpoint()) {
       // Local mode - device never provisioned and no cloud endpoint
       this.agentLogger.infoSync("Running in local mode (no cloud connection)", {
         component: LogComponents.agent,
       });
       await this.deviceManager.markAsLocalMode();
       deviceInfo = this.deviceManager.getDeviceInfo();
-    } else if (deviceInfo.provisioned && !this.agentConfig.getCloudApiEndpoint()) {
+    } else if (deviceInfo.provisioned && !this.configManager.getCloudApiEndpoint()) {
       // Device was previously provisioned but now running in local mode
       this.agentLogger.infoSync("Switching to local mode (no cloud connection)", {
         component: LogComponents.agent,
@@ -811,10 +824,10 @@ export default class DeviceAgent {
     this.stateReconciler = new StateReconciler();
     await this.stateReconciler.init();
     
-    // Initialize AgentConfig AFTER StateReconciler loads target state from SQLite
-    this.agentConfig = new AgentConfig(this.stateReconciler);
+    // Get ConfigManager reference from StateReconciler
+    this.configManager = this.stateReconciler.getConfigManager();
     
-    // Note: Full initialization of AgentConfig (reactive handlers) happens later
+    // Note: Reactive handler setup happens later via setReactiveHandlers()
     // after all dependencies (logger, containerManager, etc.) are available
   }
 
@@ -836,8 +849,8 @@ export default class DeviceAgent {
       });
     }
 
-    // Note: Config change handling is now done by AgentConfig reactive layer
-    // AgentConfig listens to StateReconciler's granular events directly
+    // Note: Config change handling is now done by ConfigManager reactive layer
+    // ConfigManager listens to StateReconciler's granular events directly
 
     this.agentLogger?.infoSync("Container manager setup complete", {
       component: LogComponents.agent,
@@ -879,16 +892,16 @@ export default class DeviceAgent {
     });
 
     // Start listening
-    await this.deviceAPI.listen(this.agentConfig.getDeviceApiPort());
+    await this.deviceAPI.listen(this.configManager.getDeviceApiPort());
     this.agentLogger?.infoSync("Device API started", {
       component: LogComponents.agent,
-      port: this.agentConfig.getDeviceApiPort(),
+      port: this.configManager.getDeviceApiPort(),
     });
   }
 
   private async initAnomalyDetection(): Promise<void> {
     // Check if anomaly detection is enabled (cloud config → env fallback)
-    const features = this.agentConfig.getFeatures();
+    const features = this.configManager.getFeatures();
     
     if (!features.enableAnomalyDetection) {
       this.agentLogger?.infoSync("Anomaly Detection disabled by configuration", {
@@ -1021,7 +1034,7 @@ export default class DeviceAgent {
     configureSystemMetrics(this.anomalyService);
     
     // Wire edge AI anomaly service to sensor-publish
-    const { configureAnomalyFeed: configureSensorAnomaly } = await import('./features/sensor-publish/publish.js');
+    const { configureAnomalyFeed: configureSensorAnomaly } = await import('./features/publish/publish.js');
     configureSensorAnomaly(this.anomalyService);
     
     this.agentLogger?.infoSync('Anomaly detection configured for system metrics and endpoints', {
@@ -1043,7 +1056,7 @@ export default class DeviceAgent {
 
     try {
       // Create discovery service with config accessor
-      this.discoveryService = new DiscoveryService(this.agentLogger, this.agentConfig);
+      this.discoveryService = new DiscoveryService(this.agentLogger, this.configManager);
       await this.discoveryService.init();
 
       // NOTE: First boot discovery is DEFERRED until after CloudSync fetches target state
@@ -1117,7 +1130,7 @@ export default class DeviceAgent {
   }
 
   private async initDeviceSync(): Promise<void> {
-    const cloudApiEndpoint = this.agentConfig.getCloudApiEndpoint();
+    const cloudApiEndpoint = this.configManager.getCloudApiEndpoint();
     
     if (!cloudApiEndpoint) {
       this.agentLogger?.warnSync(
@@ -1144,8 +1157,8 @@ export default class DeviceAgent {
       return;
     }
 
-    // Get intervals from agentConfig (cloud → env fallback)
-    const intervals = this.agentConfig.getIntervalConfig();
+    // Get intervals from ConfigManager (cloud → env fallback)
+    const intervals = this.configManager.getIntervalConfig();
 
     // Get features for CloudSync (endpoints service for health reporting)
     const features = this.featureInitializer?.getFeatures() || {};
@@ -1281,7 +1294,7 @@ export default class DeviceAgent {
 
       // Re-initialize anomaly detection now that endpoints are discovered
       // This allows auto-discovery of endpoint metrics
-      if (this.agentConfig.getFeatures().enableAnomalyDetection) {
+      if (this.configManager.getFeatures().enableAnomalyDetection) {
         this.agentLogger?.infoSync('Re-initializing anomaly detection after endpoint discovery', {
           component: LogComponents.agent
         });
@@ -1299,7 +1312,7 @@ export default class DeviceAgent {
 
 
   private startAutoReconciliation(): void {
-    const intervals = this.agentConfig.getIntervalConfig();
+    const intervals = this.configManager.getIntervalConfig();
     this.containerManager.startAutoReconciliation(
       intervals.reconciliationIntervalMs!
     );
@@ -1313,7 +1326,7 @@ export default class DeviceAgent {
    * Start active memory monitoring (independent of /ping healthcheck)
    */
   private startMemoryMonitoring(): void {
-    const performanceConfig = this.agentConfig.getPerformanceConfig();
+    const performanceConfig = this.configManager.getPerformanceConfig();
     const memoryCheckInterval = performanceConfig.memoryCheckIntervalMs!;
     const memoryThreshold = performanceConfig.memoryThresholdMb! * 1024 * 1024; // Convert MB to bytes
 
@@ -1492,8 +1505,8 @@ export default class DeviceAgent {
       // Stop discovery timers
       this.discoveryService?.stopPeriodicDiscovery();
 
-      // AgentConfig handles its own cleanup (event listeners)
-      // No manual removal needed since AgentConfig is garbage collected
+      // ConfigManager handles its own cleanup (event listeners)
+      // No manual removal needed since ConfigManager is garbage collected
 
       // **CRITICAL: Database shutdown LAST** (after all features stopped)
       // Import here to avoid circular dependencies

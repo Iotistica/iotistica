@@ -14,13 +14,109 @@ import _ from 'lodash';
 import { models as db } from '../db/connection.js';
 import { DeviceEndpointModel, type DeviceEndpoint } from '../db/models/endpoint.model.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
-import { LogComponents } from '../logging/types.js';
+import { LogComponents, type LogLevel } from '../logging/types.js';
 import type {
 	DeviceConfig,
 	ConfigStep,
 	ConfigReconciliationResult,
 	ProtocolAdapterDevice,
 } from '../drivers/types.js';
+
+// ==================== CONFIG TYPES ====================
+
+export interface ModbusConnectionConfig {
+	uuid?: string;
+	name?: string;
+	host: string;
+	port: number;
+	enabled?: boolean;
+	timeoutMs?: number;
+	profile?: string;
+	addressing?: {
+		slaveRange?: { start: number; end: number; };
+	};
+	points?: any;
+}
+
+export interface ModbusConfig {
+	enabled: boolean;
+	connections?: ModbusConnectionConfig[];
+	tcpHost?: string;
+	tcpPort?: number;
+	slaveRangeStart: number;
+	slaveRangeEnd: number;
+	timeout: number;
+	profile?: string;
+	profileDataPoints?: any[];
+	rtuPort?: string;
+	rtuBaudRate?: number;
+	rtuParity?: string;
+	rtuDataBits?: number;
+	rtuStopBits?: number;
+}
+
+export interface OPCUAConfig {
+	enabled?: boolean;
+	connections?: string[];
+	discoveryUrls?: string[];
+}
+
+export interface SNMPConfig {
+	enabled?: boolean;
+	connections?: string[];
+	ipRanges?: string[];
+	port?: number;
+}
+
+export interface MQTTConfig {
+	enabled?: boolean;
+	brokerUrl?: string;
+	username?: string;
+	password?: string;
+	discoveryRoots?: string[];
+	monitorDurationMs?: number;
+	qos?: 0 | 1 | 2;
+}
+
+export interface BACnetConfig {
+	enabled?: boolean;
+	port?: number;
+	discoveryTargets?: string[];
+	broadcastAddress?: string;
+	timeout?: number;
+	maxDevices?: number;
+}
+
+export interface PerformanceConfig {
+	memoryCheckIntervalMs?: number;
+	memoryThresholdMb?: number;
+}
+
+export interface LoggingConfig {
+	logMaxAge?: number;
+	maxLogFileSize?: number;
+	maxLogs?: number;
+	enableFilePersistence?: boolean;
+	enableCompression?: boolean;
+	logBatchSize?: number;
+	logFlushIntervalMs?: number;
+	logDir?: string;
+	logLevel?: string;
+}
+
+export interface FeatureToggles {
+	enableSensorPublish: boolean;
+	enableAnomalyDetection: boolean;
+}
+
+export interface IntervalConfig {
+	discoveryFullIntervalMs?: number;
+	discoveryLightIntervalMs?: number;
+	targetStatePollIntervalMs?: number;
+	deviceReportIntervalMs?: number;
+	metricsIntervalMs?: number;
+	reconciliationIntervalMs?: number;
+}
 
 interface ConfigManagerEvents {
 	'config-applied': () => void;
@@ -29,12 +125,25 @@ interface ConfigManagerEvents {
 	'device-unregistered': (deviceId: string) => void;
 	'features-changed': (change: { old: any; new: any }) => void;
 	'anomaly-config-changed': (change: { old: any; new: any }) => void;
+	'restart-discovery-timers': (intervals: IntervalConfig) => void;
+	'schedule-restart': (config: { restartTimeMs: number; restartConfig: any }) => void;
+	'endpoints-reload-required': (data: { changeType: { added: any[]; removed: any[]; modified: any[] }; endpoints: any[]; reason: string }) => void;
+	// Dynamic config:key events for handlers
+	[key: `config:${string}`]: (event: { key: string; value: any; previousValue?: any; timestamp: Date }) => void;
 }
 
 export class ConfigManager extends EventEmitter {
 	private targetConfig: DeviceConfig = {};
 	private currentConfig: DeviceConfig = {};
 	private logger?: AgentLogger;
+	
+	// Reactive handler dependencies (initialized via setReactiveHandlers())
+	private containerManager?: any;
+	private cloudSync?: any;
+	private discoveryLightTimer?: NodeJS.Timeout;
+	private discoveryFullTimer?: NodeJS.Timeout;
+	private scheduledRestartTimer?: NodeJS.Timeout;
+	private discoveryService?: any;
 
 	constructor(logger?: AgentLogger) {
 		super();
@@ -55,6 +164,29 @@ export class ConfigManager extends EventEmitter {
 	}
 
 	/**
+	 * Setup reactive configuration handlers
+	 * Must be called after init() to enable automatic config change responses
+	 */
+	public setReactiveHandlers(dependencies: {
+		containerManager?: any;
+		cloudSync?: any;
+		discoveryService?: any;
+		discoveryLightTimer?: NodeJS.Timeout;
+		discoveryFullTimer?: NodeJS.Timeout;
+	}): void {
+		this.containerManager = dependencies.containerManager;
+		this.cloudSync = dependencies.cloudSync;
+		this.discoveryService = dependencies.discoveryService;
+		this.discoveryLightTimer = dependencies.discoveryLightTimer;
+		this.discoveryFullTimer = dependencies.discoveryFullTimer;
+
+		this.logger?.infoSync('Reactive config handlers enabled', {
+			component: LogComponents.configManager,
+			operation: 'setReactiveHandlers',
+		});
+	}
+
+	/**
 	 * Set target configuration
 	 */
 	public async setTarget(config: DeviceConfig): Promise<void> {
@@ -69,6 +201,21 @@ export class ConfigManager extends EventEmitter {
 		});
 
 		this.targetConfig = _.cloneDeep(config);
+		
+		// Emit granular config:<key> events for changed keys
+		for (const [key, value] of Object.entries(config)) {
+			const previousValue = this.currentConfig[key];
+			const hasChanged = JSON.stringify(previousValue) !== JSON.stringify(value);
+
+			if (hasChanged) {
+				this.emit(`config:${key}`, {
+					key,
+					value,
+					previousValue,
+					timestamp: new Date()
+				});
+			}
+		}
 		
 		// Trigger reconciliation
 		await this.reconcile();
@@ -107,6 +254,273 @@ export class ConfigManager extends EventEmitter {
 		};
 		
 		return result;
+	}
+
+	/**
+	 * Get current config value for a specific key
+	 */
+	public getConfig(key: string): any {
+		return this.currentConfig[key];
+	}
+
+	/**
+	 * Check if a config key exists
+	 */
+	public hasConfig(key: string): boolean {
+		return key in this.currentConfig;
+	}
+
+	// ==================== PROTOCOL CONFIG GETTERS ====================
+
+	/**
+	 * Get discovery targets for a specific protocol
+	 */
+	public getDiscoveryTargets(protocol: string): any[] {
+		const endpoints = this.targetConfig.endpoints || [];
+
+		return endpoints.filter((endpoint: any) => {
+			if (endpoint.protocol !== protocol) return false;
+
+			switch (protocol) {
+				case 'modbus':
+					return endpoint.connection?.slaveRange !== undefined;
+				case 'opcua':
+					return endpoint.connection?.endpointUrl && 
+						(!endpoint.dataPoints || endpoint.dataPoints.length === 0);
+				case 'snmp':
+					return endpoint.connection?.community && 
+						(!endpoint.dataPoints || endpoint.dataPoints.length === 0);
+				case 'bacnet':
+					return Array.isArray(endpoint.connection?.discoveryTargets) && 
+						endpoint.connection.discoveryTargets.length > 0;
+				default:
+					return false;
+			}
+		});
+	}
+
+	/**
+	 * Get Modbus protocol configuration
+	 */
+	public getModbusConfig(): ModbusConfig {
+		const cloudProtocol = this.targetConfig.protocols?.modbus;
+
+		let profileDataPoints = cloudProtocol?.profileDataPoints;
+		
+		if (cloudProtocol?.points && typeof cloudProtocol.points === 'object') {
+			profileDataPoints = Object.entries(cloudProtocol.points).map(([name, point]: [string, any]) => ({
+				name,
+				...point
+			}));
+		}
+
+		const cloudConnection = cloudProtocol?.connection;
+		const cloudAddressing = cloudProtocol?.addressing;
+		const cloudConnections = cloudProtocol?.connections;
+
+		let connections: ModbusConnectionConfig[] | undefined;
+		if (Array.isArray(cloudConnections) && cloudConnections.length > 0) {
+			connections = cloudConnections.map((conn: any) => {
+				const connProfile = conn.profile || cloudProtocol?.profile || 'Generic';
+				
+				let connPoints: any[] | undefined;
+				if (conn.points && typeof conn.points === 'object') {
+					connPoints = Object.entries(conn.points).map(([name, point]: [string, any]) => ({
+						name,
+						...point
+					}));
+				} else if (!conn.points && profileDataPoints) {
+					connPoints = profileDataPoints;
+				}
+
+				return {
+					name: conn.name,
+					host: conn.host,
+					port: conn.port ?? 502,
+					enabled: conn.enabled ?? false,
+					timeoutMs: conn.timeoutMs ?? cloudConnection?.timeoutMs ?? 2000,
+					profile: connProfile,
+					addressing: conn.addressing,
+					points: connPoints
+				};
+			});
+		}
+
+		return {
+			enabled: cloudProtocol?.enabled ?? true,
+			connections,
+			tcpHost: cloudConnection?.host ?? cloudProtocol?.tcpHost ?? 'localhost',
+			tcpPort: cloudConnection?.port ?? cloudProtocol?.tcpPort ?? 502,
+			timeout: cloudConnection?.timeoutMs ?? cloudProtocol?.timeout ?? 2000,
+			slaveRangeStart: cloudAddressing?.slaveRange?.start ?? cloudProtocol?.slaveRangeStart ?? 1,
+			slaveRangeEnd: cloudAddressing?.slaveRange?.end ?? cloudProtocol?.slaveRangeEnd ?? 10,
+			profileDataPoints: profileDataPoints,
+			rtuPort: cloudProtocol?.serialPort,
+			rtuBaudRate: cloudProtocol?.baudRate ?? 9600,
+		};
+	}
+
+	/**
+	 * Get OPC-UA protocol configuration
+	 */
+	public getOPCUAConfig(): OPCUAConfig {
+		const cloudProtocol = this.targetConfig.protocols?.opcua;
+
+		return {
+			enabled: cloudProtocol?.enabled ?? false,
+			connections: cloudProtocol?.connections ?? cloudProtocol?.discoveryUrls ?? [],
+			discoveryUrls: cloudProtocol?.discoveryUrls
+		};
+	}
+
+	/**
+	 * Get SNMP protocol configuration
+	 */
+	public getSNMPConfig(): SNMPConfig {
+		const cloudProtocol = this.targetConfig.protocols?.snmp;
+
+		return {
+			enabled: cloudProtocol?.enabled ?? false,
+			connections: cloudProtocol?.connections ?? cloudProtocol?.ipRanges ?? [],
+			ipRanges: cloudProtocol?.ipRanges,
+			port: cloudProtocol?.port ?? 161,
+		};
+	}
+
+	/**
+	 * Get MQTT protocol configuration
+	 */
+	public getMqttConfig(): MQTTConfig {
+		const cloudProtocol = this.targetConfig.protocols?.mqtt;
+
+		return {
+			enabled: cloudProtocol?.enabled ?? false,
+			brokerUrl: cloudProtocol?.connection?.brokerUrl ?? process.env.MQTT_BROKER_URL ?? 'mqtt://mosquitto:1883',
+			username: cloudProtocol?.connection?.username ?? process.env.MQTT_USERNAME,
+			password: cloudProtocol?.connection?.password ?? process.env.MQTT_PASSWORD,
+			discoveryRoots: cloudProtocol?.discoveryRoots ?? [],
+			monitorDurationMs: cloudProtocol?.monitorDurationMs ?? 30000,
+			qos: (cloudProtocol?.qos ?? 0) as 0 | 1 | 2,
+		};
+	}
+
+	/**
+	 * Get BACnet protocol configuration
+	 */
+	public getBACnetConfig(): BACnetConfig {
+		const cloudProtocol = this.targetConfig.protocols?.bacnet;
+
+		const envTargets = process.env.BACNET_DISCOVERY_TARGETS?.split(',').map(t => t.trim()).filter(Boolean);
+		const discoveryTargets = cloudProtocol?.discoveryTargets || envTargets;
+
+		return {
+			enabled: cloudProtocol?.enabled ?? false,
+			port: cloudProtocol?.port ?? 47808,
+			...(discoveryTargets && discoveryTargets.length > 0 && { discoveryTargets }),
+			...(cloudProtocol?.broadcastAddress && { broadcastAddress: cloudProtocol.broadcastAddress }),
+			timeout: cloudProtocol?.timeout ?? 5000,
+			maxDevices: cloudProtocol?.maxDevices ?? 100,
+		};
+	}
+
+	/**
+	 * Get performance settings
+	 */
+	public getPerformanceConfig(): PerformanceConfig {
+		const cloudRuntime = this.targetConfig.runtime;
+		const cloudSettings = this.targetConfig.settings;
+		const cloudMemory = (cloudRuntime as any)?.memory;
+
+		return {
+			memoryCheckIntervalMs: cloudMemory?.checkIntervalMs ?? cloudRuntime?.memoryCheckIntervalMs ?? cloudSettings?.memoryCheckIntervalMs ?? 30000,
+			memoryThresholdMb: cloudMemory?.thresholdMb ?? cloudRuntime?.memoryThresholdMb ?? cloudSettings?.memoryThresholdMb ?? 15,
+		};
+	}
+
+	/**
+	 * Get logging configuration
+	 */
+	public getLoggingConfig(): LoggingConfig {
+		const cloudLogging = this.targetConfig.logging;
+		const cloudSettings = this.targetConfig.settings;
+
+		return {
+			maxLogs: cloudLogging?.maxLogs ?? cloudSettings?.maxLogs ?? 1000,
+			logMaxAge: cloudLogging?.logMaxAge ?? cloudSettings?.logMaxAge ?? 86400000,
+			maxLogFileSize: cloudLogging?.maxLogFileSize ?? cloudSettings?.maxLogFileSize ?? 5242880,
+			enableFilePersistence: cloudLogging?.enableFilePersistence ?? false,
+			enableCompression: cloudLogging?.enableCompression ?? true,
+			logBatchSize: cloudLogging?.logBatchSize ?? 500,
+			logFlushIntervalMs: cloudLogging?.logFlushIntervalMs ?? 30000,
+			logDir: process.env.LOG_DIR ?? cloudSettings?.logDir ?? `${process.env.DATA_DIR || '/app/data'}/logs`,
+			logLevel: (cloudLogging?.level ?? process.env.LOG_LEVEL ?? "info") as 'error' | 'warn' | 'info' | 'debug',
+		};
+	}
+
+	/**
+	 * Get feature toggles
+	 */
+	public getFeatures(): FeatureToggles {
+		const cloud = this.targetConfig.features;
+
+		return {
+			enableSensorPublish: cloud?.enableDeviceSensorPublish ?? cloud?.enableSensorPublish ?? false,
+			enableAnomalyDetection: cloud?.enableAnomalyDetection ?? false,
+		};
+	}
+
+	/**
+	 * Get interval settings
+	 */
+	public getIntervalConfig(): IntervalConfig {
+		const cloud = this.targetConfig.intervals;
+		const cloudDevice = (cloud as any)?.device;
+		const cloudDiscovery = (cloud as any)?.discovery;
+
+		return {
+			discoveryFullIntervalMs: cloudDiscovery?.fullIntervalMs ?? (cloud as any)?.discoveryFullIntervalMs ?? 86400000,
+			discoveryLightIntervalMs: cloudDiscovery?.lightIntervalMs ?? (cloud as any)?.discoveryLightIntervalMs ?? 14400000,
+			targetStatePollIntervalMs: cloudDevice?.targetStatePollIntervalMs ?? (cloud as any)?.targetStatePollIntervalMs ?? 60000,
+			deviceReportIntervalMs: cloudDevice?.reportIntervalMs ?? (cloud as any)?.deviceReportIntervalMs ?? 60000,
+			metricsIntervalMs: cloudDevice?.metricsIntervalMs ?? (cloud as any)?.metricsIntervalMs ?? 300000,
+			reconciliationIntervalMs: cloudDevice?.reconciliationIntervalMs ?? (cloud as any)?.reconciliationIntervalMs ?? 30000,
+		};
+	}
+
+	/**
+	 * Get cloud API endpoint
+	 */
+	public getCloudApiEndpoint(): string {
+		const env = process.env.CLOUD_API_ENDPOINT;
+		return env ?? 'http://localhost:4002';
+	}
+
+	/**
+	 * Get device API port
+	 */
+	public getDeviceApiPort(): number {
+		const env = process.env.DEVICE_API_PORT;
+		const port = env ? parseInt(env, 10) : 48484;
+		return isNaN(port) ? 48484 : port;
+	}
+
+	// ==================== NORMALIZATION ====================
+
+	/**
+	 * Normalize device property names (camelCase → snake_case)
+	 * Handles both API and SQLite conventions
+	 */
+	public normalizeDevice(device: ProtocolAdapterDevice): any {
+		return {
+			uuid: device.uuid,
+			name: device.name,
+			protocol: device.protocol,
+			enabled: device.enabled !== undefined ? device.enabled : true,
+			poll_interval: (device as any).pollInterval || (device as any).poll_interval || 5000,
+			connection: (device as any).connection,
+			data_points: (device as any).dataPoints || (device as any).data_points || (device as any).registers,
+			metadata: (device as any).metadata
+		};
 	}
 
 	/**
@@ -167,6 +581,10 @@ export class ConfigManager extends EventEmitter {
 					operation: 'reconcile',
 				});
 			}
+			
+			// Sync endpoints to SQLite using UUID-based operations
+			// This replaces the separate ProtocolAdaptersHandler logic
+			await this.syncEndpointsToDatabase();
 			
 			// Calculate steps for sensor reconciliation
 			const steps = this.calculateSteps();
@@ -250,6 +668,85 @@ export class ConfigManager extends EventEmitter {
 		}
 
 		return result;
+	}
+
+	/**
+	 * Sync endpoints to SQLite database using UUID-based operations
+	 * Integrated from ProtocolAdaptersHandler for unified config management
+	 */
+	private async syncEndpointsToDatabase(): Promise<void> {
+		const devices = this.targetConfig.endpoints || [];
+
+		if (!devices || !Array.isArray(devices) || devices.length === 0) {
+			this.logger?.debugSync('No endpoints to sync to database', {
+				component: LogComponents.configManager,
+				operation: 'syncEndpointsToDatabase',
+			});
+			return;
+		}
+
+		try {
+			// Get current devices from SQLite to detect deletions
+			const currentDevices = await DeviceEndpointModel.getAll();
+			const targetDeviceUuids = new Set(
+				devices.map((d: any) => d.uuid).filter(Boolean)
+			);
+
+			// Sync each device to SQLite
+			for (const device of devices) {
+				// Normalize property names from cloud API (camelCase) to SQLite (snake_case)
+				const normalizedDevice = this.normalizeDevice(device as ProtocolAdapterDevice);
+
+				// Use UUID for lookup if available, fallback to name for legacy devices
+				const existing = normalizedDevice.uuid 
+					? await DeviceEndpointModel.getByUuid(normalizedDevice.uuid)
+					: await DeviceEndpointModel.getByName(normalizedDevice.name);
+
+				if (existing) {
+					await DeviceEndpointModel.updateByUuid(
+						normalizedDevice.uuid || existing.uuid!,
+						normalizedDevice
+					);
+					this.logger?.infoSync('Updated endpoint in database', {
+						component: LogComponents.configManager,
+						deviceUuid: normalizedDevice.uuid || existing.uuid,
+						deviceName: normalizedDevice.name,
+						protocol: normalizedDevice.protocol
+					});
+				} else {
+					await DeviceEndpointModel.create(normalizedDevice);
+					this.logger?.infoSync('Added endpoint to database', {
+						component: LogComponents.configManager,
+						deviceUuid: normalizedDevice.uuid,
+						deviceName: normalizedDevice.name,
+						protocol: normalizedDevice.protocol
+					});
+				}
+			}
+
+			// Delete devices that are no longer in target state (by UUID)
+			for (const currentDevice of currentDevices) {
+				if (currentDevice.uuid && !targetDeviceUuids.has(currentDevice.uuid)) {
+					await DeviceEndpointModel.deleteByUuid(currentDevice.uuid);
+					this.logger?.infoSync('Removed endpoint from database', {
+						component: LogComponents.configManager,
+						deviceUuid: currentDevice.uuid,
+						deviceName: currentDevice.name,
+						protocol: currentDevice.protocol
+					});
+				}
+			}
+
+		} catch (error) {
+			this.logger?.errorSync(
+				'Failed to sync endpoints to database',
+				error instanceof Error ? error : new Error(String(error)),
+				{
+					component: LogComponents.configManager,
+					operation: 'syncEndpointsToDatabase'
+				}
+			);
+		}
 	}
 
 	/**
@@ -673,6 +1170,236 @@ export class ConfigManager extends EventEmitter {
 			);
 		}
 	}
+
+	// ==================== REACTIVE HANDLERS ====================
+
+	/**
+	 * Classify endpoint changes (added, removed, modified)
+	 */
+	private classifyEndpointChanges(oldEndpoints: any[], newEndpoints: any[]): {
+		added: any[];
+		removed: any[];
+		modified: any[];
+	} {
+		const oldMap = new Map(oldEndpoints.map(e => [e.uuid || e.id, e]));
+		const newMap = new Map(newEndpoints.map(e => [e.uuid || e.id, e]));
+
+		const added = newEndpoints.filter(e => !oldMap.has(e.uuid || e.id));
+		const removed = oldEndpoints.filter(e => !newMap.has(e.uuid || e.id));
+		const modified = newEndpoints.filter(e => {
+			const oldEndpoint = oldMap.get(e.uuid || e.id);
+			return oldEndpoint && !_.isEqual(oldEndpoint, e);
+		});
+
+		return { added, removed, modified };
+	}
+
+	/**
+	 * Handle logging configuration changes
+	 */
+	public handleLoggingConfigChanges(change: { old: any; new: any }): void {
+		if (!this.logger) {
+			return;
+		}
+
+		const loggingConfig = this.getLoggingConfig();
+		
+		this.logger.setLogLevel(loggingConfig.logLevel as LogLevel);
+		
+		this.logger.infoSync('Logging configuration updated from cloud', {
+			component: LogComponents.configManager,
+			logLevel: loggingConfig.logLevel,
+			enableFilePersistence: loggingConfig.enableFilePersistence,
+			enableCompression: loggingConfig.enableCompression,
+			logBatchSize: loggingConfig.logBatchSize,
+			logFlushIntervalMs: loggingConfig.logFlushIntervalMs,
+		});
+	}
+
+	/**
+	 * Handle intervals configuration changes
+	 */
+	public handleIntervalsChanges(change: { old: any; new: any }): void {
+		const intervals = this.getIntervalConfig();
+
+		if (this.discoveryService && (this.discoveryLightTimer || this.discoveryFullTimer)) {
+			this.logger?.infoSync('Discovery intervals changed, restarting timers', {
+				component: LogComponents.configManager,
+				lightIntervalHours: intervals.discoveryLightIntervalMs! / (60 * 60 * 1000),
+				fullIntervalHours: intervals.discoveryFullIntervalMs! / (60 * 60 * 1000),
+			});
+
+			this.emit('restart-discovery-timers', intervals);
+		}
+
+		if (this.containerManager) {
+			this.containerManager.stopAutoReconciliation();
+			this.containerManager.startAutoReconciliation(intervals.reconciliationIntervalMs!);
+
+			this.logger?.infoSync('Reconciliation interval updated from cloud', {
+				component: LogComponents.configManager,
+				intervalMs: intervals.reconciliationIntervalMs,
+				intervalMinutes: intervals.reconciliationIntervalMs! / 60000,
+			});
+		}
+
+		if (this.cloudSync) {
+			this.cloudSync.updateIntervals({
+				pollInterval: intervals.targetStatePollIntervalMs!,
+				reportInterval: intervals.deviceReportIntervalMs!,
+				metricsInterval: intervals.metricsIntervalMs!,
+			});
+
+			this.logger?.infoSync('CloudSync intervals updated from cloud', {
+				component: LogComponents.configManager,
+				pollIntervalMs: intervals.targetStatePollIntervalMs,
+				reportIntervalMs: intervals.deviceReportIntervalMs,
+				metricsIntervalMs: intervals.metricsIntervalMs,
+			});
+		}
+	}
+
+	/**
+	 * Handle memory configuration changes
+	 */
+	public handleMemoryConfigChanges(change: { old: any; new: any }): void {
+		const performanceConfig = this.getPerformanceConfig();
+		const newInterval = performanceConfig.memoryCheckIntervalMs!;
+		const newThreshold = performanceConfig.memoryThresholdMb! * 1024 * 1024;
+
+		import('../system/memory.js').then(({ stopMemoryMonitoring, setMemoryLogger, startMemoryMonitoring }) => {
+			stopMemoryMonitoring();
+			
+			setMemoryLogger(this.logger);
+			startMemoryMonitoring(
+				newInterval,
+				newThreshold,
+				() => {
+					this.logger?.errorSync(
+						'Memory threshold breached - agent may need restart',
+						undefined,
+						{
+							component: LogComponents.configManager,
+							thresholdMB: newThreshold / (1024 * 1024),
+							action: 'Consider restarting agent or investigating memory leak'
+						}
+					);
+				}
+			);
+
+			this.logger?.infoSync('Memory monitoring updated from cloud', {
+				component: LogComponents.configManager,
+				intervalMs: newInterval,
+				thresholdMB: newThreshold / (1024 * 1024),
+			});
+		});
+	}
+
+	/**
+	 * Handle scheduled restart configuration changes
+	 */
+	public handleScheduledRestartConfig(change: { old: any; new: any }): void {
+		const restartConfig = change.new;
+
+		if (this.scheduledRestartTimer) {
+			clearTimeout(this.scheduledRestartTimer);
+			this.scheduledRestartTimer = undefined;
+			this.logger?.infoSync("Cleared existing scheduled restart timer", {
+				component: LogComponents.configManager,
+			});
+		}
+
+		if (!restartConfig || !restartConfig.enabled) {
+			this.logger?.debugSync("Scheduled restart disabled or not configured", {
+				component: LogComponents.configManager,
+				config: restartConfig || "not set"
+			});
+			return;
+		}
+
+		const intervalDays = parseInt(restartConfig.intervalDays, 10);
+		if (isNaN(intervalDays) || intervalDays < 1 || intervalDays > 90) {
+			this.logger?.warnSync("Invalid scheduled restart intervalDays, must be 1-90", {
+				component: LogComponents.configManager,
+				providedValue: restartConfig.intervalDays,
+				using: "disabled"
+			});
+			return;
+		}
+
+		const restartTimeMs = intervalDays * 24 * 60 * 60 * 1000;
+		const restartAt = new Date(Date.now() + restartTimeMs);
+
+		this.logger?.infoSync("Scheduled restart configured from cloud", {
+			component: LogComponents.configManager,
+			enabled: true,
+			intervalDays,
+			restartAtISO: restartAt.toISOString(),
+			restartAtLocal: restartAt.toLocaleString(),
+			reason: restartConfig.reason || "heap_fragmentation_cleanup",
+			configSource: "cloud_target_state"
+		});
+
+		this.emit('schedule-restart', { restartTimeMs, restartConfig });
+	}
+
+	/**
+	 * Handle endpoints configuration changes
+	 * This is called when the cloud updates the endpoints config
+	 * 
+	 * NOTE: Does NOT trigger auto-discovery to avoid DB update conflicts
+	 * - reconcile() → syncEndpointsToDatabase() already syncs cloud config to DB
+	 * - Discovery's saveToDatabase() would conflict with reconcile's updates
+	 * - Cloud config is source of truth, discovery is for finding NEW devices
+	 */
+	public async handleEndpointsChanges(change: { old: any; new: any }): Promise<void> {
+		const newEndpoints = change.new || [];
+		const oldEndpoints = change.old || [];
+
+		// Classify changes (added, removed, modified)
+		const changeType = this.classifyEndpointChanges(oldEndpoints, newEndpoints);
+
+		this.logger?.infoSync('Endpoints configuration changed from cloud', {
+			component: LogComponents.configManager,
+			oldCount: oldEndpoints.length,
+			newCount: newEndpoints.length,
+			added: changeType.added.length,
+			removed: changeType.removed.length,
+			modified: changeType.modified.length,
+		});
+
+		// Emit reload event for protocol adapters hot-reload
+		this.emit('endpoints-reload-required', {
+			changeType,
+			endpoints: newEndpoints,
+			reason: 'cloud_config_change',
+		});
+
+		// NOTE: We do NOT trigger auto-discovery here because:
+		// 1. reconcile() already synced endpoints to DB via syncEndpointsToDatabase()
+		// 2. Discovery's saveToDatabase() would conflict with reconcile's updates
+		// 3. Cloud config is the source of truth, not discovery results
+		// 4. Discovery is for FINDING new devices, not validating existing config
+		//
+		// Discovery should only run:
+		// - On scheduled intervals (periodic discovery)
+		// - Manual trigger via API/dashboard
+		// - First boot (initial discovery)
+
+		// Log removed endpoints (cleanup handled by reconcile())
+		if (changeType.removed.length > 0) {
+			this.logger?.infoSync('Endpoints removed, will be cleaned up during reconciliation', {
+				component: LogComponents.configManager,
+				removedCount: changeType.removed.length,
+				removedNames: changeType.removed.map(e => e.name),
+			});
+		}
+
+		// Note: Endpoint syncing to database is handled automatically during
+		// ConfigManager.reconcile() via syncEndpointsToDatabase()
+	}
+
+	// ==================== TYPED EVENT EMITTER ====================
 
 	// Typed event emitter methods
 	public on<K extends keyof ConfigManagerEvents>(

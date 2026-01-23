@@ -9,9 +9,9 @@ import type { AgentLogger } from '../logging/agent-logger';
 import type { DeviceInfo } from '../device-manager/types.js';
 import { LogComponents } from '../logging/types';
 import { JobsFeature } from '../features/jobs/src/monitor.js';
-import { SensorPublishFeature } from '../features/sensor-publish/index.js';
+import { SensorPublishFeature } from '../features/publish/index.js';
 import { SensorsFeature, type SensorConfig } from '../features/endpoints/index.js';
-import { SensorConfigHandler } from '../features/sensor-publish/config-handler.js';
+import { SensorConfigHandler } from '../features/publish/config-handler.js';
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
 import { MqttManager } from '../mqtt/manager.js';
@@ -272,7 +272,7 @@ export class FeatureInitializer {
 
       // Configure edge AI anomaly detection if enabled
       if (anomalyService) {
-        const { configureAnomalyFeed } = await import('../features/sensor-publish/publish.js');
+        const { configureAnomalyFeed } = await import('../features/publish/publish.js');
         configureAnomalyFeed(anomalyService);
 
         logger.debugSync('Configured edge AI anomaly detection for sensor data', {

@@ -38,10 +38,10 @@ interface StateReconcilerEvents {
 	'state-applied': () => void;
 	'reconciliation-complete': () => void;
 	'logging-config-changed': (change: { old: any; new: any }) => void;
-	'protocol-config-changed': (change: { old: any; new: any }) => void;
 	'intervals-changed': (change: { old: any; new: any }) => void;
 	'memory-config-changed': (change: { old: any; new: any }) => void;
 	'scheduled-restart-changed': (change: { old: any; new: any }) => void;
+	'endpoints-changed': (change: { old: any; new: any }) => void;
 	'features-changed': (change: { old: any; new: any }) => void;
 	'anomaly-config-changed': (change: { old: any; new: any }) => void;
 }
@@ -95,6 +95,27 @@ export class StateReconciler extends EventEmitter {
 		// Forward anomaly config changes to agent
 		this.configManager.on('anomaly-config-changed', (change: { old: any; new: any }) => {
 			this.emit('anomaly-config-changed', change);
+		});
+		
+		// Wire reactive handler events to ConfigManager methods
+		this.on('logging-config-changed', (change) => {
+			this.configManager.handleLoggingConfigChanges(change);
+		});
+		
+		this.on('intervals-changed', (change) => {
+			this.configManager.handleIntervalsChanges(change);
+		});
+		
+		this.on('memory-config-changed', (change) => {
+			this.configManager.handleMemoryConfigChanges(change);
+		});
+		
+		this.on('scheduled-restart-changed', (change) => {
+			this.configManager.handleScheduledRestartConfig(change);
+		});
+
+		this.on('endpoints-changed', (change) => {
+			this.configManager.handleEndpointsChanges(change);
 		});
 	}
 
@@ -265,6 +286,7 @@ export class StateReconciler extends EventEmitter {
 			});
 			
 			await this.configManager.setTarget(this.targetState.config || {});
+
 
 			// Step 3: Reconcile agent version (if needed)
 			this.logger?.debugSync('Step 3: Reconciling agent version', {
@@ -589,18 +611,6 @@ export class StateReconciler extends EventEmitter {
 			});
 		}
 
-		// Check protocol config changes
-		if (!_.isEqual(oldConfig.protocols, newConfig.protocols)) {
-			this.logger?.debugSync('Protocol configuration changed', {
-				component: LogComponents.stateReconciler,
-				operation: 'emitConfigChangeEvents',
-			});
-			this.emit('protocol-config-changed', {
-				old: oldConfig.protocols,
-				new: newConfig.protocols,
-			});
-		}
-
 		// Check intervals changes
 		if (!_.isEqual(oldConfig.intervals, newConfig.intervals)) {
 			this.logger?.debugSync('Intervals configuration changed', {
@@ -642,6 +652,20 @@ export class StateReconciler extends EventEmitter {
 			this.emit('scheduled-restart-changed', {
 				old: oldConfig.settings?.scheduledRestart,
 				new: newConfig.settings?.scheduledRestart,
+			});
+		}
+
+		// Check endpoints changes
+		if (!_.isEqual(oldConfig.endpoints, newConfig.endpoints)) {
+			this.logger?.debugSync('Endpoints configuration changed', {
+				component: LogComponents.stateReconciler,
+				operation: 'emitConfigChangeEvents',
+				oldCount: oldConfig.endpoints?.length || 0,
+				newCount: newConfig.endpoints?.length || 0,
+			});
+			this.emit('endpoints-changed', {
+				old: oldConfig.endpoints,
+				new: newConfig.endpoints,
 			});
 		}
 	}

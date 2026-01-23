@@ -356,6 +356,7 @@ export interface ReconciliationResult {
  */
 export interface ProtocolAdapterDevice {
 	id: string;
+	uuid?: string; // Stable identifier for cloud/edge sync
 	name: string;
 	protocol: string;
 	connectionString: string;

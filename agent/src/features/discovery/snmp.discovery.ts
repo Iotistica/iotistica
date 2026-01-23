@@ -19,7 +19,7 @@ import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, DiscoveredDevice, ValidationResult } from './base.discovery';
 import { generateSNMPFingerprint } from './fingerprint';
-import type { AgentConfig } from '../../config/agent-config.js';
+import type { ConfigManager } from '../../device-manager/config.js';
 import * as net from 'net';
 import * as dns from 'dns';
 import { promisify } from 'util';
@@ -52,11 +52,11 @@ interface SNMPDeviceInfo {
 }
 
 export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
-  private agentConfig?: AgentConfig;
+  private configManager?: ConfigManager;
 
-  constructor(logger?: AgentLogger, agentConfig?: AgentConfig) {
+  constructor(logger?: AgentLogger, configManager?: ConfigManager) {
     super('snmp', logger);
-    this.agentConfig = agentConfig;
+    this.configManager = configManager;
   }
 
   /**
@@ -66,7 +66,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
     const discovered: DiscoveredDevice[] = [];
 
     // Get discovery targets from endpoints (those with community but no dataPoints)
-    const discoveryTargets = this.agentConfig?.getDiscoveryTargets?.('snmp') || [];
+    const discoveryTargets = this.configManager?.getDiscoveryTargets?.('snmp') || [];
     
     if (discoveryTargets.length === 0) {
       this.logger?.debugSync('No SNMP discovery targets configured (need community without dataPoints)', {
