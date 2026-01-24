@@ -20,7 +20,7 @@
       ],
       "env": {
       "LOG_LEVEL":"debug",
-			"PROVISIONING_KEY": "ca1842f35ad849197823fb21b30de6a9bd85a7c1d1473161d4e883cd3730b3ca"
+			"PROVISIONING_KEY": "0b306c8918ca530bff543dfe5872de20994cb2149a824ef66bbdea8f355ff340"
       }
     },
     {

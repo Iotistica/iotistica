@@ -195,9 +195,13 @@ export class CloudSync extends EventEmitter {
 		this.deviceManager = deviceManager;
 		this.logger = logger;
 		this.sensorPublish = sensorPublish;
-		this.endpoints = endpoints;
 		this.mqttManager = mqttManager;
 		this.agentUpdater = agentUpdater;
+		
+		// Set endpoints using method (provides logging)
+		if (endpoints) {
+			this.setEndpoints(endpoints);
+		}
 		
 		// Set defaults FIRST (needed by createHttpClient)
 		this.config = {

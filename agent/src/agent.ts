@@ -16,7 +16,7 @@ import type { DeviceInfo } from "./device-manager/types.js";
 import { DeviceAPI } from "./api/index.js";
 import { router as v1Router } from "./api/v1.js";
 import * as deviceActions from "./api/actions.js";
-import { CloudSync } from "./device-manager/state.js";
+import { CloudSync } from "./device-manager/sync.js";
 import { LocalLogBackend } from "./logging/local-backend.js";
 import { CloudLogBackend } from "./logging/cloud-backend.js";
 import { ContainerLogMonitor } from "./logging/docker-monitor.js";
@@ -264,6 +264,21 @@ export default class DeviceAgent {
 
       // 12. init sync (CloudSync will use AgentUpdater set above)
       await this.initDeviceSync();
+
+      // 12.1. Initialize anomaly detection after CloudSync loads cloud config
+      // This ensures we respect cloud-configured feature flags (not just env variables)
+      await this.initAnomalyDetection();
+
+      // 12.2. Initialize device actions with all dependencies ready
+      // (containerManager, deviceManager, cloudSync, logger, anomalyService, simulationOrchestrator)
+      deviceActions.initialize(
+        this.containerManager,
+        this.deviceManager,
+        this.cloudSync,
+        this.agentLogger,
+        this.anomalyService,
+        this.simulationOrchestrator
+      );
 
       // 12.5. Start periodic discovery timers
       this.discoveryService?.startPeriodicDiscovery();
@@ -827,8 +842,7 @@ export default class DeviceAgent {
       component: LogComponents.agent,
     });
 
-    // Initialize device actions with managers
-    deviceActions.initialize(this.containerManager, this.deviceManager, undefined, this.agentLogger, undefined, undefined);
+    // Note: deviceActions.initialize deferred until all dependencies ready (see initDeviceSync)
 
     // Health checks
     const healthchecks = [
@@ -1023,13 +1037,6 @@ export default class DeviceAgent {
       this.discoveryService = new DiscoveryService(this.agentLogger, this.configManager);
       await this.discoveryService.init();
 
-      // NOTE: First boot discovery is DEFERRED until after CloudSync fetches target state
-      // This ensures we respect cloud-configured feature flags (not just env variables)
-      // See runFirstBootDiscoveryIfEnabled() called after CloudSync initialization
-
-      this.agentLogger?.infoSync("Discovery Service initialized (first boot discovery deferred until cloud config loaded)", {
-        component: LogComponents.agent,
-      });
     } catch (error) {
       this.agentLogger?.errorSync(
         "Failed to initialize Discovery Service",
@@ -1041,7 +1048,6 @@ export default class DeviceAgent {
     }
   }
   
-
 
   private async initializeSimulationMode(): Promise<void> {
     try {
@@ -1126,15 +1132,6 @@ export default class DeviceAgent {
 
     // Get features for CloudSync (endpoints service for health reporting)
     const features = this.featureInitializer?.getFeatures() || {};
-    
-    console.log('[AGENT INIT] CloudSync initialization - checking endpoints service:', {
-      hasFeatures: !!features,
-      hasSensors: !!features.sensors,
-      sensorsType: features.sensors ? typeof features.sensors : 'undefined',
-      hasGetAllDeviceStatuses: features.sensors && typeof features.sensors.getAllDeviceStatuses === 'function',
-      featureKeys: Object.keys(features),
-      sensorsKeys: features.sensors ? Object.keys(features.sensors) : []
-    });
 
     this.cloudSync = new CloudSync(
       this.stateReconciler, // Use StateReconciler instead of ContainerManager
@@ -1153,127 +1150,11 @@ export default class DeviceAgent {
       this.updater // Pass AgentUpdater for version reporting
     );
 
-    // Reinitialize device actions with cloudSync, anomaly service, and simulation
-    this.agentLogger?.infoSync('Reinitializing device actions with all services', {
-      component: LogComponents.agent,
-      hasCloudSync: !!this.cloudSync,
-      hasAnomalyService: !!this.anomalyService,
-      hasSimulation: !!this.simulationOrchestrator,
-    });
-    
-    deviceActions.initialize(
-      this.containerManager,
-      this.deviceManager,
-      this.cloudSync,
-      this.agentLogger,
-      this.anomalyService,
-      this.simulationOrchestrator
-    );
-
-
-    // Start polling for target state
+    // Start polling for target state (loads cloud config)
     await this.cloudSync.startPoll();
 
-    // Initialize anomaly detection after cloud config is loaded
-    await this.initAnomalyDetection();
-    
-    // Reinitialize device actions WITH anomaly service now available
-    if (this.anomalyService) {
-      this.agentLogger?.infoSync('Reinitializing device actions with anomaly service', {
-        component: LogComponents.agent,
-        hasAnomalyService: true,
-      });
-      
-      deviceActions.initialize(
-        this.containerManager,
-        this.deviceManager,
-        this.cloudSync,
-        this.agentLogger,
-        this.anomalyService,
-        this.simulationOrchestrator
-      );
-    }
-
-    // Trigger first boot discovery after cloud config is loaded
-    // This ensures we respect cloud-configured feature flags
-    await this.runFirstBootDiscoveryIfEnabled();
 
   }
-
-  /**
-   * Run first boot discovery if enabled
-   * Called after CloudSync initializes and fetches target state
-   */
-  private async runFirstBootDiscoveryIfEnabled(): Promise<void> {
-    this.agentLogger?.infoSync('Checking if first boot discovery should run', {
-      component: LogComponents.agent,
-      hasDiscoveryService: !!this.discoveryService
-    });
-
-    if (!this.discoveryService) {
-      this.agentLogger?.debugSync('Discovery service not available, skipping first boot discovery', {
-        component: LogComponents.agent
-      });
-      return;
-    }
-
-    // Check if first boot discovery is enabled (default: true)
-    const enableFirstBootDiscovery = process.env.ENABLE_FIRST_BOOT_DISCOVERY !== 'false';
-    
-    this.agentLogger?.infoSync('First boot discovery check', {
-      component: LogComponents.agent,
-      enableFirstBootDiscovery,
-      envValue: process.env.ENABLE_FIRST_BOOT_DISCOVERY
-    });
-    
-    if (!enableFirstBootDiscovery) {
-      this.agentLogger?.infoSync('First boot discovery disabled by configuration', {
-        component: LogComponents.agent
-      });
-      return;
-    }
-
-
-    try {
-      this.agentLogger?.infoSync('Starting first boot discovery', {
-        component: LogComponents.agent
-      });
-
-      await this.discoveryService.runDiscovery({
-        trigger: 'first_boot',
-        validate: true, // Always run full validation on first boot
-      });
-
-      this.agentLogger?.infoSync('First boot discovery completed', {
-        component: LogComponents.agent
-      });
-
-      // Update CloudSync's endpoints reference (health reporting now available)
-      if (this.cloudSync && this.featureInitializer) {
-        const features = this.featureInitializer.getFeatures();
-        if (features.sensors) {
-          this.cloudSync.setEndpoints(features.sensors);
-        }
-      }
-
-      // Re-initialize anomaly detection now that endpoints are discovered
-      // This allows auto-discovery of endpoint metrics
-      if (this.configManager.getFeatures().enableAnomalyDetection) {
-        this.agentLogger?.infoSync('Re-initializing anomaly detection after endpoint discovery', {
-          component: LogComponents.agent
-        });
-        await this.initAnomalyDetection();
-      }
-    } catch (error) {
-      this.agentLogger?.errorSync(
-        'First boot discovery failed',
-        error as Error,
-        { component: LogComponents.agent }
-      );
-      // Don't fail startup - discovery errors are non-fatal
-    }
-  }
-
 
   private startAutoReconciliation(): void {
     const intervals = this.configManager.getIntervalConfig();

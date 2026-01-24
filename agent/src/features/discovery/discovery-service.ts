@@ -645,42 +645,30 @@ export class DiscoveryService extends EventEmitter {
 
   /**
    * Get Modbus discovery options from configuration
-   * Returns empty object if discovery targets found (slaveRange endpoints)
+   * Returns empty object to let plugin query discovery targets dynamically
    */
   private getModbusOptions(): ModbusDiscoveryOptions | undefined {
     if (!this.configManager) {
       return undefined;
     }
 
-    // Check for discovery targets (endpoints with slaveRange)
-    const discoveryTargets = this.configManager.getDiscoveryTargets?.('modbus') || [];
-    
-    if (discoveryTargets.length > 0) {
-      return {}; // Let plugin handle discovery targets via getDiscoveryTargets()
-    }
-
-    // No discovery targets configured
-    return undefined;
+    // Return empty object - plugin will query getDiscoveryTargets() for dynamic targets
+    // This allows discovery to run when endpoints are added via cloud config
+    return {};
   }
 
   /**
    * Get OPC-UA discovery options from configuration
-   * Returns empty object if discovery targets found (endpointUrl without dataPoints)
+   * Returns empty object to let plugin query discovery targets dynamically
    */
   private getOPCUAOptions(): OPCUADiscoveryOptions | undefined {
     if (!this.configManager) {
       return undefined;
     }
 
-    // Check for discovery targets (endpoints with endpointUrl but no dataPoints)
-    const discoveryTargets = this.configManager.getDiscoveryTargets?.('opcua') || [];
-    
-    if (discoveryTargets.length > 0) {
-      return {}; // Let plugin handle discovery targets via getDiscoveryTargets()
-    }
-
-    // No discovery targets configured
-    return undefined;
+    // Return empty object - plugin will query getDiscoveryTargets() for dynamic targets
+    // This allows discovery to run when endpoints are added via cloud config
+    return {};
   }
 
   /**
@@ -703,22 +691,16 @@ export class DiscoveryService extends EventEmitter {
 
   /**
    * Get SNMP discovery options from configuration
-   * Returns empty object if discovery targets found (community without dataPoints)
+   * Returns empty object to let plugin query discovery targets dynamically
    */
   private getSNMPOptions(): SNMPDiscoveryOptions | undefined {
     if (!this.configManager) {
       return undefined;
     }
 
-    // Check for discovery targets (endpoints with community but no dataPoints)
-    const discoveryTargets = this.configManager.getDiscoveryTargets?.('snmp') || [];
-    
-    if (discoveryTargets.length > 0) {
-      return {}; // Let plugin handle discovery targets via getDiscoveryTargets()
-    }
-
-    // No discovery targets configured
-    return undefined;
+    // Return empty object - plugin will query getDiscoveryTargets() for dynamic targets
+    // This allows discovery to run when endpoints are added via cloud config
+    return {};
   }
 
   /**
