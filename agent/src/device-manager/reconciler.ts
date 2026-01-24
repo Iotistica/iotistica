@@ -660,8 +660,6 @@ export class StateReconciler extends EventEmitter {
 			this.logger?.debugSync('Endpoints configuration changed', {
 				component: LogComponents.stateReconciler,
 				operation: 'emitConfigChangeEvents',
-				oldCount: oldConfig.endpoints?.length || 0,
-				newCount: newConfig.endpoints?.length || 0,
 			});
 			this.emit('endpoints-changed', {
 				old: oldConfig.endpoints,

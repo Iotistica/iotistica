@@ -180,7 +180,7 @@ export function configureAnomalyFeed(service: AnomalyDetectionService | undefine
 /**
  * Sensor - Manages connection to Unix domain socket and publishes sensor data
  */
-export class Sensor extends EventEmitter {
+export class PublishManager extends EventEmitter {
   private config: SensorConfig;
   private mqttConnection: MqttConnection;
   private logger?: Logger;

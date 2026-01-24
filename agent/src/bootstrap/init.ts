@@ -79,14 +79,8 @@ export class FeatureInitializer {
       this.features.discoveryService = this.context.discoveryService;
     }
     
-    // Store current protocols BEFORE setting up listener to prevent duplicate initialization
-    const protocols = this.context.stateReconciler.getTargetState()?.config?.protocols || {};
-    this.currentProtocols = this.deepClone(protocols);
-    
-    // Set up event-driven protocol adapter initialization for future changes
-    this.setupProtocolAdapterListener();
-    
     // Watch for new enabled endpoints from discovery (auto-reload Sensor Publish)
+    // Protocol enablement is now driven by endpoints, not config.protocols
     this.setupEndpointAutoReloadListener();
   }
 
@@ -161,7 +155,11 @@ export class FeatureInitializer {
     }
   }
 
-  private async initSensorPublish(): Promise<void> {
+  /**
+   * Initialize sensor publish feature (lightweight reload)
+   * Reads endpoint configuration from database and starts Sensor Publish
+   */
+  async initSensorPublish(): Promise<void> {
     const { logger, deviceInfo, anomalyService } = this.context;
 
     logger.infoSync('Initializing Sensor Publish Feature', {
@@ -169,34 +167,11 @@ export class FeatureInitializer {
     });
 
     try {
-      const mem1 = process.memoryUsage();
-      logger.debugSync('Memory before imports', {
-        component: LogComponents.agent,
-        heapUsed: `${Math.round(mem1.heapUsed / 1024 / 1024)}MB`
-      });
-      
       // Load sensor output configurations from database
-      const { EndpointOutputModel: EndpointOutputModel } = await import('../db/models/endpoint-outputs.model.js');
+      const { EndpointOutputModel } = await import('../db/models/endpoint-outputs.model.js');
       const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
       
-      const mem2 = process.memoryUsage();
-      logger.debugSync('Memory after imports', {
-        component: LogComponents.agent,
-        heapUsed: `${Math.round(mem2.heapUsed / 1024 / 1024)}MB`
-      });
-      
-      // Apply buffer capacities from target state to endpoint_outputs table
-      await this.applyBufferCapacitiesFromTargetState(EndpointOutputModel, logger);
-      
-      const mem3 = process.memoryUsage();
-      logger.debugSync('Memory after applyBufferCapacities', {
-        component: LogComponents.agent,
-        heapUsed: `${Math.round(mem3.heapUsed / 1024 / 1024)}MB`
-      });
-      
       const endpointOutputs = await EndpointOutputModel.getAll();
-
-      const mem4 = process.memoryUsage();
 
       if (endpointOutputs.length === 0) {
         logger.warnSync('No sensor outputs configured in database', {
@@ -269,7 +244,7 @@ export class FeatureInitializer {
 
       // Configure edge AI anomaly detection if enabled
       if (anomalyService) {
-        const { configureAnomalyFeed } = await import('../features/publish/publish.js');
+        const { configureAnomalyFeed } = await import('../features/publish/manager.js');
         configureAnomalyFeed(anomalyService);
 
         logger.debugSync('Configured edge AI anomaly detection for sensor data', {
@@ -280,18 +255,12 @@ export class FeatureInitializer {
 
       await this.features.sensorPublish.start();
 
-      const memUsage = process.memoryUsage();
       logger.debugSync('Sensor Publish Feature initialized', {
         component: LogComponents.agent,
         pipeCount: endpoints.length,
         enabledProtocols: Array.from(enabledEndpoints),
         pipes: endpoints.map(s => s.addr),
-        mqttTopicPattern: 'iot/device/{deviceUuid}/endpoints/{topic}',
-        memoryUsage: {
-          heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
-          heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`,
-          external: `${Math.round(memUsage.external / 1024 / 1024)}MB`
-        }
+        mqttTopicPattern: 'iot/device/{deviceUuid}/endpoints/{topic}'
       });
     } catch (error) {
       logger.errorSync('Failed to initialize Sensor Publish Feature', error as Error, {
@@ -302,169 +271,41 @@ export class FeatureInitializer {
     }
   }
 
-  /**
-   * Apply buffer capacities from target state to endpoint_outputs table
-   */
-  private async applyBufferCapacitiesFromTargetState(
-    EndpointOutputModel: any,
-    logger: AgentLogger
-  ): Promise<void> {
-    // Import models for direct query
-    const { models } = await import('../db/connection.js');
-
-    try {
-      // Memory checkpoint 1: Before accessing configProtocols
-      const mem1 = process.memoryUsage();
-      logger.debugSync('Memory at start of applyBufferCapacities', {
-        component: LogComponents.agent,
-        heapUsed: `${(mem1.heapUsed / 1024 / 1024).toFixed(0)}MB`
-      });
-
-      const protocols = this.context.configProtocols || {};
-      
-      // Memory checkpoint 2: After accessing configProtocols
-      const mem2 = process.memoryUsage();
-      logger.debugSync('Memory after accessing configProtocols', {
-        component: LogComponents.agent,
-        heapUsed: `${(mem2.heapUsed / 1024 / 1024).toFixed(0)}MB`,
-        protocolKeys: Object.keys(protocols),
-        protocolsSize: JSON.stringify(protocols).length
-      });
-      
-      // Map of protocol names to buffer capacities from target state
-      const bufferCapacities: Record<string, number | undefined> = {
-        'opcua': protocols.opcua?.bufferCapacity,
-        'modbus': protocols.modbus?.bufferCapacity,
-        'can': protocols.can?.bufferCapacity,
-        'snmp': protocols.snmp?.bufferCapacity,
-      };
-
-      // Memory checkpoint 3: After creating bufferCapacities map
-      const mem3 = process.memoryUsage();
-      logger.debugSync('Memory after creating bufferCapacities map', {
-        component: LogComponents.agent,
-        heapUsed: `${(mem3.heapUsed / 1024 / 1024).toFixed(0)}MB`
-      });
-
-      // Update each protocol's buffer capacity if specified in target state
-      for (const [protocol, bufferCapacity] of Object.entries(bufferCapacities)) {
-        if (bufferCapacity !== undefined) {
-          // Memory checkpoint 4: Before getOutput
-          const mem4 = process.memoryUsage();
-
-          // CRITICAL FIX: Only select needed columns to avoid loading massive logging field
-          const output = await models('endpoint_outputs')
-            .where('protocol', protocol)
-            .select('protocol', 'buffer_capacity')
-            .first();
-          
-          // Memory checkpoint 5: After getOutput
-          const mem5 = process.memoryUsage();
-       
-          if (output) {
-            await models('endpoint_outputs')
-              .where('protocol', protocol)
-              .update({
-                buffer_capacity: bufferCapacity,
-                updated_at: new Date()
-              });
-            
-          }
-        }
-      }
-    } catch (error) {
-      logger.warnSync('Failed to apply buffer capacities from target state', {
-        component: LogComponents.agent,
-        error: error instanceof Error ? error.message : String(error)
-      });
-    }
-  }
-
   private async initProtocolAdapters(): Promise<void> {
-    const { logger, deviceInfo, configFeatures, configProtocols } = this.context;
+    const { logger, deviceInfo } = this.context;
 
     try {
-      // Protocols is now the single source of truth (includes both enabled flag and config)
-      const protocols = configProtocols || {};
-      const legacyAdapters = configFeatures.protocolAdapters || {}; // Backward compatibility
+      // Protocol enablement is now database-driven (based on config.endpoints)
+      // No more config.protocols or config.protocolAdapters - endpoints determine which protocols are enabled
       
-      // Build sensor config with backward compatibility
-      // Priority: config.protocols.* (all fields) → config.protocolAdapters.* (legacy fallback)
+      // Initialize base config with all protocols disabled
       const sensorsConfig: SensorConfig = {
         enabled: true,
-        modbus: {
-          enabled: protocols.modbus?.enabled ?? legacyAdapters.modbus?.enabled ?? false,
-          // Merge config: protocols takes priority, then legacy protocolAdapters
-          ...(legacyAdapters.modbus || {}),
-          ...(protocols.modbus || {})
-        },
-        opcua: {
-          enabled: protocols.opcua?.enabled ?? legacyAdapters.opcua?.enabled ?? false,
-          ...(legacyAdapters.opcua || {}),
-          ...(protocols.opcua || {})
-        },
-        snmp: {
-          enabled: protocols.snmp?.enabled ?? legacyAdapters.snmp?.enabled ?? false,
-          ...(legacyAdapters.snmp || {}),
-          ...(protocols.snmp || {})
-        },
-        can: {
-          enabled: protocols.can?.enabled ?? legacyAdapters.can?.enabled ?? false,
-          ...(protocols.can || {})
-        },
-        comap: {
-          enabled: protocols.comap?.enabled ?? legacyAdapters.comap?.enabled ?? false,
-          ...(protocols.comap || {})
-        },
-        mqtt: {
-          enabled: protocols.mqtt?.enabled ?? legacyAdapters.mqtt?.enabled ?? false,
-          ...(legacyAdapters.mqtt || {}),
-          ...(protocols.mqtt || {})
-        }
+        modbus: { enabled: false },
+        opcua: { enabled: false },
+        snmp: { enabled: false },
+        can: { enabled: false },
+        comap: { enabled: false },
+        mqtt: { enabled: false }
       };
 
-      // Check environment variable for config override
-      const envConfigStr = process.env.PROTOCOL_ADAPTERS_CONFIG;
-      if (envConfigStr) {
-        try {
-          const envConfig = JSON.parse(envConfigStr);
-          Object.assign(sensorsConfig, envConfig);
-          logger.debugSync('Loaded protocol adapters config from PROTOCOL_ADAPTERS_CONFIG', {
-            component: LogComponents.agent
-          });
-        } catch (error) {
-          logger.warnSync('Failed to parse PROTOCOL_ADAPTERS_CONFIG, using target state config', {
-            component: LogComponents.agent
-          });
-        }
-      }
-
-      // Log enabled protocols from config
-      const configEnabledProtocols = Object.entries(sensorsConfig)
-        .filter(([key, value]) => key !== 'enabled' && typeof value === 'object' && value?.enabled)
-        .map(([key]) => key);
-
-      // Check database for enabled devices (even if config doesn't enable the protocol)
+  
+      // Check database for enabled endpoints - this enables the protocol adapter
       const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
-      const dbProtocolsWithDevices: string[] = [];
+      const enabledProtocols: string[] = [];
       
-      // ✅ Include 'mqtt' in protocol check
       for (const protocol of ['modbus', 'opcua', 'snmp', 'can', 'mqtt']) {
         const devices = await DeviceEndpointModel.getEnabled(protocol);
         if (devices.length > 0) {
-          dbProtocolsWithDevices.push(protocol);
-          // Enable the protocol in config if it has database devices
-          if (!sensorsConfig[protocol]?.enabled) {
-            if (!sensorsConfig[protocol]) {
-              sensorsConfig[protocol] = { enabled: true };
-            } else {
-              sensorsConfig[protocol].enabled = true;
-            }
+          enabledProtocols.push(protocol);
+          // Enable the protocol adapter since we have enabled endpoints
+          if (!sensorsConfig[protocol]) {
+            sensorsConfig[protocol] = { enabled: true };
+          } else {
+            sensorsConfig[protocol].enabled = true;
           }
         }
       }
-
-      const enabledProtocols = [...new Set([...configEnabledProtocols, ...dbProtocolsWithDevices])];
       
       // ALWAYS create SensorsFeature even if no protocols are enabled initially
       // This ensures health reporting works when endpoints are discovered later
@@ -477,7 +318,7 @@ export class FeatureInitializer {
       if (enabledProtocols.length === 0) {
         logger.debugSync('No protocols enabled initially, SensorsFeature created but not started', {
           component: LogComponents.agent,
-          note: 'Will be started when protocols are enabled or endpoints discovered'
+          note: 'Will be started when endpoints are enabled via discovery or config'
         });
         // Don't return - we still need to set up listeners and make feature available
       } else {
@@ -488,9 +329,10 @@ export class FeatureInitializer {
       const { setSensorsFeature } = await import('../api/actions.js');
       setSensorsFeature(this.features.sensors);
 
-      logger.debugSync('Protocol Adapters initialized', {
+      logger.debugSync('Protocol Adapters initialized (database-driven)', {
         component: LogComponents.agent,
-        enabledProtocols
+        enabledProtocols,
+        source: 'config.endpoints'
       });
     } catch (error) {
       logger.errorSync('Failed to initialize Protocol Adapters', error as Error, {
@@ -499,29 +341,6 @@ export class FeatureInitializer {
       });
       this.features.sensors = undefined;
     }
-  }
-
-  /**
-   * Set up event-driven protocol adapter initialization
-   * Listens for target-state-changed events and reinitializes protocol adapters when config changes
-   */
-  private setupProtocolAdapterListener(): void {
-    const { logger, stateReconciler } = this.context;
-
-    logger.infoSync('Setting up protocol adapter event listener', {
-      component: LogComponents.agent
-    });
-
-    stateReconciler.on('target-state-changed', async (state: any) => {
-      try {
-        const protocols = state.config?.protocols || {};
-        await this.handleProtocolConfigChange(protocols);
-      } catch (error) {
-        logger.errorSync('Failed to handle protocol config change', error as Error, {
-          component: LogComponents.agent
-        });
-      }
-    });
   }
 
   /**
@@ -538,14 +357,38 @@ export class FeatureInitializer {
       return;
     }
 
-    // Listen for individual endpoint-enabled events (real-time updates)
+    // Listen for pre-discovery event (stops features before discovery runs)
+    // This frees up IPC connection slots to prevent "max clients reached" errors
+    this.features.discoveryService.on('pre-discovery', async (data: any) => {
+      logger.infoSync('Preparing for discovery - stopping Sensor Publish to free connection slots', {
+        component: LogComponents.agent,
+        protocols: data.protocols,
+        trigger: data.trigger
+      });
+
+      try {
+        if (this.features.sensorPublish) {
+          await this.features.sensorPublish.stop();
+          logger.debugSync('Stopped Sensor Publish before discovery', {
+            component: LogComponents.agent
+          });
+          this.features.sensorPublish = undefined;
+        }
+      } catch (error) {
+        logger.errorSync('Failed to stop Sensor Publish before discovery', error as Error, {
+          component: LogComponents.agent
+        });
+      }
+    });
+
+    // Listen for individual endpoint-enabled events (real-time updates from discovery)
     this.features.discoveryService.on('endpoint-enabled', async (data: any) => {
       // Skip individual reloads during batch discovery - discovery-complete handler will reload everything
       if (data.isBatchDiscovery) {
         logger.debugSync('Skipping individual reload during batch discovery', {
           component: LogComponents.agent,
           protocol: data.protocol,
-          endpoint: data.endpoint.name,
+          endpoint: data.name,
           note: 'Will reload after discovery completes'
         });
         return;
@@ -554,11 +397,13 @@ export class FeatureInitializer {
       logger.infoSync('New enabled endpoint discovered, reloading Sensor Publish', {
         component: LogComponents.agent,
         protocol: data.protocol,
-        endpoint: data.endpoint.name
+        endpoint: data.name,
+        source: data.source
       });
 
       try {
-        // Stop existing Sensor Publish
+        // Stop existing Sensor Publish if not already stopped (e.g., direct-connection endpoints)
+        // Note: For discovery targets, pre-discovery event already stopped it
         if (this.features.sensorPublish) {
           await this.features.sensorPublish.stop();
           logger.debugSync('Stopped Sensor Publish for reload', {
@@ -567,32 +412,42 @@ export class FeatureInitializer {
           this.features.sensorPublish = undefined;
         }
 
-        // Reinitialize with new endpoints
+        // Reinitialize with new endpoints (DB already synced before event emission)
         await this.initSensorPublish();
 
         logger.infoSync('Sensor Publish reloaded successfully', {
           component: LogComponents.agent,
-          newEndpoint: data.endpoint.name
+          newEndpoint: data.name
         });
       } catch (error) {
         logger.errorSync('Failed to reload Sensor Publish', error as Error, {
           component: LogComponents.agent,
-          endpoint: data.endpoint.name
+          endpoint: data.name
         });
       }
     });
 
-    // Listen for discovery-complete events (batch reload after full discovery)
+    // Listen for discovery-complete events (batch reload after discovery OR direct-connection endpoints)
+    // This event is emitted by:
+    // 1. Discovery service after scanning for devices with slaveRange
+    // 2. ConfigManager after direct-connection endpoints (slaveId only) are added
     this.features.discoveryService.on('discovery-complete', async (data: any) => {
 
-      // Only reload protocol adapters if NEW devices were discovered
-      // Skip reload if all devices were skipped (already exist)
-      if (data.savedCount > 0) {
+      // Reload protocol adapters and Sensor Publish for ALL triggers
+      // - first_boot: Initial discovery scan
+      // - config-change: Endpoints added/modified via cloud (skipDbWrites mode)
+      // - manual: User-triggered discovery
+      // Note: For config-change with skipDbWrites, savedCount will be 0 (DB already synced by reconcile)
+      const shouldReload = data.trigger === 'config-change' || data.savedCount > 0;
+      
+      if (shouldReload) {
         try {
-          logger.infoSync('Reloading protocol adapters after discovery', {
+          logger.infoSync('Reloading protocol adapters and Sensor Publish after endpoint changes', {
             component: LogComponents.agent,
+            trigger: data.trigger,
             savedCount: data.savedCount,
-            skippedCount: data.skippedCount
+            skippedCount: data.skippedCount,
+            reason: data.trigger === 'config-change' ? 'DB already synced by reconcile' : 'new devices discovered'
           });
 
           // Stop protocol adapters
@@ -601,36 +456,35 @@ export class FeatureInitializer {
             this.features.sensors = undefined;
           }
 
-          // Reinitialize protocol adapters (will read discovered devices from database)
-          await this.initProtocolAdapters();
-
-          // On first boot, ALWAYS reload Sensor Publish to pick up new endpoints from database
-          // After first boot, Sensor Publish will auto-reconnect (no reload needed)
-          if (data.trigger === 'first_boot') {
-            logger.infoSync('Reloading Sensor Publish for first boot discovery', {
-              component: LogComponents.agent,
-              deviceCount: data.deviceCount
-            });
-
-            if (this.features.sensorPublish) {
-              await this.features.sensorPublish.stop();
-              this.features.sensorPublish = undefined;
-            }
-            
-            await this.initSensorPublish();
+          // Stop Sensor Publish
+          if (this.features.sensorPublish) {
+            await this.features.sensorPublish.stop();
+            this.features.sensorPublish = undefined;
           }
 
-          logger.infoSync('Protocol adapters reloaded after discovery', {
+          // Reinitialize protocol adapters (will read endpoints from database)
+          await this.initProtocolAdapters();
+
+          // Reinitialize Sensor Publish (will read endpoints from database)
+          await this.initSensorPublish();
+
+          logger.infoSync('Protocol adapters and Sensor Publish reloaded successfully', {
             component: LogComponents.agent,
             trigger: data.trigger,
-            deviceCount: data.deviceCount,
-            sensorPublishReloaded: data.trigger === 'first_boot'
+            deviceCount: data.deviceCount
           });
         } catch (error) {
           logger.errorSync('Failed to reload protocol adapters after discovery', error as Error, {
             component: LogComponents.agent
           });
         }
+      } else {
+        logger.debugSync('Skipping reload - no new devices discovered', {
+          component: LogComponents.agent,
+          trigger: data.trigger,
+          savedCount: data.savedCount,
+          skippedCount: data.skippedCount
+        });
       }
     });
 
@@ -638,135 +492,6 @@ export class FeatureInitializer {
       component: LogComponents.agent,
       note: 'Sensor Publish will reload automatically when discovery finds new enabled endpoints'
     });
-  }
-
-  /**
-   * Handle protocol configuration changes
-   * Compares new config with current, stops existing adapters if needed, reinitializes with new config
-   */
-  private async handleProtocolConfigChange(protocols: Record<string, any>): Promise<void> {
-    const { logger } = this.context;
-
-    // Check if protocols actually changed
-    const changed = this.hasProtocolConfigChanges(protocols);
-
-    if (!changed) {
-      return; // No changes, skip reinitialization
-    }
-
-    logger.infoSync('Protocol configuration changed, reinitializing', {
-      component: LogComponents.agent,
-      protocols
-    });
-
-    // CRITICAL: Stop Sensor Publish FIRST to avoid reconnect errors when socket is deleted
-    if (this.features.sensorPublish) {
-      try {
-        await this.features.sensorPublish.stop();
-        logger.debugSync('Stopped Sensor Publish before protocol adapter restart', {
-          component: LogComponents.agent
-        });
-      } catch (error) {
-        logger.warnSync('Error stopping sensor publish', {
-          component: LogComponents.agent,
-          error: error instanceof Error ? error.message : String(error)
-        });
-      }
-      this.features.sensorPublish = undefined;
-    }
-
-    // Stop existing protocol adapters if running
-    if (this.features.sensors) {
-      try {
-        await this.features.sensors.stop();
-        logger.infoSync('Stopped existing protocol adapters', {
-          component: LogComponents.agent
-        });
-      } catch (error) {
-        logger.warnSync('Error stopping protocol adapters', {
-          component: LogComponents.agent,
-          error: error instanceof Error ? error.message : String(error)
-        });
-      }
-    }
-
-    // Update context with new protocols config
-    this.context.configProtocols = protocols;
-
-    // Always reinitialize protocol adapters (will check database even if config is empty)
-    await this.initProtocolAdapters();
-
-    // Restart Sensor Publish to reconnect to new sockets
-    await this.initSensorPublish();
-
-    logger.infoSync('Protocol adapters and Sensor Publish reloaded', {
-      component: LogComponents.agent
-    });
-
-    // Store for next comparison
-    this.currentProtocols = this.deepClone(protocols);
-
-  }
-
-  /**
-   * Check if protocol configuration has changed
-   */
-  private hasProtocolConfigChanges(newProtocols: Record<string, any>): boolean {
-    // First time, always initialize
-    if (!this.currentProtocols) {
-      // Always return true on first call - let initProtocolAdapters check database
-      return true;
-    }
-
-    // Check for enabled status changes
-    const protocolKeys = ['modbus', 'opcua', 'snmp', 'can', 'comap'];
-    for (const key of protocolKeys) {
-      const oldEnabled = this.currentProtocols[key]?.enabled ?? false;
-      const newEnabled = newProtocols[key]?.enabled ?? false;
-      if (oldEnabled !== newEnabled) {
-        return true;
-      }
-    }
-
-    // Check for config value changes (deep comparison)
-    return !this.deepEqual(newProtocols, this.currentProtocols);
-  }
-
-  /**
-   * Deep equality check for objects
-   */
-  private deepEqual(obj1: any, obj2: any): boolean {
-    if (obj1 === obj2) return true;
-    if (obj1 == null || obj2 == null) return false;
-    if (typeof obj1 !== 'object' || typeof obj2 !== 'object') return obj1 === obj2;
-
-    const keys1 = Object.keys(obj1);
-    const keys2 = Object.keys(obj2);
-
-    if (keys1.length !== keys2.length) return false;
-
-    for (const key of keys1) {
-      if (!keys2.includes(key)) return false;
-      if (!this.deepEqual(obj1[key], obj2[key])) return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Deep clone an object
-   */
-  private deepClone(obj: any): any {
-    if (obj === null || typeof obj !== 'object') return obj;
-    if (Array.isArray(obj)) return obj.map(item => this.deepClone(item));
-    
-    const cloned: any = {};
-    for (const key in obj) {
-      if (obj.hasOwnProperty(key)) {
-        cloned[key] = this.deepClone(obj[key]);
-      }
-    }
-    return cloned;
   }
 
   private async initAgentUpdater(): Promise<void> {

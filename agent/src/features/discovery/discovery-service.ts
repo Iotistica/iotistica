@@ -40,7 +40,7 @@ import { BACnetDiscoveryPlugin } from './bacnet.discovery';
 import { autoDetectLocalSubnets } from '../../utils/network';
 import type { ConfigManager } from '../../device-manager/config.js';
 
-export type DiscoveryTrigger = 'first_boot' | 'manual' | 'scheduled';
+export type DiscoveryTrigger = 'first_boot' | 'manual' | 'scheduled' | 'config-change';
 export type DiscoveryProtocol = 'modbus' | 'opcua' | 'can' | 'snmp' | 'mqtt' | 'bacnet';
 
 export interface DiscoveryOptions {
@@ -48,6 +48,7 @@ export interface DiscoveryOptions {
   validate?: boolean; // Run validation phase (slow)
   forceRun?: boolean; // Override rate limiting
   protocols?: Array<DiscoveryProtocol>; // Only run specific protocols (default: all)
+  skipDbWrites?: boolean; // Skip saving to database (when reconcile already synced from cloud)
 }
 
 // Re-export for convenience
@@ -490,8 +491,19 @@ export class DiscoveryService extends EventEmitter {
       deviceNames: allDiscovered.map(d => d.name)
     });
 
-    // Save to database
-    const saveResults = await this.saveToDatabase(allDiscovered, traceId);
+    // Save to database (unless skipDbWrites flag is set)
+    const saveResults = options.skipDbWrites 
+      ? { saved: 0, skipped: allDiscovered.length }
+      : await this.saveToDatabase(allDiscovered, traceId);
+
+    if (options.skipDbWrites) {
+      this.logger?.debugSync('Skipping DB writes (reconcile already synced endpoints)', {
+        component: LogComponents.discovery,
+        traceId,
+        devicesValidated: allDiscovered.length,
+        protocols: selectedProtocols
+      });
+    }
 
     // Update metadata
     this.updateMetadata(trigger, validate);

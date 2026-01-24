@@ -196,7 +196,6 @@ export class ConfigManager extends EventEmitter {
 			component: LogComponents.configManager,
 			operation: 'setTarget',
 			deviceCount: devices.length,
-			endpointNames: devices.map(s => s.name),
 			hasDevices: devices.length > 0,
 		});
 
@@ -277,8 +276,8 @@ export class ConfigManager extends EventEmitter {
 	 */
 	public getDiscoveryTargets(protocol: string): any[] {
 		const endpoints = this.targetConfig.endpoints || [];
-
-		return endpoints.filter((endpoint: any) => {
+		
+		const filtered = endpoints.filter((endpoint: any) => {
 			if (endpoint.protocol !== protocol) return false;
 
 			switch (protocol) {
@@ -297,6 +296,22 @@ export class ConfigManager extends EventEmitter {
 					return false;
 			}
 		});
+		
+		// Log what was filtered
+		const filteredLog = {
+			component: LogComponents.configManager,
+			protocol,
+			totalFiltered: filtered.length,
+			filteredNames: filtered.map((e: any) => e.name),
+		};
+		
+		if (this.logger) {
+			this.logger.debugSync('Discovery targets filtered', filteredLog);
+		} else {
+			console.log('[ConfigManager] Discovery targets filtered', JSON.stringify(filteredLog, null, 2));
+		}
+		
+		return filtered;
 	}
 
 	/**
@@ -684,6 +699,13 @@ export class ConfigManager extends EventEmitter {
 			});
 			return;
 		}
+
+		this.logger?.infoSync('Syncing endpoints to database', {
+			component: LogComponents.configManager,
+			totalEndpoints: devices.length,
+			endpointNames: devices.map((d: any) => d.name),
+			endpointsWithUuids: devices.filter((d: any) => d.uuid).length,
+		});
 
 		try {
 			// Get current devices from SQLite to detect deletions
@@ -1346,11 +1368,6 @@ export class ConfigManager extends EventEmitter {
 	/**
 	 * Handle endpoints configuration changes
 	 * This is called when the cloud updates the endpoints config
-	 * 
-	 * NOTE: Does NOT trigger auto-discovery to avoid DB update conflicts
-	 * - reconcile() → syncEndpointsToDatabase() already syncs cloud config to DB
-	 * - Discovery's saveToDatabase() would conflict with reconcile's updates
-	 * - Cloud config is source of truth, discovery is for finding NEW devices
 	 */
 	public async handleEndpointsChanges(change: { old: any; new: any }): Promise<void> {
 		const newEndpoints = change.new || [];
@@ -1368,23 +1385,62 @@ export class ConfigManager extends EventEmitter {
 			modified: changeType.modified.length,
 		});
 
-		// Emit reload event for protocol adapters hot-reload
-		this.emit('endpoints-reload-required', {
-			changeType,
-			endpoints: newEndpoints,
-			reason: 'cloud_config_change',
-		});
+		// Determine which protocols were affected by changes (added or modified endpoints)
+		const changedEndpoints = [...changeType.added, ...changeType.modified];
+		const affectedProtocols = [...new Set(changedEndpoints.map((e: any) => e.protocol))];
 
-		// NOTE: We do NOT trigger auto-discovery here because:
-		// 1. reconcile() already synced endpoints to DB via syncEndpointsToDatabase()
-		// 2. Discovery's saveToDatabase() would conflict with reconcile's updates
-		// 3. Cloud config is the source of truth, not discovery results
-		// 4. Discovery is for FINDING new devices, not validating existing config
-		//
-		// Discovery should only run:
-		// - On scheduled intervals (periodic discovery)
-		// - Manual trigger via API/dashboard
-		// - First boot (initial discovery)
+		if (affectedProtocols.length === 0) {
+			this.logger?.debugSync('No protocols affected by endpoint changes, skipping discovery', {
+				component: LogComponents.configManager,
+			});
+			return;
+		}
+
+		// Filter endpoints that support discovery (only for affected protocols)
+		// Discovery validates connectivity for:
+		// - Modbus: slaveRange (scan multiple slaves) or slaveId (single slave)
+		// - OPC-UA: discovery URLs
+		// - SNMP: IP ranges or specific hosts
+		// - MQTT: topic discovery
+		// - BACnet: device discovery
+		const discoverableEndpoints = changedEndpoints.filter((e: any) => {
+			// Include endpoints with explicit discovery configuration
+			if (e.connection?.slaveRange) return true; // Modbus discovery target
+			if (e.connection?.slaveId) return true; // Modbus direct connection (validate connectivity)
+			if (e.protocol === 'opcua' && e.connection?.discoveryUrls) return true;
+			if (e.protocol === 'snmp' && e.connection?.host) return true;
+			if (e.protocol === 'mqtt' && e.connection?.discoveryRoots) return true;
+			if (e.protocol === 'bacnet') return true; // BACnet uses broadcast discovery
+			return false;
+		});
+	
+		if (discoverableEndpoints.length > 0 && this.discoveryService) {
+			// Get unique list of protocols that need discovery (from discoverable endpoints only)
+			const discoveryProtocols = [...new Set(discoverableEndpoints.map((e: any) => e.protocol))];
+
+			// Emit pre-discovery event to stop features and free IPC connection slots
+			// This prevents "max clients reached" errors when discovery tries to validate connectivity
+			this.discoveryService.emit('pre-discovery', {
+				protocols: discoveryProtocols,
+				trigger: 'config-change',
+			});
+
+			// Run discovery with skipDbWrites flag to avoid overwriting reconcile's changes
+			// Discovery will emit discovery-complete event for batch reload
+			this.discoveryService.runDiscovery({
+				trigger: 'config-change',
+				validate: true, // Full validation to ensure endpoints are reachable
+				forceRun: true, // Bypass rate limiting (config-driven change)
+				protocols: discoveryProtocols, // Only scan changed protocols
+				skipDbWrites: true, // CRITICAL: Don't overwrite DB, reconcile already synced
+				traceId: `config-change-${Date.now()}` // Set traceId to enable batch mode
+			}).catch((err: Error) => {
+				this.logger?.errorSync('Discovery validation failed after endpoint change', err, {
+					component: LogComponents.configManager,
+					protocols: discoveryProtocols,
+				});
+			});
+		}
 
 		// Log removed endpoints (cleanup handled by reconcile())
 		if (changeType.removed.length > 0) {
@@ -1395,8 +1451,6 @@ export class ConfigManager extends EventEmitter {
 			});
 		}
 
-		// Note: Endpoint syncing to database is handled automatically during
-		// ConfigManager.reconcile() via syncEndpointsToDatabase()
 	}
 
 	// ==================== TYPED EVENT EMITTER ====================

@@ -1,3 +1,3 @@
 export * from './types';
-export * from './publish';
+export * from './manager';
 export * from './init';

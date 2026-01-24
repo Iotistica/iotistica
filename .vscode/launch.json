@@ -19,7 +19,8 @@
         "!**/node_modules/**"
       ],
       "env": {
-			"PROVISIONING_KEY": "765d2b887c0b5187fd9f23bef01a1cf682f44ecd1029f85db39ca976c669407b"
+      "LOG_LEVEL":"debug",
+			"PROVISIONING_KEY": "ca1842f35ad849197823fb21b30de6a9bd85a7c1d1473161d4e883cd3730b3ca"
       }
     },
     {

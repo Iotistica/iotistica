@@ -108,6 +108,11 @@ export default class DeviceAgent {
       // This ensures ConfigManager can read target state from SQLite database
       await this.initializeStateReconciler();
 
+      // Setup event listeners IMMEDIATELY after StateReconciler init
+      // CRITICAL: Must happen before CloudSync/auto-reconciliation start
+      // to ensure hot-reload events are captured from first reconciliation
+      this.setupConfigEventListeners();
+
       // Initialize logging (now ConfigManager is available)
       const loggingConfig = this.configManager.getLoggingConfig();
       const logLevel = (loggingConfig.logLevel as LogLevel) || "info";
@@ -276,133 +281,7 @@ export default class DeviceAgent {
         discoveryService: this.discoveryService,
       });
 
-      // Setup ConfigManager event listeners for actions requiring Agent context
-      this.configManager.on('restart-discovery-timers', (intervals: any) => {
-        // Restart discovery timers with new intervals
-        this.discoveryService?.startPeriodicDiscovery();
-      });
-
-      this.configManager.on('schedule-restart', ({ restartTimeMs, restartConfig }: any) => {
-        // Schedule the restart
-        this.scheduledRestartTimer = setTimeout(async () => {
-          this.agentLogger?.infoSync("Initiating scheduled restart", {
-            component: LogComponents.agent,
-            trigger: "scheduled_timer",
-            reason: restartConfig.reason || "heap_fragmentation_cleanup",
-            memoryUsage: process.memoryUsage(),
-            timestamp: new Date().toISOString()
-          });
-
-          try {
-            await this.stop();
-            this.agentLogger?.infoSync("Graceful shutdown complete, exiting for restart", {
-              component: LogComponents.agent,
-              exitCode: 0
-            });
-            process.exit(0);
-          } catch (error) {
-            this.agentLogger?.errorSync(
-              "Error during scheduled restart shutdown",
-              error instanceof Error ? error : new Error(String(error)),
-              { component: LogComponents.agent, action: "forcing_exit" }
-            );
-            process.exit(1);
-          }
-        }, restartTimeMs);
-
-        // Don't prevent graceful shutdown
-        this.scheduledRestartTimer.unref();
-      });
-
-      // Listen for feature changes from ConfigManager
-      this.stateReconciler.on('features-changed', async (change: { old: any; new: any }) => {
-        this.agentLogger?.infoSync('Features configuration changed', {
-          component: LogComponents.agent,
-          changes: Object.keys(change.new).filter(key => change.old[key] !== change.new[key])
-        });
-        
-        // Handle anomaly detection toggle
-        if (change.old.enableAnomalyDetection !== change.new.enableAnomalyDetection) {
-          if (change.new.enableAnomalyDetection && !this.anomalyService) {
-            // Start anomaly detection
-            this.agentLogger?.infoSync('Starting Anomaly Detection Service (dynamically enabled)', {
-              component: LogComponents.agent
-            });
-            await this.initAnomalyDetection();
-          } else if (!change.new.enableAnomalyDetection && this.anomalyService) {
-            // Stop anomaly detection
-            this.agentLogger?.infoSync('Stopping Anomaly Detection Service (dynamically disabled)', {
-              component: LogComponents.agent
-            });
-            this.anomalyService.stop();
-            this.anomalyService = undefined;
-          }
-        }
-      });
-      
-      // Listen for endpoints-reload-required event from ConfigManager
-      // This triggers when reconcile() updates endpoints in the database
-      this.configManager.on('endpoints-reload-required', async (data: any) => {
-        this.agentLogger?.infoSync('Endpoint configuration changed, reloading protocol adapters', {
-          component: LogComponents.agent,
-          added: data.changeType?.added?.length || 0,
-          removed: data.changeType?.removed?.length || 0,
-          modified: data.changeType?.modified?.length || 0,
-          reason: data.reason
-        });
-
-        // Get SensorsFeature from FeatureInitializer
-        const features = this.featureInitializer?.getFeatures();
-        const sensorsFeature = features?.sensors;
-
-        if (sensorsFeature) {
-          try {
-            // Stop current adapters
-            this.agentLogger?.infoSync('Stopping protocol adapters for reload', {
-              component: LogComponents.agent
-            });
-            await sensorsFeature.stop();
-
-            // Restart adapters (they will reload endpoints from database)
-            this.agentLogger?.infoSync('Restarting protocol adapters with new endpoints', {
-              component: LogComponents.agent
-            });
-            await sensorsFeature.start();
-
-            this.agentLogger?.infoSync('Protocol adapters reloaded successfully', {
-              component: LogComponents.agent,
-              endpointCount: data.endpoints?.length || 0
-            });
-          } catch (error) {
-            this.agentLogger?.errorSync(
-              'Failed to reload protocol adapters',
-              error instanceof Error ? error : new Error(String(error)),
-              { component: LogComponents.agent }
-            );
-          }
-        } else {
-          this.agentLogger?.debugSync('SensorsFeature not available for reload', {
-            component: LogComponents.agent,
-            reason: 'Feature not initialized or disabled'
-          });
-        }
-      });
-
-      // Listen for anomaly config changes from ConfigManager
-      this.stateReconciler.on('anomaly-config-changed', (change: { old: any; new: any }) => {
-        this.agentLogger?.infoSync('Anomaly configuration changed from cloud', {
-          component: LogComponents.agent
-        });
-        
-        // Reload anomaly config if service is running
-        if (this.anomalyService && change.new) {
-          this.agentLogger?.infoSync('Reloading anomaly detection configuration', {
-            component: LogComponents.agent,
-            metricsCount: change.new.metrics?.filter((m: any) => m.enabled).length
-          });
-          this.anomalyService.updateConfig(change.new);
-        }
-      });
+      // Note: Event listeners already set up in setupConfigEventListeners() (called early)
 
       //Final words
       const mode: "Cloud-connected" | "Standalone (not provisioned)" = this.deviceInfo.provisioned
@@ -831,6 +710,91 @@ export default class DeviceAgent {
     // after all dependencies (logger, containerManager, etc.) are available
   }
 
+  /**
+   * Setup configuration event listeners
+   * CRITICAL: Must be called early (before CloudSync/auto-reconciliation)
+   * to ensure hot-reload events are captured from first reconciliation
+   */
+  private setupConfigEventListeners(): void {
+    // Listen for feature changes from StateReconciler
+    this.stateReconciler.on('features-changed', async (change: { old: any; new: any }) => {
+      const logger = this.agentLogger;
+      logger?.infoSync('Features configuration changed', {
+        component: LogComponents.agent,
+        changes: Object.keys(change.new).filter(key => change.old[key] !== change.new[key])
+      });
+      
+      // Handle anomaly detection toggle
+      if (change.old.enableAnomalyDetection !== change.new.enableAnomalyDetection) {
+        if (change.new.enableAnomalyDetection && !this.anomalyService) {
+          logger?.infoSync('Starting Anomaly Detection Service (dynamically enabled)', {
+            component: LogComponents.agent
+          });
+          await this.initAnomalyDetection();
+        } else if (!change.new.enableAnomalyDetection && this.anomalyService) {
+          logger?.infoSync('Stopping Anomaly Detection Service (dynamically disabled)', {
+            component: LogComponents.agent
+          });
+          this.anomalyService.stop();
+          this.anomalyService = undefined;
+        }
+      }
+    });
+
+    // Listen for anomaly config changes from StateReconciler
+    this.stateReconciler.on('anomaly-config-changed', (change: { old: any; new: any }) => {
+      const logger = this.agentLogger;
+      logger?.infoSync('Anomaly configuration changed from cloud', {
+        component: LogComponents.agent
+      });
+      
+      // Reload anomaly config if service is running
+      if (this.anomalyService && change.new) {
+        logger?.infoSync('Reloading anomaly detection configuration', {
+          component: LogComponents.agent,
+          metricsCount: change.new.metrics?.filter((m: any) => m.enabled).length
+        });
+        this.anomalyService.updateConfig(change.new);
+      }
+    });
+
+    // Listen for ConfigManager events that require Agent context
+    this.configManager.on('restart-discovery-timers', (intervals: any) => {
+      this.discoveryService?.startPeriodicDiscovery();
+    });
+
+    this.configManager.on('schedule-restart', ({ restartTimeMs, restartConfig }: any) => {
+      const logger = this.agentLogger;
+      this.scheduledRestartTimer = setTimeout(async () => {
+        logger?.infoSync("Initiating scheduled restart", {
+          component: LogComponents.agent,
+          trigger: "scheduled_timer",
+          reason: restartConfig.reason || "heap_fragmentation_cleanup",
+          memoryUsage: process.memoryUsage(),
+          timestamp: new Date().toISOString()
+        });
+
+        try {
+          await this.stop();
+          logger?.infoSync("Graceful shutdown complete, exiting for restart", {
+            component: LogComponents.agent,
+            exitCode: 0
+          });
+          process.exit(0);
+        } catch (error) {
+          logger?.errorSync(
+            "Error during scheduled restart shutdown",
+            error instanceof Error ? error : new Error(String(error)),
+            { component: LogComponents.agent, action: "forcing_exit" }
+          );
+          process.exit(1);
+        }
+      }, restartTimeMs);
+
+      this.scheduledRestartTimer.unref();
+    });
+  }
+
   private async initContainerManager(): Promise<void> {
     // StateReconciler already initialized, just setup logging and event handlers
     // For backward compatibility, keep ContainerManager reference for DeviceAPI
@@ -1034,7 +998,7 @@ export default class DeviceAgent {
     configureSystemMetrics(this.anomalyService);
     
     // Wire edge AI anomaly service to sensor-publish
-    const { configureAnomalyFeed: configureSensorAnomaly } = await import('./features/publish/publish.js');
+    const { configureAnomalyFeed: configureSensorAnomaly } = await import('./features/publish/manager.js');
     configureSensorAnomaly(this.anomalyService);
     
     this.agentLogger?.infoSync('Anomaly detection configured for system metrics and endpoints', {

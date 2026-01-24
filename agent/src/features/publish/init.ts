@@ -5,7 +5,7 @@ import {
   SensorPublishConfig,
   SensorConfig
 } from './types.js';
-import { Sensor } from './publish.js';
+import { PublishManager } from './manager.js';
 
 /**
  * SensorPublishFeature - Manages multiple sensors and publishes data to MQTT
@@ -14,7 +14,7 @@ import { Sensor } from './publish.js';
 export class SensorPublishFeature extends BaseFeature {
   private static readonly MAX_SENSORS = 10;
   
-  private sensors: Sensor[] = [];
+  private sensors: PublishManager[] = [];
   private agentLogger: AgentLogger;
   private dictionaryManager?: any; // Dictionary manager for MQTT message key compaction
   private readonly useMsgpackPoc: boolean;
@@ -147,7 +147,7 @@ export class SensorPublishFeature extends BaseFeature {
         };
         
         // Create sensor
-        const sensor = new Sensor(
+        const sensor = new PublishManager(
           config,
           this.mqttConnection,
           protocolLogger,
@@ -246,7 +246,7 @@ export class SensorPublishFeature extends BaseFeature {
   /**
    * Get sensor by name
    */
-  public getSensor(name: string): Sensor | undefined {
+  public getSensor(name: string): PublishManager | undefined {
     const sensorConfig = this.config as SensorPublishConfig;
     const index = sensorConfig.endpoints.findIndex((s: SensorConfig) => s.name === name);
     return index >= 0 ? this.sensors[index] : undefined;
