@@ -383,7 +383,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold border"
           style={{ backgroundColor: '#ca8a04', color: 'white', borderColor: '#a16207' }}
         >
-          Needs Sync
+          Deploy
         </span>
       );
     }

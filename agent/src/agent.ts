@@ -66,7 +66,7 @@ function loadBootConfig(): Record<string, any> | null {
   return null;
 }
 
-export default class DeviceAgent {
+export default class Agent {
   private stateReconciler!: StateReconciler; // Main state manager
   private containerManager!: ContainerManager; // Keep for backward compatibility with DeviceAPI
   private deviceManager!: DeviceManager;

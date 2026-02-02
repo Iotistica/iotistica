@@ -128,8 +128,6 @@ interface ConfigManagerEvents {
 	'restart-discovery-timers': (intervals: IntervalConfig) => void;
 	'schedule-restart': (config: { restartTimeMs: number; restartConfig: any }) => void;
 	'endpoints-reload-required': (data: { changeType: { added: any[]; removed: any[]; modified: any[] }; endpoints: any[]; reason: string }) => void;
-	// Dynamic config:key events for handlers
-	[key: `config:${string}`]: (event: { key: string; value: any; previousValue?: any; timestamp: Date }) => void;
 }
 
 export class ConfigManager extends EventEmitter {
@@ -190,31 +188,7 @@ export class ConfigManager extends EventEmitter {
 	 * Set target configuration
 	 */
 	public async setTarget(config: DeviceConfig): Promise<void> {
-		const devices = config.endpoints || [];
-		
-		this.logger?.infoSync('Setting target config', {
-			component: LogComponents.configManager,
-			operation: 'setTarget',
-			deviceCount: devices.length,
-			hasDevices: devices.length > 0,
-		});
-
 		this.targetConfig = _.cloneDeep(config);
-		
-		// Emit granular config:<key> events for changed keys
-		for (const [key, value] of Object.entries(config)) {
-			const previousValue = this.currentConfig[key];
-			const hasChanged = JSON.stringify(previousValue) !== JSON.stringify(value);
-
-			if (hasChanged) {
-				this.emit(`config:${key}`, {
-					key,
-					value,
-					previousValue,
-					timestamp: new Date()
-				});
-			}
-		}
 		
 		// Trigger reconciliation
 		await this.reconcile();
@@ -233,18 +207,18 @@ export class ConfigManager extends EventEmitter {
 	 */
 	public async getCurrentConfig(): Promise<DeviceConfig> {
 		// Get all sensors from database (includes discovered devices)
-		const allSensors = await DeviceEndpointModel.getAll();
+		const allEndpoints = await DeviceEndpointModel.getAll();
 		
 		// Convert to ProtocolAdapterDevice format
-		const endpointsConfig: ProtocolAdapterDevice[] = allSensors.map(sensor => ({
-			id: sensor.uuid || sensor.name,  // Use UUID as id, fallback to name
-			name: sensor.name,
-			protocol: sensor.protocol,
-			connectionString: JSON.stringify(sensor.connection), // Serialize connection object
-			pollInterval: sensor.poll_interval,
-			enabled: Boolean(sensor.enabled), // Convert SQLite integer (0/1) to boolean
-			metadata: sensor.metadata,
-			dataPoints: sensor.data_points // Include data point definitions for cloud reporting
+		const endpointsConfig: ProtocolAdapterDevice[] = allEndpoints.map(endpoint => ({
+			id: endpoint.uuid || endpoint.name,  // Use UUID as id, fallback to name
+			name: endpoint.name,
+			protocol: endpoint.protocol,
+			connectionString: JSON.stringify(endpoint.connection), // Serialize connection object
+			pollInterval: endpoint.poll_interval,
+			enabled: Boolean(endpoint.enabled), // Convert SQLite integer (0/1) to boolean
+			metadata: endpoint.metadata,
+			dataPoints: endpoint.data_points // Include data point definitions for cloud reporting
 		}));
 		
 		const result: DeviceConfig = {

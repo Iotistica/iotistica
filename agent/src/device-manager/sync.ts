@@ -1053,16 +1053,16 @@ export class CloudSync extends EventEmitter {
 			operation: 'collect-metrics',
 			error: error instanceof Error ? error.message : String(error)
 		});
-	}		// Add sensor health stats (if sensor-publish is enabled)
+	}		// Add publish pipeline health stats (if sensor-publish is enabled)
 
 	if (this.sensorPublish) {
 			try {
 				const sensorStats = this.sensorPublish.getStats();
-				(stateReport[deviceInfo.uuid] as any).sensor_health = sensorStats;
+				(stateReport[deviceInfo.uuid] as any).publish_health = sensorStats;
 			} catch (error) {
-				this.logger?.warnSync('Failed to collect sensor stats', {
+				this.logger?.warnSync('Failed to collect publish pipeline stats', {
 					component: LogComponents.cloudSync,
-					operation: 'collect-sensor-stats',
+					operation: 'collect-publish-stats',
 					error: error instanceof Error ? error.message : String(error)
 				});
 			}
@@ -1087,13 +1087,6 @@ export class CloudSync extends EventEmitter {
 			}
 		}
 		
-		// Log complete metrics report if metrics were collected
-	//    if (includeMetrics) {
-	// 		this.logger?.debugSync('Metrics Report', {
-	// 			component: LogComponents.metrics,
-	// 			report: stateReport[deviceInfo.uuid],
-	// 		});
-	//}
 
 	}	// Build state-only report for diff comparison (without metrics)
 	// This represents the CURRENT state that should be compared for changes
@@ -1182,9 +1175,9 @@ export class CloudSync extends EventEmitter {
 		reportToSend[deviceInfo.uuid].local_ip = stateReport[deviceInfo.uuid].local_ip;
 	}
 	
-	// Add sensor health if available and metrics cycle
-	if (includeMetrics && (stateReport[deviceInfo.uuid] as any).sensor_health) {
-		(reportToSend[deviceInfo.uuid] as any).sensor_health = (stateReport[deviceInfo.uuid] as any).sensor_health;
+	// Add publish pipeline health if available and metrics cycle
+	if (includeMetrics && (stateReport[deviceInfo.uuid] as any).publish_health) {
+		(reportToSend[deviceInfo.uuid] as any).publish_health = (stateReport[deviceInfo.uuid] as any).publish_health;
 	}
 	
 	// Add VPN health if available and metrics cycle
@@ -1192,13 +1185,18 @@ export class CloudSync extends EventEmitter {
 		(reportToSend[deviceInfo.uuid] as any).vpn_health = (stateReport[deviceInfo.uuid] as any).vpn_health;
 	}
 	
-	// Skip sending if report has no meaningful data (empty config, empty apps, no metrics)
+	// Skip sending if report has no meaningful data (empty config, empty apps, no metrics, no health)
 	const hasConfig = reportToSend[deviceInfo.uuid].config !== undefined;
 	const hasApps = reportToSend[deviceInfo.uuid].apps && Object.keys(reportToSend[deviceInfo.uuid].apps).length > 0;
+	const hasEndpointHealth = (reportToSend[deviceInfo.uuid] as any).endpoints_health !== undefined;
+	const hasMetrics = reportToSend[deviceInfo.uuid].cpu_usage !== undefined;
+	const hasPublishHealth = (reportToSend[deviceInfo.uuid] as any).publish_health !== undefined;
+	const hasVpnHealth = (reportToSend[deviceInfo.uuid] as any).vpn_health !== undefined;
 	
-	// Only skip if BOTH config and apps are empty (metrics/health alone are still valuable)
-	if (!hasConfig && !hasApps) {
-		this.logger?.infoSync('Skipping empty state report (no config or apps)', {
+	// Only skip if ALL fields are empty (health/metrics alone are still valuable)
+	const hasAnyData = hasConfig || hasApps || hasEndpointHealth || hasMetrics || hasPublishHealth || hasVpnHealth;
+	if (!hasAnyData) {
+		this.logger?.infoSync('Skipping empty state report (no data to send)', {
 			component: LogComponents.cloudSync,
 			operation: 'skip-empty-report',
 			isOnline: this.connectionMonitor.isOnline(),

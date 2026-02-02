@@ -13,7 +13,7 @@ import process from 'process';
 import { writeHeapSnapshot } from 'v8';
 import { mkdirSync } from 'fs';
 import { join } from 'path';
-import DeviceAgent from './agent';
+import Agent from './agent';
 import { startWatchdog, notifySystemd, notifyReady } from './system/watchdog';
 import { HealthArbiter } from './health/health-arbiter';
 import { healthcheck } from './system/memory';
@@ -49,7 +49,7 @@ if (process.env.ENABLE_HEAP_PROFILING === 'true') {
 }
 
 // Start the device agent
-const agent = new DeviceAgent();
+const agent = new Agent();
 
 // Create centralized health arbiter (single source of truth for all subsystem health)
 // Logger will be set after agent.init() completes
@@ -188,16 +188,6 @@ agent.init()
     if (!agent.isFullyOperational()) {
       throw new Error('Agent initialized but not fully operational - missing critical components');
     }
-
-		// Log service context for observability/post-mortems
-		agent.agentLogger?.infoSync('Service context', {
-			component: 'main',
-			operation: 'startup_context',
-			unit: process.env.SYSTEMD_UNIT || 'unknown',
-			invocation: process.env.INVOCATION_ID || 'unknown',
-			watchdogUsec: process.env.WATCHDOG_USEC || 'unknown',
-			agentVersion: packageVersion
-		});
     
     // Set logger after agent initialization
     health.setLogger(agent.agentLogger);

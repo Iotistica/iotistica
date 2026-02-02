@@ -227,6 +227,9 @@ services:
         ports:
             - "502:502"
             - "5001:5000"  # Web GUI: http://localhost:5001
+        depends_on:
+            api:
+                condition: service_healthy
         networks:
             - iotistic-net
         logging:
@@ -250,6 +253,9 @@ services:
         ports:
             - "503:502"
             - "5003:5000"  # Web GUI: http://localhost:5001
+        depends_on:
+            api:
+                condition: service_healthy
         networks:
             - iotistic-net
         logging:
@@ -272,6 +278,9 @@ services:
         ports:
             - "504:502"
             - "5004:5000"  # Web GUI: http://localhost:5001
+        depends_on:
+            api:
+                condition: service_healthy
         networks:
             - iotistic-net
         logging:
