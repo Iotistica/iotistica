@@ -191,13 +191,38 @@ class WebSocketService {
           const message = JSON.parse(event.data);
           const { type, data } = message;
 
-          console.log('[WebSocket] Received message:', { type, hasData: !!data, dataKeys: data ? Object.keys(data) : [] });
+          // Enhanced logging for history messages
+          if (type === 'history') {
+            console.log('[WebSocket] HISTORY MESSAGE RECEIVED:', {
+              type,
+              hasData: !!data,
+              cpuCount: data?.cpu?.length,
+              memoryCount: data?.memory?.length,
+              networkCount: data?.network?.length,
+              firstCpu: data?.cpu?.[0],
+              firstMemory: data?.memory?.[0],
+              firstNetwork: data?.network?.[0],
+              fullData: data // Show full data for debugging
+            });
+          } else {
+            console.log('[WebSocket] Received message:', { 
+              type, 
+              hasData: !!data, 
+              dataKeys: data ? Object.keys(data) : []
+            });
+          }
 
           // Notify all handlers for this message type
           const handlers = this.handlers.get(type);
           if (handlers) {
             console.log(`[WebSocket] Notifying ${handlers.size} handler(s) for type: ${type}`);
-            handlers.forEach(handler => handler(data));
+            handlers.forEach(handler => {
+              try {
+                handler(data);
+              } catch (err) {
+                console.error(`[WebSocket] Handler error for type ${type}:`, err);
+              }
+            });
           } else {
             console.warn(`[WebSocket] No handlers registered for message type: ${type}`);
           }

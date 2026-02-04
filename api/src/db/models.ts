@@ -597,6 +597,117 @@ export class DeviceMetricsModel {
 
   /**
    * Get metrics by time range with optional sampling
+   * Uses TimescaleDB continuous aggregates for better performance at scale:
+   * - 30min: raw device_metrics (real-time)
+   * - 6h: device_metrics_5min (5-minute aggregates)
+   * - 12h/24h: device_metrics_hourly (hourly aggregates)
+   */
+  static async getByTimeRangeMinutes(
+    deviceUuid: string,
+    minutes: number,
+    maxPoints: number = 60
+  ): Promise<DeviceMetrics[]> {
+    console.log('[DeviceMetricsModel.getByTimeRangeMinutes]', {
+      deviceUuid,
+      minutes,
+      maxPoints
+    });
+    
+    // Select appropriate table/view based on time range
+    let tableName: string;
+    let timeColumn: string;
+    let cpuUsageColumn: string;
+    let memoryUsageColumn: string;
+    let storageUsageColumn: string;
+    let cpuTempColumn: string;
+    
+    if (minutes <= 30) {
+      tableName = 'device_metrics';
+      timeColumn = 'recorded_at';
+      cpuUsageColumn = 'cpu_usage';
+      memoryUsageColumn = 'memory_usage';
+      storageUsageColumn = 'storage_usage';
+      cpuTempColumn = 'cpu_temp';
+    } else if (minutes <= 360) {
+      tableName = 'device_metrics_5min';
+      timeColumn = 'bucket';
+      cpuUsageColumn = 'avg_cpu_usage';
+      memoryUsageColumn = 'avg_memory_usage';
+      storageUsageColumn = 'avg_storage_usage';
+      cpuTempColumn = 'avg_cpu_temp';
+    } else {
+      tableName = 'device_metrics_hourly';
+      timeColumn = 'bucket';
+      cpuUsageColumn = 'avg_cpu_usage';
+      memoryUsageColumn = 'avg_memory_usage';
+      storageUsageColumn = 'avg_storage_usage';
+      cpuTempColumn = 'avg_cpu_temp';
+    }
+    
+    // Calculate interval based on table type
+    // For hourly aggregates, interval=1 since max 24 rows (already < maxPoints)
+    // For 5min aggregates, downsample to fit maxPoints
+    // For raw data, downsample to fit maxPoints
+    let interval: number;
+    if (tableName === 'device_metrics_hourly') {
+      interval = 1; // Show all hourly data (max 24 points for 24h period)
+    } else {
+      interval = Math.max(1, Math.ceil(minutes / maxPoints));
+    }
+    
+    console.log('[DeviceMetricsModel.getByTimeRangeMinutes] Table selection:', {
+      minutes,
+      tableName,
+      timeColumn,
+      interval
+    });
+    
+    const result = await query<DeviceMetrics>(
+      `WITH numbered AS (
+        SELECT 
+          device_uuid,
+          ${timeColumn} as recorded_at,
+          ${cpuUsageColumn} as cpu_usage,
+          ${memoryUsageColumn} as memory_usage,
+          ${storageUsageColumn} as storage_usage,
+          ${cpuTempColumn} as cpu_temperature,
+          ROW_NUMBER() OVER (ORDER BY ${timeColumn}) as rn
+        FROM ${tableName}
+        WHERE device_uuid = $1 
+          AND ${timeColumn} >= NOW() - INTERVAL '1 minute' * $2
+          AND ${timeColumn} <= NOW()
+      )
+      SELECT 
+        device_uuid,
+        recorded_at,
+        cpu_usage,
+        memory_usage,
+        storage_usage,
+        cpu_temperature
+      FROM numbered 
+      WHERE ($3 = 1 OR rn % $3 = 1)
+      ORDER BY recorded_at ASC`,
+      [deviceUuid, minutes, interval]
+    );
+    
+    console.log('[DeviceMetricsModel.getByTimeRangeMinutes] Query result:', {
+      tableName,
+      timeColumn,
+      rowCount: result.rows.length,
+      firstRow: result.rows[0],
+      lastRow: result.rows[result.rows.length - 1]
+    });
+    
+    return result.rows;
+  }
+
+  /**
+   * Get metrics for a specific time range (legacy method, uses Date objects)
+   * 
+   * Uses TimescaleDB continuous aggregates for better performance at scale:
+   * - 30min: raw device_metrics (real-time)
+   * - 6h: device_metrics_5min (5-minute aggregates)
+   * - 12h/24h: device_metrics_hourly (hourly aggregates)
    */
   static async getByTimeRange(
     deviceUuid: string, 
@@ -607,19 +718,86 @@ export class DeviceMetricsModel {
     const totalMinutes = Math.floor((endTime.getTime() - startTime.getTime()) / 60000);
     const interval = Math.max(1, Math.floor(totalMinutes / maxPoints));
     
+    console.log('[DeviceMetricsModel.getByTimeRange]', {
+      deviceUuid,
+      startTime: startTime.toISOString(),
+      endTime: endTime.toISOString(),
+      totalMinutes,
+      interval,
+      maxPoints
+    });
+    
+    // Select appropriate table/view based on time range
+    // Continuous aggregates provide 10-100x better performance for larger time ranges
+    let tableName: string;
+    let timeColumn: string;
+    let cpuUsageColumn: string;
+    let memoryUsageColumn: string;
+    let storageUsageColumn: string;
+    let cpuTempColumn: string;
+    
+    if (totalMinutes <= 30) {
+      // 30 minutes or less: use raw table for real-time data
+      tableName = 'device_metrics';
+      timeColumn = 'recorded_at';
+      cpuUsageColumn = 'cpu_usage';
+      memoryUsageColumn = 'memory_usage';
+      storageUsageColumn = 'storage_usage';
+      cpuTempColumn = 'cpu_temp';
+    } else if (totalMinutes <= 360) {
+      // 6 hours or less: use 5-minute continuous aggregate
+      tableName = 'device_metrics_5min';
+      timeColumn = 'bucket';
+      cpuUsageColumn = 'avg_cpu_usage';
+      memoryUsageColumn = 'avg_memory_usage';
+      storageUsageColumn = 'avg_storage_usage';
+      cpuTempColumn = 'avg_cpu_temp';
+    } else {
+      // 12 hours or more: use hourly continuous aggregate
+      tableName = 'device_metrics_hourly';
+      timeColumn = 'bucket';
+      cpuUsageColumn = 'avg_cpu_usage';
+      memoryUsageColumn = 'avg_memory_usage';
+      storageUsageColumn = 'avg_storage_usage';
+      cpuTempColumn = 'avg_cpu_temp';
+    }
+    
     const result = await query<DeviceMetrics>(
       `WITH numbered AS (
-        SELECT *, ROW_NUMBER() OVER (ORDER BY recorded_at) as rn
-        FROM device_metrics 
+        SELECT 
+          device_uuid,
+          ${timeColumn} as recorded_at,
+          ${cpuUsageColumn} as cpu_usage,
+          ${memoryUsageColumn} as memory_usage,
+          ${storageUsageColumn} as storage_usage,
+          ${cpuTempColumn} as cpu_temperature,
+          ROW_NUMBER() OVER (ORDER BY ${timeColumn}) as rn
+        FROM ${tableName}
         WHERE device_uuid = $1 
-          AND recorded_at >= $2 
-          AND recorded_at <= $3
+          AND ${timeColumn} >= ($2::timestamptz AT TIME ZONE 'UTC')::timestamp
+          AND ${timeColumn} <= ($3::timestamptz AT TIME ZONE 'UTC')::timestamp
       )
-      SELECT * FROM numbered 
+      SELECT 
+        device_uuid,
+        recorded_at,
+        cpu_usage,
+        memory_usage,
+        storage_usage,
+        cpu_temperature
+      FROM numbered 
       WHERE rn % $4 = 1
       ORDER BY recorded_at ASC`,
-      [deviceUuid, startTime, endTime, interval]
+      [deviceUuid, startTime.toISOString(), endTime.toISOString(), interval]
     );
+    
+    console.log('[DeviceMetricsModel.getByTimeRange] Query result:', {
+      tableName,
+      timeColumn,
+      rowCount: result.rows.length,
+      firstRow: result.rows[0],
+      lastRow: result.rows[result.rows.length - 1]
+    });
+    
     return result.rows;
   }
 

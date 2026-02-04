@@ -39,7 +39,6 @@ export function Header({
   onUsersClick = () => {},
   onProfileClick = () => {},
   onTagDefinitionsClick = () => {},
-  onDigitalTwinClick = () => {},
   userRole = 'viewer'
 }: HeaderProps) {
   // AI Chat state

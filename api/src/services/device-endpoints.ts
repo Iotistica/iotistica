@@ -163,6 +163,7 @@ export class DeviceSensorSyncService {
               synced_to_config = true,
               deployment_status = $10,
               config_id = $11
+              -- CRITICAL: DO NOT update health_* fields here - they come from updateEndpointHealth()
             WHERE device_uuid = $12 AND uuid = $13`,
             [
               endpoint.name,
@@ -205,7 +206,9 @@ export class DeviceSensorSyncService {
               config_version = EXCLUDED.config_version,
               synced_to_config = EXCLUDED.synced_to_config,
               deployment_status = EXCLUDED.deployment_status,
-              config_id = EXCLUDED.config_id`,
+              config_id = EXCLUDED.config_id
+              -- CRITICAL: DO NOT update health_* fields - they are updated separately via updateEndpointHealth()
+              -- health_status, health_connected, health_last_poll, health_error_count, health_last_error, health_updated_at`,
             [
               deviceUuid,
               endpoint.uuid,

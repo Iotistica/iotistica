@@ -96,19 +96,21 @@ export async function processDeviceStateReport(
       deviceState.version // Pass version from agent report
     );
 
-    // 🔄 RECONCILIATION: Sync agent's current state to device_sensors table
-    // Only reconcile if config.endpoints is present in the report
-    if (deviceState.config?.endpoints) {
-        await deviceSensorSync.syncCurrentStateToTable(uuid, deviceState);
-    }
-
-    // 🩺 HEALTH UPDATE: Update endpoint health from agent report
+    // 🩺 HEALTH UPDATE: Update endpoint health from agent report FIRST
     // endpoints_health is sent at root level, not in config
+    // CRITICAL: Must happen BEFORE config sync to avoid race conditions
     if (deviceState.endpoints_health) {
       logger.info(`Processing endpoint health for device ${uuid.substring(0, 8)}... (${Object.keys(deviceState.endpoints_health).length} endpoints)`);
       await deviceSensorSync.updateEndpointHealth(uuid, deviceState.endpoints_health);
     } else {
       logger.debug(`No endpoints_health in state report for device ${uuid.substring(0, 8)}`);
+    }
+
+    // 🔄 RECONCILIATION: Sync agent's current state to device_sensors table
+    // Only reconcile if config.endpoints is present in the report
+    // This runs AFTER health update to preserve health_* columns
+    if (deviceState.config?.endpoints) {
+        await deviceSensorSync.syncCurrentStateToTable(uuid, deviceState);
     }
 
     // EVENT SOURCING: Publish current state updated event

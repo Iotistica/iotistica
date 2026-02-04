@@ -118,14 +118,24 @@ export function AddEditDeviceDialog({
     }
   };
 
+  // Separate effect for initializing form when dialog opens
   useEffect(() => {
+    if (!open) {
+      // Reset when dialog closes (optional - helps with cleanup)
+      return;
+    }
+
+    // Only initialize formData when dialog first opens
+    console.log('[DEBUG] Dialog opened - initializing form data');
+    
     if (device) {
+      console.log('[DEBUG] Setting formData for device:', device.name);
       setFormData({
         name: device.name,
         type: device.type,
         description: "",
         ipAddress: device.ipAddress,
-        macAddress: "00:1B:44:11:3A:B7", // Default, would come from device in real scenario
+        macAddress: "00:1B:44:11:3A:B7",
         lastSeen: device.lastSeen,
         status: device.status,
         cpu: device.cpu,
@@ -136,15 +146,11 @@ export function AddEditDeviceDialog({
       // Fetch tags from API for this device
       const fetchDeviceTags = async () => {
         try {
-          console.log('[DEBUG AddEditDeviceDialog] Fetching tags for device:', device.deviceUuid);
           const response = await fetch(buildApiUrl(`/api/v1/devices/${device.deviceUuid}/tags`));
           if (response.ok) {
             const data = await response.json();
-            console.log('[DEBUG AddEditDeviceDialog] Fetched tags:', data.tags);
             setTags(data.tags || {});
           } else {
-            // Device might not have tags yet, that's okay
-            console.log('[DEBUG AddEditDeviceDialog] No tags found for device');
             setTags({});
           }
         } catch (error) {
@@ -168,17 +174,13 @@ export function AddEditDeviceDialog({
         disk: 0,
       });
       setTags({});
-      // Generate new provisioning key from API when opening for new device
-      if (open && !provisioningKey) {
+      if (!provisioningKey) {
         fetchProvisioningKey(false);
       }
     }
 
-    // Load tag definitions when dialog opens
-    if (open) {
-      loadTagDefinitions();
-    }
-  }, [device, open]);
+    loadTagDefinitions();
+  }, [open]); // Only re-run when dialog opens/closes
 
   const handleSave = () => {
     // Required field validation
@@ -332,7 +334,7 @@ export function AddEditDeviceDialog({
               id="device-name"
               placeholder="Raspberry-01"
               value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
             />
           </div>
 
@@ -342,7 +344,7 @@ export function AddEditDeviceDialog({
               id="description"
               placeholder="Enter agent description (optional)"
               value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
               rows={3}
             />
           </div>
@@ -453,7 +455,7 @@ export function AddEditDeviceDialog({
                 id="ip-address"
                 placeholder="192.168.1.10"
                 value={formData.ipAddress}
-                onChange={(e) => setFormData({ ...formData, ipAddress: e.target.value })}
+                onChange={(e) => setFormData(prev => ({ ...prev, ipAddress: e.target.value }))}
               />
             </div>
 
@@ -463,7 +465,7 @@ export function AddEditDeviceDialog({
                 id="mac-address"
                 placeholder="00:1B:44:11:3A:B7"
                 value={formData.macAddress}
-                onChange={(e) => setFormData({ ...formData, macAddress: e.target.value })}
+                onChange={(e) => setFormData(prev => ({ ...prev, macAddress: e.target.value }))}
               />
             </div>
           </div>

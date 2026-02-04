@@ -585,7 +585,7 @@ export default function App() {
               onClick={() => setCurrentView('metrics')}
             >
               <BarChart3 className="w-4 h-4 mr-2" />
-              System Metrics
+              System
             </Button>
             <Button
               variant={currentView === 'sensors' ? 'default' : 'outline'}

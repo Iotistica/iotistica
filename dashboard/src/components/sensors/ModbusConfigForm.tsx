@@ -67,12 +67,15 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
     },
   });
 
-  // Reset form when value prop changes (e.g., when editing existing device)
+  // Reset form only when component first mounts with initial value
+  // Using a ref to track if we've already initialized prevents resetting on every parent re-render
+  const initializedRef = React.useRef(false);
   useEffect(() => {
-    if (value) {
+    if (value && !initializedRef.current) {
       reset(value);
+      initializedRef.current = true;
     }
-  }, [value, reset]);
+  }, [value?.name, reset]); // Only re-initialize if device name changes (different device)
 
   const connectionType = watch('connection.type');
 

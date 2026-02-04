@@ -141,6 +141,38 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
       }
     });
 
+    // Handle metrics
+    mqttManager.on('metrics', async (data) => {
+      try {
+        logger.info('[MQTT] Metrics event received, storing to database', {
+          deviceUuid: data.deviceUuid?.substring(0, 8) + '...',
+          cpu_usage: data.cpu_usage,
+          memory_usage: data.memory_usage,
+          timestamp: data.timestamp
+        });
+        
+        const { DeviceMetricsModel } = await import('../db/models');
+        await DeviceMetricsModel.record(data.deviceUuid, {
+          cpu_usage: data.cpu_usage,
+          cpu_temp: data.cpu_temp,
+          memory_usage: data.memory_usage,
+          memory_total: data.memory_total,
+          storage_usage: data.storage_usage,
+          storage_total: data.storage_total
+        });
+        
+        logger.info('[MQTT] Metrics stored successfully', {
+          deviceUuid: data.deviceUuid?.substring(0, 8) + '...'
+        });
+      } catch (error) {
+        logger.error('Error storing metrics:', {
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          deviceUuid: data.deviceUuid
+        });
+      }
+    });
+
     // Initialize jobs handler
     try {
       const { getJobsHandler } = await import('./jobs-handler');

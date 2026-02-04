@@ -320,6 +320,16 @@ export class DeviceEndpointModel {
   }
 
   /**
+   * Update lastSeenAt timestamp by device name
+   * Fallback for devices without fingerprints (cloud-synced devices)
+   */
+  static async updateLastSeenByName(name: string): Promise<void> {
+    await models(this.table)
+      .where('name', name)
+      .update({ lastSeenAt: new Date().toISOString() });
+  }
+
+  /**
    * Import endpoints from JSON config (migration helper)
    */
   static async importFromJson(protocol: string, config: any): Promise<void> {

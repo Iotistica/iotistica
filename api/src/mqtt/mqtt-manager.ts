@@ -1289,6 +1289,15 @@ export class MqttManager extends EventEmitter {
    * Handle metrics message
    */
   private handleMetrics(deviceUuid: string, data: any): void {
+    logger.info('[MQTT] Received metrics from agent', {
+      deviceUuid: deviceUuid.substring(0, 8) + '...',
+      cpu_usage: data.cpu_usage,
+      memory_usage: data.memory_usage,
+      storage_usage: data.storage_usage,
+      cpu_temp: data.cpu_temp,
+      timestamp: data.timestamp || new Date().toISOString()
+    });
+
     const metrics: MetricsData = {
       deviceUuid,
       timestamp: data.timestamp || new Date().toISOString(),
@@ -1303,6 +1312,10 @@ export class MqttManager extends EventEmitter {
 
   
     this.emitTyped('metrics', metrics);
+    logger.info('[MQTT] Emitted metrics event', {
+      deviceUuid: deviceUuid.substring(0, 8) + '...',
+      eventName: 'metrics'
+    });
   }
 
   /**

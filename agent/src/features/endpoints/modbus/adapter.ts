@@ -4,6 +4,7 @@ import { ModbusDevice } from './types';
 import { ModbusClient } from './client';
 import { SensorDataPoint, DeviceStatus, Logger } from '../types.js';
 import { DeviceMetrics, MetricsSummary } from '../metrics.js';
+import { DeviceEndpointModel } from '../../../db/models/endpoint.model.js';
 
 /**
  * Main Modbus Adapter class that coordinates Modbus devices
@@ -138,7 +139,15 @@ export class ModbusAdapter extends EventEmitter {
    * Get status of all devices
    */
   getDeviceStatuses(): DeviceStatus[] {
-    return Array.from(this.deviceStatuses.values());
+    const statuses = Array.from(this.deviceStatuses.values());
+    this.logger.debug(`getDeviceStatuses() returning ${statuses.length} statuses`, {
+      running: this.running,
+      pollLoopRunning: this.pollLoopRunning,
+      deviceCount: this.config.devices.length,
+      enabledCount: this.config.devices.filter(d => d.enabled).length,
+      statuses: statuses.map(s => ({ name: s.deviceName, connected: s.connected, quality: s.communicationQuality }))
+    });
+    return statuses;
   }
 
   /**
@@ -637,6 +646,12 @@ export class ModbusAdapter extends EventEmitter {
       status.errorCount = 0; // Reset on success
       status.lastError = null;
       status.connected = true;
+      
+      // Persist lastSeen to database (async, fire-and-forget)
+      // Uses name-based lookup since cloud-synced devices don't have fingerprints
+      DeviceEndpointModel.updateLastSeenByName(deviceName).catch(err => {
+        this.logger.warn(`Failed to update lastSeen for ${deviceName}: ${err.message}`);
+      });
     } else {
       status.errorCount++;
     }

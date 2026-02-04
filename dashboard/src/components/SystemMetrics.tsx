@@ -35,12 +35,11 @@ import { buildApiUrl } from "@/config/api";
 
 const MAX_POINTS = 60; // Keep last 60 points (30 minutes)
 
-// Global cache for chart history data per device (persists across component unmounts)
-const chartDataCache = new Map<string, {
-  cpu: Array<{ time: string; value: number }>;
-  memory: Array<{ time: string; used: number; available: number }>;
-  network: Array<{ time: string; download: number; upload: number }>;
-}>();
+// Helper to convert period to minutes
+const getPeriodMinutes = (period: '30min' | '6h' | '12h' | '24h'): number => {
+  const map = { '30min': 30, '6h': 360, '12h': 720, '24h': 1440 };
+  return map[period];
+};
 
 interface SystemMetricsProps {
   device: Device;
@@ -54,20 +53,10 @@ export function SystemMetrics({
   const [selectedMetric, setSelectedMetric] = useState<'cpu' | 'memory' | 'network'>('cpu');
   const [timePeriod, setTimePeriod] = useState<'30min' | '6h' | '12h' | '24h'>('30min');
   
-  // Initialize from cache if available, otherwise empty arrays
-  const deviceCacheKey = device.deviceUuid;
-  const cachedData = chartDataCache.get(deviceCacheKey);
-  
-  // Local state for history data (populated by WebSocket and persisted in cache)
-  const [cpuHistory, setCpuHistory] = useState<Array<{ time: string; value: number }>>(
-    cachedData?.cpu || []
-  );
-  const [memoryHistory, setMemoryHistory] = useState<Array<{ time: string; used: number; available: number }>>(
-    cachedData?.memory || []
-  );
-  const [networkHistory, setNetworkHistory] = useState<Array<{ time: string; download: number; upload: number }>>(
-    cachedData?.network || []
-  );
+  // Local state for history data (populated by WebSocket for 30min, API for longer periods)
+  const [cpuHistory, setCpuHistory] = useState<Array<{ time: string; value: number }>>([]);
+  const [memoryHistory, setMemoryHistory] = useState<Array<{ time: string; used: number; available: number }>>([]);
+  const [networkHistory, setNetworkHistory] = useState<Array<{ time: string; download: number; upload: number }>>([]);
   
   // Check if we're still waiting for initial data
   const isLoading = device.cpu === 0 && device.memory === 0 && device.disk === 0;
@@ -233,15 +222,40 @@ export function SystemMetrics({
   // Fetch historical data from API
   const fetchHistoricalData = useCallback(async (period: string) => {
     try {
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${device.deviceUuid}/metrics?period=${period}`));
-      if (!response.ok) return;
+      const token = localStorage.getItem('token');
+      const response = await fetch(
+        buildApiUrl(`/api/v1/devices/${device.deviceUuid}/metrics?period=${period}`),
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      if (!response.ok) {
+        console.error('[SystemMetrics] Metrics fetch failed:', response.status, response.statusText);
+        return;
+      }
       
       const data = await response.json();
-      if (!data.metrics || data.metrics.length === 0) return;
+      console.log('[SystemMetrics] Fetched metrics:', { period, count: data.metrics?.length, data });
       
       const cpu: Array<{ time: string; value: number }> = [];
       const memory: Array<{ time: string; used: number; available: number }> = [];
       const network: Array<{ time: string; download: number; upload: number }> = [];
+      
+      // Log time range of data
+      if (data.metrics.length > 0) {
+        const firstTime = new Date(data.metrics[0].recorded_at);
+        const lastTime = new Date(data.metrics[data.metrics.length - 1].recorded_at);
+        const spanMinutes = (lastTime.getTime() - firstTime.getTime()) / 60000;
+        console.log('[SystemMetrics] Data time range:', {
+          first: firstTime.toISOString(),
+          last: lastTime.toISOString(),
+          spanMinutes: Math.round(spanMinutes),
+          expectedMinutes: period === '30min' ? 30 : period === '6h' ? 360 : period === '12h' ? 720 : 1440
+        });
+      }
       
       // Format time based on period
       const formatTime = (timestamp: string) => {
@@ -258,20 +272,22 @@ export function SystemMetrics({
         }
       };
       
-      data.metrics.forEach((m: any) => {
-        const time = formatTime(m.recorded_at);
-        cpu.push({ time, value: Math.round(m.cpu_usage || 0) });
-        memory.push({ 
-          time, 
-          used: Math.round((m.memory_usage || 0) / 1024), 
-          available: Math.round(((m.memory_total || 0) - (m.memory_usage || 0)) / 1024)
+      if (data.metrics && data.metrics.length > 0) {
+        data.metrics.forEach((m: any) => {
+          const time = formatTime(m.recorded_at);
+          cpu.push({ time, value: Math.round(m.cpu_usage || 0) });
+          memory.push({ 
+            time, 
+            used: Math.round((m.memory_usage || 0) / 1024), 
+            available: Math.round(((m.memory_total || 0) - (m.memory_usage || 0)) / 1024)
+          });
+          network.push({
+            time,
+            download: Math.round((m.network_rx_rate || 0) / 1024),
+            upload: Math.round((m.network_tx_rate || 0) / 1024)
+          });
         });
-        network.push({
-          time,
-          download: Math.round((m.network_rx_rate || 0) / 1024),
-          upload: Math.round((m.network_tx_rate || 0) / 1024)
-        });
-      });
+      }
       
       setCpuHistory(cpu);
       setMemoryHistory(memory);
@@ -283,19 +299,93 @@ export function SystemMetrics({
 
   // Handle metrics history updates via WebSocket (append live data only for 30min period)
   const handleMetricsHistory = useCallback((data: MetricsHistoryData) => {
+    console.log('[SystemMetrics] handleMetricsHistory called:', {
+      deviceUuid: device.deviceUuid.substring(0, 8) + '...',
+      timePeriod,
+      hasCpuData: !!data?.cpu,
+      cpuLength: data?.cpu?.length,
+      hasMemoryData: !!data?.memory,
+      memoryLength: data?.memory?.length,
+      hasNetworkData: !!data?.network,
+      networkLength: data?.network?.length,
+      firstCpuPoint: data?.cpu?.[0],
+      firstMemoryPoint: data?.memory?.[0]
+    });
+    
     // Only append live data for 30min period, ignore for historical periods
-    if (timePeriod !== '30min') return;
+    if (timePeriod !== '30min') {
+      console.log('[SystemMetrics] Ignoring history data - not in 30min period');
+      return;
+    }
+    
+    // Format timestamps from WebSocket to match API format
+    const formatTime = (timestamp: string) => {
+      const date = new Date(timestamp);
+      // Filter out invalid dates
+      if (isNaN(date.getTime())) {
+        console.warn('[SystemMetrics] Invalid timestamp:', timestamp);
+        return null;
+      }
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    };
     
     if (data.cpu && data.cpu.length > 0) {
-      setCpuHistory(prev => [...prev, ...data.cpu].slice(-MAX_POINTS));
+      console.log(`[SystemMetrics] Updating CPU history: adding ${data.cpu.length} points`);
+      setCpuHistory(prev => {
+        const formatted = data.cpu
+          .map(point => {
+            const time = formatTime(point.time);
+            return time ? { time, value: point.value } : null;
+          })
+          .filter((point): point is { time: string; value: number } => point !== null);
+        
+        // Remove duplicates by time
+        const combined = [...prev, ...formatted];
+        const unique = combined.filter((point, index, self) => 
+          index === self.findIndex(p => p.time === point.time)
+        );
+        const updated = unique.slice(-MAX_POINTS);
+        console.log(`[SystemMetrics] CPU history updated: ${prev.length} -> ${updated.length} points (${formatted.length} new, ${combined.length - unique.length} duplicates removed)`);
+        return updated;
+      });
     }
     if (data.memory && data.memory.length > 0) {
-      setMemoryHistory(prev => [...prev, ...data.memory].slice(-MAX_POINTS));
+      console.log(`[SystemMetrics] Updating memory history: adding ${data.memory.length} points`);
+      setMemoryHistory(prev => {
+        const formatted = data.memory
+          .map(point => {
+            const time = formatTime(point.time);
+            return time ? { time, used: point.used, available: point.available } : null;
+          })
+          .filter((point): point is { time: string; used: number; available: number } => point !== null);
+        
+        // Remove duplicates by time
+        const combined = [...prev, ...formatted];
+        const unique = combined.filter((point, index, self) => 
+          index === self.findIndex(p => p.time === point.time)
+        );
+        return unique.slice(-MAX_POINTS);
+      });
     }
     if (data.network && data.network.length > 0) {
-      setNetworkHistory(prev => [...prev, ...data.network].slice(-MAX_POINTS));
+      console.log(`[SystemMetrics] Updating network history: adding ${data.network.length} points`);
+      setNetworkHistory(prev => {
+        const formatted = data.network
+          .map(point => {
+            const time = formatTime(point.time);
+            return time ? { time, download: point.download, upload: point.upload } : null;
+          })
+          .filter((point): point is { time: string; download: number; upload: number } => point !== null);
+        
+        // Remove duplicates by time
+        const combined = [...prev, ...formatted];
+        const unique = combined.filter((point, index, self) => 
+          index === self.findIndex(p => p.time === point.time)
+        );
+        return unique.slice(-MAX_POINTS);
+      });
     }
-  }, [timePeriod]);
+  }, [timePeriod, device.deviceUuid]);
 
   // Subscribe to WebSocket channels
   useWebSocket(device.deviceUuid, 'system-info', handleSystemInfo);
@@ -304,7 +394,11 @@ export function SystemMetrics({
   useWebSocket(device.deviceUuid, 'history', timePeriod === '30min' ? handleMetricsHistory : () => {});
 
   // Fetch historical data when time period changes
+  // For all periods (including 30min), fetch initial data from API
+  // Then WebSocket provides live updates for 30min period only
   useEffect(() => {
+    console.log('[SystemMetrics] Time period changed to:', timePeriod);
+    console.log('[SystemMetrics] Fetching historical data from API');
     fetchHistoricalData(timePeriod);
   }, [timePeriod, fetchHistoricalData]);
 
@@ -388,51 +482,45 @@ export function SystemMetrics({
 
             {selectedMetric === 'cpu' && (
               <>
-                {cpuHistory.length === 0 ? (
-                  <div className="flex items-center justify-center h-[250px] text-muted-foreground">
-                    <Loader2 className="h-8 w-8 animate-spin" />
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={250} key="cpu-chart">
-                    <AreaChart data={cpuHistory} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
-                      <defs>
-                        <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis 
-                        dataKey="time" 
-                        stroke="#6b7280" 
-                        tick={{ fontSize: 10 }} 
-                        interval={Math.floor(cpuHistory.length / 6)}
-                        minTickGap={30}
-                      />
-                      <YAxis stroke="#6b7280" width={40} tick={{ fontSize: 10 }} domain={[0, 100]} />
-                      <Tooltip />
-                      <Area
-                        type="monotone"
-                        dataKey="value"
-                        stroke="#3b82f6"
-                        strokeWidth={2}
-                        fillOpacity={1}
-                        fill="url(#colorCpu)"
-                        isAnimationActive={false}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                )}
+                {console.log('[SystemMetrics] Rendering CPU chart with', cpuHistory.length, 'points')}
+                <ResponsiveContainer width="100%" height={250} key="cpu-chart">
+                      <AreaChart data={cpuHistory} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+                        <defs>
+                          <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                        <XAxis 
+                          dataKey="time" 
+                          stroke="#6b7280" 
+                          tick={{ fontSize: 10 }} 
+                          interval={0}
+                          angle={0}
+                          textAnchor="middle"
+                          height={40}
+                        />
+                        <YAxis stroke="#6b7280" width={40} tick={{ fontSize: 10 }} domain={[0, 100]} />
+                        <Tooltip />
+                        <Area
+                          type="linear"
+                          dataKey="value"
+                          stroke="#3b82f6"
+                          strokeWidth={2}
+                          fillOpacity={1}
+                          fill="url(#colorCpu)"
+                          isAnimationActive={false}
+                          dot={{ fill: '#3b82f6', r: 3 }}
+                          activeDot={{ r: 5 }}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
               </>
             )}
 
             {selectedMetric === 'memory' && (
               <>
-                {memoryHistory.length === 0 ? (
-                  <div className="flex items-center justify-center h-[250px] text-muted-foreground">
-                    <Loader2 className="h-8 w-8 animate-spin" />
-                  </div>
-                ) : (
                   <ResponsiveContainer width="100%" height={250} key="memory-chart">
                     <AreaChart data={memoryHistory} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
                   <defs>
@@ -450,14 +538,16 @@ export function SystemMetrics({
                     dataKey="time" 
                     stroke="#6b7280" 
                     tick={{ fontSize: 10 }} 
-                    interval={Math.floor(memoryHistory.length / 6)}
-                    minTickGap={30}
+                    interval={0}
+                    angle={0}
+                    textAnchor="middle"
+                    height={40}
                   />
                   <YAxis stroke="#6b7280" width={40} tick={{ fontSize: 10 }} domain={[0, 'dataMax']} />
                   <Tooltip />
                   <Legend />
                   <Area
-                    type="monotone"
+                    type="linear"
                     dataKey="used"
                     stackId="1"
                     stroke="#8b5cf6"
@@ -465,9 +555,11 @@ export function SystemMetrics({
                     fillOpacity={1}
                     fill="url(#colorUsed)"
                     isAnimationActive={false}
+                    dot={{ fill: '#8b5cf6', r: 3 }}
+                    activeDot={{ r: 5 }}
                   />
                   <Area
-                    type="monotone"
+                    type="linear"
                     dataKey="available"
                     stackId="1"
                     stroke="#10b981"
@@ -475,20 +567,16 @@ export function SystemMetrics({
                     fillOpacity={1}
                     fill="url(#colorAvailable)"
                     isAnimationActive={false}
+                    dot={{ fill: '#10b981', r: 3 }}
+                    activeDot={{ r: 5 }}
                   />
                 </AreaChart>
               </ResponsiveContainer>
-                )}
               </>
             )}
 
             {selectedMetric === 'network' && (
               <>
-                {networkHistory.length === 0 ? (
-                  <div className="flex items-center justify-center h-[250px] text-muted-foreground">
-                    <Loader2 className="h-8 w-8 animate-spin" />
-                  </div>
-                ) : (
                   <ResponsiveContainer width="100%" height={250} key="network-chart">
                     <LineChart data={networkHistory} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -496,31 +584,34 @@ export function SystemMetrics({
                         dataKey="time" 
                         stroke="#6b7280" 
                         tick={{ fontSize: 10 }} 
-                        interval={Math.floor(networkHistory.length / 6)}
-                        minTickGap={30}
+                        interval={0}
+                        angle={0}
+                        textAnchor="middle"
+                        height={40}
                       />
                       <YAxis stroke="#6b7280" width={40} tick={{ fontSize: 10 }} domain={[0, 'auto']} />
                       <Tooltip />
                       <Legend />
                       <Line
-                        type="monotone"
+                        type="linear"
                         dataKey="download"
                         stroke="#3b82f6"
                         strokeWidth={2}
-                        dot={false}
+                        dot={{ fill: '#3b82f6', r: 3 }}
+                        activeDot={{ r: 5 }}
                         isAnimationActive={false}
                       />
                       <Line
-                        type="monotone"
+                        type="linear"
                         dataKey="upload"
                         stroke="#10b981"
                         strokeWidth={2}
-                        dot={false}
+                        dot={{ fill: '#10b981', r: 3 }}
+                        activeDot={{ r: 5 }}
                         isAnimationActive={false}
                       />
                     </LineChart>
                   </ResponsiveContainer>
-                )}
               </>
             )}
           </Card>

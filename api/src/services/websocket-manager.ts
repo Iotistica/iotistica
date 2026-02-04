@@ -121,10 +121,8 @@ export class WebSocketManager {
    */
   private handleRedisMetrics(deviceUuid: string, metrics: any): void {
     // Transform metrics to dashboard history format
-    const time = new Date().toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    // Send ISO timestamp and let client format it (avoids timezone mismatches)
+    const time = new Date().toISOString();
     
     const dataPoint = {
       time,
@@ -806,10 +804,8 @@ export class WebSocketManager {
       const metricsData = metrics.reverse();
 
       metricsData.forEach((m: any) => {
-        const time = new Date(m.recorded_at).toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit',
-        });
+        // Send ISO timestamp and let client format it (avoids timezone mismatches)
+        const time = new Date(m.recorded_at).toISOString();
 
         // CPU data
         cpu.push({
