@@ -607,12 +607,6 @@ export class DeviceMetricsModel {
     minutes: number,
     maxPoints: number = 60
   ): Promise<DeviceMetrics[]> {
-    console.log('[DeviceMetricsModel.getByTimeRangeMinutes]', {
-      deviceUuid,
-      minutes,
-      maxPoints
-    });
-    
     // Select appropriate table/view based on time range
     let tableName: string;
     let timeColumn: string;
@@ -655,13 +649,6 @@ export class DeviceMetricsModel {
       interval = Math.max(1, Math.ceil(minutes / maxPoints));
     }
     
-    console.log('[DeviceMetricsModel.getByTimeRangeMinutes] Table selection:', {
-      minutes,
-      tableName,
-      timeColumn,
-      interval
-    });
-    
     const result = await query<DeviceMetrics>(
       `WITH numbered AS (
         SELECT 
@@ -690,14 +677,6 @@ export class DeviceMetricsModel {
       [deviceUuid, minutes, interval]
     );
     
-    console.log('[DeviceMetricsModel.getByTimeRangeMinutes] Query result:', {
-      tableName,
-      timeColumn,
-      rowCount: result.rows.length,
-      firstRow: result.rows[0],
-      lastRow: result.rows[result.rows.length - 1]
-    });
-    
     return result.rows;
   }
 
@@ -717,15 +696,6 @@ export class DeviceMetricsModel {
   ): Promise<DeviceMetrics[]> {
     const totalMinutes = Math.floor((endTime.getTime() - startTime.getTime()) / 60000);
     const interval = Math.max(1, Math.floor(totalMinutes / maxPoints));
-    
-    console.log('[DeviceMetricsModel.getByTimeRange]', {
-      deviceUuid,
-      startTime: startTime.toISOString(),
-      endTime: endTime.toISOString(),
-      totalMinutes,
-      interval,
-      maxPoints
-    });
     
     // Select appropriate table/view based on time range
     // Continuous aggregates provide 10-100x better performance for larger time ranges
@@ -789,14 +759,6 @@ export class DeviceMetricsModel {
       ORDER BY recorded_at ASC`,
       [deviceUuid, startTime.toISOString(), endTime.toISOString(), interval]
     );
-    
-    console.log('[DeviceMetricsModel.getByTimeRange] Query result:', {
-      tableName,
-      timeColumn,
-      rowCount: result.rows.length,
-      firstRow: result.rows[0],
-      lastRow: result.rows[result.rows.length - 1]
-    });
     
     return result.rows;
   }

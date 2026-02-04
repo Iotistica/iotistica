@@ -278,8 +278,7 @@ export function SystemMetrics({
           cpu.push({ time, value: Math.round(m.cpu_usage || 0) });
           memory.push({ 
             time, 
-            used: Math.round((m.memory_usage || 0) / 1024), 
-            available: Math.round(((m.memory_total || 0) - (m.memory_usage || 0)) / 1024)
+            used: Math.round(m.memory_usage || 0)
           });
           network.push({
             time,
@@ -355,9 +354,9 @@ export function SystemMetrics({
         const formatted = data.memory
           .map(point => {
             const time = formatTime(point.time);
-            return time ? { time, used: point.used, available: point.available } : null;
+            return time ? { time, used: point.used } : null;
           })
-          .filter((point): point is { time: string; used: number; available: number } => point !== null);
+          .filter((point): point is { time: string; used: number } => point !== null);
         
         // Remove duplicates by time
         const combined = [...prev, ...formatted];
@@ -501,7 +500,13 @@ export function SystemMetrics({
                           textAnchor="middle"
                           height={40}
                         />
-                        <YAxis stroke="#6b7280" width={40} tick={{ fontSize: 10 }} domain={[0, 100]} />
+                        <YAxis 
+                          stroke="#6b7280" 
+                          width={50} 
+                          tick={{ fontSize: 10 }} 
+                          domain={[0, 100]} 
+                          tickFormatter={(value) => `${value}%`}
+                        />
                         <Tooltip />
                         <Area
                           type="linear"
@@ -524,13 +529,9 @@ export function SystemMetrics({
                   <ResponsiveContainer width="100%" height={250} key="memory-chart">
                     <AreaChart data={memoryHistory} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
                   <defs>
-                    <linearGradient id="colorUsed" x1="0" y1="0" x2="0" y2="1">
+                    <linearGradient id="colorMemory" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
                       <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="colorAvailable" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -543,31 +544,25 @@ export function SystemMetrics({
                     textAnchor="middle"
                     height={40}
                   />
-                  <YAxis stroke="#6b7280" width={40} tick={{ fontSize: 10 }} domain={[0, 'dataMax']} />
+                  <YAxis 
+                    stroke="#6b7280" 
+                    width={60} 
+                    tick={{ fontSize: 10 }} 
+                    domain={[0, (dataMax: number) => Math.ceil(dataMax / 1000) * 1000]} 
+                    tickFormatter={(value) => `${value} MB`}
+                    tickCount={6}
+                  />
                   <Tooltip />
-                  <Legend />
                   <Area
                     type="linear"
                     dataKey="used"
-                    stackId="1"
+                    name="Used Memory"
                     stroke="#8b5cf6"
                     strokeWidth={2}
                     fillOpacity={1}
-                    fill="url(#colorUsed)"
+                    fill="url(#colorMemory)"
                     isAnimationActive={false}
                     dot={{ fill: '#8b5cf6', r: 3 }}
-                    activeDot={{ r: 5 }}
-                  />
-                  <Area
-                    type="linear"
-                    dataKey="available"
-                    stackId="1"
-                    stroke="#10b981"
-                    strokeWidth={2}
-                    fillOpacity={1}
-                    fill="url(#colorAvailable)"
-                    isAnimationActive={false}
-                    dot={{ fill: '#10b981', r: 3 }}
                     activeDot={{ r: 5 }}
                   />
                 </AreaChart>

@@ -38,7 +38,6 @@ export const router = express.Router();
  * Note: No auth required - called by dashboard, not device
  */
 router.get('/devices/:uuid/metrics', async (req, res) => {
-  console.log('[METRICS-ROUTE] *** ENDPOINT HIT ***', { uuid: req.params.uuid, period: req.query.period, limit: req.query.limit });
   try {
     const { uuid } = req.params;
     const limit = parseInt(req.query.limit as string) || 100;
@@ -67,9 +66,7 @@ router.get('/devices/:uuid/metrics', async (req, res) => {
           minutes = 30;
       }
       
-      console.log('[METRICS-ROUTE] Calling getByTimeRangeMinutes:', { uuid, period, minutes, maxPoints });
       metrics = await DeviceMetricsModel.getByTimeRangeMinutes(uuid, minutes, maxPoints);
-      console.log('[METRICS-ROUTE] Query returned:', { count: metrics.length, firstPoint: metrics[0], lastPoint: metrics[metrics.length - 1] });
     } else {
       metrics = await DeviceMetricsModel.getRecent(uuid, limit);
     }
