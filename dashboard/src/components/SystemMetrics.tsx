@@ -55,7 +55,7 @@ export function SystemMetrics({
   
   // Local state for history data (populated by WebSocket for 30min, API for longer periods)
   const [cpuHistory, setCpuHistory] = useState<Array<{ time: string; value: number }>>([]);
-  const [memoryHistory, setMemoryHistory] = useState<Array<{ time: string; used: number; available: number }>>([]);
+  const [memoryHistory, setMemoryHistory] = useState<Array<{ time: string; used: number }>>([]);
   const [networkHistory, setNetworkHistory] = useState<Array<{ time: string; download: number; upload: number }>>([]);
   
   // Check if we're still waiting for initial data
@@ -219,6 +219,37 @@ export function SystemMetrics({
     }
   }, []);
 
+  // Fetch initial processes data from API
+  const fetchProcesses = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(
+        buildApiUrl(`/api/v1/devices/${device.deviceUuid}/processes`),
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      
+      if (!response.ok) {
+        console.error('[SystemMetrics] Processes fetch failed:', response.status, response.statusText);
+        setProcessesLoading(false);
+        return;
+      }
+      
+      const data = await response.json();
+      if (data.top_processes && Array.isArray(data.top_processes)) {
+        setProcesses(data.top_processes);
+        setProcessesLoading(false);
+      }
+    } catch (error) {
+      console.error('[SystemMetrics] Error fetching processes:', error);
+      setProcessesLoading(false);
+    }
+  }, [device.deviceUuid]);
+
   // Fetch historical data from API
   const fetchHistoricalData = useCallback(async (period: string) => {
     try {
@@ -241,7 +272,7 @@ export function SystemMetrics({
       console.log('[SystemMetrics] Fetched metrics:', { period, count: data.metrics?.length, data });
       
       const cpu: Array<{ time: string; value: number }> = [];
-      const memory: Array<{ time: string; used: number; available: number }> = [];
+      const memory: Array<{ time: string; used: number }> = [];
       const network: Array<{ time: string; download: number; upload: number }> = [];
       
       // Log time range of data
@@ -416,7 +447,10 @@ export function SystemMetrics({
     setCpuHistory([]);
     setMemoryHistory([]);
     setNetworkHistory([]);
-  }, [device.deviceUuid, device.name, device.ipAddress]);
+    
+    // Fetch initial processes data
+    fetchProcesses();
+  }, [device.deviceUuid, device.name, device.ipAddress, fetchProcesses]);
 
   const scrollToSection = (id: string) => {
     const element = document.getElementById(id);
@@ -617,8 +651,8 @@ export function SystemMetrics({
           {/* Network Interfaces */}
           <NetworkingCard interfaces={networkInterfaces} />
 
-          {/* Analytics Card */}
-          <div id="analytics-section">
+          {/* Analytics Card - Commented out (using fake data) */}
+          {/* <div id="analytics-section">
             <AnalyticsCard 
               deviceName={device.name} 
               deviceId={device.deviceUuid} 
@@ -626,61 +660,61 @@ export function SystemMetrics({
                 name: p.name,
                 pid: p.pid,
                 cpu: p.cpu,
-                memory: p.mem, // Map mem to memory for AnalyticsCard
+                memory: p.mem,
               }))} 
               provisioned={device.status !== 'pending'}
             />
-          </div>
-        </div>
+          </div> */}
 
-        {/* Top Processes */}
-        <Card className="p-4 md:p-6" id="processes-section">
-          <div className="mb-4">
-            <h3 className="text-lg text-foreground font-medium mb-1">Top Processes</h3>
-            <p className="text-sm text-muted-foreground">Most resource-intensive processes</p>
-          </div>
-          {processesLoading ? (
-            <div className="text-center py-8 text-muted-foreground">Loading processes...</div>
-          ) : processes.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">No process data available</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="text-left py-3 px-0 text-sm font-medium text-muted-foreground">Process</th>
-                    <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground hidden sm:table-cell">PID</th>
-                    <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground">CPU %</th>
-                    <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground hidden md:table-cell">Memory %</th>
-                    <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground hidden lg:table-cell">CPU Usage</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {processes.map((process, index) => (
-                    <tr key={index} className="border-b border-border last:border-0">
-                      <td className="py-3 px-0 text-foreground truncate max-w-[150px]">
-                        {process.name}
-                      </td>
-                      <td className="py-3 px-4 text-muted-foreground hidden sm:table-cell">{process.pid}</td>
-                      <td className="py-3 px-4 text-foreground">{process.cpu.toFixed(1)}%</td>
-                      <td className="py-3 px-4 text-foreground hidden md:table-cell">{process.mem.toFixed(1)}%</td>
-                      <td className="py-3 px-4 hidden lg:table-cell">
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 bg-muted rounded-full h-2 max-w-[120px]">
-                            <div
-                              className="bg-blue-600 h-2 rounded-full transition-all"
-                              style={{ width: `${Math.min(process.cpu * 5, 100)}%` }}
-                            />
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {/* Top Processes */}
+          <Card className="p-4 md:p-6" id="processes-section">
+            <div className="mb-4">
+              <h3 className="text-lg text-foreground font-medium mb-1">Top Processes</h3>
+              <p className="text-sm text-muted-foreground">Most resource-intensive processes</p>
             </div>
-          )}
-        </Card>
+            {processesLoading ? (
+              <div className="text-center py-8 text-muted-foreground">Loading processes...</div>
+            ) : processes.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">No process data available</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left py-3 px-0 text-sm font-medium text-muted-foreground">Process</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground hidden sm:table-cell">PID</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground">CPU %</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground hidden md:table-cell">Memory %</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground hidden lg:table-cell">CPU Usage</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {processes.map((process, index) => (
+                      <tr key={index} className="border-b border-border last:border-0">
+                        <td className="py-3 px-0 text-foreground truncate max-w-[150px]">
+                          {process.name}
+                        </td>
+                        <td className="py-3 px-4 text-muted-foreground hidden sm:table-cell">{process.pid}</td>
+                        <td className="py-3 px-4 text-foreground">{process.cpu.toFixed(1)}%</td>
+                        <td className="py-3 px-4 text-foreground hidden md:table-cell">{process.mem.toFixed(1)}%</td>
+                        <td className="py-3 px-4 hidden lg:table-cell">
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 bg-muted rounded-full h-2 max-w-[120px]">
+                              <div
+                                className="bg-blue-600 h-2 rounded-full transition-all"
+                                style={{ width: `${Math.min(process.cpu * 5, 100)}%` }}
+                              />
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </div>
       </div>
     </div>
   );

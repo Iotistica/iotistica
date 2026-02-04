@@ -437,7 +437,7 @@ export default class Agent {
         await this.deviceManager.provision({
           provisioningApiKey, // Required for two-phase auth
           deviceName:
-            process.env.DEVICE_NAME || bootConfig?.deviceName || `device-${deviceInfo.uuid.slice(0, 8)}`,
+            process.env.DEVICE_NAME || bootConfig?.deviceName || `agent-${deviceInfo.uuid.slice(0, 8)}`,
           deviceType: process.env.DEVICE_TYPE || bootConfig?.deviceType || "standalone",
           apiEndpoint: cloudEndpoint,
           macAddress,

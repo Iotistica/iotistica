@@ -127,8 +127,8 @@ export class WebSocketManager {
     const dataPoint = {
       time,
       cpu: Math.round(parseFloat(metrics.cpu_usage) || 0),
-      memory_used: Math.round((parseFloat(metrics.memory_usage) || 0) / 1024 / 1024),
-      memory_available: Math.round(((parseFloat(metrics.memory_total) || 0) - (parseFloat(metrics.memory_usage) || 0)) / 1024 / 1024),
+      memory_used: Math.round(parseFloat(metrics.memory_usage) || 0), // Already in MB from database
+      memory_available: Math.round((parseFloat(metrics.memory_total) || 0) - (parseFloat(metrics.memory_usage) || 0)), // Already in MB
       network_download: 0, // Network metrics coming in future phase
       network_upload: 0,
     };

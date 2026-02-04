@@ -382,13 +382,25 @@ export async function getMemoryInfo(): Promise<{
 	percent: number;
 }> {
 	try {
+		// Detect if running in a Docker container
+		const isContainer = await isRunningInContainer();
+		
+		if (isContainer) {
+			// Read container memory stats from cgroup
+			const containerMem = await getContainerMemory();
+			if (containerMem) {
+				return containerMem;
+			}
+			// Fall through to systeminformation if cgroup read fails
+		}
+		
 		const mem = await systeminformation.mem();
 		// Exclude cached and buffers from used memory (like balena does)
 		// Ensure non-negative result (some systems report used differently)
 		const calcUsed = Math.max(0, mem.used - mem.cached - mem.buffers);
 		const usedMb = bytesToMb(calcUsed);
 		const totalMb = bytesToMb(mem.total);
-	const percent = Math.round((usedMb / totalMb) * 100);
+		const percent = Math.round((usedMb / totalMb) * 100);
 	
 	return {
 		used: usedMb,
@@ -399,7 +411,86 @@ export async function getMemoryInfo(): Promise<{
 	// Silently return zero values - caller will handle
 	return { used: 0, total: 0, percent: 0 };
 }
-}// ============================================================================
+}
+
+/**
+ * Check if running inside a Docker container
+ */
+async function isRunningInContainer(): Promise<boolean> {
+	try {
+		const fs = await import('fs/promises');
+		// Check for .dockerenv file
+		try {
+			await fs.access('/.dockerenv');
+			return true;
+		} catch {
+			// Check cgroup
+			try {
+				const cgroup = await fs.readFile('/proc/1/cgroup', 'utf-8');
+				return cgroup.includes('docker') || cgroup.includes('kubepods');
+			} catch {
+				return false;
+			}
+		}
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Read container memory usage from cgroup
+ */
+async function getContainerMemory(): Promise<{ used: number; total: number; percent: number } | null> {
+	try {
+		const fs = await import('fs/promises');
+		
+		// Try cgroup v2 first (newer Docker versions)
+		try {
+			const memCurrent = await fs.readFile('/sys/fs/cgroup/memory.current', 'utf-8');
+			const memMax = await fs.readFile('/sys/fs/cgroup/memory.max', 'utf-8');
+			
+			const used = parseInt(memCurrent.trim());
+			const total = parseInt(memMax.trim());
+			
+			if (!isNaN(used) && !isNaN(total) && total !== 9223372036854771712) { // max value means no limit
+				const usedMb = bytesToMb(used);
+				const totalMb = bytesToMb(total);
+				return {
+					used: usedMb,
+					total: totalMb,
+					percent: Math.round((usedMb / totalMb) * 100)
+				};
+			}
+		} catch {
+			// Try cgroup v1 (older Docker versions)
+			try {
+				const memUsage = await fs.readFile('/sys/fs/cgroup/memory/memory.usage_in_bytes', 'utf-8');
+				const memLimit = await fs.readFile('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'utf-8');
+				
+				const used = parseInt(memUsage.trim());
+				const total = parseInt(memLimit.trim());
+				
+				if (!isNaN(used) && !isNaN(total) && total !== 9223372036854771712) {
+					const usedMb = bytesToMb(used);
+					const totalMb = bytesToMb(total);
+					return {
+						used: usedMb,
+						total: totalMb,
+						percent: Math.round((usedMb / totalMb) * 100)
+					};
+				}
+			} catch {
+				return null;
+			}
+		}
+		
+		return null;
+	} catch {
+		return null;
+	}
+}
+
+// ============================================================================
 // STORAGE METRICS
 // ============================================================================
 

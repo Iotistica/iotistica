@@ -480,10 +480,10 @@ export async function generateDefaultTargetState(
   
   return {
     apps: {
-      "1000": {
-        appId: "1000",
-        appName: "core-services",
-        services: [
+      // "1000": {
+      //   appId: "1000",
+      //   appName: "core-services",
+      //   services: [
           // {
           //   serviceId: 1,
           //   serviceName: "mosquitto",
@@ -516,8 +516,8 @@ export async function generateDefaultTargetState(
           //     networks: ["default"]
           //   }
           // }
-        ]
-      }
+        //]
+      //}
     },
     config,  // V2 config with points object
   };

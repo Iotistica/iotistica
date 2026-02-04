@@ -383,7 +383,7 @@ export class DeviceManager {
 
 		this.deviceInfo.provisioned = false; // Explicitly mark as NOT cloud-provisioned
 		this.deviceInfo.provisioningState = 'new';
-		this.deviceInfo.deviceName = this.deviceInfo.deviceName || `device-${this.deviceInfo.uuid.slice(0, 8)}`;
+		this.deviceInfo.deviceName = this.deviceInfo.deviceName || `agent-${this.deviceInfo.uuid.slice(0, 8)}`;
 		this.deviceInfo.deviceType = this.deviceInfo.deviceType || 'standalone';
 		this.deviceInfo.agentVersion = process.env.AGENT_VERSION || getPackageVersion(); // Update agent version
 		
@@ -426,7 +426,7 @@ export class DeviceManager {
 		}
 
 			// Update device metadata
-		this.deviceInfo.deviceName = config.deviceName || this.deviceInfo.deviceName || `device-${this.deviceInfo.uuid.slice(0, 8)}`;
+		this.deviceInfo.deviceName = config.deviceName || this.deviceInfo.deviceName || `agent-${this.deviceInfo.uuid.slice(0, 8)}`;
 		this.deviceInfo.deviceType = config.deviceType || this.deviceInfo.deviceType || 'generic';
 		this.deviceInfo.apiEndpoint = config.apiEndpoint || this.deviceInfo.apiEndpoint;
 		this.deviceInfo.provisioningApiKey = config.provisioningApiKey;

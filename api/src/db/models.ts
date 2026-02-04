@@ -667,10 +667,10 @@ export class DeviceMetricsModel {
       SELECT 
         device_uuid,
         recorded_at,
-        cpu_usage,
-        memory_usage,
-        storage_usage,
-        cpu_temperature
+        ROUND(cpu_usage::numeric, 1) as cpu_usage,
+        ROUND(memory_usage::numeric, 0) as memory_usage,
+        ROUND(storage_usage::numeric, 0) as storage_usage,
+        ROUND(cpu_temperature::numeric, 1) as cpu_temperature
       FROM numbered 
       WHERE ($3 = 1 OR rn % $3 = 1)
       ORDER BY recorded_at ASC`,
