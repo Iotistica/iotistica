@@ -1254,10 +1254,28 @@ export class MQTTMonitorService extends EventEmitter {
     try {
       // Get topics from persister layer
       const topicsToUpdate = Array.from(this.persister.getPending());
+      logger.info(`syncToDatabase: ${topicsToUpdate.length} topics pending for topic/schema updates`);
       const topicRecords: any[] = [];
       const schemaHistoryBatch: any[] = [];
       const topicMetricsBatch: any[] = [];
+      
+      // Collect metrics from ALL topics (not just pending ones)
+      const allTopics: string[] = [];
+      const collectTopics = (node: any, path: string = '') => {
+        Object.keys(node).forEach(key => {
+          if (key.startsWith('_')) return;
+          const child = node[key];
+          const topicPath = path ? `${path}/${key}` : key;
+          if (child._topic) {
+            allTopics.push(topicPath);
+          }
+          collectTopics(child, topicPath);
+        });
+      };
+      collectTopics(this.topicTree);
+      logger.info(`Found ${allTopics.length} total topics for metrics collection`);
 
+      // Process topics pending for database updates (topic info + schema)
       for (const topic of topicsToUpdate) {
         const parts = topic.split('/');
         let current: any = this.topicTree;
@@ -1297,8 +1315,20 @@ export class MQTTMonitorService extends EventEmitter {
               exampleMessage: sampleMessage
             });
           }
-          
-          // Collect topic metrics for batch save
+        }
+      }
+      
+      // Collect metrics from ALL topics (separate from pending updates)
+      for (const topic of allTopics) {
+        const parts = topic.split('/');
+        let current: any = this.topicTree;
+
+        for (const part of parts) {
+          if (!current[part]) break;
+          current = current[part];
+        }
+        
+        if (current._messagesCounter) {
           const messageCount = current._messagesCounter || 1;
           const bytesReceived = current._bytesReceived || 0;
           const avgMessageSize = messageCount > 0 ? Math.round(bytesReceived / messageCount) : 0;
@@ -1374,6 +1404,7 @@ export class MQTTMonitorService extends EventEmitter {
 
       // Batch save topic metrics (if DB service supports it)
       if (topicMetricsBatch.length > 0) {
+        logger.info(`Saving ${topicMetricsBatch.length} topic metrics to database`);
         if (typeof this.dbService.saveTopicMetricsBatch === 'function') {
           await this.dbService.saveTopicMetricsBatch(topicMetricsBatch)
             .catch((err: any) => logger.error('Failed to batch save topic metrics', { 
