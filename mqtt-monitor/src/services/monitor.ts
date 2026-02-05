@@ -87,6 +87,8 @@ interface TopicNode {
   _qos?: number;
   _redeliveryCounter?: number;   // Count of duplicate/redelivered messages
   _deliveredCounter?: number;    // Count of new (non-dup) messages
+  _bytesReceived?: number;       // Cumulative bytes received for this topic
+  _lastMessageSize?: number;     // Size of last message (for avg calculation)
   [key: string]: any; // Child nodes
 }
 
@@ -368,7 +370,8 @@ export class MQTTMonitorService extends EventEmitter {
       _topic: '',
       _created: Date.now(),
       _messagesCounter: 0,
-      _topicsCounter: 0
+      _topicsCounter: 0,
+      _bytesReceived: 0
     };
 
     // Initialize system stats
@@ -654,7 +657,8 @@ export class MQTTMonitorService extends EventEmitter {
           _topic: topicPath,
           _created: Date.now(),
           _messagesCounter: 0,
-          _topicsCounter: 0
+          _topicsCounter: 0,
+          _bytesReceived: 0
         };
         newTopic = true;
       }
@@ -680,6 +684,11 @@ export class MQTTMonitorService extends EventEmitter {
 
           current[part]._messagesCounter = (current[part]._messagesCounter || 0) + 1;
           current[part]._sessionCounter = (current[part]._sessionCounter || 0) + 1;
+          
+          // Track bytes received for metrics (use messageStr length as approximation)
+          const messageSize = agg.messageStr ? Buffer.byteLength(agg.messageStr, 'utf8') : 0;
+          current[part]._bytesReceived = (current[part]._bytesReceived || 0) + messageSize;
+          current[part]._lastMessageSize = messageSize;
         }
       }
 
@@ -1290,12 +1299,21 @@ export class MQTTMonitorService extends EventEmitter {
           }
           
           // Collect topic metrics for batch save
+          const messageCount = current._messagesCounter || 1;
+          const bytesReceived = current._bytesReceived || 0;
+          const avgMessageSize = messageCount > 0 ? Math.round(bytesReceived / messageCount) : 0;
+          
+          // Calculate message rate (messages per second) based on time since topic creation
+          const topicAgeMs = Date.now() - (current._created || Date.now());
+          const topicAgeSec = Math.max(1, topicAgeMs / 1000); // Avoid division by zero
+          const messageRate = Math.round((messageCount / topicAgeSec) * 100) / 100; // 2 decimal places
+          
           topicMetricsBatch.push({
             topic,
-            messageCount: current._messagesCounter || 1,
-            bytesReceived: current._message ? Buffer.byteLength(current._message) : 0,
-            messageRate: 0, // Will be calculated from historical data
-            avgMessageSize: current._message ? Buffer.byteLength(current._message) : undefined
+            messageCount,
+            bytesReceived,
+            messageRate,
+            avgMessageSize
           });
         }
       }
