@@ -17,6 +17,7 @@ import { EventEmitter } from 'events';
 import isUtf8 from 'is-utf8';
 import { MQTTDatabaseService } from './db';
 import logger from '../utils/logger';
+import { PrometheusExporter } from './prometheus';
 
 // Update interval for metrics (milliseconds)
 const METRICS_UPDATE_INTERVAL = parseInt(process.env.MQTT_METRICS_UPDATE_INTERVAL || '5000');
@@ -32,6 +33,35 @@ interface JSONSchema {
 }
 
 /**
+ * Collected MQTT Message (raw ingestion)
+ */
+interface CollectedMessage {
+  topic: string;
+  payload: Buffer;
+  packet: any;
+  timestamp: number;
+}
+
+/**
+ * Aggregated Topic Data (computed state)
+ */
+interface AggregatedTopic {
+  topic: string;
+  parts: string[];
+  isRedelivery: boolean;
+  messageStr: string;
+  isBinary: boolean;
+  isTruncated: boolean;
+  schema?: JSONSchema;
+  schemaHash?: string;
+  messageType?: string;
+  samplingReason?: 'rate_limit' | 'degraded_mode';  // Why was this message sampled?
+  qos?: number;
+  retain?: boolean;
+  packet?: any; // Original MQTT packet for cmd, dup, retain, qos
+}
+
+/**
  * Topic Tree Node Structure
  */
 interface TopicNode {
@@ -44,19 +74,26 @@ interface TopicNode {
   _sessionCounter?: number; 
   _topicsCounter: number;
   _message?: string;
-  _messageType?: 'json' | 'xml' | 'string' | 'binary';
+  _messageType?: 'json' | 'xml' | 'string' | 'binary' | 'truncated' | 'sampled';
   _schema?: JSONSchema;
+  _schemaHash?: string;          // Hash of current schema
+  _schemaVersion?: number;       // Schema version (increments on change)
+  _schemaConfidence?: number;    // Confidence 0-1 (based on stability)
+  _schemaSampleCount?: number;   // How many messages validated against schema
+  _lastSampledTs?: number;       // Last time this topic was sampled (for display)
   _cmd?: string;
   _dup?: boolean;
   _retain?: boolean;
   _qos?: number;
+  _redeliveryCounter?: number;   // Count of duplicate/redelivered messages
+  _deliveredCounter?: number;    // Count of new (non-dup) messages
   [key: string]: any; // Child nodes
 }
 
 /**
  * Broker Statistics Structure (from $SYS topics)
  */
-interface BrokerStats {
+export interface BrokerStats {
   _name: string;
   $SYS?: {
     broker?: {
@@ -109,21 +146,25 @@ interface BrokerStats {
 /**
  * Calculated Metrics
  */
-interface CalculatedMetrics {
+export interface CalculatedMetrics {
   messageRate: {
-    published: number[];  // Last 15 measurements
-    received: number[];   // Last 15 measurements
+    published: number[];  // Last 15 measurements (delta-based, msgs/sec)
+    received: number[];   // Last 15 measurements (delta-based, msgs/sec)
     current: {
-      published: number;
-      received: number;
+      published: number;  // Current delta-based rate (msgs/sec)
+      received: number;   // Current delta-based rate (msgs/sec)
     };
   };
   throughput: {
-    inbound: number[];   // KB/s history
-    outbound: number[];  // KB/s history
+    inbound: number[];   // Last 15 measurements (delta-based, KB/sec)
+    outbound: number[];  // Last 15 measurements (delta-based, KB/sec)
     current: {
-      inbound: number;   // KB/s
-      outbound: number;  // KB/s
+      inbound: number;   // Current delta-based rate (KB/sec)
+      outbound: number;  // Current delta-based rate (KB/sec)
+    };
+    avg15min?: {         // Broker's 15-minute averages (if available)
+      inbound: number;   // KB/sec (15min avg from $SYS)
+      outbound: number;  // KB/sec (15min avg from $SYS)
     };
   };
   clients: number;
@@ -131,6 +172,8 @@ interface CalculatedMetrics {
   retainedMessages: number;
   totalMessagesSent: number;
   totalMessagesReceived: number;
+  totalBytesSent: number;       // Raw counter for delta calculation
+  totalBytesReceived: number;   // Raw counter for delta calculation
   timestamp: number;
 }
 
@@ -144,6 +187,18 @@ interface MonitorOptions {
   schemaGenerationEnabled?: boolean;
   persistToDatabase?: boolean;
   dbSyncInterval?: number; // How often to sync to DB (ms)
+  
+  // Production safety options
+  monitorTopics?: string[]; // Scoped monitoring (default: ['#'])
+  excludeTopics?: string[]; // Topics to exclude from monitoring
+  ignoreRetained?: boolean; // Ignore retained message deliveries (default: true)
+  maxPayloadBytes?: number; // Max payload size to store (default: 8KB)
+  maxTopics?: number; // Max topics to track (default: 10000)
+  topicIdleTTL?: number; // Prune topics idle for N ms (default: 24h)
+  topicSampleInterval?: number; // Min interval between payload samples per topic (default: 10s)
+  encodeBinaryPayloads?: boolean; // Base64 encode binary payloads (default: false, shows size only)
+  brokerType?: 'mosquitto' | 'emqx' | 'hivemq' | 'auto'; // Broker type (default: auto)
+  schemaStabilityThreshold?: number; // Min samples before schema update (default: 5)
 }
 
 /**
@@ -262,8 +317,28 @@ export class MQTTMonitorService extends EventEmitter {
     timestamp: Date.now()
   };
 
-  // Track changes for batch DB updates
-  private pendingTopicUpdates: Set<string> = new Set();
+  // Topic tree pruning
+  private pruningInterval?: NodeJS.Timeout;
+  private detectedBrokerType: string = 'unknown';
+  
+  // Backpressure awareness
+  private degradedMode = false;
+  private eventLoopLagInterval?: NodeJS.Timeout;
+  private lastEventLoopCheck = Date.now();
+  private eventLoopLagThreshold = parseInt(process.env.MQTT_EVENT_LOOP_LAG_THRESHOLD || '100'); // ms
+  private droppedPayloadsCount = 0;
+  
+  // Topic sampling state (separate from tree structure)
+  private topicSamplingState: Map<string, { lastSampleTs: number; sampleCount: number }> = new Map();
+  
+  // Layered architecture components
+  private collector: MessageCollector;
+  private aggregator: MessageAggregator;
+  private publisher: EventPublisher;
+  private persister: MessagePersister;
+  
+  // Prometheus exporter
+  private prometheusExporter: PrometheusExporter;
 
   constructor(options: MonitorOptions, dbService?: any) {
     super();
@@ -273,6 +348,16 @@ export class MQTTMonitorService extends EventEmitter {
       schemaGenerationEnabled: true,
       persistToDatabase: false,
       dbSyncInterval: 30000, // 30 seconds default
+      monitorTopics: ['#'], // Default to all topics
+      excludeTopics: [], // No exclusions by default
+      ignoreRetained: true, // Ignore retained deliveries by default
+      maxPayloadBytes: 8 * 1024, // 8KB max payload
+      maxTopics: 10000, // 10k topic limit
+      topicIdleTTL: 24 * 60 * 60 * 1000, // 24 hours
+      topicSampleInterval: 10000, // 10 seconds per-topic sampling
+      encodeBinaryPayloads: false, // Don't base64 encode by default (memory safety)
+      brokerType: 'auto',
+      schemaStabilityThreshold: 5, // Min 5 samples before schema update
       ...options
     };
     this.dbService = dbService;
@@ -301,15 +386,33 @@ export class MQTTMonitorService extends EventEmitter {
       throughput: {
         inbound: Array(15).fill(0),
         outbound: Array(15).fill(0),
-        current: { inbound: 0, outbound: 0 }
+        current: { inbound: 0, outbound: 0 },
+        avg15min: { inbound: 0, outbound: 0 }
       },
       clients: 0,
       subscriptions: 0,
       retainedMessages: 0,
       totalMessagesSent: 0,
       totalMessagesReceived: 0,
+      totalBytesSent: 0,
+      totalBytesReceived: 0,
       timestamp: Date.now()
     };
+    
+    // Initialize Prometheus exporter first (needed by aggregator)
+    this.prometheusExporter = new PrometheusExporter();
+    
+    // Initialize layered components
+    this.collector = new MessageCollector(this.options);
+    this.aggregator = new MessageAggregator(
+      this.options,
+      () => this.degradedMode,
+      () => this.droppedPayloadsCount++,
+      this.topicSamplingState,
+      this.prometheusExporter
+    );
+    this.publisher = new EventPublisher(this);
+    this.persister = new MessagePersister(this.options, this.dbService);
   }
 
 
@@ -399,6 +502,9 @@ export class MQTTMonitorService extends EventEmitter {
     if (this.options.persistToDatabase && this.dbService) {
       this.startDatabaseSync();
     }
+    
+    // Start event loop lag monitoring for backpressure detection
+    this.startEventLoopMonitoring();
   }
 
   /**
@@ -419,20 +525,25 @@ export class MQTTMonitorService extends EventEmitter {
     this.client.on('connect', () => {
       this.connected = true;
       logger.info(`Connected to ${this.options.brokerUrl}`);
+      this.prometheusExporter.updateConnectionStatus(true);
       this.emit('connected');
 
       // Reset per-session counters
       this.resetSessionCounters();
 
-      // Subscribe to all topics for topic tree
+      // Subscribe to scoped topics for topic tree
       if (this.options.topicTreeEnabled) {
-        this.client!.subscribe('#', (err) => {
-          if (err) {
-            logger.error('Failed to subscribe to all topics', { error: err.message });
-          } else {
-            logger.info('Subscribed to all topics (#)');
-          }
-        });
+        const monitorTopics = this.options.monitorTopics || ['#'];
+        
+        for (const topic of monitorTopics) {
+          this.client!.subscribe(topic, { qos: 0 }, (err) => {
+            if (err) {
+              logger.error(`Failed to subscribe to ${topic}`, { error: err.message });
+            } else {
+              logger.info(`Subscribed to ${topic} (QoS 0)`);
+            }
+          });
+        }
       }
 
       // Subscribe to $SYS topics for metrics
@@ -458,23 +569,41 @@ export class MQTTMonitorService extends EventEmitter {
     this.client.on('close', () => {
       logger.info('Connection closed');
       this.connected = false;
+      this.prometheusExporter.updateConnectionStatus(false);
     });
 
   this.client.on('message', (topic, payload, packet) => {
     // Ignore $SYS messages for topic tree (still handle system stats)
     if (topic.startsWith('$SYS/')) {
         this.updateSystemStats(topic, payload.toString());
+        
+        // Detect broker type from $SYS structure
+        if (this.detectedBrokerType === 'unknown') {
+          this.detectBrokerType(topic);
+        }
         return;
     }
 
-    // Optionally ignore retained messages to avoid counting retained payloads on connect.
-    // If you *want* to count retained deliveries as messages, remove/disable the next block.
-    // if (packet && packet.retain) {
-    //   return;
-    // }
-
     if (this.options.topicTreeEnabled) {
-        this.updateTopicTree(topic, payload, packet);
+      // Layered processing: Collect → Aggregate → Publish → Persist
+      const collected = this.collector.collect(topic, payload, packet);
+      if (!collected) return; // Filtered out
+      
+      const aggregated = this.aggregator.aggregate(collected, this.topicTree);
+      const treeUpdated = this.updateTopicTreeFromAggregated(aggregated);
+      
+      if (treeUpdated) {
+        this.publisher.publish(aggregated, this.topicTree);
+        
+        // Get node for intelligent persistence filtering
+        const parts = topic.split('/');
+        let node: any = this.topicTree;
+        for (const part of parts) {
+          if (!node[part]) break;
+          node = node[part];
+        }
+        this.persister.markForPersist(topic, node);
+      }
     }
     });
 
@@ -498,117 +627,137 @@ export class MQTTMonitorService extends EventEmitter {
       current = current[part];
     });
 
-    // Emit event for real-time updates
-    this.emit('system-stats-updated', this.systemStats);
+    // Emit event for real-time updates (immutable copy)
+    this.emit('system-stats-updated', structuredClone(this.systemStats));
   }
 
   /**
-   * Update topic tree with new message (includes schema generation)
+   * Update topic tree with aggregated data (tree manipulation only)
+   * Returns true if tree was updated, false if skipped (max topics reached)
    */
- private updateTopicTree(topic: string, payload: Buffer, packet: any): void {
-  // Individual topics track their own message counts (do NOT increment root)
-  const parts = topic.split('/');
-  let current: any = this.topicTree;
-  let newTopic = false;
+  private updateTopicTreeFromAggregated(agg: AggregatedTopic): boolean {
+    const { topic, parts, isRedelivery, messageStr, isBinary, isTruncated, 
+            schema, schemaHash, messageType, qos, retain } = agg;
+    
+    let current: any = this.topicTree;
+    let newTopic = false;
 
-  for (let index = 0; index < parts.length; index++) {
-    const part = parts[index];
-    const isLeaf = index === parts.length - 1;
-    const topicPath = parts.slice(0, index + 1).join('/');
+    for (let index = 0; index < parts.length; index++) {
+      const part = parts[index];
+      const isLeaf = index === parts.length - 1;
+      const topicPath = parts.slice(0, index + 1).join('/');
 
-    // Ensure node exists
-    if (!current[part]) {
-      current[part] = {
-        _name: part,
-        _topic: topicPath,
-        _created: Date.now(),
-        _messagesCounter: 0, // start at 0
-        _topicsCounter: 0
-      };
-      newTopic = true;
-    }
-
-    // update lastModified for all nodes on the path
-    current[part]._lastModified = Date.now();
-
-    // Only increment the counter for the leaf (exact topic)
-    if (isLeaf) {
-      // safety: reset if approaching 32-bit signed int overflow
-      if (typeof current[part]._messagesCounter === 'number' &&
-          current[part]._messagesCounter >= 2147483640) {
-        logger.warn(`Overflow threshold reached for ${topicPath}. Resetting counter.`);
-        current[part]._messagesCounter = 0;
+      // Ensure node exists
+      if (!current[part]) {
+        current[part] = {
+          _name: part,
+          _topic: topicPath,
+          _created: Date.now(),
+          _messagesCounter: 0,
+          _topicsCounter: 0
+        };
+        newTopic = true;
       }
 
-      current[part]._messagesCounter = (current[part]._messagesCounter || 0) + 1;
-      current[part]._sessionCounter = (current[part]._sessionCounter || 0) + 1;
+      // update lastModified for all nodes on the path
+      current[part]._lastModified = Date.now();
 
-      // debug: warn if number is absurdly large
-      if (current[part]._messagesCounter > 1_000_000) {
-        logger.warn(`High message count for ${topicPath}`, { count: current[part]._messagesCounter });
-      }
-    }
-
-    // if leaf store message details
-    if (isLeaf) {
-      const messageStr = payload.toString();
-      current[part]._message = messageStr;
-      current[part]._cmd = packet?.cmd;
-      current[part]._dup = packet?.dup;
-      current[part]._retain = packet?.retain;
-      current[part]._qos = packet?.qos;
-
-      if (this.options.schemaGenerationEnabled) {
-        if (isUtf8(payload)) {
-          if (messageStr.startsWith('<') && messageStr.endsWith('>')) {
-            current[part]._messageType = 'xml';
-          } else {
-            try {
-              const json = JSON.parse(messageStr);
-              current[part]._messageType = 'json';
-              current[part]._schema = SchemaGenerator.generateSchema(json);
-            } catch {
-              current[part]._messageType = 'string';
-            }
-          }
+      // Only increment counters for the leaf (exact topic)
+      if (isLeaf) {
+        if (isRedelivery) {
+          // Track redeliveries separately
+          current[part]._redeliveryCounter = (current[part]._redeliveryCounter || 0) + 1;
         } else {
-          current[part]._messageType = 'binary';
+          // New message delivery
+          current[part]._deliveredCounter = (current[part]._deliveredCounter || 0) + 1;
+          
+          // Total messages counter (lifetime)
+          if (typeof current[part]._messagesCounter === 'number' &&
+              current[part]._messagesCounter >= 2147483640) {
+            logger.warn(`Overflow threshold reached for ${topicPath}. Resetting counter.`);
+            current[part]._messagesCounter = 0;
+          }
+
+          current[part]._messagesCounter = (current[part]._messagesCounter || 0) + 1;
+          current[part]._sessionCounter = (current[part]._sessionCounter || 0) + 1;
+        }
+      }
+
+      // Store message details for leaf nodes
+      if (isLeaf) {
+        // Only update message for non-sampled messages (preserve last real payload)
+        if (messageType !== 'sampled') {
+          current[part]._message = messageStr;
+          current[part]._messageType = messageType;
+        } else {
+          // For sampled messages, just update timestamp
+          current[part]._lastSampledTs = Date.now();
+        }
+        
+        current[part]._cmd = agg.packet?.cmd;
+        current[part]._dup = agg.packet?.dup;
+        current[part]._retain = retain;
+        current[part]._qos = qos;
+        
+        // Enforce schema stability with versioning
+        if (schema && schemaHash) {
+          const threshold = this.options.schemaStabilityThreshold || 5;
+          
+          if (!current[part]._schema) {
+            // First schema - set it immediately
+            current[part]._schema = schema;
+            current[part]._schemaHash = schemaHash;
+            current[part]._schemaVersion = 1;
+            current[part]._schemaSampleCount = 1;
+            current[part]._schemaConfidence = 0;
+          } else if (current[part]._schemaHash === schemaHash) {
+            // Same schema - increase sample count and confidence
+            current[part]._schemaSampleCount = (current[part]._schemaSampleCount || 0) + 1;
+            current[part]._schemaConfidence = Math.min(1, 
+              (current[part]._schemaSampleCount || 0) / threshold
+            );
+          } else if ((current[part]._schemaSampleCount || 0) >= threshold) {
+            // Different schema and stability threshold reached - update version
+            current[part]._schema = schema;
+            current[part]._schemaHash = schemaHash;
+            current[part]._schemaVersion = (current[part]._schemaVersion || 1) + 1;
+            current[part]._schemaSampleCount = 1;
+            current[part]._schemaConfidence = 0;
+            logger.debug(`Schema updated for ${topicPath}`, {
+              version: current[part]._schemaVersion,
+              prevHash: current[part]._schemaHash,
+              newHash: schemaHash
+            });
+          }
+          // else: Different schema but not stable yet - keep old schema, don't increment count
+        }
+      }
+
+      current = current[part];
+    }
+
+    // Update topic counters for new topics
+    if (newTopic) {
+      const status = this.getStatus();
+      if (status.topicCount >= (this.options.maxTopics || 10000)) {
+        logger.warn(`Max topics limit reached (${this.options.maxTopics}). Ignoring new topic: ${topic}`);
+        return false;
+      }
+      
+      current = this.topicTree;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const p = parts[i];
+        if (current[p]) {
+          current[p]._topicsCounter = (current[p]._topicsCounter || 0) + 1;
+          current = current[p];
+        } else {
+          break;
         }
       }
     }
 
-    // descend
-    current = current[part];
+    return true;
   }
-
-  // Update topic counters: increment parent._topicsCounter only when a new child was created
-  if (newTopic) {
-    current = this.topicTree;
-    for (let i = 0; i < parts.length - 1; i++) {
-      const p = parts[i];
-      if (current[p]) {
-        current[p]._topicsCounter = (current[p]._topicsCounter || 0) + 1;
-        current = current[p];
-      } else {
-        // defensive: if path missing, break
-        break;
-      }
-    }
-  }
-
-  // Track topic for database sync
-  if (this.options.persistToDatabase && this.dbService) {
-    this.pendingTopicUpdates.add(topic);
-  }
-
-  // Emit update if enough time has passed
-  const now = Date.now();
-  if (now - this.lastTopicTreeUpdate > TOPIC_TREE_UPDATE_INTERVAL) {
-    this.lastTopicTreeUpdate = now;
-    this.emit('topic-tree-updated', this.topicTree);
-  }
-}
-
 
   /**
    * Start metrics calculation loop
@@ -617,6 +766,11 @@ export class MQTTMonitorService extends EventEmitter {
     this.metricsUpdateInterval = setInterval(() => {
       this.calculateMetrics();
     }, METRICS_UPDATE_INTERVAL);
+    
+    // Start topic tree pruning (every hour)
+    this.pruningInterval = setInterval(() => {
+      this.pruneIdleTopics();
+    }, 60 * 60 * 1000);
   }
 
   /**
@@ -632,10 +786,17 @@ export class MQTTMonitorService extends EventEmitter {
     // Extract current values
     const messagesSent = parseInt(stats.messages?.sent || '0');
     const messagesReceived = parseInt(stats.messages?.received || '0');
+    
+    // Try to get raw byte counters (Mosquitto: $SYS/broker/bytes/sent)
+    // These are cumulative counters, better for delta calculation
+    const bytesSent = this.extractByteCounter('sent');
+    const bytesReceived = this.extractByteCounter('received');
+    
+    // Fallback: 15-minute averages (less accurate for instantaneous rates)
     const bytesSent15min = parseFloat(stats.load?.bytes?.sent?.['15min'] || '0');
     const bytesReceived15min = parseFloat(stats.load?.bytes?.received?.['15min'] || '0');
 
-    // Calculate message rates (messages per second)
+    // Calculate message rates (messages per second) - delta-based
     const publishedRate = Math.max(0, (messagesSent - this.lastMetricsSnapshot.messagesSent) / timeDelta);
     const receivedRate = Math.max(0, (messagesReceived - this.lastMetricsSnapshot.messagesReceived) / timeDelta);
 
@@ -655,11 +816,40 @@ export class MQTTMonitorService extends EventEmitter {
       received: Math.round(receivedRate)
     };
 
-    // Update throughput (convert to KB/s)
+    // Calculate throughput (KB/sec) - prefer delta-based from raw counters
+    let outboundKBps = 0;
+    let inboundKBps = 0;
+    
+    if (bytesSent > 0 && bytesSent > this.lastMetricsSnapshot.bytesSent) {
+      // Delta-based calculation from raw byte counters (accurate)
+      const bytesDelta = bytesSent - this.lastMetricsSnapshot.bytesSent;
+      outboundKBps = Math.round((bytesDelta / timeDelta) / 1024);
+    } else if (bytesSent15min > 0) {
+      // Fallback: use 15min average (already in bytes/sec from broker)
+      outboundKBps = Math.round(bytesSent15min / 1024);
+    }
+    
+    if (bytesReceived > 0 && bytesReceived > this.lastMetricsSnapshot.bytesReceived) {
+      // Delta-based calculation from raw byte counters (accurate)
+      const bytesDelta = bytesReceived - this.lastMetricsSnapshot.bytesReceived;
+      inboundKBps = Math.round((bytesDelta / timeDelta) / 1024);
+    } else if (bytesReceived15min > 0) {
+      // Fallback: use 15min average (already in bytes/sec from broker)
+      inboundKBps = Math.round(bytesReceived15min / 1024);
+    }
+
     this.metrics.throughput.current = {
-      outbound: Math.round(bytesSent15min / 1024),
-      inbound: Math.round(bytesReceived15min / 1024)
+      outbound: outboundKBps,
+      inbound: inboundKBps
     };
+    
+    // Store 15min averages separately for reference (if available)
+    if (bytesSent15min > 0 || bytesReceived15min > 0) {
+      this.metrics.throughput.avg15min = {
+        outbound: Math.round(bytesSent15min / 1024),
+        inbound: Math.round(bytesReceived15min / 1024)
+      };
+    }
 
     this.metrics.throughput.outbound.push(this.metrics.throughput.current.outbound);
     if (this.metrics.throughput.outbound.length > 15) {
@@ -677,19 +867,26 @@ export class MQTTMonitorService extends EventEmitter {
     this.metrics.retainedMessages = parseInt(stats['retained messages']?.count || '0');
     this.metrics.totalMessagesSent = messagesSent;
     this.metrics.totalMessagesReceived = messagesReceived;
+    this.metrics.totalBytesSent = bytesSent || 0;
+    this.metrics.totalBytesReceived = bytesReceived || 0;
     this.metrics.timestamp = now;
 
     // Update snapshot
     this.lastMetricsSnapshot = {
       messagesSent,
       messagesReceived,
-      bytesSent: bytesSent15min,
-      bytesReceived: bytesReceived15min,
+      bytesSent: bytesSent || this.lastMetricsSnapshot.bytesSent,
+      bytesReceived: bytesReceived || this.lastMetricsSnapshot.bytesReceived,
       timestamp: now
     };
 
-    // Emit metrics update
-    this.emit('metrics-updated', this.metrics);
+    // Update Prometheus metrics
+    this.prometheusExporter.updateBrokerMetrics(this.metrics);
+    this.prometheusExporter.updateTopicTreeMetrics(this.getTopicCount(), this.getMessageCount());
+    this.prometheusExporter.updateDegradedMode(this.degradedMode);
+
+    // Emit metrics update (immutable copy)
+    this.emit('metrics-updated', structuredClone(this.metrics));
   }
 
   /**
@@ -712,8 +909,16 @@ export class MQTTMonitorService extends EventEmitter {
       clearInterval(this.metricsUpdateInterval);
     }
 
+    if (this.pruningInterval) {
+      clearInterval(this.pruningInterval);
+    }
+
     if (this.dbSyncInterval) {
       clearInterval(this.dbSyncInterval);
+    }
+    
+    if (this.eventLoopLagInterval) {
+      clearInterval(this.eventLoopLagInterval);
     }
 
     if (this.client) {
@@ -777,6 +982,58 @@ export class MQTTMonitorService extends EventEmitter {
       messageCount
     };
   }
+  
+  /**
+   * Get topic count
+   */
+  getTopicCount(): number {
+    let count = 0;
+    
+    const traverse = (node: any) => {
+      Object.keys(node).forEach(key => {
+        if (key.startsWith('_')) return;
+        const child = node[key];
+        if (child._message !== undefined) count++;
+        traverse(child);
+      });
+    };
+    
+    traverse(this.topicTree);
+    return count;
+  }
+  
+  /**
+   * Get total message count
+   */
+  getMessageCount(): number {
+    let count = 0;
+    
+    const traverse = (node: any) => {
+      Object.keys(node).forEach(key => {
+        if (key.startsWith('_')) return;
+        const child = node[key];
+        if (child._messagesCounter) count += child._messagesCounter;
+        traverse(child);
+      });
+    };
+    
+    traverse(this.topicTree);
+    return count;
+  }
+  
+  /**
+   * Get Prometheus metrics
+   */
+  async getPrometheusMetrics(): Promise<string> {
+    return this.prometheusExporter.getMetrics();
+  }
+  
+  /**
+   * Get Prometheus content type
+   */
+  getPrometheusContentType(): string {
+    return this.prometheusExporter.getContentType();
+  }
 
   /**
    * Get flattened topic list with schemas (for API consumption)
@@ -788,6 +1045,10 @@ export class MQTTMonitorService extends EventEmitter {
     lastMessage?: string;
     messageType?: string;
     schema?: JSONSchema;
+    schemaVersion?: number;
+    schemaConfidence?: number;
+    redeliveryCount?: number;
+    deliveredCount?: number;
     lastModified?: number;
   }> {
     const topics: Array<any> = [];
@@ -812,6 +1073,8 @@ export class MQTTMonitorService extends EventEmitter {
             topic: fullPath,
             messageCount: child._messagesCounter,
             sessionCount: child._sessionCounter || 0,
+            deliveredCount: child._deliveredCounter || 0,
+            redeliveryCount: child._redeliveryCounter || 0,
             lastMessage: child._message,
             lastModified: lastModified
           };
@@ -822,6 +1085,8 @@ export class MQTTMonitorService extends EventEmitter {
 
           if (child._schema) {
             topicData.schema = child._schema;
+            topicData.schemaVersion = child._schemaVersion || 1;
+            topicData.schemaConfidence = child._schemaConfidence || 0;
           }
 
           topics.push(topicData);
@@ -858,6 +1123,26 @@ export class MQTTMonitorService extends EventEmitter {
     }
 
     return null;
+  }
+
+  /**
+   * Extract raw byte counter from $SYS stats (for delta-based throughput)
+   * Different brokers publish this differently:
+   * - Mosquitto: $SYS/broker/bytes/sent (cumulative)
+   * - EMQX: $SYS/brokers/{node}/bytes/sent
+   */
+  private extractByteCounter(direction: 'sent' | 'received'): number {
+    const stats = this.systemStats.$SYS?.broker;
+    if (!stats) return 0;
+    
+    // Try Mosquitto format first
+    const bytesStr = stats[`bytes`]?.[direction];
+    if (bytesStr && typeof bytesStr === 'string') {
+      return parseInt(bytesStr) || 0;
+    }
+    
+    // Fallback: no raw counter available
+    return 0;
   }
 
   /**
@@ -958,9 +1243,11 @@ export class MQTTMonitorService extends EventEmitter {
     if (!this.dbService ) return;
 
     try {
-      // Get topics that need updating
-      const topicsToUpdate = Array.from(this.pendingTopicUpdates);
-      const topicRecords = [];
+      // Get topics from persister layer
+      const topicsToUpdate = Array.from(this.persister.getPending());
+      const topicRecords: any[] = [];
+      const schemaHistoryBatch: any[] = [];
+      const topicMetricsBatch: any[] = [];
 
       for (const topic of topicsToUpdate) {
         const parts = topic.split('/');
@@ -983,14 +1270,33 @@ export class MQTTMonitorService extends EventEmitter {
             retain: current._retain
           });
 
-          // Save schema history if schema exists
+          // Collect schema history for batch save
           if (current._schema) {
-            await this.dbService.saveSchemaHistory(
+            // Parse exampleMessage if it's JSON, otherwise skip
+            let sampleMessage = null;
+            if (current._message && current._messageType === 'json') {
+              try {
+                sampleMessage = JSON.parse(current._message);
+              } catch {
+                // Not valid JSON, skip sample
+              }
+            }
+            
+            schemaHistoryBatch.push({
               topic,
-              current._schema,
-              current._message
-            ).catch((err: any) => logger.error('Failed to save schema history', { error: err.message }));
+              schema: current._schema,
+              exampleMessage: sampleMessage
+            });
           }
+          
+          // Collect topic metrics for batch save
+          topicMetricsBatch.push({
+            topic,
+            messageCount: current._messagesCounter || 1,
+            bytesReceived: current._message ? Buffer.byteLength(current._message) : 0,
+            messageRate: 0, // Will be calculated from historical data
+            avgMessageSize: current._message ? Buffer.byteLength(current._message) : undefined
+          });
         }
       }
 
@@ -1030,21 +1336,51 @@ export class MQTTMonitorService extends EventEmitter {
         sysData: this.systemStats
       });
 
-      // Save per-topic metrics for time-windowed analysis
-      for (const record of topicRecords) {
-        await this.dbService.saveTopicMetrics({
-          topic: record.topic,
-          messageCount: record.messageCount,
-          bytesReceived: record.lastMessage ? Buffer.byteLength(record.lastMessage) : 0,
-          messageRate: 0, // Will be calculated from historical data
-          avgMessageSize: record.lastMessage ? Buffer.byteLength(record.lastMessage) : undefined
-        }).catch((err: any) => logger.error('Failed to save topic metrics', { error: err.message }));
+      // Batch save schema history (if DB service supports it)
+      if (schemaHistoryBatch.length > 0) {
+        if (typeof this.dbService.saveSchemaHistoryBatch === 'function') {
+          await this.dbService.saveSchemaHistoryBatch(schemaHistoryBatch)
+            .catch((err: any) => logger.error('Failed to batch save schema history', { 
+              error: err.message,
+              count: schemaHistoryBatch.length 
+            }));
+        } else {
+          // Fallback: use individual calls (legacy DB service)
+          logger.warn('DB service does not support saveSchemaHistoryBatch, using individual calls');
+          for (const item of schemaHistoryBatch) {
+            await this.dbService.saveSchemaHistory(item.topic, item.schema, item.exampleMessage)
+              .catch((err: any) => logger.error('Failed to save schema history', { error: err.message }));
+          }
+        }
       }
 
-      // Clear pending updates
-      this.pendingTopicUpdates.clear();
-    } catch (error) {
-      logger.error('Failed to sync to database', { error });
+      // Batch save topic metrics (if DB service supports it)
+      if (topicMetricsBatch.length > 0) {
+        if (typeof this.dbService.saveTopicMetricsBatch === 'function') {
+          await this.dbService.saveTopicMetricsBatch(topicMetricsBatch)
+            .catch((err: any) => logger.error('Failed to batch save topic metrics', { 
+              error: err.message,
+              count: topicMetricsBatch.length 
+            }));
+        } else {
+          // Fallback: use individual calls (legacy DB service)
+          logger.warn('DB service does not support saveTopicMetricsBatch, using individual calls');
+          for (const item of topicMetricsBatch) {
+            await this.dbService.saveTopicMetrics(item)
+              .catch((err: any) => logger.error('Failed to save topic metrics', { error: err.message }));
+          }
+        }
+      }
+
+      // Clear pending updates in persister
+      this.persister.clearPending();
+    } catch (error: any) {
+      logger.error('Failed to sync to database', { 
+        error: error.message,
+        stack: error.stack,
+        code: error.code,
+        detail: error.detail
+      });
     }
   }
 
@@ -1058,5 +1394,414 @@ export class MQTTMonitorService extends EventEmitter {
     }
 
     await this.syncToDatabase();
+  }
+
+  /**
+   * Detect broker type from $SYS topic structure
+   */
+  private detectBrokerType(topic: string): void {
+    if (topic.includes('$SYS/broker/')) {
+      this.detectedBrokerType = 'mosquitto';
+      logger.info('Detected broker type: Mosquitto');
+    } else if (topic.includes('$SYS/brokers/')) {
+      this.detectedBrokerType = 'emqx';
+      logger.info('Detected broker type: EMQX');
+    } else if (topic.includes('$SYS/cluster/')) {
+      this.detectedBrokerType = 'hivemq';
+      logger.info('Detected broker type: HiveMQ');
+    }
+  }
+
+  /**
+   * Monitor event loop lag for backpressure detection
+   */
+  private startEventLoopMonitoring(): void {
+    this.eventLoopLagInterval = setInterval(() => {
+      const now = Date.now();
+      const lag = now - this.lastEventLoopCheck - 1000; // Expected 1s interval
+      this.lastEventLoopCheck = now;
+      
+      if (lag > this.eventLoopLagThreshold && !this.degradedMode) {
+        this.degradedMode = true;
+        logger.warn('Entering degraded mode due to event loop lag', { 
+          lag, 
+          threshold: this.eventLoopLagThreshold,
+          droppedSoFar: this.droppedPayloadsCount 
+        });
+      } else if (lag <= this.eventLoopLagThreshold / 2 && this.degradedMode) {
+        this.degradedMode = false;
+        logger.info('Exiting degraded mode - event loop recovered', { 
+          lag,
+          totalDropped: this.droppedPayloadsCount 
+        });
+      }
+    }, 1000);
+  }
+
+  /**
+   * Prune idle topics based on TTL
+   */
+  private pruneIdleTopics(): void {
+    const now = Date.now();
+    const ttl = this.options.topicIdleTTL || 24 * 60 * 60 * 1000;
+    let pruned = 0;
+    
+    const prune = (node: any, path: string[] = []): void => {
+      const keys = Object.keys(node).filter(k => !k.startsWith('_'));
+      
+      for (const key of keys) {
+        const child = node[key];
+        const childPath = [...path, key];
+        
+        // Check if this is a leaf node (has a message)
+        if (child._message !== undefined) {
+          const lastModified = child._lastModified || child._created;
+          const age = now - lastModified;
+          
+          if (age > ttl) {
+            delete node[key];
+            pruned++;
+            continue;
+          }
+        }
+        
+        // Recurse into children
+        prune(child, childPath);
+        
+        // Remove empty parent nodes
+        const remainingChildren = Object.keys(node[key]).filter(k => !k.startsWith('_'));
+        if (remainingChildren.length === 0 && node[key]._message === undefined) {
+          delete node[key];
+        }
+      }
+    };
+    
+    prune(this.topicTree);
+    
+    if (pruned > 0) {
+      logger.info(`Pruned ${pruned} idle topics (TTL: ${ttl / 1000 / 60 / 60}h)`);
+    }
+  }
+}
+
+/**
+ * Layer 1: Message Collector
+ * Handles MQTT ingestion and filtering
+ */
+class MessageCollector {
+  constructor(private options: MonitorOptions) {}
+  
+  /**
+   * Collect and filter incoming MQTT messages
+   * Returns null if message should be ignored
+   */
+  collect(topic: string, payload: Buffer, packet: any): CollectedMessage | null {
+    // Ignore excluded topics
+    if (this.options.excludeTopics?.some(pattern => this.topicMatches(topic, pattern))) {
+      return null;
+    }
+
+    // Ignore retained message deliveries if configured
+    if (this.options.ignoreRetained && packet?.retain) {
+      logger.debug(`Ignoring retained message delivery: ${topic}`);
+      return null;
+    }
+    
+    return {
+      topic,
+      payload,
+      packet,
+      timestamp: Date.now()
+    };
+  }
+  
+  private topicMatches(topic: string, pattern: string): boolean {
+    if (pattern === '#') return true;
+    if (pattern === topic) return true;
+    
+    const topicParts = topic.split('/');
+    const patternParts = pattern.split('/');
+    
+    for (let i = 0; i < patternParts.length; i++) {
+      if (patternParts[i] === '#') return true;
+      if (patternParts[i] === '+') continue;
+      if (patternParts[i] !== topicParts[i]) return false;
+    }
+    
+    return topicParts.length === patternParts.length;
+  }
+}
+
+/**
+ * Layer 2: Message Aggregator
+ * Computes counters, rates, and schemas
+ */
+class MessageAggregator {
+  constructor(
+    private options: MonitorOptions,
+    private getDegradedMode: () => boolean,
+    private incrementDroppedCount: () => void,
+    private samplingState: Map<string, { lastSampleTs: number; sampleCount: number }>,
+    private prometheusExporter?: PrometheusExporter
+  ) {}
+  
+  /**
+   * Aggregate message data (payload processing, schema generation)
+   */
+  aggregate(collected: CollectedMessage, topicTree: TopicNode): AggregatedTopic {
+    const { topic, payload, packet } = collected;
+    const parts = topic.split('/');
+    const isRedelivery = packet?.dup === true;
+    const qos = packet?.qos;
+    const retain = packet?.retain;
+    
+    // Backpressure: In degraded mode, skip payload processing to reduce load
+    if (this.getDegradedMode()) {
+      this.incrementDroppedCount();
+      return {
+        topic,
+        parts,
+        isRedelivery,
+        messageStr: '[DROPPED - DEGRADED MODE]',
+        isBinary: false,
+        isTruncated: true,
+        messageType: 'sampled',
+        samplingReason: 'degraded_mode',
+        qos,
+        retain,
+        packet
+      };
+    }
+    
+    // Per-topic sampling: Check if we should sample this message
+    const now = Date.now();
+    const sampleInterval = this.options.topicSampleInterval || 10000;
+    const sampling = this.samplingState.get(topic);
+    
+    if (sampling?.lastSampleTs && now - sampling.lastSampleTs < sampleInterval) {
+      // Still count message, but skip payload/schema processing
+      // Record sampling metric for Prometheus
+      if (this.prometheusExporter) {
+        this.prometheusExporter.recordSampledMessage('rate_limit');
+      }
+      
+      return {
+        topic,
+        parts,
+        isRedelivery,
+        messageStr: '[SAMPLED]',
+        isBinary: false,
+        isTruncated: true,
+        messageType: 'sampled',
+        samplingReason: 'rate_limit',
+        qos,
+        retain,
+        packet
+      };
+    }
+    
+    // Normal mode: Handle payload size limiting
+    const maxBytes = this.options.maxPayloadBytes || 8192;
+    let messageStr: string;
+    let isBinary = false;
+    let isTruncated = false;
+    let messageType: string | undefined;
+    
+    if (payload.length > maxBytes) {
+      messageStr = `[TRUNCATED - ${payload.length} bytes]`;
+      messageType = 'truncated';
+      isTruncated = true;
+    } else {
+      isBinary = !isUtf8(payload);
+      if (isBinary) {
+        // Don't base64 encode by default (can explode memory on hot binary topics)
+        if (this.options.encodeBinaryPayloads) {
+          messageStr = `base64:${payload.toString('base64')}`;
+        } else {
+          messageStr = `[BINARY ${payload.length} bytes]`;
+        }
+        messageType = 'binary';
+      } else {
+        messageStr = payload.toString('utf8');
+      }
+    }
+    
+    // Schema generation (only for non-binary, non-truncated text)
+    let schema: JSONSchema | undefined;
+    let schemaHash: string | undefined;
+    
+    if (this.options.schemaGenerationEnabled && !isBinary && !isTruncated) {
+      const schemaResult = this.generateSchemaWithVersioning(topic, messageStr, topicTree);
+      schema = schemaResult.schema;
+      schemaHash = schemaResult.schemaHash;
+      if (schemaResult.messageType) {
+        messageType = schemaResult.messageType;
+      }
+    }
+    
+    // Update sampling state (we actually sampled this message)
+    const currentSampling = this.samplingState.get(topic);
+    if (!currentSampling) {
+      this.samplingState.set(topic, { lastSampleTs: now, sampleCount: 1 });
+    } else {
+      currentSampling.lastSampleTs = now;
+      currentSampling.sampleCount++;
+    }
+    
+    return {
+      topic,
+      parts,
+      isRedelivery,
+      messageStr,
+      isBinary,
+      isTruncated,
+      schema,
+      schemaHash,
+      messageType,
+      qos: packet?.qos,
+      retain: packet?.retain,
+      packet
+    };
+  }
+  
+  private generateSchemaWithVersioning(topic: string, messageStr: string, topicTree: TopicNode): {
+    schema?: JSONSchema;
+    schemaHash?: string;
+    messageType?: string;
+  } {
+    if (messageStr.startsWith('<') && messageStr.endsWith('>')) {
+      return { messageType: 'xml' };
+    }
+    
+    try {
+      const json = JSON.parse(messageStr);
+      const newSchema = SchemaGenerator.generateSchema(json);
+      const newSchemaHash = this.hashSchema(newSchema);
+      
+      // Aggregator only generates schema + hash
+      // Tree updater is sole authority on versioning and stability
+      return {
+        schema: newSchema,
+        schemaHash: newSchemaHash,
+        messageType: 'json'
+      };
+    } catch {
+      return { messageType: 'string' };
+    }
+  }
+  
+  private hashSchema(schema: JSONSchema): string {
+    // Deterministic JSON stringify with recursive key sorting
+    const canonicalize = (obj: any): any => {
+      if (obj === null || typeof obj !== 'object') {
+        return obj;
+      }
+      
+      if (Array.isArray(obj)) {
+        return obj.map(canonicalize);
+      }
+      
+      // Sort keys recursively
+      const sorted: any = {};
+      Object.keys(obj)
+        .sort()
+        .forEach(key => {
+          sorted[key] = canonicalize(obj[key]);
+        });
+      return sorted;
+    };
+    
+    const str = JSON.stringify(canonicalize(schema));
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return hash.toString(36);
+  }
+}
+
+/**
+ * Layer 3: Event Publisher
+ * Emits events for external consumers
+ */
+class EventPublisher {
+  private lastTopicTreeUpdate = 0;
+  
+  constructor(private monitor: MQTTMonitorService) {}
+  
+  /**
+   * Publish events (topic-tree-updated, etc.)
+   */
+  publish(aggregated: AggregatedTopic, topicTree: TopicNode): void {
+    // Throttle topic tree updates
+    const now = Date.now();
+    if (now - this.lastTopicTreeUpdate > TOPIC_TREE_UPDATE_INTERVAL) {
+      this.lastTopicTreeUpdate = now;
+      this.monitor.emit('topic-tree-updated', structuredClone(topicTree));
+    }
+  }
+}
+
+/**
+ * Layer 4: Message Persister
+ * Handles database sync tracking
+ */
+class MessagePersister {
+  private pendingTopics: Set<string> = new Set();
+  
+  constructor(
+    private options: MonitorOptions,
+    private dbService: any
+  ) {}
+  
+  /**
+   * Mark topic for persistence (dirty tracking)
+   * Only persists meaningful updates: first message, schema changes, non-sampled messages
+   */
+  markForPersist(topic: string, node?: any, isSchemaChange?: boolean): void {
+    if (!this.options.persistToDatabase || !this.dbService) {
+      return;
+    }
+    
+    // Always persist if no node context provided (backward compatibility)
+    if (!node) {
+      this.pendingTopics.add(topic);
+      return;
+    }
+    
+    // Skip sampled messages (counters already updated)
+    if (node._messageType === 'sampled') {
+      return;
+    }
+    
+    // Persist first message (discovery)
+    if ((node._messagesCounter || 0) === 1) {
+      this.pendingTopics.add(topic);
+      return;
+    }
+    
+    // Persist schema changes (versioning)
+    if (isSchemaChange || (node._schemaVersion && node._schemaVersion > 1)) {
+      this.pendingTopics.add(topic);
+      return;
+    }
+    
+    // Otherwise, skip to reduce DB writes for hot topics
+  }
+  
+  /**
+   * Get pending topics for batch sync
+   */
+  getPending(): Set<string> {
+    return this.pendingTopics;
+  }
+  
+  /**
+   * Clear pending topics after sync
+   */
+  clearPending(): void {
+    this.pendingTopics.clear();
   }
 }

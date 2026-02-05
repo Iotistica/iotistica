@@ -676,13 +676,17 @@ export class WebSocketManager {
 
   private async fetchMqttTopics(): Promise<any> {
     try {
-      // For now, return empty topics since mqtt-exporter doesn't track individual topics
-      // TODO: Could be enhanced to scrape $SYS/broker/subscriptions/# or similar
-      return {
-        topics: [],
-        count: 0,
-      };
-    } catch (error) {
+      // Fetch from our own API endpoint which queries the database (with decompression)
+      const response = await fetch('http://localhost:3002/api/v1/mqtt/topics?limit=50&decompress=true');
+      
+      if (!response.ok) {
+        logger.warn(`Failed to fetch MQTT topics: ${response.status}`);
+        return null;
+      }
+      
+      const data = await response.json();
+      return data;
+    } catch (error: any) {
       logger.error(' Error fetching MQTT topics:', error);
       return null;
     }

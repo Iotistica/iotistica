@@ -85,10 +85,12 @@ export function MqttBrokerCard({ deviceId, topics: allTopics, isConnected }: Mqt
 
     console.log(`[MqttBrokerCard] Processing ${allTopics.length} topics for device: ${deviceId}`);
     
-    // Filter topics for the selected device only
-    const deviceTopics = allTopics.filter((t: any) => 
-      t.topic.includes(deviceId)
-    );
+    // Filter topics for the selected device only (strict match to avoid partial UUID matches)
+    const deviceTopics = allTopics.filter((t: any) => {
+      const topic = t.topic || '';
+      // Match exact device UUID in topic path: /device/{uuid}/
+      return topic.includes(`/device/${deviceId}/`) || topic.endsWith(`/device/${deviceId}`);
+    });
 
     console.log(`[MqttBrokerCard] Found ${deviceTopics.length} topics for device ${deviceId}`);
 
@@ -103,7 +105,7 @@ export function MqttBrokerCard({ deviceId, topics: allTopics, isConnected }: Mqt
     const tree = buildTopicTree(topicsForTree);
     setTopics(tree);
     
-    // Calculate stats from all topics
+    // Calculate stats from device-specific topics only
     const total = deviceTopics.reduce((sum: number, t: any) => sum + (t.messageCount || 0), 0);
     const active = deviceTopics.filter((t: any) => (t.messageCount || 0) > 0).length;
     setTotalMessages(total);

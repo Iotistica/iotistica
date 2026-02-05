@@ -744,6 +744,23 @@ cd dashboard && npm install && npm run dev
 cd agent && npm install && npm run dev
 ```
 
+**Important Docker Compose Commands:**
+```bash
+# Rebuild and restart a service (after code changes)
+docker-compose up -d --build api
+
+# Restart without rebuilding (faster, but doesn't apply code changes)
+docker-compose restart api
+
+# View logs
+docker-compose logs -f api
+
+# Stop and remove containers
+docker-compose down
+```
+
+> **⚠️ Note:** `docker-compose restart` does NOT rebuild the image - it only restarts the container with the existing image. Always use `docker-compose up -d --build <service>` after making code changes to ensure they are applied.
+
 **Access services:**
 - API: http://localhost:4002
 - Dashboard: http://localhost:3000  

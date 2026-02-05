@@ -408,6 +408,177 @@ export class MQTTDatabaseService {
   }
 
   /**
+   * Batch save schema history (more efficient than individual calls)
+   */
+  async saveSchemaHistoryBatch(items: Array<{
+    topic: string;
+    schema: any;
+    exampleMessage?: string;
+  }>): Promise<void> {
+    if (items.length === 0) return;
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Get all topic_ids in one query
+      const topicNames = items.map(item => item.topic);
+      const topicIdsResult = await client.query(
+        'SELECT topic, topic_id FROM mqtt_topics WHERE topic = ANY($1)',
+        [topicNames]
+      );
+      
+      const topicIdMap = new Map<string, string>();
+      topicIdsResult.rows.forEach(row => {
+        topicIdMap.set(row.topic, row.topic_id);
+      });
+
+      // Prepare values for batch insert
+      const valuesToInsert: any[] = [];
+      for (const item of items) {
+        // Validate and debug schema
+        if (!item.schema) {
+          console.warn('Schema is null/undefined, skipping:', { topic: item.topic });
+          continue;
+        }
+        
+        if (typeof item.schema === 'string') {
+          // Schema was already stringified - try to parse it
+          try {
+            item.schema = JSON.parse(item.schema);
+            console.log('Parsed stringified schema for:', item.topic);
+          } catch (err) {
+            console.error('Invalid JSON string schema:', { 
+              topic: item.topic, 
+              schema: item.schema.substring(0, 100) 
+            });
+            continue;
+          }
+        }
+        
+        if (typeof item.schema !== 'object') {
+          console.warn('Schema is not an object after parsing:', { 
+            topic: item.topic, 
+            schemaType: typeof item.schema,
+            schemaValue: String(item.schema).substring(0, 100)
+          });
+          continue;
+        }
+        
+        const schemaStr = JSON.stringify(item.schema);
+        const schemaHash = crypto.createHash('md5').update(schemaStr).digest('hex');
+        const topicId = topicIdMap.get(item.topic);
+        
+        // Check if this schema+topic combo already exists
+        const existing = await client.query(
+          'SELECT id FROM mqtt_schema_history WHERE topic = $1 AND schema_hash = $2',
+          [item.topic, schemaHash]
+        );
+        
+        if (existing.rows.length === 0) {
+          valuesToInsert.push({
+            topic: item.topic,
+            topicId,
+            schema: item.schema, // Keep as object for PostgreSQL JSON column
+            schemaHash,
+            sampleMessage: item.exampleMessage || null
+          });
+        }
+      }
+
+      // Batch insert new schema history records
+      if (valuesToInsert.length > 0) {
+        const values = valuesToInsert.map((v, idx) => {
+          const base = idx * 5;
+          return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`;
+        }).join(', ');
+
+        const params = valuesToInsert.flatMap(v => [
+          v.topic,
+          v.topicId,
+          v.schema, // Pass object directly - pg driver handles JSON conversion
+          v.schemaHash,
+          v.sampleMessage
+        ]);
+
+        await client.query(
+          `INSERT INTO mqtt_schema_history (topic, topic_id, schema, schema_hash, sample_message)
+           VALUES ${values}`,
+          params
+        );
+      }
+
+      await client.query('COMMIT');
+    } catch (error: any) {
+      await client.query('ROLLBACK');
+      console.error('Batch schema history save failed:', {
+        error: error.message,
+        itemCount: items.length
+      });
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Batch save topic metrics (more efficient than individual calls)
+   */
+  async saveTopicMetricsBatch(items: Array<TopicMetrics>): Promise<void> {
+    if (items.length === 0) return;
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Get all topic_ids in one query
+      const topicNames = items.map(item => item.topic);
+      const topicIdsResult = await client.query(
+        'SELECT topic, topic_id FROM mqtt_topics WHERE topic = ANY($1)',
+        [topicNames]
+      );
+      
+      const topicIdMap = new Map<string, string>();
+      topicIdsResult.rows.forEach(row => {
+        topicIdMap.set(row.topic, row.topic_id);
+      });
+
+      // Batch insert metrics
+      const values = items.map((_, idx) => {
+        const base = idx * 6;
+        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6})`;
+      }).join(', ');
+
+      const params = items.flatMap(item => [
+        item.topic,
+        topicIdMap.get(item.topic),
+        item.messageCount,
+        item.bytesReceived,
+        item.messageRate,
+        item.avgMessageSize
+      ]);
+
+      await client.query(
+        `INSERT INTO mqtt_topic_metrics (
+          topic, topic_id, message_count, bytes_received, message_rate, avg_message_size
+        ) VALUES ${values}`,
+        params
+      );
+
+      await client.query('COMMIT');
+    } catch (error: any) {
+      await client.query('ROLLBACK');
+      console.error('Batch topic metrics save failed:', {
+        error: error.message,
+        itemCount: items.length
+      });
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Get statistics summary
    */
   async getStatsSummary(): Promise<any> {

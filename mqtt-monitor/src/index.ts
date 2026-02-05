@@ -43,6 +43,25 @@ app.get('/ready', (req: Request, res: Response) => {
   });
 });
 
+// Prometheus metrics endpoint
+let monitorServiceInstance: MQTTMonitorService | null = null;
+
+app.get('/metrics', async (_req: Request, res: Response) => {
+  try {
+    if (!monitorServiceInstance) {
+      res.status(503).send('Service not ready');
+      return;
+    }
+    
+    const metrics = await monitorServiceInstance.getPrometheusMetrics();
+    res.setHeader('Content-Type', monitorServiceInstance.getPrometheusContentType());
+    res.send(metrics);
+  } catch (error: any) {
+    logger.error('Error generating Prometheus metrics', { error: error.message });
+    res.status(500).send('Error generating metrics');
+  }
+});
+
 // API routes
 app.use('/api/v1', monitorRoutes);
 
@@ -102,6 +121,9 @@ async function start() {
 
     // Initialize MQTT Monitor
     const { instance: monitor, dbService } = await MQTTMonitorService.initialize(dbPool);
+    
+    // Store monitor instance for metrics endpoint
+    monitorServiceInstance = monitor;
 
     // Inject monitor instance into routes
     const { setMonitorInstance } = await import('./routes');

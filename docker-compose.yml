@@ -431,7 +431,7 @@ services:
             - DB_USER=${DB_USER:-postgres}
             - DB_PASSWORD=${DB_PASSWORD:-postgres}
             - DB_POOL_SIZE=10
-            - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtts://mosquitto:8883}
+            - MQTT_BROKER_URL=mqtt://mosquitto:1883
             - MQTT_TLS_REJECT_UNAUTHORIZED=${MQTT_TLS_REJECT_UNAUTHORIZED:-false}
             - MQTT_USERNAME=${MQTT_USERNAME:-nodered}
             - MQTT_PASSWORD=${MQTT_PASSWORD:-secret}

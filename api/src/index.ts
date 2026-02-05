@@ -345,7 +345,7 @@ app.use(API_BASE, adminRateLimit, adminRoutes);
 app.use(API_BASE, deviceDataRateLimit, deviceLogsRoutes);
 app.use(API_BASE, deviceDataRateLimit, deviceMetricsRoutes);
 app.use(API_BASE, deviceDataRateLimit, deviceSensorsRoutes);
-app.use(API_BASE, deviceDataRateLimit, endpointsDataRoutes);
+app.use(`${API_BASE}/endpoints`, deviceDataRateLimit, endpointsDataRoutes);
 
 // Standard API routes - global rate limit applied above
 console.log('[INDEX] Mounting routes...');

@@ -2,7 +2,7 @@
  * MQTT Page - Shows MQTT broker status and metrics
  */
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { Users, MessageSquare, Zap, TrendingUp } from "lucide-react";
 import { MetricCard } from "../components/ui/metric-card";
 import { Device } from "../components/DeviceSidebar";
@@ -37,9 +37,44 @@ export function MqttPage({ device }: MqttPageProps) {
   const [brokerStats, setBrokerStats] = useState<BrokerStats | null>(null);
   const [mqttTopics, setMqttTopics] = useState<any[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   // Establish global WebSocket connection
   useGlobalWebSocketConnection();
+
+  // Fetch initial data from HTTP endpoints on mount
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      setLoading(true);
+      try {
+        // Fetch broker stats
+        const statsRes = await fetch('/api/v1/mqtt/metrics');
+        if (statsRes.ok) {
+          const statsData = await statsRes.json();
+          handleMqttStats(statsData); // Stats are at top level, not nested
+        } else {
+          console.warn('[MqttPage] Failed to fetch broker stats:', statsRes.status);
+        }
+
+        // Fetch topics (with decompression)
+        const topicsRes = await fetch('/api/v1/mqtt/topics?limit=50&decompress=true');
+        if (topicsRes.ok) {
+          const topicsData = await topicsRes.json();
+          if (topicsData.topics) {
+            setMqttTopics(topicsData.topics);
+          }
+        } else {
+          console.warn('[MqttPage] Failed to fetch topics:', topicsRes.status);
+        }
+      } catch (error) {
+        console.error('[MqttPage] Failed to fetch initial data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchInitialData();
+  }, []);
 
   // Handle MQTT stats updates via WebSocket
   const handleMqttStats = useCallback((data: MqttStatsData) => {
