@@ -97,10 +97,10 @@ const WIDGET_TYPES = {
     id: 'metric-data',
     name: 'Metric Data Card',
     icon: BarChart3,
-    minW: 3,
-    minH: 3,
-    defaultW: 4,
-    defaultH: 4
+    minW: 4,
+    minH: 6,
+    defaultW: 6,
+    defaultH: 8
   }
 };
 
@@ -140,6 +140,13 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const [newDashboardName, setNewDashboardName] = useState('');
   const [showMetricConfigDialog, setShowMetricConfigDialog] = useState(false);
   const [configuringWidgetId, setConfiguringWidgetId] = useState<string | null>(null);
+  const [showDeleteConfirmDialog, setShowDeleteConfirmDialog] = useState(false);
+  const [widgetToDelete, setWidgetToDelete] = useState<string | null>(null);
+  const [showResetConfirmDialog, setShowResetConfirmDialog] = useState(false);
+  const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
+  const [pendingLayoutSwitch, setPendingLayoutSwitch] = useState<number | null>(null);
+  const [showDeleteDashboardDialog, setShowDeleteDashboardDialog] = useState(false);
+  const [dashboardToDelete, setDashboardToDelete] = useState<number | null>(null);
 
   useEffect(() => {
     loadAvailableLayouts();
@@ -366,12 +373,15 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   };
 
   const deleteDashboard = async (layoutId: number) => {
-    if (!confirm('Are you sure you want to delete this dashboard?')) {
-      return;
-    }
+    setDashboardToDelete(layoutId);
+    setShowDeleteDashboardDialog(true);
+  };
+
+  const confirmDeleteDashboard = async () => {
+    if (dashboardToDelete === null) return;
 
     try {
-      const response = await fetch(`http://localhost:4002/api/v1/dashboard-layouts/${layoutId}`, {
+      const response = await fetch(`http://localhost:4002/api/v1/dashboard-layouts/${dashboardToDelete}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
@@ -381,9 +391,11 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       if (response.ok) {
         await loadAvailableLayouts();
         // If we deleted the current layout, load the default
-        if (layoutId === currentLayoutId) {
+        if (dashboardToDelete === currentLayoutId) {
           await loadLayout();
         }
+        setShowDeleteDashboardDialog(false);
+        setDashboardToDelete(null);
       } else {
         alert('Failed to delete dashboard');
       }
@@ -395,21 +407,35 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
   const switchDashboard = async (layoutId: number) => {
     if (hasUnsavedChanges) {
-      if (!confirm('You have unsaved changes. Do you want to switch without saving?')) {
-        return;
-      }
+      setPendingLayoutSwitch(layoutId);
+      setShowUnsavedChangesDialog(true);
+      return;
     }
     await loadLayout(layoutId);
   };
 
-  const resetLayout = () => {
-    if (confirm('Are you sure you want to reset the dashboard to default layout?')) {
-      loadDefaultLayout();
-      setHasUnsavedChanges(true);
+  const confirmSwitchDashboard = async () => {
+    if (pendingLayoutSwitch !== null) {
+      await loadLayout(pendingLayoutSwitch);
+      setShowUnsavedChangesDialog(false);
+      setPendingLayoutSwitch(null);
     }
   };
 
+  const resetLayout = () => {
+    setShowResetConfirmDialog(true);
+  };
+
+  const confirmResetLayout = () => {
+    loadDefaultLayout();
+    setHasUnsavedChanges(true);
+    setShowResetConfirmDialog(false);
+  };
+
   const handleLayoutChange = (layout: Layout[]) => {
+    // Only update if in edit mode to prevent false unsaved changes on initial render
+    if (!isEditMode) return;
+    
     const updatedWidgets = widgets.map(widget => {
       const layoutItem = layout.find(l => l.i === widget.i);
       if (layoutItem) {
@@ -417,8 +443,20 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       }
       return widget;
     });
-    setWidgets(updatedWidgets);
-    setHasUnsavedChanges(true);
+    
+    // Check if layout actually changed
+    const hasChanges = updatedWidgets.some((widget, index) => {
+      const original = widgets[index];
+      return widget.x !== original.x || 
+             widget.y !== original.y || 
+             widget.w !== original.w || 
+             widget.h !== original.h;
+    });
+    
+    if (hasChanges) {
+      setWidgets(updatedWidgets);
+      setHasUnsavedChanges(true);
+    }
   };
 
   const addDeviceWidget = (deviceId: string) => {
@@ -476,6 +514,13 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const removeWidget = (id: string) => {
     setWidgets(widgets.filter(w => w.i !== id));
     setHasUnsavedChanges(true);
+    setShowDeleteConfirmDialog(false);
+    setWidgetToDelete(null);
+  };
+
+  const handleDeleteClick = (id: string) => {
+    setWidgetToDelete(id);
+    setShowDeleteConfirmDialog(true);
   };
 
   const handleSaveMetricConfig = (config: MetricDataCardConfig) => {
@@ -519,9 +564,9 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     return (
       <div key={widget.i} className="h-full">
         <Card className="h-full overflow-hidden">
-          <CardHeader className="pb-2 cursor-move card-header">
+          <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 cursor-move card-header flex-1">
                 {isEditMode && (
                   <GripVertical className="w-5 h-5 text-muted-foreground hover:text-foreground transition-colors" />
                 )}
@@ -534,8 +579,12 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8"
-                  onClick={() => removeWidget(widget.i)}
+                  className="h-8 w-8 cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    handleDeleteClick(widget.i);
+                  }}
                 >
                   <Trash2 className="w-4 h-4" />
                 </Button>
@@ -719,7 +768,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="bg-card border-b border-border p-4 flex items-center justify-between">
+      <div className="flex-none bg-card border-b border-border p-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           {/* Dashboard Selector */}
           <DropdownMenu>
@@ -982,10 +1031,132 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       {/* Metric Data Card Configuration Dialog */}
       <MetricDataCardConfigDialog
         open={showMetricConfigDialog}
-        onOpenChange={setShowMetricConfigDialog}
+        onOpenChange={(open) => {
+          setShowMetricConfigDialog(open);
+          if (!open) {
+            setConfiguringWidgetId(null);
+          }
+        }}
         onSave={handleSaveMetricConfig}
         initialConfig={configuringWidgetId ? widgets.find(w => w.i === configuringWidgetId)?.metricConfig : undefined}
       />
+
+      {/* Delete Widget Confirmation Dialog */}
+      <Dialog open={showDeleteConfirmDialog} onOpenChange={setShowDeleteConfirmDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Widget</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this widget? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowDeleteConfirmDialog(false);
+                setWidgetToDelete(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (widgetToDelete) {
+                  removeWidget(widgetToDelete);
+                }
+              }}
+            >
+              Delete Widget
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reset Layout Confirmation Dialog */}
+      <Dialog open={showResetConfirmDialog} onOpenChange={setShowResetConfirmDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reset Dashboard</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to reset the dashboard to default layout? This will remove all widgets and restore the default configuration. Unsaved changes will be lost.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowResetConfirmDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmResetLayout}
+            >
+              Reset Dashboard
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Unsaved Changes Confirmation Dialog */}
+      <Dialog open={showUnsavedChangesDialog} onOpenChange={setShowUnsavedChangesDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Unsaved Changes</DialogTitle>
+            <DialogDescription>
+              You have unsaved changes in the current dashboard. If you switch now, these changes will be lost.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowUnsavedChangesDialog(false);
+                setPendingLayoutSwitch(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmSwitchDashboard}
+            >
+              Switch Without Saving
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Dashboard Confirmation Dialog */}
+      <Dialog open={showDeleteDashboardDialog} onOpenChange={setShowDeleteDashboardDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Dashboard</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this dashboard? This action cannot be undone and all widgets will be permanently removed.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowDeleteDashboardDialog(false);
+                setDashboardToDelete(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDeleteDashboard}
+            >
+              Delete Dashboard
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

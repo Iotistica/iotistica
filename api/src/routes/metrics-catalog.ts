@@ -288,6 +288,10 @@ router.get('/timeseries', async (req, res) => {
     } else {
       // Auto-select based on time range
       switch (range) {
+        case '1m':
+          intervalMinutes = 1;
+          viewName = 'readings_1m';
+          break;
         case '1h':
           intervalMinutes = 60;
           viewName = 'readings_1m';
@@ -315,7 +319,7 @@ router.get('/timeseries', async (req, res) => {
         default:
           return res.status(400).json({
             error: 'Invalid time range',
-            message: 'Must be: 1h, 6h, 12h, 24h, 7d, or 30d'
+            message: 'Must be: 1m, 1h, 6h, 12h, 24h, 7d, or 30d'
           });
       }
     }

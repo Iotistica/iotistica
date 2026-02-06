@@ -701,12 +701,14 @@ export default function App() {
 
           {/* Conditional Content */}
           {currentView === 'dashboard' && (
-            <GlobalDashboardPage 
-              devices={devices} 
-              onDeviceSelect={(device) => {
-                setSelectedDeviceId(device.id);
-              }} 
-            />
+            <div className="h-full overflow-hidden">
+              <GlobalDashboardPage 
+                devices={devices} 
+                onDeviceSelect={(device) => {
+                  setSelectedDeviceId(device.id);
+                }} 
+              />
+            </div>
           )}
           {currentView === 'metrics' && (
             <SystemMetrics

@@ -25,7 +25,8 @@ export interface MetricDataCardConfig {
   deviceName: string;
   metricName: string;
   chartType: 'line' | 'area' | 'bar';
-  timeRange: '1h' | '6h' | '12h' | '24h' | '7d' | '30d';
+  timeRange: '1m' | '1h' | '6h' | '12h' | '24h' | '7d' | '30d';
+  color?: string;
   showStats?: boolean;
 }
 
@@ -151,7 +152,7 @@ export function MetricDataCard({ config, onConfigure }: MetricDataCardProps) {
       margin: { top: 5, right: 10, left: 0, bottom: 5 },
     };
 
-    const color = '#3b82f6'; // blue-500
+    const color = config.color || '#3b82f6'; // Use config color or default blue-500
 
     switch (config.chartType) {
       case 'area':
@@ -327,27 +328,27 @@ export function MetricDataCard({ config, onConfigure }: MetricDataCardProps) {
         ) : (
           <>
             {config.showStats !== false && stats && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3 text-sm">
-                <div>
-                  <div className="text-xs text-muted-foreground">Current</div>
-                  <div className="font-semibold flex items-center gap-1">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                <div className="bg-muted/50 rounded-lg p-3 border">
+                  <div className="text-xs text-muted-foreground mb-1">Current</div>
+                  <div className="text-lg font-bold flex items-center gap-1">
                     {formatValue(stats.current)}
-                    {stats.trend === 'up' && <TrendingUp className="h-3 w-3 text-green-500" />}
-                    {stats.trend === 'down' && <TrendingDown className="h-3 w-3 text-red-500" />}
-                    {stats.trend === 'stable' && <Minus className="h-3 w-3 text-gray-500" />}
+                    {stats.trend === 'up' && <TrendingUp className="h-4 w-4 text-green-500" />}
+                    {stats.trend === 'down' && <TrendingDown className="h-4 w-4 text-red-500" />}
+                    {stats.trend === 'stable' && <Minus className="h-4 w-4 text-gray-500" />}
                   </div>
                 </div>
-                <div>
-                  <div className="text-xs text-muted-foreground">Avg</div>
-                  <div className="font-semibold">{formatValue(stats.avg)}</div>
+                <div className="bg-muted/50 rounded-lg p-3 border">
+                  <div className="text-xs text-muted-foreground mb-1">Average</div>
+                  <div className="text-lg font-bold">{formatValue(stats.avg)}</div>
                 </div>
-                <div>
-                  <div className="text-xs text-muted-foreground">Min</div>
-                  <div className="font-semibold text-blue-600">{formatValue(stats.min)}</div>
+                <div className="bg-muted/50 rounded-lg p-3 border">
+                  <div className="text-xs text-muted-foreground mb-1">Minimum</div>
+                  <div className="text-lg font-bold text-blue-600">{formatValue(stats.min)}</div>
                 </div>
-                <div>
-                  <div className="text-xs text-muted-foreground">Max</div>
-                  <div className="font-semibold text-red-600">{formatValue(stats.max)}</div>
+                <div className="bg-muted/50 rounded-lg p-3 border">
+                  <div className="text-xs text-muted-foreground mb-1">Maximum</div>
+                  <div className="text-lg font-bold text-red-600">{formatValue(stats.max)}</div>
                 </div>
               </div>
             )}

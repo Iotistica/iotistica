@@ -46,8 +46,9 @@ export function MetricDataCardConfigDialog({
   const [selectedDevice, setSelectedDevice] = useState<string>(initialConfig?.deviceName || '');
   const [selectedMetric, setSelectedMetric] = useState<string>(initialConfig?.metricName || '');
   const [chartType, setChartType] = useState<'line' | 'area' | 'bar'>(initialConfig?.chartType || 'line');
-  const [timeRange, setTimeRange] = useState<'1h' | '6h' | '12h' | '24h' | '7d' | '30d'>(initialConfig?.timeRange || '1h');
+  const [timeRange, setTimeRange] = useState<'1m' | '1h' | '6h' | '12h' | '24h' | '7d' | '30d'>(initialConfig?.timeRange || '1h');
   const [title, setTitle] = useState<string>(initialConfig?.title || '');
+  const [color, setColor] = useState<string>(initialConfig?.color || '#3b82f6');
   const [loading, setLoading] = useState(false);
   const [availableMetrics, setAvailableMetrics] = useState<string[]>([]);
 
@@ -100,6 +101,7 @@ export function MetricDataCardConfigDialog({
       metricName: selectedMetric,
       chartType,
       timeRange,
+      color,
       title: title || undefined,
       showStats: true,
     };
@@ -192,6 +194,7 @@ export function MetricDataCardConfigDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="1m">Last 1 Minute</SelectItem>
                 <SelectItem value="1h">Last 1 Hour</SelectItem>
                 <SelectItem value="6h">Last 6 Hours</SelectItem>
                 <SelectItem value="12h">Last 12 Hours</SelectItem>
@@ -200,6 +203,20 @@ export function MetricDataCardConfigDialog({
                 <SelectItem value="30d">Last 30 Days</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="color">Chart Color</Label>
+            <div className="flex gap-2 items-center">
+              <Input
+                id="color"
+                type="color"
+                value={color}
+                onChange={(e) => setColor(e.target.value)}
+                className="w-20 h-10 cursor-pointer"
+              />
+              <span className="text-sm text-muted-foreground">{color}</span>
+            </div>
           </div>
 
           <div className="grid gap-2">
