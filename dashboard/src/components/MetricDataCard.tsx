@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Settings, RefreshCw, TrendingUp, TrendingDown, Minus } from 'lucide-react';
@@ -33,6 +32,8 @@ export interface MetricDataCardConfig {
 interface MetricDataCardProps {
   config: MetricDataCardConfig;
   onConfigure?: () => void;
+  onRefresh?: () => void;
+  onDataLoaded?: (data: TimeSeriesResponse | null) => void;
 }
 
 interface TimeSeriesDataPoint {
@@ -62,7 +63,7 @@ interface TimeSeriesResponse {
   data: TimeSeriesDataPoint[];
 }
 
-export function MetricDataCard({ config, onConfigure }: MetricDataCardProps) {
+export function MetricDataCard({ config, onConfigure, onRefresh, onDataLoaded }: MetricDataCardProps) {
   const [data, setData] = useState<TimeSeriesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +89,7 @@ export function MetricDataCard({ config, onConfigure }: MetricDataCardProps) {
       const result: TimeSeriesResponse = await response.json();
       setData(result);
       setError(null);
+      onDataLoaded?.(result);
     } catch (err: any) {
       console.error('Error fetching metric data:', err);
       setError(err.message || 'Failed to fetch data');
@@ -261,58 +263,31 @@ export function MetricDataCard({ config, onConfigure }: MetricDataCardProps) {
 
   const stats = calculateStats();
 
-  return (
-    <Card className="h-full flex flex-col">
-      <CardHeader className="flex-none pb-3">
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            <CardTitle className="text-base font-medium">
-              {config.title || `${config.metricName} - ${config.deviceName}`}
-            </CardTitle>
-            {data && (
-              <div className="flex items-center gap-2 mt-1">
-                <Badge variant="outline" className="text-xs">
-                  {data.metric.protocol}
-                </Badge>
-                <Badge variant="outline" className="text-xs">
-                  {config.timeRange}
-                </Badge>
-                {data.metadata.qualityPercentage && (
-                  <Badge 
-                    variant={data.metadata.qualityPercentage > 95 ? "default" : "destructive"}
-                    className="text-xs"
-                  >
-                    {data.metadata.qualityPercentage.toFixed(1)}% quality
-                  </Badge>
-                )}
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={fetchData}
-              disabled={refreshing}
-              className="h-8 w-8 p-0"
-            >
-              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-            </Button>
-            {onConfigure && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onConfigure}
-                className="h-8 w-8 p-0"
-              >
-                <Settings className="h-4 w-4" />
-              </Button>
-            )}
-          </div>
-        </div>
-      </CardHeader>
+  // Export badges and controls for parent to render
+  const renderBadges = () => {
+    if (!data) return null;
+    return (
+      <div className="flex items-center gap-2">
+        <Badge variant="outline" className="text-xs">
+          {data.metric.protocol}
+        </Badge>
+        <Badge variant="outline" className="text-xs">
+          {config.timeRange}
+        </Badge>
+        {data.metadata.qualityPercentage && (
+          <Badge 
+            variant={data.metadata.qualityPercentage > 95 ? "default" : "destructive"}
+            className="text-xs"
+          >
+            {data.metadata.qualityPercentage.toFixed(1)}% quality
+          </Badge>
+        )}
+      </div>
+    );
+  };
 
-      <CardContent className="flex-1 flex flex-col">
+  return (
+    <div className="h-full flex flex-col">
         {loading && !data ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-sm text-muted-foreground">Loading...</div>
@@ -362,7 +337,29 @@ export function MetricDataCard({ config, onConfigure }: MetricDataCardProps) {
             </div>
           </>
         )}
-      </CardContent>
-    </Card>
+    </div>
+  );
+}
+
+// Export helper to get badge elements for parent rendering
+export function getMetricBadges(data: TimeSeriesResponse | null, config: MetricDataCardConfig) {
+  if (!data) return null;
+  return (
+    <div className="flex items-center gap-2">
+      <Badge variant="outline" className="text-xs">
+        {data.metric.protocol}
+      </Badge>
+      <Badge variant="outline" className="text-xs">
+        {config.timeRange}
+      </Badge>
+      {data.metadata.qualityPercentage && (
+        <Badge 
+          variant={data.metadata.qualityPercentage > 95 ? "default" : "destructive"}
+          className="text-xs"
+        >
+          {data.metadata.qualityPercentage.toFixed(1)}% quality
+        </Badge>
+      )}
+    </div>
   );
 }

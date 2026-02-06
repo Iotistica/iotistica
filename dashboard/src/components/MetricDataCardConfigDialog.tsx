@@ -52,6 +52,26 @@ export function MetricDataCardConfigDialog({
   const [loading, setLoading] = useState(false);
   const [availableMetrics, setAvailableMetrics] = useState<string[]>([]);
 
+  // Update form fields when initialConfig changes (for editing existing widgets)
+  useEffect(() => {
+    if (open && initialConfig) {
+      setSelectedDevice(initialConfig.deviceName || '');
+      setSelectedMetric(initialConfig.metricName || '');
+      setChartType(initialConfig.chartType || 'line');
+      setTimeRange(initialConfig.timeRange || '1h');
+      setTitle(initialConfig.title || '');
+      setColor(initialConfig.color || '#3b82f6');
+    } else if (open && !initialConfig) {
+      // Reset form for new widget
+      setSelectedDevice('');
+      setSelectedMetric('');
+      setChartType('line');
+      setTimeRange('1h');
+      setTitle('');
+      setColor('#3b82f6');
+    }
+  }, [open, initialConfig]);
+
   useEffect(() => {
     if (open) {
       fetchDevices();

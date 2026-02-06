@@ -28,7 +28,9 @@ import {
   Check,
   Star,
   Edit2,
-  ChevronDown
+  ChevronDown,
+  RefreshCw,
+  Settings
 } from 'lucide-react';
 import {
   Dialog,
@@ -109,6 +111,8 @@ interface DashboardWidget extends Layout {
   title: string;
   deviceId?: string; // For device-specific widgets
   metricConfig?: MetricDataCardConfig; // For metric data widgets
+  _metricData?: any; // Runtime data for badge rendering
+  _refreshTrigger?: number; // Timestamp to trigger manual refresh
 }
 
 interface DashboardLayout {
@@ -147,6 +151,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const [pendingLayoutSwitch, setPendingLayoutSwitch] = useState<number | null>(null);
   const [showDeleteDashboardDialog, setShowDeleteDashboardDialog] = useState(false);
   const [dashboardToDelete, setDashboardToDelete] = useState<number | null>(null);
+  const [isEditingWidget, setIsEditingWidget] = useState(false);
 
   useEffect(() => {
     loadAvailableLayouts();
@@ -490,6 +495,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     if (type === 'METRIC_DATA') {
       // Open config dialog for metric data widgets
       setConfiguringWidgetId(`metric-${Date.now()}`);
+      setIsEditingWidget(false);  // Flag as new widget, not editing
       setShowMetricConfigDialog(true);
       return;
     }
@@ -560,35 +566,93 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
   const renderWidget = (widget: DashboardWidget) => {
     const WidgetIcon = WIDGET_TYPES[widget.type].icon;
+    const isMetricWidget = widget.type === 'METRIC_DATA';
+    const metricData = widget._metricData;
     
     return (
       <div key={widget.i} className="h-full">
         <Card className="h-full overflow-hidden">
           <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 cursor-move card-header flex-1">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2 cursor-move card-header flex-1 min-w-0">
                 {isEditMode && (
-                  <GripVertical className="w-5 h-5 text-muted-foreground hover:text-foreground transition-colors" />
+                  <GripVertical className="w-5 h-5 text-muted-foreground hover:text-foreground transition-colors flex-shrink-0" />
                 )}
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <WidgetIcon className="w-4 h-4" />
-                  {widget.title}
-                </CardTitle>
+                <div className="flex-1 min-w-0">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <WidgetIcon className="w-4 h-4 flex-shrink-0" />
+                    <span className="truncate">{widget.title}</span>
+                  </CardTitle>
+                  {isMetricWidget && metricData && (
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      <Badge variant="outline" className="text-xs">
+                        {metricData.metric.protocol}
+                      </Badge>
+                      <Badge variant="outline" className="text-xs">
+                        {widget.metricConfig?.timeRange}
+                      </Badge>
+                      {metricData.metadata.qualityPercentage && (
+                        <Badge 
+                          variant={metricData.metadata.qualityPercentage > 95 ? "default" : "destructive"}
+                          className="text-xs"
+                        >
+                          {metricData.metadata.qualityPercentage.toFixed(1)}% quality
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-              {isEditMode && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 cursor-pointer"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    handleDeleteClick(widget.i);
-                  }}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
-              )}
+              <div className="flex items-center gap-1 flex-shrink-0">
+                {isMetricWidget && widget.metricConfig && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        // Trigger refresh by updating a timestamp
+                        const updatedWidgets = widgets.map(w => 
+                          w.i === widget.i ? { ...w, _refreshTrigger: Date.now() } : w
+                        );
+                        setWidgets(updatedWidgets);
+                      }}
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setConfiguringWidgetId(widget.i);
+                        setIsEditingWidget(true);
+                        setShowMetricConfigDialog(true);
+                      }}
+                    >
+                      <Settings className="w-4 h-4" />
+                    </Button>
+                  </>
+                )}
+                {isEditMode && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      handleDeleteClick(widget.i);
+                    }}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent className="p-4 pt-0">
@@ -730,6 +794,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                   variant="outline"
                   onClick={() => {
                     setConfiguringWidgetId(widget.i);
+                    setIsEditingWidget(true);  // Editing existing widget
                     setShowMetricConfigDialog(true);
                   }}
                 >
@@ -744,7 +809,16 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
             config={widget.metricConfig}
             onConfigure={() => {
               setConfiguringWidgetId(widget.i);
+              setIsEditingWidget(true);
               setShowMetricConfigDialog(true);
+            }}
+            onDataLoaded={(data) => {
+              // Store data reference for badge rendering
+              setWidgets(prevWidgets => 
+                prevWidgets.map(w => 
+                  w.i === widget.i ? { ...w, _metricData: data } : w
+                )
+              );
             }}
           />
         );
@@ -1035,10 +1109,17 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           setShowMetricConfigDialog(open);
           if (!open) {
             setConfiguringWidgetId(null);
+            setIsEditingWidget(false);  // Reset editing flag
           }
         }}
         onSave={handleSaveMetricConfig}
-        initialConfig={configuringWidgetId ? widgets.find(w => w.i === configuringWidgetId)?.metricConfig : undefined}
+        initialConfig={(() => {
+          const config = isEditingWidget && configuringWidgetId 
+            ? widgets.find(w => w.i === configuringWidgetId)?.metricConfig 
+            : undefined;
+          console.log('Dialog initialConfig:', { isEditingWidget, configuringWidgetId, config });
+          return config;
+        })()}  // Only load config when editing existing widget, not when creating new
       />
 
       {/* Delete Widget Confirmation Dialog */}

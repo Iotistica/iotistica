@@ -289,7 +289,7 @@ router.get('/timeseries', async (req, res) => {
       // Auto-select based on time range
       switch (range) {
         case '1m':
-          intervalMinutes = 1;
+          intervalMinutes = 5;  // Show last 5 minutes of 1-minute buckets
           viewName = 'readings_1m';
           break;
         case '1h':
