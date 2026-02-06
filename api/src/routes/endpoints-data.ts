@@ -84,13 +84,14 @@ router.get('/timeseries', async (req, res) => {
       SELECT 
         bucket,
         device_uuid,
+        device_name,
         metric_name,
         protocol,
         ${aggColumn} as value,
         sample_count
       FROM readings_hourly
       ${whereClause}
-      ORDER BY bucket ASC, device_uuid, metric_name
+      ORDER BY bucket ASC, device_uuid, device_name, metric_name
     `, params);
 
     res.json({
@@ -135,23 +136,24 @@ router.get('/current', async (req, res) => {
 
     const result = await query(`
       WITH latest AS (
-        SELECT DISTINCT ON (device_uuid, metric_name)
+        SELECT DISTINCT ON (device_uuid, device_name, metric_name)
           device_uuid,
+          device_name,
           metric_name,
           protocol,
           last_value as value,
           last_time as timestamp,
           bucket
         FROM readings_hourly
-        ORDER BY device_uuid, metric_name, bucket DESC
+        ORDER BY device_uuid, device_name, metric_name, bucket DESC
       )
       SELECT 
         r.device_uuid,
+        r.device_name,
         r.metric_name,
         r.protocol,
         r.value,
         r.timestamp,
-        d.device_name,
         CASE 
           WHEN d.last_connectivity_event > NOW() - INTERVAL '5 minutes' THEN 'online'
           WHEN d.last_connectivity_event > NOW() - INTERVAL '1 hour' THEN 'degraded'
@@ -160,7 +162,7 @@ router.get('/current', async (req, res) => {
       FROM latest r
       LEFT JOIN devices d ON d.uuid = r.device_uuid
       ${whereClause}
-      ORDER BY d.device_name, r.metric_name
+      ORDER BY r.device_name, r.metric_name
     `, params);
 
     res.json({

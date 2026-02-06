@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Cpu, HardDrive, MemoryStick, Package, Network, Loader2 } from "lucide-react";
 import { Card } from "./ui/card";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { useSystemMetrics } from "@/contexts/SystemMetricsContext";
 import type { SystemInfoData, ProcessData, MetricsHistoryData } from "@/services/websocket";
 import { MetricCard } from "./ui/metric-card";
 import { Badge } from "./ui/badge";
@@ -50,13 +51,89 @@ export function SystemMetrics({
   device,
   networkInterfaces = []
 }: SystemMetricsProps) {
-  const [selectedMetric, setSelectedMetric] = useState<'cpu' | 'memory' | 'network'>('cpu');
-  const [timePeriod, setTimePeriod] = useState<'30min' | '6h' | '12h' | '24h'>('30min');
+  // Use context for persistent metrics history (survives navigation)
+  const { getDeviceHistory, addMetricsDataPoint, getCurrentStats, updateCurrentStats, getTimePeriod, setTimePeriod: setContextTimePeriod, getSelectedMetric, setSelectedMetric: setContextSelectedMetric } = useSystemMetrics();
   
-  // Local state for history data (populated by WebSocket for 30min, API for longer periods)
+  // Get persisted history and time period from context
+  const persistedHistory = getDeviceHistory(device.deviceUuid);
+  const persistedTimePeriod = getTimePeriod(device.deviceUuid);
+  const persistedMetric = getSelectedMetric(device.deviceUuid);
+  
+  // Local state initialized from context
+  const [selectedMetric, setSelectedMetric] = useState<'cpu' | 'memory' | 'network'>(persistedMetric);
+  const [timePeriod, setTimePeriod] = useState<'30min' | '6h' | '12h' | '24h'>(persistedTimePeriod);
+  
+  // Sync time period changes to context
+  useEffect(() => {
+    setContextTimePeriod(device.deviceUuid, timePeriod);
+  }, [device.deviceUuid, timePeriod, setContextTimePeriod]);
+  
+  // Sync metric selection changes to context
+  useEffect(() => {
+    setContextSelectedMetric(device.deviceUuid, selectedMetric);
+  }, [device.deviceUuid, selectedMetric, setContextSelectedMetric]);
+  
+  // Track previous device UUID to detect actual device changes
+  const prevDeviceUuidRef = useRef<string | null>(null);
+  // Track previous time period to detect time period changes
+  const prevTimePeriodRef = useRef<'30min' | '6h' | '12h' | '24h'>(persistedTimePeriod);
+  
+  // Debug: Log what context returns
+  console.log('[SystemMetrics] Component render:', {
+    deviceUuid: device.deviceUuid.substring(0, 8) + '...',
+    persistedHistoryLength: persistedHistory.length,
+    persistedHistory: persistedHistory.slice(0, 3) // First 3 points for inspection
+  });
+  
+  // Local state for history data (populated from context + new WebSocket/API data)
   const [cpuHistory, setCpuHistory] = useState<Array<{ time: string; value: number }>>([]);
   const [memoryHistory, setMemoryHistory] = useState<Array<{ time: string; used: number }>>([]);
   const [networkHistory, setNetworkHistory] = useState<Array<{ time: string; download: number; upload: number }>>([]);
+  
+  // Initialize from persisted history on mount
+  useEffect(() => {
+    console.log('[SystemMetrics] Restoration check:', {
+      deviceUuid: device.deviceUuid.substring(0, 8) + '...',
+      persistedCount: persistedHistory.length,
+      hasPersistedData: persistedHistory.length > 0
+    });
+    
+    if (persistedHistory.length > 0) {
+      console.log('[SystemMetrics] Restoring from persisted history:', persistedHistory.length, 'points');
+      
+      // Filter persisted data to only include points from the last 30 minutes
+      const thirtyMinutesAgo = Date.now() - (30 * 60 * 1000);
+      const filteredHistory = persistedHistory.filter(point => point.timestamp >= thirtyMinutesAgo);
+      
+      console.log('[SystemMetrics] Filtered to last 30 minutes:', {
+        total: persistedHistory.length,
+        filtered: filteredHistory.length,
+        removed: persistedHistory.length - filteredHistory.length
+      });
+      
+      const cpu: Array<{ time: string; value: number }> = [];
+      const memory: Array<{ time: string; used: number }> = [];
+      const network: Array<{ time: string; download: number; upload: number }> = [];
+      
+      filteredHistory.forEach(point => {
+        cpu.push({ time: point.time, value: point.cpuPercent });
+        memory.push({ time: point.time, used: point.memoryUsedPercent });
+        network.push({ time: point.time, download: point.networkRxMbps, upload: point.networkTxMbps });
+      });
+      
+      console.log('[SystemMetrics] Setting restored state:', {
+        cpuPoints: cpu.length,
+        memoryPoints: memory.length,
+        networkPoints: network.length
+      });
+      
+      setCpuHistory(cpu);
+      setMemoryHistory(memory);
+      setNetworkHistory(network);
+    } else {
+      console.log('[SystemMetrics] No persisted data to restore');
+    }
+  }, [device.deviceUuid]); // Only restore when device changes
   
   // Check if we're still waiting for initial data
   const isLoading = device.cpu === 0 && device.memory === 0 && device.disk === 0;
@@ -252,6 +329,15 @@ export function SystemMetrics({
 
   // Fetch historical data from API
   const fetchHistoricalData = useCallback(async (period: string) => {
+    // Don't fetch data for offline devices
+    if (device.status === 'offline') {
+      console.log('[SystemMetrics] Skipping metrics fetch - device is offline');
+      setCpuHistory([]);
+      setMemoryHistory([]);
+      setNetworkHistory([]);
+      return;
+    }
+    
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(
@@ -316,6 +402,18 @@ export function SystemMetrics({
             download: Math.round((m.network_rx_rate || 0) / 1024),
             upload: Math.round((m.network_tx_rate || 0) / 1024)
           });
+          
+          // Persist to context (for 30min period only)
+          if (period === '30min') {
+            addMetricsDataPoint(device.deviceUuid, {
+              timestamp: new Date(m.recorded_at).getTime(),
+              time,
+              cpuPercent: Math.round(m.cpu_usage || 0),
+              memoryUsedPercent: Math.round(m.memory_usage || 0),
+              networkRxMbps: Math.round((m.network_rx_rate || 0) / 1024),
+              networkTxMbps: Math.round((m.network_tx_rate || 0) / 1024),
+            });
+          }
         });
       }
       
@@ -325,7 +423,7 @@ export function SystemMetrics({
     } catch (error) {
       console.error('Failed to fetch historical data:', error);
     }
-  }, [device.deviceUuid]);
+  }, [device.deviceUuid, device.status, addMetricsDataPoint]);
 
   // Handle metrics history updates via WebSocket (append live data only for 30min period)
   const handleMetricsHistory = useCallback((data: MetricsHistoryData) => {
@@ -342,11 +440,14 @@ export function SystemMetrics({
       firstMemoryPoint: data?.memory?.[0]
     });
     
-    // Only append live data for 30min period, ignore for historical periods
-    if (timePeriod !== '30min') {
-      console.log('[SystemMetrics] Ignoring history data - not in 30min period');
-      return;
-    }
+    // Only keep data from last 30 minutes
+    const thirtyMinutesAgo = Date.now() - (30 * 60 * 1000);
+    const now = Date.now();
+    console.log('[SystemMetrics] Time filter:', {
+      now: new Date(now).toISOString(),
+      thirtyMinutesAgo: new Date(thirtyMinutesAgo).toISOString(),
+      windowMinutes: 30
+    });
     
     // Format timestamps from WebSocket to match API format
     const formatTime = (timestamp: string) => {
@@ -360,97 +461,194 @@ export function SystemMetrics({
     };
     
     if (data.cpu && data.cpu.length > 0) {
-      console.log(`[SystemMetrics] Updating CPU history: adding ${data.cpu.length} points`);
+      console.log(`[SystemMetrics] Processing CPU history: ${data.cpu.length} points received`);
+      
+      // Log timestamp range of incoming data
+      const firstTimestamp = new Date(data.cpu[0].time).getTime();
+      const lastTimestamp = new Date(data.cpu[data.cpu.length - 1].time).getTime();
+      console.log('[SystemMetrics] CPU data time range:', {
+        first: new Date(firstTimestamp).toISOString(),
+        last: new Date(lastTimestamp).toISOString(),
+        spanMinutes: Math.round((lastTimestamp - firstTimestamp) / 60000),
+        firstWithinWindow: firstTimestamp >= thirtyMinutesAgo,
+        lastWithinWindow: lastTimestamp >= thirtyMinutesAgo
+      });
+      
       setCpuHistory(prev => {
         const formatted = data.cpu
           .map(point => {
+            const date = new Date(point.time);
             const time = formatTime(point.time);
-            return time ? { time, value: point.value } : null;
+            const withinWindow = date.getTime() >= thirtyMinutesAgo;
+            // Only include points from last 30 minutes
+            if (!time || !withinWindow) return null;
+            return { time, value: point.value };
           })
           .filter((point): point is { time: string; value: number } => point !== null);
         
-        // Remove duplicates by time
-        const combined = [...prev, ...formatted];
-        const unique = combined.filter((point, index, self) => 
-          index === self.findIndex(p => p.time === point.time)
-        );
-        const updated = unique.slice(-MAX_POINTS);
-        console.log(`[SystemMetrics] CPU history updated: ${prev.length} -> ${updated.length} points (${formatted.length} new, ${combined.length - unique.length} duplicates removed)`);
+        console.log(`[SystemMetrics] CPU filter results:`, {
+          received: data.cpu.length,
+          afterTimeFilter: formatted.length,
+          previousCount: prev.length
+        });
+        
+        // REPLACE instead of merge - WebSocket sends full history on subscription
+        const updated = formatted.slice(-MAX_POINTS);
+        console.log(`[SystemMetrics] CPU history REPLACED:`, {
+          newCount: updated.length
+        });
+        
+
+        
+        // Persist to context (only if we have all three metrics for this timestamp)
+        if (data.memory && data.memory.length > 0 && data.network && data.network.length > 0) {
+          // Take the last point from each metric (most recent)
+          const lastCpuPoint = formatted[formatted.length - 1];
+          const lastMemoryPoint = data.memory[data.memory.length - 1];
+          const lastNetworkPoint = data.network[data.network.length - 1];
+          
+          if (lastCpuPoint && lastMemoryPoint && lastNetworkPoint) {
+            addMetricsDataPoint(device.deviceUuid, {
+              timestamp: new Date(lastNetworkPoint.time).getTime(),
+              time: lastCpuPoint.time,
+              cpuPercent: lastCpuPoint.value,
+              memoryUsedPercent: lastMemoryPoint.used,
+              networkRxMbps: lastNetworkPoint.download,
+              networkTxMbps: lastNetworkPoint.upload,
+            });
+          }
+        }
+        
         return updated;
       });
     }
     if (data.memory && data.memory.length > 0) {
-      console.log(`[SystemMetrics] Updating memory history: adding ${data.memory.length} points`);
-      setMemoryHistory(prev => {
+      console.log(`[SystemMetrics] Processing memory history: ${data.memory.length} points received`);
+      setMemoryHistory(() => {
         const formatted = data.memory
           .map(point => {
+            const date = new Date(point.time);
             const time = formatTime(point.time);
-            return time ? { time, used: point.used } : null;
+            const withinWindow = date.getTime() >= thirtyMinutesAgo;
+            // Only include points from last 30 minutes
+            if (!time || !withinWindow) return null;
+            return { time, used: point.used };
           })
           .filter((point): point is { time: string; used: number } => point !== null);
         
-        // Remove duplicates by time
-        const combined = [...prev, ...formatted];
-        const unique = combined.filter((point, index, self) => 
-          index === self.findIndex(p => p.time === point.time)
-        );
-        return unique.slice(-MAX_POINTS);
+        console.log(`[SystemMetrics] Memory filter: ${data.memory.length} received → ${formatted.length} within window`);
+        
+        // REPLACE instead of merge
+        const updated = formatted.slice(-MAX_POINTS);
+        console.log(`[SystemMetrics] Memory REPLACED: ${updated.length} points`);
+        return updated;
       });
     }
     if (data.network && data.network.length > 0) {
-      console.log(`[SystemMetrics] Updating network history: adding ${data.network.length} points`);
-      setNetworkHistory(prev => {
+      console.log(`[SystemMetrics] Processing network history: ${data.network.length} points received`);
+      setNetworkHistory(() => {
         const formatted = data.network
           .map(point => {
+            const date = new Date(point.time);
             const time = formatTime(point.time);
-            return time ? { time, download: point.download, upload: point.upload } : null;
+            const withinWindow = date.getTime() >= thirtyMinutesAgo;
+            // Only include points from last 30 minutes
+            if (!time || !withinWindow) return null;
+            return { time, download: point.download, upload: point.upload };
           })
           .filter((point): point is { time: string; download: number; upload: number } => point !== null);
         
-        // Remove duplicates by time
-        const combined = [...prev, ...formatted];
-        const unique = combined.filter((point, index, self) => 
-          index === self.findIndex(p => p.time === point.time)
-        );
-        return unique.slice(-MAX_POINTS);
+        console.log(`[SystemMetrics] Network filter: ${data.network.length} received → ${formatted.length} within window`);
+        
+        // REPLACE instead of merge
+        const updated = formatted.slice(-MAX_POINTS);
+        console.log(`[SystemMetrics] Network REPLACED: ${updated.length} points`);
+        return updated;
       });
     }
-  }, [timePeriod, device.deviceUuid]);
+  }, [timePeriod, device.deviceUuid, addMetricsDataPoint]); // Include deviceUuid and addMetricsDataPoint
 
-  // Subscribe to WebSocket channels
-  useWebSocket(device.deviceUuid, 'system-info', handleSystemInfo);
-  useWebSocket(device.deviceUuid, 'processes', handleProcesses);
-  // Only subscribe to history channel for 30min period (live updates)
-  useWebSocket(device.deviceUuid, 'history', timePeriod === '30min' ? handleMetricsHistory : () => {});
+  // Subscribe to WebSocket channels (only for online devices)
+  const isOnline = device.status === 'online';
+  useWebSocket(device.deviceUuid, 'system-info', handleSystemInfo, isOnline);
+  useWebSocket(device.deviceUuid, 'processes', handleProcesses, isOnline);
+  // Only subscribe to history channel for 30min period AND online devices
+  useWebSocket(device.deviceUuid, 'history', handleMetricsHistory, isOnline && timePeriod === '30min');
 
   // Fetch historical data when time period changes
-  // For all periods (including 30min), fetch initial data from API
-  // Then WebSocket provides live updates for 30min period only
+  // For 30min: Fetch from API (initial load), then WebSocket provides live updates
+  // For longer periods (6h, 12h, 24h): Fetch from API only (no WebSocket)
   useEffect(() => {
-    console.log('[SystemMetrics] Time period changed to:', timePeriod);
-    console.log('[SystemMetrics] Fetching historical data from API');
-    fetchHistoricalData(timePeriod);
-  }, [timePeriod, fetchHistoricalData]);
-
-  // Clear data when device changes
-  useEffect(() => {
-    setSystemInfo([
-      { label: "Operating System", value: "Unknown" },
-      { label: "Architecture", value: "Unknown" },
-      { label: "Uptime", value: "Unknown" },
-      { label: "Hostname", value: device.name },
-      { label: "IP Address", value: device.ipAddress },
-      { label: "MAC Address", value: "Unknown" },
-    ]);
-    setProcesses([]);
-    setProcessesLoading(true);
-    setCpuHistory([]);
-    setMemoryHistory([]);
-    setNetworkHistory([]);
+    const timePeriodChanged = prevTimePeriodRef.current !== timePeriod;
     
-    // Fetch initial processes data
-    fetchProcesses();
-  }, [device.deviceUuid, device.name, device.ipAddress, fetchProcesses]);
+    console.log('[SystemMetrics] Time period changed to:', timePeriod, {
+      previousPeriod: prevTimePeriodRef.current,
+      isChange: timePeriodChanged
+    });
+    
+    // For 30min period, only use persisted data if we're NOT switching from another period
+    // (i.e., only use persisted data on component mount/navigation return)
+    if (timePeriod === '30min') {
+      if (persistedHistory.length > 0 && !timePeriodChanged) {
+        console.log('[SystemMetrics] Using persisted data for 30min period (skipping API fetch)');
+        prevTimePeriodRef.current = timePeriod;
+        return;
+      }
+      if (timePeriodChanged) {
+        console.log('[SystemMetrics] Time period switched to 30min - fetching fresh data from API');
+      } else {
+        console.log('[SystemMetrics] No persisted data - fetching initial 30min data from API');
+      }
+    } else {
+      console.log('[SystemMetrics] Fetching historical data from API for period:', timePeriod);
+    }
+    
+    prevTimePeriodRef.current = timePeriod;
+    fetchHistoricalData(timePeriod);
+  }, [timePeriod, fetchHistoricalData]); // Removed persistedHistory.length - causes unnecessary re-runs
+
+  // Clear data when device changes (not on initial mount)
+  useEffect(() => {
+    const deviceChanged = prevDeviceUuidRef.current !== null && 
+                          prevDeviceUuidRef.current !== device.deviceUuid;
+    
+    if (deviceChanged) {
+      console.log('[SystemMetrics] Device changed:', {
+        from: prevDeviceUuidRef.current?.substring(0, 8) + '...',
+        to: device.deviceUuid.substring(0, 8) + '...',
+        name: device.name,
+        status: device.status
+      });
+      
+      setSystemInfo([
+        { label: "Operating System", value: "Unknown" },
+        { label: "Architecture", value: "Unknown" },
+        { label: "Uptime", value: "Unknown" },
+        { label: "Hostname", value: device.name },
+        { label: "IP Address", value: device.ipAddress },
+        { label: "MAC Address", value: "Unknown" },
+      ]);
+      setProcesses([]);
+      setProcessesLoading(true);
+      setCpuHistory([]);
+      setMemoryHistory([]);
+      setNetworkHistory([]);
+    } else if (prevDeviceUuidRef.current === null) {
+      console.log('[SystemMetrics] Initial mount for device:', {
+        uuid: device.deviceUuid.substring(0, 8) + '...',
+        name: device.name,
+        status: device.status
+      });
+    }
+    
+    // Update ref for next comparison
+    prevDeviceUuidRef.current = device.deviceUuid;
+    
+    // Fetch initial processes data (only for online devices)
+    if (device.status !== 'offline') {
+      fetchProcesses();
+    }
+  }, [device.deviceUuid, device.name, device.ipAddress, device.status, fetchProcesses]);
 
   const scrollToSection = (id: string) => {
     const element = document.getElementById(id);
@@ -515,7 +713,6 @@ export function SystemMetrics({
 
             {selectedMetric === 'cpu' && (
               <>
-                {console.log('[SystemMetrics] Rendering CPU chart with', cpuHistory.length, 'points')}
                 <ResponsiveContainer width="100%" height={250} key="cpu-chart">
                       <AreaChart data={cpuHistory} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
                         <defs>

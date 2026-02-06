@@ -215,6 +215,7 @@ export class ReadingsService {
     const result = await query(
       `SELECT
         bucket,
+        device_name,
         avg_value,
         min_value,
         max_value,

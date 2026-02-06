@@ -794,20 +794,28 @@ export class WebSocketManager {
 
   private async fetchMetricsHistory(deviceUuid: string): Promise<any> {
     try {
-      // Use same model as HTTP endpoint /api/v1/devices/:uuid/metrics for consistency
-      const metrics = await DeviceMetricsModel.getRecent(deviceUuid, 30);
+      // Fetch last 30 minutes of data (not 30 rows)
+      // This ensures we get the correct number of points based on agent reporting interval
+      const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      const metrics = await DeviceMetricsModel.getRecentByTime(deviceUuid, thirtyMinutesAgo);
 
-      logger.info(` Fetched ${metrics.length} metrics rows for device ${deviceUuid}`);
+      logger.info(` [fetchMetricsHistory] Device ${deviceUuid.substring(0, 8)}: Fetched ${metrics.length} metrics rows (last 30 min from ${thirtyMinutesAgo})`);
+
+      // Log time range of fetched data
+      if (metrics.length > 0) {
+        const firstTime = new Date(metrics[0].recorded_at);
+        const lastTime = new Date(metrics[metrics.length - 1].recorded_at);
+        const spanMinutes = (lastTime.getTime() - firstTime.getTime()) / 60000;
+        logger.info(` [fetchMetricsHistory] Time range: ${firstTime.toISOString()} to ${lastTime.toISOString()} (${Math.round(spanMinutes)} minutes)`);
+      }
 
       // Transform to dashboard format (same as original App.tsx HTTP polling logic)
       const cpu: Array<{ time: string; value: number }> = [];
       const memory: Array<{ time: string; used: number; available: number }> = [];
       const network: Array<{ time: string; download: number; upload: number }> = [];
 
-      // Reverse to get chronological order (oldest first) - matches original behavior
-      const metricsData = metrics.reverse();
-
-      metricsData.forEach((m: any) => {
+      // Data is already in chronological order (ASC) from getRecentByTime
+      metrics.forEach((m: any) => {
         // Send ISO timestamp and let client format it (avoids timezone mismatches)
         const time = new Date(m.recorded_at).toISOString();
 

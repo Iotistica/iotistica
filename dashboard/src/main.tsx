@@ -8,18 +8,19 @@
   import { AuthProvider } from "./contexts/AuthContext";
   import { MetricsHistoryProvider } from "./contexts/MetricsHistoryContext";
   import { MqttProvider } from "./contexts/MqttContext";
+import { SystemMetricsProvider } from "./contexts/SystemMetricsContext";
 
-  createRoot(document.getElementById("root")!).render(
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-      <AuthProvider>
-        <DeviceStateProvider>
-          <MetricsHistoryProvider>
+createRoot(document.getElementById("root")!).render(
+  <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+    <AuthProvider>
+      <DeviceStateProvider>
+        <MetricsHistoryProvider>
+          <SystemMetricsProvider>
             <MqttProvider>
               <App />
             </MqttProvider>
-          </MetricsHistoryProvider>
-        </DeviceStateProvider>
-      </AuthProvider>
-    </ThemeProvider>
-  );
-  
+          </SystemMetricsProvider>        </MetricsHistoryProvider>
+      </DeviceStateProvider>
+    </AuthProvider>
+  </ThemeProvider>
+);  

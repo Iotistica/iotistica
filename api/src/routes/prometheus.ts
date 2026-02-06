@@ -48,29 +48,30 @@ router.get('/metrics', async (req, res) => {
     // Uses pre-aggregated hourly buckets with last_value (only ~7K rows, no need for time filter)
     const readingsResult = await query(`
       WITH latest_hourly AS (
-        SELECT DISTINCT ON (device_uuid, metric_name)
+        SELECT DISTINCT ON (device_uuid, device_name, metric_name)
           device_uuid,
+          device_name,
           metric_name,
           protocol,
           last_value,
           EXTRACT(EPOCH FROM last_time) as timestamp_unix
         FROM readings_hourly
-        ORDER BY device_uuid, metric_name, bucket DESC
+        ORDER BY device_uuid, device_name, metric_name, bucket DESC
       )
       SELECT 
         r.device_uuid,
+        r.device_name,
         r.metric_name,
         r.protocol,
         r.last_value as value,
-        '' as unit,  -- Unit not tracked in aggregate, could add if needed
+        '' as unit,  -- Unit not tracked in aggregate
         r.timestamp_unix,
-        COALESCE(d.device_name, 'unknown') as device_name,
         CASE 
           WHEN d.last_connectivity_event > NOW() - INTERVAL '5 minutes' THEN 1
           ELSE 0
         END as device_online
       FROM latest_hourly r
-      LEFT JOIN devices d ON d.uuid = r.device_uuid  -- Use LEFT JOIN to keep all readings
+      LEFT JOIN devices d ON d.uuid = r.device_uuid
       LIMIT 10000
     `);
 

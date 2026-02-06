@@ -596,6 +596,20 @@ export class DeviceMetricsModel {
   }
 
   /**
+   * Get recent metrics since a specific timestamp
+   */
+  static async getRecentByTime(deviceUuid: string, sinceTimestamp: string): Promise<DeviceMetrics[]> {
+    const result = await query<DeviceMetrics>(
+      `SELECT * FROM device_metrics 
+       WHERE device_uuid = $1 
+       AND recorded_at >= $2
+       ORDER BY recorded_at ASC`,
+      [deviceUuid, sinceTimestamp]
+    );
+    return result.rows;
+  }
+
+  /**
    * Get metrics by time range with optional sampling
    * Uses TimescaleDB continuous aggregates for better performance at scale:
    * - 30min: raw device_metrics (real-time)

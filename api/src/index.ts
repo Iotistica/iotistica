@@ -34,6 +34,7 @@ import { router as deviceTagsRoutes } from './routes/device-tags';
 import dashboardLayoutsRoutes from './routes/dashboard-layouts';
 import mosquittoAuthRoutes from './routes/mosquitto-auth';
 import { router as noderedStorageRoutes } from './routes/nodered-storage';
+import { router as metricsCatalogRoutes } from './routes/metrics-catalog';
 import { trafficLogger} from "./middleware/traffic-logger";
 import { startTrafficFlushService, stopTrafficFlushService } from './services/traffic-flush.service';
 import alertsRoutes from './routes/alerts';
@@ -369,6 +370,7 @@ app.use(`${API_BASE}/dashboard-layouts`, dashboardLayoutsRoutes);
 app.use(API_BASE, alertsRoutes);
 app.use(API_BASE, anomalyRoutes);
 app.use(API_BASE, noderedStorageRoutes);
+app.use(`${API_BASE}/metrics`, metricsCatalogRoutes);
 
 // ============================================================================
 // API Gateway Proxies - Route requests to microservices
