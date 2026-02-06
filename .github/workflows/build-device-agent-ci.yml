@@ -431,9 +431,28 @@ jobs:
     needs: [version, build-arm64, upload-artifacts]
     runs-on: [pi]
     if: github.ref == 'refs/heads/master'  # Only deploy from master branch
+    continue-on-error: true  # Don't fail workflow if Pi is unavailable
     
     steps:
+      - name: Check Pi availability
+        id: check_pi
+        shell: pwsh
+        env:
+          PI_HOST: ${{ secrets.PI_HOST }}
+        run: |
+          Write-Host "Checking if Raspberry Pi is reachable..."
+          $available = Test-Connection -ComputerName $env:PI_HOST -Count 2 -Quiet -ErrorAction SilentlyContinue
+          
+          if ($available) {
+            Write-Host "✓ Raspberry Pi is reachable at $env:PI_HOST" -ForegroundColor Green
+            echo "pi_available=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "⚠ Raspberry Pi is not reachable at $env:PI_HOST - skipping deployment" -ForegroundColor Yellow
+            echo "pi_available=false" >> $env:GITHUB_OUTPUT
+          }
+
       - name: Deploy to Pi via SSH (password auth)
+        if: steps.check_pi.outputs.pi_available == 'true'
         shell: pwsh
         env:
           PI_HOST: ${{ secrets.PI_HOST }}
@@ -471,6 +490,7 @@ jobs:
           Write-Host "✓ Agent deployed to Raspberry Pi"
           
       - name: Verify Pi deployment
+        if: steps.check_pi.outputs.pi_available == 'true'
         shell: pwsh
         env:
           PI_HOST: ${{ secrets.PI_HOST }}
@@ -495,6 +515,20 @@ jobs:
           
           Remove-SSHSession -SessionId $session.SessionId
           Write-Host "✓ Deployment verification complete"
+
+      - name: Deployment skipped notice
+        if: steps.check_pi.outputs.pi_available != 'true'
+        run: |
+          echo "## ⚠️ Raspberry Pi Deployment Skipped" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The Raspberry Pi at \`${{ secrets.PI_HOST }}\` was not reachable." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Action Required:** Ensure the Pi is online and accessible, then manually deploy:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "curl -sfL https://iotistic.blob.core.windows.net/scripts/agent/install | \\" >> $GITHUB_STEP_SUMMARY
+          echo "  IOTISTIC_AGENT_VERSION=${{ needs.version.outputs.package_version }} \\" >> $GITHUB_STEP_SUMMARY
+          echo "  sudo -E bash" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
   # test-agent-systemd:
   #   name: Test Systemd Installation (x86_64)
