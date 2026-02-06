@@ -642,6 +642,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                             : w
                         );
                         setWidgets(updatedWidgets);
+                        setHasUnsavedChanges(true);
                       }}
                     >
                       <SelectTrigger className="h-8 w-[80px] text-xs">
@@ -858,6 +859,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         }
         return (
           <MetricDataCard 
+            key={`${widget.i}-${widget.metricConfig?.timeRange || ''}`}
             config={widget.metricConfig}
             onConfigure={() => {
               setConfiguringWidgetId(widget.i);
