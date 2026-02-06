@@ -24,6 +24,11 @@ const TopicNode = ({ topic, level = 0, onTopicSelect, fullPath = '', selectedTop
   const currentPath = fullPath ? `${fullPath}/${topic.name}` : topic.name;
   const isSelected = currentPath === selectedTopic;
 
+  // Debug: Log selection state
+  if (isSelected) {
+    console.log('[TopicNode] SELECTED:', currentPath, 'selectedTopic:', selectedTopic);
+  }
+
   // Reset expansion state when topic name changes (e.g., device UUID changes)
   useEffect(() => {
     setIsExpanded(true);
@@ -69,8 +74,8 @@ const TopicNode = ({ topic, level = 0, onTopicSelect, fullPath = '', selectedTop
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className={cn(
-              "font-mono text-sm truncate text-foreground",
-              isSelected && "underline decoration-2 decoration-blue-500 font-semibold",
+              "font-mono text-sm truncate",
+              isSelected ? "font-bold text-blue-600 dark:text-blue-400" : "text-foreground",
               !isSelected && hasChildren && "font-medium"
             )}>
               {topic.name}
