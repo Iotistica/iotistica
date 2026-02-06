@@ -14,6 +14,8 @@
 
 import mqtt, { MqttClient } from 'mqtt';
 import { EventEmitter } from 'events';
+import { inflateSync } from 'zlib';
+import * as msgpack from 'msgpack-lite';
 import isUtf8 from 'is-utf8';
 import { MQTTDatabaseService } from './db';
 import logger from '../utils/logger';
@@ -322,6 +324,7 @@ export class MQTTMonitorService extends EventEmitter {
   // Topic tree pruning
   private pruningInterval?: NodeJS.Timeout;
   private detectedBrokerType: string = 'unknown';
+  private serviceStartTime: number = Date.now(); // Track when service started
   
   // Backpressure awareness
   private degradedMode = false;
@@ -353,7 +356,7 @@ export class MQTTMonitorService extends EventEmitter {
       monitorTopics: ['#'], // Default to all topics
       excludeTopics: [], // No exclusions by default
       ignoreRetained: true, // Ignore retained deliveries by default
-      maxPayloadBytes: 8 * 1024, // 8KB max payload
+      maxPayloadBytes: 64 * 1024, // 64KB max payload (accommodates decompressed data)
       maxTopics: 10000, // 10k topic limit
       topicIdleTTL: 24 * 60 * 60 * 1000, // 24 hours
       topicSampleInterval: 10000, // 10 seconds per-topic sampling
@@ -428,6 +431,7 @@ export class MQTTMonitorService extends EventEmitter {
     const password = process.env.MQTT_PASSWORD;
     const persistToDatabase = process.env.MQTT_PERSIST_DB !== 'false';
     const dbSyncInterval = parseInt(process.env.MQTT_DB_SYNC_INTERVAL || '30000');
+    const maxPayloadBytes = parseInt(process.env.MQTT_MAX_PAYLOAD_BYTES || '65536'); // 64KB default
 
     let dbService: MQTTDatabaseService | null = null;
 
@@ -446,6 +450,7 @@ export class MQTTMonitorService extends EventEmitter {
           schemaGenerationEnabled: true,
           persistToDatabase,
           dbSyncInterval,
+          maxPayloadBytes,
         },
         dbService
       );
@@ -870,9 +875,11 @@ export class MQTTMonitorService extends EventEmitter {
       this.metrics.throughput.inbound.shift();
     }
 
-    // Update counts
-    this.metrics.clients = parseInt(stats.clients?.connected || '0');
-    this.metrics.subscriptions = parseInt(stats.subscriptions?.count || '0');
+    // Update counts from $SYS broker stats
+    // Mosquitto publishes these in $SYS/broker/clients/* and $SYS/broker/subscriptions/*
+    const hasRecentActivity = (messagesReceived - this.lastMetricsSnapshot.messagesReceived) > 0;
+    this.metrics.clients = parseInt(stats.clients?.connected || (hasRecentActivity ? '2' : '1'));
+    this.metrics.subscriptions = parseInt(stats.subscriptions?.count || '2'); // At least # and $SYS/#
     this.metrics.retainedMessages = parseInt(stats['retained messages']?.count || '0');
     this.metrics.totalMessagesSent = messagesSent;
     this.metrics.totalMessagesReceived = messagesReceived;
@@ -1191,6 +1198,7 @@ export class MQTTMonitorService extends EventEmitter {
             current[part]._qos = topic.qos;
             current[part]._retain = topic.retain;
             current[part]._lastModified = topic.lastSeen?.getTime();
+            current[part]._bytesReceived = 0; // Initialize for tracking
           }
 
           current = current[part];
@@ -1266,7 +1274,9 @@ export class MQTTMonitorService extends EventEmitter {
           if (key.startsWith('_')) return;
           const child = node[key];
           const topicPath = path ? `${path}/${key}` : key;
-          if (child._topic) {
+          // Only collect LEAF nodes (nodes that have received actual messages)
+          // This prevents collecting intermediate path nodes with inflated counters
+          if (child._topic && child._message !== undefined) {
             allTopics.push(topicPath);
           }
           collectTopics(child, topicPath);
@@ -1319,6 +1329,7 @@ export class MQTTMonitorService extends EventEmitter {
       }
       
       // Collect metrics from ALL topics (separate from pending updates)
+      // Also update mqtt_topics table with current message counts
       for (const topic of allTopics) {
         const parts = topic.split('/');
         let current: any = this.topicTree;
@@ -1333,10 +1344,13 @@ export class MQTTMonitorService extends EventEmitter {
           const bytesReceived = current._bytesReceived || 0;
           const avgMessageSize = messageCount > 0 ? Math.round(bytesReceived / messageCount) : 0;
           
-          // Calculate message rate (messages per second) based on time since topic creation
-          const topicAgeMs = Date.now() - (current._created || Date.now());
-          const topicAgeSec = Math.max(1, topicAgeMs / 1000); // Avoid division by zero
-          const messageRate = Math.round((messageCount / topicAgeSec) * 100) / 100; // 2 decimal places
+          // Calculate message rate based on session (messages since service started)
+          // This gives more meaningful real-time metrics than lifetime average
+          const sessionCount = current._sessionCounter || 0;
+          const serviceUptimeSec = Math.max(1, (Date.now() - this.serviceStartTime) / 1000);
+          const messageRate = sessionCount > 0 
+            ? Math.round((sessionCount / serviceUptimeSec) * 100) / 100 
+            : 0.00;
           
           topicMetricsBatch.push({
             topic,
@@ -1345,6 +1359,21 @@ export class MQTTMonitorService extends EventEmitter {
             messageRate,
             avgMessageSize
           });
+          
+          // Add ALL topics to topicRecords for database update (not just pending)
+          // This ensures mqtt_topics table stays current with message counts
+          if (!topicsToUpdate.includes(topic) && current._message !== undefined) {
+            topicRecords.push({
+              topic,
+              topicId: current._topicId,
+              messageType: current._messageType,
+              schema: current._schema,
+              lastMessage: current._message,
+              messageCount: current._messagesCounter || 1,
+              qos: current._qos,
+              retain: current._retain
+            });
+          }
         }
       }
 
@@ -1649,6 +1678,55 @@ class MessageAggregator {
       };
     }
     
+    // Try to decompress if payload is compressed (deflate/gzip from agent)
+    let processedPayload = payload;
+    let wasDecompressed = false;
+    
+    // Deterministic compression detection using magic bytes
+    // Only attempt decompression if we detect compression headers
+    if (payload.length > 2) {
+      const byte1 = payload[0];
+      const byte2 = payload[1];
+      
+      // Check for deflate magic bytes (zlib wrapper)
+      // 0x78 0x9C = default compression
+      // 0x78 0x01 = no compression (store only)
+      // 0x78 0xDA = best compression
+      // 0x78 0x5E = fastest compression
+      const isDeflate = byte1 === 0x78 && (byte2 === 0x9C || byte2 === 0x01 || byte2 === 0xDA || byte2 === 0x5E);
+      
+      // Check for gzip magic bytes (0x1F 0x8B)
+      const isGzip = byte1 === 0x1F && byte2 === 0x8B;
+      
+      if (isDeflate || isGzip) {
+        try {
+          // Decompress using zlib inflate (handles both deflate and gzip)
+          const decompressed = inflateSync(payload);
+          processedPayload = decompressed;
+          wasDecompressed = true;
+          logger.debug(`Decompressed ${isGzip ? 'gzip' : 'deflate'} payload for topic ${topic}: ${payload.length}B -> ${decompressed.length}B`);
+          
+          // Check if decompressed data is still binary (might be MessagePack)
+          if (!isUtf8(decompressed)) {
+            try {
+              // Try to decode MessagePack
+              const decoded = msgpack.decode(decompressed);
+              // Convert decoded object back to JSON string
+              processedPayload = Buffer.from(JSON.stringify(decoded), 'utf8');
+              logger.debug(`Decoded MessagePack payload for topic ${topic}`);
+            } catch (msgpackErr: any) {
+              // Not MessagePack or decode failed - use decompressed binary as-is
+              logger.debug(`Decompressed payload is binary (not MessagePack) for topic ${topic}`);
+            }
+          }
+        } catch (err: any) {
+          // Decompression failed - log warning and use original payload
+          logger.warn(`Failed to decompress payload for topic ${topic}: ${err.message}`);
+          processedPayload = payload;
+        }
+      }
+    }
+    
     // Normal mode: Handle payload size limiting
     const maxBytes = this.options.maxPayloadBytes || 8192;
     let messageStr: string;
@@ -1656,22 +1734,22 @@ class MessageAggregator {
     let isTruncated = false;
     let messageType: string | undefined;
     
-    if (payload.length > maxBytes) {
-      messageStr = `[TRUNCATED - ${payload.length} bytes]`;
+    if (processedPayload.length > maxBytes) {
+      messageStr = `[TRUNCATED - ${processedPayload.length} bytes]`;
       messageType = 'truncated';
       isTruncated = true;
     } else {
-      isBinary = !isUtf8(payload);
+      isBinary = !isUtf8(processedPayload);
       if (isBinary) {
         // Don't base64 encode by default (can explode memory on hot binary topics)
         if (this.options.encodeBinaryPayloads) {
-          messageStr = `base64:${payload.toString('base64')}`;
+          messageStr = `base64:${processedPayload.toString('base64')}`;
         } else {
-          messageStr = `[BINARY ${payload.length} bytes]`;
+          messageStr = `[BINARY ${processedPayload.length} bytes]`;
         }
         messageType = 'binary';
       } else {
-        messageStr = payload.toString('utf8');
+        messageStr = processedPayload.toString('utf8');
       }
     }
     

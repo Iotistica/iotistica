@@ -39,7 +39,7 @@ const buildTopicTree = (flatTopics: any[]): MqttTopic[] => {
 
       // If this is the last part, set the message details for this exact topic
       if (index === parts.length - 1) {
-        current[part].messageCount = messageCount;
+        current[part].messageCount = parseInt(messageCount, 10) || 0;
         current[part].lastMessage = lastMessage;
       }
 
@@ -66,7 +66,7 @@ const buildTopicTree = (flatTopics: any[]): MqttTopic[] => {
   return convertToArray(root);
 };
 
-export function MqttBrokerCard({ deviceId, topics: allTopics, isConnected }: MqttBrokerCardProps) {
+const MqttBrokerCard = ({ deviceId, topics: allTopics, isConnected }: MqttBrokerCardProps) => {
   const [topics, setTopics] = useState<MqttTopic[]>([]);
   const [loading, setLoading] = useState(true);
   const [totalMessages, setTotalMessages] = useState(0);
@@ -79,25 +79,19 @@ export function MqttBrokerCard({ deviceId, topics: allTopics, isConnected }: Mqt
   useEffect(() => {
     if (!allTopics || allTopics.length === 0) {
       setTopics([]);
+      setTotalMessages(0);
+      setActiveTopics(0);
       setLoading(false);
       return;
     }
 
-    console.log(`[MqttBrokerCard] Processing ${allTopics.length} topics for device: ${deviceId}`);
-    
-    // Filter topics for the selected device only (strict match to avoid partial UUID matches)
-    const deviceTopics = allTopics.filter((t: any) => {
-      const topic = t.topic || '';
-      // Match exact device UUID in topic path: /device/{uuid}/
-      return topic.includes(`/device/${deviceId}/`) || topic.endsWith(`/device/${deviceId}`);
-    });
-
-    console.log(`[MqttBrokerCard] Found ${deviceTopics.length} topics for device ${deviceId}`);
+    console.log(`[MqttBrokerCard] Processing ${allTopics.length} topics`);
 
     // Use the data directly from WebSocket (messageCount is already there)
-    const topicsForTree = deviceTopics.map((t: any) => ({
+    // Note: Topics are already filtered by parent component (MqttPage)
+    const topicsForTree = allTopics.map((t: any) => ({
       topic: t.topic,
-      messageCount: t.messageCount || 0,
+      messageCount: parseInt(t.messageCount, 10) || 0,
       lastMessage: t.lastMessage
     }));
 
@@ -105,13 +99,13 @@ export function MqttBrokerCard({ deviceId, topics: allTopics, isConnected }: Mqt
     const tree = buildTopicTree(topicsForTree);
     setTopics(tree);
     
-    // Calculate stats from device-specific topics only
-    const total = deviceTopics.reduce((sum: number, t: any) => sum + (t.messageCount || 0), 0);
-    const active = deviceTopics.filter((t: any) => (t.messageCount || 0) > 0).length;
+    // Calculate stats from filtered topics
+    const total = allTopics.reduce((sum: number, t: any) => sum + (parseInt(t.messageCount, 10) || 0), 0);
+    const active = allTopics.filter((t: any) => (parseInt(t.messageCount, 10) || 0) > 0).length;
     setTotalMessages(total);
     setActiveTopics(active);
     setLoading(false);
-  }, [deviceId, allTopics]);
+  }, [allTopics]);
 
   // Handle topic selection
   const handleTopicSelect = (topic: string, message: string) => {
@@ -305,4 +299,6 @@ export function MqttBrokerCard({ deviceId, topics: allTopics, isConnected }: Mqt
       </div>
     </Card>
   );
-}
+};
+
+export default MqttBrokerCard;

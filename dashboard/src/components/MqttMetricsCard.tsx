@@ -1,5 +1,5 @@
 import { Card } from "@/components/ui/card";
-import { useState, useEffect } from "react";
+import { useMqtt } from "@/contexts/MqttContext";
 import {
   AreaChart,
   Area,
@@ -13,70 +13,37 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-interface BrokerStats {
-  connectedClients: number;
-  disconnectedClients: number;
-  totalClients: number;
-  subscriptions: number;
-  retainedMessages: number;
-  messagesSent: number;
-  messagesReceived: number;
-  messagesPublished: number;
-  messagesDropped: number;
-  bytesSent: number;
-  bytesReceived: number;
-  messageRatePublished: number;
-  messageRateReceived: number;
-  throughputInbound: number;
-  throughputOutbound: number;
-}
-
-interface MqttMetricsCardProps {
-  brokerStats: BrokerStats | null;
-}
-
-export function MqttMetricsCard({ brokerStats }: MqttMetricsCardProps) {
-  const [messageRateHistory, setMessageRateHistory] = useState<Array<{time: string; published: number; received: number}>>([]);
-  const [throughputHistory, setThroughputHistory] = useState<Array<{time: string; inbound: number; outbound: number}>>([]);
-  const [connectionHistory, setConnectionHistory] = useState<Array<{time: string; clients: number; subscriptions: number}>>([]);
-
-  // Update history when brokerStats changes (pushed via WebSocket)
-  useEffect(() => {
-    if (!brokerStats) return;
-
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    
-    setMessageRateHistory(prev => {
-      const newEntry = {
-        time: timeStr,
-        published: Math.round(brokerStats.messageRatePublished),
-        received: Math.round(brokerStats.messageRateReceived),
-      };
-      const updated = [...prev, newEntry];
-      return updated.slice(-30); // Keep last 30 data points
+const MqttMetricsCard = () => {
+  // Read chart history directly from context - no local state needed
+  const { chartHistory } = useMqtt();
+  
+  // Custom tick formatter for X-axis - uses timestamp for proper spacing
+  const formatXAxis = (timestamp: number) => {
+    return new Date(timestamp).toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit' 
     });
-    
-    setThroughputHistory(prev => {
-      const newEntry = {
-        time: timeStr,
-        inbound: Math.round(brokerStats.throughputInbound / 1024), // Convert to KB/s
-        outbound: Math.round(brokerStats.throughputOutbound / 1024),
-      };
-      const updated = [...prev, newEntry];
-      return updated.slice(-30);
-    });
-    
-    setConnectionHistory(prev => {
-      const newEntry = {
-        time: timeStr,
-        clients: brokerStats.connectedClients,
-        subscriptions: brokerStats.subscriptions,
-      };
-      const updated = [...prev, newEntry];
-      return updated.slice(-30);
-    });
-  }, [brokerStats]);
+  };
+  
+  // Transform chartHistory for each chart type
+  const messageRateData = chartHistory.map(point => ({
+    timestamp: point.timestamp,
+    published: point.messageRatePublished,
+    received: point.messageRateReceived
+  }));
+  
+  const throughputData = chartHistory.map(point => ({
+    timestamp: point.timestamp,
+    inbound: point.throughputInbound,
+    outbound: point.throughputOutbound
+  }));
+  
+  const connectionData = chartHistory.map(point => ({
+    timestamp: point.timestamp,
+    clients: point.connectedClients,
+    subscriptions: point.subscriptions
+  }));
 
   return (
     <Card className="p-4 md:p-6">
@@ -97,7 +64,7 @@ export function MqttMetricsCard({ brokerStats }: MqttMetricsCardProps) {
             <p className="text-muted-foreground text-xs">Published and received messages per second</p>
           </div>
           <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={messageRateHistory} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+            <AreaChart data={messageRateData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
               <defs>
                 <linearGradient id="colorPublished" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
@@ -110,10 +77,13 @@ export function MqttMetricsCard({ brokerStats }: MqttMetricsCardProps) {
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis 
-                dataKey="time" 
+                dataKey="timestamp" 
                 stroke="#6b7280" 
                 tick={{ fontSize: 10 }}
+                tickFormatter={formatXAxis}
                 interval="preserveStartEnd"
+                type="number"
+                domain={['dataMin', 'dataMax']}
               />
               <YAxis stroke="#6b7280" tick={{ fontSize: 10 }} width={40} />
               <Tooltip />
@@ -147,13 +117,16 @@ export function MqttMetricsCard({ brokerStats }: MqttMetricsCardProps) {
             <p className="text-muted-foreground text-xs">Inbound and outbound data transfer (KB/s)</p>
           </div>
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={throughputHistory} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+            <LineChart data={throughputData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis 
-                dataKey="time" 
+                dataKey="timestamp" 
                 stroke="#6b7280" 
                 tick={{ fontSize: 10 }}
+                tickFormatter={formatXAxis}
                 interval="preserveStartEnd"
+                type="number"
+                domain={['dataMin', 'dataMax']}
               />
               <YAxis stroke="#6b7280" tick={{ fontSize: 10 }} width={40} />
               <Tooltip />
@@ -183,13 +156,16 @@ export function MqttMetricsCard({ brokerStats }: MqttMetricsCardProps) {
             <p className="text-muted-foreground text-xs">Connected clients and active subscriptions</p>
           </div>
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={connectionHistory} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+            <LineChart data={connectionData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis 
-                dataKey="time" 
+                dataKey="timestamp" 
                 stroke="#6b7280" 
                 tick={{ fontSize: 10 }}
+                tickFormatter={formatXAxis}
                 interval="preserveStartEnd"
+                type="number"
+                domain={['dataMin', 'dataMax']}
               />
               <YAxis stroke="#6b7280" tick={{ fontSize: 10 }} width={40} />
               <Tooltip />
@@ -200,6 +176,7 @@ export function MqttMetricsCard({ brokerStats }: MqttMetricsCardProps) {
                 stroke="#ef4444"
                 strokeWidth={2}
                 dot={false}
+                isAnimationActive={false}
               />
               <Line
                 type="monotone"
@@ -207,6 +184,7 @@ export function MqttMetricsCard({ brokerStats }: MqttMetricsCardProps) {
                 stroke="#06b6d4"
                 strokeWidth={2}
                 dot={false}
+                isAnimationActive={false}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -214,4 +192,6 @@ export function MqttMetricsCard({ brokerStats }: MqttMetricsCardProps) {
       </div>
     </Card>
   );
-}
+};
+
+export default MqttMetricsCard;

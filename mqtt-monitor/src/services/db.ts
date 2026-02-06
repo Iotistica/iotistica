@@ -185,7 +185,7 @@ export class MQTTDatabaseService {
       schema: row.schema,
       firstSeen: row.first_seen,
       lastSeen: row.last_seen,
-      messageCount: row.message_count,
+      messageCount: parseInt(row.message_count, 10) || 0,
       messageType: row.message_type,
       lastMessage: row.last_message,
     }));
@@ -209,7 +209,7 @@ export class MQTTDatabaseService {
       schema: row.schema,
       firstSeen: row.first_seen,
       lastSeen: row.last_seen,
-      messageCount: row.message_count,
+      messageCount: parseInt(row.message_count, 10) || 0,
       messageType: row.message_type,
       lastMessage: row.last_message,
     };
@@ -233,7 +233,7 @@ export class MQTTDatabaseService {
       schema: row.schema,
       firstSeen: row.first_seen,
       lastSeen: row.last_seen,
-      messageCount: row.message_count,
+      messageCount: parseInt(row.message_count, 10) || 0,
       messageType: row.message_type,
       lastMessage: row.last_message,
     };

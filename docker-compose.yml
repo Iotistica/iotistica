@@ -439,6 +439,7 @@ services:
             - MQTT_DB_SYNC_INTERVAL=${MQTT_DB_SYNC_INTERVAL:-30000}
             - MQTT_METRICS_UPDATE_INTERVAL=${MQTT_METRICS_UPDATE_INTERVAL:-5000}
             - MQTT_TOPIC_TREE_UPDATE_INTERVAL=${MQTT_TOPIC_TREE_UPDATE_INTERVAL:-5000}
+            - MQTT_MAX_PAYLOAD_BYTES=${MQTT_MAX_PAYLOAD_BYTES:-65536}
         depends_on:
             postgres:
                 condition: service_healthy

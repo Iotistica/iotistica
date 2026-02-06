@@ -733,7 +733,7 @@ export default function App() {
             <EndpointsVisualizationPage />
           )}
           {currentView === 'mqtt' && (
-            <MqttPage device={selectedDevice} />
+            <MqttPage device={selectedDevice} devices={devices} />
           )}
           {currentView === 'jobs' && (
             <JobsPage device={selectedDevice} />

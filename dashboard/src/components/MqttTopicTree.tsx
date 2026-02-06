@@ -70,7 +70,8 @@ const TopicNode = ({ topic, level = 0, onTopicSelect, fullPath = '', selectedTop
           <div className="flex items-center gap-2">
             <span className={cn(
               "font-mono text-sm truncate text-foreground",
-              isSelected ? "font-bold" : hasChildren && "font-medium"
+              isSelected && "underline decoration-2 decoration-blue-500 font-semibold",
+              !isSelected && hasChildren && "font-medium"
             )}>
               {topic.name}
             </span>
