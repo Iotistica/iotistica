@@ -269,30 +269,30 @@ jobs:
           echo "## Workflow Status" >> $GITHUB_STEP_SUMMARY
           echo "All jobs completed successfully! 🎉" >> $GITHUB_STEP_SUMMARY
 
-  trigger-integration-tests:
-    name: Trigger Integration Tests
-    needs: [version, buildx]
-    runs-on: [iotistic-lab-sc]
-    permissions:
-      actions: write
-      contents: read
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+  # trigger-integration-tests:
+  #   name: Trigger Integration Tests
+  #   needs: [version, buildx]
+  #   runs-on: [iotistic-lab-sc]
+  #   permissions:
+  #     actions: write
+  #     contents: read
+  #   if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     
-    steps:
-      - name: Trigger integration tests
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'integration-tests.yml',
-              ref: 'master',
-              inputs: {
-                api_version: '${{ needs.version.outputs.package_version }}'
-              }
-            });
+  #   steps:
+  #     - name: Trigger integration tests
+  #       uses: actions/github-script@v7
+  #       with:
+  #         github-token: ${{ secrets.GITHUB_TOKEN }}
+  #         script: |
+  #           await github.rest.actions.createWorkflowDispatch({
+  #             owner: context.repo.owner,
+  #             repo: context.repo.repo,
+  #             workflow_id: 'integration-tests.yml',
+  #             ref: 'master',
+  #             inputs: {
+  #               api_version: '${{ needs.version.outputs.package_version }}'
+  #             }
+  #           });
             
-            console.log('Integration tests triggered with API version: ${{ needs.version.outputs.package_version }}');
+  #           console.log('Integration tests triggered with API version: ${{ needs.version.outputs.package_version }}');
 

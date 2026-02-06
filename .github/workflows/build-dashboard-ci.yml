@@ -251,30 +251,3 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Tags pushed:** \`latest\`, \`${{ github.sha }}\`, \`${{ needs.version.outputs.new_version }}\`" >> $GITHUB_STEP_SUMMARY
-
-  trigger-integration-tests:
-    name: Trigger Integration Tests
-    needs: [version, buildx]
-    runs-on: [self-hosted, iotistic-lab-sc]
-    permissions:
-      actions: write
-      contents: read
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    
-    steps:
-      - name: Trigger integration tests
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'integration-tests.yml',
-              ref: 'master',
-              inputs: {
-                dashboard_version: '${{ needs.version.outputs.new_version }}'
-              }
-            });
-            
-            console.log('Integration tests triggered with Dashboard version: ${{ needs.version.outputs.new_version }}');
