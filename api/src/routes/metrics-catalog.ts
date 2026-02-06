@@ -29,19 +29,18 @@ router.get('/devices', async (req, res) => {
   try {
     const { protocol, agentUuid } = req.query;
     
+    // Group by device_name to get unique devices across all agents
     let sql = `
-      SELECT 
-        agent_uuid,
-        agent_name,
-        agent_is_online,
-        device_name,
-        protocol,
-        last_seen,
-        metric_count,
-        available_metrics,
-        overall_quality_percentage
-      FROM endpoint_devices
-      WHERE 1=1
+      WITH unnested AS (
+        SELECT 
+          device_name,
+          protocol,
+          last_seen,
+          agent_uuid,
+          overall_quality_percentage,
+          unnest(available_metrics) as metric_name
+        FROM endpoint_devices
+        WHERE 1=1
     `;
     
     const params: any[] = [];
@@ -56,7 +55,21 @@ router.get('/devices', async (req, res) => {
       sql += ` AND agent_uuid = $${params.length}`;
     }
     
-    sql += ` ORDER BY last_seen DESC`;
+    sql += `
+      )
+      SELECT 
+        device_name,
+        protocol,
+        MAX(last_seen) as last_seen,
+        COUNT(DISTINCT metric_name) as metric_count,
+        array_agg(DISTINCT metric_name ORDER BY metric_name) as available_metrics,
+        AVG(overall_quality_percentage) as overall_quality_percentage,
+        COUNT(DISTINCT agent_uuid) as agent_count,
+        array_agg(DISTINCT agent_uuid::text) as agent_uuids
+      FROM unnested
+      GROUP BY device_name, protocol
+      ORDER BY last_seen DESC
+    `;
     
     const result = await query(sql, params);
     

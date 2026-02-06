@@ -41,6 +41,8 @@ import {
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Device } from '../components/DeviceSidebar';
+import { MetricDataCard, type MetricDataCardConfig } from '../components/MetricDataCard';
+import { MetricDataCardConfigDialog } from '../components/MetricDataCardConfigDialog';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
@@ -90,6 +92,15 @@ const WIDGET_TYPES = {
     minH: 3,
     defaultW: 6,
     defaultH: 4
+  },
+  METRIC_DATA: {
+    id: 'metric-data',
+    name: 'Metric Data Card',
+    icon: BarChart3,
+    minW: 3,
+    minH: 3,
+    defaultW: 4,
+    defaultH: 4
   }
 };
 
@@ -97,6 +108,7 @@ interface DashboardWidget extends Layout {
   type: keyof typeof WIDGET_TYPES;
   title: string;
   deviceId?: string; // For device-specific widgets
+  metricConfig?: MetricDataCardConfig; // For metric data widgets
 }
 
 interface DashboardLayout {
@@ -126,6 +138,8 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const [showNewDashboardDialog, setShowNewDashboardDialog] = useState(false);
   const [showRenameDashboardDialog, setShowRenameDashboardDialog] = useState(false);
   const [newDashboardName, setNewDashboardName] = useState('');
+  const [showMetricConfigDialog, setShowMetricConfigDialog] = useState(false);
+  const [configuringWidgetId, setConfiguringWidgetId] = useState<string | null>(null);
 
   useEffect(() => {
     loadAvailableLayouts();
@@ -435,6 +449,13 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       return;
     }
 
+    if (type === 'METRIC_DATA') {
+      // Open config dialog for metric data widgets
+      setConfiguringWidgetId(`metric-${Date.now()}`);
+      setShowMetricConfigDialog(true);
+      return;
+    }
+
     const widgetConfig = WIDGET_TYPES[type];
     const newId = `${Date.now()}`;
     const newWidget: DashboardWidget = {
@@ -455,6 +476,41 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const removeWidget = (id: string) => {
     setWidgets(widgets.filter(w => w.i !== id));
     setHasUnsavedChanges(true);
+  };
+
+  const handleSaveMetricConfig = (config: MetricDataCardConfig) => {
+    if (!configuringWidgetId) return;
+
+    const existingWidget = widgets.find(w => w.i === configuringWidgetId);
+    
+    if (existingWidget) {
+      // Update existing widget
+      const updatedWidgets = widgets.map(w =>
+        w.i === configuringWidgetId
+          ? { ...w, metricConfig: config, title: config.title || `${config.metricName} - ${config.deviceName}` }
+          : w
+      );
+      setWidgets(updatedWidgets);
+    } else {
+      // Create new widget
+      const widgetConfig = WIDGET_TYPES.METRIC_DATA;
+      const newWidget: DashboardWidget = {
+        i: configuringWidgetId,
+        x: 0,
+        y: Infinity,
+        w: widgetConfig.defaultW,
+        h: widgetConfig.defaultH,
+        minW: widgetConfig.minW,
+        minH: widgetConfig.minH,
+        type: 'METRIC_DATA',
+        title: config.title || `${config.metricName} - ${config.deviceName}`,
+        metricConfig: config
+      };
+      setWidgets([...widgets, newWidget]);
+    }
+
+    setHasUnsavedChanges(true);
+    setConfiguringWidgetId(null);
   };
 
   const renderWidget = (widget: DashboardWidget) => {
@@ -614,6 +670,36 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           </div>
         );
 
+      case 'METRIC_DATA':
+        if (!widget.metricConfig) {
+          return (
+            <div className="text-center text-muted-foreground h-full flex items-center justify-center">
+              <div>
+                <div className="mb-2">No metric configured</div>
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={() => {
+                    setConfiguringWidgetId(widget.i);
+                    setShowMetricConfigDialog(true);
+                  }}
+                >
+                  Configure Metric
+                </Button>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <MetricDataCard 
+            config={widget.metricConfig}
+            onConfigure={() => {
+              setConfiguringWidgetId(widget.i);
+              setShowMetricConfigDialog(true);
+            }}
+          />
+        );
+
       default:
         return <div>Unknown widget type</div>;
     }
@@ -744,6 +830,10 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
               <DropdownMenuItem onClick={() => addWidget('RECENT_EVENTS')}>
                 <Clock className="w-4 h-4 mr-2" />
                 Recent Events
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => addWidget('METRIC_DATA')}>
+                <BarChart3 className="w-4 h-4 mr-2" />
+                Metric Data Card
               </DropdownMenuItem>
               <DropdownMenuItem 
                 onSelect={(e) => e.preventDefault()}
@@ -888,6 +978,14 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Metric Data Card Configuration Dialog */}
+      <MetricDataCardConfigDialog
+        open={showMetricConfigDialog}
+        onOpenChange={setShowMetricConfigDialog}
+        onSave={handleSaveMetricConfig}
+        initialConfig={configuringWidgetId ? widgets.find(w => w.i === configuringWidgetId)?.metricConfig : undefined}
+      />
     </div>
   );
 }
