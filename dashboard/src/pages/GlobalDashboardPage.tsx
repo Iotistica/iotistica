@@ -6,6 +6,13 @@ import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -42,6 +49,12 @@ import {
 } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '../components/ui/tooltip';
 import { Device } from '../components/DeviceSidebar';
 import { MetricDataCard, type MetricDataCardConfig } from '../components/MetricDataCard';
 import { MetricDataCardConfigDialog } from '../components/MetricDataCardConfigDialog';
@@ -582,30 +595,69 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
                     <WidgetIcon className="w-4 h-4 flex-shrink-0" />
                     <span className="truncate">{widget.title}</span>
-                  </CardTitle>
-                  {isMetricWidget && metricData && (
-                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                      <Badge variant="outline" className="text-xs">
-                        {metricData.metric.protocol}
-                      </Badge>
-                      <Badge variant="outline" className="text-xs">
-                        {widget.metricConfig?.timeRange}
-                      </Badge>
-                      {metricData.metadata.qualityPercentage && (
-                        <Badge 
-                          variant={metricData.metadata.qualityPercentage > 95 ? "default" : "destructive"}
-                          className="text-xs"
-                        >
-                          {metricData.metadata.qualityPercentage.toFixed(1)}% quality
+                    {isMetricWidget && metricData && (
+                      <>
+                        <span className="text-muted-foreground mx-1">·</span>
+                        <Badge variant="outline" className="text-xs">
+                          {metricData.metric.protocol}
                         </Badge>
-                      )}
-                    </div>
-                  )}
+                        {metricData.metadata.qualityPercentage && (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="flex items-center">
+                                  {metricData.metadata.qualityPercentage > 95 ? (
+                                    <Check className="w-4 h-4 text-green-600" />
+                                  ) : (
+                                    <AlertTriangle className="w-4 h-4 text-yellow-600" />
+                                  )}
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Data Quality: {metricData.metadata.qualityPercentage.toFixed(1)}%</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
+                      </>
+                    )}
+                  </CardTitle>
                 </div>
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
                 {isMetricWidget && widget.metricConfig && (
                   <>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">Time Range:</span>
+                      <Select
+                        value={widget.metricConfig.timeRange}
+                      onValueChange={(value: '1m' | '1h' | '6h' | '12h' | '24h' | '7d' | '30d') => {
+                        const updatedWidgets = widgets.map(w => 
+                          w.i === widget.i 
+                            ? { 
+                                ...w, 
+                                metricConfig: { ...w.metricConfig!, timeRange: value },
+                                _refreshTrigger: Date.now() 
+                              } 
+                            : w
+                        );
+                        setWidgets(updatedWidgets);
+                      }}
+                    >
+                      <SelectTrigger className="h-8 w-[80px] text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1m">1m</SelectItem>
+                        <SelectItem value="1h">1h</SelectItem>
+                        <SelectItem value="6h">6h</SelectItem>
+                        <SelectItem value="12h">12h</SelectItem>
+                        <SelectItem value="24h">24h</SelectItem>
+                        <SelectItem value="7d">7d</SelectItem>
+                        <SelectItem value="30d">30d</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    </div>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -1113,13 +1165,9 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           }
         }}
         onSave={handleSaveMetricConfig}
-        initialConfig={(() => {
-          const config = isEditingWidget && configuringWidgetId 
-            ? widgets.find(w => w.i === configuringWidgetId)?.metricConfig 
-            : undefined;
-          console.log('Dialog initialConfig:', { isEditingWidget, configuringWidgetId, config });
-          return config;
-        })()}  // Only load config when editing existing widget, not when creating new
+        initialConfig={isEditingWidget && configuringWidgetId 
+          ? widgets.find(w => w.i === configuringWidgetId)?.metricConfig 
+          : undefined}  // Only load config when editing existing widget, not when creating new
       />
 
       {/* Delete Widget Confirmation Dialog */}

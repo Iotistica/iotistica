@@ -171,6 +171,8 @@ export function MetricDataCard({ config, onConfigure, onRefresh, onDataLoaded }:
                 fontSize={12}
                 tickLine={false}
                 tickFormatter={formatValue}
+                domain={['auto', 'auto']}
+                padding={{ top: 20, bottom: 20 }}
               />
               <Tooltip 
                 contentStyle={{ 
@@ -205,7 +207,9 @@ export function MetricDataCard({ config, onConfigure, onRefresh, onDataLoaded }:
               <YAxis 
                 fontSize={12}
                 tickLine={false}
-                tickFormatter={formatValue}
+                tickFormatter={formatValue}                domain={['auto', 'auto']}
+                padding={{ top: 20, bottom: 20 }}                domain={['auto', 'auto']}
+                padding={{ top: 20, bottom: 20 }}
               />
               <Tooltip 
                 contentStyle={{ 
@@ -237,7 +241,9 @@ export function MetricDataCard({ config, onConfigure, onRefresh, onDataLoaded }:
               <YAxis 
                 fontSize={12}
                 tickLine={false}
-                tickFormatter={formatValue}
+                tickFormatter={formatValue}                domain={['auto', 'auto']}
+                padding={{ top: 20, bottom: 20 }}                domain={['auto', 'auto']}
+                padding={{ top: 20, bottom: 20 }}
               />
               <Tooltip 
                 contentStyle={{ 
