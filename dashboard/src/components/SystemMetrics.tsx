@@ -63,6 +63,12 @@ export function SystemMetrics({
   const [selectedMetric, setSelectedMetric] = useState<'cpu' | 'memory' | 'network'>(persistedMetric);
   const [timePeriod, setTimePeriod] = useState<'30min' | '6h' | '12h' | '24h'>(persistedTimePeriod);
   
+  // Refresh interval state with localStorage persistence
+  const [refreshInterval, setRefreshInterval] = useState<number>(() => {
+    const saved = localStorage.getItem('systemmetrics-refresh-interval');
+    return saved ? parseInt(saved, 10) : 30; // Default 30 seconds
+  });
+  
   // Sync time period changes to context
   useEffect(() => {
     setContextTimePeriod(device.deviceUuid, timePeriod);
@@ -72,6 +78,11 @@ export function SystemMetrics({
   useEffect(() => {
     setContextSelectedMetric(device.deviceUuid, selectedMetric);
   }, [device.deviceUuid, selectedMetric, setContextSelectedMetric]);
+  
+  // Persist refresh interval to localStorage
+  useEffect(() => {
+    localStorage.setItem('systemmetrics-refresh-interval', refreshInterval.toString());
+  }, [refreshInterval]);
   
   // Track previous device UUID to detect actual device changes
   const prevDeviceUuidRef = useRef<string | null>(null);
@@ -572,40 +583,30 @@ export function SystemMetrics({
   const isOnline = device.status === 'online';
   useWebSocket(device.deviceUuid, 'system-info', handleSystemInfo, isOnline);
   useWebSocket(device.deviceUuid, 'processes', handleProcesses, isOnline);
-  // Only subscribe to history channel for 30min period AND online devices
-  useWebSocket(device.deviceUuid, 'history', handleMetricsHistory, isOnline && timePeriod === '30min');
+  // History channel disabled - using HTTP polling instead
+  // useWebSocket(device.deviceUuid, 'history', handleMetricsHistory, isOnline && timePeriod === '30min');
 
-  // Fetch historical data when time period changes
-  // For 30min: Fetch from API (initial load), then WebSocket provides live updates
-  // For longer periods (6h, 12h, 24h): Fetch from API only (no WebSocket)
+  // Fetch historical data with HTTP polling (replaces WebSocket approach)
+  // Polls at configured interval for all time periods (30min, 6h, 12h, 24h)
   useEffect(() => {
-    const timePeriodChanged = prevTimePeriodRef.current !== timePeriod;
+    console.log('[SystemMetrics] Setting up HTTP polling for period:', timePeriod, 'interval:', refreshInterval, 's');
     
-    console.log('[SystemMetrics] Time period changed to:', timePeriod, {
-      previousPeriod: prevTimePeriodRef.current,
-      isChange: timePeriodChanged
-    });
-    
-    // For 30min period, only use persisted data if we're NOT switching from another period
-    // (i.e., only use persisted data on component mount/navigation return)
-    if (timePeriod === '30min') {
-      if (persistedHistory.length > 0 && !timePeriodChanged) {
-        console.log('[SystemMetrics] Using persisted data for 30min period (skipping API fetch)');
-        prevTimePeriodRef.current = timePeriod;
-        return;
-      }
-      if (timePeriodChanged) {
-        console.log('[SystemMetrics] Time period switched to 30min - fetching fresh data from API');
-      } else {
-        console.log('[SystemMetrics] No persisted data - fetching initial 30min data from API');
-      }
-    } else {
-      console.log('[SystemMetrics] Fetching historical data from API for period:', timePeriod);
-    }
-    
-    prevTimePeriodRef.current = timePeriod;
+    // Initial fetch
     fetchHistoricalData(timePeriod);
-  }, [timePeriod, fetchHistoricalData]); // Removed persistedHistory.length - causes unnecessary re-runs
+    
+    // Set up polling if interval > 0
+    if (refreshInterval > 0) {
+      const interval = setInterval(() => {
+        console.log('[SystemMetrics] Polling fetch triggered');
+        fetchHistoricalData(timePeriod);
+      }, refreshInterval * 1000);
+      
+      return () => {
+        console.log('[SystemMetrics] Clearing polling interval');
+        clearInterval(interval);
+      };
+    }
+  }, [timePeriod, refreshInterval, fetchHistoricalData]);
 
   // Clear data when device changes (not on initial mount)
   useEffect(() => {
@@ -686,28 +687,46 @@ export function SystemMetrics({
                 <h3 className="text-lg text-foreground font-medium mb-1">Telemetry</h3>
                 <p className="text-sm text-muted-foreground">System performance metrics</p>
               </div>
-              <div className="flex items-center gap-2">
-                <Select value={timePeriod} onValueChange={(value: any) => setTimePeriod(value)}>
-                  <SelectTrigger className="w-[120px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="30min">30 minutes</SelectItem>
-                    <SelectItem value="6h">6 hours</SelectItem>
-                    <SelectItem value="12h">12 hours</SelectItem>
-                    <SelectItem value="24h">24 hours</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select value={selectedMetric} onValueChange={(value: any) => setSelectedMetric(value)}>
-                  <SelectTrigger className="w-[140px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cpu">CPU Usage</SelectItem>
-                    <SelectItem value="memory">Memory Usage</SelectItem>
-                    <SelectItem value="network">Network Activity</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  <Select value={timePeriod} onValueChange={(value: any) => setTimePeriod(value)}>
+                    <SelectTrigger className="w-[120px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="30min">30 minutes</SelectItem>
+                      <SelectItem value="6h">6 hours</SelectItem>
+                      <SelectItem value="12h">12 hours</SelectItem>
+                      <SelectItem value="24h">24 hours</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={selectedMetric} onValueChange={(value: any) => setSelectedMetric(value)}>
+                    <SelectTrigger className="w-[140px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cpu">CPU Usage</SelectItem>
+                      <SelectItem value="memory">Memory Usage</SelectItem>
+                      <SelectItem value="network">Network Activity</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Refresh:</span>
+                  <Select value={refreshInterval.toString()} onValueChange={(value) => setRefreshInterval(parseInt(value, 10))}>
+                    <SelectTrigger className="w-[100px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="5">5s</SelectItem>
+                      <SelectItem value="10">10s</SelectItem>
+                      <SelectItem value="30">30s</SelectItem>
+                      <SelectItem value="60">1m</SelectItem>
+                      <SelectItem value="300">5m</SelectItem>
+                      <SelectItem value="0">Off</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
 

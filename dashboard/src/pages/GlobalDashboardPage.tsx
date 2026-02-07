@@ -58,6 +58,9 @@ import {
 import { Device } from '../components/DeviceSidebar';
 import { MetricDataCard, type MetricDataCardConfig } from '../components/MetricDataCard';
 import { MetricDataCardConfigDialog } from '../components/MetricDataCardConfigDialog';
+import { TableDataCard, type TableDataCardConfig } from '../components/TableDataCard';
+import { TableDataCardConfigDialog } from '../components/TableDataCardConfigDialog';
+import { Table } from 'lucide-react';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
@@ -116,6 +119,15 @@ const WIDGET_TYPES = {
     minH: 6,
     defaultW: 6,
     defaultH: 8
+  },
+  TABLE: {
+    id: 'table',
+    name: 'Table',
+    icon: Table,
+    minW: 4,
+    minH: 6,
+    defaultW: 8,
+    defaultH: 8
   }
 };
 
@@ -124,6 +136,7 @@ interface DashboardWidget extends Layout {
   title: string;
   deviceId?: string; // For device-specific widgets
   metricConfig?: MetricDataCardConfig; // For metric data widgets
+  tableConfig?: TableDataCardConfig; // For table widgets
   _metricData?: any; // Runtime data for badge rendering
   _refreshTrigger?: number; // Timestamp to trigger manual refresh
 }
@@ -156,6 +169,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const [showRenameDashboardDialog, setShowRenameDashboardDialog] = useState(false);
   const [newDashboardName, setNewDashboardName] = useState('');
   const [showMetricConfigDialog, setShowMetricConfigDialog] = useState(false);
+  const [showTableConfigDialog, setShowTableConfigDialog] = useState(false);
   const [configuringWidgetId, setConfiguringWidgetId] = useState<string | null>(null);
   const [showDeleteConfirmDialog, setShowDeleteConfirmDialog] = useState(false);
   const [widgetToDelete, setWidgetToDelete] = useState<string | null>(null);
@@ -165,6 +179,10 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const [showDeleteDashboardDialog, setShowDeleteDashboardDialog] = useState(false);
   const [dashboardToDelete, setDashboardToDelete] = useState<number | null>(null);
   const [isEditingWidget, setIsEditingWidget] = useState(false);
+  const [refreshInterval, setRefreshInterval] = useState<number>(() => {
+    const saved = localStorage.getItem('dashboard-refresh-interval');
+    return saved ? parseInt(saved, 10) : 30;
+  });
 
   useEffect(() => {
     loadAvailableLayouts();
@@ -513,6 +531,14 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       return;
     }
 
+    if (type === 'TABLE') {
+      // Open config dialog for table widgets
+      setConfiguringWidgetId(`table-${Date.now()}`);
+      setIsEditingWidget(false);  // Flag as new widget, not editing
+      setShowTableConfigDialog(true);
+      return;
+    }
+
     const widgetConfig = WIDGET_TYPES[type];
     const newId = `${Date.now()}`;
     const newWidget: DashboardWidget = {
@@ -577,9 +603,45 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     setConfiguringWidgetId(null);
   };
 
+  const handleSaveTableConfig = (config: TableDataCardConfig) => {
+    if (!configuringWidgetId) return;
+
+    const existingWidget = widgets.find(w => w.i === configuringWidgetId);
+    
+    if (existingWidget) {
+      // Update existing widget
+      const updatedWidgets = widgets.map(w =>
+        w.i === configuringWidgetId
+          ? { ...w, tableConfig: config, title: config.title || `${config.metricName} - Table` }
+          : w
+      );
+      setWidgets(updatedWidgets);
+    } else {
+      // Create new widget
+      const widgetConfig = WIDGET_TYPES.TABLE;
+      const newWidget: DashboardWidget = {
+        i: configuringWidgetId,
+        x: 0,
+        y: Infinity,
+        w: widgetConfig.defaultW,
+        h: widgetConfig.defaultH,
+        minW: widgetConfig.minW,
+        minH: widgetConfig.minH,
+        type: 'TABLE',
+        title: config.title || `${config.metricName} - Table`,
+        tableConfig: config
+      };
+      setWidgets([...widgets, newWidget]);
+    }
+
+    setHasUnsavedChanges(true);
+    setConfiguringWidgetId(null);
+  };
+
   const renderWidget = (widget: DashboardWidget) => {
     const WidgetIcon = WIDGET_TYPES[widget.type].icon;
     const isMetricWidget = widget.type === 'METRIC_DATA';
+    const isTableWidget = widget.type === 'TABLE';
     const metricData = widget._metricData;
     
     return (
@@ -685,6 +747,70 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                         setConfiguringWidgetId(widget.i);
                         setIsEditingWidget(true);
                         setShowMetricConfigDialog(true);
+                      }}
+                    >
+                      <Settings className="w-4 h-4" />
+                    </Button>
+                  </>
+                )}
+                {isTableWidget && widget.tableConfig && (
+                  <>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">Time Range:</span>
+                      <Select
+                        value={widget.tableConfig.timeRange}
+                        onValueChange={(value: string) => {
+                          const updatedWidgets = widgets.map(w => 
+                            w.i === widget.i 
+                              ? { 
+                                  ...w, 
+                                  tableConfig: { ...w.tableConfig!, timeRange: value },
+                                  _refreshTrigger: Date.now() 
+                                } 
+                              : w
+                          );
+                          setWidgets(updatedWidgets);
+                          setHasUnsavedChanges(true);
+                        }}
+                      >
+                        <SelectTrigger className="h-8 w-[80px] text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1h">1h</SelectItem>
+                          <SelectItem value="6h">6h</SelectItem>
+                          <SelectItem value="12h">12h</SelectItem>
+                          <SelectItem value="24h">24h</SelectItem>
+                          <SelectItem value="7d">7d</SelectItem>
+                          <SelectItem value="30d">30d</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        const updatedWidgets = widgets.map(w => 
+                          w.i === widget.i ? { ...w, _refreshTrigger: Date.now() } : w
+                        );
+                        setWidgets(updatedWidgets);
+                      }}
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setConfiguringWidgetId(widget.i);
+                        setIsEditingWidget(true);
+                        setShowTableConfigDialog(true);
                       }}
                     >
                       <Settings className="w-4 h-4" />
@@ -861,6 +987,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           <MetricDataCard 
             key={`${widget.i}-${widget.metricConfig?.timeRange || ''}`}
             config={widget.metricConfig}
+            refreshInterval={refreshInterval}
             onConfigure={() => {
               setConfiguringWidgetId(widget.i);
               setIsEditingWidget(true);
@@ -868,6 +995,47 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
             }}
             onDataLoaded={(data) => {
               // Store data reference for badge rendering
+              setWidgets(prevWidgets => 
+                prevWidgets.map(w => 
+                  w.i === widget.i ? { ...w, _metricData: data } : w
+                )
+              );
+            }}
+          />
+        );
+
+      case 'TABLE':
+        if (!widget.tableConfig) {
+          return (
+            <div className="text-center text-muted-foreground h-full flex items-center justify-center">
+              <div>
+                <div className="mb-2">No table configured</div>
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={() => {
+                    setConfiguringWidgetId(widget.i);
+                    setIsEditingWidget(true);
+                    setShowTableConfigDialog(true);
+                  }}
+                >
+                  Configure Table
+                </Button>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <TableDataCard 
+            key={`${widget.i}-${widget.tableConfig?.timeRange || ''}`}
+            config={widget.tableConfig}
+            refreshInterval={refreshInterval}
+            onConfigure={() => {
+              setConfiguringWidgetId(widget.i);
+              setIsEditingWidget(true);
+              setShowTableConfigDialog(true);
+            }}
+            onDataLoaded={(data) => {
               setWidgets(prevWidgets => 
                 prevWidgets.map(w => 
                   w.i === widget.i ? { ...w, _metricData: data } : w
@@ -972,6 +1140,30 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         </div>
         
         <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Refresh:</span>
+            <Select
+              value={refreshInterval.toString()}
+              onValueChange={(value) => {
+                const interval = parseInt(value, 10);
+                setRefreshInterval(interval);
+                localStorage.setItem('dashboard-refresh-interval', value);
+              }}
+            >
+              <SelectTrigger className="h-8 w-[90px] text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="5">5s</SelectItem>
+                <SelectItem value="10">10s</SelectItem>
+                <SelectItem value="30">30s</SelectItem>
+                <SelectItem value="60">1m</SelectItem>
+                <SelectItem value="300">5m</SelectItem>
+                <SelectItem value="0">Off</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
           {hasUnsavedChanges && (
             <Button onClick={saveLayout} size="sm" variant="default" disabled={isSaving}>
               <Save className="w-4 h-4 mr-2" />
@@ -1011,6 +1203,10 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
               <DropdownMenuItem onClick={() => addWidget('METRIC_DATA')}>
                 <BarChart3 className="w-4 h-4 mr-2" />
                 Metric Data Card
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => addWidget('TABLE')}>
+                <Table className="w-4 h-4 mr-2" />
+                Table
               </DropdownMenuItem>
               <DropdownMenuItem 
                 onSelect={(e) => e.preventDefault()}
@@ -1170,6 +1366,20 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         initialConfig={isEditingWidget && configuringWidgetId 
           ? widgets.find(w => w.i === configuringWidgetId)?.metricConfig 
           : undefined}  // Only load config when editing existing widget, not when creating new
+      />
+
+      {/* Table Data Card Configuration Dialog */}
+      <TableDataCardConfigDialog
+        open={showTableConfigDialog}
+        onClose={() => {
+          setShowTableConfigDialog(false);
+          setConfiguringWidgetId(null);
+          setIsEditingWidget(false);
+        }}
+        onSave={handleSaveTableConfig}
+        initialConfig={isEditingWidget && configuringWidgetId 
+          ? widgets.find(w => w.i === configuringWidgetId)?.tableConfig 
+          : undefined}
       />
 
       {/* Delete Widget Confirmation Dialog */}

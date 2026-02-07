@@ -31,6 +31,7 @@ export interface MetricDataCardConfig {
 
 interface MetricDataCardProps {
   config: MetricDataCardConfig;
+  refreshInterval?: number; // in seconds, 0 = off
   onConfigure?: () => void;
   onRefresh?: () => void;
   onDataLoaded?: (data: TimeSeriesResponse | null) => void;
@@ -63,7 +64,7 @@ interface TimeSeriesResponse {
   data: TimeSeriesDataPoint[];
 }
 
-export function MetricDataCard({ config, onConfigure, onRefresh, onDataLoaded }: MetricDataCardProps) {
+export function MetricDataCard({ config, refreshInterval = 30, onConfigure, onRefresh, onDataLoaded }: MetricDataCardProps) {
   const [data, setData] = useState<TimeSeriesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -102,10 +103,12 @@ export function MetricDataCard({ config, onConfigure, onRefresh, onDataLoaded }:
   useEffect(() => {
     fetchData();
     
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(fetchData, 30000);
-    return () => clearInterval(interval);
-  }, [config.deviceName, config.metricName, config.timeRange]);
+    // Auto-refresh based on global interval (0 = off)
+    if (refreshInterval > 0) {
+      const interval = setInterval(fetchData, refreshInterval * 1000);
+      return () => clearInterval(interval);
+    }
+  }, [config.deviceName, config.metricName, config.timeRange, refreshInterval]);
 
   const formatTime = (timeStr: string) => {
     const date = new Date(timeStr);
