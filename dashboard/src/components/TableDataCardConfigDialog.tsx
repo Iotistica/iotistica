@@ -15,12 +15,13 @@ interface TableDataCardConfigDialogProps {
   initialConfig?: TableDataCardConfig;
 }
 
-interface Device {
-  deviceName: string;
-}
-
-interface Metric {
-  metricName: string;
+interface EndpointDevice {
+  agent_uuid: string;
+  agent_name: string;
+  device_name: string;
+  protocol: string;
+  metric_count: string;
+  available_metrics: string[];
 }
 
 export function TableDataCardConfigDialog({ 
@@ -29,8 +30,8 @@ export function TableDataCardConfigDialog({
   onSave, 
   initialConfig 
 }: TableDataCardConfigDialogProps) {
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [metrics, setMetrics] = useState<Metric[]>([]);
+  const [devices, setDevices] = useState<EndpointDevice[]>([]);
+  const [availableMetrics, setAvailableMetrics] = useState<string[]>([]);
   const [selectedDevice, setSelectedDevice] = useState('');
   const [selectedMetric, setSelectedMetric] = useState('');
   const [timeRange, setTimeRange] = useState('1h');
@@ -90,16 +91,20 @@ export function TableDataCardConfigDialog({
   // Load metrics when device changes
   useEffect(() => {
     if (selectedDevice) {
-      fetchMetrics(selectedDevice);
+      const device = devices.find(d => d.device_name === selectedDevice);
+      if (device) {
+        setAvailableMetrics(device.available_metrics || []);
+      }
     } else {
-      setMetrics([]);
+      setAvailableMetrics([]);
     }
-  }, [selectedDevice]);
+  }, [selectedDevice, devices]);
 
   const fetchDevices = async () => {
     try {
       const token = localStorage.getItem('accessToken');
-      const response = await fetch(buildApiUrl('/api/v1/metrics/devices'), {
+      const url = buildApiUrl('/api/v1/metrics/devices');
+      const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -107,29 +112,11 @@ export function TableDataCardConfigDialog({
       if (response.ok) {
         const data = await response.json();
         setDevices(data.devices || []);
+      } else {
+        console.error('Failed to fetch devices:', response.status, response.statusText);
       }
     } catch (error) {
       console.error('Error fetching devices:', error);
-    }
-  };
-
-  const fetchMetrics = async (deviceName: string) => {
-    try {
-      const token = localStorage.getItem('accessToken');
-      const response = await fetch(
-        buildApiUrl(`/api/v1/metrics/${deviceName}/metrics`),
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }
-      );
-      if (response.ok) {
-        const data = await response.json();
-        setMetrics(data.metrics || []);
-      }
-    } catch (error) {
-      console.error('Error fetching metrics:', error);
     }
   };
 
@@ -138,7 +125,7 @@ export function TableDataCardConfigDialog({
       deviceName: selectedDevice,
       metricName: selectedMetric,
       timeRange,
-      title: title || `${selectedMetric} - Table`,
+      title: title || `${selectedMetric} - Metrics Table`,
       columns,
       pageSize: parseInt(pageSize, 10)
     };
@@ -166,8 +153,8 @@ export function TableDataCardConfigDialog({
               </SelectTrigger>
               <SelectContent>
                 {devices.map(device => (
-                  <SelectItem key={device.deviceName} value={device.deviceName}>
-                    {device.deviceName}
+                  <SelectItem key={device.device_name} value={device.device_name}>
+                    {device.device_name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -186,9 +173,9 @@ export function TableDataCardConfigDialog({
                 <SelectValue placeholder="Select metric" />
               </SelectTrigger>
               <SelectContent>
-                {metrics.map(metric => (
-                  <SelectItem key={metric.metricName} value={metric.metricName}>
-                    {metric.metricName}
+                {availableMetrics.map(metric => (
+                  <SelectItem key={metric} value={metric}>
+                    {metric}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -220,7 +207,7 @@ export function TableDataCardConfigDialog({
               id="title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder={selectedMetric ? `${selectedMetric} - Table` : 'Table'}
+              placeholder={selectedMetric ? `${selectedMetric} - Metrics Table` : 'Metrics Table'}
             />
           </div>
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, memo } from 'react';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Settings, RefreshCw, TrendingUp, TrendingDown, Minus } from 'lucide-react';
@@ -32,6 +32,7 @@ export interface MetricDataCardConfig {
 interface MetricDataCardProps {
   config: MetricDataCardConfig;
   refreshInterval?: number; // in seconds, 0 = off
+  refreshTrigger?: number; // timestamp to trigger manual refresh
   onConfigure?: () => void;
   onRefresh?: () => void;
   onDataLoaded?: (data: TimeSeriesResponse | null) => void;
@@ -64,11 +65,12 @@ interface TimeSeriesResponse {
   data: TimeSeriesDataPoint[];
 }
 
-export function MetricDataCard({ config, refreshInterval = 30, onConfigure, onRefresh, onDataLoaded }: MetricDataCardProps) {
+function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger, onConfigure, onRefresh, onDataLoaded }: MetricDataCardProps) {
   const [data, setData] = useState<TimeSeriesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
 
   const fetchData = async () => {
     try {
@@ -90,6 +92,7 @@ export function MetricDataCard({ config, refreshInterval = 30, onConfigure, onRe
       const result: TimeSeriesResponse = await response.json();
       setData(result);
       setError(null);
+      setLastRefreshed(new Date());
       onDataLoaded?.(result);
     } catch (err: any) {
       console.error('Error fetching metric data:', err);
@@ -108,7 +111,7 @@ export function MetricDataCard({ config, refreshInterval = 30, onConfigure, onRe
       const interval = setInterval(fetchData, refreshInterval * 1000);
       return () => clearInterval(interval);
     }
-  }, [config.deviceName, config.metricName, config.timeRange, refreshInterval]);
+  }, [config.deviceName, config.metricName, config.timeRange, refreshInterval, refreshTrigger]);
 
   const formatTime = (timeStr: string) => {
     const date = new Date(timeStr);
@@ -341,8 +344,13 @@ export function MetricDataCard({ config, refreshInterval = 30, onConfigure, onRe
               {renderChart()}
             </div>
 
-            <div className="text-xs text-muted-foreground mt-2 text-center">
-              {data.metadata.sampleCount} points • {data.metadata.aggregationLevel} aggregation
+            <div className="flex items-center justify-between text-xs text-muted-foreground mt-2">
+              <span>{data.metadata.sampleCount} points • {data.metadata.aggregationLevel} aggregation</span>
+              {lastRefreshed && (
+                <span className="text-right">
+                  Updated {lastRefreshed.toLocaleTimeString()}
+                </span>
+              )}
             </div>
           </>
         )}
@@ -372,3 +380,5 @@ export function getMetricBadges(data: TimeSeriesResponse | null, config: MetricD
     </div>
   );
 }
+
+export const MetricDataCard = memo(MetricDataCardComponent);

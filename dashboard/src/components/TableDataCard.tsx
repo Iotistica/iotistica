@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, memo } from 'react';
 import { Button } from './ui/button';
 import { Settings, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { buildApiUrl } from '../config/api';
@@ -22,6 +22,7 @@ export interface TableDataCardConfig {
 interface TableDataCardProps {
   config: TableDataCardConfig;
   refreshInterval?: number; // in seconds, 0 = off
+  refreshTrigger?: number; // timestamp to trigger manual refresh
   onConfigure?: () => void;
   onRefresh?: () => void;
   onDataLoaded?: (data: any) => void;
@@ -39,9 +40,10 @@ interface TableRow {
 type SortColumn = 'timestamp' | 'value' | 'min' | 'max' | 'avg' | 'quality';
 type SortDirection = 'asc' | 'desc';
 
-export function TableDataCard({ 
+function TableDataCardComponent({ 
   config, 
   refreshInterval = 30,
+  refreshTrigger,
   onConfigure, 
   onRefresh,
   onDataLoaded 
@@ -49,6 +51,7 @@ export function TableDataCard({
   const [data, setData] = useState<TableRow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortColumn, setSortColumn] = useState<SortColumn>('timestamp');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -67,7 +70,7 @@ export function TableDataCard({
     try {
       const token = localStorage.getItem('accessToken');
       const response = await fetch(
-        buildApiUrl(`/api/v1/metrics/${config.deviceName}/${config.metricName}/timeseries?timeRange=${config.timeRange}`),
+        buildApiUrl(`/api/v1/metrics/timeseries?deviceName=${encodeURIComponent(config.deviceName)}&metricName=${encodeURIComponent(config.metricName)}&timeRange=${config.timeRange}`),
         {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -83,15 +86,16 @@ export function TableDataCard({
       
       // Transform data for table display
       const tableData: TableRow[] = result.data.map((point: any) => ({
-        timestamp: point.timestamp,
-        value: point.value,
-        min: point.min,
-        max: point.max,
-        avg: point.avg,
-        quality: point.quality
+        timestamp: point.time,
+        value: point.avg_value,
+        min: point.min_value,
+        max: point.max_value,
+        avg: point.avg_value,
+        quality: point.quality_ratio ? point.quality_ratio * 100 : undefined
       }));
 
       setData(tableData);
+      setLastRefreshed(new Date());
       onDataLoaded?.(result);
     } catch (err) {
       console.error('Error fetching table data:', err);
@@ -108,7 +112,7 @@ export function TableDataCard({
       const interval = setInterval(fetchData, refreshInterval * 1000);
       return () => clearInterval(interval);
     }
-  }, [config.deviceName, config.metricName, config.timeRange, refreshInterval]);
+  }, [config.deviceName, config.metricName, config.timeRange, refreshInterval, refreshTrigger]);
 
   const handleSort = (column: SortColumn) => {
     if (sortColumn === column) {
@@ -302,8 +306,15 @@ export function TableDataCard({
       {/* Pagination */}
       {data.length > pageSize && (
         <div className="flex items-center justify-between p-2 border-t bg-muted/50 text-xs">
-          <div className="text-muted-foreground">
-            Showing {((currentPage - 1) * pageSize) + 1}-{Math.min(currentPage * pageSize, sortedData.length)} of {sortedData.length}
+          <div className="flex items-center gap-3">
+            <span className="text-muted-foreground">
+              Showing {((currentPage - 1) * pageSize) + 1}-{Math.min(currentPage * pageSize, sortedData.length)} of {sortedData.length}
+            </span>
+            {lastRefreshed && (
+              <span className="text-muted-foreground">
+                • Updated {lastRefreshed.toLocaleTimeString()}
+              </span>
+            )}
           </div>
           <div className="flex gap-1">
             <Button
@@ -327,6 +338,16 @@ export function TableDataCard({
           </div>
         </div>
       )}
+      {/* Show timestamp even without pagination */}
+      {data.length > 0 && data.length <= pageSize && lastRefreshed && (
+        <div className="flex items-center justify-end p-2 border-t bg-muted/50 text-xs">
+          <span className="text-muted-foreground">
+            Updated {lastRefreshed.toLocaleTimeString()}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
+
+export const TableDataCard = memo(TableDataCardComponent);

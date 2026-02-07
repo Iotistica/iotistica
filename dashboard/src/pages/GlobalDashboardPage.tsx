@@ -37,7 +37,9 @@ import {
   Edit2,
   ChevronDown,
   RefreshCw,
-  Settings
+  Settings,
+  Maximize2,
+  X
 } from 'lucide-react';
 import {
   Dialog,
@@ -122,7 +124,7 @@ const WIDGET_TYPES = {
   },
   TABLE: {
     id: 'table',
-    name: 'Table',
+    name: 'Metrics Table',
     icon: Table,
     minW: 4,
     minH: 6,
@@ -171,6 +173,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const [showMetricConfigDialog, setShowMetricConfigDialog] = useState(false);
   const [showTableConfigDialog, setShowTableConfigDialog] = useState(false);
   const [configuringWidgetId, setConfiguringWidgetId] = useState<string | null>(null);
+  const [refreshingWidgets, setRefreshingWidgets] = useState<Set<string>>(new Set());
   const [showDeleteConfirmDialog, setShowDeleteConfirmDialog] = useState(false);
   const [widgetToDelete, setWidgetToDelete] = useState<string | null>(null);
   const [showResetConfirmDialog, setShowResetConfirmDialog] = useState(false);
@@ -183,6 +186,18 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     const saved = localStorage.getItem('dashboard-refresh-interval');
     return saved ? parseInt(saved, 10) : 30;
   });
+  const [isKioskMode, setIsKioskMode] = useState<boolean>(() => {
+    const saved = localStorage.getItem('dashboard-kiosk-mode');
+    return saved === 'true';
+  });
+
+  const toggleKioskMode = () => {
+    const newKioskMode = !isKioskMode;
+    setIsKioskMode(newKioskMode);
+    localStorage.setItem('dashboard-kiosk-mode', newKioskMode.toString());
+    // Trigger a custom event for App.tsx to listen to
+    window.dispatchEvent(new CustomEvent('kiosk-mode-changed', { detail: { kioskMode: newKioskMode } }));
+  };
 
   useEffect(() => {
     loadAvailableLayouts();
@@ -628,7 +643,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         minW: widgetConfig.minW,
         minH: widgetConfig.minH,
         type: 'TABLE',
-        title: config.title || `${config.metricName} - Table`,
+        title: config.title || `${config.metricName} - Metrics Table`,
         tableConfig: config
       };
       setWidgets([...widgets, newWidget]);
@@ -643,6 +658,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     const isMetricWidget = widget.type === 'METRIC_DATA';
     const isTableWidget = widget.type === 'TABLE';
     const metricData = widget._metricData;
+    const isRefreshing = refreshingWidgets.has(widget.i);
     
     return (
       <div key={widget.i} className="h-full">
@@ -724,23 +740,36 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8 cursor-pointer"
+                      className="h-8 w-8 cursor-pointer hover:bg-primary/10 transition-colors"
                       onClick={(e) => {
                         e.stopPropagation();
                         e.preventDefault();
-                        // Trigger refresh by updating a timestamp
                         const updatedWidgets = widgets.map(w => 
                           w.i === widget.i ? { ...w, _refreshTrigger: Date.now() } : w
                         );
                         setWidgets(updatedWidgets);
+                        setRefreshingWidgets(prev => new Set(prev).add(widget.i));
+                        setTimeout(() => {
+                          setRefreshingWidgets(prev => {
+                            const next = new Set(prev);
+                            next.delete(widget.i);
+                            return next;
+                          });
+                        }, 1500);
                       }}
                     >
-                      <RefreshCw className="w-4 h-4" />
+                      <RefreshCw 
+                        className="w-4 h-4" 
+                        style={{ 
+                          transform: isRefreshing ? 'rotate(360deg)' : 'rotate(0deg)',
+                          transition: isRefreshing ? 'transform 1s linear' : 'none'
+                        }} 
+                      />
                     </Button>
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8 cursor-pointer"
+                      className="h-8 w-8 cursor-pointer hover:bg-primary/10 transition-colors"
                       onClick={(e) => {
                         e.stopPropagation();
                         e.preventDefault();
@@ -789,7 +818,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8 cursor-pointer"
+                      className="h-8 w-8 cursor-pointer hover:bg-primary/10 transition-colors"
                       onClick={(e) => {
                         e.stopPropagation();
                         e.preventDefault();
@@ -797,14 +826,28 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                           w.i === widget.i ? { ...w, _refreshTrigger: Date.now() } : w
                         );
                         setWidgets(updatedWidgets);
+                        setRefreshingWidgets(prev => new Set(prev).add(widget.i));
+                        setTimeout(() => {
+                          setRefreshingWidgets(prev => {
+                            const next = new Set(prev);
+                            next.delete(widget.i);
+                            return next;
+                          });
+                        }, 1500);
                       }}
                     >
-                      <RefreshCw className="w-4 h-4" />
+                      <RefreshCw 
+                        className="w-4 h-4" 
+                        style={{ 
+                          transform: isRefreshing ? 'rotate(360deg)' : 'rotate(0deg)',
+                          transition: isRefreshing ? 'transform 1s linear' : 'none'
+                        }} 
+                      />
                     </Button>
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8 cursor-pointer"
+                      className="h-8 w-8 cursor-pointer hover:bg-primary/10 transition-colors"
                       onClick={(e) => {
                         e.stopPropagation();
                         e.preventDefault();
@@ -988,6 +1031,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
             key={`${widget.i}-${widget.metricConfig?.timeRange || ''}`}
             config={widget.metricConfig}
             refreshInterval={refreshInterval}
+            refreshTrigger={widget._refreshTrigger}
             onConfigure={() => {
               setConfiguringWidgetId(widget.i);
               setIsEditingWidget(true);
@@ -1030,6 +1074,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
             key={`${widget.i}-${widget.tableConfig?.timeRange || ''}`}
             config={widget.tableConfig}
             refreshInterval={refreshInterval}
+            refreshTrigger={widget._refreshTrigger}
             onConfigure={() => {
               setConfiguringWidgetId(widget.i);
               setIsEditingWidget(true);
@@ -1063,8 +1108,21 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
   return (
     <div className="flex flex-col h-full">
-      {/* Toolbar */}
-      <div className="flex-none bg-card border-b border-border p-4 flex items-center justify-between">
+      {/* Exit Kiosk Mode Button - Fixed top right */}
+      {isKioskMode && (
+        <Button
+          onClick={toggleKioskMode}
+          size="icon"
+          variant="default"
+          className="fixed top-4 right-4 z-50 h-10 w-10 rounded-full shadow-lg hover:shadow-xl transition-shadow"
+        >
+          <X className="w-5 h-5" />
+        </Button>
+      )}
+      
+      {/* Toolbar - Hidden in kiosk mode */}
+      {!isKioskMode && (
+        <div className="flex-none bg-card border-b border-border p-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           {/* Dashboard Selector */}
           <DropdownMenu>
@@ -1176,6 +1234,19 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
             Reset
           </Button>
           
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button onClick={toggleKioskMode} size="sm" variant="outline">
+                  <Maximize2 className="w-4 h-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Enter Kiosk Mode</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button size="sm" variant="outline">
@@ -1206,7 +1277,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => addWidget('TABLE')}>
                 <Table className="w-4 h-4 mr-2" />
-                Table
+                Metrics Table
               </DropdownMenuItem>
               <DropdownMenuItem 
                 onSelect={(e) => e.preventDefault()}
@@ -1248,9 +1319,10 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           </Button>
         </div>
       </div>
+      )}
 
       {/* Grid Layout */}
-      <div className="flex-1 overflow-auto p-4">
+      <div className={`flex-1 overflow-auto ${isKioskMode ? 'p-0' : 'p-4'}`}>
         <ResponsiveGridLayout
           className="layout"
           layouts={{ lg: widgets }}

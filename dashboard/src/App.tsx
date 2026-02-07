@@ -65,6 +65,9 @@ export default function App() {
   const [editingDevice, setEditingDevice] = useState<Device | null>(null);
   const [currentView, setCurrentView] = useState<'metrics' | 'sensors' | 'endpoints' | 'mqtt' | 'jobs' | 'applications' | 'timeline' | 'usage' | 'analytics' | 'security' | 'maintenance' | 'logs' | 'settings' | 'tags' | 'tag-definitions' | 'account' | 'users' | 'profile' | 'dashboard' | 'digital-twin' | 'event-debugger'>('dashboard');
   const [debugMode, setDebugMode] = useState(false);
+  const [isKioskMode, setIsKioskMode] = useState<boolean>(() => {
+    return localStorage.getItem('dashboard-kiosk-mode') === 'true';
+  });
   
   // Memoize selected device to prevent unnecessary re-renders
   const selectedDevice = useMemo(() => {
@@ -257,6 +260,17 @@ export default function App() {
     window.addEventListener('open-device-tags', handleOpenTags);
     return () => window.removeEventListener('open-device-tags', handleOpenTags);
   }, [devices]);
+
+  // Listen for kiosk mode changes
+  useEffect(() => {
+    const handleKioskModeChange = (event: Event) => {
+      const customEvent = event as CustomEvent<{ kioskMode: boolean }>;
+      setIsKioskMode(customEvent.detail.kioskMode);
+    };
+
+    window.addEventListener('kiosk-mode-changed', handleKioskModeChange);
+    return () => window.removeEventListener('kiosk-mode-changed', handleKioskModeChange);
+  }, []);
 
   // Helper function to format last seen time
   const formatLastSeen = (timestamp: string | null): string => {
@@ -491,32 +505,36 @@ export default function App() {
 
     <div className="flex flex-col h-screen overflow-hidden">
 
-           {/* Header */}
-      <Header 
-        isAuthenticated={isAuthenticated}
-        onLogout={handleLogout}
-        userEmail={user?.email || ''}
-        userName={user?.username || ''}
-        deviceUuid={selectedDevice?.deviceUuid}
-        onAccountClick={() => setCurrentView('account')}
-        onUsersClick={() => setCurrentView('users')}
-        onProfileClick={() => setCurrentView('profile')}
-        onTagDefinitionsClick={() => setCurrentView('tag-definitions')}
-        onDigitalTwinClick={() => setCurrentView('digital-twin')}
-        userRole={user?.role || 'viewer'}
-      />
+           {/* Header - Hidden in kiosk mode */}
+      {!isKioskMode && (
+        <Header 
+          isAuthenticated={isAuthenticated}
+          onLogout={handleLogout}
+          userEmail={user?.email || ''}
+          userName={user?.username || ''}
+          deviceUuid={selectedDevice?.deviceUuid}
+          onAccountClick={() => setCurrentView('account')}
+          onUsersClick={() => setCurrentView('users')}
+          onProfileClick={() => setCurrentView('profile')}
+          onTagDefinitionsClick={() => setCurrentView('tag-definitions')}
+          onDigitalTwinClick={() => setCurrentView('digital-twin')}
+          userRole={user?.role || 'viewer'}
+        />
+      )}
 
       <div className="flex flex-1 overflow-hidden">
-                {/* Desktop Sidebar - Hidden on mobile, positioned on right */}
-        <div className="hidden lg:block">
-          <DeviceSidebar
-            devices={devices}
-            selectedDeviceId={selectedDeviceId}
-            onSelectDevice={handleSelectDevice}
-            onAddDevice={handleAddDevice}
-            onEditDevice={handleEditDevice}
-          />
-        </div>
+                {/* Desktop Sidebar - Hidden on mobile and in kiosk mode */}
+        {!isKioskMode && (
+          <div className="hidden lg:block">
+            <DeviceSidebar
+              devices={devices}
+              selectedDeviceId={selectedDeviceId}
+              onSelectDevice={handleSelectDevice}
+              onAddDevice={handleAddDevice}
+              onEditDevice={handleEditDevice}
+            />
+          </div>
+        )}
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col overflow-y-auto">
           {isLoadingDevices ? (
@@ -540,8 +558,9 @@ export default function App() {
             </div>
           ) : (
             <>
-          {/* Mobile Header with Menu Button - Sticky at top */}
-          <div className="lg:hidden bg-card border-b border-border p-4 flex items-center gap-3 sticky top-0 z-10">
+          {/* Mobile Header with Menu Button - Sticky at top - Hidden in kiosk mode */}
+          {!isKioskMode && (
+            <div className="lg:hidden bg-card border-b border-border p-4 flex items-center gap-3 sticky top-0 z-10">
             <Button
               variant="outline"
               size="icon"
@@ -568,9 +587,11 @@ export default function App() {
               </div>
             </div>
           </div>
+          )}
 
-          {/* View Toggle Buttons */}
-          <div className="bg-card border-b border-border px-6 py-3 flex gap-2 overflow-x-auto">
+          {/* View Toggle Buttons - Hidden in kiosk mode */}
+          {!isKioskMode && (
+            <div className="bg-card border-b border-border px-6 py-3 flex gap-2 overflow-x-auto">
             <Button
               variant={currentView === 'dashboard' ? 'default' : 'outline'}
               size="sm"
@@ -698,6 +719,7 @@ export default function App() {
               Tags
             </Button>
           </div>
+          )}
 
           {/* Conditional Content */}
           {currentView === 'dashboard' && (
