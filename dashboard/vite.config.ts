@@ -54,8 +54,9 @@
       outDir: 'build',
     },
     server: {
-      port: 3000,
-      open: true,
+      host: '0.0.0.0',
+      port: 8080, // Using higher port to avoid Windows restrictions
+      open: 'http://localhost:8080',
     },
     // Environment variables configuration
     // See: https://vitejs.dev/guide/env-and-mode.html

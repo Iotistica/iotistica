@@ -21,6 +21,7 @@ import {
   validateProvisioningKey,
   incrementProvisioningKeyUsage,
   createProvisioningKey,
+  ProvisioningKey,
 } from '../utils/provisioning-keys';
 import { tailscaleService } from './tailscale.service';
 import {
@@ -270,28 +271,150 @@ export class ProvisioningService {
     }
 
     // ============================================================
-    // PHYSICAL AGENT PATH (Existing code unchanged)
+    // VIRTUAL AGENT PATH (Device pre-created by dashboard)
     // ============================================================
-    // Validate provisioning key
-    const provisioningKeyRecord = await validateProvisioningKey(provisioningApiKey);
-
-    if (!provisioningKeyRecord.valid || !provisioningKeyRecord.keyRecord) {
-      await logProvisioningAttempt(ipAddress!, uuid, null, false, provisioningKeyRecord.error || 'Invalid provisioning key', userAgent);
-      throw new Error(provisioningKeyRecord.error || 'Invalid provisioning key');
-    }
-
-    const keyRecord = provisioningKeyRecord.keyRecord;
-
-    // Check if device already exists and is fully provisioned
+    
+    // Check if device already exists - critical for virtual agents
     const existingDevice = await DeviceModel.getByUuid(uuid);
+    
+    // Identify virtual agents by EITHER device_type='virtual' OR deployment_status is set
+    const isVirtualAgent = existingDevice && 
+                           (existingDevice.device_type === 'virtual' || !!existingDevice.deployment_status);
+    
+    if (isVirtualAgent) {
+      logger.info('Virtual agent registration detected - using existing device record', {
+        deviceUuid: uuid.substring(0, 8) + '...',
+        existingName: existingDevice.device_name,
+        existingType: existingDevice.device_type,
+        agentProvidedName: deviceName,
+        deploymentStatus: existingDevice.deployment_status,
+        provisioningState: existingDevice.provisioning_state
+      });
+      
+      // Validate provisioning key matches
+      if (!existingDevice.provisioned_by_key_id) {
+        throw new Error('Virtual agent missing provisioning key association');
+      }
+      
+      const existingKeyRecord = await query<ProvisioningKey>(
+        `SELECT * FROM provisioning_keys WHERE id = $1`,
+        [existingDevice.provisioned_by_key_id]
+      );
+      
+      if (existingKeyRecord.rows.length === 0) {
+        throw new Error('Provisioning key not found for virtual agent');
+      }
+      
+      const keyMatches = await bcrypt.compare(provisioningApiKey, existingKeyRecord.rows[0].key_hash);
+      if (!keyMatches) {
+        await logProvisioningAttempt(ipAddress!, uuid, existingDevice.provisioned_by_key_id, false, 'Provisioning key mismatch', userAgent);
+        throw new Error('Provisioning key does not match device record');
+      }
+      
+      const keyRecord = existingKeyRecord.rows[0];
+      
+      // Generate credentials
+      const [hashedApiKey, mqttCredentials, vpnCredentials] = await Promise.all([
+        bcrypt.hash(deviceApiKey, 10),
+        this.generateMqttCredentials(uuid),
+        this.generateVpnCredentials(uuid, existingDevice.device_name, ipAddress)
+      ]);
+      
+      // Update ONLY registration fields - preserve dashboard-created name, type, fleet, etc.
+      const deviceData: Partial<Device> = {
+        device_api_key_hash: hashedApiKey,
+        mqtt_username: mqttCredentials.username,
+        vpn_enabled: !!vpnCredentials,
+        vpn_ip_address: null,
+        mac_address: macAddress || null,
+        os_version: osVersion || null,
+        agent_version: agentVersion || null,
+        is_online: true,
+        is_active: true,
+        status: 'online',
+        provisioned_at: now,
+        provisioning_state: 'registered'
+      };
+      
+      if (devicePublicKey) {
+        deviceData.device_public_key = devicePublicKey;
+        deviceData.pop_verified = false;
+      }
+      
+      const device = await DeviceModel.upsert(uuid, deviceData);
+      
+      logger.info('Virtual agent registered successfully', {
+        deviceId: device.id,
+        deviceUuid: uuid.substring(0, 8) + '...',
+        deviceName: device.device_name,
+        deviceType: device.device_type
+      });
+      
+      await this.createDefaultTargetState(uuid, agentVersion, keyRecord.id);
+      await logProvisioningAttempt(ipAddress!, uuid, keyRecord.id, true, null, userAgent);
+      
+      // Generate PoP challenge if public key was provided
+      let challenge: string | undefined;
+      if (devicePublicKey) {
+        challenge = crypto.randomBytes(32).toString('base64url');
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        await DeviceModel.storeChallenge(uuid, challenge, expiresAt);
+      }
+      
+      // Use same response builder as physical agents
+      return this.buildProvisioningResponse(
+        device,
+        data,
+        keyRecord,
+        mqttCredentials,
+        vpnCredentials,
+        challenge
+      );
+    }
+    
+    // ============================================================
+    // PHYSICAL AGENT PATH (New device or existing physical device)
+    // ============================================================
+    
     if (existingDevice) {
       const isFullyProvisioned = existingDevice.provisioned_at && existingDevice.provisioning_state === 'registered';
       
       if (isFullyProvisioned) {
-        await logProvisioningAttempt(ipAddress!, uuid, keyRecord.id, false, 'Device already registered', userAgent);
+        await logProvisioningAttempt(ipAddress!, uuid, existingDevice.provisioned_by_key_id || null, false, 'Device already registered', userAgent);
         throw new Error('Device already registered');
       }
+      
+      // Use existing provisioning key if present
+      if (existingDevice.provisioned_by_key_id) {
+        const existingKeyRecord = await query<ProvisioningKey>(
+          `SELECT * FROM provisioning_keys WHERE id = $1`,
+          [existingDevice.provisioned_by_key_id]
+        );
+        
+        if (existingKeyRecord.rows.length === 0) {
+          throw new Error('Existing provisioning key not found');
+        }
+        
+        const keyMatches = await bcrypt.compare(provisioningApiKey, existingKeyRecord.rows[0].key_hash);
+        if (!keyMatches) {
+          await logProvisioningAttempt(ipAddress!, uuid, existingDevice.provisioned_by_key_id, false, 'Provisioning key mismatch', userAgent);
+          throw new Error('Provisioning key does not match device record');
+        }
+        
+        var keyRecord = existingKeyRecord.rows[0];
+      }
+    }
+    
+    // Validate provisioning key if not already validated
+    if (!existingDevice || !existingDevice.provisioned_by_key_id) {
+      const provisioningKeyRecord = await validateProvisioningKey(provisioningApiKey);
 
+      if (!provisioningKeyRecord.valid || !provisioningKeyRecord.keyRecord) {
+        await logProvisioningAttempt(ipAddress!, uuid, null, false, provisioningKeyRecord.error || 'Invalid provisioning key', userAgent);
+        throw new Error(provisioningKeyRecord.error || 'Invalid provisioning key');
+      }
+
+      var keyRecord = provisioningKeyRecord.keyRecord;
     }
 
     const [
@@ -304,7 +427,7 @@ export class ProvisioningService {
       this.generateVpnCredentials(uuid, deviceName, ipAddress)
     ]);
 
-    // Prepare device data
+    // Prepare device data for physical agents
     const deviceData: Partial<Device> = {
       device_name: deviceName,
       device_type: deviceType,
@@ -316,7 +439,7 @@ export class ProvisioningService {
       agent_version: agentVersion || null,
       mqtt_username: mqttCredentials.username,
       vpn_enabled: !!vpnCredentials,
-      vpn_ip_address: null, // Tailscale uses dynamic IP assignment
+      vpn_ip_address: null,
       is_online: true,
       is_active: true,
       status: 'online',
@@ -324,26 +447,21 @@ export class ProvisioningService {
       provisioning_state: 'registered'
     };
 
-    // Add public key if provided (for PoP)
     if (devicePublicKey) {
       logger.info('Device registration includes public key for PoP', {
         deviceUuid: uuid.substring(0, 8) + '...',
         deviceName,
-        publicKeyLength: devicePublicKey.length,
-        publicKeyType: devicePublicKey.includes('BEGIN EC PRIVATE KEY') ? 'EC' : 
-                      devicePublicKey.includes('BEGIN PUBLIC KEY') ? 'Generic' : 'Unknown'
+        publicKeyLength: devicePublicKey.length
       });
       deviceData.device_public_key = devicePublicKey;
-      deviceData.pop_verified = false; // Will be verified in key-exchange phase
+      deviceData.pop_verified = false;
     } else {
       logger.warn('⚠️ Device registered without public key - using LEGACY authentication', {
         deviceUuid: uuid.substring(0, 8) + '...',
-        deviceName,
-        message: 'Agent needs to generate key pair and send devicePublicKey for PoP authentication'
+        deviceName
       });
     }
 
-    // Upsert device with all provisioning fields atomically
     const device = await DeviceModel.upsert(uuid, deviceData);
     
     logger.info('Device upserted to database', {
@@ -353,13 +471,12 @@ export class ProvisioningService {
       popVerified: device.pop_verified
     });
 
-
-    // Create default target state with agent version (MUST happen before response)
-    // This ensures first poll after provisioning gets the correct target state
     await this.createDefaultTargetState(uuid, agentVersion, keyRecord.id);
 
-    // Increment provisioning key usage, fire and forget
-    incrementProvisioningKeyUsage(keyRecord.id).catch(err => console.error('Failed to increment provisioning key usage', err));
+    // Increment provisioning key usage for new physical devices
+    if (!existingDevice || !existingDevice.provisioned_by_key_id) {
+      incrementProvisioningKeyUsage(keyRecord.id).catch(err => console.error('Failed to increment provisioning key usage', err));
+    }
 
     // fire and forget
     eventPublisher.publish( 'device.provisioned',

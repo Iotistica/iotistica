@@ -553,6 +553,15 @@ export class DeviceManager {
 				this.deviceInfo.deviceId = response.id.toString();
 				this.deviceInfo.mqttBrokerConfig = response.mqtt.brokerConfig;
 				this.deviceInfo.apiTlsConfig = response.api?.tlsConfig;
+				
+				// Update device name/type from server response (critical for virtual agents)
+				// Virtual agents have pre-assigned names in the database that must be preserved
+				if (response.deviceName) {
+					this.deviceInfo.deviceName = response.deviceName;
+				}
+				if (response.deviceType) {
+					this.deviceInfo.deviceType = response.deviceType;
+				}
 
 				// Log full provisioning response for troubleshooting
 				this.logger?.infoSync('🔍 PROVISIONING RESPONSE RECEIVED', {

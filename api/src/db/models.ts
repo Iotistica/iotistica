@@ -131,6 +131,16 @@ export class DeviceModel {
     const existingDevice = await this.getByUuid(uuid);
     const wasOffline = existingDevice && !existingDevice.is_online;
     
+    // Don't auto-set online for virtual agents that haven't registered yet
+    const isVirtualAgentPending = existingDevice && 
+                                  existingDevice.device_type === 'virtual' && 
+                                  existingDevice.provisioning_state === 'pending';
+    
+    if (isVirtualAgentPending) {
+      // Virtual agent not yet deployed/running - don't mark as online
+      return existingDevice;
+    }
+    
     const result = await query<Device>(
       `INSERT INTO devices (uuid, is_online, is_active)
        VALUES ($1, true, true)
@@ -283,6 +293,16 @@ export class DeviceModel {
       }
     });
 
+    console.log('[DeviceModel.upsert] About to upsert device:', {
+      uuid: uuid.substring(0, 8) + '...',
+      insertFields,
+      device_type: data.device_type,
+      is_online: data.is_online,
+      status: data.status,
+      deployment_status: data.deployment_status,
+      provisioning_state: data.provisioning_state
+    });
+
     const result = await query<Device>(
       `INSERT INTO devices (${insertFields.join(', ')})
        VALUES (${insertPlaceholders.join(', ')})
@@ -291,6 +311,15 @@ export class DeviceModel {
        RETURNING *`,
       values
     );
+
+    console.log('[DeviceModel.upsert] Device upserted, returned values:', {
+      uuid: result.rows[0].uuid.substring(0, 8) + '...',
+      id: result.rows[0].id,
+      is_online: result.rows[0].is_online,
+      status: result.rows[0].status,
+      deployment_status: result.rows[0].deployment_status,
+      provisioning_state: result.rows[0].provisioning_state
+    });
 
     return result.rows[0];
   }
