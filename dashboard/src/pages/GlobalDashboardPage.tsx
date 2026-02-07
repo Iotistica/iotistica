@@ -1069,6 +1069,16 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
             </div>
           );
         }
+        
+        // Skip rendering table card if config is not set
+        if (!widget.tableConfig) {
+          return (
+            <div className="flex items-center justify-center h-full text-muted-foreground">
+              <p>Table configuration required</p>
+            </div>
+          );
+        }
+        
         return (
           <TableDataCard 
             key={`${widget.i}-${widget.tableConfig?.timeRange || ''}`}

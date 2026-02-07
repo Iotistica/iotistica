@@ -120,12 +120,22 @@ services:
             - TAILSCALE_ENABLED=false
             - MQTT_MONITOR_URL=${MQTT_MONITOR_URL:-http://mqtt-monitor:3500}
             - POSTOFFICE_URL=${POSTOFFICE_URL:-http://postoffice:3300}
+            # Virtual Agent K8s Configuration (local Docker Desktop)
+            - KUBECONFIG=/home/appuser/.kube/config
+            - VIRTUAL_AGENT_NAMESPACE=${VIRTUAL_AGENT_NAMESPACE:-virtual-agents}
+            - AGENT_IMAGE=${AGENT_IMAGE:-iotistic/agent:latest}
+            # Use host.docker.internal for K8s pods to reach Docker Compose services
+            - CLOUD_API_URL=${CLOUD_API_URL:-http://host.docker.internal:4002}
+            # Note: Agent expects CLOUD_API_ENDPOINT, but deployer reads CLOUD_API_URL and passes as CLOUD_API_ENDPOINT
+            - MQTT_BROKER_URL_VIRTUAL=${MQTT_BROKER_URL_VIRTUAL:-mqtt://host.docker.internal:5883}
         ports:
             - "${API_PORT_EXT:-4002}:3002"
             - "3443:3443"
         volumes:
             - ./certs:/app/certs:ro
             - iotistic-api-spool:/var/lib/iotistic/spool  # Persistent disk spool for circuit breaker
+            # Mount kubeconfig for local K8s access (accessible by appuser)
+            - ${USERPROFILE}/.kube:/home/appuser/.kube:ro
         healthcheck:
             test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
             interval: 10s

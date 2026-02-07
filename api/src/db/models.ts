@@ -54,6 +54,11 @@ export interface Device {
   vpn_bytes_sent?: number;
   vpn_bytes_received?: number;
   vpn_config_id?: number;
+  // Virtual Agent (K8s deployment) fields
+  deployment_status?: 'pending' | 'deploying' | 'running' | 'failed' | 'terminated' | null;
+  k8s_namespace?: string | null;
+  k8s_pod_name?: string | null;
+  helm_release_name?: string | null;
   created_at: Date;
   modified_at: Date;
 }

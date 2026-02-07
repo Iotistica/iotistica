@@ -374,23 +374,41 @@ export default function App() {
         toast.error(`Failed to update device: ${error.message}`, { id: 'update-device' });
       }
     } else {
-      // Add new device - register via API
+      // Add new device - unified endpoint for all types
       try {
-        toast.loading('Registering device...', { id: 'register-device' });
+        const isVirtual = deviceData.type === 'virtual';
+        
+        toast.loading(isVirtual ? 'Deploying virtual agent...' : 'Registering device...', { id: 'register-device' });
 
         const accessToken = localStorage.getItem('accessToken');
+        
+        // Unified request body for all device types
+        const requestBody: any = {
+          deviceName: deviceData.name,
+          deviceType: deviceData.type,
+        };
+        
+        // Add physical device fields
+        if (!isVirtual) {
+          requestBody.ipAddress = deviceData.ipAddress;
+          requestBody.macAddress = deviceData.macAddress;
+        } else {
+          // Add virtual agent fields
+          requestBody.fleetId = 'default'; // TODO: Get from user selection
+        }
+        
+        // Add tags if provided
+        if (deviceData.tags && Object.keys(deviceData.tags).length > 0) {
+          requestBody.tags = Object.entries(deviceData.tags).map(([key, value]) => ({ key, value }));
+        }
+        
         const response = await fetch(buildApiUrl('/api/v1/devices'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${accessToken}`,
           },
-          body: JSON.stringify({
-            deviceName: deviceData.name,
-            deviceType: deviceData.type,
-            ipAddress: deviceData.ipAddress,
-            macAddress: deviceData.macAddress
-          })
+          body: JSON.stringify(requestBody)
         });
 
         if (!response.ok) {
@@ -400,42 +418,32 @@ export default function App() {
 
         const result = await response.json();
         
-        // Add tags if provided
-        if (deviceData.tags && Object.keys(deviceData.tags).length > 0) {
-          const tagsResponse = await fetch(buildApiUrl(`/api/v1/devices/${result.device.uuid}/tags`), {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${accessToken}`,
-            },
-            body: JSON.stringify({
-              tags: deviceData.tags
-            })
-          });
-          
-          if (!tagsResponse.ok) {
-            const error = await tagsResponse.json();
-            console.error('Failed to add tags:', error);
-            // Don't throw - device creation succeeded
-          } else {
-            // Dispatch event to notify DeviceTagsPage to reload tags
-            window.dispatchEvent(new CustomEvent('device-tags-updated', { 
-              detail: { deviceUuid: result.device.uuid } 
-            }));
-          }
-        }
+        // Extract device info based on response format
+        const deviceUuid = result.deviceUuid || result.device?.uuid;
+        const isVirtualResponse = result.deploymentStatus !== undefined;
         
-        toast.success('Device registered successfully! Waiting for agent to connect.', { id: 'register-device' });
+        const successMessage = isVirtualResponse
+          ? `Virtual agent deployment initiated (${result.deploymentStatus})` 
+          : 'Device registered successfully! Waiting for agent to connect.';
+        
+        toast.success(successMessage, { id: 'register-device' });
+
+        // Dispatch tag update event if tags were added
+        if (deviceData.tags && Object.keys(deviceData.tags).length > 0) {
+          window.dispatchEvent(new CustomEvent('device-tags-updated', { 
+            detail: { deviceUuid } 
+          }));
+        }
 
         // Add device to local state with offline status
         const newDevice: Device = {
-          id: result.device.uuid,
-          deviceUuid: result.device.uuid,
-          name: result.device.deviceName,
-          type: result.device.deviceType,
-          ipAddress: result.device.ipAddress || 'N/A',
-          macAddress: result.device.macAddress || 'N/A',
-          status: 'offline', // Will be offline until agent connects
+          id: deviceUuid,
+          deviceUuid,
+          name: deviceData.name,
+          type: deviceData.type,
+          ipAddress: deviceData.ipAddress || 'N/A',
+          macAddress: deviceData.macAddress || 'N/A',
+          status: 'offline', // Will update when agent/pod connects
           lastSeen: 'Never',
           cpu: 0,
           memory: 0,

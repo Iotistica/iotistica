@@ -28,6 +28,8 @@ import logger from '../utils/logger';
 import { SystemConfig } from '../config/system-config';
 import deviceAuth from '../middleware/device-auth';
 import { jwtAuth } from '../middleware/jwt-auth';
+import { virtualAgentDeployer } from '../services/virtual-agent-deployer';
+import { provisioningService } from '../services/provisioning.service';
 
 console.log('[DEVICES-ROUTES] jwtAuth imported:', typeof jwtAuth, jwtAuth.name);
 
@@ -341,18 +343,26 @@ router.get('/devices/:uuid', async (req, res) => {
  */
 
 /**
- * Register a new device (pre-registration before agent connects)
+ * Register a new device (physical or virtual)
  * POST /api/v1/devices
  * 
- * Body:
- * - deviceName: Device name
+ * Body for physical devices:
+ * - deviceName: Device name (required)
  * - deviceType: Device type (gateway, edge-device, etc.)
  * - ipAddress: IP address (optional)
  * - macAddress: MAC address (optional)
+ * - tags: Array of {key, value} tags (optional)
+ * 
+ * Body for virtual agents:
+ * - deviceName: Device name (required)
+ * - deviceType: 'virtual' (required)
+ * - fleetId: Fleet ID (optional, default: 'default')
+ * - namespace: K8s namespace (optional, default: 'virtual-agents')
+ * - tags: Array of {key, value} tags (optional)
  */
-router.post('/devices', async (req, res) => {
+router.post('/devices', jwtAuth, async (req, res) => {
   try {
-    const { deviceName, deviceType, ipAddress, macAddress } = req.body;
+    const { deviceName, deviceType, ipAddress, macAddress, fleetId, namespace, tags } = req.body;
 
     if (!deviceName) {
       return res.status(400).json({
@@ -364,7 +374,62 @@ router.post('/devices', async (req, res) => {
     // Generate UUID for the device
     const { v4: uuidv4 } = require('uuid');
     const deviceUuid = uuidv4();
+    
+    const type = deviceType || 'gateway';
+    const isVirtual = type === 'virtual';
 
+    // ===== VIRTUAL AGENT PATH =====
+    if (isVirtual) {
+      logger.info('Creating virtual agent via unified endpoint', {
+        deviceUuid: deviceUuid.substring(0, 8) + '...',
+        deviceName,
+        fleetId,
+        namespace
+      });
+
+      // Generate device API key (will be injected to pod)
+      const crypto = require('crypto');
+      const deviceApiKey = crypto.randomBytes(32).toString('hex');
+
+      // Register device and trigger K8s deployment via provisioning service
+      const provisioningResponse = await provisioningService.registerDevice(
+        {
+          uuid: deviceUuid,
+          deviceName,
+          deviceType: 'virtual',
+          deviceApiKey,
+          provisioningApiKey: 'virtual-agent-auto-generated', // Will be server-generated
+          applicationId: fleetId ? parseInt(fleetId) : undefined,
+          namespace
+        },
+        req.ip,
+        req.get('user-agent')
+      );
+
+      // Save tags if provided
+      if (tags && Array.isArray(tags) && tags.length > 0) {
+        for (const tag of tags) {
+          await query(
+            `INSERT INTO device_tags (device_uuid, tag_key, tag_value)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (device_uuid, tag_key) DO UPDATE SET tag_value = EXCLUDED.tag_value`,
+            [deviceUuid, tag.key, tag.value]
+          );
+        }
+      }
+
+      return res.status(202).json({
+        success: true,
+        deviceUuid,
+        deviceName,
+        deviceType: 'virtual',
+        deploymentStatus: 'deploying',
+        namespace: namespace || process.env.VIRTUAL_AGENT_NAMESPACE || 'virtual-agents',
+        message: 'Virtual agent deployment initiated'
+      });
+    }
+
+    // ===== PHYSICAL DEVICE PATH =====
     // Create device record in database with is_active=false, provisioning_state='pending'
     const result = await query(
       `INSERT INTO devices (
@@ -383,7 +448,7 @@ router.post('/devices', async (req, res) => {
       [
         deviceUuid,
         deviceName,
-        deviceType || 'gateway',
+        type,
         ipAddress || null,
         macAddress || null,
         false, // Not online until agent connects
@@ -414,7 +479,7 @@ router.post('/devices', async (req, res) => {
       deviceUuid: deviceUuid,
       details: {
         deviceName,
-        deviceType: deviceType || 'gateway',
+        deviceType: type,
         ipAddress,
         macAddress,
         action: 'pre-registered'
@@ -423,7 +488,8 @@ router.post('/devices', async (req, res) => {
 
     logger.info('Device pre-registered', {
       deviceName,
-      deviceId: deviceUuid
+      deviceId: deviceUuid,
+      deviceType: type
     });
 
     res.status(201).json({
@@ -442,8 +508,23 @@ router.post('/devices', async (req, res) => {
   } catch (error: any) {
     logger.error('Error registering device', {
       error: error.message,
-      stack: error.stack
+      stack: error.stack,
+      body: req.body
     });
+
+    // Audit log for failures
+    await logAuditEvent({
+      eventType: AuditEventType.PROVISIONING_FAILED,
+      severity: AuditSeverity.ERROR,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      details: {
+        error: error.message,
+        deviceName: req.body.deviceName,
+        deviceType: req.body.deviceType
+      }
+    }).catch(err => logger.error('Audit log failed', err));
+
     res.status(500).json({
       error: 'Failed to register device',
       message: error.message
@@ -1596,6 +1677,230 @@ router.post('/devices/:uuid/update-agent', async (req, res) => {
 
     res.status(500).json({
       error: 'Failed to trigger agent update',
+      message: error.message
+    });
+  }
+});
+
+// ============================================================================
+// Virtual Agent Endpoints
+// ============================================================================
+
+/**
+ * Create and deploy a virtual agent
+ * POST /api/v1/devices/virtual
+ * Body: { deviceName, fleetId?, namespace?, description?, tags? }
+ */
+router.post('/devices/virtual', jwtAuth, async (req, res) => {
+  try {
+    const { deviceName, fleetId, namespace, description, tags } = req.body;
+
+    if (!deviceName) {
+      return res.status(400).json({
+        error: 'Device name required',
+        message: 'deviceName is required'
+      });
+    }
+
+    // Generate UUID for the virtual agent
+    const { v4: uuidv4 } = require('uuid');
+    const deviceUuid = uuidv4();
+    
+    // Generate device API key (will be injected to pod)
+    const crypto = require('crypto');
+    const deviceApiKey = crypto.randomBytes(32).toString('hex');
+
+    logger.info('Creating virtual agent', {
+      deviceUuid: deviceUuid.substring(0, 8) + '...',
+      deviceName,
+      fleetId,
+      namespace
+    });
+
+    // Register device and trigger K8s deployment via provisioning service
+    const provisioningResponse = await provisioningService.registerDevice(
+      {
+        uuid: deviceUuid,
+        deviceName,
+        deviceType: 'virtual',
+        deviceApiKey,
+        provisioningApiKey: 'virtual-agent-auto-generated', // Will be server-generated
+        applicationId: fleetId ? parseInt(fleetId) : undefined,
+        namespace
+      },
+      req.ip,
+      req.get('user-agent')
+    );
+
+    // Save tags if provided
+    if (tags && Array.isArray(tags) && tags.length > 0) {
+      for (const tag of tags) {
+        await query(
+          `INSERT INTO device_tags (device_uuid, tag_key, tag_value)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (device_uuid, tag_key) DO UPDATE SET tag_value = EXCLUDED.tag_value`,
+          [deviceUuid, tag.key, tag.value]
+        );
+      }
+    }
+
+    res.status(202).json({
+      message: 'Virtual agent deployment initiated',
+      deviceUuid,
+      deviceName,
+      deploymentStatus: 'deploying',
+      namespace: namespace || process.env.VIRTUAL_AGENT_NAMESPACE || 'virtual-agents'
+    });
+
+  } catch (error: any) {
+    logger.error('Error creating virtual agent', {
+      error: error.message,
+      stack: error.stack,
+      body: req.body
+    });
+
+    await logAuditEvent({
+      eventType: AuditEventType.PROVISIONING_FAILED,
+      severity: AuditSeverity.ERROR,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      details: {
+        error: error.message,
+        deviceName: req.body.deviceName,
+        deviceType: 'virtual'
+      }
+    }).catch(err => logger.error('Audit log failed', err));
+
+    res.status(500).json({
+      error: 'Failed to create virtual agent',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * Get virtual agent deployment status
+ * GET /api/v1/devices/:uuid/deployment-status
+ */
+router.get('/devices/:uuid/deployment-status', jwtAuth, async (req, res) => {
+  try {
+    const { uuid } = req.params;
+
+    const device = await DeviceModel.getByUuid(uuid);
+    if (!device) {
+      return res.status(404).json({
+        error: 'Device not found',
+        message: `Device ${uuid} not found`
+      });
+    }
+
+    if (device.device_type !== 'virtual') {
+      return res.status(400).json({
+        error: 'Not a virtual agent',
+        message: 'This endpoint is only for virtual agents'
+      });
+    }
+
+    // Get status from K8s deployer
+    const deploymentStatus = await virtualAgentDeployer.getStatus(uuid);
+
+    res.json({
+      deviceUuid: uuid,
+      deviceName: device.device_name,
+      deploymentStatus: deploymentStatus.status,
+      namespace: deploymentStatus.namespace,
+      podName: deploymentStatus.podName,
+      deploymentName: deploymentStatus.deploymentName,
+      isOnline: device.is_online,
+      deviceStatus: device.status,
+      message: deploymentStatus.message,
+      error: deploymentStatus.error
+    });
+
+  } catch (error: any) {
+    logger.error('Error getting deployment status', {
+      error: error.message,
+      stack: error.stack,
+      deviceId: req.params.uuid
+    });
+
+    res.status(500).json({
+      error: 'Failed to get deployment status',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * Destroy a virtual agent (delete pod and secret)
+ * DELETE /api/v1/devices/:uuid/virtual
+ */
+router.delete('/devices/:uuid/virtual', jwtAuth, async (req, res) => {
+  try {
+    const { uuid } = req.params;
+
+    const device = await DeviceModel.getByUuid(uuid);
+    if (!device) {
+      return res.status(404).json({
+        error: 'Device not found',
+        message: `Device ${uuid} not found`
+      });
+    }
+
+    if (device.device_type !== 'virtual') {
+      return res.status(400).json({
+        error: 'Not a virtual agent',
+        message: 'This endpoint is only for virtual agents'
+      });
+    }
+
+    logger.info('Destroying virtual agent', {
+      deviceUuid: uuid.substring(0, 8) + '...',
+      deviceName: device.device_name,
+      namespace: device.k8s_namespace
+    });
+
+    // Destroy K8s resources (deployment + secret)
+    await virtualAgentDeployer.destroy(uuid);
+
+    // Optionally delete device record from database
+    // await DeviceModel.delete(uuid);
+    // For now, we keep the device record but mark it as terminated
+
+    await logAuditEvent({
+      eventType: 'device.virtual_agent.destroyed' as any,
+      deviceUuid: uuid,
+      severity: AuditSeverity.INFO,
+      details: {
+        deviceName: device.device_name,
+        namespace: device.k8s_namespace
+      }
+    }).catch(err => logger.error('Audit log failed', err));
+
+    res.json({
+      message: 'Virtual agent destroyed successfully',
+      deviceUuid: uuid,
+      deviceName: device.device_name
+    });
+
+  } catch (error: any) {
+    logger.error('Error destroying virtual agent', {
+      error: error.message,
+      stack: error.stack,
+      deviceId: req.params.uuid
+    });
+
+    await logAuditEvent({
+      eventType: 'device.virtual_agent.destroy_failed' as any,
+      deviceUuid: req.params.uuid,
+      severity: AuditSeverity.ERROR,
+      details: {
+        error: error.message
+      }
+    }).catch(err => logger.error('Audit log failed', err));
+
+    res.status(500).json({
+      error: 'Failed to destroy virtual agent',
       message: error.message
     });
   }

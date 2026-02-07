@@ -20,6 +20,7 @@ import {
 import {
   validateProvisioningKey,
   incrementProvisioningKeyUsage,
+  createProvisioningKey,
 } from '../utils/provisioning-keys';
 import { tailscaleService } from './tailscale.service';
 import {
@@ -39,6 +40,7 @@ import {
 import { generateDefaultTargetState } from './default-target-state-generator';
 import logger from '../utils/logger';
 import { configService }  from './config.service';
+import { virtualAgentDeployer } from './virtual-agent-deployer';
 
 // Initialize event publisher for audit trail
 const eventPublisher = new EventPublisher();
@@ -54,6 +56,9 @@ export interface RegistrationRequest {
   macAddress?: string;
   osVersion?: string;
   agentVersion?: string;
+  // Virtual agent specific fields
+  isVirtual?: boolean;
+  namespace?: string;
 }
 
 export interface KeyExchangeRequest {
@@ -122,6 +127,151 @@ export class ProvisioningService {
     // Rate limiting check (database-backed)
     await checkProvisioningRateLimit(ipAddress!);
 
+    // ============================================================
+    // VIRTUAL AGENT PATH (Server-side provisioning key generation)
+    // ============================================================
+    if (deviceType === 'virtual') {
+      logger.info('Processing virtual agent registration', {
+        deviceUuid: uuid.substring(0, 8) + '...',
+        deviceName,
+        deviceType
+      });
+
+      // 1. Generate provisioning key server-side
+      const fleetId = data.applicationId?.toString() || 'default-fleet';
+      const provisioningKeyResult = await createProvisioningKey(
+        fleetId,
+        1, // max_devices: 1 (one-time use for this specific virtual agent)
+        1, // expires_in_days: 1 (short-lived for security)
+        `Auto-generated for virtual agent: ${deviceName}`,
+        'system' // created_by
+      );
+
+      const generatedProvisioningKey = provisioningKeyResult.key;
+      const provisioningKeyId = provisioningKeyResult.id;
+
+      logger.info('Provisioning key generated for virtual agent', {
+        deviceUuid: uuid.substring(0, 8) + '...',
+        provisioningKeyId,
+        fleetId
+      });
+
+      // 2. Hash device API key
+      const hashedApiKey = await bcrypt.hash(deviceApiKey, 10);
+
+      // 3. Create device record (pending deployment)
+      const deviceData: Partial<Device> = {
+        device_name: deviceName,
+        device_type: 'virtual',
+        device_api_key_hash: hashedApiKey,
+        fleet_id: fleetId,
+        provisioned_by_key_id: provisioningKeyId,
+        mac_address: macAddress || null,
+        os_version: osVersion || null,
+        agent_version: agentVersion || null,
+        deployment_status: 'pending',
+        k8s_namespace: (data as any).namespace || process.env.VIRTUAL_AGENT_NAMESPACE || 'virtual-agents',
+        is_online: false, // Not online yet (pod not running)
+        is_active: true,
+        status: 'deploying',
+        provisioned_at: null, // Will be set when agent self-provisions
+        provisioning_state: 'pending'
+      };
+
+      // Upsert device
+      const device = await DeviceModel.upsert(uuid, deviceData);
+
+      logger.info('Virtual agent device record created', {
+        deviceId: device.id,
+        deviceUuid: uuid.substring(0, 8) + '...',
+        deploymentStatus: 'pending'
+      });
+
+      // 4. Create default target state (needed for when pod comes online)
+      await this.createDefaultTargetState(uuid, agentVersion, provisioningKeyId);
+
+      // 5. Deploy to K8s with plaintext provisioning key
+      try {
+        await virtualAgentDeployer.deploy({
+          deviceUuid: device.uuid,
+          deviceName: device.device_name,
+          provisioningKey: generatedProvisioningKey, // Plaintext, injected to K8s Secret
+          fleetId: device.fleet_id,
+          namespace: device.k8s_namespace || undefined
+        });
+
+        logger.info('Virtual agent deployment initiated', {
+          deviceUuid: uuid.substring(0, 8) + '...',
+          namespace: device.k8s_namespace
+        });
+      } catch (deployError) {
+        logger.error('Virtual agent deployment failed', {
+          deviceUuid: uuid,
+          error: deployError instanceof Error ? deployError.message : String(deployError)
+        });
+
+        // Update device status to failed
+        await DeviceModel.update(device.uuid, {
+          deployment_status: 'failed',
+          status: 'offline'
+        });
+
+        throw new Error(`Virtual agent deployment failed: ${deployError instanceof Error ? deployError.message : String(deployError)}`);
+      }
+
+      // 6. Audit logging
+      await logAuditEvent({
+        eventType: AuditEventType.DEVICE_REGISTERED,
+        deviceUuid: uuid,
+        ipAddress,
+        userAgent,
+        severity: AuditSeverity.INFO,
+        details: {
+          deviceName,
+          deviceType: 'virtual',
+          fleetId,
+          namespace: device.k8s_namespace,
+          deploymentStatus: 'deploying'
+        }
+      }).catch(err => logger.error('audit failed', err));
+
+      // 7. Event publishing
+      await eventPublisher.publish(
+        'device.virtual-agent.deployed',
+        'device',
+        uuid,
+        {
+          device_name: deviceName,
+          device_type: 'virtual',
+          fleet_id: fleetId,
+          namespace: device.k8s_namespace,
+          created_at: now.toISOString()
+        }
+      ).catch(err => logger.error('event publish failed', err));
+
+      // 8. Return minimal response (NO provisioning key sent to client!)
+      return {
+        id: device.id,
+        uuid: device.uuid,
+        deviceName: device.device_name,
+        deviceType: device.device_type,
+        fleetId: device.fleet_id,
+        createdAt: device.created_at.toISOString(),
+        mqtt: {
+          username: '',
+          password: '',
+          broker: '',
+          topics: {
+            publish: [],
+            subscribe: []
+          }
+        }
+      } as any; // Minimal response for virtual agents
+    }
+
+    // ============================================================
+    // PHYSICAL AGENT PATH (Existing code unchanged)
+    // ============================================================
     // Validate provisioning key
     const provisioningKeyRecord = await validateProvisioningKey(provisioningApiKey);
 

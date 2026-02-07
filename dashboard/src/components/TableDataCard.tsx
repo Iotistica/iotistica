@@ -59,6 +59,12 @@ function TableDataCardComponent({
   const pageSize = config.pageSize || 10;
 
   const fetchData = async () => {
+    // Defensive check for missing config
+    if (!config) {
+      setError('Configuration is missing');
+      return;
+    }
+    
     if (!config.deviceName || !config.metricName || !config.timeRange) {
       setError('Missing configuration');
       return;
@@ -161,8 +167,8 @@ function TableDataCardComponent({
     return new Date(timestamp).toLocaleString();
   };
 
-  const formatValue = (value: number | undefined) => {
-    return value !== undefined ? value.toFixed(2) : '-';
+  const formatValue = (value: number | undefined | null) => {
+    return (value !== undefined && value !== null) ? value.toFixed(2) : '-';
   };
 
   return (
