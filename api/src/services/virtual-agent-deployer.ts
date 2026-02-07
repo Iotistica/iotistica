@@ -129,11 +129,26 @@ export class VirtualAgentDeployer {
   }
 
   /**
+   * Sanitize device name for Kubernetes DNS compliance
+   * - Lowercase
+   * - Max 63 characters
+   * - Only alphanumeric and hyphens
+   * - Start/end with alphanumeric
+   */
+  private sanitizeDnsName(name: string): string {
+    return name
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '-') // Replace invalid chars with hyphens
+      .replace(/^-+|-+$/g, '') // Remove leading/trailing hyphens
+      .substring(0, 63); // Max DNS label length
+  }
+
+  /**
    * Deploy a virtual agent to Kubernetes
    */
   async deploy(config: VirtualAgentConfig): Promise<void> {
     const namespace = config.namespace || this.defaultNamespace;
-    const name = `agent-${config.deviceUuid.substring(0, 8)}`;
+    const name = this.sanitizeDnsName(config.deviceName); // Use device name instead of UUID
     const secretName = `${name}-prov-key`;
 
     logger.info('Starting virtual agent deployment', {
@@ -364,7 +379,7 @@ export class VirtualAgentDeployer {
       }
 
       const namespace = device.k8s_namespace || this.defaultNamespace;
-      const deploymentName = device.helm_release_name || `agent-${deviceUuid.substring(0, 8)}`;
+      const deploymentName = device.helm_release_name || this.sanitizeDnsName(device.device_name);
 
       // Get deployment
       const deployment = await this.appsApi.readNamespacedDeployment(deploymentName, namespace);
@@ -435,7 +450,7 @@ export class VirtualAgentDeployer {
       }
 
       const namespace = device.k8s_namespace || this.defaultNamespace;
-      const name = device.helm_release_name || `agent-${deviceUuid.substring(0, 8)}`;
+      const name = device.helm_release_name || this.sanitizeDnsName(device.device_name);
       const secretName = `${name}-prov-key`;
 
       logger.info('Destroying virtual agent', {
