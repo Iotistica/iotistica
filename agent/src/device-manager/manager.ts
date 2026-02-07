@@ -203,7 +203,7 @@ export class DeviceManager {
 			const keyMetadata = parseAPIKey(newApiKey);
 			
 			this.deviceInfo = {
-				uuid: this.uuidGenerator.generate(),
+				uuid: process.env.DEVICE_UUID || this.uuidGenerator.generate(), // Use pre-assigned UUID for virtual agents
 				deviceApiKey: newApiKey,
 				provisioned: false,
 				provisioningState: 'new',
