@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { getDeviceTags } from "@/services/deviceTags";
-import { Monitor, Smartphone, Server, Laptop, Search, Plus, Filter, Edit, X, Tag, ChevronRight } from "lucide-react";
+import { Monitor, Smartphone, Server, Laptop, Search, Plus, Filter, Edit, X, Tag, ChevronRight, Container } from "lucide-react";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
@@ -25,7 +25,7 @@ export interface Device {
   id: string;
   deviceUuid: string;
   name: string;
-  type: "desktop" | "laptop" | "mobile" | "server" | "gateway" | "edge-device" | "iot-hub" | "plc" | "controller" | "sensor-node" | "standalone";
+  type: "desktop" | "laptop" | "mobile" | "server" | "gateway" | "edge-device" | "iot-hub" | "plc" | "controller" | "sensor-node" | "standalone" | "virtual";
   status: "online" | "offline" | "warning" | "pending";
   ipAddress: string;
   macAddress?: string;
@@ -56,6 +56,7 @@ const deviceIcons = {
   controller: Server,
   "sensor-node": Smartphone,
   standalone: Monitor,
+  virtual: Container, // Containerized K8s pod
 };
 
 const statusColors = {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Copy, Check, RefreshCw, X } from "lucide-react";
+import { X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -42,11 +42,6 @@ export function AddEditDeviceDialog({
   onSave,
 }: AddEditDeviceDialogProps) {
   const isEditMode = !!device;
-  const [copiedCommand, setCopiedCommand] = useState(false);
-  const [copiedKey, setCopiedKey] = useState(false);
-  const [provisioningKey, setProvisioningKey] = useState("");
-  const [provisioningKeyId, setProvisioningKeyId] = useState<string | null>(null);
-  const [isLoadingKey, setIsLoadingKey] = useState(false);
   const [tags, setTags] = useState<Record<string, string>>({});
   const [tagDefinitions, setTagDefinitions] = useState<TagDefinition[]>([]);
   const [newTagKey, setNewTagKey] = useState("");
@@ -54,7 +49,7 @@ export function AddEditDeviceDialog({
   const [selectedTagDefinition, setSelectedTagDefinition] = useState<TagDefinition | null>(null);
   const [formData, setFormData] = useState({
     name: "",
-    type: "server" as Device['type'],
+    type: "virtual" as Device['type'],
     description: "",
     ipAddress: "",
     macAddress: "",
@@ -64,9 +59,6 @@ export function AddEditDeviceDialog({
     memory: 0,
     disk: 0,
   });
-
-  // Install command
-  const installCommand = `curl -sfL https://apps.iotistica.com/agent/install | sh`;
 
   // Load tag definitions
   const loadTagDefinitions = async () => {
@@ -83,40 +75,6 @@ export function AddEditDeviceDialog({
   const availableTagKeys = tagDefinitions.filter(
     def => !tags[def.key]
   );
-
-  // Fetch provisioning key from API
-  const fetchProvisioningKey = async (isRegenerate = false) => {
-    setIsLoadingKey(true);
-    try {
-      const response = await fetch(buildApiUrl('/api/v1/provisioning-keys/generate'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fleetId: 'default-fleet',
-          newKey: isRegenerate,
-          previousKeyId: isRegenerate ? provisioningKeyId : undefined,
-        }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Failed to generate provisioning key');
-      }
-
-      const data = await response.json();
-      setProvisioningKey(data.key);
-      setProvisioningKeyId(data.id);
-      
-      if (isRegenerate) {
-        toast.success("New provisioning key generated and old key invalidated");
-      }
-    } catch (error: any) {
-      console.error('Error generating provisioning key:', error);
-      toast.error(error.message || 'Failed to generate provisioning key');
-    } finally {
-      setIsLoadingKey(false);
-    }
-  };
 
   // Separate effect for initializing form when dialog opens
   useEffect(() => {
@@ -163,7 +121,7 @@ export function AddEditDeviceDialog({
     } else {
       setFormData({
         name: "",
-        type: "server",
+        type: "virtual",
         description: "",
         ipAddress: "",
         macAddress: "",
@@ -174,9 +132,6 @@ export function AddEditDeviceDialog({
         disk: 0,
       });
       setTags({});
-      if (!provisioningKey) {
-        fetchProvisioningKey(false);
-      }
     }
 
     loadTagDefinitions();
@@ -240,24 +195,6 @@ export function AddEditDeviceDialog({
     onOpenChange(false);
   };
 
-  const copyInstallCommand = () => {
-    navigator.clipboard.writeText(installCommand);
-    setCopiedCommand(true);
-    toast.success("Install command copied to clipboard");
-    setTimeout(() => setCopiedCommand(false), 2000);
-  };
-
-  const copyProvisioningKey = () => {
-    navigator.clipboard.writeText(provisioningKey);
-    setCopiedKey(true);
-    toast.success("Provisioning key copied to clipboard");
-    setTimeout(() => setCopiedKey(false), 2000);
-  };
-
-  const regenerateProvisioningKey = async () => {
-    await fetchProvisioningKey(true);
-  };
-
   const handleAddTag = () => {
     console.log('[DEBUG handleAddTag] Called with:', { newTagKey, newTagValue, currentTags: tags });
     
@@ -319,11 +256,11 @@ export function AddEditDeviceDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[95vh] overflow-hidden flex flex-col">
         <DialogHeader className="flex-shrink-0">
-          <DialogTitle>{isEditMode ? "Edit Device" : "Add New Agent"}</DialogTitle>
+          <DialogTitle>{isEditMode ? "Edit Device" : "Add Virtual Agent"}</DialogTitle>
           <DialogDescription>
             {isEditMode
               ? "Update agent information and settings"
-              : "Configure a new agent to add to your management dashboard"}
+              : "Deploy a containerized agent to your Kubernetes cluster"}
           </DialogDescription>
         </DialogHeader>
 
@@ -332,7 +269,7 @@ export function AddEditDeviceDialog({
             <Label htmlFor="device-name">Agent Name *</Label>
             <Input
               id="device-name"
-              placeholder="Raspberry-01"
+              placeholder="virtual-agent-001"
               value={formData.name}
               onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
             />
@@ -472,62 +409,25 @@ export function AddEditDeviceDialog({
           )}
     
 
-          {(!isEditMode || formData.status === "pending") && (
-            <div className="space-y-4 pt-4 border-t border-border">
-              <div className="space-y-2">
-                <Label htmlFor="provisioning-key" className="text-sm font-semibold text-foreground">Provisioning Key</Label>
-                <div className="relative bg-muted border border-border rounded-md px-3 py-2.5">
-                  <code className="block font-mono text-xs text-foreground select-all break-all leading-relaxed pr-20">
-                    {isLoadingKey ? "Generating..." : (provisioningKey || "Loading...")}
-                  </code>
-                  <div className="absolute top-2 right-2 flex gap-1">
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="h-8 w-8"
-                      onClick={copyProvisioningKey}
-                      disabled={isLoadingKey || !provisioningKey}
-                    >
-                      {copiedKey ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4 text-muted-foreground" />}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="h-8 w-8 hover:bg-gray-200"
-                      onClick={regenerateProvisioningKey}
-                      disabled={isLoadingKey}
-                    >
-                      <RefreshCw className={`w-4 h-4 text-gray-600 ${isLoadingKey ? 'animate-spin' : ''}`} />
-                    </Button>
+          {!isEditMode && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
+              <div className="flex gap-3">
+                <div className="flex-shrink-0">
+                  <svg className="h-5 w-5 text-blue-600 dark:text-blue-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-sm font-medium text-blue-900 dark:text-blue-100">Virtual Agent Deployment</h3>
+                  <div className="mt-2 text-sm text-blue-700 dark:text-blue-300">
+                    <p>A containerized agent will be automatically deployed to your Kubernetes cluster and will self-provision on startup.</p>
+                    <ul className="mt-2 list-disc list-inside space-y-1">
+                      <li>No manual installation required</li>
+                      <li>Automatic provisioning with cloud platform</li>
+                      <li>Managed via Kubernetes/Helm</li>
+                    </ul>
                   </div>
                 </div>
-                <p className="text-xs text-gray-500">
-                  Use this key during device provisioning. You can regenerate it if needed.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="install-command" className="text-sm font-semibold text-foreground">Install Command</Label>
-                <div className="relative bg-black border border-gray-700 rounded-md px-4 py-3" style={{ backgroundColor: '#0d1117' }}>
-                  <code className="block font-mono text-sm whitespace-pre-wrap break-all select-all pr-10" style={{ color: '#00ff41' }}>
-                    {installCommand}
-                  </code>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="absolute top-2 right-2 h-8 w-8 hover:bg-gray-800/50"
-                    style={{ color: '#00ff41' }}
-                    onClick={copyInstallCommand}
-                  >
-                    {copiedCommand ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                  </Button>
-                </div>
-                <p className="text-xs text-gray-500">
-                  Run this command on the device to install the agent and connect it to Iotistic
-                </p>
               </div>
             </div>
           )}
