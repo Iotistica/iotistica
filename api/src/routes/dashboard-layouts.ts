@@ -36,7 +36,7 @@ router.get('/:deviceUuid', async (req: AuthRequest, res: Response) => {
 
     // First try to get user's default layout
     const defaultResult = await query(`
-      SELECT id, layout_name, widgets, is_default, created_at, updated_at
+      SELECT id, layout_name, widgets, is_default, share_token, created_at, updated_at
       FROM dashboard_layouts
       WHERE user_id = $1 AND ${isGlobal ? 'device_uuid IS NULL' : 'device_uuid = $2'} AND is_default = true
       LIMIT 1
@@ -49,6 +49,7 @@ router.get('/:deviceUuid', async (req: AuthRequest, res: Response) => {
         layoutName: layout.layout_name,
         widgets: layout.widgets,
         isDefault: layout.is_default,
+        shareToken: layout.share_token,
         createdAt: layout.created_at,
         updatedAt: layout.updated_at
       });
@@ -56,7 +57,7 @@ router.get('/:deviceUuid', async (req: AuthRequest, res: Response) => {
 
     // If no default, get most recently updated layout
     const latestResult = await query(`
-      SELECT id, layout_name, widgets, is_default, created_at, updated_at
+      SELECT id, layout_name, widgets, is_default, share_token, created_at, updated_at
       FROM dashboard_layouts
       WHERE user_id = $1 AND ${isGlobal ? 'device_uuid IS NULL' : 'device_uuid = $2'}
       ORDER BY updated_at DESC
@@ -70,6 +71,7 @@ router.get('/:deviceUuid', async (req: AuthRequest, res: Response) => {
         layoutName: layout.layout_name,
         widgets: layout.widgets,
         isDefault: layout.is_default,
+        shareToken: layout.share_token,
         createdAt: layout.created_at,
         updatedAt: layout.updated_at
       });
@@ -100,7 +102,7 @@ router.get('/:deviceUuid/all', async (req: AuthRequest, res: Response) => {
     const deviceUuidValue = isGlobal ? null : deviceUuid;
 
     const result = await query(`
-      SELECT id, layout_name, widgets, is_default, created_at, updated_at
+      SELECT id, layout_name, widgets, is_default, share_token, created_at, updated_at
       FROM dashboard_layouts
       WHERE user_id = $1 AND ${isGlobal ? 'device_uuid IS NULL' : 'device_uuid = $2'}
       ORDER BY is_default DESC, layout_name ASC
@@ -111,6 +113,7 @@ router.get('/:deviceUuid/all', async (req: AuthRequest, res: Response) => {
       layoutName: layout.layout_name,
       widgetCount: Array.isArray(layout.widgets) ? layout.widgets.length : 0,
       isDefault: layout.is_default,
+      shareToken: layout.share_token,
       createdAt: layout.created_at,
       updatedAt: layout.updated_at
     }));
@@ -224,6 +227,45 @@ router.post('/:deviceUuid', async (req: AuthRequest, res: Response) => {
 });
 
 /**
+ * GET /api/v1/dashboard-layouts/by-share-token/:shareToken
+ * Get a dashboard layout by share token (public access for shared dashboards)
+ */
+router.get('/by-share-token/:shareToken', async (req: AuthRequest, res: Response) => {
+  try {
+    const { shareToken } = req.params;
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const result = await query(`
+      SELECT id, layout_name, widgets, is_default, share_token, created_at, updated_at
+      FROM dashboard_layouts
+      WHERE share_token = $1
+    `, [shareToken]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Dashboard not found' });
+    }
+
+    const layout = result.rows[0];
+    res.json({
+      id: layout.id,
+      layoutName: layout.layout_name,
+      widgets: layout.widgets,
+      isDefault: layout.is_default,
+      shareToken: layout.share_token,
+      createdAt: layout.created_at,
+      updatedAt: layout.updated_at
+    });
+  } catch (error) {
+    console.error('Error fetching layout by share token:', error);
+    res.status(500).json({ error: 'Failed to fetch layout' });
+  }
+});
+
+/**
  * GET /api/v1/dashboard-layouts/by-id/:layoutId
  * Get a specific dashboard layout by ID
  */
@@ -237,7 +279,7 @@ router.get('/by-id/:layoutId', async (req: AuthRequest, res: Response) => {
     }
 
     const result = await query(`
-      SELECT id, layout_name, widgets, is_default, created_at, updated_at
+      SELECT id, layout_name, widgets, is_default, share_token, created_at, updated_at
       FROM dashboard_layouts
       WHERE id = $1 AND user_id = $2
     `, [layoutId, userId]);
@@ -252,6 +294,7 @@ router.get('/by-id/:layoutId', async (req: AuthRequest, res: Response) => {
       layoutName: layout.layout_name,
       widgets: layout.widgets,
       isDefault: layout.is_default,
+      shareToken: layout.share_token,
       createdAt: layout.created_at,
       updatedAt: layout.updated_at
     });

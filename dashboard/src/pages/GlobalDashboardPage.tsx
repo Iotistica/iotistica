@@ -39,7 +39,10 @@ import {
   RefreshCw,
   Settings,
   Maximize2,
-  X
+  X,
+  Gauge,
+  Share2,
+  Copy
 } from 'lucide-react';
 import {
   Dialog,
@@ -60,6 +63,8 @@ import {
 import { Device } from '../components/DeviceSidebar';
 import { MetricDataCard, type MetricDataCardConfig } from '../components/MetricDataCard';
 import { MetricDataCardConfigDialog } from '../components/MetricDataCardConfigDialog';
+import MetricValueCard, { type MetricValueCardConfig } from '../components/MetricValueCard';
+import MetricValueCardConfigDialog from '../components/MetricValueCardConfigDialog';
 import { TableDataCard, type TableDataCardConfig } from '../components/TableDataCard';
 import { TableDataCardConfigDialog } from '../components/TableDataCardConfigDialog';
 import { Table } from 'lucide-react';
@@ -122,6 +127,15 @@ const WIDGET_TYPES = {
     defaultW: 6,
     defaultH: 8
   },
+  METRIC_VALUE: {
+    id: 'metric-value',
+    name: 'Metric Value Card',
+    icon: Gauge,
+    minW: 2,
+    minH: 2,
+    defaultW: 2,
+    defaultH: 2
+  },
   TABLE: {
     id: 'table',
     name: 'Metrics Table',
@@ -138,6 +152,7 @@ interface DashboardWidget extends Layout {
   title: string;
   deviceId?: string; // For device-specific widgets
   metricConfig?: MetricDataCardConfig; // For metric data widgets
+  metricValueConfig?: MetricValueCardConfig; // For metric value widgets
   tableConfig?: TableDataCardConfig; // For table widgets
   _metricData?: any; // Runtime data for badge rendering
   _refreshTrigger?: number; // Timestamp to trigger manual refresh
@@ -148,6 +163,7 @@ interface DashboardLayout {
   layoutName: string;
   widgetCount: number;
   isDefault: boolean;
+  shareToken: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -167,10 +183,12 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const [availableLayouts, setAvailableLayouts] = useState<DashboardLayout[]>([]);
   const [currentLayoutId, setCurrentLayoutId] = useState<number | null>(null);
   const [currentLayoutName, setCurrentLayoutName] = useState<string>('Default');
+  const [currentShareToken, setCurrentShareToken] = useState<string | null>(null);
   const [showNewDashboardDialog, setShowNewDashboardDialog] = useState(false);
   const [showRenameDashboardDialog, setShowRenameDashboardDialog] = useState(false);
   const [newDashboardName, setNewDashboardName] = useState('');
   const [showMetricConfigDialog, setShowMetricConfigDialog] = useState(false);
+  const [showMetricValueConfigDialog, setShowMetricValueConfigDialog] = useState(false);
   const [showTableConfigDialog, setShowTableConfigDialog] = useState(false);
   const [configuringWidgetId, setConfiguringWidgetId] = useState<string | null>(null);
   const [refreshingWidgets, setRefreshingWidgets] = useState<Set<string>>(new Set());
@@ -182,6 +200,9 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const [showDeleteDashboardDialog, setShowDeleteDashboardDialog] = useState(false);
   const [dashboardToDelete, setDashboardToDelete] = useState<number | null>(null);
   const [isEditingWidget, setIsEditingWidget] = useState(false);
+  const [showShareDialog, setShowShareDialog] = useState(false);
+  const [shareUrl, setShareUrl] = useState('');
+  const [shareCopied, setShareCopied] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState<number>(() => {
     const saved = localStorage.getItem('dashboard-refresh-interval');
     return saved ? parseInt(saved, 10) : 30;
@@ -199,8 +220,44 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     window.dispatchEvent(new CustomEvent('kiosk-mode-changed', { detail: { kioskMode: newKioskMode } }));
   };
 
+  const shareDashboard = () => {
+    if (!currentShareToken) {
+      setShareUrl('');
+      setShareCopied(false);
+      setShowShareDialog(true);
+      return;
+    }
+    
+    const url = new URL(window.location.href);
+    url.searchParams.set('dashboard', currentShareToken);
+    setShareUrl(url.toString());
+    setShareCopied(false);
+    setShowShareDialog(true);
+  };
+
+  const copyShareUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+    }
+  };
+
   useEffect(() => {
     loadAvailableLayouts();
+    
+    // Check for dashboard share token in URL query params
+    const params = new URLSearchParams(window.location.search);
+    const dashboardToken = params.get('dashboard');
+    
+    if (dashboardToken) {
+      // Try to load by share token (UUID format)
+      loadLayoutByShareToken(dashboardToken);
+      return;
+    }
+    
     loadLayout();
   }, []);
 
@@ -221,6 +278,35 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     }
   };
 
+  const loadLayoutByShareToken = async (shareToken: string) => {
+    try {
+      setIsLoading(true);
+      
+      const response = await fetch(`http://localhost:4002/api/v1/dashboard-layouts/by-share-token/${shareToken}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setWidgets(data.widgets || []);
+        setCurrentLayoutId(data.id);
+        setCurrentLayoutName(data.layoutName || 'Shared Dashboard');
+        setCurrentShareToken(data.shareToken);
+        setHasUnsavedChanges(false);
+      } else {
+        console.error('Dashboard not found');
+        loadLayout(); // Fallback to default
+      }
+    } catch (error) {
+      console.error('Error loading shared dashboard:', error);
+      loadLayout(); // Fallback to default
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const loadLayout = async (layoutId?: number) => {
     try {
       setIsLoading(true);
@@ -238,6 +324,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           setWidgets(data.widgets || []);
           setCurrentLayoutId(layoutId);
           setCurrentLayoutName(data.layoutName || 'Default');
+          setCurrentShareToken(data.shareToken);
           setHasUnsavedChanges(false);
           return;
         }
@@ -256,6 +343,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           setWidgets(data.widgets);
           setCurrentLayoutId(data.id || null);
           setCurrentLayoutName(data.layoutName || 'Default');
+          setCurrentShareToken(data.shareToken || null);
         } else {
           loadDefaultLayout();
         }
@@ -463,11 +551,26 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       return;
     }
     await loadLayout(layoutId);
+    
+    // Update URL with share token (without page reload)
+    if (currentShareToken) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('dashboard', currentShareToken);
+      window.history.pushState({}, '', url.toString());
+    }
   };
 
   const confirmSwitchDashboard = async () => {
     if (pendingLayoutSwitch !== null) {
       await loadLayout(pendingLayoutSwitch);
+      
+      // Update URL with share token (without page reload)
+      if (currentShareToken) {
+        const url = new URL(window.location.href);
+        url.searchParams.set('dashboard', currentShareToken);
+        window.history.pushState({}, '', url.toString());
+      }
+      
       setShowUnsavedChangesDialog(false);
       setPendingLayoutSwitch(null);
     }
@@ -546,6 +649,14 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       return;
     }
 
+    if (type === 'METRIC_VALUE') {
+      // Open config dialog for metric value widgets
+      setConfiguringWidgetId(`metric-value-${Date.now()}`);
+      setIsEditingWidget(false);  // Flag as new widget, not editing
+      setShowMetricValueConfigDialog(true);
+      return;
+    }
+
     if (type === 'TABLE') {
       // Open config dialog for table widgets
       setConfiguringWidgetId(`table-${Date.now()}`);
@@ -592,7 +703,12 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       // Update existing widget
       const updatedWidgets = widgets.map(w =>
         w.i === configuringWidgetId
-          ? { ...w, metricConfig: config, title: config.title || `${config.metricName} - ${config.deviceName}` }
+          ? { 
+              ...w, 
+              metricConfig: config, 
+              title: config.title || `${config.metricName} - ${config.deviceName}`,
+              _refreshTrigger: Date.now() // Trigger re-render to show threshold changes
+            }
           : w
       );
       setWidgets(updatedWidgets);
@@ -618,6 +734,46 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     setConfiguringWidgetId(null);
   };
 
+  const handleSaveMetricValueConfig = (config: MetricValueCardConfig) => {
+    if (!configuringWidgetId) return;
+
+    const existingWidget = widgets.find(w => w.i === configuringWidgetId);
+    
+    if (existingWidget) {
+      // Update existing widget
+      const updatedWidgets = widgets.map(w =>
+        w.i === configuringWidgetId
+          ? { 
+              ...w, 
+              metricValueConfig: config, 
+              title: config.title || `${config.metricName} - ${config.deviceName}`,
+              _refreshTrigger: Date.now() // Trigger re-render to show threshold changes
+            }
+          : w
+      );
+      setWidgets(updatedWidgets);
+    } else {
+      // Create new widget
+      const widgetConfig = WIDGET_TYPES.METRIC_VALUE;
+      const newWidget: DashboardWidget = {
+        i: configuringWidgetId,
+        x: 0,
+        y: Infinity,
+        w: widgetConfig.defaultW,
+        h: widgetConfig.defaultH,
+        minW: widgetConfig.minW,
+        minH: widgetConfig.minH,
+        type: 'METRIC_VALUE',
+        title: config.title || `${config.metricName} - ${config.deviceName}`,
+        metricValueConfig: config
+      };
+      setWidgets([...widgets, newWidget]);
+    }
+
+    setHasUnsavedChanges(true);
+    setConfiguringWidgetId(null);
+  };
+
   const handleSaveTableConfig = (config: TableDataCardConfig) => {
     if (!configuringWidgetId) return;
 
@@ -627,7 +783,12 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       // Update existing widget
       const updatedWidgets = widgets.map(w =>
         w.i === configuringWidgetId
-          ? { ...w, tableConfig: config, title: config.title || `${config.metricName} - Table` }
+          ? { 
+              ...w, 
+              tableConfig: config, 
+              title: config.title || `${config.metricName} - Table`,
+              _refreshTrigger: Date.now() // Trigger re-render to show config changes
+            }
           : w
       );
       setWidgets(updatedWidgets);
@@ -1028,7 +1189,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         }
         return (
           <MetricDataCard 
-            key={`${widget.i}-${widget.metricConfig?.timeRange || ''}`}
+            key={`${widget.i}-${widget.metricConfig?.timeRange || ''}-${widget.metricConfig?.thresholds?.length || 0}-${widget.metricConfig?.thresholdsEnabled || false}`}
             config={widget.metricConfig}
             refreshInterval={refreshInterval}
             refreshTrigger={widget._refreshTrigger}
@@ -1091,6 +1252,49 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
               setShowTableConfigDialog(true);
             }}
             onDataLoaded={(data) => {
+              setWidgets(prevWidgets => 
+                prevWidgets.map(w => 
+                  w.i === widget.i ? { ...w, _metricData: data } : w
+                )
+              );
+            }}
+          />
+        );
+
+      case 'METRIC_VALUE':
+        if (!widget.metricValueConfig) {
+          return (
+            <div className="text-center text-muted-foreground h-full flex items-center justify-center">
+              <div>
+                <div className="mb-2">No metric configured</div>
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={() => {
+                    setConfiguringWidgetId(widget.i);
+                    setIsEditingWidget(true);
+                    setShowMetricValueConfigDialog(true);
+                  }}
+                >
+                  Configure Metric
+                </Button>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <MetricValueCard 
+            key={`${widget.i}-${widget.metricValueConfig?.timeRange || ''}-${widget.metricValueConfig?.warningThreshold || 'none'}-${widget.metricValueConfig?.criticalThreshold || 'none'}`}
+            config={widget.metricValueConfig}
+            refreshInterval={refreshInterval}
+            refreshTrigger={widget._refreshTrigger}
+            onConfigure={() => {
+              setConfiguringWidgetId(widget.i);
+              setIsEditingWidget(true);
+              setShowMetricValueConfigDialog(true);
+            }}
+            onDataLoaded={(data) => {
+              // Store data reference for badge rendering
               setWidgets(prevWidgets => 
                 prevWidgets.map(w => 
                   w.i === widget.i ? { ...w, _metricData: data } : w
@@ -1247,6 +1451,18 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
+                <Button onClick={shareDashboard} size="sm" variant="outline" disabled={!currentShareToken}>
+                  <Share2 className="w-4 h-4 mr-2" />
+                  Share
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Copy shareable link to clipboard</p>
+              </TooltipContent>
+            </Tooltip>
+            
+            <Tooltip>
+              <TooltipTrigger asChild>
                 <Button onClick={toggleKioskMode} size="sm" variant="outline">
                   <Maximize2 className="w-4 h-4" />
                 </Button>
@@ -1288,6 +1504,10 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
               <DropdownMenuItem onClick={() => addWidget('TABLE')}>
                 <Table className="w-4 h-4 mr-2" />
                 Metrics Table
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => addWidget('METRIC_VALUE')}>
+                <Gauge className="w-4 h-4 mr-2" />
+                Metric Value
               </DropdownMenuItem>
               <DropdownMenuItem 
                 onSelect={(e) => e.preventDefault()}
@@ -1464,6 +1684,22 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           : undefined}
       />
 
+      {/* Metric Value Card Configuration Dialog */}
+      <MetricValueCardConfigDialog
+        open={showMetricValueConfigDialog}
+        onOpenChange={(open) => {
+          setShowMetricValueConfigDialog(open);
+          if (!open) {
+            setConfiguringWidgetId(null);
+            setIsEditingWidget(false);
+          }
+        }}
+        onSave={handleSaveMetricValueConfig}
+        initialConfig={isEditingWidget && configuringWidgetId 
+          ? widgets.find(w => w.i === configuringWidgetId)?.metricValueConfig 
+          : undefined}
+      />
+
       {/* Delete Widget Confirmation Dialog */}
       <Dialog open={showDeleteConfirmDialog} onOpenChange={setShowDeleteConfirmDialog}>
         <DialogContent>
@@ -1576,6 +1812,60 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
               onClick={confirmDeleteDashboard}
             >
               Delete Dashboard
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Share Dashboard Dialog */}
+      <Dialog open={showShareDialog} onOpenChange={setShowShareDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Share Dashboard</DialogTitle>
+            <DialogDescription>
+              {!currentShareToken 
+                ? 'Please save the dashboard first before sharing.'
+                : 'Copy the secure link below to share this dashboard with others.'
+              }
+            </DialogDescription>
+          </DialogHeader>
+          {currentShareToken && (
+            <div className="py-4">
+              <Label htmlFor="share-url" className="text-sm font-medium">
+                Dashboard Link
+              </Label>
+              <div className="flex gap-2 mt-2">
+                <Input
+                  id="share-url"
+                  value={shareUrl}
+                  readOnly
+                  className="font-mono text-sm"
+                  onClick={(e) => e.currentTarget.select()}
+                />
+                <Button onClick={copyShareUrl} size="sm" variant="outline">
+                  {shareCopied ? (
+                    <>
+                      <Check className="w-4 h-4 mr-2" />
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4 mr-2" />
+                      Copy
+                    </>
+                  )}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                This link uses a secure token and cannot be guessed. Anyone with this link can view your dashboard.
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              onClick={() => setShowShareDialog(false)}
+            >
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

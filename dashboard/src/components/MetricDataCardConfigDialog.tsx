@@ -18,7 +18,9 @@ import {
   SelectValue,
 } from './ui/select';
 import { buildApiUrl } from '@/config/api';
-import type { MetricDataCardConfig } from './MetricDataCard';
+import type { MetricDataCardConfig, ThresholdLine } from './MetricDataCard';
+import { Plus, Trash2 } from 'lucide-react';
+import { Switch } from './ui/switch';
 
 interface MetricDataCardConfigDialogProps {
   open: boolean;
@@ -51,6 +53,8 @@ export function MetricDataCardConfigDialog({
   const [color, setColor] = useState<string>(initialConfig?.color || '#3b82f6');
   const [loading, setLoading] = useState(false);
   const [availableMetrics, setAvailableMetrics] = useState<string[]>([]);
+  const [thresholds, setThresholds] = useState<ThresholdLine[]>(initialConfig?.thresholds || []);
+  const [showThresholds, setShowThresholds] = useState<boolean>((initialConfig?.thresholds?.length || 0) > 0);
 
   // Update form fields when initialConfig changes (for editing existing widgets)
   useEffect(() => {
@@ -61,6 +65,8 @@ export function MetricDataCardConfigDialog({
       setTimeRange(initialConfig.timeRange || '1h');
       setTitle(initialConfig.title || '');
       setColor(initialConfig.color || '#3b82f6');
+      setThresholds(initialConfig.thresholds || []);
+      setShowThresholds(initialConfig.thresholdsEnabled ?? ((initialConfig.thresholds?.length || 0) > 0));
     } else if (open && !initialConfig) {
       // Reset form for new widget
       setSelectedDevice('');
@@ -69,6 +75,8 @@ export function MetricDataCardConfigDialog({
       setTimeRange('1h');
       setTitle('');
       setColor('#3b82f6');
+      setThresholds([]);
+      setShowThresholds(false);
     }
   }, [open, initialConfig]);
 
@@ -124,6 +132,8 @@ export function MetricDataCardConfigDialog({
       color,
       title: title || undefined,
       showStats: true,
+      thresholds: thresholds.length > 0 ? thresholds : undefined,
+      thresholdsEnabled: showThresholds,
     };
 
     onSave(config);
@@ -247,6 +257,134 @@ export function MetricDataCardConfigDialog({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
             />
+          </div>
+
+          {/* Thresholds Section */}
+          <div className="grid gap-2 pt-2 border-t">
+            <div className="flex items-center justify-between">
+              <Label>Thresholds</Label>
+              <Switch 
+                checked={showThresholds} 
+                onCheckedChange={setShowThresholds}
+              />
+            </div>
+
+            {showThresholds && (
+              <div className="space-y-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setThresholds([...thresholds, {
+                      value: 0,
+                      label: '',
+                      color: '#ef4444',
+                      lineStyle: 'dashed'
+                    }]);
+                  }}
+                  className="w-full"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Threshold
+                </Button>
+
+                {thresholds.map((threshold, index) => (
+                  <div key={index} className="grid gap-2 p-3 border rounded-lg bg-muted/30">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-medium">Threshold {index + 1}</Label>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setThresholds(thresholds.filter((_, i) => i !== index));
+                        }}
+                      >
+                        <Trash2 className="w-4 h-4 text-destructive" />
+                      </Button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label htmlFor={`threshold-value-${index}`} className="text-xs">Value</Label>
+                        <Input
+                          id={`threshold-value-${index}`}
+                          type="number"
+                          step="any"
+                          value={threshold.value}
+                          onChange={(e) => {
+                            const newThresholds = [...thresholds];
+                            newThresholds[index] = { ...threshold, value: parseFloat(e.target.value) || 0 };
+                            setThresholds(newThresholds);
+                          }}
+                          className="h-8"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor={`threshold-label-${index}`} className="text-xs">Label</Label>
+                        <Input
+                          id={`threshold-label-${index}`}
+                          placeholder="Optional"
+                          value={threshold.label || ''}
+                          onChange={(e) => {
+                            const newThresholds = [...thresholds];
+                            newThresholds[index] = { ...threshold, label: e.target.value };
+                            setThresholds(newThresholds);
+                          }}
+                          className="h-8"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label htmlFor={`threshold-style-${index}`} className="text-xs">Line Style</Label>
+                        <Select
+                          value={threshold.lineStyle}
+                          onValueChange={(value: 'solid' | 'dashed') => {
+                            const newThresholds = [...thresholds];
+                            newThresholds[index] = { ...threshold, lineStyle: value };
+                            setThresholds(newThresholds);
+                          }}
+                        >
+                          <SelectTrigger id={`threshold-style-${index}`} className="h-8">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="solid">Solid ─</SelectItem>
+                            <SelectItem value="dashed">Dashed ┈</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor={`threshold-color-${index}`} className="text-xs">Color</Label>
+                        <div className="flex gap-2 items-center">
+                          <Input
+                            id={`threshold-color-${index}`}
+                            type="color"
+                            value={threshold.color}
+                            onChange={(e) => {
+                              const newThresholds = [...thresholds];
+                              newThresholds[index] = { ...threshold, color: e.target.value };
+                              setThresholds(newThresholds);
+                            }}
+                            className="w-16 h-8 cursor-pointer"
+                          />
+                          <span className="text-xs text-muted-foreground">{threshold.color}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                {thresholds.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-2">
+                    No thresholds added yet
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

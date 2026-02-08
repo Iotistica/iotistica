@@ -15,8 +15,16 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
+  ReferenceLine,
 } from 'recharts';
 import { buildApiUrl } from '@/config/api';
+
+export interface ThresholdLine {
+  value: number;
+  label?: string;
+  color: string;
+  lineStyle: 'solid' | 'dashed';
+}
 
 export interface MetricDataCardConfig {
   widgetId: string;
@@ -27,6 +35,8 @@ export interface MetricDataCardConfig {
   timeRange: '1m' | '1h' | '6h' | '12h' | '24h' | '7d' | '30d';
   color?: string;
   showStats?: boolean;
+  thresholds?: ThresholdLine[];
+  thresholdsEnabled?: boolean;
 }
 
 interface MetricDataCardProps {
@@ -71,6 +81,10 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+
+  // Debug: Log config changes
+  console.log('MetricDataCard config:', config);
+  console.log('Thresholds:', config.thresholds);
 
   const fetchData = async () => {
     try {
@@ -155,6 +169,32 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
       max: point.max_value,
     }));
 
+    // Calculate Y-axis domain to include both data and thresholds
+    const calculateYDomain = (): [number, number] => {
+      // Get min/max from data
+      const dataValues = chartData.map(d => d.value);
+      const dataMin = Math.min(...dataValues);
+      const dataMax = Math.max(...dataValues);
+
+      // Include threshold values if they exist and are enabled
+      let domainMin = dataMin;
+      let domainMax = dataMax;
+
+      if (config.thresholdsEnabled && config.thresholds && config.thresholds.length > 0) {
+        const thresholdValues = config.thresholds.map(t => t.value);
+        domainMin = Math.min(dataMin, ...thresholdValues);
+        domainMax = Math.max(dataMax, ...thresholdValues);
+      }
+
+      // Add 10% padding to ensure thresholds are clearly visible
+      const range = domainMax - domainMin;
+      const padding = range * 0.1;
+      
+      return [domainMin - padding, domainMax + padding];
+    };
+
+    const yDomain = calculateYDomain();
+
     const commonProps = {
       data: chartData,
       margin: { top: 5, right: 10, left: 0, bottom: 5 },
@@ -177,8 +217,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 fontSize={12}
                 tickLine={false}
                 tickFormatter={formatValue}
-                domain={['auto', 'auto']}
-                padding={{ top: 20, bottom: 20 }}
+                domain={yDomain}
               />
               <Tooltip 
                 contentStyle={{ 
@@ -196,6 +235,21 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 fill={color}
                 fillOpacity={0.3}
               />
+              {config.thresholdsEnabled && config.thresholds?.map((threshold, idx) => (
+                <ReferenceLine
+                  key={idx}
+                  y={threshold.value}
+                  stroke={threshold.color}
+                  strokeDasharray={threshold.lineStyle === 'dashed' ? '5 5' : undefined}
+                  strokeWidth={2}
+                  label={{
+                    value: threshold.label || threshold.value.toString(),
+                    position: 'right',
+                    fill: threshold.color,
+                    fontSize: 12
+                  }}
+                />
+              ))}
             </AreaChart>
           </ResponsiveContainer>
         );
@@ -213,9 +267,8 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
               <YAxis 
                 fontSize={12}
                 tickLine={false}
-                tickFormatter={formatValue}                domain={['auto', 'auto']}
-                padding={{ top: 20, bottom: 20 }}                domain={['auto', 'auto']}
-                padding={{ top: 20, bottom: 20 }}
+                tickFormatter={formatValue}
+                domain={yDomain}
               />
               <Tooltip 
                 contentStyle={{ 
@@ -230,6 +283,21 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 dataKey="value" 
                 fill={color}
               />
+              {config.thresholdsEnabled && config.thresholds?.map((threshold, idx) => (
+                <ReferenceLine
+                  key={idx}
+                  y={threshold.value}
+                  stroke={threshold.color}
+                  strokeDasharray={threshold.lineStyle === 'dashed' ? '5 5' : undefined}
+                  strokeWidth={2}
+                  label={{
+                    value: threshold.label || threshold.value.toString(),
+                    position: 'right',
+                    fill: threshold.color,
+                    fontSize: 12
+                  }}
+                />
+              ))}
             </BarChart>
           </ResponsiveContainer>
         );
@@ -247,9 +315,8 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
               <YAxis 
                 fontSize={12}
                 tickLine={false}
-                tickFormatter={formatValue}                domain={['auto', 'auto']}
-                padding={{ top: 20, bottom: 20 }}                domain={['auto', 'auto']}
-                padding={{ top: 20, bottom: 20 }}
+                tickFormatter={formatValue}
+                domain={yDomain}
               />
               <Tooltip 
                 contentStyle={{ 
@@ -267,6 +334,21 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 strokeWidth={2}
                 dot={false}
               />
+              {config.thresholdsEnabled && config.thresholds?.map((threshold, idx) => (
+                <ReferenceLine
+                  key={idx}
+                  y={threshold.value}
+                  stroke={threshold.color}
+                  strokeDasharray={threshold.lineStyle === 'dashed' ? '5 5' : undefined}
+                  strokeWidth={2}
+                  label={{
+                    value: threshold.label || threshold.value.toString(),
+                    position: 'right',
+                    fill: threshold.color,
+                    fontSize: 12
+                  }}
+                />
+              ))}
             </LineChart>
           </ResponsiveContainer>
         );
