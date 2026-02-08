@@ -350,3 +350,37 @@ jobs:
           prerelease: ${{ github.event.inputs.release_mode == 'rc' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-to-k8s:
+    name: Deploy to Kubernetes
+    needs: [validate-release, create-release]
+    runs-on: [iotistic-lab-sc]
+    if: github.event.inputs.deploy == 'true' && needs.validate-release.result == 'success'
+    steps:
+      - name: Trigger K8s deployment workflow
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.K8S_DEPLOY_PAT }}
+          script: |
+            const releaseVersion = '${{ needs.validate-release.outputs.release_version }}';
+            const isRC = '${{ github.event.inputs.release_mode }}' === 'rc';
+            
+            console.log(`Triggering K8s deployment for ${releaseVersion} (RC: ${isRC})`);
+            
+            try {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: 'Iotistica',
+                repo: 'iot-k8s',
+                workflow_id: 'k8s-release-iotistic.yml',
+                ref: 'main',
+                inputs: {
+                  release_version: releaseVersion,
+                  is_prerelease: isRC.toString()
+                }
+              });
+              
+              console.log('✅ K8s deployment workflow triggered successfully');
+            } catch (error) {
+              console.error('❌ Failed to trigger K8s deployment:', error.message);
+              throw error;
+            }
