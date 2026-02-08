@@ -325,9 +325,9 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
           <div className="flex items-center gap-3">
             <Terminal className="h-6 w-6 text-muted-foreground" />
             <div>
-              <CardTitle>Device Logs</CardTitle>
+              <CardTitle>Agent Logs</CardTitle>
               <CardDescription>
-                Real-time logs from all device services
+                Real-time logs from all agent services
               </CardDescription>
             </div>
           </div>

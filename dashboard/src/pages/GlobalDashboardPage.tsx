@@ -120,7 +120,7 @@ const WIDGET_TYPES = {
   },
   METRIC_DATA: {
     id: 'metric-data',
-    name: 'Metric Data Card',
+    name: 'Metric Card',
     icon: BarChart3,
     minW: 4,
     minH: 6,
@@ -207,6 +207,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     const saved = localStorage.getItem('dashboard-refresh-interval');
     return saved ? parseInt(saved, 10) : 30;
   });
+  const cachedLayoutKey = 'global-dashboard-layout-cache';
   const [isKioskMode, setIsKioskMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('dashboard-kiosk-mode');
     return saved === 'true';
@@ -261,6 +262,49 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     loadLayout();
   }, []);
 
+  const saveCachedLayout = (data: {
+    widgets: DashboardWidget[];
+    id?: number | null;
+    layoutName?: string;
+    shareToken?: string | null;
+  }) => {
+    try {
+      localStorage.setItem(cachedLayoutKey, JSON.stringify({
+        widgets: data.widgets,
+        id: data.id ?? null,
+        layoutName: data.layoutName ?? 'Cached',
+        shareToken: data.shareToken ?? null
+      }));
+    } catch (error) {
+      console.warn('Failed to cache dashboard layout:', error);
+    }
+  };
+
+  const loadCachedLayout = () => {
+    try {
+      const cached = localStorage.getItem(cachedLayoutKey);
+      if (!cached) return false;
+      const data = JSON.parse(cached) as {
+        widgets?: DashboardWidget[];
+        id?: number | null;
+        layoutName?: string;
+        shareToken?: string | null;
+      };
+      if (!data.widgets || !Array.isArray(data.widgets) || data.widgets.length === 0) {
+        return false;
+      }
+      setWidgets(data.widgets);
+      setCurrentLayoutId(data.id ?? null);
+      setCurrentLayoutName(data.layoutName || 'Cached');
+      setCurrentShareToken(data.shareToken ?? null);
+      setHasUnsavedChanges(false);
+      return true;
+    } catch (error) {
+      console.warn('Failed to load cached dashboard layout:', error);
+      return false;
+    }
+  };
+
   const loadAvailableLayouts = async () => {
     try {
       const response = await fetch(`http://localhost:4002/api/v1/dashboard-layouts/global/all`, {
@@ -295,13 +339,23 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         setCurrentLayoutName(data.layoutName || 'Shared Dashboard');
         setCurrentShareToken(data.shareToken);
         setHasUnsavedChanges(false);
+        saveCachedLayout({
+          widgets: data.widgets || [],
+          id: data.id,
+          layoutName: data.layoutName || 'Shared Dashboard',
+          shareToken: data.shareToken
+        });
       } else {
         console.error('Dashboard not found');
-        loadLayout(); // Fallback to default
+        if (!loadCachedLayout()) {
+          loadLayout(); // Fallback to default
+        }
       }
     } catch (error) {
       console.error('Error loading shared dashboard:', error);
-      loadLayout(); // Fallback to default
+      if (!loadCachedLayout()) {
+        loadLayout(); // Fallback to default
+      }
     } finally {
       setIsLoading(false);
     }
@@ -326,6 +380,12 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           setCurrentLayoutName(data.layoutName || 'Default');
           setCurrentShareToken(data.shareToken);
           setHasUnsavedChanges(false);
+          saveCachedLayout({
+            widgets: data.widgets || [],
+            id: layoutId,
+            layoutName: data.layoutName || 'Default',
+            shareToken: data.shareToken
+          });
           return;
         }
       }
@@ -344,15 +404,27 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           setCurrentLayoutId(data.id || null);
           setCurrentLayoutName(data.layoutName || 'Default');
           setCurrentShareToken(data.shareToken || null);
+          saveCachedLayout({
+            widgets: data.widgets,
+            id: data.id || null,
+            layoutName: data.layoutName || 'Default',
+            shareToken: data.shareToken || null
+          });
         } else {
-          loadDefaultLayout();
+          if (!loadCachedLayout()) {
+            loadDefaultLayout();
+          }
         }
       } else {
-        loadDefaultLayout();
+        if (!loadCachedLayout()) {
+          loadDefaultLayout();
+        }
       }
     } catch (error) {
       console.error('Error loading global layout:', error);
-      loadDefaultLayout();
+      if (!loadCachedLayout()) {
+        loadDefaultLayout();
+      }
     } finally {
       setIsLoading(false);
     }
@@ -1499,7 +1571,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => addWidget('METRIC_DATA')}>
                 <BarChart3 className="w-4 h-4 mr-2" />
-                Metric Data Card
+                Metric Card
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => addWidget('TABLE')}>
                 <Table className="w-4 h-4 mr-2" />
@@ -1527,7 +1599,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                     }}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <option value="">Add Device Card...</option>
+                    <option value="">Add Agent Card...</option>
                     {devices.map(device => (
                       <option key={device.deviceUuid} value={device.deviceUuid}>
                         {device.name}

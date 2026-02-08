@@ -3,6 +3,7 @@ import cors from 'cors';
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
 import { MQTTMonitorService } from './services/monitor';
+import { StatsHistoryService } from './services/history';
 import { logger } from './utils/logger';
 import monitorRoutes from './routes';
 
@@ -125,9 +126,29 @@ async function start() {
     // Store monitor instance for metrics endpoint
     monitorServiceInstance = monitor;
 
-    // Inject monitor instance into routes
+    // Initialize Stats History Service (keep last 30 points, collect every 10 seconds)
+    const historyService = new StatsHistoryService(30);
+    historyService.start(() => {
+      const metrics = monitor.getMetrics();
+      return {
+        clients: metrics.clients,
+        subscriptions: metrics.subscriptions,
+        messageRate: {
+          published: metrics.messageRate.current.published,
+          received: metrics.messageRate.current.received
+        },
+        throughput: {
+          inbound: metrics.throughput.current.inbound,
+          outbound: metrics.throughput.current.outbound
+        }
+      };
+    }, 10000); // Collect every 10 seconds
+    
+    logger.info('Stats history service initialized');
+
+    // Inject monitor instance and history service into routes
     const { setMonitorInstance } = await import('./routes');
-    setMonitorInstance(monitor, dbService);
+    setMonitorInstance(monitor, dbService, historyService);
 
     // Start Express server
     app.listen(PORT, HOST, () => {
@@ -139,6 +160,9 @@ async function start() {
     // Graceful shutdown
     const shutdown = async (signal: string) => {
       logger.info(`Received ${signal}, shutting down gracefully`);
+      
+      // Stop history collection
+      historyService.stop();
       
       if (monitor) {
         await monitor.stop();

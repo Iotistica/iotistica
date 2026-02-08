@@ -362,7 +362,7 @@ app.use(API_BASE, deviceJobsRoutes);
 app.use(API_BASE, rotationRoutes);
 app.use(API_BASE, profileRoutes);
 app.use(API_BASE, digitalTwinGraphRoutes);
-app.use(API_BASE, mqttMetricsRoutes);
+app.use(API_BASE, mqttMetricsRoutes); // MQTT metrics from database
 app.use(API_BASE, eventsRoutes);
 app.use(API_BASE, mqttBrokerRoutes);
 app.use(API_BASE, trafficRoutes);

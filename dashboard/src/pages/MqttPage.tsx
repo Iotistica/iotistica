@@ -10,6 +10,7 @@ import MqttBrokerCard from "../components/MqttBrokerCard";
 import MqttMetricsCard from "../components/MqttMetricsCard";
 import type { MqttStatsData } from "@/services/websocket";
 import { useMqtt, type MqttBrokerStatsData, type MqttDataPoint } from "@/contexts/MqttContext";
+import { buildApiUrl } from "@/config/api";
 import {
   Select,
   SelectContent,
@@ -106,7 +107,7 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
     // This prevents duplicate points from manual refreshes in rapid succession
     const now = Date.now();
     const timeSinceLastUpdate = now - lastChartUpdateRef.current;
-    const MIN_UPDATE_INTERVAL = 2000; // 2 seconds minimum between chart updates
+    const MIN_UPDATE_INTERVAL = 1000; // 1 second minimum between chart updates
     
     if (timeSinceLastUpdate >= MIN_UPDATE_INTERVAL || lastChartUpdateRef.current === 0) {
       const dataPoint: MqttDataPoint = {
@@ -126,21 +127,77 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
     setIsConnected(data.connected || false);
   }, [updateBrokerStats, addChartDataPoint]);
 
+  // Fetch historical MQTT data to populate chart on initial load
+  const fetchHistoricalData = useCallback(async () => {
+    try {
+      // Get auth token
+      const accessToken = localStorage.getItem('accessToken');
+      
+      // Fetch historical stats (last 30 data points) via main API
+      const historyRes = await fetch(buildApiUrl('/api/v1/mqtt/stats/history?limit=30'), {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      });
+      
+      if (historyRes.ok) {
+        const response = await historyRes.json();
+        
+        if (response.success && response.history && Array.isArray(response.history)) {
+          // Add each historical point to chart (in chronological order)
+          response.history.forEach((point: any) => {
+            const dataPoint: MqttDataPoint = {
+              timestamp: new Date(point.timestamp).getTime(),
+              time: new Date(point.timestamp).toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit' 
+              }),
+              messageRatePublished: point.messageRate?.published || 0,
+              messageRateReceived: point.messageRate?.received || 0,
+              throughputInbound: point.throughput?.inbound || 0,
+              throughputOutbound: point.throughput?.outbound || 0,
+              connectedClients: point.clients || 0,
+              subscriptions: point.subscriptions || 0
+            };
+            addChartDataPoint(dataPoint);
+          });
+          
+          // Update lastChartUpdateRef to prevent duplicate on next fetch
+          if (response.history.length > 0) {
+            const lastPoint = response.history[response.history.length - 1];
+            lastChartUpdateRef.current = new Date(lastPoint.timestamp).getTime();
+          }
+          
+          return true; // Successfully loaded historical data
+        }
+      }
+    } catch (error) {
+      // Historical data not available - will fall back to polling
+    }
+    return false; // No historical data loaded
+  }, [addChartDataPoint]);
+
   // Fetch MQTT data from HTTP endpoints
   const fetchMqttData = useCallback(async () => {
     setLoading(true);
     try {
-      const mqttMonitorUrl = import.meta.env.VITE_MQTT_MONITOR_URL || 'http://localhost:3500';
+      // Get auth token
+      const accessToken = localStorage.getItem('accessToken');
       
-      // Fetch broker stats using the same endpoint structure as WebSocket
-      const statsRes = await fetch(`${mqttMonitorUrl}/api/v1/stats`);
+      // Fetch broker stats via main API (proxies to MQTT Monitor)
+      const statsRes = await fetch(buildApiUrl('/api/v1/mqtt/stats'), {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      });
       if (statsRes.ok) {
         const response = await statsRes.json();
         if (response.success && response.stats) {
           // Transform /stats response to match WebSocket format
           const statsData: MqttStatsData = {
             connected: response.stats.connected,
-            broker: mqttMonitorUrl,
+            broker: 'mqtt-monitor',
             uptime: 0,
             messageRate: response.stats.messageRate,
             throughput: response.stats.throughput,
@@ -163,26 +220,19 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
       }
 
       // Fetch topics (increased limit to support multiple agents)
-      console.log('[MqttPage] Fetching topics from:', `${mqttMonitorUrl}/api/v1/topics?limit=1000`);
-      const topicsRes = await fetch(`${mqttMonitorUrl}/api/v1/topics?limit=1000`);
-      console.log('[MqttPage] Topics fetch response:', topicsRes.status, topicsRes.statusText);
+      const topicsRes = await fetch(buildApiUrl('/api/v1/mqtt/topics?limit=1000'), {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      });
       if (topicsRes.ok) {
         const response = await topicsRes.json();
-        console.log('[MqttPage] Topics API response:', response);
-        console.log('[MqttPage] response.data structure:', response.data);
-        console.log('[MqttPage] response.data.topics:', response.data?.topics);
         
         // Check if topics are in data.topics or data directly
         const topicsArray = response.data?.topics || response.data;
         if (response.success && topicsArray && Array.isArray(topicsArray)) {
-          console.log('[MqttPage] API returned topics:', topicsArray.length, 'topics');
-          console.log('[MqttPage] Sample topics:', topicsArray.slice(0, 5).map((t: any) => t.topic));
           updateTopics(topicsArray);
-        } else {
-          console.warn('[MqttPage] Unexpected response structure:', response);
         }
-      } else {
-        console.warn('[MqttPage] Failed to fetch topics:', topicsRes.status, topicsRes.statusText);
       }
       
       setInitialLoadComplete(true);
@@ -203,10 +253,25 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
     }
   }, [fetchMqttData]);
   
-  // Initial data fetch on mount
+  // Initial data fetch on mount - load historical data first
   useEffect(() => {
-    fetchMqttData();
-  }, [fetchMqttData]);
+    const initializeData = async () => {
+      // Try to load historical data first
+      const hasHistory = await fetchHistoricalData();
+      
+      // Always fetch current stats
+      await fetchMqttData();
+      
+      // Only do quick follow-up if we didn't get historical data
+      if (!hasHistory) {
+        setTimeout(() => {
+          fetchMqttData();
+        }, 3000);
+      }
+    };
+    
+    initializeData();
+  }, [fetchMqttData, fetchHistoricalData]);
   
   // Set up polling interval
   useEffect(() => {

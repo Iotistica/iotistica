@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { getDeviceTags } from "@/services/deviceTags";
-import { Monitor, Smartphone, Server, Laptop, Search, Plus, Filter, Edit, X, Tag, ChevronRight, Container } from "lucide-react";
+import { Monitor, Smartphone, Server, Laptop, Search, Plus, Filter, Edit, X, ChevronRight, Container } from "lucide-react";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
@@ -161,57 +161,62 @@ function DeviceTagsPills({ deviceUuid }: { deviceUuid: string }) {
 
 export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDevice , onSelectDevice }: DeviceSidebarProps) {
   // Get unique statuses and types from actual devices using useMemo for performance
-  const availableStatuses = useMemo(() => 
-    Array.from(new Set(devices.map(d => d.status))), 
+  const availableStatuses = useMemo<Device['status'][]>(() => 
+    Array.from(new Set(devices.map(d => d.status))) as Device['status'][], 
     [devices]
   );
   
-  const availableTypes = useMemo(() => 
-    Array.from(new Set(devices.map(d => d.type))), 
+  const availableTypes = useMemo<Device['type'][]>(() => 
+    Array.from(new Set(devices.map(d => d.type))) as Device['type'][], 
     [devices]
   );
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilters, setStatusFilters] = useState<string[]>([]);
-  const [typeFilters, setTypeFilters] = useState<string[]>([]);
+  const [statusFilters, setStatusFilters] = useState<Device['status'][]>([]);
+  const [typeFilters, setTypeFilters] = useState<Device['type'][]>([]);
+  const [filtersInitialized, setFiltersInitialized] = useState(false);
 
-  // Initialize filters with all available options when component mounts or devices change
+  // Initialize filters once, then only remove invalid selections on refresh
   useEffect(() => {
-    setStatusFilters(prev => {
-      // Only update if empty or if we have new options
-      if (prev.length === 0) return [...availableStatuses];
-      // Keep existing selections that are still valid, add new ones
-      const stillValid = prev.filter(s => (availableStatuses as string[]).includes(s));
-      const newOnes = availableStatuses.filter(s => !prev.includes(s));
-      return [...stillValid, ...newOnes];
-    });
-    
-    setTypeFilters(prev => {
-      if (prev.length === 0) return [...availableTypes];
-      const stillValid = prev.filter(t => (availableTypes as string[]).includes(t));
-      const newOnes = availableTypes.filter(t => !prev.includes(t));
-      return [...stillValid, ...newOnes];
-    });
-  }, [availableStatuses, availableTypes]);
+    if (!filtersInitialized) {
+      if (availableStatuses.length > 0 || availableTypes.length > 0) {
+        setStatusFilters([...availableStatuses]);
+        setTypeFilters([...availableTypes]);
+        setFiltersInitialized(true);
+      }
+      return;
+    }
 
-  const toggleStatusFilter = (status: string) => {
+    setStatusFilters(prev => prev.filter(s => availableStatuses.includes(s)));
+    setTypeFilters(prev => prev.filter(t => availableTypes.includes(t)));
+  }, [availableStatuses, availableTypes, filtersInitialized]);
+
+  const toggleStatusFilter = (status: Device['status']) => {
     setStatusFilters(prev =>
       prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]
     );
   };
 
-  const toggleTypeFilter = (type: string) => {
+  const toggleTypeFilter = (type: Device['type']) => {
     setTypeFilters(prev =>
       prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]
     );
   };
 
+  const allStatusesSelected = availableStatuses.length > 0 && statusFilters.length === availableStatuses.length;
+  const allTypesSelected = availableTypes.length > 0 && typeFilters.length === availableTypes.length;
+
   const filteredDevices = devices.filter(device => {
     const matchesSearch = device.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          device.ipAddress.includes(searchQuery);
-    const matchesStatus = statusFilters.includes(device.status);
-    const matchesType = typeFilters.includes(device.type);
+    const matchesStatus = statusFilters.length === 0 || statusFilters.includes(device.status);
+    const matchesType = typeFilters.length === 0 || typeFilters.includes(device.type);
     return matchesSearch && matchesStatus && matchesType;
+  }).sort((a, b) => {
+    if (a.status === b.status) return 0;
+    if (a.status === 'online') return -1;
+    if (b.status === 'online') return 1;
+    return 0;
   });
 
   const hasActiveFilters = statusFilters.length < availableStatuses.length || 
@@ -248,7 +253,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <Input
             type="search"
-            placeholder="Search nodes..."
+            placeholder="Search agents..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10"
@@ -272,6 +277,15 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-56">
               <DropdownMenuLabel>Status</DropdownMenuLabel>
+              <DropdownMenuCheckboxItem
+                checked={allStatusesSelected}
+                onCheckedChange={(checked) =>
+                  setStatusFilters(checked ? [...availableStatuses] : [])
+                }
+              >
+                Select all
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuSeparator />
               {availableStatuses.map(status => (
                 <DropdownMenuCheckboxItem
                   key={status}
@@ -285,6 +299,15 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
               <DropdownMenuSeparator />
               
               <DropdownMenuLabel>Device Type</DropdownMenuLabel>
+              <DropdownMenuCheckboxItem
+                checked={allTypesSelected}
+                onCheckedChange={(checked) =>
+                  setTypeFilters(checked ? [...availableTypes] : [])
+                }
+              >
+                Select all
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuSeparator />
               {availableTypes.map(type => {
                 // Format type labels nicely
                 const label = type
@@ -313,7 +336,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
         </div>
 
         <p className="text-muted-foreground">
-          Showing {filteredDevices.length} of {devices.length} nodes
+          Showing {filteredDevices.length} of {devices.length} agents
         </p>
       </div>
 

@@ -15,7 +15,7 @@ import { Toaster } from "./components/ui/sonner";
 import { Sheet, SheetContent } from "./components/ui/sheet";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
-import { Menu, Activity, BarChart3, Radio, CalendarClock, Clock, Package, TrendingUp, LineChart, Shield, Settings, FileText, Tag } from "lucide-react";
+import { Menu, Activity, BarChart3, Radio, CalendarClock, Clock, Package, Shield, FileText } from "lucide-react";
 import { buildApiUrl } from "./config/api";
 import { SensorHealthDashboard } from "./pages/SensorHealthDashboard";
 import { SensorsPage } from "./pages/SensorsPage";
@@ -56,6 +56,31 @@ export default function App() {
   const [selectedDeviceId, setSelectedDeviceId] = useState(() => {
     return localStorage.getItem('selectedDeviceId') || "";
   });
+  const viewOptions = [
+    'metrics',
+    'sensors',
+    'endpoints',
+    'mqtt',
+    'jobs',
+    'applications',
+    'timeline',
+    'usage',
+    'analytics',
+    'security',
+    'maintenance',
+    'logs',
+    'settings',
+    'tags',
+    'tag-definitions',
+    'account',
+    'users',
+    'profile',
+    'dashboard',
+    'digital-twin',
+    'event-debugger'
+  ] as const;
+  type View = typeof viewOptions[number];
+
   const [devices, setDevices] = useState<Device[]>([]);
   const devicesRef = useRef<Device[]>([]); // Ref to access devices without causing re-renders
   const [isLoadingDevices, setIsLoadingDevices] = useState(true);
@@ -63,7 +88,11 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [deviceDialogOpen, setDeviceDialogOpen] = useState(false);
   const [editingDevice, setEditingDevice] = useState<Device | null>(null);
-  const [currentView, setCurrentView] = useState<'metrics' | 'sensors' | 'endpoints' | 'mqtt' | 'jobs' | 'applications' | 'timeline' | 'usage' | 'analytics' | 'security' | 'maintenance' | 'logs' | 'settings' | 'tags' | 'tag-definitions' | 'account' | 'users' | 'profile' | 'dashboard' | 'digital-twin' | 'event-debugger'>('dashboard');
+  const [currentView, setCurrentView] = useState<View>(() => {
+    const stored = localStorage.getItem('currentView');
+    return stored && viewOptions.includes(stored as View) ? (stored as View) : 'metrics';
+  });
+  const isGlobalView = currentView === 'dashboard' || currentView === 'mqtt' || currentView === 'security';
   const [debugMode, setDebugMode] = useState(false);
   const [isKioskMode, setIsKioskMode] = useState<boolean>(() => {
     return localStorage.getItem('dashboard-kiosk-mode') === 'true';
@@ -80,6 +109,11 @@ export default function App() {
       localStorage.setItem('selectedDeviceId', selectedDeviceId);
     }
   }, [selectedDeviceId]);
+
+  // Persist current view to localStorage so refresh keeps agent view
+  useEffect(() => {
+    localStorage.setItem('currentView', currentView);
+  }, [currentView]);
 
   // Fetch devices from API
   useEffect(() => {
@@ -478,6 +512,76 @@ export default function App() {
     setSidebarOpen(false); // Close sidebar on mobile after selection
   };
 
+  // Deployment actions (agent-specific)
+  const { syncTargetState, cancelDeployment, hasPendingChanges, saveTargetState, getDeviceState } = useDeviceState();
+  const needsDeployment = selectedDevice?.deviceUuid ? hasPendingChanges(selectedDevice.deviceUuid) : false;
+  const deviceState = selectedDevice?.deviceUuid ? getDeviceState(selectedDevice.deviceUuid) : null;
+  const hasUnsavedChanges = deviceState?.isDirty || false;
+
+  const handleDeploy = async () => {
+    if (!selectedDevice?.deviceUuid) {
+      toast.error("No device selected");
+      return;
+    }
+
+    try {
+      if (hasUnsavedChanges) {
+        toast.info("Saving changes...");
+        try {
+          await saveTargetState(selectedDevice.deviceUuid);
+          toast.success("Changes saved");
+        } catch (saveError: any) {
+          console.error("Save error:", saveError);
+          toast.error(`Failed to save changes: ${saveError.message || 'Unknown error'}`);
+          throw saveError;
+        }
+      }
+
+      const toastId = toast.loading("Deploying changes...");
+      try {
+        await syncTargetState(selectedDevice.deviceUuid, 'dashboard');
+        window.dispatchEvent(new CustomEvent('deployment-started', { detail: { deviceUuid: selectedDevice.deviceUuid } }));
+        toast.success("Changes deployed - waiting for agent confirmation", { id: toastId });
+      } catch (deployError: any) {
+        console.error("Deployment error:", deployError);
+        toast.error(`Deployment failed: ${deployError.message || 'Unknown error'}`, { id: toastId });
+        throw deployError;
+      }
+    } catch (error: any) {
+      // Already handled above
+    }
+  };
+
+  const handleCancelDeploy = async () => {
+    if (!selectedDevice?.deviceUuid) {
+      toast.error("No device selected");
+      return;
+    }
+
+    try {
+      await cancelDeployment(selectedDevice.deviceUuid);
+      toast.success("Deployment cancelled");
+    } catch (error) {
+      toast.error("Failed to cancel deployment");
+      console.error("Cancel deployment error:", error);
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    if (!selectedDevice?.deviceUuid) {
+      toast.error("No device selected");
+      return;
+    }
+
+    try {
+      await saveTargetState(selectedDevice.deviceUuid);
+      toast.success("Changes saved as draft");
+    } catch (error) {
+      toast.error("Failed to save draft");
+      console.error("Save draft error:", error);
+    }
+  };
+
   // Application management now handled entirely by DeviceStateContext via ApplicationsCard
   // All application handlers (add, update, remove, toggle) removed - managed by context
 
@@ -530,9 +634,49 @@ export default function App() {
         />
       )}
 
+      {/* Global Menu - Hidden in kiosk mode */}
+      {!isKioskMode && (
+        <div className="bg-card border-b border-border px-6 py-2 flex items-center gap-3">
+          <Button
+            variant={!isGlobalView ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setCurrentView('metrics')}
+          >
+            <Activity className="w-4 h-4 mr-2" />
+            Agents
+          </Button>
+          <div className="flex items-center gap-2 overflow-x-auto">
+            <Button
+              variant={currentView === 'dashboard' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setCurrentView('dashboard')}
+            >
+              <BarChart3 className="w-4 h-4 mr-2" />
+              Dashboards
+            </Button>
+            <Button
+              variant={currentView === 'mqtt' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setCurrentView('mqtt')}
+            >
+              <Radio className="w-4 h-4 mr-2" />
+              MQTT
+            </Button>
+            <Button
+              variant={currentView === 'security' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setCurrentView('security')}
+            >
+              <Shield className="w-4 h-4 mr-2" />
+              Security
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-1 overflow-hidden">
                 {/* Desktop Sidebar - Hidden on mobile and in kiosk mode */}
-        {!isKioskMode && (
+        {!isKioskMode && !isGlobalView && (
           <div className="hidden lg:block">
             <DeviceSidebar
               devices={devices}
@@ -545,7 +689,28 @@ export default function App() {
         )}
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col overflow-y-auto">
-          {isLoadingDevices ? (
+          {isGlobalView ? (
+            <>
+              {currentView === 'dashboard' && (
+                <div className="h-full overflow-hidden">
+                  <GlobalDashboardPage 
+                    devices={devices} 
+                    onDeviceSelect={(device) => {
+                      setSelectedDeviceId(device.id);
+                    }} 
+                  />
+                </div>
+              )}
+              {currentView === 'mqtt' && (
+                <MqttPage device={selectedDevice} devices={devices} />
+              )}
+              {currentView === 'security' && (
+                <div className="flex-1 bg-background overflow-auto p-6">
+                  <SecurityPage />
+                </div>
+              )}
+            </>
+          ) : isLoadingDevices ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
@@ -567,7 +732,7 @@ export default function App() {
           ) : (
             <>
           {/* Mobile Header with Menu Button - Sticky at top - Hidden in kiosk mode */}
-          {!isKioskMode && (
+          {!isKioskMode && !isGlobalView && (
             <div className="lg:hidden bg-card border-b border-border p-4 flex items-center gap-3 sticky top-0 z-10">
             <Button
               variant="outline"
@@ -598,16 +763,9 @@ export default function App() {
           )}
 
           {/* View Toggle Buttons - Hidden in kiosk mode */}
-          {!isKioskMode && (
-            <div className="bg-card border-b border-border px-6 py-3 flex gap-2 overflow-x-auto">
-            <Button
-              variant={currentView === 'dashboard' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setCurrentView('dashboard')}
-            >
-              <BarChart3 className="w-4 h-4 mr-2" />
-              Dashboard
-            </Button>
+          {!isKioskMode && !isGlobalView && (
+            <div className="bg-card border-b border-border px-6 py-3 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2 overflow-x-auto flex-1 pr-2">
             <Button
               variant={currentView === 'metrics' ? 'default' : 'outline'}
               size="sm"
@@ -631,13 +789,6 @@ export default function App() {
               <BarChart3 className="w-4 h-4 mr-2" />
               Endpoints Viz
             </Button> */}
-            <Button              variant={currentView === 'mqtt' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setCurrentView('mqtt')}
-            >
-              <Radio className="w-4 h-4 mr-2" />
-              MQTT
-            </Button>
             <Button
               variant={currentView === 'jobs' ? 'default' : 'outline'}
               size="sm"
@@ -686,14 +837,6 @@ export default function App() {
               <LineChart className="w-4 h-4 mr-2" />
               Traffic Monitor
             </Button> */}
-            <Button
-              variant={currentView === 'security' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setCurrentView('security')}
-            >
-              <Shield className="w-4 h-4 mr-2" />
-              Security
-            </Button>
             {/* <Button
               variant={currentView === 'maintenance' ? 'default' : 'outline'}
               size="sm"
@@ -718,6 +861,36 @@ export default function App() {
               <Shield className="w-4 h-4 mr-2" />
               Settings
             </Button>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {hasUnsavedChanges && (
+                <Button
+                  onClick={handleSaveDraft}
+                  size="sm"
+                  variant="outline"
+                  className="border-yellow-300 bg-yellow-50 text-yellow-700 hover:bg-yellow-100"
+                >
+                  Save Draft
+                </Button>
+              )}
+              <Button
+                onClick={handleDeploy}
+                size="sm"
+                disabled={!needsDeployment}
+                className={needsDeployment ? "bg-amber-600 text-white hover:bg-amber-700" : "bg-gray-400 text-white"}
+              >
+                Deploy
+              </Button>
+              {needsDeployment && (
+                <Button
+                  onClick={handleCancelDeploy}
+                  size="sm"
+                  variant="outline"
+                >
+                  Cancel
+                </Button>
+              )}
+            </div>
             {/* <Button
               variant={currentView === 'tags' ? 'default' : 'outline'}
               size="sm"
@@ -730,16 +903,6 @@ export default function App() {
           )}
 
           {/* Conditional Content */}
-          {currentView === 'dashboard' && (
-            <div className="h-full overflow-hidden">
-              <GlobalDashboardPage 
-                devices={devices} 
-                onDeviceSelect={(device) => {
-                  setSelectedDeviceId(device.id);
-                }} 
-              />
-            </div>
-          )}
           {currentView === 'metrics' && (
             <SystemMetrics
               device={selectedDevice}
@@ -764,9 +927,6 @@ export default function App() {
           {currentView === 'endpoints' && (
             <EndpointsVisualizationPage />
           )}
-          {currentView === 'mqtt' && (
-            <MqttPage device={selectedDevice} devices={devices} />
-          )}
           {currentView === 'jobs' && (
             <JobsPage device={selectedDevice} />
           )}
@@ -781,11 +941,6 @@ export default function App() {
           )}
           {currentView === 'analytics' && (
             <AnalyticsPage device={selectedDevice} />
-          )}
-          {currentView === 'security' && (
-            <div className="flex-1 bg-background overflow-auto p-6">
-              <SecurityPage />
-            </div>
           )}
           {currentView === 'maintenance' && (
             <HousekeeperPage />

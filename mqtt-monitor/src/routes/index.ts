@@ -1,16 +1,19 @@
 import { Router, Request, Response } from 'express';
 import { MQTTMonitorService } from '../services/monitor';
 import { MQTTDatabaseService } from '../services/db';
+import { StatsHistoryService } from '../services/history';
 import { logger } from '../utils/logger';
 
 const router = Router();
 
 let monitor: MQTTMonitorService | null = null;
 let mqttDbService: MQTTDatabaseService | null = null;
+let historyService: StatsHistoryService | null = null;
 
-export function setMonitorInstance(monitorInstance: MQTTMonitorService | null, dbService: MQTTDatabaseService | null = null) {
+export function setMonitorInstance(monitorInstance: MQTTMonitorService | null, dbService: MQTTDatabaseService | null = null, history: StatsHistoryService | null = null) {
   monitor = monitorInstance;
   mqttDbService = dbService;
+  historyService = history;
   logger.info('Monitor instance injected into routes');
 }
 
@@ -370,6 +373,34 @@ router.get('/stats', (req: Request, res: Response) => {
     });
   } catch (error: any) {
     logger.error('Error getting comprehensive stats', { error: error.message });
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
+  }
+});
+
+router.get('/stats/history', (req: Request, res: Response) => {
+  try {
+    if (!historyService) {
+      return res.status(404).json({
+        success: false,
+        error: 'History service not available'
+      });
+    }
+
+    const limitParam = req.query.limit as string;
+    const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+    
+    const history = historyService.getHistory(limit);
+    
+    res.json({
+      success: true,
+      count: history.length,
+      history
+    });
+  } catch (error: any) {
+    logger.error('Error getting stats history', { error: error.message });
     res.status(500).json({ 
       success: false,
       error: error.message 

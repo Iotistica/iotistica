@@ -8,6 +8,7 @@ import { pool } from '../db/connection';
 import { logger } from '../utils/logger';
 import zlib from 'zlib';
 import msgpack from 'msgpack-lite';
+import crypto from 'crypto';
 
 const router = Router();
 
@@ -98,10 +99,10 @@ function deserializePayload(message: Buffer | string): any {
 }
 
 /**
- * GET /api/v1/mqtt/metrics
- * Get latest MQTT broker metrics from database
+ * GET /api/v1/mqtt/stats
+ * Get latest MQTT broker stats from database
  */
-router.get('/mqtt/metrics', async (req, res) => {
+router.get('/mqtt/stats', async (req, res) => {
   try {
     // Query latest broker stats from database
     const result = await pool.query(
@@ -110,37 +111,43 @@ router.get('/mqtt/metrics', async (req, res) => {
 
     if (result.rows.length === 0) {
       return res.json({
-        connected: false,
-        clients: 0,
-        subscriptions: 0,
-        retainedMessages: 0,
-        totalMessagesSent: 0,
-        totalMessagesReceived: 0,
-        systemStats: {},
-        messageRate: { published: 0, received: 0 },
-        throughput: { inbound: 0, outbound: 0 }
+        success: true,
+        stats: {
+          connected: false,
+          clients: 0,
+          subscriptions: 0,
+          retainedMessages: 0,
+          totalMessagesSent: 0,
+          totalMessagesReceived: 0,
+          systemStats: {},
+          messageRate: { published: 0, received: 0 },
+          throughput: { inbound: 0, outbound: 0 }
+        }
       });
     }
 
     const row = result.rows[0];
     
     res.json({
-      connected: true,
-      clients: row.connected_clients || 0,
-      subscriptions: row.subscriptions || 0,
-      retainedMessages: row.retained_messages || 0,
-      totalMessagesSent: row.messages_sent || 0,
-      totalMessagesReceived: row.messages_received || 0,
-      systemStats: row.sys_data || {},
-      messageRate: {
-        published: parseFloat(row.message_rate_published) || 0,
-        received: parseFloat(row.message_rate_received) || 0
-      },
-      throughput: {
-        inbound: parseFloat(row.throughput_inbound) || 0,
-        outbound: parseFloat(row.throughput_outbound) || 0
-      },
-      timestamp: row.timestamp
+      success: true,
+      stats: {
+        connected: true,
+        clients: row.connected_clients || 0,
+        subscriptions: row.subscriptions || 0,
+        retainedMessages: row.retained_messages || 0,
+        totalMessagesSent: row.messages_sent || 0,
+        totalMessagesReceived: row.messages_received || 0,
+        systemStats: row.sys_data || {},
+        messageRate: {
+          published: parseFloat(row.message_rate_published) || 0,
+          received: parseFloat(row.message_rate_received) || 0
+        },
+        throughput: {
+          inbound: parseFloat(row.throughput_inbound) || 0,
+          outbound: parseFloat(row.throughput_outbound) || 0
+        },
+        timestamp: row.timestamp
+      }
     });
   } catch (error: any) {
     logger.error('Error fetching MQTT metrics from database:', error);
@@ -245,11 +252,14 @@ router.get('/mqtt/topics', async (req, res) => {
     });
 
     res.json({
-      topics,
-      count: topics.length,
-      total: totalCount,
-      limit,
-      offset
+      success: true,
+      data: {
+        topics,
+        count: topics.length,
+        total: totalCount,
+        limit,
+        offset
+      }
     });
   } catch (error: any) {
     logger.error('Error fetching MQTT topics from database:', error);
@@ -311,23 +321,186 @@ router.post('/mqtt/decompress', async (req, res) => {
  */
 router.get('/mqtt/stats/history', async (req, res) => {
   try {
-    const hours = parseInt(req.query.hours as string) || 24;
+    const limit = parseInt(req.query.limit as string) || 30;
     
     const result = await pool.query(
       `SELECT * FROM mqtt_broker_stats
-       WHERE timestamp > NOW() - INTERVAL '${hours} hours'
-       ORDER BY timestamp ASC`
+       ORDER BY timestamp DESC
+       LIMIT $1`,
+      [limit]
     );
 
+    // Transform to match frontend expectations
+    const history = result.rows.map(row => ({
+      timestamp: row.timestamp,
+      clients: row.connected_clients || 0,
+      subscriptions: row.subscriptions || 0,
+      messageRate: {
+        published: parseFloat(row.message_rate_published) || 0,
+        received: parseFloat(row.message_rate_received) || 0
+      },
+      throughput: {
+        inbound: parseFloat(row.throughput_inbound) || 0,
+        outbound: parseFloat(row.throughput_outbound) || 0
+      }
+    })).reverse(); // Reverse to get chronological order
+
     res.json({
-      stats: result.rows,
-      count: result.rows.length,
-      hours
+      success: true,
+      count: history.length,
+      history
     });
   } catch (error: any) {
     logger.error('Error fetching MQTT stats history from database:', error);
     res.status(503).json({
+      success: false,
       error: 'Failed to fetch MQTT stats history',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/v1/mqtt/topics/:topic/schema
+ * Get JSON schema for a specific MQTT topic from database
+ */
+router.get('/mqtt/topics/:topic(*)/schema', async (req, res) => {
+  try {
+    const topic = req.params.topic;
+    
+    const result = await pool.query(
+      `SELECT 
+        topic,
+        schema,
+        message_type,
+        first_seen,
+        last_seen
+       FROM mqtt_topics
+       WHERE topic = $1`,
+      [topic]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Schema not available for this topic'
+      });
+    }
+
+    const row = result.rows[0];
+    
+    if (!row.schema) {
+      return res.status(404).json({
+        success: false,
+        error: 'No schema available yet. Schema is generated after analyzing message patterns.'
+      });
+    }
+
+    // Calculate schema hash from the schema JSON
+    const schemaStr = JSON.stringify(row.schema);
+    const schemaHash = crypto.createHash('md5').update(schemaStr).digest('hex');
+
+    res.json({
+      success: true,
+      data: {
+        topic: row.topic,
+        schema: row.schema,
+        messageType: row.message_type,
+        // Note: version/confidence/sampleCount are in-memory only in mqtt-monitor
+        // Database only stores the schema JSON
+        schemaVersion: 1,  // Default since not persisted
+        schemaConfidence: 1.0,  // Default since not persisted
+        schemaSampleCount: 0,  // Default since not persisted
+        schemaHash: schemaHash,
+        firstSeen: row.first_seen,
+        lastSeen: row.last_seen
+      }
+    });
+  } catch (error: any) {
+    logger.error('Error fetching topic schema from database:', error);
+    res.status(503).json({
+      success: false,
+      error: 'Failed to fetch topic schema',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/v1/mqtt/topics/:topic/acls
+ * Get ACL rules for a specific MQTT topic from database
+ */
+router.get('/mqtt/topics/:topic(*)/acls', async (req, res) => {
+  try {
+    const topic = req.params.topic;
+    
+    // Fetch all ACLs and filter in-memory using proper MQTT topic matching
+    const result = await pool.query(
+      `SELECT 
+        id,
+        username,
+        clientid,
+        topic,
+        access,
+        priority,
+        created_at
+       FROM mqtt_acls
+       ORDER BY priority DESC, created_at DESC`
+    );
+
+    // Filter ACLs that match the requested topic using MQTT pattern matching
+    const matchingAcls = result.rows.filter(row => {
+      const pattern = row.topic;
+      
+      // Exact match
+      if (pattern === topic) return true;
+      
+      // Convert MQTT pattern to regex
+      // Replace + with [^/]+ (matches one level)
+      // Replace # with .* (matches zero or more levels, but only at end)
+      const regexPattern = pattern
+        .replace(/\+/g, '[^/]+')           // + matches exactly one level (non-slash chars)
+        .replace(/#$/, '.*')               // # at end matches zero or more levels
+        .replace(/([.?*+^$[\]\\(){}|-])/g, '\\$1'); // Escape other regex chars (except our replacements)
+      
+      // # must be at the end of the pattern (MQTT spec)
+      if (pattern.includes('#') && !pattern.endsWith('#')) {
+        return false;
+      }
+      
+      try {
+        const regex = new RegExp(`^${regexPattern}$`);
+        return regex.test(topic);
+      } catch (error) {
+        logger.warn('Invalid ACL pattern', { pattern, error });
+        return false;
+      }
+    });
+
+    const acls = matchingAcls.map(row => ({
+      id: row.id,
+      username: row.username || '*',  // NULL means all users
+      clientId: row.clientid || '*',  // NULL means all clients
+      topic: row.topic,
+      access: row.access,
+      accessLabel: row.access === 1 ? 'Subscribe' : row.access === 2 ? 'Publish' : 'Publish + Subscribe',
+      priority: row.priority,
+      createdAt: row.created_at
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        topic,
+        count: acls.length,
+        acls
+      }
+    });
+  } catch (error: any) {
+    logger.error('Error fetching topic ACLs from database:', error);
+    res.status(503).json({
+      success: false,
+      error: 'Failed to fetch topic ACLs',
       message: error.message
     });
   }

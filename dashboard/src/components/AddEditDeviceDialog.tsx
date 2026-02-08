@@ -330,7 +330,7 @@ export function AddEditDeviceDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[95vh] overflow-hidden flex flex-col">
         <DialogHeader className="flex-shrink-0">
-          <DialogTitle>{isEditMode ? "Edit Device" : "Add Agent"}</DialogTitle>
+          <DialogTitle>{isEditMode ? "Edit Agent" : "Add Agent"}</DialogTitle>
           <DialogDescription>
             {isEditMode
               ? "Update agent information and settings"
@@ -339,6 +339,17 @@ export function AddEditDeviceDialog({
         </DialogHeader>
 
         <div className="space-y-4">
+          {isEditMode && (
+            <div className="space-y-2">
+              <Label htmlFor="agent-uuid">Agent UUID</Label>
+              <Input
+                id="agent-uuid"
+                value={device?.deviceUuid || ""}
+                readOnly
+                disabled
+              />
+            </div>
+          )}
           {!isEditMode && (
             <div className="space-y-2 text-left">
               <Label htmlFor="device-type" className="text-left">Agent Type *</Label>
@@ -346,8 +357,8 @@ export function AddEditDeviceDialog({
                 value={formData.type}
                 onValueChange={(value: Device['type']) => setFormData(prev => ({ ...prev, type: value }))}
               >
-                <SelectTrigger id="device-type">
-                  <SelectValue placeholder="Select agent type" />
+                <SelectTrigger id="device-type" className="h-11">
+                  <SelectValue placeholder="Select agent type" className="leading-none" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="standalone">
@@ -591,7 +602,7 @@ export function AddEditDeviceDialog({
                 Cancel
               </Button>
               <Button onClick={handleSave}>
-                {isEditMode ? "Update Device" : "Add Device"}
+                {isEditMode ? "Update" : "Add"}
               </Button>
             </>
           )}

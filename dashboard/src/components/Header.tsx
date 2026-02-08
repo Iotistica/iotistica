@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Server, User, LogIn, Settings, HelpCircle, LogOut, RefreshCw, XCircle, Save, MessageSquare, Tag, Building2 } from "lucide-react";
+import { Server, User, LogIn, Settings, HelpCircle, LogOut, MessageSquare, Tag, Building2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import {
@@ -12,7 +12,6 @@ import {
 } from "./ui/dropdown-menu";
 import { toast } from "sonner";
 import { ThemeToggle } from "./theme-toggle";
-import { useDeviceState } from "../contexts/DeviceStateContext";
 import { AIChatWidget } from "./AIChatWidget";
 
 interface HeaderProps {
@@ -47,13 +46,6 @@ export function Header({
   // Force re-render when sensor config changes
   const [, forceUpdate] = useState({});
   
-  // Get deployment status and functions from context
-  const { syncTargetState, cancelDeployment, hasPendingChanges, saveTargetState, getDeviceState } = useDeviceState();
-  
-  const needsDeployment = deviceUuid ? hasPendingChanges(deviceUuid) : false;
-  const deviceState = deviceUuid ? getDeviceState(deviceUuid) : null;
-  const hasUnsavedChanges = deviceState?.isDirty || false;
-  
   // Listen for sensor config changes (toggle events)
   useEffect(() => {
     const handleConfigChanged = (event: CustomEvent) => {
@@ -69,77 +61,6 @@ export function Header({
       window.removeEventListener('sensor-config-changed', handleConfigChanged as EventListener);
     };
   }, [deviceUuid]);
-  
-  const handleDeploy = async () => {
-    if (!deviceUuid) {
-      toast.error("No device selected");
-      return;
-    }
-    
-    try {
-      // If there are unsaved changes, save them first
-      if (hasUnsavedChanges) {
-        toast.info("Saving changes...");
-        try {
-          await saveTargetState(deviceUuid);
-          toast.success("Changes saved");
-        } catch (saveError: any) {
-          console.error("Save error:", saveError);
-          toast.error(`Failed to save changes: ${saveError.message || 'Unknown error'}`);
-          throw saveError; // Stop deployment if save fails
-        }
-      }
-      
-      // Then deploy
-      const toastId = toast.loading("Deploying changes...");
-      
-      try {
-        await syncTargetState(deviceUuid, 'dashboard');
-        
-        // Emit event so SensorsPage can refresh immediately
-        window.dispatchEvent(new CustomEvent('deployment-started', { detail: { deviceUuid } }));
-        
-        toast.success("Changes deployed - waiting for agent confirmation", { id: toastId });
-      } catch (deployError: any) {
-        console.error("Deployment error:", deployError);
-        toast.error(`Deployment failed: ${deployError.message || 'Unknown error'}`, { id: toastId });
-        throw deployError;
-      }
-    } catch (error: any) {
-      // Error already handled in nested try-catch blocks
-      // This outer catch is just to prevent unhandled promise rejection
-    }
-  };
-  
-  const handleCancelDeploy = async () => {
-    if (!deviceUuid) {
-      toast.error("No device selected");
-      return;
-    }
-    
-    try {
-      await cancelDeployment(deviceUuid);
-      toast.success("Deployment cancelled");
-    } catch (error) {
-      toast.error("Failed to cancel deployment");
-      console.error("Cancel deployment error:", error);
-    }
-  };
-  
-  const handleSaveDraft = async () => {
-    if (!deviceUuid) {
-      toast.error("No device selected");
-      return;
-    }
-    
-    try {
-      await saveTargetState(deviceUuid);
-      toast.success("Changes saved as draft");
-    } catch (error) {
-      toast.error("Failed to save draft");
-      console.error("Save draft error:", error);
-    }
-  };
   
   return (
     <header className="bg-card border-b border-border sticky top-0 z-50">
@@ -159,66 +80,22 @@ export function Header({
         <div className="flex items-center gap-3">
           {isAuthenticated ? (
             <>
-              {/* Save Draft + Deploy Buttons + AI Chat */}
-              <div className="flex items-center gap-2">
-                {hasUnsavedChanges && (
-                  <Button 
-                    onClick={handleSaveDraft}
-                    size="lg"
-                    variant="outline"
-                    className="border-yellow-300 bg-yellow-50 text-yellow-700 hover:bg-yellow-100 font-semibold shadow-md"
-                    style={{ 
-                      padding: '0.75rem 1.5rem',
-                      fontSize: '1rem'
-                    }}
-                  >
-                    <Save className="w-5 h-5 mr-2" />
-                    Save Draft
-                  </Button>
-                )}
-                <Button 
-                  onClick={handleDeploy}
+              {/* AI Chat Button */}
+              {deviceUuid && (
+                <Button
+                  onClick={() => setIsChatOpen(true)}
                   size="lg"
-                  disabled={!needsDeployment}
+                  variant="outline"
+                  className="border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold shadow-md"
                   style={{ 
-                    backgroundColor: needsDeployment ? '#ca8a04' : '#9ca3af',
-                    color: 'white',
                     padding: '0.75rem 1.5rem',
                     fontSize: '1rem'
                   }}
-                  className="font-semibold shadow-md"
                 >
-                  
-                  Deploy
+                  <MessageSquare className="w-5 h-5 mr-2" />
+                  AI Assistant
                 </Button>
-                {needsDeployment && (
-                  <Button 
-                    onClick={handleCancelDeploy}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <XCircle className="w-4 h-4 mr-2" />
-                    Cancel
-                  </Button>
-                )}
-                
-                {/* AI Chat Button */}
-                {deviceUuid && (
-                  <Button
-                    onClick={() => setIsChatOpen(true)}
-                    size="lg"
-                    variant="outline"
-                    className="border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 font-semibold shadow-md"
-                    style={{ 
-                      padding: '0.75rem 1.5rem',
-                      fontSize: '1rem'
-                    }}
-                  >
-                    <MessageSquare className="w-5 h-5 mr-2" />
-                    AI Assistant
-                  </Button>
-                )}
-              </div>
+              )}
 
               <ThemeToggle />
 
