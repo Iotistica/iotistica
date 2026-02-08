@@ -368,7 +368,13 @@ jobs:
             
             // Check if PAT exists
             if (!process.env.DEPLOY_TOKEN) {
-              throw new Error('K8S_DEPLOY_PAT secret not found. Please create a GitHub PAT with workflow permissions and add it as a repository secret.');
+              core.warning('⚠️ K8S_DEPLOY_PAT secret not configured - skipping K8s deployment');
+              core.warning('To enable K8s deployments:');
+              core.warning('1. Go to GitHub Settings → Developer settings → Personal access tokens');
+              core.warning('2. Create a token (classic) with "workflow" scope');
+              core.warning('3. Add it to repository secrets as K8S_DEPLOY_PAT');
+              console.log('Deployment skipped - secret not configured');
+              //return;
             }
             
             try {
