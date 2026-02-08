@@ -1028,9 +1028,7 @@ export default function App() {
             <HousekeeperPage />
           )}
           {currentView === 'logs' && (
-            <div className="flex-1 bg-background overflow-auto p-6">
-              <LogsPage deviceUuid={selectedDevice.deviceUuid} />
-            </div>
+            <LogsPage deviceUuid={selectedDevice.deviceUuid} />
           )}
           {currentView === 'settings' && (
             <DeviceSettingsPage deviceUuid={selectedDevice.deviceUuid} />

@@ -8,12 +8,12 @@
  */
 
 import { useState, useEffect, useRef } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Terminal, RefreshCw, Download, Pause, Play, Calendar } from "lucide-react";
+import { RefreshCw, Download, Pause, Play, Calendar } from "lucide-react";
 import { buildApiUrl } from '@/config/api';
 
 interface LogEntry {
@@ -53,6 +53,12 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
     setDateFrom(sevenDaysAgo.toISOString().split('T')[0]);
     setDateTo(now.toISOString().split('T')[0]);
   }, []);
+
+  // Clear logs when device changes
+  useEffect(() => {
+    setLogs([]);
+    setIsLoading(false);
+  }, [deviceUuid]);
 
   // Auto-scroll to bottom when new logs arrive in live mode
   useEffect(() => {
@@ -362,97 +368,100 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
   });
 
   return (
-    <Card className="border-2 h-full flex flex-col">
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Terminal className="h-6 w-6 text-muted-foreground" />
-            <div>
-              <CardTitle>Agent Logs</CardTitle>
-              <CardDescription>
-                {mode === 'live' 
-                  ? 'Real-time log streaming from agent services'
-                  : 'Historical log query with date range filtering'
-                }
-              </CardDescription>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-2">
-            {/* Mode Toggle */}
-            <div className="flex border rounded-md">
-              <Button
-                variant={mode === 'live' ? 'default' : 'ghost'}
-                size="sm"
-                onClick={() => handleModeChange('live')}
-                className="rounded-r-none"
-              >
-                Live
-              </Button>
-              <Button
-                variant={mode === 'historical' ? 'default' : 'ghost'}
-                size="sm"
-                onClick={() => handleModeChange('historical')}
-                className="rounded-l-none"
-              >
-                Historical
-              </Button>
-            </div>
-
-            {/* WebSocket Connection Status - Live mode only */}
-            {mode === 'live' && (
-              <Badge 
-                variant={wsConnected ? "default" : "secondary"}
-                className={wsConnected ? 'bg-green-500 text-white' : 'bg-gray-400 text-white'}
-              >
-                {wsConnected ? '🟢 Streaming' : '⚫ Disconnected'}
-              </Badge>
-            )}
-            
-            {/* Pause/Resume - Live mode only */}
-            {mode === 'live' && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleTogglePause}
-                className={isPaused ? 'bg-yellow-50 border-yellow-200' : ''}
-              >
-                {isPaused ? (
-                  <>
-                    <Play className="h-4 w-4 mr-1" />
-                    Resume
-                  </>
-                ) : (
-                  <>
-                    <Pause className="h-4 w-4 mr-1" />
-                    Pause
-                  </>
-                )}
-              </Button>
-            )}
-            
-            {/* Refresh - Historical mode only */}
-            {mode === 'historical' && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRefresh}
-                disabled={isLoading}
-              >
-                <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-              </Button>
-            )}
-            
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={downloadLogs}
-              disabled={filteredLogs.length === 0}
-            >
-              <Download className="h-4 w-4" />
-            </Button>
-          </div>
+    <div className="flex-1 bg-background overflow-auto">
+      <div className="p-4 md:p-6 lg:p-8 space-y-6 min-h-full flex flex-col">
+        <div className="mb-6">
+          <h2 className="text-2xl font-bold text-foreground mb-2">Agent Logs</h2>
+          <p className="text-muted-foreground">
+            {mode === 'live' 
+              ? 'Real-time log streaming from agent services'
+              : 'Historical log query with date range filtering'
+            }
+          </p>
         </div>
+
+        <Card className="border-2 flex flex-col flex-1 min-h-[calc(100vh-280px)]">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {/* Left side - placeholder for future controls */}
+              </div>
+              
+              <div className="flex items-center gap-2">
+                {/* Mode Toggle */}
+                <div className="flex border rounded-md">
+                  <Button
+                    variant={mode === 'live' ? 'default' : 'ghost'}
+                    size="sm"
+                    onClick={() => handleModeChange('live')}
+                    className="rounded-r-none"
+                  >
+                    Live
+                  </Button>
+                  <Button
+                    variant={mode === 'historical' ? 'default' : 'ghost'}
+                    size="sm"
+                    onClick={() => handleModeChange('historical')}
+                    className="rounded-l-none"
+                  >
+                    Historical
+                  </Button>
+                </div>
+
+                {/* WebSocket Connection Status - Live mode only */}
+                {mode === 'live' && (
+                  <Badge 
+                    variant={wsConnected ? "default" : "secondary"}
+                    className={wsConnected ? 'bg-green-500 text-white' : 'bg-gray-400 text-white'}
+                  >
+                    {wsConnected ? '🟢 Streaming' : '⚫ Disconnected'}
+                  </Badge>
+                )}
+                
+                {/* Pause/Resume - Live mode only */}
+                {mode === 'live' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleTogglePause}
+                    className={isPaused ? 'bg-yellow-50 border-yellow-200' : ''}
+                  >
+                    {isPaused ? (
+                      <>
+                        <Play className="h-4 w-4 mr-1" />
+                        Resume
+                      </>
+                    ) : (
+                      <>
+                        <Pause className="h-4 w-4 mr-1" />
+                        Pause
+                      </>
+                    )}
+                  </Button>
+                )}
+                
+                {/* Refresh - Historical mode only */}
+                {mode === 'historical' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRefresh}
+                    disabled={isLoading}
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+                  </Button>
+                )}
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={downloadLogs}
+                  disabled={filteredLogs.length === 0}
+                >
+                  <Download className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
 
         {/* Filters */}
         <div className="flex items-center gap-3 mt-4 flex-wrap">
@@ -547,13 +556,15 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
         </div>
       </CardHeader>
 
-      <CardContent className="flex-1 overflow-hidden">
+      <CardContent className="flex-1 overflow-hidden p-6">
         {/* Log Output */}
         <div 
           ref={logContainerRef}
-          className="bg-black rounded-lg p-4 font-mono text-sm overflow-auto h-full"
+          className="bg-black rounded-lg p-4 font-mono text-sm overflow-y-auto"
           style={{ 
             backgroundColor: '#1e1e1e',
+            height: 'calc(100vh - 450px)',
+            minHeight: '400px',
           }}
         >
           {filteredLogs.length === 0 && !isLoading && (
@@ -617,5 +628,7 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
         </div>
       </CardContent>
     </Card>
+      </div>
+    </div>
   );
 }
