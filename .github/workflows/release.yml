@@ -3,17 +3,32 @@ name: Release All
 on:
   push:
     tags:
+      # Only trigger on final release tags (not RC tags)
+      # RCs should be created via manual workflow_dispatch
+      # To include RCs, add: - 'v*.*.*-rc.*'
       - 'v*.*.*'
   workflow_dispatch:
     inputs:
       release_type:
-        description: 'Choose release type'
+        description: 'Version bump type'
         required: true
         type: choice
         options:
           - patch
           - minor
           - major
+      release_mode:
+        description: 'Release mode'
+        required: true
+        type: choice
+        default: final
+        options:
+          - rc
+          - final
+      rc_number:
+        description: 'RC number (only for rc mode)'
+        required: false
+        default: '1'
       deploy:
         description: 'Deploy to Kubernetes after release'
         required: false
@@ -97,8 +112,20 @@ jobs:
           esac
 
           NEW="v${MAJOR}.${MINOR}.${PATCH}"
-          echo "Auto-generated version: $NEW"
-          echo "release_version=$NEW" >> $GITHUB_OUTPUT
+          
+          # Apply RC mode if specified
+          MODE="${{ github.event.inputs.release_mode || 'final' }}"
+          RC_NUM="${{ github.event.inputs.rc_number || '1' }}"
+          
+          if [ "$MODE" = "rc" ]; then
+            RELEASE="${NEW}-rc.${RC_NUM}"
+            echo "Auto-generated RC version: $RELEASE"
+          else
+            RELEASE="$NEW"
+            echo "Auto-generated final version: $RELEASE"
+          fi
+          
+          echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
 
       - name: Read service versions from package.json at this commit
         id: pkg_versions
@@ -205,9 +232,17 @@ jobs:
 
       - name: Summary for step output
         run: |
-          echo "|  Release validation" >> $GITHUB_STEP_SUMMARY
+          MODE="${{ github.event.inputs.release_mode || 'final' }}"
+          MODE_BADGE="🎯 Final Release"
+          if [ "$MODE" = "rc" ]; then
+            MODE_BADGE="🧪 Release Candidate (RC ${{ github.event.inputs.rc_number || '1' }})"
+          fi
+          
+          echo "## Release validation" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Release:** \`${{ steps.set_version.outputs.release_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Mode:** $MODE_BADGE" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Service | package.json | selected image tag |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---:|---|" >> $GITHUB_STEP_SUMMARY
@@ -286,6 +321,6 @@ jobs:
           name: Release ${{ needs.validate-release.outputs.release_version }}
           body_path: changelog.txt
           draft: false
-          prerelease: false
+          prerelease: ${{ github.event.inputs.release_mode == 'rc' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
