@@ -25,10 +25,6 @@ on:
         options:
           - rc
           - final
-      rc_number:
-        description: 'RC number (only for rc mode)'
-        required: false
-        default: '1'
       deploy:
         description: 'Deploy to Kubernetes after release'
         required: false
@@ -74,50 +70,85 @@ jobs:
             exit 0
           fi
 
-          # Manual dispatch → auto bump
-          TYPE="${{ github.event.inputs.release_type }}"
-
-          # Get latest semver tag
-          LAST=$(git tag -l 'v*.*.*' --sort=-version:refname | head -n1)
-
-          if [ -z "$LAST" ]; then
-            echo "No previous tags found, starting at v1.0.0"
-            LAST="v1.0.0"
-          fi
-
-          echo "Latest tag: $LAST"
-
-          # strip v prefix
-          BASE=${LAST#v}
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
-
-          case "$TYPE" in
-            patch)
-              PATCH=$((PATCH + 1))
-              ;;
-            minor)
-              MINOR=$((MINOR + 1))
-              PATCH=0
-              ;;
-            major)
-              MAJOR=$((MAJOR + 1))
-              MINOR=0
-              PATCH=0
-              ;;
-          esac
-
-          NEW="v${MAJOR}.${MINOR}.${PATCH}"
-          
-          # Apply RC mode if specified
+          # Manual dispatch → determine release version
           MODE="${{ github.event.inputs.release_mode || 'final' }}"
-          RC_NUM="${{ github.event.inputs.rc_number || '1' }}"
+          TYPE="${{ github.event.inputs.release_type }}"
           
+          # Find latest final release (no -rc suffix)
+          LATEST_FINAL=$(git tag -l 'v*.*.*' --sort=-version:refname | grep -v '-rc' | head -n1 || echo "v0.0.0")
+          
+          echo "Latest final release: $LATEST_FINAL"
+          
+          # Strip v prefix and parse version
+          BASE=${LATEST_FINAL#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
+          
+          # === RC MODE ===
           if [ "$MODE" = "rc" ]; then
-            RELEASE="${NEW}-rc.${RC_NUM}"
+            # Check if there are existing RCs for the current final version
+            LATEST_RC=$(git tag -l "${LATEST_FINAL}-rc.*" --sort=-version:refname | head -n1 || echo "")
+            
+            if [ -n "$LATEST_RC" ]; then
+              # Reuse base version, auto-increment RC number
+              BASE_VERSION="$LATEST_FINAL"
+              LAST_RC_NUM=$(echo "$LATEST_RC" | sed -E 's/.*-rc\.([0-9]+)/\1/')
+              RC_NUM=$((LAST_RC_NUM + 1))
+              echo "Existing RC line found: $LATEST_RC"
+              echo "Incrementing to RC #${RC_NUM} for base ${BASE_VERSION}"
+            else
+              # New RC line → bump version based on release_type
+              case "$TYPE" in
+                patch)
+                  PATCH=$((PATCH + 1))
+                  ;;
+                minor)
+                  MINOR=$((MINOR + 1))
+                  PATCH=0
+                  ;;
+                major)
+                  MAJOR=$((MAJOR + 1))
+                  MINOR=0
+                  PATCH=0
+                  ;;
+              esac
+              BASE_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+              RC_NUM=1
+              echo "Starting new RC line with base ${BASE_VERSION}"
+            fi
+            
+            RELEASE="${BASE_VERSION}-rc.${RC_NUM}"
             echo "Auto-generated RC version: $RELEASE"
+            echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # === FINAL MODE ===
+          # Check if we're finalizing from an RC line
+          RC_CHECK=$(git tag -l "${LATEST_FINAL}-rc.*" | head -n1 || echo "")
+          
+          if [ -n "$RC_CHECK" ]; then
+            # Finalizing from existing RCs - use current final version
+            RELEASE="$LATEST_FINAL"
+            echo "Finalizing release ${RELEASE} from existing RC line"
+            echo "⚠️  This will promote the RC line to final release"
           else
-            RELEASE="$NEW"
-            echo "Auto-generated final version: $RELEASE"
+            # Fresh final release - bump version
+            case "$TYPE" in
+              patch)
+                PATCH=$((PATCH + 1))
+                ;;
+              minor)
+                MINOR=$((MINOR + 1))
+                PATCH=0
+                ;;
+              major)
+                MAJOR=$((MAJOR + 1))
+                MINOR=0
+                PATCH=0
+                ;;
+            esac
+            RELEASE="v${MAJOR}.${MINOR}.${PATCH}"
+            echo "New final release: $RELEASE"
           fi
           
           echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
@@ -210,14 +241,18 @@ jobs:
       - name: Summary for step output
         run: |
           MODE="${{ github.event.inputs.release_mode || 'final' }}"
+          RELEASE="${{ steps.set_version.outputs.release_version }}"
           MODE_BADGE="🎯 Final Release"
+          
           if [ "$MODE" = "rc" ]; then
-            MODE_BADGE="🧪 Release Candidate (RC ${{ github.event.inputs.rc_number || '1' }})"
+            # Extract RC number from version tag (e.g., v1.0.134-rc.2 -> 2)
+            RC_NUM=$(echo "$RELEASE" | sed -E 's/.*-rc\.([0-9]+)/\1/' || echo "1")
+            MODE_BADGE="🧪 Release Candidate (RC ${RC_NUM})"
           fi
           
           echo "## Release validation" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Release:** \`${{ steps.set_version.outputs.release_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** \`$RELEASE\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Mode:** $MODE_BADGE" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
