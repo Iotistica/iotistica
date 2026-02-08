@@ -273,6 +273,7 @@ export function SystemMetrics({
     command?: string;
   }>>([]);
   const [processesLoading, setProcessesLoading] = useState(true);
+  const [isProcessesRefreshing, setIsProcessesRefreshing] = useState(false);
 
   // Format uptime from seconds to human readable
   const formatUptime = useCallback((seconds: number): string => {
@@ -340,6 +341,16 @@ export function SystemMetrics({
       setProcessesLoading(false);
     }
   }, [device.deviceUuid]);
+
+  // Manual refresh for processes
+  const handleProcessesRefresh = useCallback(async () => {
+    setIsProcessesRefreshing(true);
+    try {
+      await fetchProcesses();
+    } finally {
+      setIsProcessesRefreshing(false);
+    }
+  }, [fetchProcesses]);
 
   // Fetch historical data from API
   const fetchHistoricalData = useCallback(async (period: string) => {
@@ -748,6 +759,10 @@ export function SystemMetrics({
                   >
                     <RefreshCw 
                       className={`w-4 h-4 ${isTelemetryRefreshing ? 'animate-spin' : ''}`}
+                      style={{ 
+                        transform: isTelemetryRefreshing ? undefined : 'rotate(0deg)',
+                        transition: isTelemetryRefreshing ? undefined : 'none'
+                      }}
                     />
                   </Button>
                 </div>
@@ -908,9 +923,26 @@ export function SystemMetrics({
 
           {/* Top Processes */}
           <Card className="p-4 md:p-6" id="processes-section">
-            <div className="mb-4">
-              <h3 className="text-lg text-foreground font-medium mb-1">Top Processes</h3>
-              <p className="text-sm text-muted-foreground">Most resource-intensive processes</p>
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg text-foreground font-medium mb-1">Top Processes</h3>
+                <p className="text-sm text-muted-foreground">Most resource-intensive processes</p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={handleProcessesRefresh}
+                disabled={isProcessesRefreshing || processesLoading}
+              >
+                <RefreshCw 
+                  className={`w-4 h-4 ${isProcessesRefreshing ? 'animate-spin' : ''}`}
+                  style={{ 
+                    transform: isProcessesRefreshing ? undefined : 'rotate(0deg)',
+                    transition: isProcessesRefreshing ? undefined : 'none'
+                  }}
+                />
+              </Button>
             </div>
             {processesLoading ? (
               <div className="text-center py-8 text-muted-foreground">Loading processes...</div>

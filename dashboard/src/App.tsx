@@ -718,14 +718,14 @@ export default function App() {
               <Shield className="w-4 h-4 mr-2" />
               Settings
             </Button>
-            <Button
+            {/* <Button
               variant={currentView === 'tags' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCurrentView('tags')}
             >
               <Tag className="w-4 h-4 mr-2" />
               Tags
-            </Button>
+            </Button> */}
           </div>
           )}
 

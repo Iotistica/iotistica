@@ -44,6 +44,7 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
   }, [refreshInterval]);
   
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastChartUpdateRef = useRef<number>(0); // Track last chart data point timestamp
   
   // Agent filtering
   const [selectedAgentUuid, setSelectedAgentUuid] = useState<string>('all');
@@ -101,19 +102,26 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
     // Update context with broker stats
     updateBrokerStats(mappedStats);
     
-    // Add data point to chart history
-    const now = new Date();
-    const dataPoint: MqttDataPoint = {
-      timestamp: now.getTime(),  // Store Unix timestamp for proper spacing
-      time: now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      messageRatePublished: mappedStats.messageRatePublished,
-      messageRateReceived: mappedStats.messageRateReceived,
-      throughputInbound: mappedStats.throughputInbound,
-      throughputOutbound: mappedStats.throughputOutbound,
-      connectedClients: mappedStats.connectedClients,
-      subscriptions: mappedStats.subscriptions
-    };
-    addChartDataPoint(dataPoint);
+    // Add data point to chart history only if enough time has passed
+    // This prevents duplicate points from manual refreshes in rapid succession
+    const now = Date.now();
+    const timeSinceLastUpdate = now - lastChartUpdateRef.current;
+    const MIN_UPDATE_INTERVAL = 2000; // 2 seconds minimum between chart updates
+    
+    if (timeSinceLastUpdate >= MIN_UPDATE_INTERVAL || lastChartUpdateRef.current === 0) {
+      const dataPoint: MqttDataPoint = {
+        timestamp: now,  // Store Unix timestamp for proper spacing
+        time: new Date(now).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        messageRatePublished: mappedStats.messageRatePublished,
+        messageRateReceived: mappedStats.messageRateReceived,
+        throughputInbound: mappedStats.throughputInbound,
+        throughputOutbound: mappedStats.throughputOutbound,
+        connectedClients: mappedStats.connectedClients,
+        subscriptions: mappedStats.subscriptions
+      };
+      addChartDataPoint(dataPoint);
+      lastChartUpdateRef.current = now;
+    }
     
     setIsConnected(data.connected || false);
   }, [updateBrokerStats, addChartDataPoint]);
@@ -183,7 +191,7 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
     } finally {
       setLoading(false);
     }
-  }, [updateBrokerStats, updateTopics, addChartDataPoint, handleMqttStats, setIsConnected, setLoading, setInitialLoadComplete]);
+  }, [updateBrokerStats, updateTopics, handleMqttStats, setIsConnected, setLoading, setInitialLoadComplete]);
   
   // Manual refresh function
   const handleManualRefresh = useCallback(async () => {

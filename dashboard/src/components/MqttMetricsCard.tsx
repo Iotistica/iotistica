@@ -94,6 +94,10 @@ const MqttMetricsCard = ({ refreshInterval, onRefreshIntervalChange, onManualRef
             >
               <RefreshCw 
                 className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`}
+                style={{ 
+                  transform: isRefreshing ? undefined : 'rotate(0deg)',
+                  transition: isRefreshing ? undefined : 'none'
+                }}
               />
             </Button>
           </div>
