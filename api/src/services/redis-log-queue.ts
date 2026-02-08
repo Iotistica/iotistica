@@ -423,6 +423,33 @@ class RedisLogQueue {
       // Insert all logs in one batch operation
       await this.insertLogsBatch(allLogs);
 
+      // Group logs by device for WebSocket broadcasting
+      const logsByDevice = new Map<string, typeof allLogs>();
+      allLogs.forEach(log => {
+        const existing = logsByDevice.get(log.deviceUuid) || [];
+        existing.push(log);
+        logsByDevice.set(log.deviceUuid, existing);
+      });
+
+      // Publish to Redis pub/sub for WebSocket real-time streaming
+      // This notifies connected WebSocket clients about new logs
+      for (const [deviceUuid, deviceLogs] of logsByDevice.entries()) {
+        try {
+          const channel = `device:${deviceUuid}:logs`;
+          await this.redisIngestion.publish(
+            channel,
+            JSON.stringify({ logs: deviceLogs })
+          );
+          logger.debug(`📤 Published ${deviceLogs.length} logs to Redis channel: ${channel}`);
+        } catch (err: any) {
+          logger.error('Failed to publish logs to WebSocket channel', {
+            deviceUuid: deviceUuid.substring(0, 8),
+            count: deviceLogs.length,
+            error: err.message
+          });
+        }
+      }
+
       // Acknowledge messages (atomic)
       const messageIds = entries.map(e => e.id);
       await this.redisConsumer.xack(this.streamKey, this.consumerGroup, ...messageIds);

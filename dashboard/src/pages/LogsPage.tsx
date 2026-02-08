@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Terminal, RefreshCw, Download, Pause, Play, Calendar } from "lucide-react";
+import { buildApiUrl } from '@/config/api';
 
 interface LogEntry {
   id?: number;
@@ -21,6 +22,7 @@ interface LogEntry {
   service_name: string;
   message: string;
   timestamp: string;
+  level?: string;
   is_stderr: boolean;
   is_system: boolean;
 }
@@ -30,15 +32,16 @@ interface LogsPageProps {
 }
 
 export function LogsPage({ deviceUuid }: LogsPageProps) {
+  const [mode, setMode] = useState<'live' | 'historical'>('live');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [autoScroll, setAutoScroll] = useState(true);
   const [isPaused, setIsPaused] = useState(false);
   const [selectedService, setSelectedService] = useState<string>("all");
   const [serviceOptions, setServiceOptions] = useState<string[]>([]);
   const [dateRange, setDateRange] = useState<string>("last7days");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
+  const [wsConnected, setWsConnected] = useState(false);
   const logContainerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -51,16 +54,16 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
     setDateTo(now.toISOString().split('T')[0]);
   }, []);
 
-  // Auto-scroll to bottom when new logs arrive
+  // Auto-scroll to bottom when new logs arrive in live mode
   useEffect(() => {
-    if (autoScroll && logContainerRef.current) {
+    if (mode === 'live' && logContainerRef.current) {
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
-  }, [logs, autoScroll]);
+  }, [logs, mode]);
 
   // Fetch historical logs based on date range
   const fetchHistoricalLogs = async () => {
-    if (!deviceUuid || !dateFrom || !dateTo) return;
+    if (!deviceUuid || !dateFrom || !dateTo || mode !== 'historical') return;
     
     setIsLoading(true);
     try {
@@ -74,10 +77,13 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
         params.append('service', selectedService);
       }
       
-      const response = await fetch(`http://localhost:4002/api/v1/devices/${deviceUuid}/logs?${params}`);
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/logs?${params}`));
       if (response.ok) {
         const data = await response.json();
+        console.log('[LogsPage] Fetched historical logs:', data.count, 'logs');
         setLogs(data.logs || []);
+      } else {
+        console.error('[LogsPage] Failed to fetch logs:', response.status);
       }
     } catch (error) {
       console.error('[LogsPage] Error fetching historical logs:', error);
@@ -90,7 +96,7 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
   useEffect(() => {
     const fetchServices = async () => {
       try {
-        const response = await fetch(`http://localhost:4002/api/v1/devices/${deviceUuid}/logs/services`);
+        const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/logs/services`));
         if (response.ok) {
           const data = await response.json();
           setServiceOptions(data.services || []);
@@ -105,16 +111,16 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
     }
   }, [deviceUuid]);
   
-  // Fetch historical logs when date range or service changes
+  // Fetch historical logs when in historical mode and filters change
   useEffect(() => {
-    if (dateFrom && dateTo) {
+    if (mode === 'historical' && dateFrom && dateTo) {
       fetchHistoricalLogs();
     }
-  }, [dateFrom, dateTo, selectedService, deviceUuid]);
+  }, [mode, dateFrom, dateTo, selectedService, deviceUuid]);
 
-  // WebSocket connection for real-time log streaming
+  // WebSocket connection for real-time log streaming (Live mode only)
   useEffect(() => {
-    if (!deviceUuid) return;
+    if (!deviceUuid || mode !== 'live') return;
 
     setIsLoading(true);
     
@@ -129,6 +135,7 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
 
     ws.onopen = () => {
       console.log('[LogsPage] WebSocket connected');
+      setWsConnected(true);
       ws.send(JSON.stringify({
         type: 'subscribe',
         channel: 'logs',
@@ -142,11 +149,25 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
         const message = JSON.parse(event.data);
         
         if (message.type === 'logs' && message.data?.logs) {
-          console.log('[LogsPage] Received logs:', message.data.logs.length);
+          console.log('[LogsPage] 📥 WebSocket received:', {
+            count: message.data.logs.length,
+            source: message.source,
+            sample: message.data.logs[0] // Show first log entry
+          });
+          
+          // Normalize field names from WebSocket (camelCase) to match database format (snake_case)
+          const normalizedLogs = message.data.logs.map((log: any) => ({
+            ...log,
+            service_name: log.service_name || log.serviceName,
+            device_uuid: log.device_uuid || log.deviceUuid,
+            level: log.level,
+            is_stderr: log.is_stderr ?? log.isStderr,
+            is_system: log.is_system ?? log.isSystem,
+          }));
           
           setLogs(prev => {
             // Append new logs and keep last 500
-            const combined = [...prev, ...message.data.logs];
+            const combined = [...prev, ...normalizedLogs];
             const unique = Array.from(
               new Map(combined.map(log => [log.id || log.timestamp, log])).values()
             );
@@ -160,11 +181,13 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
 
     ws.onerror = (error) => {
       console.error('[LogsPage] WebSocket error:', error);
+      setWsConnected(false);
       setIsLoading(false);
     };
 
     ws.onclose = () => {
       console.log('[LogsPage] WebSocket disconnected');
+      setWsConnected(false);
       setIsLoading(false);
     };
 
@@ -178,7 +201,7 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
       ws.close();
       wsRef.current = null;
     };
-  }, [deviceUuid, selectedService]);
+  }, [deviceUuid, selectedService, mode]);
 
   // Handle service filter change
   const handleServiceChange = (value: string) => {
@@ -201,7 +224,17 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
 
   const handleRefresh = () => {
     setLogs([]);
-    fetchHistoricalLogs();
+    if (mode === 'historical') {
+      fetchHistoricalLogs();
+    }
+  };
+
+  const handleModeChange = (newMode: 'live' | 'historical') => {
+    setMode(newMode);
+    setLogs([]);
+    if (newMode === 'live') {
+      setIsPaused(false);
+    }
   };
 
   const handleTogglePause = () => {
@@ -306,16 +339,26 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
   const filteredLogs = logs.filter(log => {
     if (dateFrom) {
       const logDate = new Date(log.timestamp);
-      const fromDate = new Date(dateFrom);
+      // Parse dateFrom as UTC midnight to match log timestamps
+      const fromDate = new Date(dateFrom + 'T00:00:00.000Z');
       if (logDate < fromDate) return false;
     }
     if (dateTo) {
       const logDate = new Date(log.timestamp);
-      const toDate = new Date(dateTo);
-      toDate.setHours(23, 59, 59, 999); // End of day
+      // Parse dateTo as UTC end-of-day to match log timestamps
+      const toDate = new Date(dateTo + 'T23:59:59.999Z');
       if (logDate > toDate) return false;
     }
     return true;
+  });
+
+  console.log('[LogsPage] Filtering logs:', {
+    totalLogs: logs.length,
+    filteredLogs: filteredLogs.length,
+    dateFrom,
+    dateTo,
+    firstLog: logs[0],
+    firstFilteredLog: filteredLogs[0]
   });
 
   return (
@@ -327,50 +370,78 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
             <div>
               <CardTitle>Agent Logs</CardTitle>
               <CardDescription>
-                Real-time logs from all agent services
+                {mode === 'live' 
+                  ? 'Real-time log streaming from agent services'
+                  : 'Historical log query with date range filtering'
+                }
               </CardDescription>
             </div>
           </div>
           
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setAutoScroll(!autoScroll)}
-              className={autoScroll ? 'bg-green-50 border-green-200' : ''}
-            >
-              <Badge variant={autoScroll ? "default" : "secondary"} className="text-xs">
-                {autoScroll ? 'Auto-scroll ON' : 'Auto-scroll OFF'}
+            {/* Mode Toggle */}
+            <div className="flex border rounded-md">
+              <Button
+                variant={mode === 'live' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => handleModeChange('live')}
+                className="rounded-r-none"
+              >
+                Live
+              </Button>
+              <Button
+                variant={mode === 'historical' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => handleModeChange('historical')}
+                className="rounded-l-none"
+              >
+                Historical
+              </Button>
+            </div>
+
+            {/* WebSocket Connection Status - Live mode only */}
+            {mode === 'live' && (
+              <Badge 
+                variant={wsConnected ? "default" : "secondary"}
+                className={wsConnected ? 'bg-green-500 text-white' : 'bg-gray-400 text-white'}
+              >
+                {wsConnected ? '🟢 Streaming' : '⚫ Disconnected'}
               </Badge>
-            </Button>
+            )}
             
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleTogglePause}
-              className={isPaused ? 'bg-yellow-50 border-yellow-200' : ''}
-            >
-              {isPaused ? (
-                <>
-                  <Play className="h-4 w-4 mr-1" />
-                  Resume
-                </>
-              ) : (
-                <>
-                  <Pause className="h-4 w-4 mr-1" />
-                  Pause
-                </>
-              )}
-            </Button>
+            {/* Pause/Resume - Live mode only */}
+            {mode === 'live' && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleTogglePause}
+                className={isPaused ? 'bg-yellow-50 border-yellow-200' : ''}
+              >
+                {isPaused ? (
+                  <>
+                    <Play className="h-4 w-4 mr-1" />
+                    Resume
+                  </>
+                ) : (
+                  <>
+                    <Pause className="h-4 w-4 mr-1" />
+                    Pause
+                  </>
+                )}
+              </Button>
+            )}
             
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRefresh}
-              disabled={isLoading}
-            >
-              <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-            </Button>
+            {/* Refresh - Historical mode only */}
+            {mode === 'historical' && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRefresh}
+                disabled={isLoading}
+              >
+                <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+              </Button>
+            )}
             
             <Button
               variant="outline"
@@ -403,51 +474,53 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
             </Select>
           </div>
 
-          {/* Date Range Preset */}
-          <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Period:</span>
-            <Select value={dateRange} onValueChange={handleDateRangeChange}>
-              <SelectTrigger className="w-40">
-                <SelectValue placeholder="Today" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="today">Today</SelectItem>
-                <SelectItem value="yesterday">Yesterday</SelectItem>
-                <SelectItem value="last7days">Last 7 Days</SelectItem>
-                <SelectItem value="last30days">Last 30 Days</SelectItem>
-                <SelectItem value="custom">Custom</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          {/* Date Range Filters - Historical mode only */}
+          {mode === 'historical' && (
+            <>
+              <div className="flex items-center gap-2">
+                <Calendar className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Period:</span>
+                <Select value={dateRange} onValueChange={handleDateRangeChange}>
+                  <SelectTrigger className="w-40">
+                    <SelectValue placeholder="Today" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="yesterday">Yesterday</SelectItem>
+                    <SelectItem value="last7days">Last 7 Days</SelectItem>
+                    <SelectItem value="last30days">Last 30 Days</SelectItem>
+                    <SelectItem value="custom">Custom</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-          {/* Date From */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">From:</span>
-            <Input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => {
-                setDateFrom(e.target.value);
-                setDateRange("custom"); // Switch to custom when manually changed
-              }}
-              className="w-40"
-            />
-          </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">From:</span>
+                <Input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => {
+                    setDateFrom(e.target.value);
+                    setDateRange("custom");
+                  }}
+                  className="w-40"
+                />
+              </div>
 
-          {/* Date To */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">To:</span>
-            <Input
-              type="date"
-              value={dateTo}
-              onChange={(e) => {
-                setDateTo(e.target.value);
-                setDateRange("custom"); // Switch to custom when manually changed
-              }}
-              className="w-40"
-            />
-          </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">To:</span>
+                <Input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => {
+                    setDateTo(e.target.value);
+                    setDateRange("custom");
+                  }}
+                  className="w-40"
+                />
+              </div>
+            </>
+          )}
 
           {/* Clear Filters */}
           {(dateFrom || dateTo || selectedService !== 'all') && (
@@ -464,9 +537,12 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
             </Button>
           )}
 
+          {/* Spacer to push log count to the right */}
+          <div className="flex-1"></div>
+
           {/* Log Count Badge */}
-          <Badge className="bg-blue-100 dark:bg-blue-900 text-black dark:text-blue-100 border border-blue-200 dark:border-blue-800">
-            {filteredLogs.length} lines
+          <Badge className="bg-blue-600 dark:bg-blue-900 text-white dark:text-blue-100 border border-blue-700 dark:border-blue-800 font-medium">
+            {filteredLogs.length} lines {mode === 'live' ? '(last 500)' : ''}
           </Badge>
         </div>
       </CardHeader>
@@ -478,16 +554,6 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
           className="bg-black rounded-lg p-4 font-mono text-sm overflow-auto h-full"
           style={{ 
             backgroundColor: '#1e1e1e',
-          }}
-          onScroll={() => {
-            if (logContainerRef.current) {
-              const { scrollTop, scrollHeight, clientHeight } = logContainerRef.current;
-              if (scrollTop + clientHeight < scrollHeight - 50) {
-                setAutoScroll(false);
-              } else {
-                setAutoScroll(true);
-              }
-            }
           }}
         >
           {filteredLogs.length === 0 && !isLoading && (
@@ -526,10 +592,14 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
                 <span className="select-none" style={{ color: '#9ca3af' }}>
                   [{formatTimestamp(log.timestamp)}]
                 </span>
-                <span className="ml-2 font-semibold" style={{ color: '#a78bfa' }}>
-                  [{log.service_name}]
+                <span className="ml-2 font-semibold" style={{ 
+                  color: isActualError ? '#f87171' : isWarning ? '#fbbf24' : isNotice ? '#60a5fa' : '#9ca3af' 
+                }}>
+                  [{(log.level || 'info').toUpperCase()}]
                 </span>
-                {levelBadge}
+                <span className="ml-2 font-semibold" style={{ color: '#a78bfa' }}>
+                  [{log.service_name || 'unknown'}]
+                </span>
                 {log.is_system && (
                   <span className="ml-2 font-semibold" style={{ color: '#a78bfa' }}>SYSTEM</span>
                 )}

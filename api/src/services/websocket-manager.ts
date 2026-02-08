@@ -958,18 +958,52 @@ export class WebSocketManager {
 
   private broadcast(deviceUuid: string, message: WebSocketMessage): void {
     const deviceClients = this.deviceClients.get(deviceUuid);
-    if (!deviceClients) return;
+    if (!deviceClients) {
+      logger.debug(`📭 No WebSocket clients for device ${deviceUuid.substring(0, 8)}`);
+      return;
+    }
 
     const channel = message.type;
     let sentCount = 0;
+    let filteredCount = 0;
 
     deviceClients.forEach(ws => {
       const client = this.clients.get(ws);
       if (client?.subscriptions.has(channel) && ws.readyState === WebSocket.OPEN) {
-        this.send(ws, message);
+        // For logs channel: filter by serviceName if client has a filter
+        if (channel === 'logs' && message.data?.logs) {
+          const filteredMessage = { ...message };
+          
+          // If client has serviceName filter, only send matching logs
+          if (client.serviceName) {
+            const filteredLogs = message.data.logs.filter(
+              (log: any) => {
+                // Handle both camelCase (from Redis/worker) and snake_case (from database)
+                const logService = log.serviceName || log.service_name;
+                return logService === client.serviceName;
+              }
+            );
+            
+            // Skip if no logs match the filter
+            if (filteredLogs.length === 0) {
+              filteredCount++;
+              return;
+            }
+            
+            filteredMessage.data = { ...message.data, logs: filteredLogs };
+          }
+          
+          this.send(ws, filteredMessage);
+        } else {
+          this.send(ws, message);
+        }
         sentCount++;
       }
     });
+
+    if (channel === 'logs' && message.data?.logs) {
+      logger.debug(`📡 Broadcast logs: ${message.data.logs.length} total, sent to ${sentCount} clients, ${filteredCount} filtered out`);
+    }
 
     if (sentCount > 0) {
       logger.info(` Broadcasted ${channel} to ${sentCount} client(s) for device ${deviceUuid}`);
