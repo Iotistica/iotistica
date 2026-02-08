@@ -357,17 +357,17 @@ jobs:
     steps:
       - name: Trigger K8s deployment workflow
         uses: actions/github-script@v7
-        env:
-          DEPLOY_TOKEN: ${{ secrets.K8S_DEPLOY_PAT }}
         with:
+          github-token: ${{ secrets.K8S_DEPLOY_PAT || secrets.GITHUB_TOKEN }}
           script: |
             const releaseVersion = '${{ needs.validate-release.outputs.release_version }}';
             const isRC = '${{ github.event.inputs.release_mode }}' === 'rc';
+            const hasPAT = '${{ secrets.K8S_DEPLOY_PAT }}' !== '';
             
             console.log(`Triggering K8s deployment for ${releaseVersion} (RC: ${isRC})`);
             
             // Check if PAT exists
-            if (!process.env.DEPLOY_TOKEN) {
+            if (!hasPAT) {
               core.warning('⚠️ K8S_DEPLOY_PAT secret not configured - skipping K8s deployment');
               core.warning('To enable K8s deployments:');
               core.warning('1. Go to GitHub Settings → Developer settings → Personal access tokens');
@@ -378,11 +378,8 @@ jobs:
             }
             
             try {
-              // Create authenticated Octokit instance with custom PAT
-              const { getOctokit } = require('@actions/github');
-              const octokit = getOctokit(process.env.DEPLOY_TOKEN);
-              
-              await octokit.rest.actions.createWorkflowDispatch({
+              // Use the github object (already authenticated with K8S_DEPLOY_PAT)
+              await github.rest.actions.createWorkflowDispatch({
                 owner: 'Iotistica',
                 repo: 'iot-k8s',
                 workflow_id: 'k8s-release-iotistic.yml',
