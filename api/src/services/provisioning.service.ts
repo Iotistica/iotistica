@@ -718,6 +718,9 @@ export class ProvisioningService {
   ): Promise<ProvisioningResponse> {
     const { uuid, deviceName, deviceType, applicationId } = data;
 
+    // Detect virtual agents FIRST (before checking broker config)
+    const isVirtual = device.device_type === 'virtual';
+    
     // Fetch broker configuration for external device (uses MQTT_BROKER_EXTERNAL_HOST if set)
     const brokerConfig = await getBrokerConfigForExternalDevice(device.uuid);
     
@@ -731,13 +734,39 @@ export class ProvisioningService {
     let finalBrokerConfig;
     let brokerUrl;
     
-    if (brokerConfig) {
-      // Use database broker config
+    if (brokerConfig && !isVirtual) {
+      // Use database broker config for physical devices
       finalBrokerConfig = formatBrokerConfigForClient(brokerConfig, mqttCredentials);
       brokerUrl = buildBrokerUrl(brokerConfig);
+    } else if (brokerConfig && isVirtual) {
+      // Virtual agents: Use database config but override host if it's localhost
+      finalBrokerConfig = formatBrokerConfigForClient(brokerConfig, mqttCredentials);
+      
+      if (finalBrokerConfig.host === 'localhost' || finalBrokerConfig.host === '127.0.0.1') {
+        finalBrokerConfig.host = 'host.docker.internal';
+        logger.info('Virtual agent: Overriding localhost broker host to host.docker.internal', {
+          deviceType: device.device_type,
+          deploymentStatus: device.deployment_status,
+          originalHost: brokerConfig.host,
+          newHost: finalBrokerConfig.host
+        });
+      }
+      
+      brokerUrl = buildBrokerUrl({ ...brokerConfig, host: finalBrokerConfig.host });
     } else {
       // Fallback to environment variables
-      const envBrokerUrl = process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883';
+      // Virtual agents need external broker URL (host.docker.internal) since they run in K8s pods
+      const envBrokerUrl = isVirtual 
+        ? (process.env.MQTT_BROKER_URL_VIRTUAL || 'mqtt://host.docker.internal:5883')
+        : (process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883');
+      
+      logger.info(`Using ${isVirtual ? 'virtual' : 'standard'} broker URL for ${device.device_type} device`, { 
+        brokerUrl: envBrokerUrl,
+        isVirtual,
+        deviceType: device.device_type,
+        hasDeploymentStatus: !!device.deployment_status
+      });
+      
       const parsedUrl = new URL(envBrokerUrl);
       
       finalBrokerConfig = {
