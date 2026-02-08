@@ -1,4 +1,4 @@
-name: Release All
+name: Release
 
 on:
   push:
@@ -99,38 +99,36 @@ jobs:
           
           # === RC MODE ===
           if [ "$MODE" = "rc" ]; then
-            # Check if there are existing RCs for the current final version
-            LATEST_RC=$(git tag -l "${LATEST_FINAL}-rc.*" --sort=-version:refname | head -n1)
+            # Step 1: Determine target base version based on release_type
+            case "$TYPE" in
+              patch)
+                TARGET_BASE="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+                ;;
+              minor)
+                TARGET_BASE="v${MAJOR}.$((MINOR + 1)).0"
+                ;;
+              major)
+                TARGET_BASE="v$((MAJOR + 1)).0.0"
+                ;;
+            esac
+            
+            echo "Target base version: $TARGET_BASE"
+            
+            # Step 2: Find latest RC for this target base version
+            LATEST_RC=$(git tag -l "${TARGET_BASE}-rc.*" --sort=-version:refname | head -n1)
             
             if [ -n "$LATEST_RC" ]; then
-              # Reuse base version, auto-increment RC number
-              BASE_VERSION="$LATEST_FINAL"
+              # Increment RC number for existing RC line
               LAST_RC_NUM=$(echo "$LATEST_RC" | sed -E 's/.*-rc\.([0-9]+)/\1/')
               RC_NUM=$((LAST_RC_NUM + 1))
-              echo "Existing RC line found: $LATEST_RC"
-              echo "Incrementing to RC #${RC_NUM} for base ${BASE_VERSION}"
+              echo "Found existing RC: $LATEST_RC → incrementing to rc.${RC_NUM}"
             else
-              # New RC line → bump version based on release_type
-              case "$TYPE" in
-                patch)
-                  PATCH=$((PATCH + 1))
-                  ;;
-                minor)
-                  MINOR=$((MINOR + 1))
-                  PATCH=0
-                  ;;
-                major)
-                  MAJOR=$((MAJOR + 1))
-                  MINOR=0
-                  PATCH=0
-                  ;;
-              esac
-              BASE_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+              # Start new RC line
               RC_NUM=1
-              echo "Starting new RC line with base ${BASE_VERSION}"
+              echo "Starting new RC line for ${TARGET_BASE}"
             fi
             
-            RELEASE="${BASE_VERSION}-rc.${RC_NUM}"
+            RELEASE="${TARGET_BASE}-rc.${RC_NUM}"
             echo "Auto-generated RC version: $RELEASE"
             echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
             exit 0
