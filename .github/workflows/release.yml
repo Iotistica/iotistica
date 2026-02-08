@@ -359,27 +359,40 @@ jobs:
     steps:
       - name: Trigger K8s deployment workflow
         uses: actions/github-script@v7
+        env:
+          DEPLOY_TOKEN: ${{ secrets.K8S_DEPLOY_PAT }}
         with:
-          github-token: ${{ secrets.K8S_DEPLOY_PAT }}
           script: |
             const releaseVersion = '${{ needs.validate-release.outputs.release_version }}';
             const isRC = '${{ github.event.inputs.release_mode }}' === 'rc';
             
             console.log(`Triggering K8s deployment for ${releaseVersion} (RC: ${isRC})`);
             
+            // Check if PAT exists
+            if (!process.env.DEPLOY_TOKEN) {
+              throw new Error('K8S_DEPLOY_PAT secret not found. Please create a GitHub PAT with workflow permissions and add it as a repository secret.');
+            }
+            
             try {
-              await github.rest.actions.createWorkflowDispatch({
+              const octokit = github.getOctokit(process.env.DEPLOY_TOKEN);
+              
+              await octokit.rest.actions.createWorkflowDispatch({
                 owner: 'Iotistica',
                 repo: 'iot-k8s',
                 workflow_id: 'k8s-release-iotistic.yml',
                 ref: 'main',
                 inputs: {
                   release_version: releaseVersion,
-                  is_prerelease: isRC.toString()
+                  client_name: 'iotistic-nodeport',
+                  cluster_name: 'k3scl01',
+                  clean_before_deploy: 'false'
                 }
               });
               
               console.log('✅ K8s deployment workflow triggered successfully');
+              console.log(`   Repository: Iotistica/iot-k8s`);
+              console.log(`   Version: ${releaseVersion}`);
+              console.log(`   Client: iotistic-nodeport`);
             } catch (error) {
               console.error('❌ Failed to trigger K8s deployment:', error.message);
               throw error;
