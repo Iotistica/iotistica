@@ -513,10 +513,56 @@ export default function App() {
   };
 
   // Deployment actions (agent-specific)
-  const { syncTargetState, cancelDeployment, hasPendingChanges, saveTargetState, getDeviceState } = useDeviceState();
+  const { syncTargetState, cancelDeployment, hasPendingChanges, saveTargetState, getDeviceState, discardPendingChanges } = useDeviceState();
   const needsDeployment = selectedDevice?.deviceUuid ? hasPendingChanges(selectedDevice.deviceUuid) : false;
   const deviceState = selectedDevice?.deviceUuid ? getDeviceState(selectedDevice.deviceUuid) : null;
   const hasUnsavedChanges = deviceState?.isDirty || false;
+
+  // Calculate devices with pending changes for "Deploy All"
+  const devicesWithPendingChanges = useMemo(() => {
+    return devices.filter(d => d.deviceUuid && hasPendingChanges(d.deviceUuid));
+  }, [devices, hasPendingChanges]);
+
+  const handleDeployAll = async () => {
+    if (devicesWithPendingChanges.length === 0) {
+      toast.info("No devices have pending changes");
+      return;
+    }
+
+    const totalDevices = devicesWithPendingChanges.length;
+    toast.info(`Starting deployment to ${totalDevices} device(s)...`);
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const device of devicesWithPendingChanges) {
+      try {
+        const deviceState = getDeviceState(device.deviceUuid);
+        
+        // Save draft if there are unsaved changes
+        if (deviceState?.isDirty) {
+          await saveTargetState(device.deviceUuid);
+        }
+        
+        // Deploy
+        await syncTargetState(device.deviceUuid, 'dashboard');
+        window.dispatchEvent(new CustomEvent('deployment-started', { detail: { deviceUuid: device.deviceUuid } }));
+        successCount++;
+        toast.success(`✓ ${device.name} deployed (${successCount}/${totalDevices})`);
+      } catch (error: any) {
+        failCount++;
+        console.error(`Failed to deploy ${device.name}:`, error);
+        toast.error(`✗ ${device.name} failed: ${error.message || 'Unknown error'}`);
+      }
+    }
+
+    // Final summary
+    if (failCount === 0) {
+      toast.success(`🎉 All ${successCount} device(s) deployed successfully!`);
+    } else {
+      toast.warning(`Deployment complete: ${successCount} succeeded, ${failCount} failed`);
+    }
+  };
 
   const handleDeploy = async () => {
     if (!selectedDevice?.deviceUuid) {
@@ -559,11 +605,20 @@ export default function App() {
     }
 
     try {
-      await cancelDeployment(selectedDevice.deviceUuid);
-      toast.success("Deployment cancelled");
-    } catch (error) {
-      toast.error("Failed to cancel deployment");
+      // Check if we have unsaved local changes or saved deployment
+      if (hasUnsavedChanges && !deviceState?.targetState?.needsDeployment) {
+        // Only local changes - discard them
+        discardPendingChanges(selectedDevice.deviceUuid);
+        toast.success("Unsaved changes discarded");
+      } else {
+        // Saved deployment - cancel via API
+        const toastId = toast.loading("Canceling deployment...");
+        await cancelDeployment(selectedDevice.deviceUuid);
+        toast.success("Deployment cancelled - reverted to last deployed state", { id: toastId });
+      }
+    } catch (error: any) {
       console.error("Cancel deployment error:", error);
+      toast.error(`Failed to cancel: ${error.message || 'Unknown error'}`);
     }
   };
 
@@ -684,6 +739,7 @@ export default function App() {
               onSelectDevice={handleSelectDevice}
               onAddDevice={handleAddDevice}
               onEditDevice={handleEditDevice}
+              hasPendingChanges={hasPendingChanges}
             />
           </div>
         )}
@@ -877,7 +933,17 @@ export default function App() {
                 onClick={handleDeploy}
                 size="sm"
                 disabled={!needsDeployment}
-                className={needsDeployment ? "bg-amber-600 text-white hover:bg-amber-700" : "bg-gray-400 text-white"}
+                variant="ghost"
+                style={needsDeployment ? {
+                  backgroundColor: '#d97706',
+                  color: 'white',
+                  fontWeight: 500
+                } : {
+                  backgroundColor: '#9ca3af',
+                  color: 'white',
+                  cursor: 'not-allowed'
+                }}
+                className="hover:opacity-90"
               >
                 Deploy
               </Button>
@@ -886,8 +952,24 @@ export default function App() {
                   onClick={handleCancelDeploy}
                   size="sm"
                   variant="outline"
+                  className="border-red-300 hover:bg-red-50 text-red-600"
                 >
-                  Cancel
+                  {hasUnsavedChanges && !deviceState?.targetState?.needsDeployment ? 'Discard' : 'Cancel'}
+                </Button>
+              )}
+              {devicesWithPendingChanges.length > 1 && (
+                <Button
+                  onClick={handleDeployAll}
+                  size="sm"
+                  variant="ghost"
+                  style={{
+                    backgroundColor: '#ea580c',
+                    color: 'white',
+                    fontWeight: 600
+                  }}
+                  className="hover:opacity-90"
+                >
+                  Deploy All ({devicesWithPendingChanges.length})
                 </Button>
               )}
             </div>
@@ -986,6 +1068,7 @@ export default function App() {
               onSelectDevice={handleSelectDevice}
               onAddDevice={handleAddDevice}
               onEditDevice={handleEditDevice}
+              hasPendingChanges={hasPendingChanges}
             />
           </SheetContent>
         </Sheet>

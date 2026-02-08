@@ -83,7 +83,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [selectedProtocol, setSelectedProtocol] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
-  const { getPendingConfig, getTargetConfig, updatePendingSensor, saveTargetState } = useDeviceState();
+  const { getPendingConfig, getTargetConfig, updatePendingSensor, saveTargetState, addPendingSensor } = useDeviceState();
 
   const fetchSensors = async () => {
     try {
@@ -119,7 +119,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         const health = d.health;
         const isConnected = health ? health.connected : d.connected;
         
-        console.log(`[fetchSensors] Sensor "${d.name}":`, {
+        console.log(`[fetchSensors] device "${d.name}":`, {
           enabled: d.enabled,
           healthConnected: health?.connected,
           deploymentStatus: d.deploymentStatus,
@@ -161,20 +161,36 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         };
       });
       
-      // Get pending sensors from config (sensors not yet deployed)
+      // Get pending devices from config (devices not yet deployed)
       const pendingConfig = getPendingConfig(deviceUuid);
       const targetConfig = getTargetConfig(deviceUuid);
       
-      const pendingSensors = (pendingConfig.sensors || [])
+      console.log('[fetchdevices] Pending config:', {
+        hasEndpoints: !!pendingConfig.endpoints,
+        endpointsCount: pendingConfig.endpoints?.length || 0,
+        hasSensors: !!pendingConfig.sensors,
+        sensorsCount: pendingConfig.sensors?.length || 0
+      });
+      
+      // Check both endpoints (new validation mode) and sensors (legacy)
+      const pendingEndpoints = pendingConfig.endpoints || pendingConfig.sensors || [];
+      
+      const pendingSensors = pendingEndpoints
         .filter((s: any) => {
           // Only include sensors that are NOT in the database yet
-          return !devices.find((d: any) => d.name === s.name);
+          const notInDb = !devices.find((d: any) => d.name === s.name);
+          if (notInDb) {
+            console.log(`[fetchSensors] Pending sensor "${s.name}" not in DB - adding to grid`);
+          }
+          return notInDb;
         })
         .map((s: any) => {
           // Check if sensor exists in saved target state (clicked "Save Draft")
-          const inTargetState = targetConfig?.sensors?.find((ts: any) => ts.name === s.name);
+          const targetEndpoints = targetConfig?.endpoints || targetConfig?.sensors || [];
+          const inTargetState = targetEndpoints.find((ts: any) => ts.name === s.name);
           
           return {
+            uuid: s.id || s.uuid, // Use generated ID from addPendingSensor
             name: s.name,
             state: 'DRAFT', // Use DRAFT to distinguish from deployed sensors waiting for agent
             healthy: false,
@@ -186,6 +202,9 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             type: 'device' as const,
             protocol: s.protocol,
             connected: false,
+            connection: s.connection, // Include connection config
+            dataPoints: s.dataPoints, // Include data points
+            pollInterval: s.pollInterval,
             // Show "saved-draft" if saved to target_state, "draft" if only in context
             deploymentStatus: inTargetState ? 'saved-draft' : 'draft',
             lastDeployedAt: null,
@@ -194,7 +213,9 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           };
         });
       
-      // Show newly added sensors (DRAFT) at the top, then deployed sensors
+      console.log(`[fetchSensors] Found ${pendingSensors.length} pending devices to display`);
+      
+      // Show newly added devices (DRAFT) at the top, then deployed devices
       setSensors([...pendingSensors, ...pipelines, ...devices]);
       setError(null);
     } catch (err: any) {
@@ -213,7 +234,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     // Listen for deployment events from Header (Sync button)
     const handleDeploymentStarted = (event: CustomEvent) => {
       if (event.detail.deviceUuid === deviceUuid) {
-        console.log('Deployment started - refreshing sensors after database update completes');
+        console.log('Deployment started - refreshing devices after database update completes');
         // Small delay to ensure database update completes before fetching
         // This prevents race condition where deployment_status hasn't been set to 'pending' yet
         setTimeout(() => {
@@ -232,10 +253,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
   const handleAddProtocolDevice = async (device: any) => {
     try {
-      console.log('📝 Saving new sensor via API:', device);
+      console.log('📝 Validating new device (not persisting yet):', device);
       
-      // Call POST /api/v1/devices/:uuid/sensors API endpoint
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors`), {
+      // Call POST /api/v1/devices/:uuid/sensors?validateOnly=true
+      // This validates the sensor config without persisting to DB
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors?validateOnly=true`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -245,29 +267,40 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Failed to add sensor: ${response.status}`);
+        throw new Error(errorData.error || `Failed to validate device: ${response.status}`);
       }
 
       const result = await response.json();
-      console.log('✅ Sensor added successfully:', result);
+      console.log('✅ Device validated:', result);
 
-      // Refresh sensor list to show the new sensor
+      // Check if API returned validated sensor (validateOnly mode)
+      if (!result.sensor) {
+        throw new Error('API did not return validated sensor. Please rebuild the API service.');
+      }
+
+      // Add to pending state (React only - not in DB yet)
+      await addPendingSensor(deviceUuid, result.sensor);
+
+      // Refresh sensor list to show the new sensor from pending state
       await fetchSensors();
 
-      toast.success(`Sensor "${device.name}" added - Click Sync to deploy to agent`);
+      toast.success(`Device "${device.name}" added to pending changes - Click "Save Draft" or "Deploy"`, {
+        duration: 4000
+      });
     } catch (error: any) {
-      console.error('❌ Failed to add sensor:', error);
-      toast.error(`Failed to add sensor: ${error.message}`);
+      console.error('❌ Failed to add device:', error);
+      toast.error(`Failed to add device: ${error.message}`);
       throw error;
     }
   };
 
   const handleUpdateProtocolDevice = async (deviceName: string, updates: any) => {
     try {
-      console.log('📝 Updating sensor via API:', deviceName, updates);
+      console.log('📝 Validating device updates (not persisting yet):', deviceName, updates);
       
-      // Call PUT /api/v1/devices/:uuid/sensors/:name API endpoint
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors/${encodeURIComponent(deviceName)}`), {
+      // Call PUT /api/v1/devices/:uuid/sensors/:name?validateOnly=true
+      // This validates updates without persisting to DB
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors/${encodeURIComponent(deviceName)}?validateOnly=true`), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -277,19 +310,29 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Failed to update sensor: ${response.status}`);
+        throw new Error(errorData.error || `Failed to validate device: ${response.status}`);
       }
 
       const result = await response.json();
-      console.log('✅ Sensor updated successfully:', result);
+      console.log('✅ Device updates validated:', result);
 
-      // Refresh sensor list to show the updated sensor
+      // Check if API returned validated updates (validateOnly mode)
+      if (!result.updates) {
+        throw new Error('API did not return validated updates. Please rebuild the API service.');
+      }
+
+      // Update pending state (React only - not in DB yet)
+      await updatePendingSensor(deviceUuid, deviceName, result.updates);
+
+      // Refresh sensor list
       await fetchSensors();
 
-      toast.success(`Sensor "${deviceName}" updated - Click Sync to deploy to agent`);
+      toast.success(`Sensor "${deviceName}" updated in pending changes - Click "Save Draft" or "Deploy"`, {
+        duration: 4000
+      });
     } catch (error: any) {
-      console.error('❌ Failed to update sensor:', error);
-      toast.error(`Failed to update sensor: ${error.message}`);
+      console.error('❌ Failed to update device:', error);
+      toast.error(`Failed to update device: ${error.message}`);
       throw error;
     }
   };
@@ -339,19 +382,17 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         enabled: newEnabled
       };
       
-      // OVERRIDE-ONLY PATTERN: Update pending changes with just {uuid, name, enabled}
-      // Now returns a promise to ensure state is updated before saveTargetState
+      // Update pending changes (React state only - not saved to DB yet)
       await updatePendingSensor(deviceUuid, sensor.name, updates);
       
-      // Auto-save to persist to database (now uses functional state update - no closure issue)
-      console.log('[Toggle] Auto-saving to database...');
-      await saveTargetState(deviceUuid);
-      console.log('[Toggle] Saved successfully');
+      console.log('[Toggle] Updated pending state - Click "Save Draft" to persist or "Deploy" to deploy');
       
-      // Refresh sensor list to show updated state
+      // Refresh sensor list to show updated state from pending changes
       await fetchSensors();
 
-      toast.success(`Device "${sensor.name}" ${newEnabled ? 'enabled' : 'disabled'} - Click Sync to deploy`);
+      toast.success(`Device "${sensor.name}" ${newEnabled ? 'enabled' : 'disabled'} - Click "Save Draft" or "Deploy"`, {
+        duration: 4000
+      });
     } catch (error: any) {
       console.error('Toggle device error:', error);
       toast.error(`Failed to toggle device: ${error.message}`);

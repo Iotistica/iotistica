@@ -42,6 +42,7 @@ interface DeviceSidebarProps {
   onSelectDevice: (deviceId: string) => void;
   onAddDevice: () => void;
   onEditDevice: (device: Device) => void;
+  hasPendingChanges?: (deviceUuid: string) => boolean;
 }
 
 const deviceIcons = {
@@ -159,7 +160,7 @@ function DeviceTagsPills({ deviceUuid }: { deviceUuid: string }) {
   );
 }
 
-export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDevice , onSelectDevice }: DeviceSidebarProps) {
+export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDevice , onSelectDevice, hasPendingChanges }: DeviceSidebarProps) {
   // Get unique statuses and types from actual devices using useMemo for performance
   const availableStatuses = useMemo<Device['status'][]>(() => 
     Array.from(new Set(devices.map(d => d.status))) as Device['status'][], 
@@ -388,10 +389,15 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
                       </Tooltip>
                     </div>
                     
-                    <div className="flex items-center gap-2 mb-2">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
                       <Badge variant="outline" className={cn("text-xs", statusBadgeColors[device.status])}>
                         {device.status}
                       </Badge>
+                      {hasPendingChanges && hasPendingChanges(device.deviceUuid) && (
+                        <Badge className="text-xs text-white" style={{ backgroundColor: 'rgb(217, 119, 6)' }}>
+                          Pending
+                        </Badge>
+                      )}
                       <span className="text-muted-foreground">{device.ipAddress}</span>
                     </div>
 

@@ -407,6 +407,12 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
   
   // Add sensor to config (local only - matches app pattern)
   const addPendingSensor = useCallback((deviceUuid: string, sensor: any) => {
+    // Defensive check
+    if (!sensor) {
+      console.error('[addPendingSensor] Sensor is undefined');
+      throw new Error('Cannot add undefined sensor. API may need to be rebuilt.');
+    }
+
     setDeviceStates(prev => {
       const deviceState = prev[deviceUuid];
       if (!deviceState) return prev;

@@ -57,15 +57,19 @@ router.get('/devices/:uuid/sensors', async (req, res) => {
  * Add new sensor
  * POST /api/v1/devices/:uuid/sensors
  * 
- * Dual-write: config + table (sync service handles both)
+ * Query Parameters:
+ * - validateOnly=true: Only validate config, don't persist (for draft mode)
+ * - validateOnly=false (default): Validate and persist using dual-write
  */
 router.post('/devices/:uuid/sensors', async (req, res) => {
   try {
     const { uuid } = req.params;
     const sensorConfig = req.body;
+    const validateOnly = req.query.validateOnly === 'true';
 
     // Debug logging
     logger.info('Received sensor config:', JSON.stringify(sensorConfig, null, 2));
+    logger.info('Validation-only mode:', validateOnly);
 
     // Basic validation
     if (!sensorConfig.name) {
@@ -97,7 +101,33 @@ router.post('/devices/:uuid/sensors', async (req, res) => {
       });
     }
 
-    // Add sensor using sync service (handles dual-write)
+    // If validation-only mode, return validated config without persisting
+    if (validateOnly) {
+      // Normalize the sensor config
+      const validatedSensor = {
+        name: sensorConfig.name,
+        protocol: sensorConfig.protocol,
+        enabled: sensorConfig.enabled !== undefined ? sensorConfig.enabled : true,
+        connection: sensorConfig.connection,
+        dataPoints: sensorConfig.dataPoints,
+        pollInterval: sensorConfig.pollInterval || 5000,
+        metadata: {
+          createdAt: new Date().toISOString(),
+          createdBy: (req as any).user?.username || (req as any).user?.email || 'dashboard'
+        }
+      };
+
+      logger.info('Returning validated sensor (not persisting):', validatedSensor.name);
+      
+      return res.status(200).json({
+        status: 'ok',
+        message: 'Sensor validated successfully. Add to pending state.',
+        sensor: validatedSensor,
+        validateOnly: true
+      });
+    }
+
+    // Standard path: Add sensor using sync service (handles dual-write)
     const result = await deviceSensorSync.addEndpoint(
       uuid,
       sensorConfig,
@@ -138,12 +168,42 @@ router.post('/devices/:uuid/sensors', async (req, res) => {
  * Update sensor
  * PUT /api/v1/devices/:uuid/sensors/:name
  * 
- * Dual-write: table + config (sync service handles both)
+ * Query Parameters:
+ * - validateOnly=true: Only validate updates, don't persist (for draft mode)
+ * - validateOnly=false (default): Validate and persist using dual-write
  */
 router.put('/devices/:uuid/sensors/:name', async (req, res) => {
   try {
     const { uuid, name } = req.params;
     const updates = req.body;
+    const validateOnly = req.query.validateOnly === 'true';
+
+    logger.info('Update sensor:', { uuid, name, validateOnly });
+
+    // If validation-only mode, just validate and return
+    if (validateOnly) {
+      // Basic validation on updates
+      if (updates.protocol && typeof updates.protocol !== 'string') {
+        return res.status(400).json({
+          error: 'Validation failed',
+          message: 'Protocol must be a string'
+        });
+      }
+
+      if (updates.dataPoints && (!Array.isArray(updates.dataPoints) || updates.dataPoints.length === 0)) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          message: 'Data points must be a non-empty array'
+        });
+      }
+
+      return res.status(200).json({
+        status: 'ok',
+        message: 'Updates validated successfully. Add to pending state.',
+        updates: updates,
+        validateOnly: true
+      });
+    }
 
     // Update sensor using sync service (handles dual-write)
     const result = await deviceSensorSync.updateEndpoint(
