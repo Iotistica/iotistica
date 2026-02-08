@@ -563,22 +563,21 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
           )}
           
           {filteredLogs.map((log, index) => {
-            const isActualError = /\[error\]|\[crit\]|\[alert\]|\[emerg\]|ERROR|FATAL|CRITICAL/i.test(log.message);
-            const isWarning = /\[warn\]|WARNING/i.test(log.message);
-            const isNotice = /\[notice\]|INFO/i.test(log.message);
+            const isActualError = /\[error\]|\[crit\]|\[alert\]|\[emerg\]|ERROR|FATAL|CRITICAL/i.test(log.message) || 
+                                  log.level?.toLowerCase() === 'error';
+            const isWarning = /\[warn\]|WARNING/i.test(log.message) || 
+                              log.level?.toLowerCase() === 'warn';
+            const isNotice = /\[notice\]|INFO/i.test(log.message) || 
+                             log.level?.toLowerCase() === 'info';
             
             let messageColor = '#9ca3af';
-            let levelBadge = null;
             
             if (isActualError) {
               messageColor = '#fca5a5';
-              levelBadge = <span className="ml-2 font-semibold" style={{ color: '#f87171' }}>ERROR</span>;
             } else if (isWarning) {
               messageColor = '#fcd34d';
-              levelBadge = <span className="ml-2 font-semibold" style={{ color: '#fbbf24' }}>WARN</span>;
             } else if (isNotice) {
               messageColor = '#93c5fd';
-              levelBadge = <span className="ml-2 font-semibold" style={{ color: '#60a5fa' }}>INFO</span>;
             } else if (!log.is_stderr) {
               messageColor = '#86efac';
             }
