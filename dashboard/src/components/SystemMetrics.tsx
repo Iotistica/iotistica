@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Cpu, HardDrive, MemoryStick, Package, Network, Loader2 } from "lucide-react";
+import { Cpu, HardDrive, MemoryStick, Package, Network, Loader2, RefreshCw } from "lucide-react";
 import { Card } from "./ui/card";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useSystemMetrics } from "@/contexts/SystemMetricsContext";
@@ -68,6 +68,9 @@ export function SystemMetrics({
     const saved = localStorage.getItem('systemmetrics-refresh-interval');
     return saved ? parseInt(saved, 10) : 30; // Default 30 seconds
   });
+  
+  // State to track manual refresh loading
+  const [isTelemetryRefreshing, setIsTelemetryRefreshing] = useState(false);
   
   // Sync time period changes to context
   useEffect(() => {
@@ -436,6 +439,16 @@ export function SystemMetrics({
     }
   }, [device.deviceUuid, device.status, addMetricsDataPoint]);
 
+  // Manual refresh function for telemetry
+  const handleManualRefresh = useCallback(async () => {
+    setIsTelemetryRefreshing(true);
+    try {
+      await fetchHistoricalData(timePeriod);
+    } finally {
+      setIsTelemetryRefreshing(false);
+    }
+  }, [timePeriod, fetchHistoricalData]);
+
   // Handle metrics history updates via WebSocket (append live data only for 30min period)
   const handleMetricsHistory = useCallback((data: MetricsHistoryData) => {
     console.log('[SystemMetrics] handleMetricsHistory called:', {
@@ -726,6 +739,17 @@ export function SystemMetrics({
                       <SelectItem value="0">Off</SelectItem>
                     </SelectContent>
                   </Select>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    onClick={handleManualRefresh}
+                    disabled={isTelemetryRefreshing}
+                  >
+                    <RefreshCw 
+                      className={`w-4 h-4 ${isTelemetryRefreshing ? 'animate-spin' : ''}`}
+                    />
+                  </Button>
                 </div>
               </div>
             </div>

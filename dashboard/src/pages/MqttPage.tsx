@@ -2,13 +2,12 @@
  * MQTT Page - Shows MQTT broker status and metrics
  */
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Users, MessageSquare, Zap, TrendingUp, Filter } from "lucide-react";
 import { MetricCard } from "../components/ui/metric-card";
 import { Device } from "../components/DeviceSidebar";
 import MqttBrokerCard from "../components/MqttBrokerCard";
 import MqttMetricsCard from "../components/MqttMetricsCard";
-import { useWebSocket, useGlobalWebSocketConnection } from "@/hooks/useWebSocket";
 import type { MqttStatsData } from "@/services/websocket";
 import { useMqtt, type MqttBrokerStatsData, type MqttDataPoint } from "@/contexts/MqttContext";
 import {
@@ -31,6 +30,20 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
   const [isConnected, setIsConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // Refresh interval state with localStorage persistence
+  const [refreshInterval, setRefreshInterval] = useState<number>(() => {
+    const saved = localStorage.getItem('mqtt-refresh-interval');
+    return saved ? parseInt(saved, 10) : 10; // Default 10 seconds
+  });
+  
+  // Persist refresh interval to localStorage
+  useEffect(() => {
+    localStorage.setItem('mqtt-refresh-interval', refreshInterval.toString());
+  }, [refreshInterval]);
+  
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
   // Agent filtering
   const [selectedAgentUuid, setSelectedAgentUuid] = useState<string>('all');
@@ -48,81 +61,9 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
     ];
   }, [devices]);
 
-  // Establish global WebSocket connection
-  useGlobalWebSocketConnection();
+  // Note: WebSocket connection removed - now using HTTP polling
 
-  // Fetch initial data from HTTP endpoints on mount
-  useEffect(() => {
-    const fetchInitialData = async () => {
-      setLoading(true);
-      try {
-        const mqttMonitorUrl = import.meta.env.VITE_MQTT_MONITOR_URL || 'http://localhost:3500';
-        
-        // Fetch broker stats using the same endpoint structure as WebSocket
-        const statsRes = await fetch(`${mqttMonitorUrl}/api/v1/stats`);
-        if (statsRes.ok) {
-          const response = await statsRes.json();
-          if (response.success && response.stats) {
-            // Transform /stats response to match WebSocket format
-            const statsData: MqttStatsData = {
-              connected: response.stats.connected,
-              broker: mqttMonitorUrl,
-              uptime: 0,
-              messageRate: response.stats.messageRate,
-              throughput: response.stats.throughput,
-              clients: response.stats.clients,
-              subscriptions: response.stats.subscriptions,
-              retainedMessages: response.stats.retainedMessages,
-              totalMessagesSent: response.stats.totalMessagesSent,
-              totalMessagesReceived: response.stats.totalMessagesReceived,
-              totalTopics: response.stats.topicCount || 0,
-              topicsWithSchemas: response.stats.schemas?.total || 0,
-              schemasDetected: response.stats.schemas?.total || 0,
-              messageTypeBreakdown: response.stats.schemas?.byType || {},
-              systemStats: response.stats.broker ? { $SYS: { broker: response.stats.broker } } : {},
-              timestamp: new Date().toISOString()
-            };
-            handleMqttStats(statsData);
-          }
-        } else {
-          console.warn('[MqttPage] Failed to fetch broker stats:', statsRes.status);
-        }
-
-        // Fetch topics (increased limit to support multiple agents)
-        console.log('[MqttPage] Fetching topics from:', `${mqttMonitorUrl}/api/v1/topics?limit=1000`);
-        const topicsRes = await fetch(`${mqttMonitorUrl}/api/v1/topics?limit=1000`);
-        console.log('[MqttPage] Topics fetch response:', topicsRes.status, topicsRes.statusText);
-        if (topicsRes.ok) {
-          const response = await topicsRes.json();
-          console.log('[MqttPage] Topics API response:', response);
-          console.log('[MqttPage] response.data structure:', response.data);
-          console.log('[MqttPage] response.data.topics:', response.data?.topics);
-          
-          // Check if topics are in data.topics or data directly
-          const topicsArray = response.data?.topics || response.data;
-          if (response.success && topicsArray && Array.isArray(topicsArray)) {
-            console.log('[MqttPage] API returned topics:', topicsArray.length, 'topics');
-            console.log('[MqttPage] Sample topics:', topicsArray.slice(0, 5).map((t: any) => t.topic));
-            updateTopics(topicsArray);
-          } else {
-            console.warn('[MqttPage] Unexpected response structure:', response);
-          }
-        } else {
-          console.warn('[MqttPage] Failed to fetch topics:', topicsRes.status, topicsRes.statusText);
-        }
-        
-        setInitialLoadComplete(true);
-      } catch (error) {
-        console.error('[MqttPage] Failed to fetch initial data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchInitialData();
-  }, [updateBrokerStats, updateTopics, addChartDataPoint]);
-
-  // Handle MQTT stats updates via WebSocket
+  // Handle MQTT stats updates from HTTP endpoints
   const handleMqttStats = useCallback((data: MqttStatsData) => {
     // Helper function to safely parse number or return 0
     const safeNumber = (value: any): number => {
@@ -131,8 +72,7 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
       return isNaN(num) ? 0 : num;
     };
     
-    // Map WebSocket data to BrokerStats interface
-    // WebSocket sends data directly (not wrapped in 'stats' like HTTP endpoint)
+    // Map data to BrokerStats interface
     const mappedStats: MqttBrokerStatsData = {
       // Use data.clients directly (from metrics.clients)
       connectedClients: safeNumber(data.clients),
@@ -151,7 +91,7 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
       bytesSent: safeNumber(data.systemStats?.bytes?.sent),
       bytesReceived: safeNumber(data.systemStats?.bytes?.received),
       
-      // Rates (from metrics) - WebSocket sends flattened structure
+      // Rates (from metrics)
       messageRatePublished: safeNumber(data.messageRate?.published),
       messageRateReceived: safeNumber(data.messageRate?.received),
       throughputInbound: safeNumber(data.throughput?.inbound),
@@ -178,18 +118,111 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
     setIsConnected(data.connected || false);
   }, [updateBrokerStats, addChartDataPoint]);
 
-  // Handle MQTT topics updates via WebSocket
-  const handleMqttTopics = useCallback((data: any) => {
-    if (data.topics) {
-      updateTopics(data.topics);
+  // Fetch MQTT data from HTTP endpoints
+  const fetchMqttData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const mqttMonitorUrl = import.meta.env.VITE_MQTT_MONITOR_URL || 'http://localhost:3500';
+      
+      // Fetch broker stats using the same endpoint structure as WebSocket
+      const statsRes = await fetch(`${mqttMonitorUrl}/api/v1/stats`);
+      if (statsRes.ok) {
+        const response = await statsRes.json();
+        if (response.success && response.stats) {
+          // Transform /stats response to match WebSocket format
+          const statsData: MqttStatsData = {
+            connected: response.stats.connected,
+            broker: mqttMonitorUrl,
+            uptime: 0,
+            messageRate: response.stats.messageRate,
+            throughput: response.stats.throughput,
+            clients: response.stats.clients,
+            subscriptions: response.stats.subscriptions,
+            retainedMessages: response.stats.retainedMessages,
+            totalMessagesSent: response.stats.totalMessagesSent,
+            totalMessagesReceived: response.stats.totalMessagesReceived,
+            totalTopics: response.stats.topicCount || 0,
+            topicsWithSchemas: response.stats.schemas?.total || 0,
+            schemasDetected: response.stats.schemas?.total || 0,
+            messageTypeBreakdown: response.stats.schemas?.byType || {},
+            systemStats: response.stats.broker ? { $SYS: { broker: response.stats.broker } } : {},
+            timestamp: new Date().toISOString()
+          };
+          handleMqttStats(statsData);
+        }
+      } else {
+        console.warn('[MqttPage] Failed to fetch broker stats:', statsRes.status);
+      }
+
+      // Fetch topics (increased limit to support multiple agents)
+      console.log('[MqttPage] Fetching topics from:', `${mqttMonitorUrl}/api/v1/topics?limit=1000`);
+      const topicsRes = await fetch(`${mqttMonitorUrl}/api/v1/topics?limit=1000`);
+      console.log('[MqttPage] Topics fetch response:', topicsRes.status, topicsRes.statusText);
+      if (topicsRes.ok) {
+        const response = await topicsRes.json();
+        console.log('[MqttPage] Topics API response:', response);
+        console.log('[MqttPage] response.data structure:', response.data);
+        console.log('[MqttPage] response.data.topics:', response.data?.topics);
+        
+        // Check if topics are in data.topics or data directly
+        const topicsArray = response.data?.topics || response.data;
+        if (response.success && topicsArray && Array.isArray(topicsArray)) {
+          console.log('[MqttPage] API returned topics:', topicsArray.length, 'topics');
+          console.log('[MqttPage] Sample topics:', topicsArray.slice(0, 5).map((t: any) => t.topic));
+          updateTopics(topicsArray);
+        } else {
+          console.warn('[MqttPage] Unexpected response structure:', response);
+        }
+      } else {
+        console.warn('[MqttPage] Failed to fetch topics:', topicsRes.status, topicsRes.statusText);
+      }
+      
+      setInitialLoadComplete(true);
+    } catch (error) {
+      console.error('[MqttPage] Failed to fetch MQTT data:', error);
+    } finally {
+      setLoading(false);
     }
-  }, [updateTopics]);
-
-  // Subscribe to mqtt-stats channel
-  useWebSocket(null, 'mqtt-stats', handleMqttStats);
-
-  // Subscribe to mqtt-topics channel
-  useWebSocket(null, 'mqtt-topics', handleMqttTopics);
+  }, [updateBrokerStats, updateTopics, addChartDataPoint, handleMqttStats, setIsConnected, setLoading, setInitialLoadComplete]);
+  
+  // Manual refresh function
+  const handleManualRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await fetchMqttData();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [fetchMqttData]);
+  
+  // Initial data fetch on mount
+  useEffect(() => {
+    fetchMqttData();
+  }, [fetchMqttData]);
+  
+  // Set up polling interval
+  useEffect(() => {
+    // Clear existing interval
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    
+    // Set up new interval if enabled (not 0)
+    if (refreshInterval > 0) {
+      pollIntervalRef.current = setInterval(() => {
+        fetchMqttData();
+      }, refreshInterval * 1000);
+    }
+    
+    // Cleanup on unmount or interval change
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+  }, [refreshInterval, fetchMqttData]);
 
   // Filter topics based on selected agent
   const filteredTopics = useMemo(() => {
@@ -349,7 +382,12 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
               </div>
 
               {/* MQTT Metrics Card */}
-              <MqttMetricsCard />
+              <MqttMetricsCard 
+                refreshInterval={refreshInterval}
+                onRefreshIntervalChange={setRefreshInterval}
+                onManualRefresh={handleManualRefresh}
+                isRefreshing={isRefreshing}
+              />
             </>
           )}
         </div>

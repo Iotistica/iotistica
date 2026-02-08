@@ -1,4 +1,14 @@
+import { useState } from "react";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { RefreshCw } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useMqtt } from "@/contexts/MqttContext";
 import {
   AreaChart,
@@ -13,7 +23,14 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-const MqttMetricsCard = () => {
+interface MqttMetricsCardProps {
+  refreshInterval: number;
+  onRefreshIntervalChange: (interval: number) => void;
+  onManualRefresh: () => void;
+  isRefreshing: boolean;
+}
+
+const MqttMetricsCard = ({ refreshInterval, onRefreshIntervalChange, onManualRefresh, isRefreshing }: MqttMetricsCardProps) => {
   // Read chart history directly from context - no local state needed
   const { chartHistory } = useMqtt();
   
@@ -48,11 +65,39 @@ const MqttMetricsCard = () => {
   return (
     <Card className="p-4 md:p-6">
       <div className="mb-6">
-        <div className="flex items-center gap-2 mb-1">
-   
-          <h3 className="text-lg text-foreground font-medium mb-1">MQTT Metrics</h3>
+        <div className="flex items-start justify-between gap-4 mb-3">
+          <div>
+            <h3 className="text-lg text-foreground font-medium mb-1">MQTT Metrics</h3>
+            <p className="text-muted-foreground text-sm">Broker statistics and performance</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Refresh:</span>
+            <Select value={refreshInterval.toString()} onValueChange={(value) => onRefreshIntervalChange(parseInt(value, 10))}>
+              <SelectTrigger className="w-[100px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="5">5s</SelectItem>
+                <SelectItem value="10">10s</SelectItem>
+                <SelectItem value="30">30s</SelectItem>
+                <SelectItem value="60">1m</SelectItem>
+                <SelectItem value="300">5m</SelectItem>
+                <SelectItem value="0">Off</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0"
+              onClick={onManualRefresh}
+              disabled={isRefreshing}
+            >
+              <RefreshCw 
+                className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`}
+              />
+            </Button>
+          </div>
         </div>
-        <p className="text-muted-foreground text-sm">Real-time broker statistics and performance</p>
       </div>
 
       {/* Charts Grid */}
