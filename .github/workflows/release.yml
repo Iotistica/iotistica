@@ -34,11 +34,6 @@ on:
         required: false
         default: true
         type: boolean
-      force_latest:
-        description: 'Force deployment using :latest images with release tag'
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: write
@@ -161,24 +156,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          # If force_latest is true, use "latest" for all services
-          if [ "${{ github.event.inputs.force_latest }}" = "true" ]; then
-            echo "api_src_tag=latest" >> $GITHUB_OUTPUT
-            echo "dashboard_src_tag=latest" >> $GITHUB_OUTPUT
-            echo "mqtt_src_tag=latest" >> $GITHUB_OUTPUT
-            echo "housekeeper_src_tag=latest" >> $GITHUB_OUTPUT
-            echo "postoffice_src_tag=latest" >> $GITHUB_OUTPUT
-            
-            echo ""
-            echo "Image verification complete (forced latest):"
-            echo "  API  -> latest"
-            echo "  Dashboard -> latest"
-            echo "  MQTT Monitor -> latest"
-            echo "  Housekeeper -> latest"
-            echo "  Postoffice -> latest"
-            exit 0
-          fi
 
           # Helper: check image existence (returns tag to use or "skip")
           check_image() {
