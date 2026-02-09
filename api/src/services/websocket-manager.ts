@@ -49,20 +49,29 @@ export class WebSocketManager {
 
   setMqttManager(manager: any): void {
     this.mqttManager = manager;
-    logger.info(' MQTT Manager instance set for shell commands');
+    logger.info('🐚 [SHELL] MQTT Manager instance set for shell commands');
     
     // Subscribe to shell-output topic for all devices
     if (manager) {
       manager.subscribeTopic('iot/device/+/agent/shell-output', 1).then(() => {
-        logger.info(' Subscribed to shell-output topic');
+        logger.info('🐚 [SHELL] ✅ Subscribed to shell-output topic: iot/device/+/agent/shell-output');
       }).catch((err: any) => {
-        logger.error(' Failed to subscribe to shell-output topic:', err);
+        logger.error('🐚 [SHELL] ❌ Failed to subscribe to shell-output topic:', err);
       });
       
       // Handle shell output messages
       manager.on('agent', (payload: any) => {
+        logger.info('🐚 [SHELL] Agent event received', {
+          deviceUuid: payload.deviceUuid?.substring(0, 8) + '...',
+          subTopic: payload.subTopic,
+          hasMessage: !!payload.message
+        });
+        
         if (payload.subTopic === 'shell-output') {
+          logger.info('🐚 [SHELL] ✅ Matched shell-output subTopic, calling handleShellOutput');
           this.handleShellOutput(payload.deviceUuid, payload.message);
+        } else {
+          logger.debug('🐚 [SHELL] Ignoring non-shell agent message', { subTopic: payload.subTopic });
         }
       });
     }
@@ -487,6 +496,11 @@ export class WebSocketManager {
 
       case 'shell':
         // Forward shell commands to device via MQTT
+        logger.info('🐚 [SHELL] Received shell command from WebSocket', {
+          deviceUuid: client.deviceUuid?.substring(0, 8) + '...',
+          action: message.data?.action,
+          hasData: !!message.data?.data
+        });
         if (client.deviceUuid && message.data) {
           this.handleShellCommand(client.deviceUuid, message.data);
         }
@@ -503,6 +517,13 @@ export class WebSocketManager {
 
   private handleSubscribe(client: WebSocketClient, channel: string): void {
     logger.info(` Client subscribed to ${channel} for device ${client.deviceUuid}`);
+    
+    if (channel === 'shell') {
+      logger.info('🐚 [SHELL] WebSocket client subscribed to shell channel', {
+        deviceUuid: client.deviceUuid?.substring(0, 8) + '...',
+        channel
+      });
+    }
     
     client.subscriptions.add(channel);
 
@@ -1039,6 +1060,15 @@ export class WebSocketManager {
     if (channel === 'logs' && message.data?.logs) {
       logger.debug(`📡 Broadcast logs: ${message.data.logs.length} total, sent to ${sentCount} clients, ${filteredCount} filtered out`);
     }
+    
+    if (channel === 'shell') {
+      logger.info(`🐚 [SHELL] 📡 Broadcast shell output to ${sentCount} client(s)`, {
+        deviceUuid: deviceUuid.substring(0, 8) + '...',
+        totalClients: deviceClients?.size || 0,
+        sentCount,
+        outputPreview: message.data?.output?.substring(0, 50)
+      });
+    }
 
     if (sentCount > 0) {
       logger.info(` Broadcasted ${channel} to ${sentCount} client(s) for device ${deviceUuid}`);
@@ -1105,7 +1135,7 @@ export class WebSocketManager {
    */
   private async handleShellCommand(deviceUuid: string, data: any): Promise<void> {
     if (!this.mqttManager) {
-      logger.error(' MQTT Manager not set - cannot send shell command');
+      logger.error('🐚 [SHELL] ❌ MQTT Manager not set - cannot send shell command');
       return;
     }
 
@@ -1113,10 +1143,18 @@ export class WebSocketManager {
       const topic = `iot/device/${deviceUuid}/agent/shell`;
       const payload = JSON.stringify(data);
       
-      logger.info(` Sending shell command to device ${deviceUuid.substring(0, 8)}...`, { action: data.action });
+      logger.info(`🐚 [SHELL] ➡️ Publishing command to MQTT`, {
+        deviceUuid: deviceUuid.substring(0, 8) + '...',
+        topic,
+        action: data.action,
+        dataLength: data.data?.length || 0
+      });
+      
       await this.mqttManager.publish(topic, payload, 1);
+      
+      logger.info('🐚 [SHELL] ✅ Command published to MQTT successfully');
     } catch (error) {
-      logger.error(' Failed to send shell command:', error);
+      logger.error('🐚 [SHELL] ❌ Failed to send shell command:', error);
     }
   }
 
@@ -1124,15 +1162,29 @@ export class WebSocketManager {
    * Handle shell output from MQTT - forward to WebSocket clients
    */
   private handleShellOutput(deviceUuid: string, message: any): void {
-    logger.debug(` Received shell output from device ${deviceUuid.substring(0, 8)}...`);
+    logger.info(`🐚 [SHELL] ⬅️ Received shell output from MQTT`, {
+      deviceUuid: deviceUuid.substring(0, 8) + '...',
+      messageStructure: JSON.stringify(message).substring(0, 200)
+    });
+    
+    // Unwrap the message structure: { format: 'json', data: { output: '...', timestamp: '...' } }
+    const outputData = message?.data || message;
+    
+    logger.info(`🐚 [SHELL] 📡 Broadcasting to WebSocket clients`, {
+      deviceUuid: deviceUuid.substring(0, 8) + '...',
+      outputLength: outputData?.output?.length || 0,
+      output: outputData?.output?.substring(0, 100)
+    });
     
     this.broadcast(deviceUuid, {
       type: 'shell',
       deviceUuid,
-      data: message,
+      data: outputData,
       timestamp: new Date().toISOString(),
       source: 'mqtt',
     });
+    
+    logger.info('🐚 [SHELL] ✅ Broadcast complete');
   }
 }
 
