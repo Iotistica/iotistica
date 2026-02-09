@@ -24,6 +24,7 @@ import HousekeeperPage from "./pages/HousekeeperPage";
 import DeviceSettingsPage from "./pages/DeviceSettingsPage";
 import AccountPage from "./pages/AccountPage";
 import { LogsPage } from "./pages/LogsPage";
+import { RemoteAccessPage } from "./pages/RemoteAccessPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { GlobalDashboardPage } from "./pages/GlobalDashboardPage";
 import DeviceTagsPage from "./pages/DeviceTagsPage";
@@ -69,6 +70,7 @@ export default function App() {
     'security',
     'maintenance',
     'logs',
+    'remote-access',
     'settings',
     'tags',
     'tag-definitions',
@@ -910,6 +912,14 @@ export default function App() {
               Logs
             </Button>
             <Button
+              variant={currentView === 'remote-access' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setCurrentView('remote-access')}
+            >
+              <FileText className="w-4 h-4 mr-2" />
+              Remote Access
+            </Button>
+            <Button
               variant={currentView === 'settings' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCurrentView('settings')}
@@ -1029,6 +1039,9 @@ export default function App() {
           )}
           {currentView === 'logs' && (
             <LogsPage deviceUuid={selectedDevice.deviceUuid} />
+          )}
+          {currentView === 'remote-access' && (
+            <RemoteAccessPage deviceUuid={selectedDevice.deviceUuid} />
           )}
           {currentView === 'settings' && (
             <DeviceSettingsPage deviceUuid={selectedDevice.deviceUuid} />
