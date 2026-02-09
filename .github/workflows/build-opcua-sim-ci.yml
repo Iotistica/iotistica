@@ -100,11 +100,31 @@ jobs:
           git add sensors/opcua-simulator/package.json
           git commit -m "chore: bump opcua-simulator version to ${{ steps.bump.outputs.package_version }} [skip ci]"
           
-          # Pull with rebase strategy, auto-stashing if needed
-          git pull --rebase --autostash origin master
+          # Retry push with rebase up to 5 times (handles concurrent workflow runs)
+          for i in {1..5}; do
+            echo "Push attempt $i of 5..."
+            
+            # Fetch latest state from remote
+            git fetch origin master
+            
+            # Rebase our commit on top of latest origin/master
+            git rebase origin/master
+            
+            # Try to push
+            if git push origin HEAD:master; then
+              echo "Successfully pushed version bump!"
+              exit 0
+            fi
+            
+            # If push failed, wait before retry
+            if [ $i -lt 5 ]; then
+              echo "Push failed, retrying in 2 seconds..."
+              sleep 2
+            fi
+          done
           
-          # Push to master
-          git push origin HEAD:master
+          echo "Failed to push after 5 attempts"
+          exit 1
 
       - name: Display version info
         run: |

@@ -107,6 +107,32 @@ jobs:
           git config user.email "github-actions@github.com"
           git add postoffice/package.json
           git commit -m "chore: bump postoffice version to ${{ steps.bump.outputs.package_version }} [skip ci]"
+          
+          # Retry push with rebase up to 5 times (handles concurrent workflow runs)
+          for i in {1..5}; do
+            echo "Push attempt $i of 5..."
+            
+            # Fetch latest state from remote
+            git fetch origin master
+            
+            # Rebase our commit on top of latest origin/master
+            git rebase origin/master
+            
+            # Try to push
+            if git push origin HEAD:master; then
+              echo "Successfully pushed version bump!"
+              exit 0
+            fi
+            
+            # If push failed, wait before retry
+            if [ $i -lt 5 ]; then
+              echo "Push failed, retrying in 2 seconds..."
+              sleep 2
+            fi
+          done
+          
+          echo "Failed to push after 5 attempts"
+          exit 1
           git push origin HEAD
 
       - name: Display version info
