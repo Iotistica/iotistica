@@ -359,5 +359,7 @@ jobs:
         uses: Iotistica/iot-k8s/.github/workflows/k8s-release-iotistic.yml@main
         with:
           release_version: ${{ needs.validate-release.outputs.release_version }}
+          client_name: iotistic-nodeport
+          cluster_name: k3scl01
           clean_before_deploy: false
         secrets: inherit
