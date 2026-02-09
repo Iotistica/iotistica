@@ -20,13 +20,27 @@ import {
 } from "@/components/ui/select";
 
 interface MqttPageProps {
-  device: Device;
+  device?: Device;
   devices?: Device[];
 }
 
 export function MqttPage({ device, devices = [] }: MqttPageProps) {
   // Get context actions and state
   const { brokerStats, topics, chartHistory, updateBrokerStats, updateTopics, addChartDataPoint } = useMqtt();
+  
+  // Handle case where device is not provided (e.g., in global view with no devices)
+  if (!device) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <p className="text-muted-foreground mb-2">No device selected</p>
+          <p className="text-sm text-muted-foreground">
+            Please select a device from the sidebar to view MQTT information
+          </p>
+        </div>
+      </div>
+    );
+  }
   
   const [isConnected, setIsConnected] = useState(false);
   const [loading, setLoading] = useState(true);
