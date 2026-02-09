@@ -8,6 +8,9 @@
 -- Retention: Auto-refresh with 1-day lag
 -- Use case: GET /metrics, 6h-24h dashboard views, alerting
 
+-- Drop existing continuous aggregate if it exists (idempotent migration)
+DROP MATERIALIZED VIEW IF EXISTS readings_hourly CASCADE;
+
 CREATE MATERIALIZED VIEW readings_hourly
 WITH (timescaledb.continuous) AS
 SELECT
@@ -44,6 +47,9 @@ SELECT add_continuous_aggregate_policy('readings_hourly',
 -- Purpose: Long-term trend analysis and historical reporting
 -- Retention: Auto-refresh with 2-day lag
 -- Use case: Weekly/monthly reports, capacity planning, trend analysis
+
+-- Drop existing continuous aggregate if it exists (idempotent migration)
+DROP MATERIALIZED VIEW IF EXISTS readings_daily CASCADE;
 
 CREATE MATERIALIZED VIEW readings_daily
 WITH (timescaledb.continuous) AS
