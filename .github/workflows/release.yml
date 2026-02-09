@@ -352,14 +352,11 @@ jobs:
   deploy-to-k8s:
     name: Deploy to Kubernetes
     needs: [validate-release, create-release]
-    runs-on: [iotistic-lab-sc]
     if: github.event.inputs.deploy == 'true' && needs.validate-release.result == 'success'
-    steps:
-      - name: Call K8s deployment workflow
-        uses: Iotistica/iot-k8s/.github/workflows/k8s-release-iotistic.yml@main
-        with:
-          release_version: ${{ needs.validate-release.outputs.release_version }}
-          client_name: iotistic-nodeport
-          cluster_name: k3scl01
-          clean_before_deploy: false
-        secrets: inherit
+    uses: Iotistica/iot-k8s/.github/workflows/k8s-release-iotistic.yml@main
+    with:
+      release_version: ${{ needs.validate-release.outputs.release_version }}
+      client_name: iotistic-nodeport
+      cluster_name: k3scl01
+      clean_before_deploy: false
+    secrets: inherit
