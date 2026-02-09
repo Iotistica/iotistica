@@ -1,9 +1,12 @@
 #!/bin/sh
 set -e
 
-# Create Tailscale socket directory (required for tailscaled daemon)
-mkdir -p /var/run/tailscale
-mkdir -p /var/lib/tailscale
+# Create Tailscale socket directory only for edge agents (not virtual agents)
+# Virtual agents run in Kubernetes and don't need VPN
+if [ "$IS_VIRTUAL_AGENT" != "true" ]; then
+  mkdir -p /var/run/tailscale
+  mkdir -p /var/lib/tailscale
+fi
 
 # Insert default sensor outputs if not exists (idempotent)
 node -e "

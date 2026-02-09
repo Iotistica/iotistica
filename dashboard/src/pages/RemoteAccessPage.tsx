@@ -227,7 +227,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         <div className="mb-6">
           <h2 className="text-2xl font-bold text-foreground mb-2">Remote Access</h2>
           <p className="text-muted-foreground">
-            WebSocket-based shell access to device terminal
+            Execute commands and manage your device remotely
           </p>
         </div>
 
