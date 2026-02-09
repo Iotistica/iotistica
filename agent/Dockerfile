@@ -3,8 +3,9 @@ FROM node:20-alpine AS deps
 
 WORKDIR /app
 
-# Install build tools needed for native dependencies (sqlite3)
-RUN apk add --no-cache python3 make g++ sqlite-dev
+# Install build tools needed for native dependencies (sqlite3, node-pty)
+# py3-setuptools provides distutils replacement for Python 3.12+
+RUN apk add --no-cache python3 py3-setuptools make g++ sqlite-dev linux-headers
 
 # Copy package files
 COPY agent/package*.json ./
@@ -23,8 +24,9 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install build tools for native deps (Alpine uses apk)
-RUN apk add --no-cache make g++ sqlite-dev
+# Install build tools for native deps (sqlite3, node-pty)
+# py3-setuptools provides distutils replacement for Python 3.12+
+RUN apk add --no-cache python3 py3-setuptools make g++ sqlite-dev linux-headers
 
 # Copy package files
 COPY agent/package*.json agent/tsconfig.json agent/tsconfig.build.json ./

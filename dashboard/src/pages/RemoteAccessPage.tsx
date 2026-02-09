@@ -44,10 +44,18 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         channel: 'shell',
       }));
 
+      // Start PTY session on the device
+      ws.send(JSON.stringify({
+        type: 'shell',
+        data: {
+          action: 'start',
+        },
+      }));
+
       // Send initial message to terminal
       if (xtermRef.current) {
         xtermRef.current.writeln('\x1b[32m✓ Connected to device shell\x1b[0m');
-        xtermRef.current.writeln('Type commands below:\r\n');
+        xtermRef.current.writeln('\x1b[90mStarting shell session...\x1b[0m\r\n');
       }
     };
 
@@ -87,6 +95,14 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
   const disconnect = () => {
     if (wsRef.current) {
+      // Stop the PTY session
+      wsRef.current.send(JSON.stringify({
+        type: 'shell',
+        data: {
+          action: 'stop',
+        },
+      }));
+      
       wsRef.current.send(JSON.stringify({
         type: 'unsubscribe',
         channel: 'shell',
@@ -136,9 +152,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     fitAddonRef.current = fitAddon;
 
     // Welcome message
-    term.writeln('\x1b[1;36m╔════════════════════════════════════════════╗\x1b[0m');
-    term.writeln('\x1b[1;36m║     IoTistic Remote Access Terminal       ║\x1b[0m');
-    term.writeln('\x1b[1;36m╚════════════════════════════════════════════╝\x1b[0m');
+  
     term.writeln('');
     term.writeln('\x1b[33mClick "Connect" to start a shell session\x1b[0m');
     term.writeln('');
@@ -155,13 +169,14 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       
       if (code === 13) { // Enter
         term.write('\r\n');
-        if (commandBuffer.trim()) {
-          // Send command to device
-          wsRef.current.send(JSON.stringify({
-            type: 'shell',
-            command: commandBuffer + '\n',
-          }));
-        }
+        // Send Enter key to device
+        wsRef.current.send(JSON.stringify({
+          type: 'shell',
+          data: {
+            action: 'input',
+            data: commandBuffer + '\n',
+          },
+        }));
         commandBuffer = '';
       } else if (code === 127) { // Backspace
         if (commandBuffer.length > 0) {
@@ -171,7 +186,10 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       } else if (code === 3) { // Ctrl+C
         wsRef.current.send(JSON.stringify({
           type: 'shell',
-          command: '\x03', // Send Ctrl+C signal
+          data: {
+            action: 'input',
+            data: '\x03', // Send Ctrl+C signal
+          },
         }));
         commandBuffer = '';
         term.write('^C\r\n');
