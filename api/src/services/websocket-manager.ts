@@ -32,6 +32,7 @@ export class WebSocketManager {
   private globalClients: Set<WebSocket> = new Set(); // Global connections for MQTT stats
   private globalIntervals: Map<string, NodeJS.Timeout> = new Map(); // Global intervals
   private mqttMonitor: any = null; // MQTTMonitorService instance
+  private mqttManager: any = null; // MQTT Manager instance for publishing commands
   private redisClient: any = null; // Redis client for pub/sub
   private redisSubscriber: any = null; // Separate Redis subscriber client (required by ioredis)
   private redisSubscriptions: Map<string, Set<WebSocket>> = new Map(); // Track Redis subscriptions per device
@@ -44,6 +45,27 @@ export class WebSocketManager {
   setMqttMonitor(monitor: any): void {
     this.mqttMonitor = monitor;
     logger.info(' MQTT Monitor instance set');
+  }
+
+  setMqttManager(manager: any): void {
+    this.mqttManager = manager;
+    logger.info(' MQTT Manager instance set for shell commands');
+    
+    // Subscribe to shell-output topic for all devices
+    if (manager) {
+      manager.subscribeTopic('iot/device/+/agent/shell-output', 1).then(() => {
+        logger.info(' Subscribed to shell-output topic');
+      }).catch((err: any) => {
+        logger.error(' Failed to subscribe to shell-output topic:', err);
+      });
+      
+      // Handle shell output messages
+      manager.on('agent', (payload: any) => {
+        if (payload.subTopic === 'shell-output') {
+          this.handleShellOutput(payload.deviceUuid, payload.message);
+        }
+      });
+    }
   }
 
   /**
@@ -463,6 +485,13 @@ export class WebSocketManager {
         }
         break;
 
+      case 'shell':
+        // Forward shell commands to device via MQTT
+        if (client.deviceUuid && message.data) {
+          this.handleShellCommand(client.deviceUuid, message.data);
+        }
+        break;
+
       case 'ping':
         this.send(client.ws, { type: 'pong' });
         break;
@@ -534,6 +563,12 @@ export class WebSocketManager {
 
     // Don't start if already running
     if (intervals.has(channel)) {
+      return;
+    }
+
+    // Shell channel uses MQTT pub/sub only (no polling)
+    if (channel === 'shell') {
+      logger.info(` 📡 Shell channel active for device ${deviceUuid.substring(0, 8)}... (MQTT-based)`);
       return;
     }
 
@@ -1063,6 +1098,41 @@ export class WebSocketManager {
     }
 
     logger.info(' Shutdown complete');
+  }
+
+  /**
+   * Handle shell command from WebSocket client - forward to device via MQTT
+   */
+  private async handleShellCommand(deviceUuid: string, data: any): Promise<void> {
+    if (!this.mqttManager) {
+      logger.error(' MQTT Manager not set - cannot send shell command');
+      return;
+    }
+
+    try {
+      const topic = `iot/device/${deviceUuid}/agent/shell`;
+      const payload = JSON.stringify(data);
+      
+      logger.info(` Sending shell command to device ${deviceUuid.substring(0, 8)}...`, { action: data.action });
+      await this.mqttManager.publish(topic, payload, 1);
+    } catch (error) {
+      logger.error(' Failed to send shell command:', error);
+    }
+  }
+
+  /**
+   * Handle shell output from MQTT - forward to WebSocket clients
+   */
+  private handleShellOutput(deviceUuid: string, message: any): void {
+    logger.debug(` Received shell output from device ${deviceUuid.substring(0, 8)}...`);
+    
+    this.broadcast(deviceUuid, {
+      type: 'shell',
+      deviceUuid,
+      data: message,
+      timestamp: new Date().toISOString(),
+      source: 'mqtt',
+    });
   }
 }
 

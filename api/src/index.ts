@@ -594,7 +594,15 @@ async function startServer() {
   // Initialize MQTT manager for device messages
   (async () => {
     try {
-      await initializeMqtt();
+      const mqttManager = await initializeMqtt();
+      // Set MQTT manager on WebSocket manager for shell command forwarding
+      if (mqttManager) {
+        const { getMqttManager } = await import('./mqtt');
+        const manager = getMqttManager();
+        if (manager) {
+          websocketManager.setMqttManager(manager);
+        }
+      }
       // MQTT manager will log its own initialization status
     } catch (error) {
       logger.warn('⚠️  MQTT service initialization failed - will retry in background', {

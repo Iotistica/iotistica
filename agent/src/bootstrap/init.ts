@@ -41,6 +41,7 @@ export interface InitializedFeatures {
   sensors?: SensorsFeature;
   updater?: AgentUpdater;
   firewall?: AgentFirewall;
+  shellHandler?: any; // Shell handler for remote terminal access
   discoveryService?: any; // Discovery service (passed from Agent)
 }
 
@@ -98,6 +99,8 @@ export class FeatureInitializer {
   async initSupportingFeatures(): Promise<void> {
     await Promise.all([
       this.initAgentUpdater(),
+      this.initShellHandler(),
+      this.initFirewall(),
       this.initFirewall()
     ]);
   }
@@ -517,6 +520,32 @@ export class FeatureInitializer {
     }
   }
 
+  private async initShellHandler(): Promise<void> {
+    const { logger, deviceInfo, mqttManager } = this.context;
+
+    try {
+      const { ShellHandler } = await import('../shell/shell-handler.js');
+      
+      this.features.shellHandler = new ShellHandler(
+        deviceInfo.uuid,
+        mqttManager,
+        logger
+      );
+
+      await this.features.shellHandler.initialize();
+
+      logger.infoSync('Shell handler initialized (remote terminal access enabled)', {
+        component: LogComponents.agent
+      });
+    } catch (error) {
+      logger.errorSync('Failed to initialize Shell Handler', error as Error, {
+        component: LogComponents.agent,
+        note: 'Remote terminal access will not be available'
+      });
+      this.features.shellHandler = undefined;
+    }
+  }
+
   private async initFirewall(): Promise<void> {
     const { logger, configSettings, deviceApiPort } = this.context;
 
@@ -613,6 +642,14 @@ export class FeatureInitializer {
     if (this.features.updater) {
       // No explicit stop method
       logger.debugSync('Agent Updater cleanup', {
+        component: LogComponents.agent,
+      });
+    }
+
+    // Stop Shell Handler
+    if (this.features.shellHandler) {
+      await this.features.shellHandler.cleanup();
+      logger.debugSync('Shell Handler stopped', {
         component: LogComponents.agent,
       });
     }
