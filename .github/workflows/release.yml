@@ -352,11 +352,51 @@ jobs:
   deploy-to-k8s:
     name: Deploy to Kubernetes
     needs: [validate-release, create-release]
+    runs-on: [iotistic-lab-sc]
     if: github.event.inputs.deploy == 'true' && needs.validate-release.result == 'success'
-    uses: Iotistica/iot-k8s/.github/workflows/k8s-release-iotistic.yml@main
-    with:
-      release_version: ${{ needs.validate-release.outputs.release_version }}
-      client_name: iotistic-nodeport
-      cluster_name: k3scl01
-      clean_before_deploy: false
-    secrets: inherit
+    steps:
+      - name: Trigger K8s deployment workflow
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.K8S_DEPLOY_PAT || secrets.GITHUB_TOKEN }}
+          script: |
+            const releaseVersion = '${{ needs.validate-release.outputs.release_version }}';
+            const isRC = '${{ github.event.inputs.release_mode }}' === 'rc';
+            const hasPAT = '${{ secrets.K8S_DEPLOY_PAT }}' !== '';
+            
+            console.log(`Triggering K8s deployment for ${releaseVersion} (RC: ${isRC})`);
+            
+            // Check if PAT exists
+            if (!hasPAT) {
+              core.warning('⚠️ K8S_DEPLOY_PAT secret not configured - skipping K8s deployment');
+              core.warning('To enable K8s deployments:');
+              core.warning('1. Go to GitHub Settings → Developer settings → Personal access tokens');
+              core.warning('2. Create a token (classic) with "workflow" scope');
+              core.warning('3. Add it to repository secrets as K8S_DEPLOY_PAT');
+              console.log('Deployment skipped - secret not configured');
+              return;
+            }
+            
+            try {
+              // Use the github object (already authenticated with K8S_DEPLOY_PAT)
+              await github.rest.actions.createWorkflowDispatch({
+                owner: 'Iotistica',
+                repo: 'iot-k8s',
+                workflow_id: 'k8s-release-iotistic.yml',
+                ref: 'main',
+                inputs: {
+                  release_version: releaseVersion,
+                  client_name: 'client1',
+                  cluster_name: 'k3scl01',
+                  clean_before_deploy: 'false'
+                }
+              });
+              
+              console.log('✅ K8s deployment workflow triggered successfully');
+              console.log(`   Repository: Iotistica/iot-k8s`);
+              console.log(`   Version: ${releaseVersion}`);
+              console.log(`   Client: client1`);
+            } catch (error) {
+              console.error('❌ Failed to trigger K8s deployment:', error.message);
+              throw error;
+            }
