@@ -270,6 +270,46 @@ export class VirtualAgentDeployer {
   }
 
   /**
+   * Create PersistentVolumeClaim for agent data (SQLite database)
+   */
+  private async createPersistentVolumeClaim(
+    namespace: string,
+    pvcName: string
+  ): Promise<void> {
+    const pvc: k8s.V1PersistentVolumeClaim = {
+      metadata: {
+        name: pvcName,
+        namespace,
+        labels: {
+          'app.kubernetes.io/managed-by': 'iotistic-api',
+          'iotistic.com/pvc-type': 'agent-data'
+        }
+      },
+      spec: {
+        accessModes: ['ReadWriteOnce'],
+        resources: {
+          requests: {
+            storage: process.env.VIRTUAL_AGENT_STORAGE_SIZE || '1Gi'
+          }
+        },
+        storageClassName: process.env.VIRTUAL_AGENT_STORAGE_CLASS || undefined // use default if not specified
+      }
+    };
+
+    try {
+      await this.coreApi.createNamespacedPersistentVolumeClaim(namespace, pvc);
+      logger.info('PersistentVolumeClaim created', { namespace, pvcName });
+    } catch (error: any) {
+      if (error.statusCode === 409) {
+        // PVC already exists, this is OK - reuse it
+        logger.debug('PersistentVolumeClaim already exists, reusing', { namespace, pvcName });
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  /**
    * Create K8s Deployment for virtual agent
    */
   private async createDeployment(
@@ -278,6 +318,9 @@ export class VirtualAgentDeployer {
     secretName: string,
     config: VirtualAgentConfig
   ): Promise<void> {
+    // Create PVC for SQLite database persistence
+    await this.createPersistentVolumeClaim(namespace, `${name}-data`);
+
     const deployment: k8s.V1Deployment = {
       metadata: {
         name,
@@ -317,6 +360,7 @@ export class VirtualAgentDeployer {
                   { name: 'IS_VIRTUAL_AGENT', value: 'true' },
                   { name: 'CLOUD_API_ENDPOINT', value: this.cloudApiUrl },
                   { name: 'MQTT_BROKER_URL', value: this.mqttBrokerUrl },
+                  { name: 'FIREWALL_ENABLED', value: 'false' },
                   {
                     name: 'PROVISIONING_KEY',
                     valueFrom: {
@@ -336,6 +380,20 @@ export class VirtualAgentDeployer {
                     cpu: config.resourceLimits?.cpu || process.env.VIRTUAL_AGENT_CPU_LIMIT || '1000m',
                     memory: config.resourceLimits?.memory || process.env.VIRTUAL_AGENT_MEMORY_LIMIT || '2Gi'
                   }
+                },
+                volumeMounts: [
+                  {
+                    name: 'agent-data',
+                    mountPath: '/app/data'
+                  }
+                ]
+              }
+            ],
+            volumes: [
+              {
+                name: 'agent-data',
+                persistentVolumeClaim: {
+                  claimName: `${name}-data`
                 }
               }
             ],
@@ -488,6 +546,18 @@ export class VirtualAgentDeployer {
           throw error;
         }
         logger.warn('Secret not found, skipping', { namespace, secretName });
+      }
+
+      // Delete PVC
+      const pvcName = `${name}-data`;
+      try {
+        await this.coreApi.deleteNamespacedPersistentVolumeClaim(pvcName, namespace);
+        logger.info('PersistentVolumeClaim deleted', { namespace, pvcName });
+      } catch (error: any) {
+        if (error.statusCode !== 404) {
+          throw error;
+        }
+        logger.warn('PersistentVolumeClaim not found, skipping', { namespace, pvcName });
       }
 
       // Update device status

@@ -106,7 +106,7 @@ export class ShellHandler {
 
     try {
       // Determine shell and platform
-      const shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash';
+      const shell = os.platform() === 'win32' ? 'powershell.exe' : '/bin/sh';
       const cwd = os.homedir();
 
       this.logger.infoSync('Starting PTY process', {
