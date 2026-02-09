@@ -118,6 +118,20 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     setTimeout(() => connectShell(), 500);
   };
 
+  // Warn user before navigating away from active session
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isConnected) {
+        e.preventDefault();
+        e.returnValue = 'You have an active shell session. Are you sure you want to leave?';
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isConnected]);
+
   useEffect(() => {
     if (!terminalRef.current) return;
 
@@ -296,20 +310,67 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           </CardContent>
         </Card>
 
-        {/* Info Card */}
-        <Card className="border">
-          <CardContent className="p-4">
-            <div className="text-sm text-muted-foreground space-y-2">
-              <p><strong>Keyboard Shortcuts:</strong></p>
-              <ul className="list-disc list-inside space-y-1 ml-2">
-                <li><kbd>Enter</kbd> - Execute command</li>
-                <li><kbd>Ctrl+C</kbd> - Interrupt current process</li>
-                <li><kbd>Backspace</kbd> - Delete character</li>
-              </ul>
-              <p className="mt-4"><strong>Note:</strong> This is a WebSocket-based shell. For advanced SSH features (file transfer, tunneling), use VPN + native SSH client.</p>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Info and Quick Reference Cards */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Card className="border">
+            <CardContent className="p-4">
+              <div className="text-sm text-muted-foreground space-y-2">
+                <p><strong>Keyboard Shortcuts:</strong></p>
+                <ul className="list-disc list-inside space-y-1 ml-2">
+                  <li><kbd>Enter</kbd> - Execute command</li>
+                  <li><kbd>Ctrl+C</kbd> - Interrupt current process</li>
+                  <li><kbd>Backspace</kbd> - Delete character</li>
+                </ul>
+                <p className="mt-4"><strong>Session Info:</strong></p>
+                <ul className="list-disc list-inside space-y-1 ml-2">
+                  <li>Sessions close when navigating away (you'll be warned)</li>
+                  <li>Use <code className="bg-muted px-1 rounded">screen</code> or <code className="bg-muted px-1 rounded">tmux</code> for persistent sessions</li>
+                </ul>
+                <p className="mt-4"><strong>Note:</strong> For advanced SSH features (file transfer, tunneling), use VPN + native SSH client.</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border">
+            <CardContent className="p-4">
+              <div className="text-sm text-muted-foreground space-y-2">
+                <p><strong>Quick Command Reference:</strong></p>
+                <div className="space-y-3 mt-2">
+                  <div>
+                    <p className="font-medium text-foreground mb-1">Device Status & Info</p>
+                    <ul className="list-disc list-inside space-y-0.5 ml-2 text-xs">
+                      <li><code className="bg-muted px-1 rounded">iotctl status</code> - Device health and metrics</li>
+                      <li><code className="bg-muted px-1 rounded">iotctl config show</code> - Show all configuration</li>
+                      <li><code className="bg-muted px-1 rounded">iotctl provision status</code> - Provisioning info</li>
+                      <li><code className="bg-muted px-1 rounded">iotctl diagnostics</code> - System diagnostics</li>
+                    </ul>
+                  </div>
+                  
+                  <div>
+                    <p className="font-medium text-foreground mb-1">App Management</p>
+                    <ul className="list-disc list-inside space-y-0.5 ml-2 text-xs">
+                      <li><code className="bg-muted px-1 rounded">iotctl apps list</code> - List all applications</li>
+                      <li><code className="bg-muted px-1 rounded">iotctl apps start &lt;appId&gt;</code> - Start app</li>
+                      <li><code className="bg-muted px-1 rounded">iotctl apps stop &lt;appId&gt;</code> - Stop app</li>
+                    </ul>
+                  </div>
+                  
+                  <div>
+                    <p className="font-medium text-foreground mb-1">Service Management</p>
+                    <ul className="list-disc list-inside space-y-0.5 ml-2 text-xs">
+                      <li><code className="bg-muted px-1 rounded">iotctl services list</code> - List all services</li>
+                      <li><code className="bg-muted px-1 rounded">iotctl services logs &lt;id&gt; -f</code> - Follow logs</li>
+                    </ul>
+                  </div>
+                  
+                  <p className="text-xs italic mt-2">
+                    Type <code className="bg-muted px-1 rounded">iotctl help</code> for complete command list
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

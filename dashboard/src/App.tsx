@@ -15,7 +15,7 @@ import { Toaster } from "./components/ui/sonner";
 import { Sheet, SheetContent } from "./components/ui/sheet";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
-import { Menu, Activity, BarChart3, Radio, CalendarClock, Clock, Package, Shield, FileText } from "lucide-react";
+import { Menu, Activity, BarChart3, Radio, CalendarClock, Clock, Package, Shield, FileText, Terminal } from "lucide-react";
 import { buildApiUrl } from "./config/api";
 import { SensorHealthDashboard } from "./pages/SensorHealthDashboard";
 import { SensorsPage } from "./pages/SensorsPage";
@@ -916,7 +916,7 @@ export default function App() {
               size="sm"
               onClick={() => setCurrentView('remote-access')}
             >
-              <FileText className="w-4 h-4 mr-2" />
+              <Terminal className="w-4 h-4 mr-2" />
               Remote Access
             </Button>
             <Button
