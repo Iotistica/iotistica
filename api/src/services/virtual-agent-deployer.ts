@@ -348,11 +348,29 @@ export class VirtualAgentDeployer {
             }
           },
           spec: {
+            // Security: Run as non-root user (virtual agents don't need Docker socket or VPN)
+            securityContext: {
+              runAsNonRoot: true,
+              runAsUser: 1000, // agentuser from Dockerfile
+              runAsGroup: 1000, // agentgroup from Dockerfile
+              fsGroup: 1000, // Ensure PVC files are owned by agentgroup
+              seccompProfile: {
+                type: 'RuntimeDefault'
+              }
+            },
             containers: [
               {
                 name: 'agent',
                 image: this.agentImage,
                 imagePullPolicy: process.env.AGENT_IMAGE_PULL_POLICY as any || 'Always',
+                securityContext: {
+                  allowPrivilegeEscalation: false,
+                  readOnlyRootFilesystem: false, // Agent needs to write to /app/data
+                  runAsNonRoot: true,
+                  capabilities: {
+                    drop: ['ALL']
+                  }
+                },
                 env: [
                   { name: 'DEVICE_UUID', value: config.deviceUuid },
                   { name: 'FLEET_ID', value: config.fleetId },

@@ -71,9 +71,9 @@ RUN apk add --no-cache \
 # Required for Tailscale state
 VOLUME ["/var/lib/tailscale"]
 
-# Create non-root user and group early
-RUN addgroup -S agentgroup && \
-    adduser -S agentuser -G agentgroup && \
+# Create non-root user and group with explicit UID/GID for K8s compatibility
+RUN addgroup -g 1000 agentgroup && \
+    adduser -u 1000 -G agentgroup -s /bin/sh -D agentuser && \
     mkdir -p /app/data/vpn && \
     chown -R agentuser:agentgroup /app
 
