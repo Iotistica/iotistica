@@ -72,8 +72,26 @@ export class ShellHandler {
           this.stopSession();
           break;
         case 'input':
+          this.logger.infoSync('[SHELL-DEBUG] Received input action', {
+            component: LogComponents.agent,
+            hasData: !!message.data,
+            hasPty: !!this.ptyProcess,
+            sessionActive: this.sessionActive,
+            dataLength: message.data?.length || 0,
+            sessionId: message.sessionId || 'none',
+          });
           if (message.data && this.ptyProcess) {
+            this.logger.infoSync('[SHELL-DEBUG] Writing to PTY', {
+              component: LogComponents.agent,
+              data: message.data.substring(0, 20),
+            });
             this.ptyProcess.write(message.data);
+          } else {
+            this.logger.warnSync('[SHELL-DEBUG] Cannot write - missing data or PTY', {
+              component: LogComponents.agent,
+              hasData: !!message.data,
+              hasPty: !!this.ptyProcess,
+            });
           }
           break;
         case 'resize':
@@ -133,6 +151,11 @@ export class ShellHandler {
 
       // Handle PTY output
       this.ptyProcess.onData((data: string) => {
+        this.logger.debugSync('[SHELL-DEBUG] PTY onData triggered', {
+          component: LogComponents.agent,
+          dataLength: data.length,
+          preview: data.substring(0, 30).replace(/[\r\n]/g, '\\n'),
+        });
         this.sendOutput(data);
       });
 
@@ -196,19 +219,39 @@ export class ShellHandler {
    * Send shell output to cloud via MQTT
    */
   private async sendOutput(data: string): Promise<void> {
+    this.logger.infoSync('[SHELL-DEBUG] sendOutput called', {
+      component: LogComponents.agent,
+      dataLength: data.length,
+      sessionId: this.currentSessionId || 'none',
+      outputTopic: this.outputTopic,
+      preview: data.substring(0, 50).replace(/[\r\n]/g, '\\n'),
+    });
+    
     try {
+      const payload = {
+        format: 'json',
+        data: {
+          sessionId: this.currentSessionId,
+          output: data,
+          timestamp: new Date().toISOString(),
+        },
+      };
+      
+      this.logger.infoSync('[SHELL-DEBUG] Publishing to MQTT', {
+        component: LogComponents.agent,
+        topic: this.outputTopic,
+        payloadSize: JSON.stringify(payload).length,
+      });
+      
       await this.mqtt.publish(
         this.outputTopic,
-        {
-          format: 'json',
-          data: {
-            sessionId: this.currentSessionId,
-            output: data,
-            timestamp: new Date().toISOString(),
-          },
-        },
+        payload,
         { qos: 0, retain: false }
       );
+      
+      this.logger.infoSync('[SHELL-DEBUG] MQTT publish successful', {
+        component: LogComponents.agent,
+      });
     } catch (error) {
       this.logger.errorSync('Failed to publish shell output', error as Error, {
         component: LogComponents.agent,

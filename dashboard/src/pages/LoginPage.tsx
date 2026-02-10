@@ -68,7 +68,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           </CardTitle>
           <CardDescription className="text-center">
             {isLogin
-              ? 'Sign in to your Iotistic account'
+              ? 'Sign in to your Iotistica account'
               : 'Get started with Iotistic'}
           </CardDescription>
         </CardHeader>

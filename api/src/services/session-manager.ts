@@ -174,10 +174,11 @@ export class SessionManager {
     // Remove client from attached set
     session.attachedClients.delete(ws);
 
-    logger.info(`🐚 [SESSION] Client detached from session ${sessionId.substring(0, 8)}... (${session.attachedClients.size} clients remaining)`);
+    logger.info(`🐚 [SESSION] Client detached from session ${sessionId.substring(0, 8)}... (${session.attachedClients.size} clients remaining, current status: ${session.info.status})`);
 
-    // If no more clients attached, mark as detached
-    if (session.attachedClients.size === 0 && session.info.status === 'active') {
+    // If no more clients attached, mark as detached (unless already terminated)
+    if (session.attachedClients.size === 0 && session.info.status !== 'terminated') {
+      logger.info(`🐚 [SESSION] No more clients attached, updating status to detached for session ${sessionId.substring(0, 8)}...`);
       await this.updateSessionStatus(sessionId, 'detached');
     }
 

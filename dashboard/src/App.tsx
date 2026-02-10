@@ -196,9 +196,18 @@ export default function App() {
           return prev;
         });
         
-        // Select first device if none selected (and update localStorage)
-        if (!selectedDeviceId && transformedDevices.length > 0) {
-          setSelectedDeviceId(transformedDevices[0].id);
+        // Validate and preserve selected device across refreshes
+        if (transformedDevices.length > 0) {
+          // Check if the currently selected device exists in the fetched list
+          const selectedExists = selectedDeviceId && transformedDevices.some(d => d.id === selectedDeviceId);
+          
+          if (!selectedExists) {
+            // If no valid selection, prefer first online device, then fall back to first device
+            const firstOnline = transformedDevices.find(d => d.status === 'online');
+            const fallbackDevice = firstOnline || transformedDevices[0];
+            setSelectedDeviceId(fallbackDevice.id);
+          }
+          // If selectedExists is true, keep the current selection (preserves user's choice on refresh)
         }
       } catch (error) {
         console.error('Error fetching devices:', error);
