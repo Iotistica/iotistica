@@ -4,6 +4,7 @@ import { DeviceModel, DeviceMetricsModel, DeviceLogsModel } from '../db/models';
 import logger from '../utils/logger';
 import fetch from 'node-fetch';
 import { sessionManager } from './session-manager';
+import { query } from '../db/connection';
 
 interface WebSocketClient {
   ws: WebSocket;
@@ -42,6 +43,9 @@ export class WebSocketManager {
   private metricsBuffers: Map<string, Array<any>> = new Map(); // deviceUuid -> metrics array
   private flushIntervals: Map<string, NodeJS.Timeout> = new Map(); // deviceUuid -> flush interval
   private readonly BATCH_FLUSH_INTERVAL_MS = 10000; // 10 seconds
+  
+  // Shell command buffers (per session) - for audit logging
+  private commandBuffers: Map<string, string> = new Map(); // sessionId -> accumulated command string
 
   setMqttMonitor(monitor: any): void {
     this.mqttMonitor = monitor;
@@ -1421,6 +1425,9 @@ export class WebSocketManager {
 
       await sessionManager.terminateSession(sessionId);
 
+      // Clean up command buffer for this session
+      this.commandBuffers.delete(sessionId);
+
       // Note: session-terminated message is sent by sessionManager.terminateSession()
       // to all attached clients, no need to send again here
 
@@ -1466,6 +1473,12 @@ export class WebSocketManager {
       // Terminate all sessions
       await sessionManager.terminateAllSessions(deviceUuid, userId);
       logger.info(`🐚 [SESSION] 🗑️ terminateAllSessions() completed`);
+
+      // Clean up command buffers for all sessions from this device
+      sessionsBefore.forEach(session => {
+        this.commandBuffers.delete(session.sessionId);
+      });
+      logger.info(`🐚 [SESSION] 🗑️ Cleared ${sessionsBefore.length} command buffers`);
 
       // Get sessions after clearing
       const sessionsAfter = await sessionManager.listSessions(deviceUuid);
@@ -1538,7 +1551,7 @@ export class WebSocketManager {
         return;
       }
 
-      // Get session to find device UUID
+      // Get session to find device UUID and user ID
       const sessions = await sessionManager.listSessions();
       const session = sessions.find(s => s.sessionId === sessionId);
       
@@ -1549,6 +1562,9 @@ export class WebSocketManager {
         });
         return;
       }
+
+      // Track command for audit logging (Option B: log on Enter)
+      await this.trackShellCommand(sessionId, input, session.deviceUuid, session.userId);
 
       // Forward input to device
       await this.handleShellCommand(session.deviceUuid, {
@@ -1564,6 +1580,56 @@ export class WebSocketManager {
         type: 'error',
         message: `Failed to send input: ${error.message}`,
       });
+    }
+  }
+
+  private async trackShellCommand(
+    sessionId: string,
+    input: string,
+    deviceUuid: string,
+    userId: string
+  ): Promise<void> {
+    try {
+      // Get or initialize command buffer for this session
+      let commandBuffer = this.commandBuffers.get(sessionId) || '';
+
+      // Check if this is Enter key (carriage return or newline)
+      const isEnter = input === '\r' || input === '\n';
+
+      if (isEnter) {
+        // Log the command if buffer is not empty (ignore empty commands)
+        if (commandBuffer.trim().length > 0) {
+          await query(
+            `INSERT INTO shell_audit_log (user_id, device_uuid, session_id, command)
+             VALUES ($1, $2, $3, $4)`,
+            [userId, deviceUuid, sessionId, commandBuffer]
+          );
+          
+          logger.info('📝 [AUDIT] Logged shell command', {
+            sessionId: sessionId.substring(0, 8),
+            deviceUuid: deviceUuid.substring(0, 8),
+            userId,
+            commandLength: commandBuffer.length
+          });
+        }
+        
+        // Clear buffer after logging
+        this.commandBuffers.delete(sessionId);
+      } else if (input === '\x7f' || input === '\b') {
+        // Handle backspace/delete - remove last character from buffer
+        commandBuffer = commandBuffer.slice(0, -1);
+        this.commandBuffers.set(sessionId, commandBuffer);
+      } else if (input === '\x03') {
+        // Handle Ctrl+C - clear buffer
+        this.commandBuffers.delete(sessionId);
+      } else {
+        // Accumulate regular characters
+        commandBuffer += input;
+        this.commandBuffers.set(sessionId, commandBuffer);
+      }
+    } catch (error: any) {
+      logger.error('📝 [AUDIT] Failed to track shell command:', error);
+      // Don't throw - audit logging failure shouldn't break shell functionality
     }
   }
 }
