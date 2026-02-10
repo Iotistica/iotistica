@@ -247,6 +247,15 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
                 },
               }));
             }
+          } else if (!ptyWasRestarted && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            // For brand new sessions or when buffer is empty, send \r to trigger prompt
+            wsRef.current.send(JSON.stringify({
+              type: 'shell-input',
+              data: {
+                sessionId: message.sessionId,
+                input: '\r',
+              },
+            }));
           }
           
           // Focus terminal so user can start typing immediately
