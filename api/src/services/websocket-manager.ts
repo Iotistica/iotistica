@@ -1179,10 +1179,13 @@ export class WebSocketManager {
       const topic = `iot/device/${deviceUuid}/agent/shell`;
       const payload = JSON.stringify(data);
       
-      logger.info(`🐚 [SHELL] ➡️ Publishing command to MQTT`, {
+      logger.info(`🐚 [SHELL] ➡️ Publishing command to MQTT - STACK TRACE:`);
+      console.trace();
+      logger.info(`🐚 [SHELL] ➡️ Command details:`, {
         deviceUuid: deviceUuid.substring(0, 8) + '...',
         topic,
         action: data.action,
+        sessionId: data.sessionId?.substring(0, 8),
         dataLength: data.data?.length || 0
       });
       
@@ -1332,22 +1335,20 @@ export class WebSocketManager {
 
       logger.info(`🐚 [SESSION] attachSession succeeded, buffer size: ${result.buffer.length} chunks, needsPtyRestart: ${result.needsPtyRestart}`);
 
-      // If PTY needs restart, send start command to device
-      if (result.needsPtyRestart && client.deviceUuid) {
-        logger.info(`🐚 [SESSION] Restarting PTY for session ${sessionId.substring(0, 8)}...`);
-        await this.handleShellCommand(client.deviceUuid, {
-          action: 'start',
-          sessionId: sessionId,
-        });
-        logger.info(`🐚 [SESSION] PTY restart command sent for session ${sessionId.substring(0, 8)}...`);
-      }
-
-      // Ensure the device switches PTY to the attached session (safe no-op if already active)
+      // Send PTY start command to device (only once)
       if (client.deviceUuid) {
+        if (result.needsPtyRestart) {
+          logger.info(`🐚 [SESSION] Restarting PTY for session ${sessionId.substring(0, 8)}...`);
+        } else {
+          logger.info(`🐚 [SESSION] Ensuring PTY is active for session ${sessionId.substring(0, 8)}... (safe no-op if already running)`);
+        }
+        
         await this.handleShellCommand(client.deviceUuid, {
           action: 'start',
           sessionId: sessionId,
         });
+        
+        logger.info(`🐚 [SESSION] PTY start command sent for session ${sessionId.substring(0, 8)}...`);
       }
 
       this.send(client.ws, {

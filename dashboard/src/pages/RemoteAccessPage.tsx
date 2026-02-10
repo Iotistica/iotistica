@@ -93,14 +93,18 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     }
   };
 
-  const connectWebSocket = () => {
-    console.log('[RemoteAccess] connectWebSocket called, current WS state:', wsRef.current?.readyState);
+  const connectWebSocket = (skipAutoConnect = false) => {
+    console.log('[RemoteAccess] 🔌 connectWebSocket() called - skipAutoConnect:', skipAutoConnect, '- STACK TRACE:');
+    console.trace();
+    console.log('[RemoteAccess] Current WS state:', wsRef.current?.readyState);
+    
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       console.log('[RemoteAccess] WebSocket already open, skipping');
       return;
     }
     
     setIsConnecting(true);
+    console.log('[RemoteAccess] 🔌 Creating new WebSocket connection...');
     
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsHost = window.location.hostname;
@@ -111,12 +115,12 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log('[RemoteAccess] WebSocket connected');
+      console.log('[RemoteAccess] ✅ WebSocket OPENED');
       setIsConnected(true);
       setIsConnecting(false);
       
       // Subscribe to shell channel
-      console.log('[RemoteAccess] Subscribing to shell channel');
+      console.log('[RemoteAccess] ✅ Subscribing to shell channel');
       ws.send(JSON.stringify({
         type: 'subscribe',
         channel: 'shell',
@@ -126,12 +130,18 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         xtermRef.current.writeln('\x1b[32m✓ Connected to WebSocket\x1b[0m');
       }
 
-      // Auto-connect: List existing sessions
-      ws.send(JSON.stringify({
-        type: 'list-sessions',
-        deviceUuid,
-      }));
-      autoConnectPendingRef.current = true;
+      // Auto-connect: List existing sessions (unless reconnecting to saved session)
+      if (!skipAutoConnect) {
+        console.log('[RemoteAccess] ✅ Sending list-sessions and ENABLING auto-connect');
+        ws.send(JSON.stringify({
+          type: 'list-sessions',
+          deviceUuid,
+        }));
+        autoConnectPendingRef.current = true;
+        console.log('[RemoteAccess] ✅ autoConnectPendingRef.current = true');
+      } else {
+        console.log('[RemoteAccess] ⏭️ Skipping auto-connect (reconnecting to saved session)');
+      }
     };
 
     ws.onmessage = (event) => {
@@ -166,10 +176,12 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   const handleWebSocketMessage = (message: any) => {
     switch (message.type) {
       case 'session-created':
+        console.log('[RemoteAccess] 🆕 Received session-created for:', message.sessionId?.substring(0, 8));
         if (xtermRef.current) {
           xtermRef.current.writeln('\x1b[32m✓ Session created\x1b[0m');
         }
         // Auto-attach to newly created session
+        console.log('[RemoteAccess] 🆕 Auto-attaching to newly created session');
         if (wsRef.current && message.sessionId) {
           wsRef.current.send(JSON.stringify({
             type: 'attach-session',
@@ -182,7 +194,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         break;
 
       case 'session-attached': {
-        console.log('[RemoteAccess] Session attached:', message.sessionId);
+        console.log('[RemoteAccess] 📨 Received session-attached for:', message.sessionId?.substring(0, 8), '- PTY restarted:', message.data?.ptyRestarted || message.ptyRestarted);
         setCurrentSessionId(message.sessionId);
         currentSessionIdRef.current = message.sessionId;
         currentDeviceUuidRef.current = deviceUuid; // Track which device this session belongs to
@@ -285,7 +297,9 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         break;
 
       case 'sessions-list':
+        console.log('[RemoteAccess] 📋 Received sessions-list');
         const sessionsList = message.data?.sessions || message.sessions || [];
+        console.log('[RemoteAccess] 📋 Total sessions from backend:', sessionsList.length);
         // Filter out terminated sessions - show creating/active/detached sessions
         // Also filter by current user when available to avoid cross-user attach errors
         const currentUserId = user?.id !== undefined && user?.id !== null
@@ -304,10 +318,13 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           }
           return String(s.userId) === currentUserId;
         });
+        console.log('[RemoteAccess] 📋 Usable sessions after filtering:', usableSessions.length, usableSessions.map((s: SessionInfo) => ({id: s.sessionId.substring(0, 8), status: s.status})));
         setSessions(usableSessions);
         
         // Auto-connect logic: attach to most recent active/detached session OR create new
+        console.log('[RemoteAccess] 🤖 Auto-connect check - autoConnectPendingRef:', autoConnectPendingRef.current);
         if (autoConnectPendingRef.current) {
+          console.log('[RemoteAccess] 🤖 Auto-connect IS ACTIVE - processing...');
           autoConnectPendingRef.current = false;
           
           if (!user?.id) {
@@ -341,6 +358,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
             }
           } else {
             // Create new session
+            console.log('[RemoteAccess] 🤖 No existing sessions found - creating new session');
             if (xtermRef.current) {
               xtermRef.current.writeln(`\x1b[90mCreating new session...\x1b[0m`);
             }
@@ -413,11 +431,15 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   };
 
   const createNewSession = () => {
+    console.log('[RemoteAccess] ✨ createNewSession() called - STACK TRACE:');
+    console.trace();
+    
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       console.error('[RemoteAccess] WebSocket not connected');
       return;
     }
 
+    console.log('[RemoteAccess] ✨ Sending create-session message to backend');
     const msg = {
       type: 'create-session',
       deviceUuid,
@@ -433,6 +455,8 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   };
 
   const attachToSession = (sessionId: string) => {
+    console.log('[RemoteAccess] 🔄 attachToSession called for:', sessionId.substring(0, 8));
+    
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       console.error('[RemoteAccess] WebSocket not connected');
       return;
@@ -442,6 +466,10 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       console.error('[RemoteAccess] Cannot attach - sessionId is null/undefined');
       return;
     }
+    
+    // Disable auto-connect to prevent creating new session when listSessions is called
+    autoConnectPendingRef.current = false;
+    console.log('[RemoteAccess] 🔄 Auto-connect disabled for manual session switch');
     
     // Don't call detachFromSession when switching - just attach to new session
     // Backend will handle moving client from old session to new one
@@ -454,6 +482,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       },
     };
     wsRef.current.send(JSON.stringify(msg));
+    console.log('[RemoteAccess] 🔄 Sent attach-session message');
 
     if (xtermRef.current) {
       xtermRef.current.clear();
@@ -852,8 +881,8 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       const sessionToReconnect = savedState.sessionId;
       console.log('[RemoteAccess] Starting auto-reconnect sequence for session:', sessionToReconnect);
       
-      // Connect WebSocket first
-      connectWebSocket();
+      // Connect WebSocket first (with auto-connect DISABLED to prevent race condition)
+      connectWebSocket(true); // Pass true to skip auto-connect logic
       
       // Wait for WebSocket to establish, then reconnect
       const reconnectTimer = setTimeout(() => {
@@ -915,7 +944,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
                   <Button
                     variant="default"
                     size="sm"
-                    onClick={connectWebSocket}
+                    onClick={() => connectWebSocket()}
                     disabled={isConnecting}
                   >
                     <Power className="h-4 w-4 mr-1" />

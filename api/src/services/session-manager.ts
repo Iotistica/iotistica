@@ -200,6 +200,14 @@ export class SessionManager {
     // Track this as the active PTY session if restarting
     if (needsPtyRestart) {
       this.activePtySession.set(session.info.deviceUuid, sessionId);
+      // Clear buffer when restarting PTY - old output is stale and will be duplicated
+      logger.info(`🐚 [SESSION] Clearing stale buffer for session ${sessionId.substring(0, 8)} due to PTY restart`);
+      session.buffer = {
+        chunks: [],
+        totalBytes: 0,
+        maxChunks: this.BUFFER_MAX_CHUNKS,
+        maxBytes: this.BUFFER_MAX_BYTES,
+      };
     }
 
     // Add client to attached set
@@ -215,7 +223,7 @@ export class SessionManager {
 
     logger.info(`🐚 [SESSION] Client attached to session ${sessionId.substring(0, 8)}... (${session.attachedClients.size} clients)${needsPtyRestart ? ' - PTY restart needed' : ''}`);
 
-    // Return buffered output (capped to prevent WS flooding on reconnect)
+    // Return buffered output (empty if PTY restarted, otherwise replay chunks)
     return {
       buffer: this.getReplayChunks(session),
       needsPtyRestart,
