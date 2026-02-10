@@ -1335,13 +1335,10 @@ export class WebSocketManager {
 
       logger.info(`🐚 [SESSION] attachSession succeeded, buffer size: ${result.buffer.length} chunks, needsPtyRestart: ${result.needsPtyRestart}`);
 
-      // Send PTY start command to device (only once)
-      if (client.deviceUuid) {
-        if (result.needsPtyRestart) {
-          logger.info(`🐚 [SESSION] Restarting PTY for session ${sessionId.substring(0, 8)}...`);
-        } else {
-          logger.info(`🐚 [SESSION] Ensuring PTY is active for session ${sessionId.substring(0, 8)}... (safe no-op if already running)`);
-        }
+      // Only send PTY start command if it needs to be restarted
+      // For brand new sessions, PTY was already started during creation
+      if (client.deviceUuid && result.needsPtyRestart) {
+        logger.info(`🐚 [SESSION] Restarting PTY for session ${sessionId.substring(0, 8)}...`);
         
         await this.handleShellCommand(client.deviceUuid, {
           action: 'start',
@@ -1349,6 +1346,8 @@ export class WebSocketManager {
         });
         
         logger.info(`🐚 [SESSION] PTY start command sent for session ${sessionId.substring(0, 8)}...`);
+      } else {
+        logger.info(`🐚 [SESSION] PTY already running for session ${sessionId.substring(0, 8)}, skipping start command`);
       }
 
       this.send(client.ws, {

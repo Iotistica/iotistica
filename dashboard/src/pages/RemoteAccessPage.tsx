@@ -212,9 +212,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         const ptyWasRestarted = message.data?.ptyRestarted || message.ptyRestarted;
         if (ptyWasRestarted) {
           setPtyRestarted(true);
-          if (xtermRef.current) {
-            xtermRef.current.writeln('\x1b[33m⚠ Session PTY was restarted - waiting for connection...\x1b[0m');
-          }
         }
 
         if (xtermRef.current) {
@@ -224,28 +221,32 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           // Display buffered output (check both data.buffer and buffer for compatibility)
           const buffer = message.data?.buffer || message.buffer;
           
-          // Only replay buffer if we have one AND PTY wasn't restarted
-          // (PTY restart means fresh session, buffer is stale)
-          if (buffer && buffer.length > 0 && !ptyWasRestarted) {
+          // For brand new sessions, skip buffer replay - PTY is still active and will send fresh output
+          // Only replay buffer if it contains actual command history (not just startup banner + first prompt)
+          const isJustStartupBanner = buffer && buffer.length <= 2 && 
+            buffer.some((chunk: string) => chunk.includes('Shell session started'));
+          
+          // Only replay buffer if:
+          // 1. PTY wasn't restarted (would have stale data)
+          // 2. Buffer has meaningful history (not just startup)
+          if (buffer && buffer.length > 0 && !ptyWasRestarted && !isJustStartupBanner) {
             buffer.forEach((chunk: string) => {
               xtermRef.current?.write(chunk);
             });
-          }
-
-          // Only send carriage return if buffer is empty or doesn't end with a prompt
-          // Check if buffer already has a prompt (ends with $ or # followed by optional space)
-          const lastChunk = buffer && buffer.length > 0 ? buffer[buffer.length - 1] : '';
-          const hasPrompt = /[$#]\s*$/.test(lastChunk);
-          
-          // Only trigger prompt if PTY wasn't restarted AND buffer doesn't already have a prompt
-          if (!ptyWasRestarted && !hasPrompt && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({
-              type: 'shell-input',
-              data: {
-                sessionId: message.sessionId,
-                input: '\r', // Send carriage return to trigger prompt
-              },
-            }));
+            
+            // Only send \r if buffer doesn't already end with a prompt
+            const lastChunk = buffer[buffer.length - 1];
+            const hasPrompt = /[$#]\s*$/.test(lastChunk);
+            
+            if (!hasPrompt && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({
+                type: 'shell-input',
+                data: {
+                  sessionId: message.sessionId,
+                  input: '\r',
+                },
+              }));
+            }
           }
           
           // Focus terminal so user can start typing immediately
