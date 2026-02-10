@@ -200,7 +200,17 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
               xtermRef.current?.write(chunk);
             });
           } else {
-            xtermRef.current.writeln('\x1b[90m(No buffered output)\x1b[0m');
+            // No buffered output - likely a brand new session
+            // Send newline to trigger shell prompt
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({
+                type: 'shell-input',
+                data: {
+                  sessionId: message.sessionId,
+                  data: '\r', // Send carriage return to trigger prompt
+                },
+              }));
+            }
           }
           
           xtermRef.current.writeln('');
@@ -760,7 +770,14 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <TerminalIcon className="h-5 w-5 text-muted-foreground" />
-                <span className="font-semibold">Shell Terminal</span>
+                <span className="font-semibold">
+                  Shell Terminal
+                  {currentSessionId && (
+                    <span className="text-muted-foreground font-normal ml-2">
+                      (id: {currentSessionId.substring(0, 8)})
+                    </span>
+                  )}
+                </span>
               </div>
               
               <div className="flex items-center gap-2">

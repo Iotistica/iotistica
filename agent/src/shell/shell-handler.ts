@@ -79,7 +79,19 @@ export class ShellHandler {
             sessionActive: this.sessionActive,
             dataLength: message.data?.length || 0,
             sessionId: message.sessionId || 'none',
+            currentSessionId: this.currentSessionId || 'none',
           });
+          
+          // Validate session ID - only accept input for the current active session
+          if (message.sessionId && this.currentSessionId && message.sessionId !== this.currentSessionId) {
+            this.logger.warnSync('[SHELL-DEBUG] Rejecting input - session ID mismatch', {
+              component: LogComponents.agent,
+              receivedSessionId: message.sessionId.substring(0, 8),
+              currentSessionId: this.currentSessionId.substring(0, 8),
+            });
+            return;
+          }
+          
           if (message.data && this.ptyProcess) {
             this.logger.infoSync('[SHELL-DEBUG] Writing to PTY', {
               component: LogComponents.agent,
