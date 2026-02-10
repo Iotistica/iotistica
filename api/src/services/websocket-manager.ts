@@ -511,6 +511,10 @@ export class WebSocketManager {
         this.handleTerminateSession(client, message);
         break;
 
+      case 'clear-all-sessions':
+        this.handleClearAllSessions(client, message);
+        break;
+
       case 'list-sessions':
         this.handleListSessions(client, message);
         break;
@@ -1338,6 +1342,14 @@ export class WebSocketManager {
         logger.info(`🐚 [SESSION] PTY restart command sent for session ${sessionId.substring(0, 8)}...`);
       }
 
+      // Ensure the device switches PTY to the attached session (safe no-op if already active)
+      if (client.deviceUuid) {
+        await this.handleShellCommand(client.deviceUuid, {
+          action: 'start',
+          sessionId: sessionId,
+        });
+      }
+
       this.send(client.ws, {
         type: 'session-attached',
         sessionId,
@@ -1418,6 +1430,70 @@ export class WebSocketManager {
       this.send(client.ws, {
         type: 'error',
         message: `Failed to terminate session: ${error.message}`,
+      });
+    }
+  }
+
+  /**
+   * Clear all sessions for the user
+   */
+  private async handleClearAllSessions(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
+    try {
+      const userId = message.data?.userId;
+      const deviceUuid = message.deviceUuid || client.deviceUuid;
+
+      logger.info(`🐚 [SESSION] 🗑️ CLEAR ALL SESSIONS - Received request`);
+      logger.info(`🐚 [SESSION] 🗑️ Device UUID: ${deviceUuid?.substring(0, 8)}...`);
+      logger.info(`🐚 [SESSION] 🗑️ User ID: ${userId || 'none'}`);
+
+      if (!deviceUuid) {
+        logger.error(`🐚 [SESSION] 🗑️ ERROR - No device UUID provided`);
+        this.send(client.ws, {
+          type: 'error',
+          message: 'Device UUID required',
+        });
+        return;
+      }
+
+      // Get sessions before clearing
+      const sessionsBefore = await sessionManager.listSessions(deviceUuid);
+      logger.info(`🐚 [SESSION] 🗑️ Sessions BEFORE clear: ${sessionsBefore.length}`);
+      sessionsBefore.forEach(s => {
+        logger.info(`🐚 [SESSION] 🗑️   - ${s.sessionId.substring(0, 8)}... status=${s.status} userId=${s.userId || 'none'}`);
+      });
+
+      logger.info(`🐚 [SESSION] 🗑️ Calling terminateAllSessions()...`);
+      // Terminate all sessions
+      await sessionManager.terminateAllSessions(deviceUuid, userId);
+      logger.info(`🐚 [SESSION] 🗑️ terminateAllSessions() completed`);
+
+      // Get sessions after clearing
+      const sessionsAfter = await sessionManager.listSessions(deviceUuid);
+      logger.info(`🐚 [SESSION] 🗑️ Sessions AFTER clear: ${sessionsAfter.length}`);
+      sessionsAfter.forEach(s => {
+        logger.info(`🐚 [SESSION] 🗑️   - ${s.sessionId.substring(0, 8)}... status=${s.status} userId=${s.userId || 'none'}`);
+      });
+
+      // Send confirmation message
+      logger.info(`🐚 [SESSION] 🗑️ Sending all-sessions-cleared confirmation`);
+      this.send(client.ws, {
+        type: 'all-sessions-cleared',
+        message: 'All sessions cleared successfully',
+      });
+
+      // Send updated sessions list
+      logger.info(`🐚 [SESSION] 🗑️ Sending sessions-list with ${sessionsAfter.length} sessions`);
+      this.send(client.ws, {
+        type: 'sessions-list',
+        data: { sessions: sessionsAfter },
+      });
+
+      logger.info(`🐚 [SESSION] 🗑️ CLEAR ALL SESSIONS - Completed successfully`);
+    } catch (error: any) {
+      logger.error('🐚 [SESSION] 🗑️ CLEAR ALL SESSIONS - Failed:', error);
+      this.send(client.ws, {
+        type: 'error',
+        message: `Failed to clear sessions: ${error.message}`,
       });
     }
   }

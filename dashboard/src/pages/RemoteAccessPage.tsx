@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Terminal as TerminalIcon, Power, Plus, List} from 'lucide-react';
+import { Terminal as TerminalIcon, Power, Plus, List, Trash2 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +11,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
@@ -46,6 +56,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [ptyRestarted, setPtyRestarted] = useState(false);
+  const [clearAllDialogOpen, setClearAllDialogOpen] = useState(false);
   
   // Helper functions for persistent session storage (survives component unmount)
   const saveSessionState = (deviceId: string, sessionId: string, sessionsList: SessionInfo[]) => {
@@ -250,6 +261,25 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         listSessions();
         break;
 
+      case 'all-sessions-cleared':
+        console.log('[RemoteAccess] 🗑️ ALL SESSIONS CLEARED - Server confirmed:', message.message);
+        console.log('[RemoteAccess] 🗑️ Clearing local state...');
+        setCurrentSessionId(null);
+        currentSessionIdRef.current = null;
+        setSessions([]);
+        if (xtermRef.current) {
+          xtermRef.current.clear();
+          xtermRef.current.writeln('\x1b[32m✓ All sessions cleared successfully!\x1b[0m');
+          xtermRef.current.writeln('\x1b[90mCreating new session...\x1b[0m');
+        }
+        // Create a fresh new session after clearing
+        console.log('[RemoteAccess] 🗑️ Will create new session in 500ms...');
+        setTimeout(() => {
+          console.log('[RemoteAccess] 🗑️ Creating new session NOW');
+          createNewSession();
+        }, 500);
+        break;
+
       case 'sessions-list':
         const sessionsList = message.data?.sessions || message.sessions || [];
         // Filter out terminated sessions - show creating/active/detached sessions
@@ -437,6 +467,48 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       data: { sessionId: currentSessionId },
     };
     wsRef.current.send(JSON.stringify(msg));
+  };
+
+  const clearAllSessions = () => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.error('[RemoteAccess] WebSocket not connected');
+      return;
+    }
+
+    console.log('[RemoteAccess] 🗑️ CLEAR ALL SESSIONS - Starting for device:', deviceUuid.substring(0, 8));
+    console.log('[RemoteAccess] 🗑️ Current session before clear:', currentSessionIdRef.current?.substring(0, 8));
+    console.log('[RemoteAccess] 🗑️ Sessions count before clear:', sessions.length);
+    
+    // Clear terminal
+    if (xtermRef.current) {
+      xtermRef.current.clear();
+      xtermRef.current.writeln('\x1b[90mClearing all sessions...\x1b[0m');
+    }
+
+    // Send clear-all-sessions message
+    const msg = {
+      type: 'clear-all-sessions',
+      deviceUuid,
+      data: { 
+        userId: user?.id,
+      },
+    };
+    console.log('[RemoteAccess] 🗑️ Sending clear-all-sessions message:', JSON.stringify(msg));
+    wsRef.current.send(JSON.stringify(msg));
+
+    // Clear local state
+    setCurrentSessionId(null);
+    currentSessionIdRef.current = null;
+    setSessions([]);
+    
+    // Clear persisted session state
+    try {
+      const key = `remote-session-${deviceUuid}`;
+      sessionStorage.removeItem(key);
+      console.log('[RemoteAccess] Cleared persisted session state');
+    } catch (error) {
+      console.error('[RemoteAccess] Failed to clear session storage:', error);
+    }
   };
 
   const terminateSession = () => {
@@ -871,7 +943,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
                                 {session.sessionId.substring(0, 8)}
                               </span>
                               {session.sessionId === currentSessionId && (
-                                <span className="text-blue-500">●</span>
+                                <span className="text-green-500">●</span>
                               )}
                               <span className="text-xs text-muted-foreground ml-auto">
                                 {new Date(session.lastActivity).toLocaleTimeString()}
@@ -884,6 +956,18 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
                           <Plus className="h-4 w-4 mr-2" />
                           New Session
                         </DropdownMenuItem>
+                        {sessions.length > 0 && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem 
+                              onClick={() => setClearAllDialogOpen(true)}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Clear All Sessions
+                            </DropdownMenuItem>
+                          </>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
 
@@ -978,6 +1062,32 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           </Card>
         </div>
       </div>
+
+      {/* Clear All Sessions Confirmation Dialog */}
+      <AlertDialog open={clearAllDialogOpen} onOpenChange={setClearAllDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear All Sessions?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will terminate all active and detached sessions for this device and create a fresh session.
+              <br /><br />
+              <strong>This action cannot be undone.</strong>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setClearAllDialogOpen(false);
+                clearAllSessions();
+              }}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Clear All Sessions
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

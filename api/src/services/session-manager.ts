@@ -272,28 +272,35 @@ export class SessionManager {
    * Terminate a session (kill PTY, cleanup resources)
    */
   async terminateSession(sessionId: string): Promise<void> {
+    logger.info(`🐚 [SESSION] 🗑️ terminateSession() called for ${sessionId.substring(0, 8)}...`);
+    
     const session = this.sessions.get(sessionId);
     
     if (!session) {
-      logger.warn(`🐚 [SESSION] Cannot terminate - session ${sessionId} not found`);
+      logger.warn(`🐚 [SESSION] 🗑️ Cannot terminate - session ${sessionId} not found in memory`);
       return;
     }
 
+    logger.info(`🐚 [SESSION] 🗑️ Updating session status to 'terminated'`);
     // Update status
     await this.updateSessionStatus(sessionId, 'terminated');
     session.info.terminatedAt = new Date();
 
+    logger.info(`🐚 [SESSION] 🗑️ Updating database with terminated_at timestamp`);
     // Update database
-    await query(
+    const updateResult = await query(
       `UPDATE shell_sessions SET terminated_at = $1 WHERE session_id = $2`,
       [session.info.terminatedAt, sessionId]
     );
+    logger.info(`🐚 [SESSION] 🗑️ Database UPDATE executed - rowCount: ${updateResult.rowCount}`);
 
     const activeSessionId = this.activePtySession.get(session.info.deviceUuid);
     if (activeSessionId === sessionId) {
+      logger.info(`🐚 [SESSION] 🗑️ Clearing active PTY session for device`);
       this.activePtySession.delete(session.info.deviceUuid);
     }
 
+    logger.info(`🐚 [SESSION] 🗑️ Closing ${session.attachedClients.size} attached client(s)`);
     // Close all attached clients
     session.attachedClients.forEach(ws => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -306,7 +313,43 @@ export class SessionManager {
     });
     session.attachedClients.clear();
 
-    logger.info(`🐚 [SESSION] Terminated session ${sessionId.substring(0, 8)}...`);
+    logger.info(`🐚 [SESSION] 🗑️ Session ${sessionId.substring(0, 8)}... terminated successfully`);
+  }
+
+  /**
+   * Terminate all sessions for a user on a device (or all sessions if no userId specified)
+   */
+  async terminateAllSessions(deviceUuid: string, userId?: string): Promise<void> {
+    logger.info(`🐚 [SESSION] 🗑️ terminateAllSessions() called for device ${deviceUuid.substring(0, 8)}...${userId ? ' and user ' + userId : ''}`);
+    
+    const deviceSessions = this.getDeviceSessions(deviceUuid);
+    logger.info(`🐚 [SESSION] 🗑️ Total device sessions found: ${deviceSessions.length}`);
+    
+    const sessionsToTerminate = deviceSessions.filter(s => {
+      const isTerminated = s.status === 'terminated';
+      const userMatch = !userId || !s.userId || s.userId === userId;
+      const shouldTerminate = !isTerminated && userMatch;
+      
+      logger.info(`🐚 [SESSION] 🗑️   Session ${s.sessionId.substring(0, 8)}... status=${s.status} userId=${s.userId || 'none'} shouldTerminate=${shouldTerminate}`);
+      
+      return shouldTerminate;
+    });
+
+    if (sessionsToTerminate.length === 0) {
+      logger.info(`🐚 [SESSION] 🗑️ No sessions to terminate for device ${deviceUuid.substring(0, 8)}...${userId ? ' and user ' + userId : ''}`);
+      return;
+    }
+
+    logger.info(`🐚 [SESSION] 🗑️ Will terminate ${sessionsToTerminate.length} session(s)`);
+
+    // Terminate all matching sessions
+    for (const session of sessionsToTerminate) {
+      logger.info(`🐚 [SESSION] 🗑️ Terminating session ${session.sessionId.substring(0, 8)}...`);
+      await this.terminateSession(session.sessionId);
+      logger.info(`🐚 [SESSION] 🗑️ Session ${session.sessionId.substring(0, 8)}... terminated`);
+    }
+
+    logger.info(`🐚 [SESSION] 🗑️ terminateAllSessions() completed - all ${sessionsToTerminate.length} sessions cleared`);
   }
 
   /**
@@ -424,18 +467,25 @@ export class SessionManager {
 
     sqlQuery += ` ORDER BY last_activity DESC`;
 
+    logger.info(`🐚 [SESSION] 🗑️ Executing listSessions SQL: ${sqlQuery}`);
     const result = await query(sqlQuery, params);
+    logger.info(`🐚 [SESSION] 🗑️ listSessions returned ${result.rows.length} rows from database`);
+    
+    const sessions = result.rows.map(row => {
+      logger.info(`🐚 [SESSION] 🗑️   - ${row.session_id.substring(0, 8)}... status=${row.status} terminated_at=${row.terminated_at}`);
+      return {
+        sessionId: row.session_id,
+        deviceUuid: row.device_uuid,
+        userId: row.user_id,
+        status: row.status,
+        createdAt: row.created_at,
+        lastActivity: row.last_activity,
+        terminatedAt: row.terminated_at,
+        metadata: row.metadata,
+      };
+    });
 
-    return result.rows.map(row => ({
-      sessionId: row.session_id,
-      deviceUuid: row.device_uuid,
-      userId: row.user_id,
-      status: row.status,
-      createdAt: row.created_at,
-      lastActivity: row.last_activity,
-      terminatedAt: row.terminated_at,
-      metadata: row.metadata,
-    }));
+    return sessions;
   }
 
   /**
@@ -494,10 +544,12 @@ export class SessionManager {
       session.info.status = status;
     }
 
-    await query(
+    logger.info(`🐚 [SESSION] 🗑️ Executing SQL: UPDATE shell_sessions SET status = '${status}' WHERE session_id = '${sessionId.substring(0, 8)}...'`);
+    const updateResult = await query(
       `UPDATE shell_sessions SET status = $1 WHERE session_id = $2`,
       [status, sessionId]
     );
+    logger.info(`🐚 [SESSION] 🗑️ Status UPDATE executed - rowCount: ${updateResult.rowCount}`);
   }
 
   /**
