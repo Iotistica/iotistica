@@ -229,7 +229,7 @@ export class ShellHandler {
     
     try {
       const payload = {
-        format: 'json',
+        format: 'json' as const,
         data: {
           sessionId: this.currentSessionId,
           output: data,
