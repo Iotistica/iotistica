@@ -3,6 +3,7 @@ import { Server as HTTPServer } from 'http';
 import { DeviceModel, DeviceMetricsModel, DeviceLogsModel } from '../db/models';
 import logger from '../utils/logger';
 import fetch from 'node-fetch';
+import { sessionManager } from './session-manager';
 
 interface WebSocketClient {
   ws: WebSocket;
@@ -494,9 +495,33 @@ export class WebSocketManager {
         }
         break;
 
+      case 'create-session':
+        this.handleCreateSession(client, message);
+        break;
+
+      case 'attach-session':
+        this.handleAttachSession(client, message);
+        break;
+
+      case 'detach-session':
+        this.handleDetachSession(client, message);
+        break;
+
+      case 'terminate-session':
+        this.handleTerminateSession(client, message);
+        break;
+
+      case 'list-sessions':
+        this.handleListSessions(client, message);
+        break;
+
+      case 'shell-input':
+        this.handleShellInput(client, message);
+        break;
+
       case 'shell':
-        // Forward shell commands to device via MQTT
-        logger.info('🐚 [SHELL] Received shell command from WebSocket', {
+        // Legacy support: Forward shell commands to device via MQTT
+        logger.info('🐚 [SHELL] Received legacy shell command from WebSocket', {
           deviceUuid: client.deviceUuid?.substring(0, 8) + '...',
           action: message.data?.action,
           hasData: !!message.data?.data
@@ -1081,8 +1106,11 @@ export class WebSocketManager {
     }
   }
 
-  shutdown(): void {
+  async shutdown(): Promise<void> {
     logger.info(' Shutting down...');
+
+    // Shutdown session manager
+    await sessionManager.shutdown();
 
     // Flush any pending metrics before shutdown
     this.metricsBuffers.forEach((buffer, deviceUuid) => {
@@ -1159,7 +1187,7 @@ export class WebSocketManager {
   }
 
   /**
-   * Handle shell output from MQTT - forward to WebSocket clients
+   * Handle shell output from MQTT - forward to WebSocket clients and buffer in session
    */
   private handleShellOutput(deviceUuid: string, message: any): void {
     logger.info(`🐚 [SHELL] ⬅️ Received shell output from MQTT`, {
@@ -1167,24 +1195,298 @@ export class WebSocketManager {
       messageStructure: JSON.stringify(message).substring(0, 200)
     });
     
-    // Unwrap the message structure: { format: 'json', data: { output: '...', timestamp: '...' } }
+    // Unwrap the message structure: { format: 'json', data: { output: '...', timestamp: '...', sessionId: '...' } }
     const outputData = message?.data || message;
+    const sessionId = outputData?.sessionId;
+    const output = outputData?.output;
     
-    logger.info(`🐚 [SHELL] 📡 Broadcasting to WebSocket clients`, {
-      deviceUuid: deviceUuid.substring(0, 8) + '...',
-      outputLength: outputData?.output?.length || 0,
-      output: outputData?.output?.substring(0, 100)
-    });
-    
-    this.broadcast(deviceUuid, {
-      type: 'shell',
-      deviceUuid,
-      data: outputData,
-      timestamp: new Date().toISOString(),
-      source: 'mqtt',
-    });
+    if (sessionId && output) {
+      // Mark PTY as active on first output
+      if (!sessionManager.isPtyActive(sessionId)) {
+        sessionManager.setPtyActive(sessionId, true);
+      }
+      
+      // Session-based output: buffer and broadcast to session clients with fan-out protection
+      sessionManager.appendToBuffer(sessionId, output);
+      
+      const attachedClients = sessionManager.getAttachedClients(sessionId);
+      logger.info(`🐚 [SHELL] 📡 Broadcasting to ${attachedClients.size} attached clients for session ${sessionId.substring(0, 8)}...`);
+      
+      // Fan-out protection: non-blocking sends, skip slow/closed clients
+      let sentCount = 0;
+      attachedClients.forEach(ws => {
+        // Skip if not open (prevents blocking on slow clients)
+        if (ws.readyState === WebSocket.OPEN) {
+          try {
+            this.send(ws, {
+              type: 'shell-output',
+              sessionId,
+              data: { output },
+              timestamp: new Date().toISOString(),
+              source: 'mqtt',
+            });
+            sentCount++;
+          } catch (err) {
+            logger.warn(`🐚 [SHELL] Failed to send to client, will detach on next error`, err);
+          }
+        }
+      });
+      
+      logger.debug(`🐚 [SHELL] Sent to ${sentCount}/${attachedClients.size} clients`);
+    } else {
+      // Legacy non-session output: broadcast to all device clients
+      logger.info(`🐚 [SHELL] 📡 Broadcasting legacy output to device ${deviceUuid.substring(0, 8)}... clients`);
+      
+      this.broadcast(deviceUuid, {
+        type: 'shell',
+        deviceUuid,
+        data: outputData,
+        timestamp: new Date().toISOString(),
+        source: 'mqtt',
+      });
+    }
     
     logger.info('🐚 [SHELL] ✅ Broadcast complete');
+  }
+
+  /**
+   * Create a new shell session
+   */
+  private async handleCreateSession(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
+    try {
+      const deviceUuid = message.deviceUuid || client.deviceUuid;
+      if (!deviceUuid) {
+        this.send(client.ws, {
+          type: 'error',
+          message: 'Device UUID required to create session',
+        });
+        return;
+      }
+
+      const session = await sessionManager.createSession(deviceUuid, message.data?.userId);
+      
+      // Send start command to device
+      await this.handleShellCommand(deviceUuid, {
+        action: 'start',
+        sessionId: session.sessionId,
+      });
+
+      // Mark as expecting PTY (will be set to true when first output arrives)
+      logger.info(`🐚 [SESSION] Waiting for PTY to start for session ${session.sessionId.substring(0, 8)}...`);
+
+      this.send(client.ws, {
+        type: 'session-created',
+        sessionId: session.sessionId,
+        deviceUuid,
+        data: session,
+      });
+
+      logger.info(`🐚 [SESSION] Created and started session ${session.sessionId.substring(0, 8)}... for device ${deviceUuid.substring(0, 8)}...`);
+    } catch (error: any) {
+      logger.error('🐚 [SESSION] Failed to create session:', error);
+      this.send(client.ws, {
+        type: 'error',
+        message: `Failed to create session: ${error.message}`,
+      });
+    }
+  }
+
+  /**
+   * Attach client to existing session
+   * Security: passes userId for ownership validation
+   * Auto-restarts PTY if it died
+   */
+  private async handleAttachSession(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
+    logger.info(`🐚 [SESSION] handleAttachSession called`, {
+      hasSessionId: !!message.data?.sessionId,
+      sessionId: message.data?.sessionId?.substring(0, 8) + '...',
+      userId: message.data?.userId,
+      deviceUuid: client.deviceUuid?.substring(0, 8) + '...'
+    });
+    
+    try {
+      const sessionId = message.data?.sessionId;
+      const userId = message.data?.userId; // Get userId from message
+      
+      if (!sessionId) {
+        logger.warn(`🐚 [SESSION] No sessionId provided in attach request`);
+        this.send(client.ws, {
+          type: 'error',
+          message: 'Session ID required',
+        });
+        return;
+      }
+
+      logger.info(`🐚 [SESSION] Calling sessionManager.attachSession for ${sessionId.substring(0, 8)}...`);
+      
+      // Pass userId for security validation - returns buffer and PTY restart flag
+      const result = await sessionManager.attachSession(sessionId, client.ws, userId);
+
+      logger.info(`🐚 [SESSION] attachSession succeeded, buffer size: ${result.buffer.length} chunks, needsPtyRestart: ${result.needsPtyRestart}`);
+
+      // If PTY needs restart, send start command to device
+      if (result.needsPtyRestart && client.deviceUuid) {
+        logger.info(`🐚 [SESSION] Restarting PTY for session ${sessionId.substring(0, 8)}...`);
+        await this.handleShellCommand(client.deviceUuid, {
+          action: 'start',
+          sessionId: sessionId,
+        });
+        logger.info(`🐚 [SESSION] PTY restart command sent for session ${sessionId.substring(0, 8)}...`);
+      }
+
+      this.send(client.ws, {
+        type: 'session-attached',
+        sessionId,
+        data: { 
+          buffer: result.buffer,
+          ptyRestarted: result.needsPtyRestart, // Inform client that PTY was restarted
+        },
+      });
+
+      logger.info(`🐚 [SESSION] Client attached to session ${sessionId.substring(0, 8)}...`);
+    } catch (error: any) {
+      logger.error('🐚 [SESSION] Failed to attach session:', error);
+      logger.error('🐚 [SESSION] Error stack:', error.stack);
+      this.send(client.ws, {
+        type: 'error',
+        message: `Failed to attach session: ${error.message}`,
+      });
+    }
+  }
+
+  /**
+   * Detach client from session (session persists)
+   */
+  private async handleDetachSession(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
+    try {
+      const sessionId = message.data?.sessionId;
+      if (!sessionId) {
+        return;
+      }
+
+      await sessionManager.detachSession(sessionId, client.ws);
+
+      this.send(client.ws, {
+        type: 'session-detached',
+        sessionId,
+      });
+
+      logger.info(`🐚 [SESSION] Client detached from session ${sessionId.substring(0, 8)}...`);
+    } catch (error: any) {
+      logger.error('🐚 [SESSION] Failed to detach session:', error);
+    }
+  }
+
+  /**
+   * Terminate session (kill PTY)
+   */
+  private async handleTerminateSession(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
+    try {
+      const sessionId = message.data?.sessionId;
+      if (!sessionId) {
+        this.send(client.ws, {
+          type: 'error',
+          message: 'Session ID required',
+        });
+        return;
+      }
+
+      // Get session info before terminating
+      const sessions = await sessionManager.listSessions();
+      const session = sessions.find(s => s.sessionId === sessionId);
+      
+      if (session) {
+        // Send stop command to device
+        await this.handleShellCommand(session.deviceUuid, {
+          action: 'stop',
+          sessionId,
+        });
+      }
+
+      await sessionManager.terminateSession(sessionId);
+
+      this.send(client.ws, {
+        type: 'session-terminated',
+        sessionId,
+      });
+
+      logger.info(`🐚 [SESSION] Terminated session ${sessionId.substring(0, 8)}...`);
+    } catch (error: any) {
+      logger.error('🐚 [SESSION] Failed to terminate session:', error);
+      this.send(client.ws, {
+        type: 'error',
+        message: `Failed to terminate session: ${error.message}`,
+      });
+    }
+  }
+
+  /**
+   * List sessions for device
+   */
+  private async handleListSessions(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
+    try {
+      const deviceUuid = message.deviceUuid || client.deviceUuid;
+      const sessions = await sessionManager.listSessions(deviceUuid);
+
+      this.send(client.ws, {
+        type: 'sessions-list',
+        deviceUuid,
+        data: { sessions },
+      });
+
+      logger.info(`🐚 [SESSION] Listed ${sessions.length} sessions for device ${deviceUuid?.substring(0, 8)}...`);
+    } catch (error: any) {
+      logger.error('🐚 [SESSION] Failed to list sessions:', error);
+      this.send(client.ws, {
+        type: 'error',
+        message: `Failed to list sessions: ${error.message}`,
+      });
+    }
+  }
+
+  /**
+   * Handle shell input for a session
+   */
+  private async handleShellInput(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
+    try {
+      const sessionId = message.data?.sessionId;
+      const input = message.data?.input;
+      
+      if (!sessionId || input === undefined) {
+        this.send(client.ws, {
+          type: 'error',
+          message: 'Session ID and input required',
+        });
+        return;
+      }
+
+      // Get session to find device UUID
+      const sessions = await sessionManager.listSessions();
+      const session = sessions.find(s => s.sessionId === sessionId);
+      
+      if (!session) {
+        this.send(client.ws, {
+          type: 'error',
+          message: 'Session not found',
+        });
+        return;
+      }
+
+      // Forward input to device
+      await this.handleShellCommand(session.deviceUuid, {
+        action: 'input',
+        sessionId,
+        data: input,
+      });
+
+      logger.debug(`🐚 [SESSION] Forwarded input to session ${sessionId.substring(0, 8)}...`);
+    } catch (error: any) {
+      logger.error('🐚 [SESSION] Failed to handle shell input:', error);
+      this.send(client.ws, {
+        type: 'error',
+        message: `Failed to send input: ${error.message}`,
+      });
+    }
   }
 }
 

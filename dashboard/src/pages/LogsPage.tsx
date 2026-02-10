@@ -132,7 +132,7 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
     
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsHost = window.location.hostname;
-    const wsPort = import.meta.env.VITE_API_PORT || '4002';
+    const wsPort = import.meta.env.VITE_API_PORT || '3002';
     const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/ws?deviceUuid=${deviceUuid}`;
 
     console.log('[LogsPage] Connecting to WebSocket:', wsUrl);

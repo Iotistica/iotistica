@@ -4,7 +4,7 @@
  * This module handles API endpoint configuration for both local and K8s deployments.
  * 
  * Local Development:
- *   - Uses localhost:4002 (configurable via VITE_API_URL)
+ *   - Uses localhost:3002 (configurable via VITE_API_URL)
  * 
  * Kubernetes Deployment:
  *   - Uses relative path "/api" (same ingress as dashboard)
@@ -22,7 +22,7 @@
  * 1. VITE_API_URL environment variable (set via Helm chart or .env)
  *    - If empty string "", auto-detect using NodePort on current host
  * 2. Check if running in production (window.location.origin)
- * 3. Fall back to localhost:4002 for local development
+ * 3. Fall back to localhost:3002 for local development
  */
 export function getApiUrl(): string {
   const envApiUrl = import.meta.env.VITE_API_URL;
