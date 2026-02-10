@@ -142,6 +142,13 @@ export class SessionManager {
    * Returns: { buffer, needsPtyRestart } - buffer chunks and flag indicating if PTY needs restart
    */
   async attachSession(sessionId: string, ws: WebSocket, userId?: string): Promise<{ buffer: string[], needsPtyRestart: boolean }> {
+    logger.info(`🔄 [SESSION] Preparing to attach to session ${sessionId.substring(0, 8)}... - detaching from any existing sessions first`);
+    
+    // Detach from any existing sessions first to prevent multi-attach
+    await this.detachClientFromAllSessions(ws);
+    
+    logger.info(`🔄 [SESSION] Detach complete, now attaching to ${sessionId.substring(0, 8)}...`);
+    
     // Load session if not in memory
     let session = this.sessions.get(sessionId);
     if (!session) {
@@ -252,6 +259,12 @@ export class SessionManager {
       if (session.attachedClients.has(ws)) {
         sessionsToDetach.push(sessionId);
       }
+    }
+
+    if (sessionsToDetach.length > 0) {
+      logger.info(`🔄 [SESSION] Detaching client from ${sessionsToDetach.length} session(s): ${sessionsToDetach.map(s => s.substring(0, 8)).join(', ')}`);
+    } else {
+      logger.info(`🔄 [SESSION] Client not attached to any sessions, nothing to detach`);
     }
 
     // Detach from each session
