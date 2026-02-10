@@ -255,6 +255,11 @@ export class SessionManager {
       [session.info.terminatedAt, sessionId]
     );
 
+    const activeSessionId = this.activePtySession.get(session.info.deviceUuid);
+    if (activeSessionId === sessionId) {
+      this.activePtySession.delete(session.info.deviceUuid);
+    }
+
     // Close all attached clients
     session.attachedClients.forEach(ws => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -421,6 +426,14 @@ export class SessionManager {
     const session = this.sessions.get(sessionId);
     if (session) {
       session.devicePtyActive = active;
+      if (active) {
+        this.activePtySession.set(session.info.deviceUuid, sessionId);
+      } else {
+        const currentSessionId = this.activePtySession.get(session.info.deviceUuid);
+        if (currentSessionId === sessionId) {
+          this.activePtySession.delete(session.info.deviceUuid);
+        }
+      }
       if (active && !session.ptyStartedAt) {
         session.ptyStartedAt = new Date();
         logger.info(`🐚 [SESSION] PTY started for session ${sessionId.substring(0, 8)}...`);
