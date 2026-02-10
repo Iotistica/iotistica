@@ -19,6 +19,7 @@ export class ShellHandler {
   private commandTopic: string;
   private outputTopic: string;
   private sessionActive = false;
+  private currentSessionId: string | null = null;
 
   constructor(deviceUuid: string, mqtt: MqttManager, logger: AgentLogger) {
     this.deviceUuid = deviceUuid;
@@ -65,7 +66,7 @@ export class ShellHandler {
 
       switch (message.action) {
         case 'start':
-          await this.startSession();
+          await this.startSession(message.sessionId);
           break;
         case 'stop':
           this.stopSession();
@@ -96,13 +97,16 @@ export class ShellHandler {
   /**
    * Start a new shell session
    */
-  private async startSession(): Promise<void> {
+  private async startSession(sessionId?: string): Promise<void> {
     if (this.sessionActive) {
       this.logger.warnSync('Shell session already active', {
         component: LogComponents.agent,
       });
       return;
     }
+
+    // Store sessionId for including in shell-output messages
+    this.currentSessionId = sessionId || null;
 
     try {
       // Determine shell and platform
@@ -178,6 +182,7 @@ export class ShellHandler {
         });
       }
       this.ptyProcess = null;
+    this.currentSessionId = null;
     }
 
     this.sessionActive = false;
@@ -193,7 +198,8 @@ export class ShellHandler {
   private async sendOutput(data: string): Promise<void> {
     try {
       await this.mqtt.publish(
-        this.outputTopic,
+        thissessionId: this.currentSessionId,
+            .outputTopic,
         {
           format: 'json',
           data: {

@@ -14,6 +14,7 @@ import {
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface SessionInfo {
   sessionId: string;
@@ -29,6 +30,7 @@ interface RemoteAccessPageProps {
 }
 
 export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
+  const { user } = useAuth();
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -124,18 +126,24 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           console.log('[RemoteAccess] Auto-attaching to new session...');
           wsRef.current.send(JSON.stringify({
             type: 'attach-session',
-            data: { sessionId: message.sessionId },
+            data: { 
+              sessionId: message.sessionId,
+              userId: user?.id,
+            },
           }));
         }
         break;
 
       case 'session-attached':
         console.log('[RemoteAccess] Session attached:', message.sessionId);
+        console.log('[RemoteAccess] Full message:', message);
         setCurrentSessionId(message.sessionId);
         currentSessionIdRef.current = message.sessionId;
         console.log('[RemoteAccess] currentSessionIdRef set to:', currentSessionIdRef.current);
         
-        if (message.ptyRestarted) {
+        // Check for PTY restart (nested under data)
+        const ptyRestarted = message.data?.ptyRestarted || message.ptyRestarted;
+        if (ptyRestarted) {
           console.log('[RemoteAccess] PTY was restarted for this session');
           setPtyRestarted(true);
           if (xtermRef.current) {
@@ -147,13 +155,16 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           xtermRef.current.clear();
           xtermRef.current.writeln('\x1b[32m✓ Attached to session\x1b[0m');
           
-          // Display buffered output
-          if (message.buffer && message.buffer.length > 0) {
-            console.log(`[RemoteAccess] Replaying ${message.buffer.length} buffered chunks`);
-            message.buffer.forEach((chunk: string) => {
+          // Display buffered output (check both data.buffer and buffer for compatibility)
+          const buffer = message.data?.buffer || message.buffer;
+          console.log('[RemoteAccess] Buffer check - data.buffer:', message.data?.buffer?.length, 'buffer:', message.buffer?.length, 'final buffer:', buffer?.length);
+          if (buffer && buffer.length > 0) {
+            console.log(`[RemoteAccess] Replaying ${buffer.length} buffered chunks`);
+            buffer.forEach((chunk: string) => {
               xtermRef.current?.write(chunk);
             });
           } else {
+            console.log('[RemoteAccess] No buffer to replay');
             xtermRef.current.writeln('\x1b[90m(No buffered output)\x1b[0m');
           }
           
@@ -187,9 +198,13 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         break;
 
       case 'sessions-list':
-        const sessionsList = message.sessions || [];
-        console.log('[RemoteAccess] Received sessions list:', sessionsList.length);
-        setSessions(sessionsList);
+        const sessionsList = message.data?.sessions || message.sessions || [];
+        // Filter out terminated sessions - only show active/detached (usable) sessions
+        const usableSessions = sessionsList.filter((s: SessionInfo) => 
+          s.status === 'active' || s.status === 'detached'
+        );
+        console.log('[RemoteAccess] Received sessions list:', sessionsList.length, '(usable:', usableSessions.length, ')');
+        setSessions(usableSessions);
         
         // Auto-connect logic: attach to most recent active/detached session OR create new
         if (autoConnectPendingRef.current) {
@@ -213,7 +228,10 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
             if (wsRef.current) {
               wsRef.current.send(JSON.stringify({
                 type: 'attach-session',
-                sessionId: mostRecent.sessionId,
+                data: { 
+                  sessionId: mostRecent.sessionId,
+                  userId: user?.id,
+                },
               }));
             }
           } else {
@@ -274,6 +292,9 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     const msg = {
       type: 'create-session',
       deviceUuid,
+      data: {
+        userId: user?.id,
+      },
     };
     console.log('[RemoteAccess] Sending:', msg);
     wsRef.current.send(JSON.stringify(msg));
@@ -303,7 +324,10 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
     const msg = {
       type: 'attach-session',
-      data: { sessionId },
+      data: { 
+        sessionId,
+        userId: user?.id,
+      },
     };
     console.log('[RemoteAccess] Sending:', msg);
     wsRef.current.send(JSON.stringify(msg));
@@ -518,38 +542,16 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
               <div className="flex items-center gap-2">
                 <TerminalIcon className="h-5 w-5 text-muted-foreground" />
                 <span className="font-semibold">Shell Terminal</span>
-                {currentSessionId && (
-                  <Badge variant="outline" className="text-xs font-mono">
-                    {currentSessionId.substring(0, 8)}
-                  </Badge>
-                )}
               </div>
               
               <div className="flex items-center gap-2">
-                {/* PTY Restart Warning */}
-                {ptyRestarted && (
-                  <Badge variant="outline" className="bg-yellow-500/10 text-yellow-600 border-yellow-500/20">
-                    ⚠ PTY Restarting
-                  </Badge>
-                )}
-
                 {/* Connection Status */}
                 <Badge 
                   variant={isConnected ? "default" : "secondary"}
                   className={isConnected ? 'bg-green-500 text-white' : 'bg-gray-400 text-white'}
                 >
-                  {isConnecting ? '🔄 Connecting...' : isConnected ? '🟢 Connected' : '⚫ Disconnected'}
+                  {isConnecting ? 'Connecting...' : isConnected ? 'Connected' : 'Disconnected'}
                 </Badge>
-
-                {/* Session Status */}
-                {currentSessionId && (
-                  <Badge 
-                    variant="outline"
-                    className="bg-blue-500/10 text-blue-600 border-blue-500/20"
-                  >
-                    📌 Session Active
-                  </Badge>
-                )}
                 
                 {/* Connect/Disconnect Button */}
                 {!isConnected ? (
@@ -581,37 +583,18 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
                           sessions.map((session) => (
                             <DropdownMenuItem
                               key={session.sessionId}
-                              className="flex items-center justify-between cursor-pointer"
+                              className="flex items-center gap-2 cursor-pointer"
+                              onClick={() => attachToSession(session.sessionId)}
                             >
-                              <div className="flex-1" onClick={() => attachToSession(session.sessionId)}>
-                                <div className="flex items-center gap-2">
-                                  <span className="font-mono text-xs">
-                                    {session.sessionId.substring(0, 8)}
-                                  </span>
-                                  <Badge
-                                    variant={session.status === 'active' ? 'default' : 'secondary'}
-                                    className="text-xs"
-                                  >
-                                    {session.status}
-                                  </Badge>
-                                  {session.sessionId === currentSessionId && (
-                                    <span className="text-blue-500">●</span>
-                                  )}
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                  {new Date(session.lastActivity).toLocaleTimeString()}
-                                </div>
-                              </div>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  terminateSession(session.sessionId);
-                                }}
-                              >
-                                <Trash2 className="h-3 w-3 text-destructive" />
-                              </Button>
+                              <span className="font-mono text-xs">
+                                {session.sessionId.substring(0, 8)}
+                              </span>
+                              {session.sessionId === currentSessionId && (
+                                <span className="text-blue-500">●</span>
+                              )}
+                              <span className="text-xs text-muted-foreground ml-auto">
+                                {new Date(session.lastActivity).toLocaleTimeString()}
+                              </span>
                             </DropdownMenuItem>
                           ))
                         )}
@@ -623,14 +606,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
                       </DropdownMenuContent>
                     </DropdownMenu>
 
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={reconnect}
-                    >
-                      <RefreshCw className="h-4 w-4 mr-1" />
-                      Reconnect
-                    </Button>
                     <Button
                       variant="destructive"
                       size="sm"
