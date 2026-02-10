@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Terminal as TerminalIcon, Power, RefreshCw, Plus, List, Trash2 } from 'lucide-react';
+import { Terminal as TerminalIcon, Power, Plus, List} from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,7 +45,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
   const connectWebSocket = () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      console.log('[RemoteAccess] WebSocket already connected');
       return;
     }
     
@@ -56,12 +55,10 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     const wsPort = import.meta.env.VITE_API_PORT || '4002';
     const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/ws?deviceUuid=${deviceUuid}`;
 
-    console.log('[RemoteAccess] Connecting to WebSocket:', wsUrl);
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log('[RemoteAccess] WebSocket connected');
       setIsConnected(true);
       setIsConnecting(false);
       
@@ -76,7 +73,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       }
 
       // Auto-connect: List existing sessions
-      console.log('[RemoteAccess] Listing sessions for auto-connect...');
       ws.send(JSON.stringify({
         type: 'list-sessions',
         deviceUuid,
@@ -103,7 +99,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     };
 
     ws.onclose = () => {
-      console.log('[RemoteAccess] WebSocket disconnected');
       setIsConnected(false);
       setIsConnecting(false);
       if (xtermRef.current) {
@@ -113,17 +108,13 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   };
 
   const handleWebSocketMessage = (message: any) => {
-    console.log('[RemoteAccess] Received message:', message.type);
-
     switch (message.type) {
       case 'session-created':
-        console.log('[RemoteAccess] Session created:', message.sessionId);
         if (xtermRef.current) {
           xtermRef.current.writeln('\x1b[32m✓ Session created\x1b[0m');
         }
         // Auto-attach to newly created session
         if (wsRef.current && message.sessionId) {
-          console.log('[RemoteAccess] Auto-attaching to new session...');
           wsRef.current.send(JSON.stringify({
             type: 'attach-session',
             data: { 
@@ -135,16 +126,12 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         break;
 
       case 'session-attached':
-        console.log('[RemoteAccess] Session attached:', message.sessionId);
-        console.log('[RemoteAccess] Full message:', message);
         setCurrentSessionId(message.sessionId);
         currentSessionIdRef.current = message.sessionId;
-        console.log('[RemoteAccess] currentSessionIdRef set to:', currentSessionIdRef.current);
         
         // Check for PTY restart (nested under data)
         const ptyRestarted = message.data?.ptyRestarted || message.ptyRestarted;
         if (ptyRestarted) {
-          console.log('[RemoteAccess] PTY was restarted for this session');
           setPtyRestarted(true);
           if (xtermRef.current) {
             xtermRef.current.writeln('\x1b[33m⚠ Session PTY was restarted - waiting for connection...\x1b[0m');
@@ -157,26 +144,25 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           
           // Display buffered output (check both data.buffer and buffer for compatibility)
           const buffer = message.data?.buffer || message.buffer;
-          console.log('[RemoteAccess] Buffer check - data.buffer:', message.data?.buffer?.length, 'buffer:', message.buffer?.length, 'final buffer:', buffer?.length);
           if (buffer && buffer.length > 0) {
-            console.log(`[RemoteAccess] Replaying ${buffer.length} buffered chunks`);
             buffer.forEach((chunk: string) => {
               xtermRef.current?.write(chunk);
             });
           } else {
-            console.log('[RemoteAccess] No buffer to replay');
             xtermRef.current.writeln('\x1b[90m(No buffered output)\x1b[0m');
           }
           
           xtermRef.current.writeln('');
         }
 
+        // Send terminal size to backend for proper PTY configuration
+        resizeSession();
+
         // Refresh session list
         listSessions();
         break;
 
       case 'session-detached':
-        console.log('[RemoteAccess] Session detached');
         setCurrentSessionId(null);
         currentSessionIdRef.current = null;
         if (xtermRef.current) {
@@ -186,7 +172,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         break;
 
       case 'session-terminated':
-        console.log('[RemoteAccess] Session terminated:', message.sessionId);
         if (message.sessionId === currentSessionId) {
           setCurrentSessionId(null);
           currentSessionIdRef.current = null;
@@ -203,7 +188,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         const usableSessions = sessionsList.filter((s: SessionInfo) => 
           s.status === 'active' || s.status === 'detached'
         );
-        console.log('[RemoteAccess] Received sessions list:', sessionsList.length, '(usable:', usableSessions.length, ')');
         setSessions(usableSessions);
         
         // Auto-connect logic: attach to most recent active/detached session OR create new
@@ -220,7 +204,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
               new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
             )[0];
             
-            console.log('[RemoteAccess] Auto-attaching to existing session:', mostRecent.sessionId);
             if (xtermRef.current) {
               xtermRef.current.writeln(`\x1b[90mAttaching to existing session...\x1b[0m`);
             }
@@ -236,7 +219,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
             }
           } else {
             // Create new session
-            console.log('[RemoteAccess] No existing sessions, creating new one...');
             if (xtermRef.current) {
               xtermRef.current.writeln(`\x1b[90mCreating new session...\x1b[0m`);
             }
@@ -279,7 +261,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         break;
 
       default:
-        console.log('[RemoteAccess] Unhandled message type:', message.type);
+        break;
     }
   };
 
@@ -296,7 +278,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         userId: user?.id,
       },
     };
-    console.log('[RemoteAccess] Sending:', msg);
     wsRef.current.send(JSON.stringify(msg));
 
     if (xtermRef.current) {
@@ -314,8 +295,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       console.error('[RemoteAccess] Cannot attach - sessionId is null/undefined');
       return;
     }
-
-    console.log('[RemoteAccess] Attaching to session:', sessionId);
     
     // Detach from current session first
     if (currentSessionId && currentSessionId !== sessionId) {
@@ -329,7 +308,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         userId: user?.id,
       },
     };
-    console.log('[RemoteAccess] Sending:', msg);
     wsRef.current.send(JSON.stringify(msg));
 
     if (xtermRef.current) {
@@ -339,7 +317,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
   const detachFromSession = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !currentSessionId) {
-      console.log('[RemoteAccess] Skipping detach - no active session');
       return;
     }
 
@@ -347,28 +324,9 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       type: 'detach-session',
       data: { sessionId: currentSessionId },
     };
-    console.log('[RemoteAccess] Sending:', msg);
     wsRef.current.send(JSON.stringify(msg));
   };
 
-  const terminateSession = (sessionId: string) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      console.error('[RemoteAccess] WebSocket not connected');
-      return;
-    }
-
-    if (!sessionId) {
-      console.error('[RemoteAccess] Cannot terminate - sessionId is null/undefined');
-      return;
-    }
-
-    const msg = {
-      type: 'terminate-session',
-      data: { sessionId },
-    };
-    console.log('[RemoteAccess] Sending:', msg);
-    wsRef.current.send(JSON.stringify(msg));
-  };
 
   const listSessions = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
@@ -379,20 +337,15 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       type: 'list-sessions',
       deviceUuid,
     };
-    console.log('[RemoteAccess] Sending:', msg);
     wsRef.current.send(JSON.stringify(msg));
   };
 
   const sendInput = (data: string) => {
-    console.log('[RemoteAccess] sendInput called with data length:', data.length);
-    
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      console.warn('[RemoteAccess] Cannot send input - WebSocket not connected');
       return;
     }
 
     if (!currentSessionIdRef.current) {
-      console.warn('[RemoteAccess] Cannot send input - no active session');
       return;
     }
 
@@ -400,10 +353,30 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       type: 'shell-input',
       data: {
         sessionId: currentSessionIdRef.current,
-        input: data,  // Changed from 'data' to 'input'
+        input: data,
       },
     };
-    console.log('[RemoteAccess] Sending shell-input:', msg);
+    wsRef.current.send(JSON.stringify(msg));
+  };
+
+  const resizeSession = () => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    if (!currentSessionIdRef.current || !xtermRef.current) {
+      return;
+    }
+
+    const { cols, rows } = xtermRef.current;
+    const msg = {
+      type: 'resize-session',
+      data: {
+        sessionId: currentSessionIdRef.current,
+        cols,
+        rows,
+      },
+    };
     wsRef.current.send(JSON.stringify(msg));
   };
 
@@ -414,10 +387,13 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         detachFromSession();
       }
       
-      wsRef.current.send(JSON.stringify({
-        type: 'unsubscribe',
-        channel: 'shell',
-      }));
+      // Only send if WebSocket is still open
+      if (wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'unsubscribe',
+          channel: 'shell',
+        }));
+      }
       wsRef.current.close();
       wsRef.current = null;
     }
@@ -426,15 +402,11 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     currentSessionIdRef.current = null;
   };
 
-  const reconnect = () => {
-    disconnect();
-    setTimeout(() => connectWebSocket(), 500);
-  };
-
   // Warn user before navigating away from active session
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (isConnected) {
+      // Only warn if actually attached to a session (not just WebSocket connected)
+      if (currentSessionIdRef.current) {
         e.preventDefault();
         e.returnValue = 'You have an active shell session. Are you sure you want to leave?';
         return e.returnValue;
@@ -443,7 +415,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [isConnected]);
+  }, []);
 
   useEffect(() => {
     if (!terminalRef.current) return;
@@ -485,10 +457,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
     // Handle user input
     term.onData((data) => {
-      console.log('[RemoteAccess] Terminal onData fired, currentSessionIdRef:', currentSessionIdRef.current);
-      
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-        console.warn('[RemoteAccess] WebSocket not open');
         return;
       }
 
@@ -504,6 +473,8 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     // Handle window resize
     const handleResize = () => {
       fitAddon.fit();
+      // Send new terminal size to backend
+      resizeSession();
     };
     window.addEventListener('resize', handleResize);
 
