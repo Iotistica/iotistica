@@ -39,7 +39,7 @@ services:
             timeout: 5s
             retries: 5
         networks:
-           - iotistic-net
+            - iotistic-net
 
     redis:
         image: redis:7-alpine
@@ -61,7 +61,7 @@ services:
             timeout: 3s
             retries: 5
         networks:
-           - iotistic-net
+            - iotistic-net
    
     api:
         build:
@@ -148,7 +148,7 @@ services:
             redis:
                 condition: service_healthy
         networks:
-           - iotistic-net
+            - iotistic-net
     mosquitto:
         image: iegomez/mosquitto-go-auth
         restart: unless-stopped
@@ -173,7 +173,7 @@ services:
             retries: 3
             start_period: 10s
         networks:
-           - iotistic-net
+            - iotistic-net
     
 
     # VPN Services - Commented out until TypeScript code is complete
@@ -222,11 +222,11 @@ services:
     #         start_period: 60s
     
     # Protocol Simulators for Testing
-    modbus-sim-1:
+    modbus-sim:
         build:
             context: ./sensors/modbus-simulator
             dockerfile: Dockerfile
-        container_name: modbus-sim-1
+        container_name: modbus-sim
         restart: unless-stopped
         environment:
           - MODBUS_PROFILE=Generic
@@ -247,74 +247,7 @@ services:
             options:
                 max-size: "5m"
                 max-file: "2"
-
-    modbus-sim-2:
-        build:
-            context: ./sensors/modbus-simulator
-            dockerfile: Dockerfile
-        container_name: modbus-sim-2
-        restart: unless-stopped
-        environment:
-          - MODBUS_PROFILE=Generic
-          - MODBUS_API_URL=http://api:3002
-          - API_TOKEN=${API_TOKEN:-}
-          - GUI_PORT=5000
-          - GUI_HOST=0.0.0.0
-        ports:
-            - "503:502"
-            - "5003:5000"  # Web GUI: http://localhost:5001
-        depends_on:
-            api:
-                condition: service_healthy
-        networks:
-            - iotistic-net
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "5m"
-                max-file: "2"
-    modbus-sim-3:
-        build:
-            context: ./sensors/modbus-simulator
-            dockerfile: Dockerfile
-        container_name: modbus-sim-3
-        restart: unless-stopped
-        environment:
-          - MODBUS_PROFILE=Generic
-          - MODBUS_API_URL=http://api:3002
-          - API_TOKEN=${API_TOKEN:-}
-          - GUI_PORT=5000
-          - GUI_HOST=0.0.0.0
-        ports:
-            - "504:502"
-            - "5004:5000"  # Web GUI: http://localhost:5001
-        depends_on:
-            api:
-                condition: service_healthy
-        networks:
-            - iotistic-net
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "5m"
-                max-file: "2"
-
-    snmp-simulator:
-        build:
-            context: ./sensors/snmp-simulator
-            dockerfile: Dockerfile
-        container_name: iotistic-snmp-sim
-        restart: unless-stopped
-        ports:
-            - "161:161/udp"
-        networks:
-            - iotistic-net
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "5m"
-                max-file: "2"
-    
+ 
     opcua-simulator:
         build:
             context: ./sensors/opcua-simulator
@@ -353,74 +286,8 @@ services:
             options:
                 max-size: "5m"
                 max-file: "2"
-
-    neo4j:
-        image: neo4j:5.15-community
-        container_name: neo4j
-        restart: always
-        environment:
-            - NEO4J_AUTH=neo4j/iotistic123
-            - NEO4J_PLUGINS=["apoc"]
-            - NEO4J_dbms_security_procedures_unrestricted=apoc.*
-            - NEO4J_dbms_memory_heap_initial__size=512m
-            - NEO4J_dbms_memory_heap_max__size=2G
-        ports:
-            - "7474:7474"  # HTTP
-            - "7687:7687"  # Bolt
-        volumes:
-            - neo4j-data:/data
-            - neo4j-logs:/logs
-            - neo4j-import:/var/lib/neo4j/import
-            - neo4j-plugins:/plugins
         networks:
             - iotistic-net
-        healthcheck:
-            test: ["CMD-SHELL", "cypher-shell -u neo4j -p iotistic123 'RETURN 1'"]
-            interval: 10s
-            timeout: 5s
-            retries: 5
-            start_period: 30s
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "5m"
-                max-file: "2"
-
-    housekeeper:
-        build:
-            context: ./housekeeper
-            dockerfile: Dockerfile
-        container_name: iotistic-housekeeper
-        restart: unless-stopped
-        ports:
-            - "${HOUSEKEEPER_PORT_EXT:-3400}:3400"
-        environment:
-            - NODE_ENV=${NODE_ENV:-development}
-            - PORT=3400
-            - DB_HOST=${DB_HOST:-postgres}
-            - DB_PORT=${DB_PORT:-5432}
-            - DB_NAME=${DB_NAME:-iotistic}
-            - DB_USER=${DB_USER:-postgres}
-            - DB_PASSWORD=${DB_PASSWORD:-postgres}
-            - LOG_LEVEL=${HOUSEKEEPER_LOG_LEVEL:-info}
-            - CLEANUP_INTERVAL=${CLEANUP_INTERVAL:-3600000}
-            - RETENTION_DAYS=${RETENTION_DAYS:-30}
-        depends_on:
-            postgres:
-                condition: service_healthy
-        networks:
-            - iotistic-net
-        healthcheck:
-            test: ["CMD", "node", "-e", "require('http').get('http://localhost:3400/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
-            interval: 30s
-            timeout: 10s
-            retries: 3
-            start_period: 40s
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "10m"
-                max-file: "3"
 
     mqtt-monitor:
         build:
@@ -550,95 +417,95 @@ services:
     #     - postgres
 
 
-    nodered:
-        build:
-            context: ./nodered
-            dockerfile: Dockerfile
-        container_name: iotistic-nodered
-        restart: unless-stopped
-        ports:
-            - "${NODERED_PORT_EXT:-1880}:1880"
-        volumes:
-            - ./nodered/data:/data
-        environment:
-            - TZ=America/Toronto
-            - NODE_RED_ENABLE_SAFE_MODE=false
-            - NODE_RED_ENABLE_PROJECTS=false
-            - IOTISTIC_BASE_URL=${IOTISTIC_BASE_URL:-http://api:3002}
-            - NODERED_BASE_URL=${NODERED_BASE_URL:-http://localhost:1880}
-            - IOTISTIC_STORAGE_TOKEN=5317a772-c8dc-b8af-af76-fce09c973db0034da53b-e5e3-1d36-93a7-ec53de09c4af
-        depends_on:
-            api:
-                condition: service_healthy
-            mosquitto:
-                condition: service_healthy
-        networks:
-            - iotistic-net
-        healthcheck:
-            test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:1880"]
-            interval: 30s
-            timeout: 10s
-            retries: 3
-            start_period: 60s
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "10m"
-                max-file: "3"
+    # nodered:
+    #     build:
+    #         context: ./nodered
+    #         dockerfile: Dockerfile
+    #     container_name: iotistic-nodered
+    #     restart: unless-stopped
+    #     ports:
+    #         - "${NODERED_PORT_EXT:-1880}:1880"
+    #     volumes:
+    #         - ./nodered/data:/data
+    #     environment:
+    #         - TZ=America/Toronto
+    #         - NODE_RED_ENABLE_SAFE_MODE=false
+    #         - NODE_RED_ENABLE_PROJECTS=false
+    #         - IOTISTIC_BASE_URL=${IOTISTIC_BASE_URL:-http://api:3002}
+    #         - NODERED_BASE_URL=${NODERED_BASE_URL:-http://localhost:1880}
+    #         - IOTISTIC_STORAGE_TOKEN=5317a772-c8dc-b8af-af76-fce09c973db0034da53b-e5e3-1d36-93a7-ec53de09c4af
+    #     depends_on:
+    #         api:
+    #             condition: service_healthy
+    #         mosquitto:
+    #             condition: service_healthy
+    #     networks:
+    #         - iotistic-net
+    #     healthcheck:
+    #         test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:1880"]
+    #         interval: 30s
+    #         timeout: 10s
+    #         retries: 3
+    #         start_period: 60s
+    #     logging:
+    #         driver: "json-file"
+    #         options:
+    #             max-size: "10m"
+    #             max-file: "3"
 
-    prometheus:
-        image: prom/prometheus:latest
-        container_name: iotistic-prometheus
-        restart: unless-stopped
-        ports:
-            - "${PROMETHEUS_PORT_EXT:-9090}:9090"
-        volumes:
-            - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-            - prometheus-data:/prometheus
-        command:
-            - '--config.file=/etc/prometheus/prometheus.yml'
-            - '--storage.tsdb.path=/prometheus'
-            - '--storage.tsdb.retention.time=30d'
-            - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-            - '--web.console.templates=/usr/share/prometheus/consoles'
-        depends_on:
-            api:
-                condition: service_healthy
-        networks:
-            - iotistic-net
-        healthcheck:
-            test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
-            interval: 30s
-            timeout: 10s
-            retries: 3
-            start_period: 10s
+    # prometheus:
+    #     image: prom/prometheus:latest
+    #     container_name: iotistic-prometheus
+    #     restart: unless-stopped
+    #     ports:
+    #         - "${PROMETHEUS_PORT_EXT:-9090}:9090"
+    #     volumes:
+    #         - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    #         - prometheus-data:/prometheus
+    #     command:
+    #         - '--config.file=/etc/prometheus/prometheus.yml'
+    #         - '--storage.tsdb.path=/prometheus'
+    #         - '--storage.tsdb.retention.time=30d'
+    #         - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+    #         - '--web.console.templates=/usr/share/prometheus/consoles'
+    #     depends_on:
+    #         api:
+    #             condition: service_healthy
+    #     networks:
+    #         - iotistic-net
+    #     healthcheck:
+    #         test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+    #         interval: 30s
+    #         timeout: 10s
+    #         retries: 3
+    #         start_period: 10s
 
-    grafana:
-        image: grafana/grafana:latest
-        container_name: iotistic-grafana
-        restart: unless-stopped
-        ports:
-            - "${GRAFANA_PORT_EXT:-30001}:3000"
-        volumes:
-            - grafana-data:/var/lib/grafana
-            - ./grafana/provisioning:/etc/grafana/provisioning:ro
-        environment:
-            - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
-            - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
-            - GF_USERS_ALLOW_SIGN_UP=false
-            - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:3001}
-            - GF_INSTALL_PLUGINS=
-        depends_on:
-            prometheus:
-                condition: service_healthy
-        networks:
-            - iotistic-net
-        healthcheck:
-            test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
-            interval: 30s
-            timeout: 10s
-            retries: 3
-            start_period: 30s
+    # grafana:
+    #     image: grafana/grafana:latest
+    #     container_name: iotistic-grafana
+    #     restart: unless-stopped
+    #     ports:
+    #         - "${GRAFANA_PORT_EXT:-30001}:3000"
+    #     volumes:
+    #         - grafana-data:/var/lib/grafana
+    #         - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    #     environment:
+    #         - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+    #         - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+    #         - GF_USERS_ALLOW_SIGN_UP=false
+    #         - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:3001}
+    #         - GF_INSTALL_PLUGINS=
+    #     depends_on:
+    #         prometheus:
+    #             condition: service_healthy
+    #     networks:
+    #         - iotistic-net
+    #     healthcheck:
+    #         test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+    #         interval: 30s
+    #         timeout: 10s
+    #         retries: 3
+    #         start_period: 30s
 
 volumes:
   wg-data:

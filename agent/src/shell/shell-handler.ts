@@ -198,11 +198,11 @@ export class ShellHandler {
   private async sendOutput(data: string): Promise<void> {
     try {
       await this.mqtt.publish(
-        thissessionId: this.currentSessionId,
-            .outputTopic,
+        this.outputTopic,
         {
           format: 'json',
           data: {
+            sessionId: this.currentSessionId,
             output: data,
             timestamp: new Date().toISOString(),
           },
