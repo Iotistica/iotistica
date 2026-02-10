@@ -2,25 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Terminal as TerminalIcon, Power, Plus, List, Trash2 } from 'lucide-react';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { Terminal as TerminalIcon, Power, Plus } from 'lucide-react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
@@ -57,7 +39,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [ptyRestarted, setPtyRestarted] = useState(false);
-  const [clearAllDialogOpen, setClearAllDialogOpen] = useState(false);
   
   // Helper functions for persistent session storage (survives component unmount)
   const saveSessionState = (deviceId: string, sessionId: string, sessionsList: SessionInfo[]) => {
@@ -247,9 +228,10 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
                 },
               }));
             }
+          } else if (!buffer || buffer.length === 0 || isJustStartupBanner) {
+            // For new sessions, write a newline to establish cursor position
+            xtermRef.current.write('\r\n');
           }
-          // For brand new sessions (isJustStartupBanner or empty buffer), don't send \r
-          // PTY is actively sending output - let it send its own prompt
           
           // Focus terminal so user can start typing immediately
           xtermRef.current.focus();
@@ -312,11 +294,18 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         console.log('[RemoteAccess] 📋 Received sessions-list');
         const sessionsList = message.data?.sessions || message.sessions || [];
         console.log('[RemoteAccess] 📋 Total sessions from backend:', sessionsList.length);
+        console.log('[RemoteAccess] 📋 ALL sessions from backend:', sessionsList.map((s: SessionInfo) => ({
+          id: s.sessionId.substring(0, 8),
+          status: s.status,
+          userId: s.userId,
+          deviceUuid: s.deviceUuid.substring(0, 8),
+        })));
         // Filter to show only creating/active sessions (exclude detached and terminated)
         // Also filter by current user when available to avoid cross-user attach errors
         const currentUserId = user?.id !== undefined && user?.id !== null
           ? String(user.id)
           : null;
+        console.log('[RemoteAccess] 📋 Current userId for filtering:', currentUserId);
         const usableSessions = sessionsList.filter((s: SessionInfo) => {
           // Only show sessions that are actively in use (not detached or terminated)
           const isUsableStatus = s.status === 'creating' || s.status === 'active';
@@ -387,7 +376,8 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
       case 'shell-output':
         console.log('[RemoteAccess] shell-output received, sessionId:', message.sessionId?.substring(0, 8), 'current:', currentSessionIdRef.current?.substring(0, 8), 'hasOutput:', !!message.data?.output);
-        if (message.sessionId === currentSessionIdRef.current && message.data?.output) {
+        // Accept output if sessionId matches OR if sessionId is null (legacy agent messages)
+        if (message.data?.output && (message.sessionId === currentSessionIdRef.current || !message.sessionId)) {
           console.log('[RemoteAccess] Writing output to terminal:', message.data.output.length, 'chars');
           if (xtermRef.current) {
             xtermRef.current.write(message.data.output);
@@ -397,7 +387,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
             setPtyRestarted(false);
           }
         } else {
-          console.warn('[RemoteAccess] shell-output NOT displayed. Session match:', message.sessionId === currentSessionIdRef.current, 'Has output:', !!message.data?.output);
+          console.warn('[RemoteAccess] shell-output NOT displayed. Session match:', message.sessionId === currentSessionIdRef.current, 'Has output:', !!message.data?.output, 'SessionId:', message.sessionId);
         }
         break;
 
@@ -536,48 +526,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       data: { sessionId: currentSessionId },
     };
     wsRef.current.send(JSON.stringify(msg));
-  };
-
-  const clearAllSessions = () => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      console.error('[RemoteAccess] WebSocket not connected');
-      return;
-    }
-
-    console.log('[RemoteAccess] 🗑️ CLEAR ALL SESSIONS - Starting for device:', deviceUuid.substring(0, 8));
-    console.log('[RemoteAccess] 🗑️ Current session before clear:', currentSessionIdRef.current?.substring(0, 8));
-    console.log('[RemoteAccess] 🗑️ Sessions count before clear:', sessions.length);
-    
-    // Clear terminal
-    if (xtermRef.current) {
-      xtermRef.current.clear();
-      xtermRef.current.writeln('\x1b[90mClearing all sessions...\x1b[0m');
-    }
-
-    // Send clear-all-sessions message
-    const msg = {
-      type: 'clear-all-sessions',
-      deviceUuid,
-      data: { 
-        userId: user?.id,
-      },
-    };
-    console.log('[RemoteAccess] 🗑️ Sending clear-all-sessions message:', JSON.stringify(msg));
-    wsRef.current.send(JSON.stringify(msg));
-
-    // Clear local state
-    setCurrentSessionId(null);
-    currentSessionIdRef.current = null;
-    setSessions([]);
-    
-    // Clear persisted session state
-    try {
-      const key = `remote-session-${deviceUuid}`;
-      sessionStorage.removeItem(key);
-      console.log('[RemoteAccess] Cleared persisted session state');
-    } catch (error) {
-      console.error('[RemoteAccess] Failed to clear session storage:', error);
-    }
   };
 
   const terminateSession = () => {
@@ -991,62 +939,22 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
                   </Button>
                 ) : (
                   <>
-                    {/* Sessions Dropdown */}
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm">
-                          <List className="h-4 w-4 mr-1" />
-                          Sessions ({sessions.length})
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-64">
-                        <DropdownMenuLabel>Active Sessions</DropdownMenuLabel>
-                        <DropdownMenuSeparator />
-                        {sessions.length === 0 ? (
-                          <DropdownMenuItem disabled>No sessions</DropdownMenuItem>
-                        ) : (
-                          sessions.map((session) => (
-                            <DropdownMenuItem
-                              key={session.sessionId}
-                              className="flex items-center gap-2 cursor-pointer"
-                              onClick={() => attachToSession(session.sessionId)}
-                            >
-                              <span className="font-mono text-xs">
-                                {session.sessionId.substring(0, 8)}
-                              </span>
-                              {session.sessionId === currentSessionId && (
-                                <span className="text-green-500">●</span>
-                              )}
-                              <span className="text-xs text-muted-foreground ml-auto">
-                                {new Date(session.lastActivity).toLocaleTimeString()}
-                              </span>
-                            </DropdownMenuItem>
-                          ))
-                        )}
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={createNewSession}>
-                          <Plus className="h-4 w-4 mr-2" />
-                          New Session
-                        </DropdownMenuItem>
-                        {sessions.length > 0 && (
-                          <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem 
-                              onClick={() => setClearAllDialogOpen(true)}
-                              className="text-destructive focus:text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Clear All Sessions
-                            </DropdownMenuItem>
-                          </>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    {/* New Session Button */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={createNewSession}
+                      className="cursor-pointer hover:bg-accent"
+                    >
+                      <Plus className="h-4 w-4 mr-1" />
+                      New Session
+                    </Button>
 
                     <Button
                       variant="destructive"
                       size="sm"
                       onClick={disconnect}
+                      className="cursor-pointer"
                     >
                       <Power className="h-4 w-4 mr-1" />
                       Disconnect
@@ -1134,32 +1042,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           </Card>
         </div>
       </div>
-
-      {/* Clear All Sessions Confirmation Dialog */}
-      <AlertDialog open={clearAllDialogOpen} onOpenChange={setClearAllDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Clear All Sessions?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will terminate all active and detached sessions for this device and create a fresh session.
-              <br /><br />
-              <strong>This action cannot be undone.</strong>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                setClearAllDialogOpen(false);
-                clearAllSessions();
-              }}
-              className="bg-red-600 hover:bg-red-700"
-            >
-              Clear All Sessions
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
