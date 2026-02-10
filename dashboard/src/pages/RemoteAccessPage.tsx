@@ -264,6 +264,10 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       case 'all-sessions-cleared':
         console.log('[RemoteAccess] 🗑️ ALL SESSIONS CLEARED - Server confirmed:', message.message);
         console.log('[RemoteAccess] 🗑️ Clearing local state...');
+        
+        // Disable auto-connect to prevent duplicate session creation
+        autoConnectPendingRef.current = false;
+        
         setCurrentSessionId(null);
         currentSessionIdRef.current = null;
         setSessions([]);

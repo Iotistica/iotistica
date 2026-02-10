@@ -274,10 +274,27 @@ export class SessionManager {
   async terminateSession(sessionId: string): Promise<void> {
     logger.info(`🐚 [SESSION] 🗑️ terminateSession() called for ${sessionId.substring(0, 8)}...`);
     
-    const session = this.sessions.get(sessionId);
-    
+    // Load from database if not in memory (handles detached/stale sessions)
+    let session = this.sessions.get(sessionId);
     if (!session) {
-      logger.warn(`🐚 [SESSION] 🗑️ Cannot terminate - session ${sessionId} not found in memory`);
+      logger.warn(`🐚 [SESSION] 🗑️ Session ${sessionId.substring(0, 8)}... not in memory, loading from database`);
+      const loaded = await this.loadSessionFromDatabase(sessionId);
+      if (!loaded) {
+        logger.warn(`🐚 [SESSION] 🗑️ Session ${sessionId.substring(0, 8)}... not found in database either`);
+        // Still update database in case it exists
+        const now = new Date();
+        const updateResult = await query(
+          `UPDATE shell_sessions SET status = 'terminated', terminated_at = $1 WHERE session_id = $2`,
+          [now, sessionId]
+        );
+        logger.info(`🐚 [SESSION] 🗑️ Direct database UPDATE - rowCount: ${updateResult.rowCount}`);
+        return;
+      }
+      session = this.sessions.get(sessionId);
+    }
+
+    if (!session) {
+      logger.warn(`🐚 [SESSION] 🗑️ Cannot terminate - session ${sessionId} could not be loaded`);
       return;
     }
 
@@ -322,10 +339,11 @@ export class SessionManager {
   async terminateAllSessions(deviceUuid: string, userId?: string): Promise<void> {
     logger.info(`🐚 [SESSION] 🗑️ terminateAllSessions() called for device ${deviceUuid.substring(0, 8)}...${userId ? ' and user ' + userId : ''}`);
     
-    const deviceSessions = this.getDeviceSessions(deviceUuid);
-    logger.info(`🐚 [SESSION] 🗑️ Total device sessions found: ${deviceSessions.length}`);
+    // Query database for all sessions (not just memory) to ensure we catch detached/stale sessions
+    const allSessions = await this.listSessions(deviceUuid, true); // Include terminated to see full picture
+    logger.info(`🐚 [SESSION] 🗑️ Total device sessions in database: ${allSessions.length}`);
     
-    const sessionsToTerminate = deviceSessions.filter(s => {
+    const sessionsToTerminate = allSessions.filter(s => {
       const isTerminated = s.status === 'terminated';
       const userMatch = !userId || !s.userId || s.userId === userId;
       const shouldTerminate = !isTerminated && userMatch;
@@ -342,14 +360,14 @@ export class SessionManager {
 
     logger.info(`🐚 [SESSION] 🗑️ Will terminate ${sessionsToTerminate.length} session(s)`);
 
-    // Terminate all matching sessions
+    // Terminate all matching sessions (kept in DB for audit purposes)
     for (const session of sessionsToTerminate) {
       logger.info(`🐚 [SESSION] 🗑️ Terminating session ${session.sessionId.substring(0, 8)}...`);
       await this.terminateSession(session.sessionId);
-      logger.info(`🐚 [SESSION] 🗑️ Session ${session.sessionId.substring(0, 8)}... terminated`);
+      logger.info(`🐚 [SESSION] 🗑️ Session ${session.sessionId.substring(0, 8)}... terminated (kept in DB for audit)`);
     }
 
-    logger.info(`🐚 [SESSION] 🗑️ terminateAllSessions() completed - all ${sessionsToTerminate.length} sessions cleared`);
+    logger.info(`🐚 [SESSION] 🗑️ terminateAllSessions() completed - ${sessionsToTerminate.length} sessions marked as terminated`);
   }
 
   /**
@@ -456,7 +474,7 @@ export class SessionManager {
   /**
    * List sessions for a device (or all sessions)
    */
-  async listSessions(deviceUuid?: string): Promise<SessionInfo[]> {
+  async listSessions(deviceUuid?: string, includeTerminated = false): Promise<SessionInfo[]> {
     let sqlQuery = `SELECT * FROM shell_sessions WHERE 1=1`;
     const params: any[] = [];
 
@@ -465,11 +483,16 @@ export class SessionManager {
       sqlQuery += ` AND device_uuid = $${params.length}`;
     }
 
+    // Exclude terminated sessions by default (for audit, they stay in DB)
+    if (!includeTerminated) {
+      sqlQuery += ` AND status != 'terminated'`;
+    }
+
     sqlQuery += ` ORDER BY last_activity DESC`;
 
     logger.info(`🐚 [SESSION] 🗑️ Executing listSessions SQL: ${sqlQuery}`);
     const result = await query(sqlQuery, params);
-    logger.info(`🐚 [SESSION] 🗑️ listSessions returned ${result.rows.length} rows from database`);
+    logger.info(`🐚 [SESSION] 🗑️ listSessions returned ${result.rows.length} rows from database (includeTerminated=${includeTerminated})`);
     
     const sessions = result.rows.map(row => {
       logger.info(`🐚 [SESSION] 🗑️   - ${row.session_id.substring(0, 8)}... status=${row.status} terminated_at=${row.terminated_at}`);
