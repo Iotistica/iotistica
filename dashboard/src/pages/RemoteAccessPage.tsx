@@ -247,16 +247,9 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
                 },
               }));
             }
-          } else if (!ptyWasRestarted && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            // For brand new sessions or when buffer is empty, send \r to trigger prompt
-            wsRef.current.send(JSON.stringify({
-              type: 'shell-input',
-              data: {
-                sessionId: message.sessionId,
-                input: '\r',
-              },
-            }));
           }
+          // For brand new sessions (isJustStartupBanner or empty buffer), don't send \r
+          // PTY is actively sending output - let it send its own prompt
           
           // Focus terminal so user can start typing immediately
           xtermRef.current.focus();
