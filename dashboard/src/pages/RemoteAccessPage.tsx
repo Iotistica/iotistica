@@ -51,6 +51,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   const autoConnectPendingRef = useRef<boolean>(false);
   const currentSessionIdRef = useRef<string | null>(null);
   const currentDeviceUuidRef = useRef<string>(deviceUuid); // Track which device the current session belongs to
+  const isAttachingRef = useRef<boolean>(false); // Prevent race conditions during session switching
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -195,6 +196,10 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
       case 'session-attached': {
         console.log('[RemoteAccess] 📨 Received session-attached for:', message.sessionId?.substring(0, 8), '- PTY restarted:', message.data?.ptyRestarted || message.ptyRestarted);
+        
+        // Clear the attaching flag
+        isAttachingRef.current = false;
+        
         setCurrentSessionId(message.sessionId);
         currentSessionIdRef.current = message.sessionId;
         currentDeviceUuidRef.current = deviceUuid; // Track which device this session belongs to
@@ -218,29 +223,33 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           
           // Display buffered output (check both data.buffer and buffer for compatibility)
           const buffer = message.data?.buffer || message.buffer;
-          let needsPrompt = true;
-          if (buffer && buffer.length > 0) {
+          
+          // Only replay buffer if we have one AND PTY wasn't restarted
+          // (PTY restart means fresh session, buffer is stale)
+          if (buffer && buffer.length > 0 && !ptyWasRestarted) {
             buffer.forEach((chunk: string) => {
               xtermRef.current?.write(chunk);
             });
-            // If the only output is the startup banner, still prompt for input
-            needsPrompt = buffer.length === 1 && buffer[0].includes('Shell session started');
           }
 
-          if (needsPrompt) {
-            // Send newline to trigger shell prompt
-            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-              wsRef.current.send(JSON.stringify({
-                type: 'shell-input',
-                data: {
-                  sessionId: message.sessionId,
-                  input: '\r', // Send carriage return to trigger prompt
-                },
-              }));
-            }
+          // Only send carriage return if buffer is empty or doesn't end with a prompt
+          // Check if buffer already has a prompt (ends with $ or # followed by optional space)
+          const lastChunk = buffer && buffer.length > 0 ? buffer[buffer.length - 1] : '';
+          const hasPrompt = /[$#]\s*$/.test(lastChunk);
+          
+          // Only trigger prompt if PTY wasn't restarted AND buffer doesn't already have a prompt
+          if (!ptyWasRestarted && !hasPrompt && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({
+              type: 'shell-input',
+              data: {
+                sessionId: message.sessionId,
+                input: '\r', // Send carriage return to trigger prompt
+              },
+            }));
           }
           
-          xtermRef.current.writeln('');
+          // Focus terminal so user can start typing immediately
+          xtermRef.current.focus();
         }
 
         // Send terminal size to backend for proper PTY configuration
@@ -300,13 +309,14 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         console.log('[RemoteAccess] 📋 Received sessions-list');
         const sessionsList = message.data?.sessions || message.sessions || [];
         console.log('[RemoteAccess] 📋 Total sessions from backend:', sessionsList.length);
-        // Filter out terminated sessions - show creating/active/detached sessions
+        // Filter to show only creating/active sessions (exclude detached and terminated)
         // Also filter by current user when available to avoid cross-user attach errors
         const currentUserId = user?.id !== undefined && user?.id !== null
           ? String(user.id)
           : null;
         const usableSessions = sessionsList.filter((s: SessionInfo) => {
-          const isUsableStatus = s.status === 'creating' || s.status === 'active' || s.status === 'detached';
+          // Only show sessions that are actively in use (not detached or terminated)
+          const isUsableStatus = s.status === 'creating' || s.status === 'active';
           if (!isUsableStatus) {
             return false;
           }
@@ -322,8 +332,12 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         setSessions(usableSessions);
         
         // Auto-connect logic: attach to most recent active/detached session OR create new
-        console.log('[RemoteAccess] 🤖 Auto-connect check - autoConnectPendingRef:', autoConnectPendingRef.current);
-        if (autoConnectPendingRef.current) {
+        console.log('[RemoteAccess] 🤖 Auto-connect check - autoConnectPendingRef:', autoConnectPendingRef.current, 'currentSessionId:', currentSessionIdRef.current?.substring(0, 8));
+        
+        // SAFETY: Only run auto-connect if:
+        // 1. autoConnectPendingRef is true
+        // 2. We DON'T already have a current session (prevents creating duplicates during session switch)
+        if (autoConnectPendingRef.current && !currentSessionIdRef.current) {
           console.log('[RemoteAccess] 🤖 Auto-connect IS ACTIVE - processing...');
           autoConnectPendingRef.current = false;
           
@@ -333,8 +347,9 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
             return;
           }
           
+          // Filter for active sessions only (creating sessions aren't ready to attach)
           const existingSessions = usableSessions.filter((s: SessionInfo) =>
-            s.status === 'active' || s.status === 'detached'
+            s.status === 'active'
           );
           
           if (existingSessions.length > 0) {
@@ -431,8 +446,17 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   };
 
   const createNewSession = () => {
-    console.log('[RemoteAccess] ✨ createNewSession() called - STACK TRACE:');
+    console.log('[RemoteAccess] ✨ createNewSession() called');
+    console.log('[RemoteAccess] ✨ Current state - currentSessionId:', currentSessionIdRef.current?.substring(0, 8), 'autoConnectPending:', autoConnectPendingRef.current, 'isAttaching:', isAttachingRef.current);
+    console.log('[RemoteAccess] ✨ STACK TRACE:');
     console.trace();
+    
+    // SAFETY: Don't create a new session if we're in the middle of attaching to one
+    // (prevents accidental duplication during session switching)
+    if (isAttachingRef.current) {
+      console.log('[RemoteAccess] ⚠️ BLOCKED: Currently attaching to a session - not creating duplicate');
+      return;
+    }
     
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       console.error('[RemoteAccess] WebSocket not connected');
@@ -457,6 +481,12 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   const attachToSession = (sessionId: string) => {
     console.log('[RemoteAccess] 🔄 attachToSession called for:', sessionId.substring(0, 8));
     
+    // Prevent race conditions - don't allow multiple simultaneous attach operations
+    if (isAttachingRef.current) {
+      console.log('[RemoteAccess] ⚠️ BLOCKED: Already attaching to a session, ignoring duplicate call');
+      return;
+    }
+    
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       console.error('[RemoteAccess] WebSocket not connected');
       return;
@@ -466,6 +496,9 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       console.error('[RemoteAccess] Cannot attach - sessionId is null/undefined');
       return;
     }
+    
+    // Mark that we're in the process of attaching
+    isAttachingRef.current = true;
     
     // Disable auto-connect to prevent creating new session when listSessions is called
     autoConnectPendingRef.current = false;
@@ -703,6 +736,9 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     
     term.open(terminalRef.current);
     fitAddon.fit();
+    
+    // Focus terminal immediately after opening
+    term.focus();
 
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
