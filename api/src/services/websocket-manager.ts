@@ -1452,7 +1452,7 @@ export class WebSocketManager {
   private async handleShellInput(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
     try {
       const sessionId = message.data?.sessionId;
-      const input = message.data?.input;
+      const input = message.data?.input ?? message.data?.data;
       
       if (!sessionId || input === undefined) {
         this.send(client.ws, {

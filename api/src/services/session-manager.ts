@@ -56,10 +56,44 @@ export class SessionManager {
   async createSession(deviceUuid: string, userId?: string): Promise<SessionInfo> {
     // Check device session limit
     const deviceSessions = this.getDeviceSessions(deviceUuid);
-    const activeSessions = deviceSessions.filter(s => s.status !== 'terminated');
+    let activeSessions = deviceSessions.filter(s => s.status !== 'terminated');
     
     if (activeSessions.length >= this.SESSION_MAX_PER_DEVICE) {
-      throw new Error(`Device ${deviceUuid} has reached maximum sessions (${this.SESSION_MAX_PER_DEVICE})`);
+      // Try to free a slot by terminating the oldest detached session
+      const detachedSessions = activeSessions.filter(s =>
+        s.status === 'detached' && (!userId || !s.userId || s.userId === userId)
+      );
+
+      if (detachedSessions.length > 0) {
+        const oldestDetached = detachedSessions.sort((a, b) =>
+          new Date(a.lastActivity).getTime() - new Date(b.lastActivity).getTime()
+        )[0];
+        logger.info(`🐚 [SESSION] Auto-terminating oldest detached session ${oldestDetached.sessionId.substring(0, 8)}...`);
+        await this.terminateSession(oldestDetached.sessionId);
+      } else {
+        const params: any[] = [deviceUuid];
+        let userClause = '';
+        if (userId) {
+          userClause = ' AND (user_id IS NULL OR user_id = $2)';
+          params.push(userId);
+        }
+        const result = await query(
+          `SELECT session_id FROM shell_sessions WHERE device_uuid = $1 AND status = 'detached'${userClause} ORDER BY last_activity ASC LIMIT 1`,
+          params
+        );
+
+        if (result.rows.length > 0) {
+          const oldestDetachedId = result.rows[0].session_id as string;
+          await this.loadSessionFromDatabase(oldestDetachedId);
+          logger.info(`🐚 [SESSION] Auto-terminating oldest detached session ${oldestDetachedId.substring(0, 8)}...`);
+          await this.terminateSession(oldestDetachedId);
+        }
+      }
+
+      activeSessions = this.getDeviceSessions(deviceUuid).filter(s => s.status !== 'terminated');
+      if (activeSessions.length >= this.SESSION_MAX_PER_DEVICE) {
+        throw new Error(`Device ${deviceUuid} has reached maximum sessions (${this.SESSION_MAX_PER_DEVICE})`);
+      }
     }
 
     const sessionId = uuidv4();

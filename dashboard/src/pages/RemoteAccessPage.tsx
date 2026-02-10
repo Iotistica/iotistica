@@ -170,7 +170,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         }
         break;
 
-      case 'session-attached':
+      case 'session-attached': {
         console.log('[RemoteAccess] Session attached:', message.sessionId);
         setCurrentSessionId(message.sessionId);
         currentSessionIdRef.current = message.sessionId;
@@ -181,8 +181,8 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         saveSessionState(deviceUuid, message.sessionId, sessions);
         
         // Check for PTY restart (nested under data)
-        const ptyRestarted = message.data?.ptyRestarted || message.ptyRestarted;
-        if (ptyRestarted) {
+        const ptyWasRestarted = message.data?.ptyRestarted || message.ptyRestarted;
+        if (ptyWasRestarted) {
           setPtyRestarted(true);
           if (xtermRef.current) {
             xtermRef.current.writeln('\x1b[33m⚠ Session PTY was restarted - waiting for connection...\x1b[0m');
@@ -195,19 +195,23 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           
           // Display buffered output (check both data.buffer and buffer for compatibility)
           const buffer = message.data?.buffer || message.buffer;
+          let needsPrompt = true;
           if (buffer && buffer.length > 0) {
             buffer.forEach((chunk: string) => {
               xtermRef.current?.write(chunk);
             });
-          } else {
-            // No buffered output - likely a brand new session
+            // If the only output is the startup banner, still prompt for input
+            needsPrompt = buffer.length === 1 && buffer[0].includes('Shell session started');
+          }
+
+          if (needsPrompt) {
             // Send newline to trigger shell prompt
             if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
               wsRef.current.send(JSON.stringify({
                 type: 'shell-input',
                 data: {
                   sessionId: message.sessionId,
-                  data: '\r', // Send carriage return to trigger prompt
+                  input: '\r', // Send carriage return to trigger prompt
                 },
               }));
             }
@@ -222,6 +226,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         // Refresh session list
         listSessions();
         break;
+      }
 
       case 'session-detached':
         setCurrentSessionId(null);
@@ -247,17 +252,37 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
       case 'sessions-list':
         const sessionsList = message.data?.sessions || message.sessions || [];
-        // Filter out terminated sessions - only show active/detached (usable) sessions
-        const usableSessions = sessionsList.filter((s: SessionInfo) => 
-          s.status === 'active' || s.status === 'detached'
-        );
+        // Filter out terminated sessions - show creating/active/detached sessions
+        // Also filter by current user when available to avoid cross-user attach errors
+        const currentUserId = user?.id !== undefined && user?.id !== null
+          ? String(user.id)
+          : null;
+        const usableSessions = sessionsList.filter((s: SessionInfo) => {
+          const isUsableStatus = s.status === 'creating' || s.status === 'active' || s.status === 'detached';
+          if (!isUsableStatus) {
+            return false;
+          }
+          if (!currentUserId) {
+            return true;
+          }
+          if (!s.userId) {
+            return true;
+          }
+          return String(s.userId) === currentUserId;
+        });
         setSessions(usableSessions);
         
         // Auto-connect logic: attach to most recent active/detached session OR create new
         if (autoConnectPendingRef.current) {
           autoConnectPendingRef.current = false;
           
-          const existingSessions = sessionsList.filter((s: SessionInfo) => 
+          if (!user?.id) {
+            console.log('[RemoteAccess] User not ready yet, deferring auto-connect');
+            autoConnectPendingRef.current = true;
+            return;
+          }
+          
+          const existingSessions = usableSessions.filter((s: SessionInfo) =>
             s.status === 'active' || s.status === 'detached'
           );
           
@@ -323,9 +348,13 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         const errorMsg = message.error || message.message || JSON.stringify(message);
         console.error('[RemoteAccess] Server error:', errorMsg);
         
-        // If error is about session not found, clear stale sessionStorage and create new session
-        if (errorMsg.includes('Session') && errorMsg.includes('not found')) {
-          console.warn('[RemoteAccess] Session not found - clearing stale sessionStorage');
+        // If error is about session not found or access denied, clear stale sessionStorage and create new session
+        if (
+          (errorMsg.includes('Session') && errorMsg.includes('not found')) ||
+          errorMsg.includes('Access denied') ||
+          errorMsg.includes('has been terminated')
+        ) {
+          console.warn('[RemoteAccess] Session invalid - clearing stale sessionStorage');
           try {
             sessionStorage.removeItem(`remote-session-${deviceUuid}`);
             setCurrentSessionId(null);
@@ -660,6 +689,23 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       }
     }
   }, [currentSessionId, sessions, deviceUuid]); // Added deviceUuid back for safety check
+
+  // If auth loads after WebSocket is open, re-list sessions to complete auto-connect
+  useEffect(() => {
+    if (!user?.id || !autoConnectPendingRef.current) {
+      return;
+    }
+
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    console.log('[RemoteAccess] User ready - requesting sessions list for auto-connect');
+    wsRef.current.send(JSON.stringify({
+      type: 'list-sessions',
+      deviceUuid,
+    }));
+  }, [user?.id, deviceUuid]);
 
   // Handle device switching - preserve and restore sessions
   useEffect(() => {

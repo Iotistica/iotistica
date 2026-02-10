@@ -119,10 +119,19 @@ export class ShellHandler {
    */
   private async startSession(sessionId?: string): Promise<void> {
     if (this.sessionActive) {
-      this.logger.warnSync('Shell session already active', {
-        component: LogComponents.agent,
-      });
-      return;
+      if (this.currentSessionId && sessionId && this.currentSessionId !== sessionId) {
+        this.logger.infoSync('Switching shell session', {
+          component: LogComponents.agent,
+          fromSessionId: this.currentSessionId.substring(0, 8),
+          toSessionId: sessionId.substring(0, 8),
+        });
+        this.stopSession();
+      } else {
+        this.logger.warnSync('Shell session already active', {
+          component: LogComponents.agent,
+        });
+        return;
+      }
     }
 
     // Store sessionId for including in shell-output messages
