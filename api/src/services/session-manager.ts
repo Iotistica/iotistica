@@ -187,6 +187,33 @@ export class SessionManager {
   }
 
   /**
+   * Detach a WebSocket client from all sessions (used when client disconnects)
+   */
+  async detachClientFromAllSessions(ws: WebSocket): Promise<void> {
+    const sessionsToDetach: string[] = [];
+    
+    // Find all sessions this client is attached to
+    for (const [sessionId, session] of this.sessions.entries()) {
+      if (session.attachedClients.has(ws)) {
+        sessionsToDetach.push(sessionId);
+      }
+    }
+
+    // Detach from each session
+    for (const sessionId of sessionsToDetach) {
+      try {
+        await this.detachSession(sessionId, ws);
+      } catch (error) {
+        logger.error(`🐚 [SESSION] Error detaching client from session ${sessionId}:`, error);
+      }
+    }
+
+    if (sessionsToDetach.length > 0) {
+      logger.info(`🐚 [SESSION] Client detached from ${sessionsToDetach.length} session(s) on disconnect`);
+    }
+  }
+
+  /**
    * Terminate a session (kill PTY, cleanup resources)
    */
   async terminateSession(sessionId: string): Promise<void> {

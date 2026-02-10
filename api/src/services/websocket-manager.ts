@@ -1006,6 +1006,10 @@ export class WebSocketManager {
   private handleDisconnect(client: WebSocketClient): void {
     logger.info(` Client disconnected from device: ${client.deviceUuid}`);
 
+    // CRITICAL: Detach from all sessions this client was attached to
+    // This ensures database status is updated when WebSocket closes unexpectedly
+    sessionManager.detachClientFromAllSessions(client.ws);
+
     // Remove from device clients
     const deviceClients = this.deviceClients.get(client.deviceUuid);
     if (deviceClients) {
@@ -1405,10 +1409,8 @@ export class WebSocketManager {
 
       await sessionManager.terminateSession(sessionId);
 
-      this.send(client.ws, {
-        type: 'session-terminated',
-        sessionId,
-      });
+      // Note: session-terminated message is sent by sessionManager.terminateSession()
+      // to all attached clients, no need to send again here
 
       logger.info(`🐚 [SESSION] Terminated session ${sessionId.substring(0, 8)}...`);
     } catch (error: any) {
