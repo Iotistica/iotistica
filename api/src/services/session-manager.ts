@@ -32,6 +32,7 @@ interface ActiveSession {
 
 export class SessionManager {
   private sessions: Map<string, ActiveSession> = new Map();
+  private activePtySession: Map<string, string> = new Map(); // deviceUuid -> sessionId with active PTY
   private cleanupInterval: NodeJS.Timeout | null = null;
   
   // Configuration
@@ -130,7 +131,22 @@ export class SessionManager {
 
     // Check if PTY needs to be restarted
     let needsPtyRestart = false;
-    if (session.info.status !== 'creating' && !session.devicePtyActive) {
+    
+    // Get current active PTY session for this device
+    const currentPtySessionId = this.activePtySession.get(session.info.deviceUuid);
+    
+    // Restart PTY if:
+    // 1. Attaching to a different session than the one with active PTY
+    // 2. OR PTY is not active at all
+    if (currentPtySessionId && currentPtySessionId !== sessionId) {
+      logger.info(`🐚 [SESSION] Switching PTY from session ${currentPtySessionId.substring(0, 8)} to ${sessionId.substring(0, 8)}`);
+      needsPtyRestart = true;
+      // Mark old session's PTY as inactive
+      const oldSession = this.sessions.get(currentPtySessionId);
+      if (oldSession) {
+        oldSession.devicePtyActive = false;
+      }
+    } else if (session.info.status !== 'creating' && !session.devicePtyActive) {
       const timeSinceCreation = Date.now() - session.info.createdAt.getTime();
       if (timeSinceCreation > this.PTY_STARTUP_GRACE_PERIOD_MS) {
         logger.warn(`🐚 [SESSION] PTY is not active for session ${sessionId.substring(0, 8)}... - will request restart`);
@@ -138,6 +154,11 @@ export class SessionManager {
         // Reset PTY active flag so new output will be accepted
         session.devicePtyActive = false;
       }
+    }
+    
+    // Track this as the active PTY session if restarting
+    if (needsPtyRestart) {
+      this.activePtySession.set(session.info.deviceUuid, sessionId);
     }
 
     // Add client to attached set

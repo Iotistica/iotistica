@@ -380,11 +380,9 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       return;
     }
     
-    // Detach from current session first
-    if (currentSessionId && currentSessionId !== sessionId) {
-      detachFromSession();
-    }
-
+    // Don't call detachFromSession when switching - just attach to new session
+    // Backend will handle moving client from old session to new one
+    
     const msg = {
       type: 'attach-session',
       data: { 
@@ -395,7 +393,8 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     wsRef.current.send(JSON.stringify(msg));
 
     if (xtermRef.current) {
-      xtermRef.current.writeln(`\x1b[90mAttaching to session ${sessionId.substring(0, 8)}...\x1b[0m`);
+      xtermRef.current.clear();
+      xtermRef.current.writeln(`\x1b[90mSwitching to session ${sessionId.substring(0, 8)}...\x1b[0m`);
     }
   };
 
