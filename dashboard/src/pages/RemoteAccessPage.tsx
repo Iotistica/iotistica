@@ -471,50 +471,51 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     }
   };
 
-  const attachToSession = (sessionId: string) => {
-    console.log('[RemoteAccess] 🔄 attachToSession called for:', sessionId.substring(0, 8));
-    
-    // Prevent race conditions - don't allow multiple simultaneous attach operations
-    if (isAttachingRef.current) {
-      console.log('[RemoteAccess] ⚠️ BLOCKED: Already attaching to a session, ignoring duplicate call');
-      return;
-    }
-    
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      console.error('[RemoteAccess] WebSocket not connected');
-      return;
-    }
-
-    if (!sessionId) {
-      console.error('[RemoteAccess] Cannot attach - sessionId is null/undefined');
-      return;
-    }
-    
-    // Mark that we're in the process of attaching
-    isAttachingRef.current = true;
-    
-    // Disable auto-connect to prevent creating new session when listSessions is called
-    autoConnectPendingRef.current = false;
-    console.log('[RemoteAccess] 🔄 Auto-connect disabled for manual session switch');
-    
-    // Don't call detachFromSession when switching - just attach to new session
-    // Backend will handle moving client from old session to new one
-    
-    const msg = {
-      type: 'attach-session',
-      data: { 
-        sessionId,
-        userId: user?.id,
-      },
-    };
-    wsRef.current.send(JSON.stringify(msg));
-    console.log('[RemoteAccess] 🔄 Sent attach-session message');
-
-    if (xtermRef.current) {
-      xtermRef.current.clear();
-      xtermRef.current.writeln(`\x1b[90mSwitching to session ${sessionId.substring(0, 8)}...\x1b[0m`);
-    }
-  };
+  // COMMENTED OUT: Unused after UI simplification - keeping for reference
+  // const attachToSession = (sessionId: string) => {
+  //   console.log('[RemoteAccess] 🔄 attachToSession called for:', sessionId.substring(0, 8));
+  //   
+  //   // Prevent race conditions - don't allow multiple simultaneous attach operations
+  //   if (isAttachingRef.current) {
+  //     console.log('[RemoteAccess] ⚠️ BLOCKED: Already attaching to a session, ignoring duplicate call');
+  //     return;
+  //   }
+  //   
+  //   if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+  //     console.error('[RemoteAccess] WebSocket not connected');
+  //     return;
+  //   }
+  //
+  //   if (!sessionId) {
+  //     console.error('[RemoteAccess] Cannot attach - sessionId is null/undefined');
+  //     return;
+  //   }
+  //   
+  //   // Mark that we're in the process of attaching
+  //   isAttachingRef.current = true;
+  //   
+  //   // Disable auto-connect to prevent creating new session when listSessions is called
+  //   autoConnectPendingRef.current = false;
+  //   console.log('[RemoteAccess] 🔄 Auto-connect disabled for manual session switch');
+  //   
+  //   // Don't call detachFromSession when switching - just attach to new session
+  //   // Backend will handle moving client from old session to new one
+  //   
+  //   const msg = {
+  //     type: 'attach-session',
+  //     data: { 
+  //       sessionId,
+  //       userId: user?.id,
+  //     },
+  //   };
+  //   wsRef.current.send(JSON.stringify(msg));
+  //   console.log('[RemoteAccess] 🔄 Sent attach-session message');
+  //
+  //   if (xtermRef.current) {
+  //     xtermRef.current.clear();
+  //     xtermRef.current.writeln(`\x1b[90mSwitching to session ${sessionId.substring(0, 8)}...\x1b[0m`);
+  //   }
+  // };
 
   const detachFromSession = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !currentSessionId) {
