@@ -200,7 +200,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
 
     const commonProps = {
       data: chartData,
-      margin: { top: 5, right: 10, left: 0, bottom: 5 },
+      margin: { top: 5, right: 10, left: 24, bottom: 5 },
     };
 
     const color = config.color || '#3b82f6'; // Use config color or default blue-500
@@ -217,6 +217,8 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 tickLine={false}
               />
               <YAxis 
+                yAxisId="left"
+                orientation="left"
                 fontSize={12}
                 tickLine={false}
                 tickFormatter={formatValue}
@@ -232,6 +234,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 formatter={(value: number) => [formatValue(value) + (data.metric.unit ? ` ${data.metric.unit}` : ''), 'Value']}
               />
               <Area 
+                yAxisId="left"
                 type="monotone" 
                 dataKey="value" 
                 stroke={color} 
@@ -241,13 +244,14 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
               {config.thresholdsEnabled && config.thresholds?.map((threshold, idx) => (
                 <ReferenceLine
                   key={idx}
+                  yAxisId="left"
                   y={threshold.value}
                   stroke={threshold.color}
                   strokeDasharray={threshold.lineStyle === 'dashed' ? '5 5' : undefined}
                   strokeWidth={2}
                   label={{
                     value: threshold.label || threshold.value.toString(),
-                    position: 'right',
+                    position: 'left',
                     fill: threshold.color,
                     fontSize: 12
                   }}
@@ -268,6 +272,8 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 tickLine={false}
               />
               <YAxis 
+                yAxisId="left"
+                orientation="left"
                 fontSize={12}
                 tickLine={false}
                 tickFormatter={formatValue}
@@ -283,19 +289,21 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 formatter={(value: number) => [formatValue(value) + (data.metric.unit ? ` ${data.metric.unit}` : ''), 'Value']}
               />
               <Bar 
+                yAxisId="left"
                 dataKey="value" 
                 fill={color}
               />
               {config.thresholdsEnabled && config.thresholds?.map((threshold, idx) => (
                 <ReferenceLine
                   key={idx}
+                  yAxisId="left"
                   y={threshold.value}
                   stroke={threshold.color}
                   strokeDasharray={threshold.lineStyle === 'dashed' ? '5 5' : undefined}
                   strokeWidth={2}
                   label={{
                     value: threshold.label || threshold.value.toString(),
-                    position: 'right',
+                    position: 'left',
                     fill: threshold.color,
                     fontSize: 12
                   }}
@@ -316,6 +324,8 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 tickLine={false}
               />
               <YAxis 
+                yAxisId="left"
+                orientation="left"
                 fontSize={12}
                 tickLine={false}
                 tickFormatter={formatValue}
@@ -331,6 +341,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 formatter={(value: number) => [formatValue(value) + (data.metric.unit ? ` ${data.metric.unit}` : ''), 'Value']}
               />
               <Line 
+                yAxisId="left"
                 type="monotone" 
                 dataKey="value" 
                 stroke={color}
@@ -340,13 +351,14 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
               {config.thresholdsEnabled && config.thresholds?.map((threshold, idx) => (
                 <ReferenceLine
                   key={idx}
+                  yAxisId="left"
                   y={threshold.value}
                   stroke={threshold.color}
                   strokeDasharray={threshold.lineStyle === 'dashed' ? '5 5' : undefined}
                   strokeWidth={2}
                   label={{
                     value: threshold.label || threshold.value.toString(),
-                    position: 'right',
+                    position: 'left',
                     fill: threshold.color,
                     fontSize: 12
                   }}

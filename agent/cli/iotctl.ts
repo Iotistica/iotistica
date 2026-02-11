@@ -279,7 +279,7 @@ DEVICE MANAGEMENT:
 
   status                            Show device status and health
 
-  restart                           Restart agent services (soft restart, API stays running)
+  restart                           Restart agent services (API and MQTT stay running)
 
   logs [--follow] [-n <lines>]      Show device logs
                                     --follow, -f : Follow log output
@@ -1010,7 +1010,7 @@ async function restart(): Promise<void> {
 		});
 		
 		logger.info('Agent services restarting', {
-			note: 'All services will reinitialize (API stays running)'
+			note: 'All services will reinitialize (API and MQTT stay running)'
 		});
 	} catch (error) {
 		logger.error('Failed to restart agent services', error as Error);

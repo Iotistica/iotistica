@@ -629,7 +629,11 @@ export class FeatureInitializer {
   /**
    * Cleanup all initialized features
    */
-  async cleanup(): Promise<void> {
+  /**
+   * Cleanup all features
+   * @param preserveShell - If true, skip shell handler cleanup (for restarts)
+   */
+  async cleanup(preserveShell: boolean = false): Promise<void> {
     const { logger } = this.context;
 
     // Stop Sensor Publish
@@ -664,10 +668,14 @@ export class FeatureInitializer {
       });
     }
 
-    // Stop Shell Handler
-    if (this.features.shellHandler) {
+    // Stop Shell Handler (skip during restart to preserve remote sessions)
+    if (this.features.shellHandler && !preserveShell) {
       await this.features.shellHandler.cleanup();
       logger.debugSync('Shell Handler stopped', {
+        component: LogComponents.agent,
+      });
+    } else if (preserveShell) {
+      logger.debugSync('Shell Handler preserved (restart mode)', {
         component: LogComponents.agent,
       });
     }

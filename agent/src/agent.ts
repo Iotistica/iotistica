@@ -1392,41 +1392,91 @@ export default class Agent {
   }
 
   /**
-   * Restart all agent services except the API server
-   * This is a soft restart that keeps the HTTP server running
+   * Restart all agent services except the API server and MQTT
+   * This is a soft restart that keeps the HTTP server and MQTT connection running
    */
   public async restartServices(): Promise<void> {
-    this.agentLogger?.infoSync('Restarting agent services (soft restart)', {
+    this.agentLogger?.infoSync('Starting agent services restart (soft restart)', {
       component: LogComponents.agent,
+      note: 'API and MQTT will remain running',
     });
 
     try {
-      // Stop all services (similar to stop() but skip deviceAPI)
+      // Stop features (sensors, jobs, protocols) but preserve shell handler
       if (this.featureInitializer) {
-        await this.featureInitializer.cleanup();
+        this.agentLogger?.infoSync('Stopping features (sensors, jobs, protocols)...', {
+          component: LogComponents.agent,
+        });
+        await this.featureInitializer.cleanup(true); // preserveShell = true
+        this.featureInitializer = undefined;
+        this.agentLogger?.infoSync('✓ Features stopped (shell preserved)', {
+          component: LogComponents.agent,
+        });
       }
       
+      // Stop cloud sync
       if (this.cloudSync) {
+        this.agentLogger?.infoSync('Stopping cloud sync...', {
+          component: LogComponents.agent,
+        });
         await this.cloudSync.stop();
+        this.cloudSync = undefined;
+        this.agentLogger?.infoSync('✓ Cloud sync stopped', {
+          component: LogComponents.agent,
+        });
       }
 
+      // Stop firewall
       if (this.firewall) {
+        this.agentLogger?.infoSync('Stopping firewall...', {
+          component: LogComponents.agent,
+        });
         await this.firewall.stop();
+        this.firewall = undefined;
+        this.agentLogger?.infoSync('✓ Firewall stopped', {
+          component: LogComponents.agent,
+        });
       }
 
+      // Stop updater
       if (this.updater) {
+        this.agentLogger?.infoSync('Stopping agent updater...', {
+          component: LogComponents.agent,
+        });
         await this.updater.cleanup();
+        this.updater = undefined;
+        this.agentLogger?.infoSync('✓ Agent updater stopped', {
+          component: LogComponents.agent,
+        });
       }
 
+      // Stop memory monitoring
+      this.agentLogger?.infoSync('Stopping memory monitoring...', {
+        component: LogComponents.agent,
+      });
       stopMemoryMonitoring();
+      this.agentLogger?.infoSync('✓ Memory monitoring stopped', {
+        component: LogComponents.agent,
+      });
 
+      // Stop simulation orchestrator
       if (this.simulationOrchestrator) {
+        this.agentLogger?.infoSync('Stopping simulation orchestrator...', {
+          component: LogComponents.agent,
+        });
         await this.simulationOrchestrator.stop();
+        this.simulationOrchestrator = undefined;
+        this.agentLogger?.infoSync('✓ Simulation orchestrator stopped', {
+          component: LogComponents.agent,
+        });
       }
 
       stopMemoryLeakSimulation();
 
-      // Stop log backends
+      // Stop log backends (cloud logging)
+      this.agentLogger?.infoSync('Stopping log backends...', {
+        component: LogComponents.agent,
+      });
       for (const backend of this.agentLogger?.getBackends() || []) {
         try {
           if ('disconnect' in backend && typeof backend.disconnect === 'function') {
@@ -1441,31 +1491,59 @@ export default class Agent {
           });
         }
       }
+      this.agentLogger?.infoSync('✓ Log backends stopped', {
+        component: LogComponents.agent,
+      });
 
+      // Stop dictionary manager
       if (this.dictionaryManager) {
+        this.agentLogger?.infoSync('Stopping dictionary manager...', {
+          component: LogComponents.agent,
+        });
         await this.dictionaryManager.shutdown();
         this.dictionaryManager = undefined;
+        this.agentLogger?.infoSync('✓ Dictionary manager stopped', {
+          component: LogComponents.agent,
+        });
       }
 
-      const mqttManager = MqttManager.getInstance();
-      if (mqttManager.isConnected()) {
-        await mqttManager.disconnect();
-      }
+      // SKIP MQTT - keep it running for shell session and MQTT monitoring
+      this.agentLogger?.infoSync('✓ MQTT connection preserved (not restarted)', {
+        component: LogComponents.agent,
+      });
 
       // NOTE: Skip deviceAPI - keep it running!
 
+      // Stop auto-reconciliation
       if (this.containerManager) {
+        this.agentLogger?.infoSync('Stopping auto-reconciliation...', {
+          component: LogComponents.agent,
+        });
         this.containerManager.stopAutoReconciliation();
+        this.agentLogger?.infoSync('✓ Auto-reconciliation stopped', {
+          component: LogComponents.agent,
+        });
       }
 
+      // Clear scheduled restart timer
       if (this.scheduledRestartTimer) {
         clearTimeout(this.scheduledRestartTimer);
         this.scheduledRestartTimer = undefined;
       }
       
-      this.discoveryService?.stopPeriodicDiscovery();
+      // Stop discovery service
+      if (this.discoveryService) {
+        this.agentLogger?.infoSync('Stopping discovery service...', {
+          component: LogComponents.agent,
+        });
+        this.discoveryService.stopPeriodicDiscovery();
+        this.discoveryService = undefined;
+        this.agentLogger?.infoSync('✓ Discovery service stopped', {
+          component: LogComponents.agent,
+        });
+      }
 
-      this.agentLogger?.infoSync('All services stopped, waiting before reinit...', {
+      this.agentLogger?.infoSync('All services stopped, reinitializing...', {
         component: LogComponents.agent,
       });
 
@@ -1475,8 +1553,9 @@ export default class Agent {
       // Re-initialize all services (reuse init logic)
       await this.init();
 
-      this.agentLogger?.infoSync('Agent services restarted successfully', {
+      this.agentLogger?.infoSync('✓ Agent services restarted successfully', {
         component: LogComponents.agent,
+        note: 'All services reinitialized (API and MQTT preserved)',
       });
     } catch (error) {
       this.agentLogger?.errorSync(
