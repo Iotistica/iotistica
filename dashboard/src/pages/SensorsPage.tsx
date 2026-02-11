@@ -3,7 +3,7 @@
  * Hides technical pipeline details, focuses on sensor configuration and status
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Activity, Pencil, Plus } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -85,7 +85,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const { getPendingConfig, updatePendingSensor, addPendingSensor } = useDeviceState();
 
-  const fetchSensors = async () => {
+  const fetchSensors = useCallback(async () => {
     console.log('[fetchSensors] 🔄 START - Fetching sensors from API');
     try {
       const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors`));
@@ -212,8 +212,16 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       console.log(`[fetchSensors] Found ${pendingSensors.length} pending devices to display`);
       console.log('[fetchSensors] 📊 Final pendingSensors status:', pendingSensors.map((s: any) => ({ name: s.name, status: s.deploymentStatus })));
       
-      // Show newly added devices (DRAFT) at the top, then deployed devices
-      setSensors([...pendingSensors, ...pipelines, ...devices]);
+      // Sort devices to show pending at top (recently deployed), then deployed, then others
+      const sortedDevices = [...devices].sort((a, b) => {
+        const statusOrder = { 'pending': 0, 'deployed': 1, 'failed': 2 };
+        const aOrder = statusOrder[a.deploymentStatus as keyof typeof statusOrder] ?? 3;
+        const bOrder = statusOrder[b.deploymentStatus as keyof typeof statusOrder] ?? 3;
+        return aOrder - bOrder;
+      });
+      
+      // Show newly added devices (DRAFT) at the top, then sorted devices
+      setSensors([...pendingSensors, ...pipelines, ...sortedDevices]);
       console.log('[fetchSensors] ✅ COMPLETE - Updated sensors state');
       setError(null);
     } catch (err: any) {
@@ -221,7 +229,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [deviceUuid, getPendingConfig]);
 
   useEffect(() => {
     fetchSensors();
@@ -233,18 +241,12 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     const handleDeploymentStarted = (event: CustomEvent) => {
       if (event.detail.deviceUuid === deviceUuid) {
         console.log('[deployment-started] 🚀 Event received for device:', deviceUuid);
-        console.log('[deployment-started] 📊 Current sensors before update:', sensors.map(s => ({ name: s.name, status: s.deploymentStatus })));
         
-        // Update UI: draft → pending
-        setSensors(prev => {
-          const updated = prev.map(sensor => 
-            sensor.deploymentStatus === 'draft' 
-              ? { ...sensor, deploymentStatus: 'pending' as any }
-              : sensor
-          );
-          console.log('[deployment-started] ✅ Sensors after update:', updated.map(s => ({ name: s.name, status: s.deploymentStatus })));
-          return updated;
-        });
+        // Refresh immediately to get the database version with pending status
+        setTimeout(() => {
+          console.log('[deployment-started] 🔄 Fetching sensors to confirm database update');
+          fetchSensors();
+        }, 500);
       }
     };
     
@@ -254,7 +256,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       clearInterval(interval);
       window.removeEventListener('deployment-started', handleDeploymentStarted as EventListener);
     };
-  }, [deviceUuid]);
+  }, [deviceUuid, fetchSensors]);
 
   const handleAddProtocolDevice = async (device: any) => {
     try {

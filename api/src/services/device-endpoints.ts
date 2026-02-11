@@ -163,38 +163,21 @@ export class DeviceSensorSyncService {
         [deviceUuid]
       );
       const existingByUuid = new Map(existingResult.rows.map((r: any) => [r.uuid, r]));
+      const existingByName = new Map(existingResult.rows.map((r: any) => [r.name, r]));
       const existingUuids = new Set(existingResult.rows.map((r: any) => r.uuid).filter(Boolean));
       const configUuids = new Set(configDevices.map(d => d.uuid).filter(Boolean));
 
       // 1. Insert or update sensors from config
       for (const endpoint of configDevices) {
         if (endpoint.uuid && existingUuids.has(endpoint.uuid)) {
-          // Compare with existing record to detect changes
           const existing = existingByUuid.get(endpoint.uuid);
-          const hasChanged = existing && (
-            existing.enabled !== endpoint.enabled ||
-            existing.poll_interval !== endpoint.pollInterval ||
-            JSON.stringify(existing.connection) !== JSON.stringify(endpoint.connection) ||
-            JSON.stringify(existing.data_points) !== JSON.stringify(endpoint.dataPoints)
-          );
-          
-          // Detect out-of-sync: enabled state doesn't match agent's actual state
-          // - If we disabled but agent still has it connected → needs deployment
-          // - If we enabled but agent has it disconnected → needs deployment
-          const isOutOfSync = existing && existing.health_connected !== null && 
-            existing.enabled !== existing.health_connected;
           
           // Update existing sensor by UUID (stable identifier)
-          // CRITICAL: Deployment status state machine during reconciliation
-          // - If 'pending': Keep pending (user made changes agent hasn't seen yet)
-          // - If 'reconciling': Mark as deployed (agent confirms changes applied)
-          // - If 'deployed': Keep deployed (already confirmed)
-          // - During deployment (not reconciliation): Mark as pending ONLY if changed or out of sync
-          const deploymentStatus = isReconciliation 
-            ? (existing?.deployment_status === 'pending' ? 'pending' : 
-               existing?.deployment_status === 'reconciling' ? 'deployed' :
-               existing?.deployment_status || 'deployed')
-            : (hasChanged || isOutOfSync ? 'pending' : existing?.deployment_status || 'deployed');
+          // Keep the existing deployment_status during deploy to avoid flipping all to pending.
+          // During reconciliation, mark as deployed (agent has applied changes).
+          const deploymentStatus = isReconciliation
+            ? 'deployed'
+            : (existing?.deployment_status || 'deployed');
           
           await query(
             `UPDATE device_sensors SET
@@ -230,13 +213,19 @@ export class DeviceSensorSyncService {
           );
           logger.info(`Updated: ${endpoint.name} (${endpoint.protocol}) - ${deploymentStatus}`);
         } else {
+          const existingByNameMatch = existingByName.get(endpoint.name);
+          
           // Insert new sensor into table
           // If reconciliation from agent, mark as deployed (agent found it running)
-          // Otherwise, mark as pending (saved to config and ready for deployment)
-          const deploymentStatus = isReconciliation ? 'deployed' : 'pending';
+          // Otherwise, mark as pending ONLY for truly new sensors
+          const deploymentStatus = isReconciliation
+            ? 'deployed'
+            : (existingByNameMatch
+                ? (existingByNameMatch.deployment_status || 'deployed')
+                : 'pending');
           
-          // Generate UUID if not present (for new sensors added via UI)
-          const sensorUuid = endpoint.uuid || uuidv4();
+          // Reuse UUID if name already exists, otherwise generate a new one
+          const sensorUuid = endpoint.uuid || existingByNameMatch?.uuid || uuidv4();
           
           await query(
             `INSERT INTO device_sensors (
