@@ -655,10 +655,13 @@ export class DeviceSensorSyncService {
       // Return sensors in API format
       return result.rows.map((row: any) => {
         // Get desired 'enabled' state from target, fallback to table value
+        // If pending deletion, force disabled so UI doesn't show offline.
         const targetSensor: any = targetSensorsByName.get(row.name);
-        const enabledFromTarget = targetSensor?.enabled !== undefined 
-          ? targetSensor.enabled 
-          : row.enabled;
+        const enabledFromTarget = row.deployment_status === 'pending_deletion'
+          ? false
+          : (targetSensor?.enabled !== undefined 
+              ? targetSensor.enabled 
+              : row.enabled);
         
         logger.debug(`[getEndpoints] Device "${row.name}": target=${targetSensor?.enabled}, table=${row.enabled}, final=${enabledFromTarget}`);
         

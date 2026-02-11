@@ -57,7 +57,7 @@ interface Sensor {
   connected?: boolean;
   dataPoints?: ModbusDataPoint[] | OPCUADataPoint[]; // Protocol-specific data points
   // Deployment tracking fields
-  deploymentStatus?: 'pending' | 'deployed' | 'deploying' | 'failed' | 'draft';
+  deploymentStatus?: 'pending' | 'deployed' | 'deploying' | 'failed' | 'draft' | 'pending_deletion';
   lastDeployedAt?: string | null;
   deploymentError?: string | null;
   deploymentAttempts?: number;
@@ -146,7 +146,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           dataPoints: d.dataPoints || d.data_points || [], // Data points configuration
           pollInterval: d.pollInterval, // Poll interval
           // Deployment tracking
-          deploymentStatus: d.deploymentStatus,
+          deploymentStatus: d.deploymentStatus || d.deployment_status,
           lastDeployedAt: d.lastDeployedAt,
           deploymentError: d.deploymentError,
           deploymentAttempts: d.deploymentAttempts,
@@ -438,6 +438,10 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       return <Badge className="bg-red-600 dark:bg-red-700 text-white border border-red-700 dark:border-red-600 font-semibold">Deploy Failed</Badge>;
     }
     
+    // Pending deletion (marked for deletion, waiting for agent to confirm)
+    if (deploymentStatus === 'pending_deletion') {
+      return <Badge className="bg-gray-500 dark:bg-gray-600 text-white border border-gray-600 dark:border-gray-500">Pending Deletion</Badge>;
+    }
 
     
     // 2. Disabled state (toggle is off - don't show health indicators)
