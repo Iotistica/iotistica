@@ -103,6 +103,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [selectedProtocol, setSelectedProtocol] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  const [selectedType, setSelectedType] = useState<string>('all');
   const { getPendingConfig, updatePendingSensor, addPendingSensor } = useDeviceState();
 
   // Virtual device states
@@ -564,14 +565,10 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   /**
    * Simplified status badge - shows what users need to know
    * Priority: Deployment actions → Disabled state → Health status
+   * Note: Virtual devices follow same status lifecycle as regular devices
    */
   const getStatusBadge = (sensor: Sensor) => {
     const deploymentStatus = sensor.deploymentStatus;
-    
-    // Virtual device badge (always show for virtual devices)
-    if (sensor.type === 'virtual' || sensor.isVirtual) {
-      return <Badge className="bg-purple-600 dark:bg-purple-700 text-white border border-purple-700 dark:border-purple-600 font-semibold">Virtual</Badge>;
-    }
     
     // 1. Deployment lifecycle states (require user action - highest priority)
     
@@ -615,7 +612,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       return <Badge className="bg-red-500 dark:bg-red-600 text-white border border-red-600 dark:border-red-500 font-semibold">Error</Badge>;
     }
     
-    // Active (healthy and connected)
+    // Active (healthy and connected) - Same for all device types
     if (sensor.state === 'CONNECTED' && sensor.healthy) {
       return <Badge className="bg-green-500 dark:bg-green-600 text-white border border-green-600 dark:border-green-500 font-semibold">Active</Badge>;
     }
@@ -699,7 +696,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                   className="border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 >
                   <option value="all">All ({sensors.length})</option>
-                  <option value="CONNECTED">Connected ({sensors.filter(s => s.state === 'CONNECTED').length})</option>
+                  <option value="CONNECTED">Active ({sensors.filter(s => s.state === 'CONNECTED').length})</option>
                   <option value="DISCONNECTED">Disconnected ({sensors.filter(s => s.state === 'DISCONNECTED').length})</option>
                   <option value="PENDING">Pending ({sensors.filter(s => s.state === 'PENDING').length})</option>
                   <option value="healthy">Healthy ({sensors.filter(s => s.healthy).length})</option>
@@ -707,13 +704,27 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                 </select>
               </div>
 
-              {(selectedProtocol !== 'all' || selectedStatus !== 'all') && (
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-foreground">Type:</label>
+                <select 
+                  value={selectedType} 
+                  onChange={(e) => setSelectedType(e.target.value)}
+                  className="border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="all">All ({sensors.length})</option>
+                  <option value="device">Physical ({sensors.filter(s => s.type === 'device').length})</option>
+                  <option value="virtual">Virtual ({sensors.filter(s => s.type === 'virtual').length})</option>
+                </select>
+              </div>
+
+              {(selectedProtocol !== 'all' || selectedStatus !== 'all' || selectedType !== 'all') && (
                 <Button 
                   variant="ghost" 
                   size="sm" 
                   onClick={() => {
                     setSelectedProtocol('all');
                     setSelectedStatus('all');
+                    setSelectedType('all');
                   }}
                   className="text-sm"
                 >
@@ -750,6 +761,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                 : (() => {
                     const filtered = sensors
                       .filter(s => selectedProtocol === 'all' || s.protocol === selectedProtocol)
+                      .filter(s => selectedType === 'all' || s.type === selectedType)
                       .filter(s => {
                         if (selectedStatus === 'all') return true;
                         if (selectedStatus === 'healthy') return s.healthy;
@@ -757,7 +769,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                         return s.state === selectedStatus;
                       });
                     
-                    const hasFilters = selectedProtocol !== 'all' || selectedStatus !== 'all';
+                    const hasFilters = selectedProtocol !== 'all' || selectedStatus !== 'all' || selectedType !== 'all';
                     return hasFilters 
                       ? `${filtered.length} of ${sensors.length} device(s) matching filters`
                       : `${sensors.length} device(s) configured`;
@@ -775,6 +787,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
               <div className="space-y-3">
                 {sensors
                   .filter(sensor => selectedProtocol === 'all' || sensor.protocol === selectedProtocol)
+                  .filter(sensor => selectedType === 'all' || sensor.type === selectedType)
                   .filter(sensor => {
                     if (selectedStatus === 'all') return true;
                     if (selectedStatus === 'healthy') return sensor.healthy;
@@ -791,6 +804,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                         <div className="flex items-center gap-3 mb-2">
                           <h3 className="text-lg font-semibold text-foreground">{sensor.name}</h3>
                           {getStatusBadge(sensor)}
+                          {(sensor.type === 'virtual' || sensor.isVirtual) && (
+                            <Badge className="bg-purple-600 dark:bg-purple-700 text-white border border-purple-700 dark:border-purple-600 text-xs font-semibold">
+                              Virtual
+                            </Badge>
+                          )}
                           {sensor.protocol && (
                             <Badge variant="outline" className="text-xs">
                               {sensor.protocol.toUpperCase()}

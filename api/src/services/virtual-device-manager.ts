@@ -169,10 +169,8 @@ export class VirtualDeviceManager {
       'virtual-device-manager'
     );
 
-    const virtualDevice = result.sensor;
-
-    logger.info('Virtual device created via standard flow', {
-      uuid: virtualDevice.uuid,
+    logger.info('Virtual device added via standard flow', {
+      uuid: result.sensor.uuid,
       deviceUuid: config.deviceUuid,
       protocol: config.protocol,
       profile: config.profile,
@@ -180,19 +178,44 @@ export class VirtualDeviceManager {
       version: result.version
     });
 
-    // 7. If parent is K8s virtual agent, patch Deployment
+    // 7. Query database to get complete record with all fields
+    // This ensures we return the same structure as regular devices
+    const dbResult = await query(
+      `SELECT uuid, device_uuid, name, protocol, enabled, poll_interval,
+              connection, data_points, metadata, created_at, updated_at,
+              created_by, updated_by, deployment_status, config_version,
+              synced_to_config
+       FROM device_sensors
+       WHERE device_uuid = $1 AND uuid = $2`,
+      [config.deviceUuid, result.sensor.uuid]
+    );
+
+    if (dbResult.rows.length === 0) {
+      throw new Error('Virtual device created but not found in database');
+    }
+
+    const dbRecord = dbResult.rows[0];
+
+    // 8. If parent is K8s virtual agent, patch Deployment
     if (agent.helm_release_name && agent.k8s_namespace) {
       await this.patchVirtualAgentDeployment(config.deviceUuid, agent.helm_release_name, agent.k8s_namespace);
     }
 
+    // 9. Return complete database record
     return {
-      uuid: virtualDevice.uuid,
-      device_uuid: config.deviceUuid,
-      name: virtualDevice.name,
-      protocol: virtualDevice.protocol,
-      connection: connectionObj,
-      data_points: dataPoints,
-      metadata: sensorConfig.metadata
+      uuid: dbRecord.uuid,
+      device_uuid: dbRecord.device_uuid,
+      name: dbRecord.name,
+      protocol: dbRecord.protocol,
+      connection: typeof dbRecord.connection === 'string'
+        ? JSON.parse(dbRecord.connection)
+        : dbRecord.connection,
+      data_points: typeof dbRecord.data_points === 'string'
+        ? JSON.parse(dbRecord.data_points)
+        : dbRecord.data_points,
+      metadata: typeof dbRecord.metadata === 'string'
+        ? JSON.parse(dbRecord.metadata)
+        : dbRecord.metadata
     };
   }
 
@@ -201,7 +224,7 @@ export class VirtualDeviceManager {
    */
   async getVirtualDevices(deviceUuid: string): Promise<VirtualDeviceSensor[]> {
     const result = await query(
-      `SELECT uuid, device_uuid, name, protocol, connection, metadata
+      `SELECT uuid, device_uuid, name, protocol, connection, data_points, metadata
        FROM device_sensors
        WHERE device_uuid = $1 
        AND metadata->>'sidecar' = 'true'
@@ -215,6 +238,7 @@ export class VirtualDeviceManager {
       name: row.name,
       protocol: row.protocol,
       connection: typeof row.connection === 'string' ? JSON.parse(row.connection) : row.connection,
+      data_points: typeof row.data_points === 'string' ? JSON.parse(row.data_points) : row.data_points,
       metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata
     }));
   }
@@ -223,19 +247,20 @@ export class VirtualDeviceManager {
    * Delete virtual device
    * 
    * Flow:
-   * 1. Delete from device_sensors table
+   * 1. Use standard deleteEndpoint flow (soft delete)
    * 2. If parent is K8s virtual agent, patch Deployment to remove sidecar
    */
   async deleteVirtualDevice(deviceUuid: string, sensorUuid: string): Promise<void> {
     // Get parent device info before deletion
     const agent = await DeviceModel.getByUuid(deviceUuid);
     
-    // Delete from database
-    await query('DELETE FROM device_sensors WHERE uuid = $1 AND device_uuid = $2', [sensorUuid, deviceUuid]);
+    // Use standard deleteEndpoint flow (soft delete with reconciliation)
+    await deviceSensorSync.deleteEndpoint(deviceUuid, sensorUuid, 'virtual-device-manager');
 
-    logger.info('Virtual device deleted', { uuid: sensorUuid, deviceUuid });
+    logger.info('Virtual device marked for deletion', { uuid: sensorUuid, deviceUuid });
 
-    // If parent is K8s virtual agent, patch Deployment
+    // If parent is K8s virtual agent, patch Deployment immediately
+    // (virtual devices don't need agent reconciliation since they're sidecars)
     if (agent?.helm_release_name && agent?.k8s_namespace) {
       await this.patchVirtualAgentDeployment(deviceUuid, agent?.helm_release_name, agent?.k8s_namespace);
     }
