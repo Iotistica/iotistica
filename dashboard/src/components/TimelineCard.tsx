@@ -30,6 +30,7 @@ interface TimelineEvent {
   metadata: any;
   source?: string;
   correlation_id?: string;
+  event_timestamp?: string;
 }
 
 interface TimelineCardProps {
@@ -50,18 +51,37 @@ export function TimelineCard({
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
 
-  // Fetch events from API
-  const fetchEvents = async () => {
-    if (!deviceId) {
-      setLoading(false);
-      return;
-    }
+  const parseMaybeJson = (value: unknown) => {
+    if (!value) return value;
+    if (typeof value !== "string") return value;
 
     try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  };
+
+  const normalizeEvent = (event: TimelineEvent) => {
+    return {
+      ...event,
+      timestamp: event.timestamp || event.event_timestamp || null,
+      data: parseMaybeJson(event.data),
+      metadata: parseMaybeJson(event.metadata),
+    } as TimelineEvent;
+  };
+
+  // Fetch events from API
+  const fetchEvents = async () => {
+    try {
       setError(null);
-      const response = await fetch(
-        buildApiUrl(`/api/v1/events/device/${deviceId}?limit=${limit}`)
-      );
+      
+      // Determine API endpoint based on whether deviceId is provided
+      const endpoint = deviceId 
+        ? `/api/v1/events/device/${deviceId}?limit=${limit}`
+        : `/api/v1/events/recent?limit=${limit}`; // Global view - all devices
+      
+      const response = await fetch(buildApiUrl(endpoint));
 
       if (!response.ok) {
         throw new Error(`Failed to fetch events: ${response.statusText}`);
@@ -70,9 +90,9 @@ export function TimelineCard({
       const data = await response.json();
 
       if (data.success && data.events) {
-        // Get the top 5 latest events (API already returns them in order)
-        const latestEvents = data.events.slice(0, 5);
-        setEvents(latestEvents);
+        // Get the latest events (API already returns them in order)
+        const latestEvents = data.events.slice(0, limit).map(normalizeEvent);
+        setEvents(latestEvents as TimelineEvent[]);
         setLastRefresh(new Date());
       } else {
         throw new Error(data.error || 'Failed to fetch events');
@@ -228,12 +248,16 @@ export function TimelineCard({
   const getEventTimestamp = (event: TimelineEvent) => {
     // Primary timestamp from event
     if (event.timestamp) return event.timestamp;
+    if (event.event_timestamp) return event.event_timestamp;
     
     // Fallback to data timestamps
+    if (event.data?.created_at) return event.data.created_at;
+    if (event.data?.updated_at) return event.data.updated_at;
     if (event.data?.provisioned_at) return event.data.provisioned_at;
     if (event.data?.detected_at) return event.data.detected_at;
     if (event.data?.came_online_at) return event.data.came_online_at;
     if (event.data?.last_seen) return event.data.last_seen;
+    if (event.metadata?.createdAt) return event.metadata.createdAt;
     return null;
   };
 
@@ -294,6 +318,15 @@ export function TimelineCard({
     // Add source if available
     if (event.source) {
       details.push({ label: "Source", value: event.source });
+    }
+
+    // Fallback: show first few data fields if no structured details matched
+    if (details.length === 0 && event.data && typeof event.data === "object") {
+      const entries = Object.entries(event.data).slice(0, 3);
+      entries.forEach(([key, value]) => {
+        if (value === null || value === undefined) return;
+        details.push({ label: key, value: String(value) });
+      });
     }
 
     return details;

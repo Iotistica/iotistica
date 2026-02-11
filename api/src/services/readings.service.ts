@@ -44,6 +44,30 @@ export interface TimeSeriesQuery {
 }
 
 export class ReadingsService {
+  private lastRefreshTime: number = 0;
+  private readonly REFRESH_THROTTLE_MS = 60000; // Max once per minute
+
+  /**
+   * Refresh materialized views (throttled)
+   * Called after bulk insert when new device data is detected
+   */
+  private async refreshMetricCatalog(): Promise<void> {
+    const now = Date.now();
+    
+    // Throttle: only refresh once per minute
+    if (now - this.lastRefreshTime < this.REFRESH_THROTTLE_MS) {
+      return;
+    }
+
+    try {
+      await query('SELECT refresh_all_catalog_views()');
+      this.lastRefreshTime = now;
+      logger.debug('Refreshed metric catalog views');
+    } catch (error) {
+      logger.error('Failed to refresh metric catalog views:', error);
+    }
+  }
+
   /**
    * Insert single reading
    */
@@ -120,6 +144,15 @@ export class ReadingsService {
        RETURNING *`,
       values
     );
+
+    // Refresh metric catalog if readings contain deviceName (new devices detected)
+    const hasDeviceNames = readings.some(r => r.extra?.deviceName);
+    if (hasDeviceNames && result.rows.length > 0) {
+      // Fire-and-forget (don't block on refresh)
+      this.refreshMetricCatalog().catch(err => 
+        logger.error('Background metric catalog refresh failed:', err)
+      );
+    }
 
     return result.rows.length;
   }

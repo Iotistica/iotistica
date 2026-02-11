@@ -33,6 +33,30 @@ export interface EndpointDeviceConfig {
 }
 
 export class DeviceSensorSyncService {
+  private lastRefreshTime: number = 0;
+  private readonly REFRESH_THROTTLE_MS = 60000; // Max once per minute
+
+  /**
+   * Refresh materialized views (throttled)
+   * Called after device sensors are synced
+   */
+  private async refreshMetricCatalog(): Promise<void> {
+    const now = Date.now();
+    
+    // Throttle: only refresh once per minute
+    if (now - this.lastRefreshTime < this.REFRESH_THROTTLE_MS) {
+      return;
+    }
+
+    try {
+      await query('SELECT refresh_all_catalog_views()');
+      this.lastRefreshTime = now;
+      logger.debug('Refreshed metric catalog views');
+    } catch (error) {
+      logger.error('Failed to refresh metric catalog views:', error);
+    }
+  }
+
   /**
    * Mark endpoints as pending deployment
    * Called when user clicks Sync button (POST /deploy)
@@ -232,6 +256,14 @@ export class DeviceSensorSyncService {
 
 
       logger.info(`Sync complete: config → table (version ${configVersion}) - ${isReconciliation ? 'DEPLOYED' : 'PENDING'}`);
+      
+      // Refresh metric catalog views after syncing device sensors
+      // Fire-and-forget (don't block on refresh)
+      if (configDevices.length > 0) {
+        this.refreshMetricCatalog().catch(err => 
+          logger.error('Background metric catalog refresh failed:', err)
+        );
+      }
     } catch (error) {
       logger.error(' Error syncing config to table:', error);
       throw error;

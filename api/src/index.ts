@@ -536,7 +536,6 @@ async function startServer() {
     // Don't exit - this is not critical for API operation
   }
 
-
   // Start traffic flush service (persists device traffic metrics to database)
   try {
     startTrafficFlushService();

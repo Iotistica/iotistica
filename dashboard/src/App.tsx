@@ -7,7 +7,6 @@ import { SystemMetrics } from "./components/SystemMetrics";
 import { MqttPage } from "./pages/MqttPage";
 import { JobsPage } from "./pages/JobsPage";
 import { ApplicationsPage } from "./pages/ApplicationsPage";
-import { TimelinePage } from "./pages/TimelinePage";
 import { UsagePage } from "./pages/UsagePage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { SecurityPage } from "./pages/SecurityPage";
@@ -15,7 +14,7 @@ import { Toaster } from "./components/ui/sonner";
 import { Sheet, SheetContent } from "./components/ui/sheet";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
-import { Menu, Activity, BarChart3, Radio, CalendarClock, Clock, Package, Shield, FileText, Terminal } from "lucide-react";
+import { Menu, Activity, BarChart3, Radio, CalendarClock, Package, Shield, FileText, Terminal } from "lucide-react";
 import { buildApiUrl } from "./config/api";
 import { SensorHealthDashboard } from "./pages/SensorHealthDashboard";
 import { SensorsPage } from "./pages/SensorsPage";
@@ -31,6 +30,7 @@ import DeviceTagsPage from "./pages/DeviceTagsPage";
 import TagDefinitionsPage from "./pages/TagDefinitionsPage";
 import { DigitalTwinPage } from "./pages/DigitalTwinPage";
 import { EventDebuggerPage } from "./pages/EventDebuggerPage";
+import { AuditPage } from "./pages/audit";
 
 import { toast } from "sonner";
 import { Header } from "./components/Header";
@@ -64,7 +64,7 @@ export default function App() {
     'mqtt',
     'jobs',
     'applications',
-    'timeline',
+    'audit',
     'usage',
     'analytics',
     'security',
@@ -94,7 +94,7 @@ export default function App() {
     const stored = localStorage.getItem('currentView');
     return stored && viewOptions.includes(stored as View) ? (stored as View) : 'metrics';
   });
-  const isGlobalView = currentView === 'dashboard' || currentView === 'mqtt' || currentView === 'security';
+  const isGlobalView = currentView === 'dashboard' || currentView === 'mqtt' || currentView === 'audit' || currentView === 'security';
   const [debugMode, setDebugMode] = useState(false);
   const [isKioskMode, setIsKioskMode] = useState<boolean>(() => {
     return localStorage.getItem('dashboard-kiosk-mode') === 'true';
@@ -729,6 +729,14 @@ export default function App() {
               MQTT
             </Button>
             <Button
+              variant={currentView === 'audit' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setCurrentView('audit')}
+            >
+              <FileText className="w-4 h-4 mr-2" />
+              Audit & Activity
+            </Button>
+            <Button
               variant={currentView === 'security' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setCurrentView('security')}
@@ -770,6 +778,9 @@ export default function App() {
               )}
               {currentView === 'mqtt' && (
                 <MqttPage device={selectedDevice} devices={devices} />
+              )}
+              {currentView === 'audit' && (
+                <AuditPage />
               )}
               {currentView === 'security' && (
                 <div className="flex-1 bg-background overflow-auto p-6">
@@ -872,16 +883,8 @@ export default function App() {
               <Package className="w-4 h-4 mr-2" />
               Applications
             </Button>
-            <Button
-              variant={currentView === 'timeline' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setCurrentView('timeline')}
-            >
-              <Clock className="w-4 h-4 mr-2" />
-              Timeline
-            </Button>
             {/* <Button
-              variant={currentView === 'event-debugger' ? 'default' : 'outline'}
+              variant={currentView === 'event-debugger' ? 'default' : 'outline'}}
               size="sm"
               onClick={() => setCurrentView('event-debugger')}
             >
@@ -1030,9 +1033,6 @@ export default function App() {
           )}
           {currentView === 'jobs' && (
             <JobsPage device={selectedDevice} />
-          )}
-          {currentView === 'timeline' && (
-            <TimelinePage device={selectedDevice} />
           )}
           {currentView === 'event-debugger' && (
             <EventDebuggerPage deviceUuid={selectedDevice.deviceUuid} />
