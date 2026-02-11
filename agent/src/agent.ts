@@ -1152,6 +1152,10 @@ export default class Agent {
       this.updater // Pass AgentUpdater for version reporting
     );
 
+    // Pass CloudSync reference to FeatureInitializer for auto-reload coordination
+    // This allows auto-reload to update CloudSync's endpoints reference after reinitializing protocol adapters
+    this.featureInitializer?.setCloudSync(this.cloudSync);
+
     // Start polling for target state (loads cloud config)
     await this.cloudSync.startPoll();
 

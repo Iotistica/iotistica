@@ -139,7 +139,10 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     }
   };
 
-  const formatValue = (value: number) => {
+  const formatValue = (value: number | null | undefined) => {
+    if (value === null || value === undefined || isNaN(value) || !isFinite(value)) {
+      return '--';
+    }
     return value.toFixed(2);
   };
 

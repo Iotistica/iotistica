@@ -58,6 +58,7 @@ export class FeatureInitializer {
   private context: FeatureContext;
   private features: InitializedFeatures = {};
   private currentProtocols: Record<string, any> | null = null;
+  private cloudSync?: any; // CloudSync reference for updating endpoints after auto-reload
 
   constructor(context: FeatureContext) {
     this.context = context;
@@ -110,6 +111,14 @@ export class FeatureInitializer {
    */
   getFeatures(): InitializedFeatures {
     return this.features;
+  }
+
+  /**
+   * Set CloudSync reference for updating endpoints after auto-reload
+   * Called from agent.ts after CloudSync creation
+   */
+  setCloudSync(cloudSync: any): void {
+    this.cloudSync = cloudSync;
   }
 
   // ============================================================================
@@ -470,6 +479,15 @@ export class FeatureInitializer {
 
           // Reinitialize Sensor Publish (will read endpoints from database)
           await this.initSensorPublish();
+
+          // CRITICAL: Update CloudSync's endpoints reference to new SensorsFeature instance
+          // Without this, CloudSync tries to collect health from the old (stopped) instance
+          if (this.cloudSync && this.features.sensors) {
+            this.cloudSync.setEndpoints(this.features.sensors);
+            logger.infoSync('Updated CloudSync endpoints reference after reload', {
+              component: LogComponents.agent
+            });
+          }
 
           logger.infoSync('Protocol adapters and Sensor Publish reloaded successfully', {
             component: LogComponents.agent,

@@ -188,6 +188,18 @@ export class ConfigManager extends EventEmitter {
 	 * Set target configuration
 	 */
 	public async setTarget(config: DeviceConfig): Promise<void> {
+		console.log('[ConfigManager] setTarget called', {
+			configKeys: Object.keys(config),
+			hasEndpoints: !!config.endpoints,
+			endpointsCount: config.endpoints?.length || 0,
+			endpoints: config.endpoints?.map((e: any) => ({
+				name: e.name,
+				protocol: e.protocol,
+				hasConnection: !!e.connection,
+				hasSlaveRange: !!e.connection?.slaveRange
+			}))
+		});
+		
 		this.targetConfig = _.cloneDeep(config);
 		
 		// Trigger reconciliation
@@ -251,21 +263,46 @@ export class ConfigManager extends EventEmitter {
 	public getDiscoveryTargets(protocol: string): any[] {
 		const endpoints = this.targetConfig.endpoints || [];
 		
+		// Debug: Log what we received
+		console.log('[ConfigManager] getDiscoveryTargets called', {
+			protocol,
+			totalEndpoints: endpoints.length,
+			targetConfigKeys: Object.keys(this.targetConfig),
+			endpoints: endpoints.map((e: any) => ({
+				name: e.name,
+				protocol: e.protocol,
+				hasConnection: !!e.connection,
+				hasConnectionString: !!e.connectionString,
+				connectionType: e.connection?.type,
+				hasSlaveRange: !!e.connection?.slaveRange
+			}))
+		});
+		
 		const filtered = endpoints.filter((endpoint: any) => {
 			if (endpoint.protocol !== protocol) return false;
 
+			// Parse connection from either object or string format
+			let connection: any = endpoint.connection;
+			if (!connection && endpoint.connectionString) {
+				try {
+					connection = JSON.parse(endpoint.connectionString);
+				} catch {
+					connection = null;
+				}
+			}
+
 			switch (protocol) {
 				case 'modbus':
-					return endpoint.connection?.slaveRange !== undefined;
+					return connection?.slaveRange !== undefined;
 				case 'opcua':
-					return endpoint.connection?.endpointUrl && 
+					return connection?.endpointUrl && 
 						(!endpoint.dataPoints || endpoint.dataPoints.length === 0);
 				case 'snmp':
-					return endpoint.connection?.community && 
+					return connection?.community && 
 						(!endpoint.dataPoints || endpoint.dataPoints.length === 0);
 				case 'bacnet':
-					return Array.isArray(endpoint.connection?.discoveryTargets) && 
-						endpoint.connection.discoveryTargets.length > 0;
+					return Array.isArray(connection?.discoveryTargets) && 
+						connection.discoveryTargets.length > 0;
 				default:
 					return false;
 			}
@@ -1346,6 +1383,22 @@ export class ConfigManager extends EventEmitter {
 	public async handleEndpointsChanges(change: { old: any; new: any }): Promise<void> {
 		const newEndpoints = change.new || [];
 		const oldEndpoints = change.old || [];
+
+		console.log('[ConfigManager] handleEndpointsChanges called', {
+			oldCount: oldEndpoints.length,
+			newCount: newEndpoints.length,
+			newEndpoints: newEndpoints.map((e: any) => ({
+				name: e?.name,
+				protocol: e?.protocol,
+				hasConnection: !!e?.connection,
+				connectionKeys: e?.connection ? Object.keys(e.connection) : [],
+				hasSlaveRange: !!e?.connection?.slaveRange
+			}))
+		});
+
+		// CRITICAL: Update targetConfig.endpoints immediately so getDiscoveryTargets() sees new endpoints
+		// This prevents race condition where discovery runs before setTarget() is called
+		this.targetConfig.endpoints = newEndpoints;
 
 		// Classify changes (added, removed, modified)
 		const changeType = this.classifyEndpointChanges(oldEndpoints, newEndpoints);
