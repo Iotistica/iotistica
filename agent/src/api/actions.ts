@@ -350,7 +350,10 @@ export const getProvisionStatus = async () => {
 		deviceName: deviceInfo.deviceName,
 		apiEndpoint: deviceInfo.apiEndpoint,
 		hasProvisioningKey: !!deviceInfo.provisioningApiKey,
-		mqttConfigured: !!(deviceInfo.mqttBrokerConfig?.username && deviceInfo.mqttBrokerConfig?.password)
+		mqttConfigured: !!(deviceInfo.mqttBrokerConfig?.username && deviceInfo.mqttBrokerConfig?.password),
+		mqttBrokerUrl: deviceInfo.mqttBrokerConfig 
+			? `${deviceInfo.mqttBrokerConfig.protocol}://${deviceInfo.mqttBrokerConfig.host}:${deviceInfo.mqttBrokerConfig.port}` 
+			: undefined
 	};
 };
 

@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Terminal as TerminalIcon, Power, Plus } from 'lucide-react';
+import { Terminal as TerminalIcon, Power, Plus, Settings } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Label } from '@/components/ui/label';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
@@ -39,6 +41,10 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [ptyRestarted, setPtyRestarted] = useState(false);
+  const [fontSize, setFontSize] = useState<number>(() => {
+    const saved = localStorage.getItem('terminal-font-size');
+    return saved ? parseInt(saved, 10) : 14;
+  });
   
   // Helper functions for persistent session storage (survives component unmount)
   const saveSessionState = (deviceId: string, sessionId: string, sessionsList: SessionInfo[]) => {
@@ -665,7 +671,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     // Initialize xterm.js
     const term = new Terminal({
       cursorBlink: true,
-      fontSize: 14,
+      fontSize: fontSize,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       theme: {
         background: '#1e1e1e',
@@ -764,6 +770,17 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       term.dispose();
     };
   }, []); // No dependencies - stable across session changes
+
+  // Update font size dynamically without recreating terminal
+  useEffect(() => {
+    if (xtermRef.current && fitAddonRef.current) {
+      xtermRef.current.options.fontSize = fontSize;
+      // Refit terminal to adjust layout for new font size
+      fitAddonRef.current.fit();
+    }
+    // Save to localStorage
+    localStorage.setItem('terminal-font-size', fontSize.toString());
+  }, [fontSize]);
 
   // Keep session state updated whenever currentSessionId or sessions change
   useEffect(() => {
@@ -962,6 +979,59 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
                     </Button>
                   </>
                 )}
+
+                {/* Settings Button - placed at far right */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" size="sm" title="Terminal Settings">
+                      <Settings className="h-4 w-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-64" align="end">
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="font-medium text-sm mb-3">Terminal Settings</h4>
+                        <div className="space-y-2">
+                          <Label className="text-sm text-muted-foreground">Font size</Label>
+                          <div className="space-y-1">
+                            <Button
+                              variant={fontSize === 12 ? "default" : "ghost"}
+                              size="sm"
+                              className="w-full justify-start"
+                              onClick={() => setFontSize(12)}
+                            >
+                              Small
+                            </Button>
+                            <Button
+                              variant={fontSize === 14 ? "default" : "ghost"}
+                              size="sm"
+                              className="w-full justify-start"
+                              onClick={() => setFontSize(14)}
+                            >
+                              Medium (default)
+                            </Button>
+                            <Button
+                              variant={fontSize === 16 ? "default" : "ghost"}
+                              size="sm"
+                              className="w-full justify-start"
+                              onClick={() => setFontSize(16)}
+                            >
+                              Large
+                            </Button>
+                            <Button
+                              variant={fontSize === 18 ? "default" : "ghost"}
+                              size="sm"
+                              className="w-full justify-start"
+                              onClick={() => setFontSize(18)}
+                            >
+                              Extra Large
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
           </CardHeader>
