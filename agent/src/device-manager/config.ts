@@ -283,18 +283,12 @@ export class ConfigManager extends EventEmitter {
 		});
 		
 		// Log what was filtered
-		const filteredLog = {
+		this.logger?.debugSync('Discovery targets filtered', {
 			component: LogComponents.configManager,
 			protocol,
 			totalFiltered: filtered.length,
 			filteredNames: filtered.map((e: any) => e.name),
-		};
-		
-		if (this.logger) {
-			this.logger.debugSync('Discovery targets filtered', filteredLog);
-		} else {
-			console.log('[ConfigManager] Discovery targets filtered', JSON.stringify(filteredLog, null, 2));
-		}
+		});
 		
 		return filtered;
 	}
