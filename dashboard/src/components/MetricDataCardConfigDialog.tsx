@@ -33,7 +33,7 @@ import {
 import { buildApiUrl } from '@/config/api';
 import type { MetricDataCardConfig, ThresholdLine } from './MetricDataCard';
 import { Plus, Trash2, Check, ChevronsUpDown } from 'lucide-react';
-import { Switch } from './ui/switch';
+import { Checkbox } from './ui/checkbox';
 import { cn } from './ui/utils';
 
 interface MetricDataCardConfigDialogProps {
@@ -277,15 +277,18 @@ export function MetricDataCardConfigDialog({
           </div>
 
           <div className="grid gap-2">
-            <div className="flex items-center justify-between">
-              <Label>Show Aggregate Cards</Label>
-              <Switch
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="show-stats"
                 checked={showStats}
                 onCheckedChange={setShowStats}
               />
+              <Label htmlFor="show-stats" className="cursor-pointer">
+                Show Aggregate Cards
+              </Label>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Toggle Current/Average/Minimum/Maximum cards above the chart.
+            <p className="text-xs text-muted-foreground ml-6">
+              Display Current/Average/Minimum/Maximum cards above the chart.
             </p>
           </div>
 
@@ -314,13 +317,16 @@ export function MetricDataCardConfigDialog({
           </div>
 
           {/* Thresholds Section */}
-          <div className="grid gap-2 pt-2 border-t">
-            <div className="flex items-center justify-between">
-              <Label>Thresholds</Label>
-              <Switch 
-                checked={showThresholds} 
+          <div className="grid gap-2 pt-2">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="show-thresholds"
+                checked={showThresholds}
                 onCheckedChange={setShowThresholds}
               />
+              <Label htmlFor="show-thresholds" className="cursor-pointer">
+                Thresholds
+              </Label>
             </div>
 
             {showThresholds && (

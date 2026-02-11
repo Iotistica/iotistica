@@ -31,7 +31,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   Shield, 
@@ -595,27 +595,27 @@ export function SecurityPage() {
             </div>
             
             <div className="flex items-center space-x-2">
-              <Switch
+              <Checkbox
                 id="is_superuser"
                 checked={userFormData.is_superuser}
                 onCheckedChange={(checked) => 
-                  setUserFormData({ ...userFormData, is_superuser: checked })
+                  setUserFormData({ ...userFormData, is_superuser: checked as boolean })
                 }
               />
-              <Label htmlFor="is_superuser">
+              <Label htmlFor="is_superuser" className="cursor-pointer">
                 Superuser (bypass all ACL checks)
               </Label>
             </div>
             
             <div className="flex items-center space-x-2">
-              <Switch
+              <Checkbox
                 id="is_active"
                 checked={userFormData.is_active}
                 onCheckedChange={(checked) => 
-                  setUserFormData({ ...userFormData, is_active: checked })
+                  setUserFormData({ ...userFormData, is_active: checked as boolean })
                 }
               />
-              <Label htmlFor="is_active">
+              <Label htmlFor="is_active" className="cursor-pointer">
                 Active
               </Label>
             </div>

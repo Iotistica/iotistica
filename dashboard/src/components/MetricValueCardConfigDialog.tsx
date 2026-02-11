@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { MetricValueCardConfig } from './MetricValueCard';
 import { buildApiUrl } from '@/config/api';
 
@@ -232,26 +232,31 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
             />
           </div>
 
-          <div className="flex items-center justify-between">
-            <Label htmlFor="sparkline">Show Sparkline</Label>
-            <Switch
+          <div className="flex items-center gap-2">
+            <Checkbox
               id="sparkline"
               checked={showSparkline}
               onCheckedChange={setShowSparkline}
             />
+            <Label htmlFor="sparkline" className="cursor-pointer">
+              Show Sparkline
+            </Label>
           </div>
 
           {/* Thresholds Section */}
-          <div className="grid gap-2 pt-2 border-t">
+          <div className="grid gap-2 pt-2">
             <Label>Thresholds</Label>
             
             <div className="space-y-3">
               <div className="flex items-center gap-2">
-                <Switch
+                <Checkbox
+                  id="warning-threshold"
                   checked={enableWarning}
                   onCheckedChange={setEnableWarning}
                 />
-                <Label className="text-sm">Warning Threshold</Label>
+                <Label htmlFor="warning-threshold" className="text-sm cursor-pointer">
+                  Warning Threshold
+                </Label>
               </div>
               {enableWarning && (
                 <Input
@@ -264,11 +269,14 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
               )}
 
               <div className="flex items-center gap-2">
-                <Switch
+                <Checkbox
+                  id="critical-threshold"
                   checked={enableCritical}
                   onCheckedChange={setEnableCritical}
                 />
-                <Label className="text-sm">Critical Threshold</Label>
+                <Label htmlFor="critical-threshold" className="text-sm cursor-pointer">
+                  Critical Threshold
+                </Label>
               </div>
               {enableCritical && (
                 <Input

@@ -11,7 +11,7 @@ import { useState, useEffect } from 'react';
 import { Settings, Save, RefreshCw, AlertCircle, Server, Clock, Zap, Brain, FileText } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
@@ -570,15 +570,19 @@ interface FeatureToggleProps {
 
 function FeatureToggle({ label, description, enabled, onToggle }: FeatureToggleProps) {
   return (
-    <div className="flex items-center justify-between p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors">
-      <div className="flex-1 mr-4">
-        <div className="font-medium text-foreground">{label}</div>
-        <div className="text-sm text-muted-foreground mt-1">{description}</div>
-      </div>
-      <Switch
+    <div className="flex items-center gap-3 p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors">
+      <Checkbox
         checked={enabled}
         onCheckedChange={onToggle}
+        id={`feature-${label.toLowerCase().replace(/\s+/g, '-')}`}
       />
+      <label 
+        htmlFor={`feature-${label.toLowerCase().replace(/\s+/g, '-')}`}
+        className="flex-1 cursor-pointer"
+      >
+        <div className="font-medium text-foreground">{label}</div>
+        <div className="text-sm text-muted-foreground mt-1">{description}</div>
+      </label>
     </div>
   );
 }
