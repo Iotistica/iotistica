@@ -630,6 +630,7 @@ export class DeviceSensorSyncService {
       );
       
       // Read from TABLE (deployed/running state)
+      // Exclude virtual devices (they're managed via virtual-devices endpoint)
       let sql = `
         SELECT id, uuid, device_uuid, name, protocol, enabled, poll_interval,
                connection, data_points, metadata, config_version, synced_to_config,
@@ -639,8 +640,11 @@ export class DeviceSensorSyncService {
                health_last_error, health_updated_at
         FROM device_sensors 
         WHERE device_uuid = $1
+        AND (metadata->>'virtual' IS NULL OR metadata->>'virtual'::text != 'true')
       `;
       const params: any[] = [deviceUuid];
+
+      logger.debug(`[getEndpoints] SQL filter: excluding virtual devices for device ${deviceUuid.substring(0, 8)}`);
 
       // Filter by protocol if specified
       if (protocol) {

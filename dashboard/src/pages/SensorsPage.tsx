@@ -4,11 +4,15 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Activity, Pencil, Plus } from 'lucide-react';
+import { Activity, Pencil, Plus, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AddSensorDialog } from '@/components/sensors/AddSensorDialog';
 import { EditSensorDialog } from '@/components/sensors/EditSensorDialog';
 import { SensorSummaryCards } from '@/components/sensors/SensorSummaryCards';
@@ -21,6 +25,7 @@ import { useDeviceState } from '@/contexts/DeviceStateContext';
 interface SensorsPageProps {
   deviceUuid: string;
   deviceStatus?: Device['status']; // Add device status for permission checks
+  deviceType?: Device['type']; // Device type to determine feature availability
   debugMode?: boolean;
   onDebugModeChange?: (enabled: boolean) => void;
 }
@@ -52,7 +57,7 @@ interface Sensor {
   lastError: string | null;
   configured: boolean;
   enabled?: boolean; // Whether sensor is enabled/disabled
-  type?: 'pipeline' | 'device'; // pipeline = sensor publish, device = protocol adapter
+  type?: 'pipeline' | 'device' | 'virtual'; // pipeline = sensor publish, device = protocol adapter, virtual = simulator
   protocol?: string;
   connected?: boolean;
   dataPoints?: ModbusDataPoint[] | OPCUADataPoint[]; // Protocol-specific data points
@@ -70,10 +75,25 @@ interface Sensor {
     lastError: string | null;
     updatedAt: string | null;
   } | null;
+  // Virtual device fields
+  isVirtual?: boolean;
+  virtualProfile?: string;
+  virtualImage?: string;
+  virtualConnection?: {
+    host: string;
+    port: number;
+  };
+}
+
+interface Profile {
+  profile_name: string;
+  protocol: string;
+  data_points: any[];
 }
 
 export const SensorsPage: React.FC<SensorsPageProps> = ({ 
-  deviceUuid
+  deviceUuid,
+  deviceType
 }) => {
   const [sensors, setSensors] = useState<Sensor[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,6 +104,17 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [selectedProtocol, setSelectedProtocol] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const { getPendingConfig, updatePendingSensor, addPendingSensor } = useDeviceState();
+
+  // Virtual device states
+  const [addVirtualDeviceDialogOpen, setAddVirtualDeviceDialogOpen] = useState(false);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [virtualFormData, setVirtualFormData] = useState({
+    name: '',
+    protocol: 'modbus',
+    profile: '',
+    slaveCount: 40,
+  });
+  const [virtualDeviceLoading, setVirtualDeviceLoading] = useState(false);
 
   const fetchSensors = useCallback(async () => {
     console.log('[fetchSensors] 🔄 START - Fetching sensors from API');
@@ -104,8 +135,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       
       console.log('[fetchSensors] Raw API response:', {
         devicesCount: data.devices?.length,
+        pipelinesCount: data.pipelines?.length,
         firstDevice: data.devices?.[0],
-        deploymentStatuses: data.devices?.map((d: any) => ({ name: d.name, status: d.deploymentStatus || d.deployment_status }))
+        deviceNames: data.devices?.map((d: any) => d.name),
+        pipelineNames: data.pipelines?.map((p: any) => p.name),
+        deploymentStatuses: data.devices?.map((d: any) => ({ name: d.name, status: d.deploymentStatus || d.deployment_status, metadata: d.metadata }))
       });
       
       // Merge pipelines and protocol adapter devices
@@ -178,6 +212,12 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       
       const pendingSensors = pendingEndpoints
         .filter((s: any) => {
+          // Exclude virtual devices from pending sensors (they're fetched separately)
+          if (s.metadata?.virtual === true) {
+            console.log(`[fetchSensors] Skipping virtual device "${s.name}" from pending state (fetched via virtual-devices endpoint)`);
+            return false;
+          }
+          
           // Only include sensors that are NOT in the database yet
           const notInDb = !devices.find((d: any) => d.name === s.name);
           if (notInDb) {
@@ -220,8 +260,51 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         return aOrder - bOrder;
       });
       
-      // Show newly added devices (DRAFT) at the top, then sorted devices
-      setSensors([...pendingSensors, ...pipelines, ...sortedDevices]);
+      // Fetch virtual devices
+      let virtualDevices: Sensor[] = [];
+      try {
+        const virtualResponse = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/virtual-devices`));
+        if (virtualResponse.ok) {
+          const virtualData = await virtualResponse.json();
+          virtualDevices = (virtualData.virtualDevices || []).map((vd: any) => ({
+            uuid: vd.uuid,
+            name: vd.name,
+            state: 'CONNECTED', // Virtual devices are always "connected" since they're sidecars
+            healthy: true,
+            messagesPublished: 0,
+            lastActivity: null,
+            lastError: null,
+            configured: true,
+            enabled: true,
+            type: 'virtual' as const,
+            protocol: vd.protocol,
+            connected: true,
+            isVirtual: true,
+            virtualProfile: vd.profile,
+            virtualImage: vd.image,
+            virtualConnection: vd.connection,
+            deploymentStatus: 'deployed', // Virtual devices created via API are immediately deployed
+          }));
+          console.log(`[fetchSensors] Found ${virtualDevices.length} virtual devices`);
+        }
+      } catch (virtualErr) {
+        console.warn('[fetchSensors] Failed to fetch virtual devices:', virtualErr);
+        // Don't fail the whole request if virtual devices fail
+      }
+
+      console.log(`[fetchSensors] Merging arrays:`, {
+        pendingSensorsCount: pendingSensors.length,
+        virtualDevicesCount: virtualDevices.length,
+        pipelinesCount: pipelines.length,
+        sortedDevicesCount: sortedDevices.length,
+        pendingSensorsNames: pendingSensors.map(s => s.name),
+        virtualDevicesNames: virtualDevices.map(s => s.name),
+        pipelinesNames: pipelines.map(s => s.name),
+        sortedDevicesNames: sortedDevices.map(s => s.name)
+      });
+
+      // Show newly added devices (DRAFT) at the top, then virtual devices, then sorted physical devices
+      setSensors([...pendingSensors, ...virtualDevices, ...pipelines, ...sortedDevices]);
       console.log('[fetchSensors] ✅ COMPLETE - Updated sensors state');
       setError(null);
     } catch (err: any) {
@@ -345,6 +428,17 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   };
 
   const handleDeleteProtocolDevice = async (deviceName: string) => {
+    // Check if this is a virtual device
+    const sensor = sensors.find(s => s.name === deviceName);
+    if (sensor && (sensor.type === 'virtual' || sensor.isVirtual)) {
+      // Virtual devices use direct delete
+      if (sensor.uuid) {
+        await handleDeleteVirtualDevice(sensor.uuid, deviceName);
+      }
+      return;
+    }
+
+    // Physical devices use soft delete
     try {
       console.log('🗑️ Marking sensor for deletion via API:', deviceName);
       
@@ -406,12 +500,111 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     }
   };
 
+  // Virtual Device Management Functions
+  const fetchProfiles = async (protocol: string) => {
+    try {
+      const response = await fetch(buildApiUrl(`/api/v1/profiles?protocol=${protocol}`));
+      if (!response.ok) throw new Error('Failed to fetch profiles');
+      const data = await response.json();
+      setProfiles(data || []);
+      
+      // Auto-select first profile if available
+      if (data && data.length > 0 && !virtualFormData.profile) {
+        setVirtualFormData(prev => ({ ...prev, profile: data[0].profile_name }));
+      }
+    } catch (err) {
+      console.error('Failed to fetch profiles:', err);
+      toast.error('Failed to fetch profiles');
+    }
+  };
+
+  const handleOpenVirtualDeviceDialog = () => {
+    const virtualCount = sensors.filter(s => s.type === 'virtual').length;
+    
+    setVirtualFormData({
+      name: `Virtual ${virtualFormData.protocol.toUpperCase()} Device ${virtualCount + 1}`,
+      protocol: 'modbus',
+      profile: '',
+      slaveCount: 40,
+    });
+    
+    // Fetch profiles for default protocol
+    fetchProfiles('modbus');
+    
+    setAddVirtualDeviceDialogOpen(true);
+  };
+
+  const handleCreateVirtualDevice = async () => {
+    setVirtualDeviceLoading(true);
+
+    try {
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/virtual-devices`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(virtualFormData),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to create virtual device');
+      }
+      
+      toast.success('Virtual device created successfully');
+      
+      // Refresh sensor list
+      await fetchSensors();
+      
+      // Close dialog
+      setAddVirtualDeviceDialogOpen(false);
+    } catch (err) {
+      console.error('Failed to create virtual device:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to create virtual device');
+    } finally {
+      setVirtualDeviceLoading(false);
+    }
+  };
+
+  const handleDeleteVirtualDevice = async (virtualDeviceUuid: string, name: string) => {
+    if (!confirm(`Delete virtual device "${name}"?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        buildApiUrl(`/api/v1/devices/${deviceUuid}/virtual-devices/${virtualDeviceUuid}`),
+        { method: 'DELETE' }
+      );
+
+      if (!response.ok) throw new Error('Failed to delete virtual device');
+      
+      toast.success('Virtual device deleted');
+      
+      // Refresh sensor list
+      await fetchSensors();
+    } catch (err) {
+      console.error('Failed to delete virtual device:', err);
+      toast.error('Failed to delete virtual device');
+    }
+  };
+
+  // Fetch profiles when protocol changes
+  useEffect(() => {
+    if (virtualFormData.protocol && addVirtualDeviceDialogOpen) {
+      fetchProfiles(virtualFormData.protocol);
+    }
+  }, [virtualFormData.protocol, addVirtualDeviceDialogOpen]);
+
   /**
    * Simplified status badge - shows what users need to know
    * Priority: Deployment actions → Disabled state → Health status
    */
   const getStatusBadge = (sensor: Sensor) => {
     const deploymentStatus = sensor.deploymentStatus;
+    
+    // Virtual device badge (always show for virtual devices)
+    if (sensor.type === 'virtual' || sensor.isVirtual) {
+      return <Badge className="bg-purple-600 dark:bg-purple-700 text-white border border-purple-700 dark:border-purple-600 font-semibold">Virtual</Badge>;
+    }
     
     // 1. Deployment lifecycle states (require user action - highest priority)
     
@@ -565,10 +758,18 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             <div></div>
           )}
           
-          <Button onClick={() => setAddSensorDialogOpen(true)}>
-            <Plus className="w-4 h-4 mr-2" />
-            Add Device
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={() => setAddSensorDialogOpen(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              Add Device
+            </Button>
+            {deviceType === 'virtual' && (
+              <Button onClick={handleOpenVirtualDeviceDialog}>
+                <Plus className="w-4 h-4 mr-2" />
+                Add Virtual Device
+              </Button>
+            )}
+          </div>
         </div>
 
        
@@ -739,6 +940,115 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           onDeleteDevice={handleDeleteProtocolDevice}
           device={selectedSensor}
         />
+
+        {/* Add Virtual Device Dialog */}
+        <Dialog open={addVirtualDeviceDialogOpen} onOpenChange={setAddVirtualDeviceDialogOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Add Virtual Device</DialogTitle>
+              <DialogDescription>
+                Virtual devices are protocol simulators that run as sidecar containers.
+                The agent connects to them via localhost just like physical devices.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="virtual-name">Device Name</Label>
+                <Input
+                  id="virtual-name"
+                  value={virtualFormData.name}
+                  onChange={(e) => setVirtualFormData({ ...virtualFormData, name: e.target.value })}
+                  placeholder="e.g., Virtual PLC 1"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="virtual-protocol">Protocol</Label>
+                <Select
+                  value={virtualFormData.protocol}
+                  onValueChange={(value) => setVirtualFormData({ ...virtualFormData, protocol: value, profile: '' })}
+                >
+                  <SelectTrigger id="virtual-protocol">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="modbus">Modbus TCP</SelectItem>
+                    <SelectItem value="opcua">OPC-UA</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="virtual-profile">Profile</Label>
+                <Select
+                  value={virtualFormData.profile}
+                  onValueChange={(value) => setVirtualFormData({ ...virtualFormData, profile: value })}
+                  disabled={profiles.length === 0}
+                >
+                  <SelectTrigger id="virtual-profile">
+                    <SelectValue placeholder="Select a profile" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {profiles.map((profile) => (
+                      <SelectItem key={profile.profile_name} value={profile.profile_name}>
+                        {profile.profile_name} ({profile.data_points?.length || 0} data points)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {virtualFormData.protocol === 'modbus' && (
+                <div className="space-y-2">
+                  <Label htmlFor="virtual-slaveCount">Slave Count</Label>
+                  <Input
+                    id="virtual-slaveCount"
+                    type="number"
+                    value={virtualFormData.slaveCount}
+                    onChange={(e) => setVirtualFormData({ ...virtualFormData, slaveCount: parseInt(e.target.value) })}
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Number of Modbus slave IDs to simulate
+                  </p>
+                </div>
+              )}
+
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  <div className="font-medium mb-1">Auto-Configuration:</div>
+                  <ul className="list-disc list-inside space-y-1 text-sm">
+                    <li>Port will be auto-assigned (502, 503, 504... for Modbus)</li>
+                    <li>
+                      Agent will connect via localhost:
+                      {sensors.filter(s => s.type === 'virtual' && s.protocol === 'modbus').length === 0 
+                        ? '502' 
+                        : `${502 + sensors.filter(s => s.type === 'virtual' && s.protocol === 'modbus').length}`}
+                    </li>
+                    <li>Data points defined by selected profile</li>
+                  </ul>
+                </AlertDescription>
+              </Alert>
+            </div>
+
+            <DialogFooter>
+              <Button 
+                variant="outline" 
+                onClick={() => setAddVirtualDeviceDialogOpen(false)} 
+                disabled={virtualDeviceLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCreateVirtualDevice}
+                disabled={virtualDeviceLoading || !virtualFormData.name || !virtualFormData.profile}
+              >
+                {virtualDeviceLoading ? 'Creating...' : 'Create'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

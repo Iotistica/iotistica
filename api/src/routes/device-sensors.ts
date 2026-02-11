@@ -21,8 +21,12 @@ import express from 'express';
 import { query } from '../db/connection';
 import { deviceSensorSync } from '../services/device-endpoints';
 import { logger } from '../utils/logger';
+import { VirtualDeviceManager } from '../services/virtual-device-manager';
 
 export const router = express.Router();
+
+// Initialize virtual device manager
+const virtualDeviceManager = new VirtualDeviceManager();
 
 /**
  * List all sensors for a device
@@ -733,3 +737,159 @@ router.get('/devices/:uuid/protocol-adapters/:protocol/:deviceName/history', asy
 //   }
 // });
 
+
+// =============================================================================
+// VIRTUAL DEVICE ROUTES
+// Manage virtual protocol simulators deployed as sidecar containers
+// =============================================================================
+
+/**
+ * Create virtual device (protocol simulator sidecar)
+ * POST /api/v1/devices/:uuid/virtual-devices
+ * 
+ * Body: {
+ *   name: "Virtual PLC 1",
+ *   protocol: "modbus" | "opcua",
+ *   profile: "PM556x" | "Generic",
+ *   image: "iotistic/modbus-simulator:latest" (optional),
+ *   slaveCount: 40 (optional)
+ * }
+ * 
+ * Flow:
+ * 1. Creates record in device_sensors table with virtual=true metadata
+ * 2. Auto-assigns port (502, 503, 504... for Modbus)
+ * 3. If parent is K8s virtual agent, patches Deployment to add sidecar container
+ * 4. If parent is physical agent, agent will reconcile sidecar on next state sync
+ * 5. Agent connects to virtual device at localhost:port like a normal physical device
+ */
+router.post('/devices/:uuid/virtual-devices', async (req, res) => {
+  try {
+    const { uuid } = req.params;
+    const { name, protocol, profile, image, slaveCount } = req.body;
+
+    // Validation
+    if (!name || !protocol || !profile) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        message: 'name, protocol, and profile are required'
+      });
+    }
+
+    if (!['modbus', 'opcua'].includes(protocol)) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        message: 'protocol must be either "modbus" or "opcua"'
+      });
+    }
+
+    // Create virtual device
+    const virtualDevice = await virtualDeviceManager.createVirtualDevice({
+      deviceUuid: uuid,
+      name,
+      protocol,
+      profile,
+      image,
+      slaveCount
+    });
+
+    logger.info('Virtual device created via API', {
+      deviceUuid: uuid,
+      virtualDeviceUuid: virtualDevice.uuid,
+      protocol,
+      profile,
+      port: virtualDevice.connection.port
+    });
+
+    res.status(201).json({
+      status: 'ok',
+      message: 'Virtual device created. Agent will auto-configure connection.',
+      virtualDevice: {
+        uuid: virtualDevice.uuid,
+        name: virtualDevice.name,
+        protocol: virtualDevice.protocol,
+        profile: virtualDevice.metadata.profile,
+        connection: virtualDevice.connection,
+        image: virtualDevice.metadata.image
+      }
+    });
+  } catch (error: any) {
+    logger.error('Error creating virtual device:', error);
+    
+    if (error.message?.includes('not found')) {
+      return res.status(404).json({
+        error: 'Not found',
+        message: error.message
+      });
+    }
+
+    res.status(500).json({
+      error: 'Failed to create virtual device',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * List virtual devices for a device
+ * GET /api/v1/devices/:uuid/virtual-devices
+ * 
+ * Returns all virtual device sidecars configured for the agent
+ */
+router.get('/devices/:uuid/virtual-devices', async (req, res) => {
+  try {
+    const { uuid } = req.params;
+
+    const virtualDevices = await virtualDeviceManager.getVirtualDevices(uuid);
+
+    res.json({
+      virtualDevices: virtualDevices.map(vd => ({
+        uuid: vd.uuid,
+        name: vd.name,
+        protocol: vd.protocol,
+        profile: vd.metadata.profile,
+        connection: vd.connection,
+        image: vd.metadata.image
+      })),
+      count: virtualDevices.length
+    });
+  } catch (error: any) {
+    logger.error('Error listing virtual devices:', error);
+    res.status(500).json({
+      error: 'Failed to list virtual devices',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * Delete virtual device
+ * DELETE /api/v1/devices/:uuid/virtual-devices/:virtualDeviceUuid
+ * 
+ * Flow:
+ * 1. Deletes record from device_sensors table
+ * 2. If parent is K8s virtual agent, patches Deployment to remove sidecar
+ * 3. If parent is physical agent, agent will remove sidecar on next state sync
+ */
+router.delete('/devices/:uuid/virtual-devices/:virtualDeviceUuid', async (req, res) => {
+  try {
+    const { uuid, virtualDeviceUuid } = req.params;
+
+    await virtualDeviceManager.deleteVirtualDevice(uuid, virtualDeviceUuid);
+
+    logger.info('Virtual device deleted via API', {
+      deviceUuid: uuid,
+      virtualDeviceUuid
+    });
+
+    res.json({
+      status: 'ok',
+      message: 'Virtual device deleted'
+    });
+  } catch (error: any) {
+    logger.error('Error deleting virtual device:', error);
+    res.status(500).json({
+      error: 'Failed to delete virtual device',
+      message: error.message
+    });
+  }
+});

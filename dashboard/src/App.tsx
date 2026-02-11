@@ -137,7 +137,7 @@ export default function App() {
         
         // Get auth token from localStorage
         const accessToken = localStorage.getItem('accessToken');
-        const apiUrl = buildApiUrl('/api/v1/devices');
+        const apiUrl = buildApiUrl('/api/v1/devices?limit=100');
         console.log('[DEBUG] API URL:', apiUrl);
         console.log('[DEBUG] Fetching devices with token:', accessToken ? `${accessToken.substring(0, 20)}...` : 'NULL');
         console.log('[DEBUG] Full auth header:', `Bearer ${accessToken}`);
@@ -1024,6 +1024,7 @@ export default function App() {
               : <SensorsPage 
                   deviceUuid={selectedDevice.deviceUuid}
                   deviceStatus={selectedDevice.status}
+                  deviceType={selectedDevice.type}
                   debugMode={debugMode}
                   onDebugModeChange={setDebugMode}
                 />
