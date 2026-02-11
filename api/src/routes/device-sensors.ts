@@ -848,7 +848,8 @@ router.get('/devices/:uuid/virtual-devices', async (req, res) => {
         protocol: vd.protocol,
         profile: vd.metadata.profile,
         connection: vd.connection,
-        image: vd.metadata.image
+        image: vd.metadata.image,
+        dataPoints: vd.data_points || [] // Include data points
       })),
       count: virtualDevices.length
     });

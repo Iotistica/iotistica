@@ -173,12 +173,17 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           lastError: health?.lastError || d.lastError,
           configured: true,
           enabled: d.enabled !== undefined ? d.enabled : true, // Default to enabled
-          type: 'device' as const,
+          type: (d.metadata?.sidecar === true ? 'virtual' : 'device') as const,
           protocol: d.protocol,
           connected: isConnected,
           connection: d.connection, // Full connection configuration
           dataPoints: d.dataPoints || d.data_points || [], // Data points configuration
           pollInterval: d.pollInterval, // Poll interval
+          // Virtual device fields (populated from metadata.sidecar)
+          isVirtual: d.metadata?.sidecar === true,
+          virtualProfile: d.metadata?.profile,
+          virtualImage: d.metadata?.image,
+          virtualConnection: d.connection, // Connection is already in the right format
           // Deployment tracking
           deploymentStatus: d.deploymentStatus || d.deployment_status,
           lastDeployedAt: d.lastDeployedAt,
@@ -212,12 +217,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       
       const pendingSensors = pendingEndpoints
         .filter((s: any) => {
-          // Exclude virtual devices from pending sensors (they're fetched separately)
-          if (s.metadata?.virtual === true) {
-            console.log(`[fetchSensors] Skipping virtual device "${s.name}" from pending state (fetched via virtual-devices endpoint)`);
-            return false;
-          }
-          
           // Only include sensors that are NOT in the database yet
           const notInDb = !devices.find((d: any) => d.name === s.name);
           if (notInDb) {
@@ -259,52 +258,20 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         const bOrder = statusOrder[b.deploymentStatus as keyof typeof statusOrder] ?? 3;
         return aOrder - bOrder;
       });
-      
-      // Fetch virtual devices
-      let virtualDevices: Sensor[] = [];
-      try {
-        const virtualResponse = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/virtual-devices`));
-        if (virtualResponse.ok) {
-          const virtualData = await virtualResponse.json();
-          virtualDevices = (virtualData.virtualDevices || []).map((vd: any) => ({
-            uuid: vd.uuid,
-            name: vd.name,
-            state: 'CONNECTED', // Virtual devices are always "connected" since they're sidecars
-            healthy: true,
-            messagesPublished: 0,
-            lastActivity: null,
-            lastError: null,
-            configured: true,
-            enabled: true,
-            type: 'virtual' as const,
-            protocol: vd.protocol,
-            connected: true,
-            isVirtual: true,
-            virtualProfile: vd.profile,
-            virtualImage: vd.image,
-            virtualConnection: vd.connection,
-            deploymentStatus: 'deployed', // Virtual devices created via API are immediately deployed
-          }));
-          console.log(`[fetchSensors] Found ${virtualDevices.length} virtual devices`);
-        }
-      } catch (virtualErr) {
-        console.warn('[fetchSensors] Failed to fetch virtual devices:', virtualErr);
-        // Don't fail the whole request if virtual devices fail
-      }
 
+      // Virtual devices now come through regular devices endpoint (no separate fetch needed)
+      // They have metadata.sidecar === true
       console.log(`[fetchSensors] Merging arrays:`, {
         pendingSensorsCount: pendingSensors.length,
-        virtualDevicesCount: virtualDevices.length,
         pipelinesCount: pipelines.length,
         sortedDevicesCount: sortedDevices.length,
         pendingSensorsNames: pendingSensors.map(s => s.name),
-        virtualDevicesNames: virtualDevices.map(s => s.name),
         pipelinesNames: pipelines.map(s => s.name),
         sortedDevicesNames: sortedDevices.map(s => s.name)
       });
 
-      // Show newly added devices (DRAFT) at the top, then virtual devices, then sorted physical devices
-      setSensors([...pendingSensors, ...virtualDevices, ...pipelines, ...sortedDevices]);
+      // Show newly added devices (DRAFT) at the top, then sorted devices (includes virtual devices now)
+      setSensors([...pendingSensors, ...pipelines, ...sortedDevices]);
       console.log('[fetchSensors] ✅ COMPLETE - Updated sensors state');
       setError(null);
     } catch (err: any) {

@@ -15,6 +15,7 @@ import * as k8s from '@kubernetes/client-node';
 import { query } from '../db/connection.js';
 import { logger } from '../utils/logger.js';
 import { DeviceModel } from '../db/models.js';
+import { deviceSensorSync } from './device-endpoints.js';
 
 export interface VirtualDeviceConfig {
   deviceUuid: string; // Parent agent UUID
@@ -33,9 +34,16 @@ export interface VirtualDeviceSensor {
   connection: {
     host: string;
     port: number;
+    type: string; // e.g., "tcp" for Modbus
+    timeout: number; // Connection timeout in ms
+    slaveRange?: { // Modbus slave range (optional)
+      start: number;
+      end: number;
+    };
   };
+  data_points?: any[]; // Data points from profile
   metadata: {
-    virtual: boolean;
+    sidecar: boolean; // Indicates this is a sidecar device
     profile: string;
     image: string;
     containerConfig: {
@@ -94,71 +102,97 @@ export class VirtualDeviceManager {
       throw new Error(`Parent agent not found: ${config.deviceUuid}`);
     }
 
-    // 2. Auto-assign port
+    // 2. Fetch profile data points
+    const profileResult = await query(
+      'SELECT data_points FROM profile_configs WHERE profile_name = $1 AND protocol = $2',
+      [config.profile, config.protocol]
+    );
+
+    if (profileResult.rows.length === 0) {
+      throw new Error(`Profile '${config.profile}' not found for protocol '${config.protocol}'`);
+    }
+
+    const dataPoints = typeof profileResult.rows[0].data_points === 'string'
+      ? JSON.parse(profileResult.rows[0].data_points)
+      : profileResult.rows[0].data_points;
+
+    // 3. Auto-assign port
     const existingDevices = await this.getVirtualDevices(config.deviceUuid);
     const usedPorts = existingDevices.map(d => d.connection.port);
     const nextPort = this.findNextAvailablePort(usedPorts, config.protocol);
 
-    // 3. Build container config
+    // 4. Build container config
     const image = config.image || `iotistic/${config.protocol}-simulator:latest`;
     const containerEnv = this.buildContainerEnv(config.protocol, config.profile, nextPort, config.slaveCount);
 
-    // 4. Insert into device_sensors table
-    const result = await query(
-      `INSERT INTO device_sensors (
-        uuid,
-        device_uuid, 
-        name, 
-        protocol, 
-        connection, 
-        metadata, 
-        enabled,
-        poll_interval,
-        data_points
-      ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, true, 5000, '[]'::jsonb)
-      RETURNING *`,
-      [
-        config.deviceUuid,
-        config.name,
-        config.protocol,
-        JSON.stringify({ host: 'localhost', port: nextPort }),
-        JSON.stringify({
-          virtual: true,
-          profile: config.profile,
-          image,
-          containerConfig: {
-            env: containerEnv
-          }
-        })
-      ]
+    // 5. Build connection object
+    const slaveCount = config.slaveCount || 1;
+    const connectionObj: any = {
+      host: 'localhost',
+      port: nextPort,
+      type: 'tcp',
+      timeout: 5000
+    };
+
+    // Add slaveRange if specified (Modbus only)
+    if (config.protocol === 'modbus' && slaveCount > 0) {
+      connectionObj.slaveRange = {
+        start: 1,
+        end: slaveCount
+      };
+    }
+
+    // 6. Use standard addEndpoint flow (dual-write: table + config)
+    // This ensures virtual devices appear in target state like regular devices
+    const sensorConfig = {
+      name: config.name,
+      protocol: config.protocol,
+      enabled: true,
+      pollInterval: 5000,
+      connection: connectionObj,
+      dataPoints: dataPoints,
+      metadata: {
+        sidecar: true, // Flag for K8s deployment (not for filtering)
+        profile: config.profile,
+        image,
+        containerConfig: {
+          env: containerEnv
+        },
+        createdAt: new Date().toISOString(),
+        createdBy: 'virtual-device-manager'
+      }
+    };
+
+    const result = await deviceSensorSync.addEndpoint(
+      config.deviceUuid,
+      sensorConfig,
+      'virtual-device-manager'
     );
 
-    const virtualDevice = result.rows[0];
+    const virtualDevice = result.sensor;
 
-    logger.info('Virtual device created', {
+    logger.info('Virtual device created via standard flow', {
       uuid: virtualDevice.uuid,
       deviceUuid: config.deviceUuid,
       protocol: config.protocol,
       profile: config.profile,
-      port: nextPort
+      port: nextPort,
+      version: result.version
     });
 
-    // 5. If parent is K8s virtual agent, patch Deployment
+    // 7. If parent is K8s virtual agent, patch Deployment
     if (agent.helm_release_name && agent.k8s_namespace) {
       await this.patchVirtualAgentDeployment(config.deviceUuid, agent.helm_release_name, agent.k8s_namespace);
     }
 
     return {
       uuid: virtualDevice.uuid,
-      device_uuid: virtualDevice.device_uuid,
+      device_uuid: config.deviceUuid,
       name: virtualDevice.name,
       protocol: virtualDevice.protocol,
-      connection: typeof virtualDevice.connection === 'string' 
-        ? JSON.parse(virtualDevice.connection) 
-        : virtualDevice.connection,
-      metadata: typeof virtualDevice.metadata === 'string'
-        ? JSON.parse(virtualDevice.metadata)
-        : virtualDevice.metadata
+      connection: connectionObj,
+      data_points: dataPoints,
+      metadata: sensorConfig.metadata
     };
   }
 
@@ -170,7 +204,7 @@ export class VirtualDeviceManager {
       `SELECT uuid, device_uuid, name, protocol, connection, metadata
        FROM device_sensors
        WHERE device_uuid = $1 
-       AND metadata->>'virtual' = 'true'
+       AND metadata->>'sidecar' = 'true'
        ORDER BY created_at ASC`,
       [deviceUuid]
     );
