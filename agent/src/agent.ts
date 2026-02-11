@@ -283,18 +283,20 @@ export default class Agent {
       // 12.5. Start periodic discovery timers
       this.discoveryService?.startPeriodicDiscovery();
 
-      // 14. Start auto-reconciliation
-      this.startAutoReconciliation();
-
-      // 15. Start active memory monitoring (independent of healthcheck endpoint)
-      this.startMemoryMonitoring();
-
-      // 16. Initialize reactive ConfigManager handlers (handles all config changes automatically)
+      // 13. Initialize reactive ConfigManager handlers (handles all config changes automatically)
+      // CRITICAL: Must be set BEFORE auto-reconciliation starts to ensure discoveryService is available
+      // when handleEndpointsChanges() is triggered during initial reconciliation
       this.configManager.setReactiveHandlers({
         containerManager: this.containerManager,
         cloudSync: this.cloudSync,
         discoveryService: this.discoveryService,
       });
+
+      // 14. Start auto-reconciliation
+      this.startAutoReconciliation();
+
+      // 15. Start active memory monitoring (independent of healthcheck endpoint)
+      this.startMemoryMonitoring();
 
       // Note: Event listeners already set up in setupConfigEventListeners() (called early)
 
