@@ -18,6 +18,7 @@ import {
   ReferenceLine,
 } from 'recharts';
 import { buildApiUrl } from '@/config/api';
+import { detectGaps, createGapDotRenderer } from '@/utils/chartGapDetection';
 
 export interface ThresholdLine {
   value: number;
@@ -146,6 +147,8 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     return value.toFixed(2);
   };
 
+  // Gap detection is handled by the utility function
+
   const calculateStats = () => {
     if (!data || data.data.length === 0) return null;
 
@@ -165,17 +168,25 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
   const renderChart = () => {
     if (!data || data.data.length === 0) return null;
 
-    const chartData = data.data.map(point => ({
+    // Process data and detect gaps (service interruptions)
+    const processedData = detectGaps(data.data);
+
+    const chartData = processedData.map(point => ({
       time: formatTime(point.time),
       value: point.avg_value,
       min: point.min_value,
       max: point.max_value,
+      isGap: point.isGap, // Mark gap points for visualization
     }));
+
+    const gapMarkers = chartData.filter(point => point.isGap).map(point => point.time);
 
     // Calculate Y-axis domain to include both data and thresholds
     const calculateYDomain = (): [number, number] => {
-      // Get min/max from data
-      const dataValues = chartData.map(d => d.value);
+      // Get min/max from data (excluding gaps)
+      const dataValues = chartData.filter(d => !d.isGap).map(d => d.value);
+      if (dataValues.length === 0) return [0, 100];
+      
       const dataMin = Math.min(...dataValues);
       const dataMax = Math.max(...dataValues);
 
@@ -240,7 +251,20 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 stroke={color} 
                 fill={color}
                 fillOpacity={0.3}
+                dot={createGapDotRenderer()}
+                connectNulls={true}
               />
+              {gapMarkers.map((gapTime, idx) => (
+                <ReferenceLine
+                  key={`gap-area-${idx}`}
+                  x={gapTime}
+                  yAxisId="left"
+                  stroke="#ef4444"
+                  strokeDasharray="4 4"
+                  strokeWidth={1.5}
+                  opacity={0.8}
+                />
+              ))}
               {config.thresholdsEnabled && config.thresholds?.map((threshold, idx) => (
                 <ReferenceLine
                   key={idx}
@@ -293,6 +317,17 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 dataKey="value" 
                 fill={color}
               />
+              {gapMarkers.map((gapTime, idx) => (
+                <ReferenceLine
+                  key={`gap-bar-${idx}`}
+                  x={gapTime}
+                  yAxisId="left"
+                  stroke="#ef4444"
+                  strokeDasharray="4 4"
+                  strokeWidth={1.5}
+                  opacity={0.8}
+                />
+              ))}
               {config.thresholdsEnabled && config.thresholds?.map((threshold, idx) => (
                 <ReferenceLine
                   key={idx}
@@ -346,8 +381,20 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 dataKey="value" 
                 stroke={color}
                 strokeWidth={2}
-                dot={false}
+                dot={createGapDotRenderer()}
+                connectNulls={true}
               />
+              {gapMarkers.map((gapTime, idx) => (
+                <ReferenceLine
+                  key={`gap-line-${idx}`}
+                  x={gapTime}
+                  yAxisId="left"
+                  stroke="#ef4444"
+                  strokeDasharray="4 4"
+                  strokeWidth={1.5}
+                  opacity={0.8}
+                />
+              ))}
               {config.thresholdsEnabled && config.thresholds?.map((threshold, idx) => (
                 <ReferenceLine
                   key={idx}

@@ -1,11 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Cpu, HardDrive, MemoryStick, Package, Network, Loader2, RefreshCw } from "lucide-react";
+import { Cpu, HardDrive, MemoryStick, Network, RefreshCw } from "lucide-react";
 import { Card } from "./ui/card";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useSystemMetrics } from "@/contexts/SystemMetricsContext";
-import type { SystemInfoData, ProcessData, MetricsHistoryData } from "@/services/websocket";
+import type { SystemInfoData, ProcessData } from "@/services/websocket";
 import { MetricCard } from "./ui/metric-card";
-import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import {
   Select,
@@ -25,22 +24,13 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
+  ReferenceLine,
 } from "recharts";
 import { Device } from "./DeviceSidebar";
-import { DeviceActions } from "./DeviceActions";
-import { ApplicationsCard, Application } from "./ApplicationsCard";
 import { NetworkingCard, NetworkInterface } from "./NetworkingCard";
-import { AnalyticsCard } from "./AnalyticsCard";
 import { GeneralInfoCard } from "./GeneralInfoCard";
 import { buildApiUrl } from "@/config/api";
-
-const MAX_POINTS = 60; // Keep last 60 points (30 minutes)
-
-// Helper to convert period to minutes
-const getPeriodMinutes = (period: '30min' | '6h' | '12h' | '24h'): number => {
-  const map = { '30min': 30, '6h': 360, '12h': 720, '24h': 1440 };
-  return map[period];
-};
+import { detectGaps, createGapDotRenderer } from "@/utils/chartGapDetection";
 
 interface SystemMetricsProps {
   device: Device;
@@ -52,7 +42,7 @@ export function SystemMetrics({
   networkInterfaces = []
 }: SystemMetricsProps) {
   // Use context for persistent metrics history (survives navigation)
-  const { getDeviceHistory, addMetricsDataPoint, getCurrentStats, updateCurrentStats, getTimePeriod, setTimePeriod: setContextTimePeriod, getSelectedMetric, setSelectedMetric: setContextSelectedMetric } = useSystemMetrics();
+  const { getDeviceHistory, addMetricsDataPoint, getTimePeriod, setTimePeriod: setContextTimePeriod, getSelectedMetric, setSelectedMetric: setContextSelectedMetric } = useSystemMetrics();
   
   // Get persisted history and time period from context
   const persistedHistory = getDeviceHistory(device.deviceUuid);
@@ -89,9 +79,6 @@ export function SystemMetrics({
   
   // Track previous device UUID to detect actual device changes
   const prevDeviceUuidRef = useRef<string | null>(null);
-  // Track previous time period to detect time period changes
-  const prevTimePeriodRef = useRef<'30min' | '6h' | '12h' | '24h'>(persistedTimePeriod);
-  
   // Debug: Log what context returns
   console.log('[SystemMetrics] Component render:', {
     deviceUuid: device.deviceUuid.substring(0, 8) + '...',
@@ -504,154 +491,9 @@ export function SystemMetrics({
     }
   }, [timePeriod, fetchHistoricalData]);
 
-  // Handle metrics history updates via WebSocket (append live data only for 30min period)
-  const handleMetricsHistory = useCallback((data: MetricsHistoryData) => {
-    console.log('[SystemMetrics] handleMetricsHistory called:', {
-      deviceUuid: device.deviceUuid.substring(0, 8) + '...',
-      timePeriod,
-      hasCpuData: !!data?.cpu,
-      cpuLength: data?.cpu?.length,
-      hasMemoryData: !!data?.memory,
-      memoryLength: data?.memory?.length,
-      hasNetworkData: !!data?.network,
-      networkLength: data?.network?.length,
-      firstCpuPoint: data?.cpu?.[0],
-      firstMemoryPoint: data?.memory?.[0]
-    });
-    
-    // Only keep data from last 30 minutes
-    const thirtyMinutesAgo = Date.now() - (30 * 60 * 1000);
-    const now = Date.now();
-    console.log('[SystemMetrics] Time filter:', {
-      now: new Date(now).toISOString(),
-      thirtyMinutesAgo: new Date(thirtyMinutesAgo).toISOString(),
-      windowMinutes: 30
-    });
-    
-    // Format timestamps from WebSocket to match API format
-    const formatTime = (timestamp: string) => {
-      const date = new Date(timestamp);
-      // Filter out invalid dates
-      if (isNaN(date.getTime())) {
-        console.warn('[SystemMetrics] Invalid timestamp:', timestamp);
-        return null;
-      }
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    };
-    
-    if (data.cpu && data.cpu.length > 0) {
-      console.log(`[SystemMetrics] Processing CPU history: ${data.cpu.length} points received`);
-      
-      // Log timestamp range of incoming data
-      const firstTimestamp = new Date(data.cpu[0].time).getTime();
-      const lastTimestamp = new Date(data.cpu[data.cpu.length - 1].time).getTime();
-      console.log('[SystemMetrics] CPU data time range:', {
-        first: new Date(firstTimestamp).toISOString(),
-        last: new Date(lastTimestamp).toISOString(),
-        spanMinutes: Math.round((lastTimestamp - firstTimestamp) / 60000),
-        firstWithinWindow: firstTimestamp >= thirtyMinutesAgo,
-        lastWithinWindow: lastTimestamp >= thirtyMinutesAgo
-      });
-      
-      setCpuHistory(prev => {
-        const formatted = data.cpu
-          .map(point => {
-            const date = new Date(point.time);
-            const time = formatTime(point.time);
-            const withinWindow = date.getTime() >= thirtyMinutesAgo;
-            // Only include points from last 30 minutes
-            if (!time || !withinWindow) return null;
-            return { time, value: point.value };
-          })
-          .filter((point): point is { time: string; value: number } => point !== null);
-        
-        console.log(`[SystemMetrics] CPU filter results:`, {
-          received: data.cpu.length,
-          afterTimeFilter: formatted.length,
-          previousCount: prev.length
-        });
-        
-        // REPLACE instead of merge - WebSocket sends full history on subscription
-        const updated = formatted.slice(-MAX_POINTS);
-        console.log(`[SystemMetrics] CPU history REPLACED:`, {
-          newCount: updated.length
-        });
-        
-
-        
-        // Persist to context (only if we have all three metrics for this timestamp)
-        if (data.memory && data.memory.length > 0 && data.network && data.network.length > 0) {
-          // Take the last point from each metric (most recent)
-          const lastCpuPoint = formatted[formatted.length - 1];
-          const lastMemoryPoint = data.memory[data.memory.length - 1];
-          const lastNetworkPoint = data.network[data.network.length - 1];
-          
-          if (lastCpuPoint && lastMemoryPoint && lastNetworkPoint) {
-            addMetricsDataPoint(device.deviceUuid, {
-              timestamp: new Date(lastNetworkPoint.time).getTime(),
-              time: lastCpuPoint.time,
-              cpuPercent: lastCpuPoint.value,
-              memoryUsedPercent: lastMemoryPoint.used,
-              networkRxMbps: lastNetworkPoint.download,
-              networkTxMbps: lastNetworkPoint.upload,
-            });
-          }
-        }
-        
-        return updated;
-      });
-    }
-    if (data.memory && data.memory.length > 0) {
-      console.log(`[SystemMetrics] Processing memory history: ${data.memory.length} points received`);
-      setMemoryHistory(() => {
-        const formatted = data.memory
-          .map(point => {
-            const date = new Date(point.time);
-            const time = formatTime(point.time);
-            const withinWindow = date.getTime() >= thirtyMinutesAgo;
-            // Only include points from last 30 minutes
-            if (!time || !withinWindow) return null;
-            return { time, used: point.used };
-          })
-          .filter((point): point is { time: string; used: number } => point !== null);
-        
-        console.log(`[SystemMetrics] Memory filter: ${data.memory.length} received → ${formatted.length} within window`);
-        
-        // REPLACE instead of merge
-        const updated = formatted.slice(-MAX_POINTS);
-        console.log(`[SystemMetrics] Memory REPLACED: ${updated.length} points`);
-        return updated;
-      });
-    }
-    if (data.network && data.network.length > 0) {
-      console.log(`[SystemMetrics] Processing network history: ${data.network.length} points received`);
-      setNetworkHistory(() => {
-        const formatted = data.network
-          .map(point => {
-            const date = new Date(point.time);
-            const time = formatTime(point.time);
-            const withinWindow = date.getTime() >= thirtyMinutesAgo;
-            // Only include points from last 30 minutes
-            if (!time || !withinWindow) return null;
-            return { time, download: point.download, upload: point.upload };
-          })
-          .filter((point): point is { time: string; download: number; upload: number } => point !== null);
-        
-        console.log(`[SystemMetrics] Network filter: ${data.network.length} received → ${formatted.length} within window`);
-        
-        // REPLACE instead of merge
-        const updated = formatted.slice(-MAX_POINTS);
-        console.log(`[SystemMetrics] Network REPLACED: ${updated.length} points`);
-        return updated;
-      });
-    }
-  }, [timePeriod, device.deviceUuid, addMetricsDataPoint]); // Include deviceUuid and addMetricsDataPoint
-
   // Subscribe to WebSocket channels (only for online devices)
   const isOnline = device.status === 'online';
   useWebSocket(device.deviceUuid, 'processes', handleProcesses, isOnline);
-  // History channel disabled - using HTTP polling instead
-  // useWebSocket(device.deviceUuid, 'history', handleMetricsHistory, isOnline && timePeriod === '30min');
 
   // Fetch historical data with HTTP polling (replaces WebSocket approach)
   // Polls at configured interval for all time periods (30min, 6h, 12h, 24h)
@@ -718,12 +560,13 @@ export function SystemMetrics({
     }
   }, [device.deviceUuid, device.name, device.ipAddress, device.status, fetchProcesses]);
 
-  const scrollToSection = (id: string) => {
-    const element = document.getElementById(id);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
+  // Process chart data to detect service interruptions (gaps)
+  const cpuChartData = useMemo(() => detectGaps(cpuHistory), [cpuHistory]);
+  const memoryChartData = useMemo(() => detectGaps(memoryHistory), [memoryHistory]);
+  const networkChartData = useMemo(() => detectGaps(networkHistory), [networkHistory]);
+  const cpuGapTimes = useMemo(() => cpuChartData.filter(point => point.isGap).map(point => point.time), [cpuChartData]);
+  const memoryGapTimes = useMemo(() => memoryChartData.filter(point => point.isGap).map(point => point.time), [memoryChartData]);
+  const networkGapTimes = useMemo(() => networkChartData.filter(point => point.isGap).map(point => point.time), [networkChartData]);
 
   return (
     <div className="flex-1 bg-background overflow-auto">
@@ -815,7 +658,7 @@ export function SystemMetrics({
             {selectedMetric === 'cpu' && (
               <>
                 <ResponsiveContainer width="100%" height={250} key="cpu-chart">
-                      <AreaChart data={cpuHistory} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+                      <AreaChart data={cpuChartData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
                         <defs>
                           <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
@@ -848,9 +691,20 @@ export function SystemMetrics({
                           fillOpacity={1}
                           fill="url(#colorCpu)"
                           isAnimationActive={false}
-                          dot={{ fill: '#3b82f6', r: 3 }}
+                          dot={createGapDotRenderer({ color: '#ef4444' })}
                           activeDot={{ r: 5 }}
+                          connectNulls={true}
                         />
+                        {cpuGapTimes.map((gapTime, idx) => (
+                          <ReferenceLine
+                            key={`cpu-gap-${idx}`}
+                            x={gapTime}
+                            stroke="#ef4444"
+                            strokeDasharray="4 4"
+                            strokeWidth={1.5}
+                            opacity={0.8}
+                          />
+                        ))}
                       </AreaChart>
                     </ResponsiveContainer>
               </>
@@ -859,7 +713,7 @@ export function SystemMetrics({
             {selectedMetric === 'memory' && (
               <>
                   <ResponsiveContainer width="100%" height={250} key="memory-chart">
-                    <AreaChart data={memoryHistory} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+                    <AreaChart data={memoryChartData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
                   <defs>
                     <linearGradient id="colorMemory" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
@@ -894,9 +748,20 @@ export function SystemMetrics({
                     fillOpacity={1}
                     fill="url(#colorMemory)"
                     isAnimationActive={false}
-                    dot={{ fill: '#8b5cf6', r: 3 }}
+                    dot={createGapDotRenderer({ color: '#ef4444' })}
                     activeDot={{ r: 5 }}
+                    connectNulls={true}
                   />
+                  {memoryGapTimes.map((gapTime, idx) => (
+                    <ReferenceLine
+                      key={`memory-gap-${idx}`}
+                      x={gapTime}
+                      stroke="#ef4444"
+                      strokeDasharray="4 4"
+                      strokeWidth={1.5}
+                      opacity={0.8}
+                    />
+                  ))}
                 </AreaChart>
               </ResponsiveContainer>
               </>
@@ -905,7 +770,7 @@ export function SystemMetrics({
             {selectedMetric === 'network' && (
               <>
                   <ResponsiveContainer width="100%" height={250} key="network-chart">
-                    <LineChart data={networkHistory} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+                    <LineChart data={networkChartData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                       <XAxis 
                         dataKey="time" 
@@ -924,19 +789,31 @@ export function SystemMetrics({
                         dataKey="download"
                         stroke="#3b82f6"
                         strokeWidth={2}
-                        dot={{ fill: '#3b82f6', r: 3 }}
+                        dot={createGapDotRenderer({ color: '#ef4444' })}
                         activeDot={{ r: 5 }}
                         isAnimationActive={false}
+                        connectNulls={true}
                       />
                       <Line
                         type="linear"
                         dataKey="upload"
                         stroke="#10b981"
                         strokeWidth={2}
-                        dot={{ fill: '#10b981', r: 3 }}
+                        dot={createGapDotRenderer({ color: '#ef4444' })}
                         activeDot={{ r: 5 }}
                         isAnimationActive={false}
+                        connectNulls={true}
                       />
+                      {networkGapTimes.map((gapTime, idx) => (
+                        <ReferenceLine
+                          key={`network-gap-${idx}`}
+                          x={gapTime}
+                          stroke="#ef4444"
+                          strokeDasharray="4 4"
+                          strokeWidth={1.5}
+                          opacity={0.8}
+                        />
+                      ))}
                     </LineChart>
                   </ResponsiveContainer>
               </>
