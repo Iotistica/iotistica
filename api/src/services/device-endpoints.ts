@@ -116,30 +116,6 @@ export class DeviceSensorSyncService {
   }
 
   /**
-   * Mark pending endpoints as reconciling
-   * Called when agent fetches target state (GET /target-state)
-   * Transition: pending → reconciling (agent is processing changes)
-   */
-  async markPendingAsReconciling(deviceUuid: string): Promise<void> {
-    try {
-      const result = await query(
-        `UPDATE device_sensors 
-         SET deployment_status = 'reconciling',
-             updated_at = NOW()
-         WHERE device_uuid = $1 AND deployment_status = 'pending'`,
-        [deviceUuid]
-      );
-
-      if (result.rowCount > 0) {
-        logger.info(`Marked ${result.rowCount} endpoints as reconciling for device ${deviceUuid.substring(0, 8)}`);
-      }
-    } catch (error) {
-      logger.error('Failed to mark endpoints as reconciling:', error);
-      throw error;
-    }
-  }
-
-  /**
    * Sync sensor devices from config to database table
    * Called during deployment or reconciliation
    * 

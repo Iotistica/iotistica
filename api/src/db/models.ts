@@ -487,16 +487,34 @@ export class DeviceTargetStateModel {
 
     const deployedState = result.rows[0];
 
-    // Sync config to table (inserts new sensors with 'pending' status, updates existing ones)
+    // Sync config to table for NEW sensors only (avoid flipping existing statuses on deploy)
     if (deployedState.config && deployedState.config.endpoints) {
       const syncService = new DeviceSensorSyncService();
-      
-      await syncService.syncConfigToTable(
-        deviceUuid,
-        deployedState.config.endpoints,
-        deployedState.version,
-        deployedBy
+      const existingSensors = await query(
+        'SELECT uuid, name FROM device_sensors WHERE device_uuid = $1',
+        [deviceUuid]
       );
+      const existingUuids = new Set(existingSensors.rows.map((row: any) => row.uuid).filter(Boolean));
+      const existingNames = new Set(existingSensors.rows.map((row: any) => row.name));
+
+      const newEndpoints = deployedState.config.endpoints.filter((endpoint: any) => {
+        if (endpoint.uuid && existingUuids.has(endpoint.uuid)) {
+          return false;
+        }
+        if (endpoint.name && existingNames.has(endpoint.name)) {
+          return false;
+        }
+        return true;
+      });
+
+      if (newEndpoints.length > 0) {
+        await syncService.syncConfigToTable(
+          deviceUuid,
+          newEndpoints,
+          deployedState.version,
+          deployedBy
+        );
+      }
     }
 
     return deployedState;
