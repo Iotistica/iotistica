@@ -1313,7 +1313,7 @@ async function runDiagnostics(): Promise<void> {
 					details: {
 						apiEndpoint: data.apiEndpoint,
 						deviceId: redact(data.deviceId),
-						mqttBroker: data.mqttBrokerUrl ? redact(data.mqttBrokerUrl) : 'not set'
+						mqttBroker: data.mqttBrokerUrl || 'not set'
 					}
 				};
 			} else {
