@@ -26,7 +26,7 @@ export function detectGaps<T extends DataPointWithTime>(
     return data;
   }
 
-  // Calculate average time interval between points
+  // Calculate median time interval between points to avoid skew from large gaps
   const intervals: number[] = [];
   for (let i = 1; i < data.length; i++) {
     const prevTime = typeof data[i - 1].time === 'number' 
@@ -44,8 +44,12 @@ export function detectGaps<T extends DataPointWithTime>(
     return data;
   }
 
-  const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-  const gapThreshold = avgInterval * gapMultiplier;
+  const sortedIntervals = [...intervals].sort((a, b) => a - b);
+  const mid = Math.floor(sortedIntervals.length / 2);
+  const medianInterval = sortedIntervals.length % 2 === 0
+    ? (sortedIntervals[mid - 1] + sortedIntervals[mid]) / 2
+    : sortedIntervals[mid];
+  const gapThreshold = medianInterval * gapMultiplier;
 
   // Mark points that have a gap before them
   const processed: (T & { isGap?: boolean })[] = [data[0]];

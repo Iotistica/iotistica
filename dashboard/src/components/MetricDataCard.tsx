@@ -1,7 +1,6 @@
 import { useState, useEffect, memo } from 'react';
 import { Badge } from './ui/badge';
-import { Button } from './ui/button';
-import { Settings, RefreshCw, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import {
   LineChart,
   Line,
@@ -14,12 +13,11 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
   ReferenceLine,
 } from 'recharts';
 import { buildApiUrl } from '@/config/api';
-import { detectGaps, createGapDotRenderer } from '@/utils/chartGapDetection';
 import { metricsRequestQueue } from '@/utils/metricsRequestQueue';
+import { detectGaps, createGapDotRenderer } from '@/utils/chartGapDetection';
 
 export interface ThresholdLine {
   value: number;
@@ -45,8 +43,6 @@ interface MetricDataCardProps {
   config: MetricDataCardConfig;
   refreshInterval?: number; // in seconds, 0 = off
   refreshTrigger?: number; // timestamp to trigger manual refresh
-  onConfigure?: () => void;
-  onRefresh?: () => void;
   onDataLoaded?: (data: TimeSeriesResponse | null) => void;
 }
 
@@ -77,11 +73,10 @@ interface TimeSeriesResponse {
   data: TimeSeriesDataPoint[];
 }
 
-function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger, onConfigure, onRefresh, onDataLoaded }: MetricDataCardProps) {
+function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger, onDataLoaded }: MetricDataCardProps) {
   const [data, setData] = useState<TimeSeriesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
 
   // Debug: Log config changes
@@ -90,7 +85,6 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
 
   const fetchData = async () => {
     try {
-      setRefreshing(true);
       const cacheTtlMs = refreshInterval > 0
         ? Math.min(Math.max(refreshInterval * 1000, 5000), 60000)
         : 15000;
@@ -138,7 +132,6 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
       }
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   };
 
@@ -152,8 +145,8 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     }
   }, [config.deviceName, config.metricName, config.timeRange, refreshInterval, refreshTrigger]);
 
-  const formatTime = (timeStr: string) => {
-    const date = new Date(timeStr);
+  const formatTimeValue = (timeValue: number) => {
+    const date = new Date(timeValue);
     const now = new Date();
     const diffHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
 
@@ -171,7 +164,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     return value.toFixed(2);
   };
 
-  // Gap detection is handled by the utility function
+  const formatTimeLabel = (timeValue: number) => formatTimeValue(timeValue);
 
   const calculateStats = () => {
     if (!data || data.data.length === 0) return null;
@@ -192,23 +185,28 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
   const renderChart = () => {
     if (!data || data.data.length === 0) return null;
 
-    // Process data and detect gaps (service interruptions)
-    const processedData = detectGaps(data.data);
+    const chartData = data.data.map(point => {
+      const timeValue = new Date(point.time).getTime();
+      return {
+        time: timeValue,
+        timeValue,
+        timeLabel: formatTimeLabel(timeValue),
+        value: point.avg_value,
+        min: point.min_value,
+        max: point.max_value,
+      };
+    });
 
-    const chartData = processedData.map(point => ({
-      time: formatTime(point.time),
-      value: point.avg_value,
-      min: point.min_value,
-      max: point.max_value,
-      isGap: point.isGap, // Mark gap points for visualization
-    }));
-
-    const gapMarkers = chartData.filter(point => point.isGap).map(point => point.time);
+    const chartDataWithGaps = detectGaps(chartData);
+    const gapTimes = chartDataWithGaps.filter(point => point.isGap).map(point => point.timeValue);
+    const gapDotRenderer = createGapDotRenderer({ color: '#ef4444' });
 
     // Calculate Y-axis domain to include both data and thresholds
     const calculateYDomain = (): [number, number] => {
       // Get min/max from data (excluding gaps)
-      const dataValues = chartData.filter(d => !d.isGap).map(d => d.value);
+      const dataValues = chartDataWithGaps
+        .map(d => d.value)
+        .filter(value => Number.isFinite(value));
       if (dataValues.length === 0) return [0, 100];
       
       const dataMin = Math.min(...dataValues);
@@ -234,7 +232,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     const yDomain = calculateYDomain();
 
     const commonProps = {
-      data: chartData,
+      data: chartDataWithGaps,
       margin: { top: 5, right: 10, left: 24, bottom: 5 },
     };
 
@@ -247,9 +245,13 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
             <AreaChart {...commonProps}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis 
-                dataKey="time" 
+                dataKey="timeValue"
+                type="number"
+                scale="time"
+                domain={['dataMin', 'dataMax']}
                 fontSize={12}
                 tickLine={false}
+                tickFormatter={(value: number) => formatTimeValue(value)}
               />
               <YAxis 
                 yAxisId="left"
@@ -266,6 +268,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   borderRadius: '4px',
                   color: 'white'
                 }}
+                labelFormatter={(label: number) => formatTimeValue(label)}
                 formatter={(value: number) => [formatValue(value) + (data.metric.unit ? ` ${data.metric.unit}` : ''), 'Value']}
               />
               <Area 
@@ -275,12 +278,11 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 stroke={color} 
                 fill={color}
                 fillOpacity={0.3}
-                dot={createGapDotRenderer()}
-                connectNulls={true}
+                dot={gapDotRenderer}
               />
-              {gapMarkers.map((gapTime, idx) => (
+              {gapTimes.map((gapTime, idx) => (
                 <ReferenceLine
-                  key={`gap-area-${idx}`}
+                  key={`area-gap-${idx}`}
                   x={gapTime}
                   yAxisId="left"
                   stroke="#ef4444"
@@ -315,9 +317,13 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
             <BarChart {...commonProps}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis 
-                dataKey="time" 
+                dataKey="timeValue"
+                type="number"
+                scale="time"
+                domain={['dataMin', 'dataMax']}
                 fontSize={12}
                 tickLine={false}
+                tickFormatter={(value: number) => formatTimeValue(value)}
               />
               <YAxis 
                 yAxisId="left"
@@ -334,6 +340,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   borderRadius: '4px',
                   color: 'white'
                 }}
+                labelFormatter={(label: number) => formatTimeValue(label)}
                 formatter={(value: number) => [formatValue(value) + (data.metric.unit ? ` ${data.metric.unit}` : ''), 'Value']}
               />
               <Bar 
@@ -341,9 +348,9 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 dataKey="value" 
                 fill={color}
               />
-              {gapMarkers.map((gapTime, idx) => (
+              {gapTimes.map((gapTime, idx) => (
                 <ReferenceLine
-                  key={`gap-bar-${idx}`}
+                  key={`bar-gap-${idx}`}
                   x={gapTime}
                   yAxisId="left"
                   stroke="#ef4444"
@@ -378,9 +385,13 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
             <LineChart {...commonProps}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis 
-                dataKey="time" 
+                dataKey="timeValue"
+                type="number"
+                scale="time"
+                domain={['dataMin', 'dataMax']}
                 fontSize={12}
                 tickLine={false}
+                tickFormatter={(value: number) => formatTimeValue(value)}
               />
               <YAxis 
                 yAxisId="left"
@@ -397,6 +408,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   borderRadius: '4px',
                   color: 'white'
                 }}
+                labelFormatter={(label: number) => formatTimeValue(label)}
                 formatter={(value: number) => [formatValue(value) + (data.metric.unit ? ` ${data.metric.unit}` : ''), 'Value']}
               />
               <Line 
@@ -405,12 +417,11 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 dataKey="value" 
                 stroke={color}
                 strokeWidth={2}
-                dot={createGapDotRenderer()}
-                connectNulls={true}
+                dot={gapDotRenderer}
               />
-              {gapMarkers.map((gapTime, idx) => (
+              {gapTimes.map((gapTime, idx) => (
                 <ReferenceLine
-                  key={`gap-line-${idx}`}
+                  key={`line-gap-${idx}`}
                   x={gapTime}
                   yAxisId="left"
                   stroke="#ef4444"
@@ -442,29 +453,6 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
   };
 
   const stats = calculateStats();
-
-  // Export badges and controls for parent to render
-  const renderBadges = () => {
-    if (!data) return null;
-    return (
-      <div className="flex items-center gap-2">
-        <Badge variant="outline" className="text-xs">
-          {data.metric.protocol}
-        </Badge>
-        <Badge variant="outline" className="text-xs">
-          {config.timeRange}
-        </Badge>
-        {data.metadata.qualityPercentage && (
-          <Badge 
-            variant={data.metadata.qualityPercentage > 95 ? "default" : "destructive"}
-            className="text-xs"
-          >
-            {data.metadata.qualityPercentage.toFixed(1)}% quality
-          </Badge>
-        )}
-      </div>
-    );
-  };
 
   return (
     <div className="h-full flex flex-col">
