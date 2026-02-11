@@ -1205,11 +1205,13 @@ export class ConfigManager extends EventEmitter {
 
 		const loggingConfig = this.getLoggingConfig();
 		
+		// Update log level dynamically
 		this.logger.setLogLevel(loggingConfig.logLevel as LogLevel);
 		
-		this.logger.infoSync('Logging configuration updated from cloud', {
+		this.logger.infoSync('Logging configuration updated from cloud - DYNAMIC UPDATE APPLIED', {
 			component: LogComponents.configManager,
-			logLevel: loggingConfig.logLevel,
+			oldLogLevel: change.old?.level,
+			newLogLevel: loggingConfig.logLevel,
 			enableFilePersistence: loggingConfig.enableFilePersistence,
 			enableCompression: loggingConfig.enableCompression,
 			logBatchSize: loggingConfig.logBatchSize,
@@ -1223,8 +1225,15 @@ export class ConfigManager extends EventEmitter {
 	public handleIntervalsChanges(change: { old: any; new: any }): void {
 		const intervals = this.getIntervalConfig();
 
+		this.logger?.infoSync('Intervals configuration changed - APPLYING DYNAMIC UPDATES', {
+			component: LogComponents.configManager,
+			old: change.old,
+			new: change.new,
+			parsed: intervals,
+		});
+
 		if (this.discoveryService && (this.discoveryLightTimer || this.discoveryFullTimer)) {
-			this.logger?.infoSync('Discovery intervals changed, restarting timers', {
+			this.logger?.infoSync('Discovery intervals changed, restarting timers - DYNAMIC UPDATE', {
 				component: LogComponents.configManager,
 				lightIntervalHours: intervals.discoveryLightIntervalMs! / (60 * 60 * 1000),
 				fullIntervalHours: intervals.discoveryFullIntervalMs! / (60 * 60 * 1000),
@@ -1237,9 +1246,10 @@ export class ConfigManager extends EventEmitter {
 			this.containerManager.stopAutoReconciliation();
 			this.containerManager.startAutoReconciliation(intervals.reconciliationIntervalMs!);
 
-			this.logger?.infoSync('Reconciliation interval updated from cloud', {
+			this.logger?.infoSync('Reconciliation interval updated from cloud - DYNAMIC UPDATE APPLIED', {
 				component: LogComponents.configManager,
-				intervalMs: intervals.reconciliationIntervalMs,
+				oldIntervalMs: change.old?.device?.reconciliationIntervalMs || change.old?.reconciliationIntervalMs,
+				newIntervalMs: intervals.reconciliationIntervalMs,
 				intervalMinutes: intervals.reconciliationIntervalMs! / 60000,
 			});
 		}

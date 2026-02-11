@@ -601,9 +601,11 @@ export class StateReconciler extends EventEmitter {
 
 		// Check logging config changes
 		if (!_.isEqual(oldConfig.logging, newConfig.logging)) {
-			this.logger?.debugSync('Logging configuration changed', {
+			this.logger?.infoSync('Logging configuration changed - EMITTING EVENT', {
 				component: LogComponents.stateReconciler,
 				operation: 'emitConfigChangeEvents',
+				oldConfig: oldConfig.logging,
+				newConfig: newConfig.logging,
 			});
 			this.emit('logging-config-changed', {
 				old: oldConfig.logging,
@@ -613,9 +615,11 @@ export class StateReconciler extends EventEmitter {
 
 		// Check intervals changes
 		if (!_.isEqual(oldConfig.intervals, newConfig.intervals)) {
-			this.logger?.debugSync('Intervals configuration changed', {
+			this.logger?.infoSync('Intervals configuration changed - EMITTING EVENT', {
 				component: LogComponents.stateReconciler,
 				operation: 'emitConfigChangeEvents',
+				oldConfig: oldConfig.intervals,
+				newConfig: newConfig.intervals,
 			});
 			this.emit('intervals-changed', {
 				old: oldConfig.intervals,
