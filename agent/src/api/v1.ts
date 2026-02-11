@@ -153,25 +153,26 @@ router.post('/v1/purge', async (req: Request, res: Response, next: NextFunction)
 
 /**
  * POST /v1/reboot
- * Reboot the agent (graceful restart via process.exit)
+ * Restart agent services (soft restart - keeps API running)
  */
 router.post('/v1/reboot', async (req: Request, res: Response, next: NextFunction) => {
 	try {
-		console.log('Agent reboot requested - exiting process for restart');
+		const agent = actions.getAgent();
 		
-		// Send response before exiting
+		// Send response immediately (don't wait for restart)
 		res.status(202).json({ 
-			Data: 'Agent restarting', 
+			Data: 'Agent services restarting', 
 			Error: null 
 		});
 		
-		// Close the response and exit (Docker/systemd will restart the container/process)
-		res.end();
-		
-		// Give time for response to be sent
-		setTimeout(() => {
-			process.exit(0);
-		}, 1000);
+		// Restart services asynchronously (keeps API running)
+		setImmediate(async () => {
+			try {
+				await agent.restartServices();
+			} catch (error) {
+				console.error('Agent restart failed:', error);
+			}
+		});
 	} catch (error) {
 		next(error);
 	}

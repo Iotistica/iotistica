@@ -20,6 +20,18 @@ let anomalyService: AnomalyDetectionService | undefined;
 let simulationOrchestrator: SimulationOrchestrator | undefined;
 let sensorsFeature: SensorsFeature | undefined;
 let discoveryService: import('../features/discovery/discovery-service').DiscoveryService | undefined;
+let agentInstance: any | undefined;
+
+export function setAgent(agent: any): void {
+	agentInstance = agent;
+}
+
+export function getAgent(): any {
+	if (!agentInstance) {
+		throw new Error('Agent not initialized');
+	}
+	return agentInstance;
+}
 
 export function initialize(
 	cm: ContainerManager, 

@@ -34,7 +34,7 @@ export class ShellHandler {
    */
   async initialize(): Promise<void> {
     this.logger.infoSync('Shell handler initializing', {
-      component: LogComponents.agent,
+      component: LogComponents.shell,
       commandTopic: this.commandTopic,
       outputTopic: this.outputTopic,
     });
@@ -47,7 +47,7 @@ export class ShellHandler {
     );
 
     this.logger.infoSync('Shell handler initialized', {
-      component: LogComponents.agent,
+      component: LogComponents.shell,
     });
   }
 
@@ -59,7 +59,7 @@ export class ShellHandler {
       const message = JSON.parse(payload.toString());
       
       this.logger.debugSync('Received shell command', {
-        component: LogComponents.agent,
+        component: LogComponents.shell,
         action: message.action,
         sessionActive: this.sessionActive,
       });
@@ -72,8 +72,8 @@ export class ShellHandler {
           this.stopSession();
           break;
         case 'input':
-          this.logger.infoSync('[SHELL-DEBUG] Received input action', {
-            component: LogComponents.agent,
+          this.logger.debugSync('Received input action', {
+            component: LogComponents.shell,
             hasData: !!message.data,
             hasPty: !!this.ptyProcess,
             sessionActive: this.sessionActive,
@@ -83,14 +83,14 @@ export class ShellHandler {
           });
           
           if (message.data && this.ptyProcess) {
-            this.logger.infoSync('[SHELL-DEBUG] Writing to PTY', {
-              component: LogComponents.agent,
+            this.logger.debugSync('Writing to PTY', {
+              component: LogComponents.shell,
               data: message.data.substring(0, 20),
             });
             this.ptyProcess.write(message.data);
           } else {
-            this.logger.warnSync('[SHELL-DEBUG] Cannot write - missing data or PTY', {
-              component: LogComponents.agent,
+            this.logger.warnSync('Cannot write - missing data or PTY', {
+              component: LogComponents.shell,
               hasData: !!message.data,
               hasPty: !!this.ptyProcess,
             });
@@ -103,13 +103,13 @@ export class ShellHandler {
           break;
         default:
           this.logger.warnSync('Unknown shell action', {
-            component: LogComponents.agent,
+            component: LogComponents.shell,
             action: message.action,
           });
       }
     } catch (error) {
       this.logger.errorSync('Error handling shell command', error as Error, {
-        component: LogComponents.agent,
+        component: LogComponents.shell,
       });
     }
   }
@@ -121,14 +121,14 @@ export class ShellHandler {
     if (this.sessionActive) {
       if (this.currentSessionId && sessionId && this.currentSessionId !== sessionId) {
         this.logger.infoSync('Switching shell session', {
-          component: LogComponents.agent,
+          component: LogComponents.shell,
           fromSessionId: this.currentSessionId.substring(0, 8),
           toSessionId: sessionId.substring(0, 8),
         });
         this.stopSession();
       } else {
         this.logger.warnSync('Shell session already active', {
-          component: LogComponents.agent,
+          component: LogComponents.shell,
         });
         return;
       }
@@ -143,7 +143,7 @@ export class ShellHandler {
       const cwd = os.homedir();
 
       this.logger.infoSync('Starting PTY process', {
-        component: LogComponents.agent,
+        component: LogComponents.shell,
         shell,
         cwd,
         platform: os.platform(),
@@ -162,8 +162,8 @@ export class ShellHandler {
 
       // Handle PTY output
       this.ptyProcess.onData((data: string) => {
-        this.logger.debugSync('[SHELL-DEBUG] PTY onData triggered', {
-          component: LogComponents.agent,
+        this.logger.debugSync('PTY onData triggered', {
+          component: LogComponents.shell,
           dataLength: data.length,
           preview: data.substring(0, 30).replace(/[\r\n]/g, '\\n'),
         });
@@ -173,7 +173,7 @@ export class ShellHandler {
       // Handle PTY exit
       this.ptyProcess.onExit(({ exitCode, signal }: { exitCode: number; signal?: number }) => {
         this.logger.infoSync('PTY process exited', {
-          component: LogComponents.agent,
+          component: LogComponents.shell,
           exitCode,
           signal,
         });
@@ -184,11 +184,11 @@ export class ShellHandler {
       await this.sendOutput('\r\n\x1b[32m✓ Shell session started\x1b[0m\r\n');
       
       this.logger.infoSync('Shell session started', {
-        component: LogComponents.agent,
+        component: LogComponents.shell,
       });
     } catch (error) {
       this.logger.errorSync('Failed to start shell session', error as Error, {
-        component: LogComponents.agent,
+        component: LogComponents.shell,
       });
       this.sessionActive = false;
       await this.sendOutput(`\r\n\x1b[31m✗ Failed to start shell: ${(error as Error).message}\x1b[0m\r\n`);
@@ -204,7 +204,7 @@ export class ShellHandler {
     }
 
     this.logger.infoSync('Stopping shell session', {
-      component: LogComponents.agent,
+      component: LogComponents.shell,
     });
 
     if (this.ptyProcess) {
@@ -212,7 +212,7 @@ export class ShellHandler {
         this.ptyProcess.kill();
       } catch (error) {
         this.logger.errorSync('Error killing PTY process', error as Error, {
-          component: LogComponents.agent,
+          component: LogComponents.shell,
         });
       }
       this.ptyProcess = null;
@@ -222,7 +222,7 @@ export class ShellHandler {
     this.sessionActive = false;
 
     this.logger.infoSync('Shell session stopped', {
-      component: LogComponents.agent,
+      component: LogComponents.shell,
     });
   }
 
@@ -230,8 +230,8 @@ export class ShellHandler {
    * Send shell output to cloud via MQTT
    */
   private async sendOutput(data: string): Promise<void> {
-    this.logger.infoSync('[SHELL-DEBUG] sendOutput called', {
-      component: LogComponents.agent,
+    this.logger.debugSync('sendOutput called', {
+      component: LogComponents.shell,
       dataLength: data.length,
       sessionId: this.currentSessionId || 'none',
       outputTopic: this.outputTopic,
@@ -248,8 +248,8 @@ export class ShellHandler {
         },
       };
       
-      this.logger.infoSync('[SHELL-DEBUG] Publishing to MQTT', {
-        component: LogComponents.agent,
+      this.logger.debugSync('Publishing to MQTT', {
+        component: LogComponents.shell,
         topic: this.outputTopic,
         payloadSize: JSON.stringify(payload).length,
       });
@@ -260,12 +260,12 @@ export class ShellHandler {
         { qos: 0, retain: false }
       );
       
-      this.logger.infoSync('[SHELL-DEBUG] MQTT publish successful', {
-        component: LogComponents.agent,
+      this.logger.debugSync('MQTT publish successful', {
+        component: LogComponents.shell,
       });
     } catch (error) {
       this.logger.errorSync('Failed to publish shell output', error as Error, {
-        component: LogComponents.agent,
+        component: LogComponents.shell,
       });
     }
   }
@@ -280,12 +280,12 @@ export class ShellHandler {
       await this.mqtt.unsubscribe(this.commandTopic);
     } catch (error) {
       this.logger.errorSync('Error unsubscribing from shell topic', error as Error, {
-        component: LogComponents.agent,
+        component: LogComponents.shell,
       });
     }
 
     this.logger.infoSync('Shell handler cleaned up', {
-      component: LogComponents.agent,
+      component: LogComponents.shell,
     });
   }
 }

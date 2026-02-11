@@ -280,7 +280,8 @@ export default class Agent {
         this.simulationOrchestrator
       );
 
-		// 12.3. Expose discovery service to API actions
+		// 12.3. Expose agent and discovery service to API actions
+		deviceActions.setAgent(this);
 		deviceActions.setDiscoveryService(this.discoveryService);
 
       // 13. Initialize reactive ConfigManager handlers (handles all config changes automatically)
@@ -840,6 +841,14 @@ export default class Agent {
 
 
   private async initDeviceAPI(): Promise<void> {
+    // Skip if Device API is already running (e.g., during restartServices)
+    if (this.deviceAPI) {
+      this.agentLogger?.infoSync("Device API already running, skipping initialization", {
+        component: LogComponents.agent,
+      });
+      return;
+    }
+
     this.agentLogger?.infoSync("Initializing device API", {
       component: LogComponents.agent,
     });
@@ -1377,6 +1386,103 @@ export default class Agent {
         {
           component: LogComponents.agent,
         }
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Restart all agent services except the API server
+   * This is a soft restart that keeps the HTTP server running
+   */
+  public async restartServices(): Promise<void> {
+    this.agentLogger?.infoSync('Restarting agent services (soft restart)', {
+      component: LogComponents.agent,
+    });
+
+    try {
+      // Stop all services (similar to stop() but skip deviceAPI)
+      if (this.featureInitializer) {
+        await this.featureInitializer.cleanup();
+      }
+      
+      if (this.cloudSync) {
+        await this.cloudSync.stop();
+      }
+
+      if (this.firewall) {
+        await this.firewall.stop();
+      }
+
+      if (this.updater) {
+        await this.updater.cleanup();
+      }
+
+      stopMemoryMonitoring();
+
+      if (this.simulationOrchestrator) {
+        await this.simulationOrchestrator.stop();
+      }
+
+      stopMemoryLeakSimulation();
+
+      // Stop log backends
+      for (const backend of this.agentLogger?.getBackends() || []) {
+        try {
+          if ('disconnect' in backend && typeof backend.disconnect === 'function') {
+            await backend.disconnect();
+          } else if ('stop' in backend && typeof backend.stop === 'function') {
+            await (backend as any).stop();
+          }
+        } catch (error) {
+          this.agentLogger?.warnSync('Error stopping log backend', {
+            component: LogComponents.agent,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      if (this.dictionaryManager) {
+        await this.dictionaryManager.shutdown();
+        this.dictionaryManager = undefined;
+      }
+
+      const mqttManager = MqttManager.getInstance();
+      if (mqttManager.isConnected()) {
+        await mqttManager.disconnect();
+      }
+
+      // NOTE: Skip deviceAPI - keep it running!
+
+      if (this.containerManager) {
+        this.containerManager.stopAutoReconciliation();
+      }
+
+      if (this.scheduledRestartTimer) {
+        clearTimeout(this.scheduledRestartTimer);
+        this.scheduledRestartTimer = undefined;
+      }
+      
+      this.discoveryService?.stopPeriodicDiscovery();
+
+      this.agentLogger?.infoSync('All services stopped, waiting before reinit...', {
+        component: LogComponents.agent,
+      });
+
+      // Small delay to ensure cleanup completes
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Re-initialize all services (reuse init logic)
+      await this.init();
+
+      this.agentLogger?.infoSync('Agent services restarted successfully', {
+        component: LogComponents.agent,
+      });
+    } catch (error) {
+      this.agentLogger?.errorSync(
+        'Agent restart failed',
+        error instanceof Error ? error : new Error(String(error)),
+        { component: LogComponents.agent }
       );
       throw error;
     }

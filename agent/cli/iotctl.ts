@@ -279,7 +279,7 @@ DEVICE MANAGEMENT:
 
   status                            Show device status and health
 
-  restart                           Restart device agent service
+  restart                           Restart agent services (soft restart, API stays running)
 
   logs [--follow] [-n <lines>]      Show device logs
                                     --follow, -f : Follow log output
@@ -1003,19 +1003,17 @@ async function servicesInfo(serviceId: string): Promise<void> {
 
 async function restart(): Promise<void> {
 	try {
-		logger.info('Restarting device agent...');
+		logger.info('Restarting agent services...');
 		
 		await apiRequest(`${DEVICE_API_V1}/reboot`, {
 			method: 'POST'
 		});
 		
-		logger.info('Agent restarting', {
-			note: 'Process will exit and container will restart automatically'
+		logger.info('Agent services restarting', {
+			note: 'All services will reinitialize (API stays running)'
 		});
 	} catch (error) {
-		logger.error('Failed to restart agent', error as Error, {
-			hint: 'From host, run: docker restart agent-1'
-		});
+		logger.error('Failed to restart agent services', error as Error);
 		process.exit(1);
 	}
 }
