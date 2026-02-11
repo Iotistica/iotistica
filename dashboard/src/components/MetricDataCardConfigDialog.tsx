@@ -70,6 +70,7 @@ export function MetricDataCardConfigDialog({
   const [availableMetrics, setAvailableMetrics] = useState<string[]>([]);
   const [thresholds, setThresholds] = useState<ThresholdLine[]>(initialConfig?.thresholds || []);
   const [showThresholds, setShowThresholds] = useState<boolean>((initialConfig?.thresholds?.length || 0) > 0);
+  const [showStats, setShowStats] = useState<boolean>(initialConfig?.showStats ?? true);
 
   // Update form fields when initialConfig changes (for editing existing widgets)
   useEffect(() => {
@@ -82,6 +83,7 @@ export function MetricDataCardConfigDialog({
       setColor(initialConfig.color || '#3b82f6');
       setThresholds(initialConfig.thresholds || []);
       setShowThresholds(initialConfig.thresholdsEnabled ?? ((initialConfig.thresholds?.length || 0) > 0));
+      setShowStats(initialConfig.showStats ?? true);
     } else if (open && !initialConfig) {
       // Reset form for new widget
       setSelectedDevice('');
@@ -92,6 +94,7 @@ export function MetricDataCardConfigDialog({
       setColor('#3b82f6');
       setThresholds([]);
       setShowThresholds(false);
+      setShowStats(false);
     }
   }, [open, initialConfig]);
 
@@ -146,7 +149,7 @@ export function MetricDataCardConfigDialog({
       timeRange,
       color,
       title: title || undefined,
-      showStats: true,
+      showStats,
       thresholds: thresholds.length > 0 ? thresholds : undefined,
       thresholdsEnabled: showThresholds,
     };
@@ -271,6 +274,19 @@ export function MetricDataCardConfigDialog({
                 <SelectItem value="30d">Last 30 Days</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="grid gap-2">
+            <div className="flex items-center justify-between">
+              <Label>Show Aggregate Cards</Label>
+              <Switch
+                checked={showStats}
+                onCheckedChange={setShowStats}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Toggle Current/Average/Minimum/Maximum cards above the chart.
+            </p>
           </div>
 
           <div className="grid gap-2">

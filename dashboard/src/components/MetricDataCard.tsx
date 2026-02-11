@@ -19,6 +19,7 @@ import {
 } from 'recharts';
 import { buildApiUrl } from '@/config/api';
 import { detectGaps, createGapDotRenderer } from '@/utils/chartGapDetection';
+import { metricsRequestQueue } from '@/utils/metricsRequestQueue';
 
 export interface ThresholdLine {
   value: number;
@@ -90,28 +91,51 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
   const fetchData = async () => {
     try {
       setRefreshing(true);
-      const url = buildApiUrl(
-        `/api/v1/metrics/timeseries?deviceName=${encodeURIComponent(config.deviceName)}&metricName=${encodeURIComponent(config.metricName)}&timeRange=${config.timeRange}`
-      );
+      const cacheTtlMs = refreshInterval > 0
+        ? Math.min(Math.max(refreshInterval * 1000, 5000), 60000)
+        : 15000;
+      const requestKey = `${config.deviceName}|${config.metricName}|${config.timeRange}`;
 
-      const response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('accessToken')}`,
+      const result: TimeSeriesResponse = await metricsRequestQueue.enqueue(
+        requestKey,
+        async () => {
+          const url = buildApiUrl(
+            `/api/v1/metrics/timeseries?deviceName=${encodeURIComponent(config.deviceName)}&metricName=${encodeURIComponent(config.metricName)}&timeRange=${config.timeRange}`
+          );
+
+          const response = await fetch(url, {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem('accessToken')}`,
+            },
+          });
+
+          if (response.status === 429) {
+            const retryAfter = response.headers.get('retry-after');
+            const retrySeconds = retryAfter ? parseInt(retryAfter, 10) : 30;
+            const error: any = new Error('Rate limited');
+            error.status = 429;
+            error.retryAfter = Number.isFinite(retrySeconds) ? retrySeconds : 30;
+            throw error;
+          }
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+
+          return response.json();
         },
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const result: TimeSeriesResponse = await response.json();
+        cacheTtlMs
+      );
       setData(result);
       setError(null);
       setLastRefreshed(new Date());
       onDataLoaded?.(result);
     } catch (err: any) {
       console.error('Error fetching metric data:', err);
-      setError(err.message || 'Failed to fetch data');
+      if (err?.status === 429) {
+        setError('Rate limited. Pausing refresh briefly.');
+      } else {
+        setError(err.message || 'Failed to fetch data');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);

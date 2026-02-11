@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -104,31 +105,33 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   
   // Load filter preferences from localStorage
-  const getStoredFilter = (key: string, defaultValue: string) => {
+  const getStoredFilter = (key: string, defaultValue: string[]) => {
     try {
       const stored = localStorage.getItem(`sensors-filter-${key}-${deviceUuid}`);
-      return stored || defaultValue;
+      if (!stored) return defaultValue;
+      const parsed = JSON.parse(stored);
+      return Array.isArray(parsed) ? parsed : defaultValue;
     } catch {
       return defaultValue;
     }
   };
 
-  const [selectedProtocol, setSelectedProtocol] = useState<string>(() => getStoredFilter('protocol', 'all'));
-  const [selectedStatus, setSelectedStatus] = useState<string>(() => getStoredFilter('status', 'all'));
-  const [selectedType, setSelectedType] = useState<string>(() => getStoredFilter('type', 'all'));
+  const [selectedProtocol, setSelectedProtocol] = useState<string[]>(() => getStoredFilter('protocol', []));
+  const [selectedStatus, setSelectedStatus] = useState<string[]>(() => getStoredFilter('status', []));
+  const [selectedType, setSelectedType] = useState<string[]>(() => getStoredFilter('type', []));
   const { getPendingConfig, updatePendingSensor, addPendingSensor } = useDeviceState();
 
   // Persist filter changes to localStorage
   useEffect(() => {
-    localStorage.setItem(`sensors-filter-protocol-${deviceUuid}`, selectedProtocol);
+    localStorage.setItem(`sensors-filter-protocol-${deviceUuid}`, JSON.stringify(selectedProtocol));
   }, [selectedProtocol, deviceUuid]);
 
   useEffect(() => {
-    localStorage.setItem(`sensors-filter-status-${deviceUuid}`, selectedStatus);
+    localStorage.setItem(`sensors-filter-status-${deviceUuid}`, JSON.stringify(selectedStatus));
   }, [selectedStatus, deviceUuid]);
 
   useEffect(() => {
-    localStorage.setItem(`sensors-filter-type-${deviceUuid}`, selectedType);
+    localStorage.setItem(`sensors-filter-type-${deviceUuid}`, JSON.stringify(selectedType));
   }, [selectedType, deviceUuid]);
 
   // Virtual device states
@@ -141,6 +144,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     slaveCount: 40,
   });
   const [virtualDeviceLoading, setVirtualDeviceLoading] = useState(false);
+  const selectedVirtualProfile = profiles.find(profile => profile.profile_name === virtualFormData.profile);
 
   // Profile management states
   const [addProfileDialogOpen, setAddProfileDialogOpen] = useState(false);
@@ -253,7 +257,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           lastError: health?.lastError || d.lastError,
           configured: true,
           enabled: d.enabled !== undefined ? d.enabled : true, // Default to enabled
-          type: (d.metadata?.sidecar === true ? 'virtual' : 'device') as const,
+          type: d.metadata?.sidecar === true ? 'virtual' : 'device',
           protocol: d.protocol,
           connected: isConnected,
           connection: d.connection, // Full connection configuration
@@ -345,8 +349,8 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         pendingSensorsCount: pendingSensors.length,
         pipelinesCount: pipelines.length,
         sortedDevicesCount: sortedDevices.length,
-        pendingSensorsNames: pendingSensors.map(s => s.name),
-        pipelinesNames: pipelines.map(s => s.name),
+        pendingSensorsNames: pendingSensors.map((s: { name: string }) => s.name),
+        pipelinesNames: pipelines.map((s: { name: string }) => s.name),
         sortedDevicesNames: sortedDevices.map(s => s.name)
       });
 
@@ -569,7 +573,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     const virtualCount = sensors.filter(s => s.type === 'virtual').length;
     
     setVirtualFormData({
-      name: `Virtual ${virtualFormData.protocol.toUpperCase()} Device ${virtualCount + 1}`,
+      name: `Virtual Device ${virtualCount + 1}`,
       protocol: 'modbus',
       profile: '',
       slaveCount: 40,
@@ -863,57 +867,165 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-2">
                 <label className="text-sm font-medium text-foreground">Protocol:</label>
-                <select 
-                  value={selectedProtocol} 
-                  onChange={(e) => setSelectedProtocol(e.target.value)}
-                  className="border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="all">All ({sensors.length})</option>
-                  {Array.from(new Set(sensors.map(s => s.protocol).filter(Boolean))).sort().map(protocol => (
-                    <option key={protocol} value={protocol}>
-                      {protocol?.toUpperCase()} ({sensors.filter(s => s.protocol === protocol).length})
-                    </option>
-                  ))}
-                </select>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="min-w-[160px] justify-between">
+                      {selectedProtocol.length === 0 ? 'All' : `${selectedProtocol.length} selected`}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-56">
+                    <DropdownMenuCheckboxItem
+                      checked={selectedProtocol.length === 0}
+                      onSelect={(e) => e.preventDefault()}
+                      onCheckedChange={(checked) => setSelectedProtocol(checked ? [] : selectedProtocol)}
+                    >
+                      All ({sensors.length})
+                    </DropdownMenuCheckboxItem>
+                    {Array.from(new Set(sensors.map(s => s.protocol).filter(Boolean))).sort().map(protocol => (
+                      <DropdownMenuCheckboxItem
+                        key={protocol}
+                        checked={selectedProtocol.includes(protocol as string)}
+                        onSelect={(e) => e.preventDefault()}
+                        onCheckedChange={(checked) => {
+                          setSelectedProtocol(prev =>
+                            checked
+                              ? [...prev.filter(p => p !== protocol), protocol as string]
+                              : prev.filter(p => p !== protocol)
+                          );
+                        }}
+                      >
+                        {protocol?.toUpperCase()} ({sensors.filter(s => s.protocol === protocol).length})
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
 
               <div className="flex items-center gap-2">
                 <label className="text-sm font-medium text-foreground">Status:</label>
-                <select 
-                  value={selectedStatus} 
-                  onChange={(e) => setSelectedStatus(e.target.value)}
-                  className="border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="all">All ({sensors.length})</option>
-                  <option value="CONNECTED">Active ({sensors.filter(s => s.state === 'CONNECTED').length})</option>
-                  <option value="DISCONNECTED">Disconnected ({sensors.filter(s => s.state === 'DISCONNECTED').length})</option>
-                  <option value="PENDING">Pending ({sensors.filter(s => s.state === 'PENDING').length})</option>
-                  <option value="healthy">Healthy ({sensors.filter(s => s.healthy).length})</option>
-                  <option value="unhealthy">Unhealthy ({sensors.filter(s => !s.healthy && s.state !== 'PENDING').length})</option>
-                </select>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="min-w-[160px] justify-between">
+                      {selectedStatus.length === 0 ? 'All' : `${selectedStatus.length} selected`}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-56">
+                    <DropdownMenuCheckboxItem
+                      checked={selectedStatus.length === 0}
+                      onSelect={(e) => e.preventDefault()}
+                      onCheckedChange={(checked) => setSelectedStatus(checked ? [] : selectedStatus)}
+                    >
+                      All ({sensors.length})
+                    </DropdownMenuCheckboxItem>
+                    <DropdownMenuCheckboxItem
+                      checked={selectedStatus.includes('CONNECTED')}
+                      onSelect={(e) => e.preventDefault()}
+                      onCheckedChange={(checked) => {
+                        setSelectedStatus(prev =>
+                          checked ? [...prev.filter(s => s !== 'CONNECTED'), 'CONNECTED'] : prev.filter(s => s !== 'CONNECTED')
+                        );
+                      }}
+                    >
+                      Active ({sensors.filter(s => s.state === 'CONNECTED').length})
+                    </DropdownMenuCheckboxItem>
+                    <DropdownMenuCheckboxItem
+                      checked={selectedStatus.includes('DISCONNECTED')}
+                      onSelect={(e) => e.preventDefault()}
+                      onCheckedChange={(checked) => {
+                        setSelectedStatus(prev =>
+                          checked ? [...prev.filter(s => s !== 'DISCONNECTED'), 'DISCONNECTED'] : prev.filter(s => s !== 'DISCONNECTED')
+                        );
+                      }}
+                    >
+                      Disconnected ({sensors.filter(s => s.state === 'DISCONNECTED').length})
+                    </DropdownMenuCheckboxItem>
+                    <DropdownMenuCheckboxItem
+                      checked={selectedStatus.includes('PENDING')}
+                      onSelect={(e) => e.preventDefault()}
+                      onCheckedChange={(checked) => {
+                        setSelectedStatus(prev =>
+                          checked ? [...prev.filter(s => s !== 'PENDING'), 'PENDING'] : prev.filter(s => s !== 'PENDING')
+                        );
+                      }}
+                    >
+                      Pending ({sensors.filter(s => s.state === 'PENDING').length})
+                    </DropdownMenuCheckboxItem>
+                    <DropdownMenuCheckboxItem
+                      checked={selectedStatus.includes('healthy')}
+                      onSelect={(e) => e.preventDefault()}
+                      onCheckedChange={(checked) => {
+                        setSelectedStatus(prev =>
+                          checked ? [...prev.filter(s => s !== 'healthy'), 'healthy'] : prev.filter(s => s !== 'healthy')
+                        );
+                      }}
+                    >
+                      Healthy ({sensors.filter(s => s.healthy).length})
+                    </DropdownMenuCheckboxItem>
+                    <DropdownMenuCheckboxItem
+                      checked={selectedStatus.includes('unhealthy')}
+                      onSelect={(e) => e.preventDefault()}
+                      onCheckedChange={(checked) => {
+                        setSelectedStatus(prev =>
+                          checked ? [...prev.filter(s => s !== 'unhealthy'), 'unhealthy'] : prev.filter(s => s !== 'unhealthy')
+                        );
+                      }}
+                    >
+                      Unhealthy ({sensors.filter(s => !s.healthy && s.state !== 'PENDING').length})
+                    </DropdownMenuCheckboxItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
 
               <div className="flex items-center gap-2">
                 <label className="text-sm font-medium text-foreground">Type:</label>
-                <select 
-                  value={selectedType} 
-                  onChange={(e) => setSelectedType(e.target.value)}
-                  className="border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="all">All ({sensors.length})</option>
-                  <option value="device">Physical ({sensors.filter(s => s.type === 'device').length})</option>
-                  <option value="virtual">Virtual ({sensors.filter(s => s.type === 'virtual').length})</option>
-                </select>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="min-w-[160px] justify-between">
+                      {selectedType.length === 0 ? 'All' : `${selectedType.length} selected`}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-56">
+                    <DropdownMenuCheckboxItem
+                      checked={selectedType.length === 0}
+                      onSelect={(e) => e.preventDefault()}
+                      onCheckedChange={(checked) => setSelectedType(checked ? [] : selectedType)}
+                    >
+                      All ({sensors.length})
+                    </DropdownMenuCheckboxItem>
+                    <DropdownMenuCheckboxItem
+                      checked={selectedType.includes('device')}
+                      onSelect={(e) => e.preventDefault()}
+                      onCheckedChange={(checked) => {
+                        setSelectedType(prev =>
+                          checked ? [...prev.filter(s => s !== 'device'), 'device'] : prev.filter(s => s !== 'device')
+                        );
+                      }}
+                    >
+                      Physical ({sensors.filter(s => s.type === 'device').length})
+                    </DropdownMenuCheckboxItem>
+                    <DropdownMenuCheckboxItem
+                      checked={selectedType.includes('virtual')}
+                      onSelect={(e) => e.preventDefault()}
+                      onCheckedChange={(checked) => {
+                        setSelectedType(prev =>
+                          checked ? [...prev.filter(s => s !== 'virtual'), 'virtual'] : prev.filter(s => s !== 'virtual')
+                        );
+                      }}
+                    >
+                      Virtual ({sensors.filter(s => s.type === 'virtual').length})
+                    </DropdownMenuCheckboxItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
 
-              {(selectedProtocol !== 'all' || selectedStatus !== 'all' || selectedType !== 'all') && (
+              {(selectedProtocol.length > 0 || selectedStatus.length > 0 || selectedType.length > 0) && (
                 <Button 
                   variant="ghost" 
                   size="sm" 
                   onClick={() => {
-                    setSelectedProtocol('all');
-                    setSelectedStatus('all');
-                    setSelectedType('all');
+                    setSelectedProtocol([]);
+                    setSelectedStatus([]);
+                    setSelectedType([]);
                   }}
                   className="text-sm"
                 >
@@ -926,10 +1038,12 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           )}
           
           <div className="flex gap-2">
-            <Button onClick={() => setAddSensorDialogOpen(true)}>
-              <Plus className="w-4 h-4 mr-2" />
-              Add Device
-            </Button>
+            {deviceType !== 'virtual' && (
+              <Button onClick={() => setAddSensorDialogOpen(true)}>
+                <Plus className="w-4 h-4 mr-2" />
+                Add Device
+              </Button>
+            )}
             {deviceType === 'virtual' && (
               <Button onClick={handleOpenVirtualDeviceDialog}>
                 <Plus className="w-4 h-4 mr-2" />
@@ -953,16 +1067,16 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                 ? 'No devices configured yet.' 
                 : (() => {
                     const filtered = sensors
-                      .filter(s => selectedProtocol === 'all' || s.protocol === selectedProtocol)
-                      .filter(s => selectedType === 'all' || s.type === selectedType)
-                      .filter(s => {
-                        if (selectedStatus === 'all') return true;
-                        if (selectedStatus === 'healthy') return s.healthy;
-                        if (selectedStatus === 'unhealthy') return !s.healthy && s.state !== 'PENDING';
-                        return s.state === selectedStatus;
-                      });
+                    .filter(s => selectedProtocol.length === 0 || selectedProtocol.includes(s.protocol || ''))
+                    .filter(s => selectedType.length === 0 || selectedType.includes(s.type || ''))
+                    .filter(s => {
+                      if (selectedStatus.length === 0) return true;
+                      if (selectedStatus.includes('healthy') && s.healthy) return true;
+                      if (selectedStatus.includes('unhealthy') && !s.healthy && s.state !== 'PENDING') return true;
+                      return selectedStatus.includes(s.state);
+                    });
                     
-                    const hasFilters = selectedProtocol !== 'all' || selectedStatus !== 'all' || selectedType !== 'all';
+                  const hasFilters = selectedProtocol.length > 0 || selectedStatus.length > 0 || selectedType.length > 0;
                     return hasFilters 
                       ? `${filtered.length} of ${sensors.length} device(s) matching filters`
                       : `${sensors.length} device(s) configured`;
@@ -979,13 +1093,13 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             ) : (
               <div className="space-y-3">
                 {sensors
-                  .filter(sensor => selectedProtocol === 'all' || sensor.protocol === selectedProtocol)
-                  .filter(sensor => selectedType === 'all' || sensor.type === selectedType)
+                  .filter(sensor => selectedProtocol.length === 0 || selectedProtocol.includes(sensor.protocol || ''))
+                  .filter(sensor => selectedType.length === 0 || selectedType.includes(sensor.type || ''))
                   .filter(sensor => {
-                    if (selectedStatus === 'all') return true;
-                    if (selectedStatus === 'healthy') return sensor.healthy;
-                    if (selectedStatus === 'unhealthy') return !sensor.healthy && sensor.state !== 'PENDING';
-                    return sensor.state === selectedStatus;
+                    if (selectedStatus.length === 0) return true;
+                    if (selectedStatus.includes('healthy') && sensor.healthy) return true;
+                    if (selectedStatus.includes('unhealthy') && !sensor.healthy && sensor.state !== 'PENDING') return true;
+                    return selectedStatus.includes(sensor.state);
                   })
                   .map((sensor) => (
                   <div key={sensor.name}>
@@ -1121,7 +1235,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
         {/* Add Virtual Device Dialog */}
         <Dialog open={addVirtualDeviceDialogOpen} onOpenChange={setAddVirtualDeviceDialogOpen}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-4xl w-full">
             <DialogHeader>
               <DialogTitle>Add Virtual Device</DialogTitle>
               <DialogDescription>
@@ -1177,6 +1291,19 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                 </Select>
               </div>
 
+              <div className="space-y-2">
+                <Label>Data Points Preview</Label>
+                <Textarea
+                  readOnly
+                  className="h-80 w-full font-mono text-xs"
+                  value={
+                    selectedVirtualProfile
+                      ? JSON.stringify(selectedVirtualProfile.data_points || [], null, 2)
+                      : 'Select a profile to preview its data points.'
+                  }
+                />
+              </div>
+
               {virtualFormData.protocol === 'modbus' && (
                 <div className="space-y-2">
                   <Label htmlFor="virtual-slaveCount">Slave Count</Label>
@@ -1192,22 +1319,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                 </div>
               )}
 
-              <Alert>
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>
-                  <div className="font-medium mb-1">Auto-Configuration:</div>
-                  <ul className="list-disc list-inside space-y-1 text-sm">
-                    <li>Port will be auto-assigned (502, 503, 504... for Modbus)</li>
-                    <li>
-                      Agent will connect via localhost:
-                      {sensors.filter(s => s.type === 'virtual' && s.protocol === 'modbus').length === 0 
-                        ? '502' 
-                        : `${502 + sensors.filter(s => s.type === 'virtual' && s.protocol === 'modbus').length}`}
-                    </li>
-                    <li>Data points defined by selected profile</li>
-                  </ul>
-                </AlertDescription>
-              </Alert>
             </div>
 
             <DialogFooter>

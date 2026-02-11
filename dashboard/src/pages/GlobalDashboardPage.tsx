@@ -38,6 +38,7 @@ import {
   ChevronDown,
   RefreshCw,
   Settings,
+  Layers,
   Maximize2,
   X,
   Gauge,
@@ -970,6 +971,40 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                       </SelectContent>
                     </Select>
                     </div>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 cursor-pointer hover:bg-primary/10 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              const updatedWidgets = widgets.map(w =>
+                                w.i === widget.i
+                                  ? {
+                                    ...w,
+                                    metricConfig: {
+                                      ...w.metricConfig!,
+                                      showStats: !(w.metricConfig?.showStats ?? true)
+                                    },
+                                    _refreshTrigger: Date.now()
+                                  }
+                                : w
+                              );
+                              setWidgets(updatedWidgets);
+                              setHasUnsavedChanges(true);
+                            }}
+                          >
+                            <Layers className={`w-4 h-4 ${(widget.metricConfig.showStats ?? true) ? 'text-primary' : 'text-muted-foreground'}`} />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>{(widget.metricConfig.showStats ?? true) ? 'Hide' : 'Show'} aggregate cards</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -1261,7 +1296,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         }
         return (
           <MetricDataCard 
-            key={`${widget.i}-${widget.metricConfig?.timeRange || ''}-${widget.metricConfig?.thresholds?.length || 0}-${widget.metricConfig?.thresholdsEnabled || false}`}
+            key={`${widget.i}-${widget.metricConfig?.timeRange || ''}-${widget.metricConfig?.thresholds?.length || 0}-${widget.metricConfig?.thresholdsEnabled || false}-${widget.metricConfig?.showStats ?? true}`}
             config={widget.metricConfig}
             refreshInterval={refreshInterval}
             refreshTrigger={widget._refreshTrigger}
