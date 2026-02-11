@@ -1120,6 +1120,9 @@ export class CloudSync extends EventEmitter {
 	if (stateReport[deviceInfo.uuid].os_version !== undefined) {
 		stateOnlyReport[deviceInfo.uuid].os_version = stateReport[deviceInfo.uuid].os_version;
 	}
+	if (stateReport[deviceInfo.uuid].architecture !== undefined) {
+		stateOnlyReport[deviceInfo.uuid].architecture = stateReport[deviceInfo.uuid].architecture;
+	}
 	// Always include agent_version (critical for reconciliation)
 	if (this.agentUpdater) {
 		const agentVersion = this.agentUpdater.getCurrentVersion();
@@ -1164,6 +1167,9 @@ export class CloudSync extends EventEmitter {
 	// Add static fields only if they changed
 	if (osVersionChanged || this.lastOsVersion === undefined) {
 		reportToSend[deviceInfo.uuid].os_version = deviceInfo.osVersion;
+	}
+	if (architectureChanged || this.lastArchitecture === undefined) {
+		reportToSend[deviceInfo.uuid].architecture = architecture;
 	}
 	if (agentVersionChanged || this.lastAgentVersion === undefined) {
 		reportToSend[deviceInfo.uuid].agent_version = deviceInfo.agentVersion;

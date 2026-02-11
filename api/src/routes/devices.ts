@@ -219,6 +219,15 @@ router.get('/devices', jwtAuth, async (req, res) => {
       paginatedDevices.map(async (device) => {
         const targetState = await DeviceTargetStateModel.get(device.uuid);
         const currentState = await DeviceCurrentStateModel.get(device.uuid);
+        let systemInfo = currentState?.system_info;
+
+        if (typeof systemInfo === 'string') {
+          try {
+            systemInfo = JSON.parse(systemInfo);
+          } catch {
+            systemInfo = null;
+          }
+        }
 
         return {
           id: device.uuid,
@@ -233,7 +242,9 @@ router.get('/devices', jwtAuth, async (req, res) => {
           lastSeen: device.last_connectivity_event,
           last_connectivity_event: device.last_connectivity_event,
           ip_address: device.ip_address,
+          mac_address: device.mac_address,
           os_version: device.os_version,
+          architecture: systemInfo?.architecture || null,
           agent_version: device.agent_version,
           cpu_usage: device.cpu_usage,
           cpu_temp: device.cpu_temp,

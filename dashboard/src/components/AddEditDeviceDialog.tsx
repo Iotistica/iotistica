@@ -135,7 +135,7 @@ export function AddEditDeviceDialog({
         type: device.type,
         description: "",
         ipAddress: device.ipAddress,
-        macAddress: "00:1B:44:11:3A:B7",
+        macAddress: device.macAddress || "",
         lastSeen: device.lastSeen,
         status: device.status,
         cpu: device.cpu,
