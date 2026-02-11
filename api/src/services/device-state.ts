@@ -33,6 +33,7 @@ export interface DeviceStateReport {
     local_ip?: string;
     mac_address?: string;
     os_version?: string;
+    architecture?: string;
     agent_version?: string;
     uptime?: number;
     cpu_usage?: number;
@@ -90,6 +91,7 @@ export async function processDeviceStateReport(
         ip_address: deviceState.ip_address,
         mac_address: deviceState.mac_address,
         os_version: deviceState.os_version,
+        architecture: deviceState.architecture,
         agent_version: deviceState.agent_version,
         uptime: deviceState.uptime,
       },
@@ -132,6 +134,7 @@ export async function processDeviceStateReport(
             ip_address: deviceState.ip_address || deviceState.local_ip,
             mac_address: deviceState.mac_address,
             os_version: deviceState.os_version,
+            architecture: deviceState.architecture,
             agent_version: deviceState.agent_version,
             uptime: deviceState.uptime,
             cpu_usage: deviceState.cpu_usage,

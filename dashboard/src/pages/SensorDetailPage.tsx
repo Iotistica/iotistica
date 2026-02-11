@@ -58,7 +58,7 @@ export const SensorDetailPage: React.FC<SensorDetailPageProps> = ({
         const currentSensor = sensorsData.devices.find((d: any) => d.name === sensorName);
         
         if (currentSensor) {
-          setSensor({
+          const nextSensor = {
             name: currentSensor.name,
             protocol: currentSensor.protocol,
             status: currentSensor.status,
@@ -67,7 +67,8 @@ export const SensorDetailPage: React.FC<SensorDetailPageProps> = ({
             errorCount: currentSensor.errorCount,
             lastError: currentSensor.lastError,
             lastSeen: currentSensor.lastSeen
-          });
+          };
+          setSensor(nextSensor);
 
           // Fetch 24-hour history from protocol adapter history
           const historyResponse = await fetch(
@@ -76,7 +77,6 @@ export const SensorDetailPage: React.FC<SensorDetailPageProps> = ({
           
           if (historyResponse.ok) {
             const historyData = await historyResponse.json();
-            console.log('📊 History data received:', historyData);
             
             // Transform protocol adapter history to match expected format
             const transformedHistory = (historyData.history || []).map((h: any) => ({
@@ -86,7 +86,6 @@ export const SensorDetailPage: React.FC<SensorDetailPageProps> = ({
               error_count: h.error_count,
               last_error: h.last_error
             }));
-            console.log(`📈 Transformed ${transformedHistory.length} history points`);
             setHistory(transformedHistory);
           } else {
             console.warn('⚠️ History fetch failed:', historyResponse.status, historyResponse.statusText);
@@ -172,7 +171,7 @@ export const SensorDetailPage: React.FC<SensorDetailPageProps> = ({
             <div>
               <p className="text-sm text-muted-foreground">Last Seen</p>
               <p className="text-sm font-medium">
-                {new Date(sensor.lastSeen).toLocaleString()}
+                {sensor.lastSeen ? new Date(sensor.lastSeen).toLocaleString() : 'Never'}
               </p>
             </div>
           </div>

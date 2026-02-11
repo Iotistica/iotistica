@@ -303,6 +303,46 @@ export function SystemMetrics({
     ]);
   }, [device.name, device.ipAddress, device.macAddress, formatUptime]);
 
+  // Fetch system info once via REST to avoid waiting on WebSocket
+  const fetchSystemInfo = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('accessToken');
+      const response = await fetch(
+        buildApiUrl(`/api/v1/devices/${device.deviceUuid}`),
+        {
+          headers: token
+            ? {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            : {
+                'Content-Type': 'application/json'
+              }
+        }
+      );
+
+      if (!response.ok) {
+        console.warn('[SystemMetrics] System info fetch failed:', response.status, response.statusText);
+        return;
+      }
+
+      const data = await response.json();
+      const systemInfo = data?.current_state?.system_info || {};
+      const deviceInfo = data?.device || {};
+
+      handleSystemInfo({
+        os: systemInfo.os || systemInfo.os_version || deviceInfo.os_version || '',
+        architecture: systemInfo.architecture || '',
+        uptime: systemInfo.uptime || 0,
+        hostname: systemInfo.hostname || deviceInfo.device_name || '',
+        ipAddress: systemInfo.ipAddress || systemInfo.ip_address || deviceInfo.ip_address || '',
+        macAddress: systemInfo.macAddress || systemInfo.mac_address || deviceInfo.mac_address || ''
+      });
+    } catch (error) {
+      console.warn('[SystemMetrics] Error fetching system info:', error);
+    }
+  }, [device.deviceUuid, handleSystemInfo]);
+
   // Handle processes updates via WebSocket
   const handleProcesses = useCallback((data: { top_processes: ProcessData[] }) => {
     if (data.top_processes && Array.isArray(data.top_processes)) {
@@ -310,6 +350,10 @@ export function SystemMetrics({
       setProcessesLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    fetchSystemInfo();
+  }, [fetchSystemInfo]);
 
   // Fetch initial processes data from API
   const fetchProcesses = useCallback(async () => {
@@ -605,7 +649,6 @@ export function SystemMetrics({
 
   // Subscribe to WebSocket channels (only for online devices)
   const isOnline = device.status === 'online';
-  useWebSocket(device.deviceUuid, 'system-info', handleSystemInfo, isOnline);
   useWebSocket(device.deviceUuid, 'processes', handleProcesses, isOnline);
   // History channel disabled - using HTTP polling instead
   // useWebSocket(device.deviceUuid, 'history', handleMetricsHistory, isOnline && timePeriod === '30min');

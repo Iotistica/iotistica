@@ -44,6 +44,7 @@ interface DeviceStateReport {
 		is_online?: boolean;
 		local_ip?: string;
 		os_version?: string;
+		architecture?: string;
 		agent_version?: string;
 		uptime?: number;
 		top_processes?: Array<{
@@ -103,6 +104,7 @@ export class CloudSync extends EventEmitter {
 	// Static field tracking (only send when changed)
 	private lastOsVersion?: string;
 	private lastAgentVersion?: string;
+	private lastArchitecture?: string;
 	private lastLocalIp?: string;
 	
 	// Hash tracking for bandwidth optimization
@@ -947,6 +949,8 @@ export class CloudSync extends EventEmitter {
 		// Detect changes in static fields (bandwidth optimization)
 		const osVersionChanged = deviceInfo.osVersion !== this.lastOsVersion;
 		const agentVersionChanged = deviceInfo.agentVersion !== this.lastAgentVersion;
+		const architecture = process.arch;
+		const architectureChanged = architecture !== this.lastArchitecture;
 		
 	// Hash-based endpoints change detection (bandwidth optimization)
 	// Only track endpoints, not full config (static fields like protocols, intervals, logging, etc. are not reported)
@@ -1012,6 +1016,10 @@ export class CloudSync extends EventEmitter {
 	if (agentVersionChanged || this.lastAgentVersion === undefined) {
 		stateReport[deviceInfo.uuid].agent_version = deviceInfo.agentVersion;
 		this.lastAgentVersion = deviceInfo.agentVersion;
+	}
+	if (architectureChanged || this.lastArchitecture === undefined) {
+		stateReport[deviceInfo.uuid].architecture = architecture;
+		this.lastArchitecture = architecture;
 	}
 		
 	// Add metrics if needed

@@ -307,7 +307,13 @@ router.get('/devices/:uuid/device-health', async (req, res) => {
         data_points,
         metadata,
         updated_at,
-        synced_to_config
+        synced_to_config,
+        health_status,
+        health_connected,
+        health_last_poll,
+        health_error_count,
+        health_last_error,
+        health_updated_at
       FROM device_sensors
       WHERE ${whereClause}
       ORDER BY protocol, name`,
@@ -317,13 +323,18 @@ router.get('/devices/:uuid/device-health', async (req, res) => {
     const devices = result.rows.map((row: any) => ({
       name: row.name,
       protocol: row.protocol,
-      status: row.enabled ? 'configured' : 'disabled',
+      status: row.health_status || (row.enabled ? 'configured' : 'disabled'),
       enabled: row.enabled,
       pollInterval: row.poll_interval,
       connection: row.connection,
       dataPoints: row.data_points,
       lastUpdated: row.updated_at,
-      synced: row.synced_to_config
+      synced: row.synced_to_config,
+      connected: row.health_connected ?? false,
+      lastPoll: row.health_last_poll || null,
+      errorCount: row.health_error_count ?? 0,
+      lastError: row.health_last_error || null,
+      lastSeen: row.health_updated_at || null
     }));
 
     const summary = {

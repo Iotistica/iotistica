@@ -135,7 +135,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           state: isConnected ? 'CONNECTED' : 'DISCONNECTED',
           healthy: health ? (health.status === 'healthy' || health.connected) : d.connected,
           messagesPublished: 0, // Protocol adapters don't track messages
-          lastActivity: health?.lastPoll || d.lastSeen,
+          lastActivity: health?.updatedAt || null,
           lastError: health?.lastError || d.lastError,
           configured: true,
           enabled: d.enabled !== undefined ? d.enabled : true, // Default to enabled
