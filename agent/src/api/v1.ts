@@ -96,6 +96,29 @@ router.get('/v1/apps/:appId', async (req: Request, res: Response, next: NextFunc
 });
 
 /**
+ * POST /v1/discover
+ * Run device discovery for protocols
+ */
+router.post('/v1/discover', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const protocols = req.body.protocols as string[] | undefined;
+		const validate = req.body.validate === true || req.body.validate === 'true';
+		const forceRun = req.body.forceRun === true || req.body.forceRun === 'true';
+
+		const devices = await actions.runDiscovery({
+			trigger: 'manual',
+			protocols,
+			validate,
+			forceRun
+		});
+
+		return res.status(200).json({ devices });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
  * GET /v1/device
  * Get device state information
  */

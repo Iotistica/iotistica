@@ -19,6 +19,7 @@ let logger: AgentLogger | undefined;
 let anomalyService: AnomalyDetectionService | undefined;
 let simulationOrchestrator: SimulationOrchestrator | undefined;
 let sensorsFeature: SensorsFeature | undefined;
+let discoveryService: import('../features/discovery/discovery-service').DiscoveryService | undefined;
 
 export function initialize(
 	cm: ContainerManager, 
@@ -62,6 +63,20 @@ export function getAnomalyService(): AnomalyDetectionService | undefined {
  */
 export function getSimulationOrchestrator(): SimulationOrchestrator | undefined {
 	return simulationOrchestrator;
+}
+
+/**
+ * Set discovery service (called by agent after initialization)
+ */
+export function setDiscoveryService(service: import('../features/discovery/discovery-service').DiscoveryService | undefined) {
+	discoveryService = service;
+}
+
+/**
+ * Get discovery service (for accessing discovery functionality)
+ */
+export function getDiscoveryService(): import('../features/discovery/discovery-service').DiscoveryService | undefined {
+	return discoveryService;
 }
 
 /**
@@ -363,3 +378,25 @@ export const factoryResetDevice = async () => {
 		operation: 'factoryReset'
 	});
 };
+
+/**
+ * Run device discovery
+ * @param options Discovery options
+ * @returns Array of discovered devices
+ */
+export async function runDiscovery(options: {
+	trigger: 'manual' | 'first_boot' | 'scheduled' | 'config-change';
+	protocols?: string[];
+	validate?: boolean;
+	forceRun?: boolean;
+}): Promise<any[]> {
+	if (!discoveryService) {
+		throw new Error('DiscoveryService not initialized');
+	}
+	// Cast protocols to the proper type expected by DiscoveryService
+	const discoveryOptions = {
+		...options,
+		protocols: options.protocols as any
+	};
+	return discoveryService.runDiscovery(discoveryOptions);
+}

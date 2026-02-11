@@ -348,6 +348,19 @@ EXAMPLES:
   # List services for specific app
   iotctl services list 1001
 
+
+DISCOVERY:
+
+  discover [protocol]               Run device discovery for all or specific protocol
+                                    Protocols: modbus, opcua, snmp, mqtt, bacnet, can
+                                    --validate : Include validation phase (slower, reads device info)
+                                    --protocol <name> : Specify protocol to discover
+                                    Examples:
+                                      iotctl discover                    # All protocols
+                                      iotctl discover modbus             # Modbus only
+                                      iotctl discover --validate         # All with validation
+                                      iotctl discover --protocol=snmp    # SNMP only
+
   # Manage individual service container
   iotctl services start myapp-web-1
   iotctl services restart myapp-api-2
@@ -1007,6 +1020,103 @@ async function restart(): Promise<void> {
 	}
 }
 
+/**
+ * Format connection details for display
+ */
+function formatConnection(protocol: string, connection: Record<string, any>): string {
+	switch (protocol) {
+		case 'modbus':
+			if (connection.type === 'tcp') {
+				return `${connection.host}:${connection.port} (TCP/${connection.slaveId || connection.slaveRange})`;
+			} else {
+				return `${connection.path} (Serial/${connection.slaveId || connection.slaveRange})`;
+			}
+		case 'opcua':
+			return connection.endpointUrl || 'opc.tcp://...';
+		case 'mqtt':
+			return `${connection.host || connection.broker}:${connection.port || 1883}`;
+		case 'snmp':
+			return `${connection.host}:${connection.port || 161}`;
+		case 'bacnet':
+			return `Device ID: ${connection.deviceId}`;
+		case 'can':
+			return `${connection.interface} (${connection.protocol || 'CAN'})`;
+		default:
+			return JSON.stringify(connection);
+	}
+}
+
+async function discover(protocolArg?: string): Promise<void> {
+	clearApiCache();
+	try {
+		// Parse flags from args
+		let validate = false;
+		let protocol: string | undefined = protocolArg;
+
+		// Check for --validate flag
+		if (process.argv.includes('--validate')) {
+			validate = true;
+		}
+
+		// Check for --protocol flag (overrides positional argument)
+		const protocolFlagIndex = process.argv.findIndex((arg: string) => arg.startsWith('--protocol='));
+		if (protocolFlagIndex !== -1) {
+			const flagValue = process.argv[protocolFlagIndex].split('=')[1];
+			if (flagValue) {
+				protocol = flagValue;
+			}
+		}
+
+		// Build request body
+		const body: any = {
+			trigger: 'manual',
+			validate
+		};
+
+		if (protocol) {
+			body.protocols = [protocol];
+			logger.info(`Running discovery for ${protocol}${validate ? ' with validation' : ''}...`);
+		} else {
+			logger.info(`Running discovery for all protocols${validate ? ' with validation' : ''}...`);
+		}
+
+		const result = await apiRequest(`${DEVICE_API_V1}/discover`, {
+			method: 'POST',
+			body: JSON.stringify(body)
+		});
+
+		const devices = result.devices || [];
+
+		if (devices.length === 0) {
+			logger.info('No devices discovered');
+			return;
+		}
+
+		logger.info(`Discovered ${devices.length} device${devices.length === 1 ? '' : 's'}`);
+		console.log('');
+
+		// Format as table
+		for (const device of devices) {
+			const connectionStr = formatConnection(device.protocol, device.connection);
+			const confidenceIcon = device.confidence === 'high' ? '●' : device.confidence === 'medium' ? '◐' : '○';
+			const validatedIcon = device.validated ? ' [V]' : '';
+			
+			logger.info(device.name, {
+				protocol: device.protocol,
+				connection: connectionStr,
+				confidence: `${confidenceIcon} ${device.confidence}${validatedIcon}`,
+				discoveredAt: new Date(device.discoveredAt).toLocaleString()
+			});
+		}
+
+		console.log('');
+		logger.info('Legend: ● = high confidence, ◐ = medium, ○ = low, [V] = validated');
+	} catch (error) {
+		logger.error('Failed to run discovery', error as Error);
+		process.exit(1);
+	}
+}
+
 async function runDiagnostics(): Promise<void> {
 	logger.info('Running system diagnostics...');
 	
@@ -1473,6 +1583,9 @@ async function main(): Promise<void> {
 		},
 		status: {
 			_default: showStatusEnhanced
+		},
+		discover: {
+			_default: discover
 		},
 		diagnostics: {
 			_default: runDiagnostics

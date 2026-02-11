@@ -20,7 +20,8 @@
     "allowJs": false
   },
   "include": [
-    "src/**/*"
+    "src/**/*",
+    "cli/**/*"
   ],
   "exclude": [
     "node_modules",

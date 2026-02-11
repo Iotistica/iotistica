@@ -280,8 +280,8 @@ export default class Agent {
         this.simulationOrchestrator
       );
 
-      // 12.5. Start periodic discovery timers
-      this.discoveryService?.startPeriodicDiscovery();
+		// 12.3. Expose discovery service to API actions
+		deviceActions.setDiscoveryService(this.discoveryService);
 
       // 13. Initialize reactive ConfigManager handlers (handles all config changes automatically)
       // CRITICAL: Must be set BEFORE auto-reconciliation starts to ensure discoveryService is available
