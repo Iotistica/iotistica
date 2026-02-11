@@ -188,18 +188,6 @@ export class ConfigManager extends EventEmitter {
 	 * Set target configuration
 	 */
 	public async setTarget(config: DeviceConfig): Promise<void> {
-		console.log('[ConfigManager] setTarget called', {
-			configKeys: Object.keys(config),
-			hasEndpoints: !!config.endpoints,
-			endpointsCount: config.endpoints?.length || 0,
-			endpoints: config.endpoints?.map((e: any) => ({
-				name: e.name,
-				protocol: e.protocol,
-				hasConnection: !!e.connection,
-				hasSlaveRange: !!e.connection?.slaveRange
-			}))
-		});
-		
 		this.targetConfig = _.cloneDeep(config);
 		
 		// Trigger reconciliation
@@ -263,21 +251,6 @@ export class ConfigManager extends EventEmitter {
 	public getDiscoveryTargets(protocol: string): any[] {
 		const endpoints = this.targetConfig.endpoints || [];
 		
-		// Debug: Log what we received
-		console.log('[ConfigManager] getDiscoveryTargets called', {
-			protocol,
-			totalEndpoints: endpoints.length,
-			targetConfigKeys: Object.keys(this.targetConfig),
-			endpoints: endpoints.map((e: any) => ({
-				name: e.name,
-				protocol: e.protocol,
-				hasConnection: !!e.connection,
-				hasConnectionString: !!e.connectionString,
-				connectionType: e.connection?.type,
-				hasSlaveRange: !!e.connection?.slaveRange
-			}))
-		});
-		
 		const filtered = endpoints.filter((endpoint: any) => {
 			if (endpoint.protocol !== protocol) return false;
 
@@ -293,7 +266,8 @@ export class ConfigManager extends EventEmitter {
 
 			switch (protocol) {
 				case 'modbus':
-					return connection?.slaveRange !== undefined;
+					// Accept endpoints with slaveRange (scan multiple slaves) OR slaveId (single slave)
+					return connection?.slaveRange !== undefined || connection?.slaveId !== undefined;
 				case 'opcua':
 					return connection?.endpointUrl && 
 						(!endpoint.dataPoints || endpoint.dataPoints.length === 0);
@@ -1384,18 +1358,6 @@ export class ConfigManager extends EventEmitter {
 		const newEndpoints = change.new || [];
 		const oldEndpoints = change.old || [];
 
-		console.log('[ConfigManager] handleEndpointsChanges called', {
-			oldCount: oldEndpoints.length,
-			newCount: newEndpoints.length,
-			newEndpoints: newEndpoints.map((e: any) => ({
-				name: e?.name,
-				protocol: e?.protocol,
-				hasConnection: !!e?.connection,
-				connectionKeys: e?.connection ? Object.keys(e.connection) : [],
-				hasSlaveRange: !!e?.connection?.slaveRange
-			}))
-		});
-
 		// CRITICAL: Update targetConfig.endpoints immediately so getDiscoveryTargets() sees new endpoints
 		// This prevents race condition where discovery runs before setTarget() is called
 		this.targetConfig.endpoints = newEndpoints;
@@ -1432,8 +1394,8 @@ export class ConfigManager extends EventEmitter {
 		// - BACnet: device discovery
 		const discoverableEndpoints = changedEndpoints.filter((e: any) => {
 			// Include endpoints with explicit discovery configuration
-			if (e.connection?.slaveRange) return true; // Modbus discovery target
-			if (e.connection?.slaveId) return true; // Modbus direct connection (validate connectivity)
+			if (e.connection?.slaveRange) return true; // Modbus multi-slave discovery
+			if (e.connection?.slaveId) return true; // Modbus single slave discovery
 			if (e.protocol === 'opcua' && e.connection?.discoveryUrls) return true;
 			if (e.protocol === 'snmp' && e.connection?.host) return true;
 			if (e.protocol === 'mqtt' && e.connection?.discoveryRoots) return true;

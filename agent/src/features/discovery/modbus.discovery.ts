@@ -60,17 +60,17 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
    */
   async discover(options?: ModbusDiscoveryOptions): Promise<DiscoveredDevice[]> {
 
-    // Get discovery targets from endpoints (those with slaveRange)
+    // Get discovery targets from endpoints (those with slaveRange or slaveId)
     const discoveryTargets = this.configManager?.getDiscoveryTargets?.('modbus') || [];
     
     if (discoveryTargets.length === 0) {
-      this.logger?.debugSync('No Modbus discovery targets configured (need slaveRange)', {
+      this.logger?.debugSync('No Modbus discovery targets configured (need slaveRange or slaveId)', {
         component: LogComponents.discovery + "] [" + this.protocol as any
       });
       return [];
     }
 
-    this.logger?.debugSync(`Starting Modbus discovery (${discoveryTargets.length} targets with slaveRange)`, {
+    this.logger?.debugSync(`Starting Modbus discovery (${discoveryTargets.length} target(s))`, {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       targetCount: discoveryTargets.length
     });
@@ -96,13 +96,23 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
         for (const chunk of chunks) {
           const results = await Promise.all(
             chunk.map(async (endpoint: any) => {
+              // Determine slave ID range: slaveRange (multi-slave scan) or slaveId (single slave)
+              let slaveIdRange: [number, number];
+              if (endpoint.connection.slaveRange) {
+                slaveIdRange = [endpoint.connection.slaveRange.start, endpoint.connection.slaveRange.end];
+              } else if (endpoint.connection.slaveId !== undefined) {
+                // Single slave: scan only that slave ID
+                slaveIdRange = [endpoint.connection.slaveId, endpoint.connection.slaveId];
+              } else {
+                // Fallback: scan common range
+                slaveIdRange = [1, 247];
+              }
+
               const connOptions: ModbusDiscoveryOptions = {
                 tcpHost: endpoint.connection.host,
                 tcpPort: endpoint.connection.port || 502,
                 timeout: endpoint.connection.timeout || 5000,
-                slaveIdRange: endpoint.connection.slaveRange 
-                  ? [endpoint.connection.slaveRange.start, endpoint.connection.slaveRange.end]
-                  : [1, 247]
+                slaveIdRange
               };
 
               // Discovery targets may have sample dataPoints to test read
@@ -113,7 +123,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
                 name: endpoint.name,
                 host: endpoint.connection.host,
                 port: endpoint.connection.port,
-                slaveRange: `${endpoint.connection.slaveRange.start}-${endpoint.connection.slaveRange.end}`
+                slaveRange: `${slaveIdRange[0]}-${slaveIdRange[1]}`
               });
 
               return await this.discoverOnBus(connOptions, dataPoints, endpoint.name);
@@ -131,13 +141,23 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
         });
 
         for (const endpoint of serialConnections) {
+          // Determine slave ID range: slaveRange (multi-slave scan) or slaveId (single slave)
+          let slaveIdRange: [number, number];
+          if (endpoint.connection.slaveRange) {
+            slaveIdRange = [endpoint.connection.slaveRange.start, endpoint.connection.slaveRange.end];
+          } else if (endpoint.connection.slaveId !== undefined) {
+            // Single slave: scan only that slave ID
+            slaveIdRange = [endpoint.connection.slaveId, endpoint.connection.slaveId];
+          } else {
+            // Fallback: scan common range
+            slaveIdRange = [1, 247];
+          }
+
           const connOptions: ModbusDiscoveryOptions = {
             serialPort: endpoint.connection.serialPort,
             baudRate: endpoint.connection.baudRate || 9600,
             timeout: endpoint.connection.timeout || 5000,
-            slaveIdRange: endpoint.connection.slaveRange 
-              ? [endpoint.connection.slaveRange.start, endpoint.connection.slaveRange.end]
-              : [1, 247]
+            slaveIdRange
           };
 
           // Discovery targets may have sample dataPoints to test read
@@ -147,7 +167,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
             component: LogComponents.discovery + "] [" + this.protocol as any,
             name: endpoint.name,
             port: endpoint.connection.serialPort,
-            slaveRange: `${endpoint.connection.slaveRange.start}-${endpoint.connection.slaveRange.end}`
+            slaveRange: `${slaveIdRange[0]}-${slaveIdRange[1]}`
           });
 
           const discovered = await this.discoverOnBus(connOptions, dataPoints, endpoint.name);
