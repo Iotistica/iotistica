@@ -11,7 +11,7 @@
  * 4. User clicks Sync → Calls /deploy API → Increments version → Device applies changes
  */
 
-import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { buildApiUrl } from '../config/api';
 
 // ============================================================================
@@ -643,13 +643,14 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
   
   // Sync/Deploy - marks target state ready for device (Sync button in Header)
   const syncTargetState = useCallback(async (deviceUuid: string, deployedBy: string = 'dashboard') => {
+    console.log('[syncTargetState] 🚀 START - Deploying to agent');
+    
     setDeviceStates(prev => ({
       ...prev,
       [deviceUuid]: { ...prev[deviceUuid], isSyncing: true }
     }));
     
     try {
-      // Call global deploy endpoint - increments version, syncs sensors to table with deployment_status='pending'
       const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/deploy`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -662,8 +663,7 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
         throw new Error(errorData.message || `Failed to sync state: ${response.statusText}`);
       }
       
-      // Re-fetch to update needsDeployment flag
-      await fetchDeviceState(deviceUuid);
+      console.log('[syncTargetState] ✅ Deploy successful - database updated with pending status');
       
       setDeviceStates(prev => ({
         ...prev,
@@ -680,7 +680,7 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
       }));
       throw error;
     }
-  }, [fetchDeviceState]);
+  }, []);
   
   // Cancel deployment - discard pending deployment
   const cancelDeployment = useCallback(async (deviceUuid: string) => {
@@ -731,9 +731,19 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
   const getTargetConfig = useCallback((deviceUuid: string) =>
     deviceStates[deviceUuid]?.targetState?.config || {}, [deviceStates]);
   
-  const getPendingConfig = useCallback((deviceUuid: string) =>
-    deviceStates[deviceUuid]?.pendingChanges?.config ||
-    deviceStates[deviceUuid]?.targetState?.config || {}, [deviceStates]);
+  const getPendingConfig = useCallback((deviceUuid: string) => {
+    const config = deviceStates[deviceUuid]?.pendingChanges?.config ||
+      deviceStates[deviceUuid]?.targetState?.config || {};
+    
+    console.log('[getPendingConfig] Returning config:', {
+      hasPendingChanges: !!deviceStates[deviceUuid]?.pendingChanges?.config,
+      hasTargetState: !!deviceStates[deviceUuid]?.targetState?.config,
+      endpoints: config.endpoints?.map((e: any) => ({ name: e.name, deploymentStatus: e.deploymentStatus })),
+      sensors: config.sensors?.map((s: any) => ({ name: s.name, deploymentStatus: s.deploymentStatus }))
+    });
+    
+    return config;
+  }, [deviceStates]);
   
   const hasPendingChanges = useCallback((deviceUuid: string) => {
     const deviceState = deviceStates[deviceUuid];

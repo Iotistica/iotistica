@@ -487,21 +487,16 @@ export class DeviceTargetStateModel {
 
     const deployedState = result.rows[0];
 
-    // Mark endpoints as pending deployment (they're already in the table from addEndpoint)
-    // Don't sync all endpoints - that would reset their deployment status
-    // Only the endpoints in config.endpoints should be marked pending
+    // Sync config to table (inserts new sensors with 'pending' status, updates existing ones)
     if (deployedState.config && deployedState.config.endpoints) {
       const syncService = new DeviceSensorSyncService();
-      const endpointUuids = deployedState.config.endpoints.map((e: any) => e.uuid).filter(Boolean);
       
-      if (endpointUuids.length > 0) {
-        await syncService.markEndpointsAsPending(
-          deviceUuid,
-          deployedState.config.endpoints,
-          deployedState.version,
-          deployedBy
-        );
-      }
+      await syncService.syncConfigToTable(
+        deviceUuid,
+        deployedState.config.endpoints,
+        deployedState.version,
+        deployedBy
+      );
     }
 
     return deployedState;

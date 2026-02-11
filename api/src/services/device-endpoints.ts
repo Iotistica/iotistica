@@ -59,8 +59,9 @@ export class DeviceSensorSyncService {
 
   /**
    * Mark endpoints as pending deployment
-   * Called when user clicks Sync button (POST /deploy)
-   * Updates ONLY devices that are already 'pending' - doesn't touch 'deployed' devices
+   * Called when user clicks Deploy button (POST /deploy)
+   * Transitions 'draft' → 'pending', updates already 'pending' devices
+   * Doesn't touch 'deployed' devices (those match actual agent state)
    */
   async markEndpointsAsPending(
     deviceUuid: string,
@@ -71,21 +72,43 @@ export class DeviceSensorSyncService {
     try {
       const uuids = endpointOverrides.map(e => e.uuid).filter(Boolean);
       
+      logger.info(`Marking endpoints as pending for device ${deviceUuid.substring(0, 8)}`, {
+        endpointsCount: endpointOverrides.length,
+        uuidsFound: uuids.length,
+        uuids: uuids,
+        configVersion
+      });
+      
       if (uuids.length === 0) {
+        logger.warn('No UUIDs found in endpoint overrides - cannot mark as pending');
         return;
       }
 
-      // Only update devices that are already 'pending' - don't touch 'deployed' or 'reconciling' devices
+      // Set to 'pending' for draft devices, update config_version for already-pending
+      // Don't touch 'deployed' (those represent actual agent state)
       const result = await query(
         `UPDATE device_sensors 
-         SET config_version = $1,
+         SET deployment_status = CASE 
+               WHEN deployment_status = 'draft' THEN 'pending'
+               ELSE deployment_status
+             END,
+             config_version = $1,
              updated_by = $2,
              updated_at = NOW()
-         WHERE device_uuid = $3 AND uuid = ANY($4) AND deployment_status = 'pending'`,
+         WHERE device_uuid = $3 
+           AND uuid = ANY($4) 
+           AND deployment_status NOT IN ('deployed')`,
         [configVersion, userId || 'system', deviceUuid, uuids]
       );
 
-      logger.info(`Updated ${result.rowCount} pending endpoints (marked for deployment)`);
+      if (result.rowCount === 0) {
+        logger.warn(`No endpoints updated - UUIDs may not match database records`, {
+          uuids,
+          deviceUuid: deviceUuid.substring(0, 8)
+        });
+      } else {
+        logger.info(`Marked ${result.rowCount} endpoints as pending deployment (${uuids.length} total in config)`);
+      }
     } catch (error) {
       logger.error('Failed to mark endpoints as pending:', error);
       throw error;
@@ -207,10 +230,13 @@ export class DeviceSensorSyncService {
           );
           logger.info(`Updated: ${endpoint.name} (${endpoint.protocol}) - ${deploymentStatus}`);
         } else {
-          // Insert new sensor into table (or update if name collision exists)
+          // Insert new sensor into table
           // If reconciliation from agent, mark as deployed (agent found it running)
-          // Otherwise, mark as pending (deployment just triggered, waiting for agent confirmation)
+          // Otherwise, mark as pending (saved to config and ready for deployment)
           const deploymentStatus = isReconciliation ? 'deployed' : 'pending';
+          
+          // Generate UUID if not present (for new sensors added via UI)
+          const sensorUuid = endpoint.uuid || uuidv4();
           
           await query(
             `INSERT INTO device_sensors (
@@ -235,7 +261,7 @@ export class DeviceSensorSyncService {
               -- health_status, health_connected, health_last_poll, health_error_count, health_last_error, health_updated_at`,
             [
               deviceUuid,
-              endpoint.uuid,
+              sensorUuid,
               endpoint.name,
               endpoint.protocol,
               endpoint.enabled,
@@ -247,10 +273,10 @@ export class DeviceSensorSyncService {
               userId || 'system',
               configVersion,
               deploymentStatus,
-              endpoint.uuid || null // Use UUID (not numeric id) for config_id
+              sensorUuid // Use same UUID for config_id
             ]
           );
-          logger.info(`Upserted: ${endpoint.name} (${endpoint.protocol}) - ${deploymentStatus}`);
+          logger.info(`Upserted: ${endpoint.name} (${endpoint.protocol}) - ${deploymentStatus} (uuid: ${sensorUuid.substring(0, 8)}...)`);
         }
       }
 

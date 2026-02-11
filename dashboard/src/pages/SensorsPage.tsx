@@ -57,7 +57,7 @@ interface Sensor {
   connected?: boolean;
   dataPoints?: ModbusDataPoint[] | OPCUADataPoint[]; // Protocol-specific data points
   // Deployment tracking fields
-  deploymentStatus?: 'pending' | 'deployed' | 'deploying' | 'failed' | 'reconciling' | 'draft' | 'saved-draft';
+  deploymentStatus?: 'pending' | 'deployed' | 'deploying' | 'failed' | 'draft';
   lastDeployedAt?: string | null;
   deploymentError?: string | null;
   deploymentAttempts?: number;
@@ -83,9 +83,10 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [selectedProtocol, setSelectedProtocol] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
-  const { getPendingConfig, getTargetConfig, updatePendingSensor, saveTargetState, addPendingSensor } = useDeviceState();
+  const { getPendingConfig, updatePendingSensor, addPendingSensor } = useDeviceState();
 
   const fetchSensors = async () => {
+    console.log('[fetchSensors] 🔄 START - Fetching sensors from API');
     try {
       const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors`));
       if (!response.ok) {
@@ -162,8 +163,8 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       });
       
       // Get pending devices from config (devices not yet deployed)
+      console.log('[fetchSensors] 📋 Getting pending config...');
       const pendingConfig = getPendingConfig(deviceUuid);
-      const targetConfig = getTargetConfig(deviceUuid);
       
       console.log('[fetchdevices] Pending config:', {
         hasEndpoints: !!pendingConfig.endpoints,
@@ -185,10 +186,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           return notInDb;
         })
         .map((s: any) => {
-          // Check if sensor exists in saved target state (clicked "Save Draft")
-          const targetEndpoints = targetConfig?.endpoints || targetConfig?.sensors || [];
-          const inTargetState = targetEndpoints.find((ts: any) => ts.name === s.name);
-          
           return {
             uuid: s.id || s.uuid, // Use generated ID from addPendingSensor
             name: s.name,
@@ -205,8 +202,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             connection: s.connection, // Include connection config
             dataPoints: s.dataPoints, // Include data points
             pollInterval: s.pollInterval,
-            // Show "saved-draft" if saved to target_state, "draft" if only in context
-            deploymentStatus: inTargetState ? 'saved-draft' : 'draft',
+            deploymentStatus: s.deploymentStatus || 'draft',
             lastDeployedAt: null,
             deploymentError: null,
             deploymentAttempts: 0,
@@ -214,9 +210,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         });
       
       console.log(`[fetchSensors] Found ${pendingSensors.length} pending devices to display`);
+      console.log('[fetchSensors] 📊 Final pendingSensors status:', pendingSensors.map((s: any) => ({ name: s.name, status: s.deploymentStatus })));
       
       // Show newly added devices (DRAFT) at the top, then deployed devices
       setSensors([...pendingSensors, ...pipelines, ...devices]);
+      console.log('[fetchSensors] ✅ COMPLETE - Updated sensors state');
       setError(null);
     } catch (err: any) {
       setError(err.message);
@@ -228,28 +226,35 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   useEffect(() => {
     fetchSensors();
     
-    // Auto-refresh every 10 seconds
-    // const interval = setInterval(fetchSensors, 10000);
+    // Auto-refresh every 10 seconds to pick up agent status updates
+    const interval = setInterval(fetchSensors, 10000);
     
     // Listen for deployment events from Header (Sync button)
     const handleDeploymentStarted = (event: CustomEvent) => {
       if (event.detail.deviceUuid === deviceUuid) {
-        console.log('Deployment started - refreshing devices after database update completes');
-        // Small delay to ensure database update completes before fetching
-        // This prevents race condition where deployment_status hasn't been set to 'pending' yet
-        setTimeout(() => {
-          fetchSensors();
-        }, 500);
+        console.log('[deployment-started] 🚀 Event received for device:', deviceUuid);
+        console.log('[deployment-started] 📊 Current sensors before update:', sensors.map(s => ({ name: s.name, status: s.deploymentStatus })));
+        
+        // Update UI: draft → pending
+        setSensors(prev => {
+          const updated = prev.map(sensor => 
+            sensor.deploymentStatus === 'draft' 
+              ? { ...sensor, deploymentStatus: 'pending' as any }
+              : sensor
+          );
+          console.log('[deployment-started] ✅ Sensors after update:', updated.map(s => ({ name: s.name, status: s.deploymentStatus })));
+          return updated;
+        });
       }
     };
     
     window.addEventListener('deployment-started', handleDeploymentStarted as EventListener);
     
     return () => {
-      // clearInterval(interval);
+      clearInterval(interval);
       window.removeEventListener('deployment-started', handleDeploymentStarted as EventListener);
     };
-  }, [deviceUuid, getPendingConfig(deviceUuid), getTargetConfig(deviceUuid)]);
+  }, [deviceUuid]);
 
   const handleAddProtocolDevice = async (device: any) => {
     try {
@@ -411,20 +416,17 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     if (deploymentStatus === 'draft') {
       return <Badge className="bg-zinc-700 dark:bg-zinc-600 text-white border border-zinc-800 dark:border-zinc-500">Draft</Badge>;
     }
-    if (deploymentStatus === 'saved-draft') {
-      return <Badge className="bg-zinc-700 dark:bg-zinc-600 text-white border border-zinc-800 dark:border-zinc-500">Draft (Saved)</Badge>;
-    }
     
 
     // When user toggles, deploymentStatus becomes 'pending' to prevent overwrite
     if (deploymentStatus === 'pending') {
-      console.log(`[Badge] "${sensor.name}" - Showing "Needs Sync" (deploymentStatus=${deploymentStatus})`);
+      console.log(`[Badge] "${sensor.name}" - Showing "Pending" (deploymentStatus=${deploymentStatus})`);
       return (
         <span 
           className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold border"
           style={{ backgroundColor: '#ca8a04', color: 'white', borderColor: '#a16207' }}
         >
-          Deploy
+          Pending
         </span>
       );
     }
@@ -432,10 +434,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     
     if (deploymentStatus === 'failed') {
       return <Badge className="bg-red-600 dark:bg-red-700 text-white border border-red-700 dark:border-red-600 font-semibold">Deploy Failed</Badge>;
-    }
-    
-    if (deploymentStatus === 'reconciling') {
-      return <Badge className="bg-blue-500 dark:bg-blue-600 text-white border border-blue-600 dark:border-blue-500 font-semibold">Reconciling</Badge>;
     }
     
 
@@ -687,8 +685,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                       <div className="flex items-center gap-3 ml-4">
                         {/* Enable/Disable Select - only show for deployed sensors */}
                         {sensor.type === 'device' && 
-                         sensor.deploymentStatus !== 'draft' && 
-                         sensor.deploymentStatus !== 'saved-draft' && (
+                         sensor.deploymentStatus !== 'draft' && (
                           <select
                             value={sensor.enabled !== undefined ? (sensor.enabled ? 'enabled' : 'disabled') : 'enabled'}
                             onChange={(e) => handleToggleSensorEnabled(sensor, e.target.value === 'enabled')}
