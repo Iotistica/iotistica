@@ -3,7 +3,6 @@
  * 
  * Provides interface to:
  * - Manage MQTT users and ACLs
- * - Manage regular users and roles
  * - Manage API keys
  */
 
@@ -43,7 +42,6 @@ import {
   Lock,
   Unlock,
   Key,
-  Users,
   Copy,
   Eye,
   EyeOff
@@ -69,16 +67,6 @@ interface MqttUser {
   acls: MqttAcl[];
 }
 
-interface RegularUser {
-  id: number;
-  username: string;
-  email: string;
-  role: string;
-  is_active: boolean;
-  created_at: string;
-  last_login_at: string | null;
-}
-
 interface ApiKey {
   id: number;
   name: string;
@@ -94,10 +82,6 @@ export function SecurityPage() {
   // MQTT Users state
   const [mqttUsers, setMqttUsers] = useState<MqttUser[]>([]);
   const [loadingMqtt, setLoadingMqtt] = useState(true);
-  
-  // Regular Users state
-  const [regularUsers, setRegularUsers] = useState<RegularUser[]>([]);
-  const [loadingUsers, setLoadingUsers] = useState(true);
   
   // API Keys state
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
@@ -130,7 +114,6 @@ export function SecurityPage() {
 
   useEffect(() => {
     fetchMqttUsers();
-    fetchRegularUsers();
     fetchApiKeys();
   }, []);
 
@@ -152,17 +135,6 @@ export function SecurityPage() {
       toast.error("Network error while fetching users");
     } finally {
       setLoadingMqtt(false);
-    }
-  };
-
-  const fetchRegularUsers = async () => {
-    try {
-      // Placeholder - implement when backend endpoint exists
-      setRegularUsers([]);
-    } catch (error) {
-      console.error('Failed to fetch users:', error);
-    } finally {
-      setLoadingUsers(false);
     }
   };
 
@@ -346,7 +318,7 @@ export function SecurityPage() {
           Security & Access Control
         </h2>
         <p className="text-sm text-gray-600 mt-1">
-          Manage MQTT users, regular users, and API keys
+          Manage MQTT users and API keys
         </p>
       </div>
 
@@ -356,10 +328,6 @@ export function SecurityPage() {
           <TabsTrigger value="mqtt">
             <Key className="w-4 h-4 mr-2" />
             MQTT Users
-          </TabsTrigger>
-          <TabsTrigger value="users">
-            <Users className="w-4 h-4 mr-2" />
-            Users & Roles
           </TabsTrigger>
           <TabsTrigger value="api-keys">
             <Shield className="w-4 h-4 mr-2" />
@@ -472,83 +440,6 @@ export function SecurityPage() {
                                 setDeleteDialogOpen(true);
                               }}
                             >
-                              <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          )}
-        </TabsContent>
-
-        {/* Users & Roles Tab */}
-        <TabsContent value="users" className="space-y-4">
-          <div className="flex justify-end">
-            <Button>
-              <UserPlus className="w-4 h-4 mr-2" />
-              Add User
-            </Button>
-          </div>
-
-          {loadingUsers ? (
-            <div className="flex items-center justify-center h-64">
-              <p className="text-muted-foreground">Loading users...</p>
-            </div>
-          ) : regularUsers.length === 0 ? (
-            <Card>
-              <CardContent className="py-12 text-center">
-                <Users className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                <p className="text-muted-foreground mb-4">No users configured</p>
-                <Button>
-                  <UserPlus className="w-4 h-4 mr-2" />
-                  Add Your First User
-                </Button>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card className="p-4 md:p-6">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border">
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Username</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Email</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Role</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Status</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Last Login</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Created</th>
-                      <th className="text-right py-3 px-4 font-semibold text-sm text-foreground">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {regularUsers.map((user) => (
-                      <tr key={user.id} className="border-b border-border last:border-0 hover:bg-muted">
-                        <td className="py-3 px-4 font-medium text-foreground">{user.username}</td>
-                        <td className="py-3 px-4 text-foreground">{user.email}</td>
-                        <td className="py-3 px-4">
-                          <Badge>{user.role}</Badge>
-                        </td>
-                        <td className="py-3 px-4">
-                          <Badge variant={user.is_active ? "default" : "outline"}>
-                            {user.is_active ? 'Active' : 'Inactive'}
-                          </Badge>
-                        </td>
-                        <td className="py-3 px-4 text-muted-foreground">
-                          {user.last_login_at ? new Date(user.last_login_at).toLocaleDateString() : 'Never'}
-                        </td>
-                        <td className="py-3 px-4 text-muted-foreground">
-                          {new Date(user.created_at).toLocaleDateString()}
-                        </td>
-                        <td className="py-3 px-4">
-                          <div className="flex items-center justify-end gap-2 whitespace-nowrap ml-auto">
-                            <Button variant="outline" size="sm">
-                              <Edit className="w-4 h-4" />
-                            </Button>
-                            <Button variant="outline" size="sm">
                               <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
                             </Button>
                           </div>

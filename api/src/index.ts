@@ -339,9 +339,9 @@ app.use(`${API_BASE}/auth`, authRateLimit, authRoutes);
 console.log('[INDEX] Mounting devicesRoutes at', API_BASE);
 app.use(API_BASE, devicesRoutes);
 
-// User management and admin - moderate rate limiting
-app.use(API_BASE, adminRateLimit, usersRoutes);
-app.use(API_BASE, adminRateLimit, adminRoutes);
+// User management and admin - moderate rate limiting + JWT auth
+app.use(`${API_BASE}/users`, jwtAuth, adminRateLimit, usersRoutes);
+app.use(API_BASE, jwtAuth, adminRateLimit, adminRoutes);
 
 // Device data ingestion - high rate limits (supports 16Hz sensor data)
 app.use(API_BASE, deviceDataRateLimit, deviceLogsRoutes);

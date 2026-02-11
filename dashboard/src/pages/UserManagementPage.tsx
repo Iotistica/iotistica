@@ -62,7 +62,7 @@ const ROLES = {
   admin: 'Admin',
   manager: 'Manager',
   operator: 'Operator',
-  viewer: 'Viewer',
+  viewer: 'User',
 };
 
 const ROLE_DESCRIPTIONS = {
@@ -88,19 +88,62 @@ export function UserManagementPage() {
     email: '',
     password: '',
     role: 'viewer' as keyof typeof ROLES,
+    isActive: true,
   });
+
+  const refreshAccessToken = async (): Promise<string | null> => {
+    const refreshToken = localStorage.getItem('refreshToken');
+    if (!refreshToken) return null;
+
+    const response = await fetch(buildApiUrl('/api/v1/auth/refresh'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refreshToken }),
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const newToken = data?.data?.accessToken;
+    if (newToken) {
+      localStorage.setItem('accessToken', newToken);
+    }
+    return newToken || null;
+  };
+
+  const withAuthRetry = async (requestFn: (token?: string) => Promise<Response>) => {
+    const token = localStorage.getItem('accessToken') || localStorage.getItem('token') || undefined;
+    let response = await requestFn(token);
+    if (response.status === 401) {
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        response = await requestFn(newToken);
+      }
+    }
+    return response;
+  };
 
   // Fetch users
   const fetchUsers = async () => {
     try {
-      const accessToken = localStorage.getItem('accessToken');
-      const response = await fetch(buildApiUrl('/api/v1/users'), {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
+      const response = await withAuthRetry((token) =>
+        fetch(buildApiUrl('/api/v1/users'), {
+          credentials: 'include',
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        })
+      );
 
       if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Unauthorized. Please sign in again.');
+        }
+        if (response.status === 403) {
+          throw new Error('You do not have permission to view users.');
+        }
         throw new Error('Failed to fetch users');
       }
 
@@ -121,7 +164,7 @@ export function UserManagementPage() {
   // Open create dialog
   const handleCreate = () => {
     setEditingUser(null);
-    setFormData({ username: '', email: '', password: '', role: 'viewer' });
+    setFormData({ username: '', email: '', password: '', role: 'viewer', isActive: true });
     setDialogOpen(true);
   };
 
@@ -133,6 +176,7 @@ export function UserManagementPage() {
       email: user.email,
       password: '',
       role: user.role as keyof typeof ROLES,
+      isActive: user.isActive,
     });
     setDialogOpen(true);
   };
@@ -147,7 +191,6 @@ export function UserManagementPage() {
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const accessToken = localStorage.getItem('accessToken');
       const isEditing = !!editingUser;
 
       const endpoint = isEditing
@@ -161,24 +204,37 @@ export function UserManagementPage() {
         role: formData.role,
       };
 
+      if (isEditing) {
+        body.isActive = formData.isActive;
+      }
+
       // Only include username and password for new users
       if (!isEditing) {
         body.username = formData.username;
         body.password = formData.password;
       }
 
-      const response = await fetch(buildApiUrl(endpoint), {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify(body),
-      });
+      const response = await withAuthRetry((token) =>
+        fetch(buildApiUrl(endpoint), {
+          method,
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(body),
+        })
+      );
 
       const data = await response.json();
 
       if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Unauthorized. Please sign in again.');
+        }
+        if (response.status === 403) {
+          throw new Error('You do not have permission to manage users.');
+        }
         throw new Error(data.message || data.error || 'Failed to save user');
       }
 
@@ -201,18 +257,23 @@ export function UserManagementPage() {
 
     setIsSaving(true);
     try {
-      const accessToken = localStorage.getItem('accessToken');
-      const response = await fetch(
-        buildApiUrl(`/api/v1/users/${deletingUser.id}`),
-        {
+      const response = await withAuthRetry((token) =>
+        fetch(buildApiUrl(`/api/v1/users/${deletingUser.id}`), {
           method: 'DELETE',
+          credentials: 'include',
           headers: {
-            Authorization: `Bearer ${accessToken}`,
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
-        }
+        })
       );
 
       if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Unauthorized. Please sign in again.');
+        }
+        if (response.status === 403) {
+          throw new Error('You do not have permission to delete users.');
+        }
         const data = await response.json();
         throw new Error(data.message || 'Failed to delete user');
       }
@@ -436,6 +497,30 @@ export function UserManagementPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            {editingUser && (
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label htmlFor="isActive">Account Status</Label>
+                  <p className="text-xs text-muted-foreground">Disable access without deleting the user.</p>
+                </div>
+                <Select
+                  value={formData.isActive ? 'active' : 'inactive'}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, isActive: value === 'active' })
+                  }
+                  disabled={isSaving}
+                >
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           <DialogFooter>
