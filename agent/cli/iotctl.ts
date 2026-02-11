@@ -358,6 +358,18 @@ DISCOVERY:
                                     Examples:
                                       iotctl discover                    # All protocols
                                       iotctl discover modbus             # Modbus only
+
+
+ENDPOINTS (SENSORS):
+
+  endpoints list [protocol]         List all configured endpoints/sensors
+                                    Optional protocol filter: modbus, opcua, mqtt, can, snmp, bacnet
+                                    Examples:
+                                      iotctl endpoints list              # All endpoints
+                                      iotctl endpoints list modbus       # Modbus endpoints only
+
+  endpoints show <name>             Show detailed endpoint information including
+                                    connection details, data points, and metadata
                                       iotctl discover --validate         # All with validation
                                       iotctl discover --protocol=snmp    # SNMP only
 
@@ -1115,6 +1127,121 @@ async function discover(protocolArg?: string): Promise<void> {
 	}
 }
 
+/**
+ * List all configured endpoints/sensors
+ */
+async function endpointsList(protocolFilter?: string): Promise<void> {
+	clearApiCache();
+	try {
+		const query = protocolFilter ? `?protocol=${protocolFilter}` : '';
+		const result = await apiRequest(`${DEVICE_API_V1}/endpoints${query}`);
+		const endpoints = result.endpoints || [];
+
+		if (endpoints.length === 0) {
+			logger.info('No endpoints configured');
+			return;
+		}
+
+		logger.info(`Found ${endpoints.length} endpoint${endpoints.length === 1 ? '' : 's'}${protocolFilter ? ` (${protocolFilter})` : ''}`);
+		console.log('');
+
+		// Group by protocol
+		const byProtocol = endpoints.reduce((acc: Record<string, any[]>, endpoint: any) => {
+			const proto = endpoint.protocol || 'unknown';
+			if (!acc[proto]) acc[proto] = [];
+			acc[proto].push(endpoint);
+			return acc;
+		}, {} as Record<string, any[]>);
+
+		// Display by protocol groups
+		for (const [protocol, protoEndpoints] of Object.entries(byProtocol)) {
+			console.log(`\n${protocol.toUpperCase()} Endpoints:`);
+			console.log('━'.repeat(60));
+
+			for (const endpoint of protoEndpoints as any[]) {
+				const enabledIcon = endpoint.enabled ? '✓' : '✗';
+				const connectionStr = formatConnection(endpoint.protocol, endpoint.connection);
+				
+				logger.info(`${enabledIcon} ${endpoint.name}`, {
+					connection: connectionStr,
+					pollInterval: `${endpoint.poll_interval}ms`,
+					dataPoints: endpoint.data_points?.length || 0
+				});
+			}
+		}
+
+		console.log('');
+	} catch (error) {
+		logger.error('Failed to list endpoints', error as Error);
+		process.exit(1);
+	}
+}
+
+/**
+ * Show detailed information for a specific endpoint
+ */
+async function endpointsShow(endpointName?: string): Promise<void> {
+	if (!endpointName) {
+		logger.error('Endpoint name required');
+		logger.info('Usage: iotctl endpoints show <name>');
+		process.exit(1);
+	}
+
+	clearApiCache();
+	try {
+		const result = await apiRequest(`${DEVICE_API_V1}/endpoints`);
+		const endpoints = result.endpoints || [];
+		const endpoint = endpoints.find((e: any) => e.name === endpointName);
+
+		if (!endpoint) {
+			logger.error(`Endpoint not found: ${endpointName}`);
+			process.exit(1);
+		}
+
+		console.log('\n╔═══════════════════════════════════════════════════════════════════╗');
+		console.log('║                    ENDPOINT DETAILS                               ║');
+		console.log('╚═══════════════════════════════════════════════════════════════════╝\n');
+
+		logger.info('Name', { value: endpoint.name });
+		logger.info('Protocol', { value: endpoint.protocol });
+		logger.info('Enabled', { value: endpoint.enabled ? 'Yes' : 'No' });
+		logger.info('Poll Interval', { value: `${endpoint.poll_interval}ms` });
+		logger.info('Connection', { value: formatConnection(endpoint.protocol, endpoint.connection) });
+
+		if (endpoint.data_points && endpoint.data_points.length > 0) {
+			console.log('\nData Points:');
+			console.log('━'.repeat(60));
+			for (const dp of endpoint.data_points) {
+				const dpInfo: any = {};
+				if (endpoint.protocol === 'modbus') {
+					dpInfo.address = dp.address;
+					dpInfo.type = dp.type;
+					dpInfo.dataType = dp.dataType;
+				} else if (endpoint.protocol === 'opcua') {
+					dpInfo.nodeId = dp.nodeId;
+					dpInfo.dataType = dp.dataType;
+				} else if (endpoint.protocol === 'mqtt') {
+					dpInfo.topic = dp.topic;
+				}
+				logger.info(`  • ${dp.name || dp.label || 'unnamed'}`, dpInfo);
+			}
+		}
+
+		if (endpoint.metadata && Object.keys(endpoint.metadata).length > 0) {
+			console.log('\nMetadata:');
+			console.log('━'.repeat(60));
+			for (const [key, value] of Object.entries(endpoint.metadata)) {
+				logger.info(`  ${key}`, { value });
+			}
+		}
+
+		console.log('');
+	} catch (error) {
+		logger.error('Failed to show endpoint details', error as Error);
+		process.exit(1);
+	}
+}
+
 async function runDiagnostics(): Promise<void> {
 	logger.info('Running system diagnostics...');
 	
@@ -1584,6 +1711,11 @@ async function main(): Promise<void> {
 		},
 		discover: {
 			_default: discover
+		},
+		endpoints: {
+			list: endpointsList,
+			show: endpointsShow,
+			_default: endpointsList
 		},
 		diagnostics: {
 			_default: runDiagnostics

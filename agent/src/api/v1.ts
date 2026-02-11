@@ -637,4 +637,18 @@ router.get('/v1/modbus/metrics', async (req: Request, res: Response, next: NextF
 	}
 });
 
+/**
+ * GET /v1/endpoints
+ * Get all configured device endpoints/sensors
+ * Supports filtering by protocol via query parameter: ?protocol=modbus
+ */
+router.get('/v1/endpoints', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const endpoints = await actions.getEndpoints(req.query.protocol as string | undefined);
+		return res.status(200).json({ endpoints });
+	} catch (error) {
+		next(error);
+	}
+});
+
 export default router;

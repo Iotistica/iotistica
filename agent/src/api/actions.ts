@@ -376,6 +376,16 @@ export const deprovisionDevice = async () => {
 };
 
 /**
+ * Get all configured endpoints/sensors
+ * Used by: GET /v1/endpoints
+ */
+export const getEndpoints = async (protocol?: string) => {
+	const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
+	const endpoints = await DeviceEndpointModel.getAll(protocol);
+	return endpoints;
+};
+
+/**
  * Factory reset device - complete data wipe
  * Used by: POST /v1/factory-reset
  */
