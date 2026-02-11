@@ -235,7 +235,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
               />
               <Area 
                 yAxisId="left"
-                type="monotone" 
+                type="linear" 
                 dataKey="value" 
                 stroke={color} 
                 fill={color}
@@ -342,7 +342,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
               />
               <Line 
                 yAxisId="left"
-                type="monotone" 
+                type="linear" 
                 dataKey="value" 
                 stroke={color}
                 strokeWidth={2}

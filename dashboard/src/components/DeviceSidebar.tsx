@@ -172,17 +172,62 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
     [devices]
   );
 
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState(() => {
+    return localStorage.getItem('deviceSidebar.searchQuery') || '';
+  });
   const [statusFilters, setStatusFilters] = useState<Device['status'][]>([]);
   const [typeFilters, setTypeFilters] = useState<Device['type'][]>([]);
   const [filtersInitialized, setFiltersInitialized] = useState(false);
+
+  // Persist search query to localStorage
+  useEffect(() => {
+    localStorage.setItem('deviceSidebar.searchQuery', searchQuery);
+  }, [searchQuery]);
+
+  // Persist status filters to localStorage
+  useEffect(() => {
+    if (filtersInitialized) {
+      localStorage.setItem('deviceSidebar.statusFilters', JSON.stringify(statusFilters));
+    }
+  }, [statusFilters, filtersInitialized]);
+
+  // Persist type filters to localStorage
+  useEffect(() => {
+    if (filtersInitialized) {
+      localStorage.setItem('deviceSidebar.typeFilters', JSON.stringify(typeFilters));
+    }
+  }, [typeFilters, filtersInitialized]);
 
   // Initialize filters once, then only remove invalid selections on refresh
   useEffect(() => {
     if (!filtersInitialized) {
       if (availableStatuses.length > 0 || availableTypes.length > 0) {
-        setStatusFilters([...availableStatuses]);
-        setTypeFilters([...availableTypes]);
+        // Try to load from localStorage first, fallback to all selected
+        const savedStatusFilters = localStorage.getItem('deviceSidebar.statusFilters');
+        const savedTypeFilters = localStorage.getItem('deviceSidebar.typeFilters');
+        
+        if (savedStatusFilters) {
+          try {
+            const parsed = JSON.parse(savedStatusFilters);
+            setStatusFilters(parsed.filter((s: Device['status']) => availableStatuses.includes(s)));
+          } catch {
+            setStatusFilters([...availableStatuses]);
+          }
+        } else {
+          setStatusFilters([...availableStatuses]);
+        }
+        
+        if (savedTypeFilters) {
+          try {
+            const parsed = JSON.parse(savedTypeFilters);
+            setTypeFilters(parsed.filter((t: Device['type']) => availableTypes.includes(t)));
+          } catch {
+            setTypeFilters([...availableTypes]);
+          }
+        } else {
+          setTypeFilters([...availableTypes]);
+        }
+        
         setFiltersInitialized(true);
       }
       return;

@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AddSensorDialog } from '@/components/sensors/AddSensorDialog';
 import { EditSensorDialog } from '@/components/sensors/EditSensorDialog';
@@ -101,10 +102,34 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [addSensorDialogOpen, setAddSensorDialogOpen] = useState(false);
   const [selectedSensor, setSelectedSensor] = useState<Sensor | null>(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
-  const [selectedProtocol, setSelectedProtocol] = useState<string>('all');
-  const [selectedStatus, setSelectedStatus] = useState<string>('all');
-  const [selectedType, setSelectedType] = useState<string>('all');
+  
+  // Load filter preferences from localStorage
+  const getStoredFilter = (key: string, defaultValue: string) => {
+    try {
+      const stored = localStorage.getItem(`sensors-filter-${key}-${deviceUuid}`);
+      return stored || defaultValue;
+    } catch {
+      return defaultValue;
+    }
+  };
+
+  const [selectedProtocol, setSelectedProtocol] = useState<string>(() => getStoredFilter('protocol', 'all'));
+  const [selectedStatus, setSelectedStatus] = useState<string>(() => getStoredFilter('status', 'all'));
+  const [selectedType, setSelectedType] = useState<string>(() => getStoredFilter('type', 'all'));
   const { getPendingConfig, updatePendingSensor, addPendingSensor } = useDeviceState();
+
+  // Persist filter changes to localStorage
+  useEffect(() => {
+    localStorage.setItem(`sensors-filter-protocol-${deviceUuid}`, selectedProtocol);
+  }, [selectedProtocol, deviceUuid]);
+
+  useEffect(() => {
+    localStorage.setItem(`sensors-filter-status-${deviceUuid}`, selectedStatus);
+  }, [selectedStatus, deviceUuid]);
+
+  useEffect(() => {
+    localStorage.setItem(`sensors-filter-type-${deviceUuid}`, selectedType);
+  }, [selectedType, deviceUuid]);
 
   // Virtual device states
   const [addVirtualDeviceDialogOpen, setAddVirtualDeviceDialogOpen] = useState(false);
@@ -116,6 +141,60 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     slaveCount: 40,
   });
   const [virtualDeviceLoading, setVirtualDeviceLoading] = useState(false);
+
+  // Profile management states
+  const [addProfileDialogOpen, setAddProfileDialogOpen] = useState(false);
+  const [profileFormData, setProfileFormData] = useState({
+    profile_name: '',
+    protocol: 'modbus',
+    description: '',
+    data_points: '[]'
+  });
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [dataPointsError, setDataPointsError] = useState('');
+
+  // Protocol-specific data point templates
+  const PROTOCOL_TEMPLATES: Record<string, any[]> = {
+    modbus: [
+      {
+        name: 'example_register',
+        address: 100,
+        type: 'holding',
+        dataType: 'uint16',
+        unit: '',
+        scale: 1,
+        displayName: 'Example Register'
+      }
+    ],
+    opcua: [
+      {
+        name: 'example_node',
+        nodeId: 'ns=2;s=Example',
+        namespace: 2,
+        dataType: 'float',
+        browseName: 'Example Node'
+      }
+    ],
+    mqtt: [
+      {
+        name: 'example_topic',
+        topic: 'sensor/example',
+        qos: 1,
+        dataType: 'float',
+        unit: ''
+      }
+    ],
+    can: [
+      {
+        name: 'example_signal',
+        messageId: '0x100',
+        signalName: 'ExampleSignal',
+        startBit: 0,
+        length: 16,
+        dataType: 'uint16'
+      }
+    ]
+  };
 
   const fetchSensors = useCallback(async () => {
     console.log('[fetchSensors] 🔄 START - Fetching sensors from API');
@@ -562,6 +641,116 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     }
   }, [virtualFormData.protocol, addVirtualDeviceDialogOpen]);
 
+  // Profile Management Functions
+  const handleOpenProfileDialog = () => {
+    setProfileFormData({
+      profile_name: '',
+      protocol: 'modbus',
+      description: '',
+      data_points: JSON.stringify(PROTOCOL_TEMPLATES.modbus, null, 2)
+    });
+    setDataPointsError('');
+    setAddProfileDialogOpen(true);
+  };
+
+  const handleLoadTemplate = () => {
+    const template = PROTOCOL_TEMPLATES[profileFormData.protocol] || [];
+    setProfileFormData({
+      ...profileFormData,
+      data_points: JSON.stringify(template, null, 2)
+    });
+    setDataPointsError('');
+  };
+
+  const handleValidateDataPoints = () => {
+    try {
+      const parsed = JSON.parse(profileFormData.data_points);
+      if (!Array.isArray(parsed)) {
+        setDataPointsError('Data points must be a JSON array');
+        return false;
+      }
+      if (parsed.length === 0) {
+        setDataPointsError('At least one data point is required');
+        return false;
+      }
+      setDataPointsError('');
+      toast.success('Valid JSON!');
+      return true;
+    } catch (err) {
+      setDataPointsError(err instanceof Error ? err.message : 'Invalid JSON');
+      return false;
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    // Validate required fields
+    if (!profileFormData.profile_name.trim()) {
+      toast.error('Profile name is required');
+      return;
+    }
+
+    if (!profileFormData.protocol) {
+      toast.error('Protocol is required');
+      return;
+    }
+
+    // Validate data points JSON
+    let dataPoints;
+    try {
+      dataPoints = JSON.parse(profileFormData.data_points);
+      if (!Array.isArray(dataPoints)) {
+        toast.error('Data points must be a JSON array');
+        return;
+      }
+      if (dataPoints.length === 0) {
+        toast.error('At least one data point is required');
+        return;
+      }
+    } catch (err) {
+      toast.error('Invalid JSON in data points');
+      return;
+    }
+
+    setProfileLoading(true);
+
+    try {
+      const payload = {
+        profile_name: profileFormData.profile_name.trim(),
+        protocol: profileFormData.protocol,
+        data_points: dataPoints,
+        metadata: profileFormData.description.trim() 
+          ? { description: profileFormData.description.trim() }
+          : undefined
+      };
+
+      const response = await fetch(buildApiUrl('/api/v1/profiles'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to save profile');
+      }
+
+      toast.success(`Profile "${profileFormData.profile_name}" saved successfully`);
+      
+      // Refresh profiles list if the same protocol
+      if (profileFormData.protocol === virtualFormData.protocol) {
+        await fetchProfiles(profileFormData.protocol);
+      }
+      
+      // Close dialog
+      setAddProfileDialogOpen(false);
+    } catch (err) {
+      console.error('Failed to save profile:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to save profile');
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
   /**
    * Simplified status badge - shows what users need to know
    * Priority: Deployment actions → Disabled state → Health status
@@ -747,6 +936,10 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                 Add Virtual Device
               </Button>
             )}
+            <Button onClick={handleOpenProfileDialog}>
+              <Plus className="w-4 h-4 mr-2" />
+              Add Profile
+            </Button>
           </div>
         </div>
 
@@ -1030,6 +1223,158 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                 disabled={virtualDeviceLoading || !virtualFormData.name || !virtualFormData.profile}
               >
                 {virtualDeviceLoading ? 'Creating...' : 'Create'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add Profile Dialog */}
+        <Dialog open={addProfileDialogOpen} onOpenChange={setAddProfileDialogOpen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Add Profile</DialogTitle>
+              <DialogDescription>
+                Create a reusable configuration profile for protocol devices.
+                Profiles define which data points are available for a specific device type.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="profile-name">Profile Name *</Label>
+                  <Input
+                    id="profile-name"
+                    value={profileFormData.profile_name}
+                    onChange={(e) => setProfileFormData({ ...profileFormData, profile_name: e.target.value })}
+                    placeholder="e.g., COMAP-IG-NT, Generic-Modbus, Siemens-S7"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="profile-protocol">Protocol *</Label>
+                  <Select
+                    value={profileFormData.protocol}
+                    onValueChange={(value) => setProfileFormData({ 
+                      ...profileFormData, 
+                      protocol: value,
+                      data_points: JSON.stringify(PROTOCOL_TEMPLATES[value] || [], null, 2)
+                    })}
+                  >
+                    <SelectTrigger id="profile-protocol">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="modbus">Modbus TCP/RTU</SelectItem>
+                      <SelectItem value="opcua">OPC-UA</SelectItem>
+                      <SelectItem value="mqtt">MQTT</SelectItem>
+                      <SelectItem value="can">CAN Bus</SelectItem>
+                      <SelectItem value="snmp">SNMP</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="profile-description">Description (Optional)</Label>
+                <Textarea
+                  id="profile-description"
+                  value={profileFormData.description}
+                  onChange={(e) => setProfileFormData({ ...profileFormData, description: e.target.value })}
+                  placeholder="e.g., COMAP InteliGen NT controller configuration"
+                  rows={2}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="profile-datapoints">Data Points (JSON Array) *</Label>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleLoadTemplate}
+                    >
+                      Load Template
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleValidateDataPoints}
+                    >
+                      Validate JSON
+                    </Button>
+                  </div>
+                </div>
+                <Textarea
+                  id="profile-datapoints"
+                  value={profileFormData.data_points}
+                  onChange={(e) => {
+                    setProfileFormData({ ...profileFormData, data_points: e.target.value });
+                    setDataPointsError('');
+                  }}
+                  placeholder="Paste JSON array of data points..."
+                  rows={15}
+                  className={`font-mono text-xs ${dataPointsError ? 'border-red-500' : ''}`}
+                />
+                {dataPointsError && (
+                  <p className="text-sm text-red-600">{dataPointsError}</p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Each data point must include protocol-specific fields. 
+                  Click "Load Template" to see an example structure for {profileFormData.protocol}.
+                </p>
+              </div>
+
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  <div className="font-medium mb-1">Protocol-Specific Fields:</div>
+                  <ul className="list-disc list-inside space-y-1 text-sm">
+                    {profileFormData.protocol === 'modbus' && (
+                      <>
+                        <li>Modbus: name, address, type (holding/input/coil/discrete), dataType, unit, scale</li>
+                        <li>Example: {"{"}"name": "engine_rpm", "address": 100, "type": "holding", "dataType": "uint16"{"}"}</li>
+                      </>
+                    )}
+                    {profileFormData.protocol === 'opcua' && (
+                      <>
+                        <li>OPC-UA: name, nodeId, namespace, dataType, browseName</li>
+                        <li>Example: {"{"}"name": "temperature", "nodeId": "ns=2;s=Temp", "namespace": 2, "dataType": "float"{"}"}</li>
+                      </>
+                    )}
+                    {profileFormData.protocol === 'mqtt' && (
+                      <>
+                        <li>MQTT: name, topic, qos, dataType, unit</li>
+                        <li>Example: {"{"}"name": "sensor_reading", "topic": "sensor/temp", "qos": 1, "dataType": "float"{"}"}</li>
+                      </>
+                    )}
+                    {profileFormData.protocol === 'can' && (
+                      <>
+                        <li>CAN: name, messageId, signalName, startBit, length, dataType</li>
+                        <li>Example: {"{"}"name": "wheel_speed", "messageId": "0x100", "signalName": "Speed_FL", "startBit": 0, "length": 16{"}"}</li>
+                      </>
+                    )}
+                  </ul>
+                </AlertDescription>
+              </Alert>
+            </div>
+
+            <DialogFooter>
+              <Button 
+                variant="outline" 
+                onClick={() => setAddProfileDialogOpen(false)} 
+                disabled={profileLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSaveProfile}
+                disabled={profileLoading || !profileFormData.profile_name || !profileFormData.protocol}
+              >
+                {profileLoading ? 'Saving...' : 'Save Profile'}
               </Button>
             </DialogFooter>
           </DialogContent>

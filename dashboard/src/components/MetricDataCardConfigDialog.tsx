@@ -17,10 +17,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from './ui/command';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from './ui/popover';
 import { buildApiUrl } from '@/config/api';
 import type { MetricDataCardConfig, ThresholdLine } from './MetricDataCard';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, Check, ChevronsUpDown } from 'lucide-react';
 import { Switch } from './ui/switch';
+import { cn } from './ui/utils';
 
 interface MetricDataCardConfigDialogProps {
   open: boolean;
@@ -45,6 +59,7 @@ export function MetricDataCardConfigDialog({
   initialConfig,
 }: MetricDataCardConfigDialogProps) {
   const [devices, setDevices] = useState<EndpointDevice[]>([]);
+  const [deviceOpen, setDeviceOpen] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<string>(initialConfig?.deviceName || '');
   const [selectedMetric, setSelectedMetric] = useState<string>(initialConfig?.metricName || '');
   const [chartType, setChartType] = useState<'line' | 'area' | 'bar'>(initialConfig?.chartType || 'line');
@@ -152,29 +167,52 @@ export function MetricDataCardConfigDialog({
 
         <div className="grid gap-4 py-4">
           <div className="grid gap-2">
-            <Label htmlFor="device">Device</Label>
-            <Select value={selectedDevice} onValueChange={setSelectedDevice}>
-              <SelectTrigger id="device">
-                <SelectValue placeholder="Select device" />
-              </SelectTrigger>
-              <SelectContent>
-                {loading ? (
-                  <SelectItem value="loading" disabled>
-                    Loading devices...
-                  </SelectItem>
-                ) : devices.length === 0 ? (
-                  <SelectItem value="none" disabled>
-                    No devices found
-                  </SelectItem>
-                ) : (
-                  devices.map((device) => (
-                    <SelectItem key={device.device_name} value={device.device_name}>
-                      {device.device_name} ({device.protocol}) - {device.metric_count} metrics
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
+            <Label>Device</Label>
+            <Popover open={deviceOpen} onOpenChange={setDeviceOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={deviceOpen}
+                  className="w-full justify-between"
+                >
+                  {selectedDevice
+                    ? devices.find((device) => device.device_name === selectedDevice)?.device_name
+                    : "Select device..."}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[400px] p-0">
+                <Command>
+                  <CommandInput placeholder="Search devices..." />
+                  <CommandList>
+                    <CommandEmpty>
+                      {loading ? "Loading devices..." : "No devices found."}
+                    </CommandEmpty>
+                    <CommandGroup>
+                      {devices.map((device) => (
+                        <CommandItem
+                          key={device.device_name}
+                          value={device.device_name}
+                          onSelect={(currentValue) => {
+                            setSelectedDevice(currentValue === selectedDevice ? "" : currentValue);
+                            setDeviceOpen(false);
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              selectedDevice === device.device_name ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          {device.device_name} ({device.protocol}) - {device.metric_count} metrics
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
 
           <div className="grid gap-2">
