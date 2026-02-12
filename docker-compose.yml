@@ -417,41 +417,41 @@ services:
     #     - postgres
 
 
-    # nodered:
-    #     build:
-    #         context: ./nodered
-    #         dockerfile: Dockerfile
-    #     container_name: iotistic-nodered
-    #     restart: unless-stopped
-    #     ports:
-    #         - "${NODERED_PORT_EXT:-1880}:1880"
-    #     volumes:
-    #         - ./nodered/data:/data
-    #     environment:
-    #         - TZ=America/Toronto
-    #         - NODE_RED_ENABLE_SAFE_MODE=false
-    #         - NODE_RED_ENABLE_PROJECTS=false
-    #         - IOTISTIC_BASE_URL=${IOTISTIC_BASE_URL:-http://api:3002}
-    #         - NODERED_BASE_URL=${NODERED_BASE_URL:-http://localhost:1880}
-    #         - IOTISTIC_STORAGE_TOKEN=5317a772-c8dc-b8af-af76-fce09c973db0034da53b-e5e3-1d36-93a7-ec53de09c4af
-    #     depends_on:
-    #         api:
-    #             condition: service_healthy
-    #         mosquitto:
-    #             condition: service_healthy
-    #     networks:
-    #         - iotistic-net
-    #     healthcheck:
-    #         test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:1880"]
-    #         interval: 30s
-    #         timeout: 10s
-    #         retries: 3
-    #         start_period: 60s
-    #     logging:
-    #         driver: "json-file"
-    #         options:
-    #             max-size: "10m"
-    #             max-file: "3"
+    nodered:
+        build:
+            context: ./nodered
+            dockerfile: Dockerfile
+        container_name: iotistic-nodered
+        restart: unless-stopped
+        ports:
+            - "${NODERED_PORT_EXT:-1880}:1880"
+        volumes:
+            - ./nodered/data:/data
+        environment:
+            - TZ=America/Toronto
+            - NODE_RED_ENABLE_SAFE_MODE=false
+            - NODE_RED_ENABLE_PROJECTS=false
+            - IOTISTIC_BASE_URL=${IOTISTIC_BASE_URL:-http://api:3002}
+            - NODERED_BASE_URL=${NODERED_BASE_URL:-http://localhost:1880}
+            - IOTISTIC_STORAGE_TOKEN=5317a772-c8dc-b8af-af76-fce09c973db0034da53b-e5e3-1d36-93a7-ec53de09c4af
+        depends_on:
+            api:
+                condition: service_healthy
+            mosquitto:
+                condition: service_healthy
+        networks:
+            - iotistic-net
+        healthcheck:
+            test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:1880"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 60s
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "10m"
+                max-file: "3"
 
     # prometheus:
     #     image: prom/prometheus:latest

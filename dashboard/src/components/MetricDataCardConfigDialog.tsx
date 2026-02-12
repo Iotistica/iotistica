@@ -281,7 +281,7 @@ export function MetricDataCardConfigDialog({
               <Checkbox
                 id="show-stats"
                 checked={showStats}
-                onCheckedChange={setShowStats}
+                onCheckedChange={(checked) => setShowStats(checked === true)}
               />
               <Label htmlFor="show-stats" className="cursor-pointer">
                 Show Aggregate Cards
@@ -322,7 +322,7 @@ export function MetricDataCardConfigDialog({
               <Checkbox
                 id="show-thresholds"
                 checked={showThresholds}
-                onCheckedChange={setShowThresholds}
+                onCheckedChange={(checked) => setShowThresholds(checked === true)}
               />
               <Label htmlFor="show-thresholds" className="cursor-pointer">
                 Thresholds

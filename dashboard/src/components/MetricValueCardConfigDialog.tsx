@@ -236,7 +236,7 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
             <Checkbox
               id="sparkline"
               checked={showSparkline}
-              onCheckedChange={setShowSparkline}
+              onCheckedChange={(checked) => setShowSparkline(checked === true)}
             />
             <Label htmlFor="sparkline" className="cursor-pointer">
               Show Sparkline
@@ -252,7 +252,7 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
                 <Checkbox
                   id="warning-threshold"
                   checked={enableWarning}
-                  onCheckedChange={setEnableWarning}
+                  onCheckedChange={(checked) => setEnableWarning(checked === true)}
                 />
                 <Label htmlFor="warning-threshold" className="text-sm cursor-pointer">
                   Warning Threshold
@@ -272,7 +272,7 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
                 <Checkbox
                   id="critical-threshold"
                   checked={enableCritical}
-                  onCheckedChange={setEnableCritical}
+                  onCheckedChange={(checked) => setEnableCritical(checked === true)}
                 />
                 <Label htmlFor="critical-threshold" className="text-sm cursor-pointer">
                   Critical Threshold

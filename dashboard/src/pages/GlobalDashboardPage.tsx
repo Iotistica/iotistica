@@ -134,8 +134,8 @@ const WIDGET_TYPES = {
     icon: Gauge,
     minW: 2,
     minH: 2,
-    defaultW: 2,
-    defaultH: 2
+    defaultW: 4,
+    defaultH: 4
   },
   TABLE: {
     id: 'table',
@@ -1145,7 +1145,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
               </div>
             </div>
           </CardHeader>
-          <CardContent className="p-4 pt-0">
+          <CardContent className={`p-4 pt-0 ${widget.type === 'METRIC_VALUE' ? 'h-full' : ''}`}>
             {renderWidgetContent(widget)}
           </CardContent>
         </Card>
@@ -1300,11 +1300,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
             config={widget.metricConfig}
             refreshInterval={refreshInterval}
             refreshTrigger={widget._refreshTrigger}
-            onConfigure={() => {
-              setConfiguringWidgetId(widget.i);
-              setIsEditingWidget(true);
-              setShowMetricConfigDialog(true);
-            }}
             onDataLoaded={(data) => {
               // Store data reference for badge rendering
               setWidgets(prevWidgets => 
@@ -1395,11 +1390,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
             config={widget.metricValueConfig}
             refreshInterval={refreshInterval}
             refreshTrigger={widget._refreshTrigger}
-            onConfigure={() => {
-              setConfiguringWidgetId(widget.i);
-              setIsEditingWidget(true);
-              setShowMetricValueConfigDialog(true);
-            }}
+            noWrapper={true}
             onDataLoaded={(data) => {
               // Store data reference for badge rendering
               setWidgets(prevWidgets => 

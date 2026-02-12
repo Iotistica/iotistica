@@ -23,6 +23,7 @@ interface MetricValueCardProps {
   refreshTrigger?: number;
   onConfigure?: () => void;
   onDataLoaded?: (data: any) => void;
+  noWrapper?: boolean; // When true, renders content only without Card wrapper
 }
 
 interface TimeSeriesResponse {
@@ -48,6 +49,7 @@ const MetricValueCard: React.FC<MetricValueCardProps> = ({
   refreshTrigger,
   onConfigure,
   onDataLoaded,
+  noWrapper = false,
 }) => {
   const [data, setData] = useState<TimeSeriesResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -194,6 +196,65 @@ const MetricValueCard: React.FC<MetricValueCardProps> = ({
 
   const TrendIcon = trend === 'up' ? TrendingUp : trend === 'down' ? TrendingDown : Minus;
   const trendColorClass = trend === 'up' ? 'text-green-600' : trend === 'down' ? 'text-red-600' : 'text-muted-foreground';
+const content = (
+    <>
+      {/* Large Value Display */}
+      <div className="text-center mb-4">
+        <div className={`text-9xl font-bold ${getThresholdColor(currentValue)}`}>
+          {formatValue(currentValue)}
+          {data.metric.unit && data.metric.unit.toLowerCase() !== 'count' && (
+            <span className="text-5xl ml-2 font-normal text-muted-foreground">              {data.metric.unit}
+            </span>
+          )}
+        </div>      </div>
+
+      {/* Trend Indicator */}
+      <div className={`flex items-center justify-center gap-1 mb-3 ${trendColorClass}`}>
+        <TrendIcon className="w-4 h-4" />
+        <span className="text-sm font-medium">
+          {change > 0 ? '+' : ''}{change.toFixed(1)}%
+        </span>
+      </div>
+
+      {/* Sparkline */}
+      {config.showSparkline && sparklineData.length > 1 && (
+        <div className="h-12 mb-2">
+          <ResponsiveContainer width="100%" height={48}>
+            <LineChart data={sparklineData.map(value => ({ value }))}>
+              <YAxis hide domain={['auto', 'auto']} />
+              <Line 
+                type="monotone"
+                dataKey="value"
+                stroke={
+                  config.criticalThreshold !== undefined && currentValue >= config.criticalThreshold
+                    ? '#dc2626'
+                    : config.warningThreshold !== undefined && currentValue >= config.warningThreshold
+                    ? '#ca8a04'
+                    : '#3b82f6'
+                }
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Footer Info */}
+      <div className="text-xs text-muted-foreground text-center">
+        {data.data_points} points • {config.timeRange} • Updated {formatTime(lastUpdate)}
+      </div>
+    </>
+  );
+
+  if (noWrapper) {
+    return (
+      <div className={`h-full flex flex-col justify-center p-2 ${getThresholdBgColor(currentValue)}`}>
+        {content}
+      </div>
+    );
+  }
 
   return (
     <Card className={`h-full flex flex-col ${getThresholdBgColor(currentValue)}`}>
@@ -240,55 +301,7 @@ const MetricValueCard: React.FC<MetricValueCardProps> = ({
       </CardHeader>
       
       <CardContent className="flex-1 flex flex-col justify-center pb-4">
-        {/* Large Value Display */}
-        <div className="text-center mb-2">
-          <div className={`text-4xl font-bold ${getThresholdColor(currentValue)}`}>
-            {formatValue(currentValue)}
-            {data.metric.unit && (
-              <span className="text-2xl ml-1 font-normal text-muted-foreground">
-                {data.metric.unit}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Trend Indicator */}
-        <div className={`flex items-center justify-center gap-1 mb-3 ${trendColorClass}`}>
-          <TrendIcon className="w-4 h-4" />
-          <span className="text-sm font-medium">
-            {change > 0 ? '+' : ''}{change.toFixed(1)}%
-          </span>
-        </div>
-
-        {/* Sparkline */}
-        {config.showSparkline && sparklineData.length > 1 && (
-          <div className="h-12 mb-2">
-            <ResponsiveContainer width="100%" height={48}>
-              <LineChart data={sparklineData.map(value => ({ value }))}>
-                <YAxis hide domain={['auto', 'auto']} />
-                <Line 
-                  type="monotone"
-                  dataKey="value"
-                  stroke={
-                    config.criticalThreshold !== undefined && currentValue >= config.criticalThreshold
-                      ? '#dc2626'
-                      : config.warningThreshold !== undefined && currentValue >= config.warningThreshold
-                      ? '#ca8a04'
-                      : '#3b82f6'
-                  }
-                  strokeWidth={2}
-                  dot={false}
-                  isAnimationActive={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-
-        {/* Footer Info */}
-        <div className="text-xs text-muted-foreground text-center">
-          {data.data_points} points • {config.timeRange} • Updated {formatTime(lastUpdate)}
-        </div>
+        {content}
       </CardContent>
     </Card>
   );
