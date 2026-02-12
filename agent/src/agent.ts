@@ -892,9 +892,16 @@ export default class Agent {
     // Check if anomaly detection is enabled (cloud config → env fallback)
     const features = this.configManager.getFeatures();
     
+    this.agentLogger?.debugSync("Checking anomaly detection configuration", {
+      component: LogComponents.agent,
+      enableAnomalyDetection: features.enableAnomalyDetection,
+      targetConfigFeatures: this.configManager.getTargetConfig().features
+    });
+    
     if (!features.enableAnomalyDetection) {
       this.agentLogger?.infoSync("Anomaly Detection disabled by configuration", {
         component: LogComponents.agent,
+        features
       });
       return;
     }

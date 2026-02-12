@@ -553,14 +553,19 @@ export class ConfigManager extends EventEmitter {
 				this.currentConfig.endpoints = currentEndpoints;
 			}
 			
-			// Emit feature change event if features changed
-			if (oldFeatures && newFeatures && !_.isEqual(oldFeatures, newFeatures)) {
-				this.emit('features-changed', { old: oldFeatures, new: newFeatures });
+			// Emit feature change event if features changed OR if this is first-time config load
+			if (newFeatures && (!oldFeatures || !_.isEqual(oldFeatures, newFeatures))) {
+				this.emit('features-changed', { old: oldFeatures || {}, new: newFeatures });
+				
+				const changes = oldFeatures 
+					? Object.keys(newFeatures).filter(key => oldFeatures[key] !== newFeatures[key])
+					: Object.keys(newFeatures);
 				
 				this.logger?.infoSync('Feature configuration changed', {
 					component: LogComponents.configManager,
 					operation: 'reconcile',
-					changes: Object.keys(newFeatures).filter(key => oldFeatures[key] !== newFeatures[key])
+					isFirstLoad: !oldFeatures,
+					changes
 				});
 			}
 			
