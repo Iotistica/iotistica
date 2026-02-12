@@ -315,7 +315,7 @@ export default function App() {
       if (!deletedDevice) return;
 
       setDevices(prev => prev.filter(d => d.deviceUuid !== customEvent.detail.deviceUuid));
-      setSelectedDeviceId(prev => (prev === deletedDevice.id ? null : prev));
+      setSelectedDeviceId(prev => (prev === deletedDevice.id ? "" : prev));
     };
 
     window.addEventListener('device-deleted', handleDeviceDeleted);

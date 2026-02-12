@@ -63,7 +63,7 @@ function topicMatches(topic: string, pattern: string): boolean {
  * 
  * Authenticate username and password
  * 
- * Request body:
+ * Request body (JSON or form-encoded):
  * {
  *   "username": "string",
  *   "password": "string"
@@ -75,14 +75,26 @@ function topicMatches(topic: string, pattern: string): boolean {
  * - 500 Internal Server Error: Database error
  */
 router.post('/user', async (req: Request, res: Response) => {
-  const { username, password } = req.body;
+  // Support both JSON body and query parameters (for EMQX compatibility)
+  const username = req.body?.username || req.query?.username as string;
+  const password = req.body?.password || req.query?.password as string;
+
+  // Log raw request for debugging
+  authLogger.info('User authentication request received', {
+    hasBody: !!req.body,
+    bodyKeys: req.body ? Object.keys(req.body) : [],
+    hasQuery: Object.keys(req.query).length > 0,
+    queryKeys: Object.keys(req.query),
+    contentType: req.get('content-type'),
+    username
+  });
 
   if (!username || !password) {
     authLogger.info('Missing credentials in request');
-    return res.status(403).json({ error: 'Missing credentials' });
+    return res.status(403).json({ result: 'deny', error: 'Missing credentials' });
   }
 
-  authLogger.info('User authentication request', { username });
+  authLogger.info('User authentication attempt', { username });
 
   try {
     // Query user from database
@@ -93,7 +105,7 @@ router.post('/user', async (req: Request, res: Response) => {
 
     if (result.rows.length === 0) {
       authLogger.info('User not found', { username });
-      return res.status(403).json({ error: 'User not found' });
+      return res.status(403).json({ result: 'deny', error: 'User not found' });
     }
 
     const user = result.rows[0];
@@ -101,7 +113,7 @@ router.post('/user', async (req: Request, res: Response) => {
     // Check if user is active
     if (!user.is_active) {
       authLogger.info('User inactive', { username });
-      return res.status(403).json({ error: 'User inactive' });
+      return res.status(403).json({ result: 'deny', error: 'User inactive' });
     }
 
     // Verify password using bcrypt
@@ -109,15 +121,15 @@ router.post('/user', async (req: Request, res: Response) => {
 
     if (!passwordMatch) {
       authLogger.info('Invalid password for user', { username });
-      return res.status(403).json({ error: 'Invalid password' });
+      return res.status(403).json({ result: 'deny', error: 'Invalid password' });
     }
 
     authLogger.info('User authenticated successfully', { username });
-    return res.status(200).json({ success: true });
+    return res.status(200).json({ result: 'allow', is_superuser: false });
 
   } catch (error) {
     authLogger.error('Database error during user authentication', { username, error: error instanceof Error ? error.message : String(error) });
-    return res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ result: 'deny', error: 'Internal server error' });
   }
 });
 
@@ -142,7 +154,7 @@ router.post('/superuser', async (req: Request, res: Response) => {
 
   if (!username) {
     authLogger.info('Missing username for superuser check');
-    return res.status(403).json({ error: 'Missing username' });
+    return res.status(403).json({ result: 'deny', error: 'Missing username' });
   }
 
 
@@ -155,20 +167,20 @@ router.post('/superuser', async (req: Request, res: Response) => {
 
     if (result.rows.length === 0) {
       authLogger.info('User not found or inactive', { username });
-      return res.status(403).json({ error: 'User not found or inactive' });
+      return res.status(403).json({ result: 'deny', error: 'User not found or inactive' });
     }
 
     const isSuperuser = result.rows[0].is_superuser;
 
     if (isSuperuser) {
-      return res.status(200).json({ success: true });
+      return res.status(200).json({ result: 'allow', is_superuser: true });
     } else {
-      return res.status(403).json({ error: 'Not a superuser' });
+      return res.status(403).json({ result: 'deny', error: 'Not a superuser' });
     }
 
   } catch (error) {
     authLogger.error('Database error during superuser check', { username, error: error instanceof Error ? error.message : String(error) });
-    return res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ result: 'deny', error: 'Internal server error' });
   }
 });
 
@@ -177,7 +189,7 @@ router.post('/superuser', async (req: Request, res: Response) => {
  * 
  * Check if user has access to a specific topic
  * 
- * Request body:
+ * Request body (JSON or form-encoded):
  * {
  *   "username": "string",
  *   "topic": "string",
@@ -196,14 +208,40 @@ router.post('/superuser', async (req: Request, res: Response) => {
  * ACL rules support MQTT wildcards in the topic pattern
  */
 router.post('/acl', async (req: Request, res: Response) => {
-  const { username, topic, acc } = req.body;
+  // Support both JSON body and query parameters (for EMQX compatibility)
+  const username = req.body?.username || req.query?.username as string;
+  const topic = req.body?.topic || req.query?.topic as string;
+  const acc = req.body?.acc || req.query?.acc;
+  const action = req.body?.action || req.query?.action as string | undefined;
 
-  if (!username || !topic || acc === undefined) {
+  // Log raw request for debugging
+  authLogger.info('ACL request received', {
+    hasBody: !!req.body,
+    bodyKeys: req.body ? Object.keys(req.body) : [],
+    hasQuery: Object.keys(req.query).length > 0,
+    queryKeys: Object.keys(req.query),
+    contentType: req.get('content-type'),
+    username,
+    topic,
+    acc,
+    action
+  });
+
+  if (!username || !topic || (acc === undefined && !action)) {
     authLogger.info('Missing ACL parameters');
-    return res.status(403).json({ error: 'Missing parameters' });
+    return res.status(403).json({ result: 'deny', error: 'Missing parameters' });
   }
 
-  const accessType = acc === 1 ? 'READ' : acc === 2 ? 'WRITE' : `UNKNOWN(${acc})`;
+  const resolvedAcc = acc !== undefined
+    ? acc
+    : action === 'publish'
+      ? 2
+      : 1;
+  const accessType = resolvedAcc === 1 || resolvedAcc === '1'
+    ? 'READ'
+    : resolvedAcc === 2 || resolvedAcc === '2'
+      ? 'WRITE'
+      : `UNKNOWN(${resolvedAcc})`;
   authLogger.info('ACL check', { username, topic, accessType });
 
   try {
@@ -215,7 +253,7 @@ router.post('/acl', async (req: Request, res: Response) => {
 
     if (superuserResult.rows.length > 0 && superuserResult.rows[0].is_superuser) {
       authLogger.info('User is superuser, access GRANTED', { username, topic });
-      return res.status(200).json({ success: true });
+      return res.status(200).json({ result: 'allow' });
     }
 
     // Check ACL rules for this user
@@ -226,7 +264,7 @@ router.post('/acl', async (req: Request, res: Response) => {
 
     if (aclResult.rows.length === 0) {
       authLogger.info('No ACL rules found for user, access DENIED', { username, topic });
-      return res.status(403).json({ error: 'No ACL rules found' });
+      return res.status(403).json({ result: 'deny', error: 'No ACL rules found' });
     }
 
     // Check each ACL rule to find a match
@@ -234,11 +272,11 @@ router.post('/acl', async (req: Request, res: Response) => {
       if (topicMatches(topic, rule.topic)) {
         // Check if the access level includes the requested access
         // access is a bitwise field: 1=read, 2=write, 3=both
-        const hasAccess = (rule.access & acc) === acc;
+        const hasAccess = (rule.access & resolvedAcc) === resolvedAcc;
 
         if (hasAccess) {
           authLogger.info('ACL matched pattern, access GRANTED', { username, topic, pattern: rule.topic });
-          return res.status(200).json({ success: true });
+          return res.status(200).json({ result: 'allow' });
         } else {
           authLogger.info('ACL matched pattern but insufficient access level, access DENIED', { username, topic, pattern: rule.topic });
           // Continue checking other rules
@@ -248,11 +286,11 @@ router.post('/acl', async (req: Request, res: Response) => {
 
     // No matching rule found or all matched rules had insufficient access
     authLogger.info('No matching ACL rule for topic, access DENIED', { username, topic });
-    return res.status(403).json({ error: 'Access denied' });
+    return res.status(403).json({ result: 'deny', error: 'Access denied' });
 
   } catch (error) {
     authLogger.error('Database error during ACL check', { username, topic, error: error instanceof Error ? error.message : String(error) });
-    return res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ result: 'deny', error: 'Internal server error' });
   }
 });
 
