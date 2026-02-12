@@ -200,10 +200,10 @@ const content = (
     <>
       {/* Large Value Display */}
       <div className="text-center mb-4">
-        <div className={`text-9xl font-bold ${getThresholdColor(currentValue)}`}>
+        <div className={`font-bold ${getThresholdColor(currentValue)}`} style={{ fontSize: '8rem', lineHeight: '1' }}>
           {formatValue(currentValue)}
           {data.metric.unit && data.metric.unit.toLowerCase() !== 'count' && (
-            <span className="text-5xl ml-2 font-normal text-muted-foreground">              {data.metric.unit}
+            <span className="ml-2 font-normal text-muted-foreground" style={{ fontSize: '3.5rem' }}>              {data.metric.unit}
             </span>
           )}
         </div>      </div>
