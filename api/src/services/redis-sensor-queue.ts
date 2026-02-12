@@ -9,6 +9,8 @@
  * - Scalable: Multiple workers can consume
  * - Backpressure: Queue absorbs traffic spikes
  * - Atomic batching: XREAD returns exact batch size
+ * 
+ * Now uses centralized RedisClientFactory for consistent configuration.
  */
 
 import Redis from 'ioredis';
@@ -18,6 +20,7 @@ import { promisify } from 'util';
 import { brotliDecompress, gunzip, inflate } from 'zlib';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getRedisIngestion, getRedisConsumer } from '../redis/client-factory';
 
 /**
  * Prometheus metrics for observability
@@ -217,35 +220,9 @@ class RedisSensorQueue {
   private diskSpoolReplayInterval: NodeJS.Timeout | null = null;
 
   constructor() {
-    // Separate ingestion connection (write-optimized, fail-fast)
-    this.redisIngestion = new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379', 10),
-      password: process.env.REDIS_PASSWORD,
-      maxRetriesPerRequest: 3,
-      enableOfflineQueue: false,
-      retryStrategy: (times) => {
-        if (times > 10) return null;
-        return Math.min(times * 100, 2000);
-      },
-      reconnectOnError: (err) => {
-        const targetErrors = ['READONLY', 'ECONNREFUSED', 'ETIMEDOUT'];
-        return targetErrors.some(e => err.message.includes(e));
-      },
-    });
-
-    // Separate consumption connection (read-optimized, blocking allowed)
-    this.redisConsumer = new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379', 10),
-      password: process.env.REDIS_PASSWORD,
-      maxRetriesPerRequest: 10,
-      enableOfflineQueue: true,
-      retryStrategy: (times) => {
-        if (times > 20) return null;
-        return Math.min(times * 200, 3000);
-      },
-    });
+    // Get clients from factory (handles all cluster/auth/TLS configuration)
+    this.redisIngestion = getRedisIngestion(); // Fail-fast for writes
+    this.redisConsumer = getRedisConsumer(); // Resilient for reads
 
     this.consumerName = `worker-${process.pid}-${Date.now()}`;
     this.workerCount = parseInt(process.env.SENSOR_WORKER_COUNT || '2', 10);

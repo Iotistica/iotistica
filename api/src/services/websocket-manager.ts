@@ -88,27 +88,13 @@ export class WebSocketManager {
    */
   async initializeRedis(): Promise<void> {
     try {
-      const { redisClient } =await import('../redis/client');
+      const { redisClient } = await import('../redis/client');
+      const { getRedisSubscriber } = await import('../redis/client-factory');
+      
       this.redisClient = redisClient;
       
-      // Import ioredis to create subscriber client
-      const Redis = (await import('ioredis')).default;
-      
-      const host = process.env.REDIS_HOST || 'localhost';
-      const port = parseInt(process.env.REDIS_PORT || '6379', 10);
-      
-      // Create dedicated subscriber client (required by ioredis for pub/sub)
-      this.redisSubscriber = new Redis({
-        host,
-        port,
-        retryStrategy: (times: number) => {
-          if (times > 5) {
-            logger.error(' Redis subscriber max retries reached');
-            return null;
-          }
-          return Math.min(times * 1000, 3000);
-        },
-      });
+      // Get dedicated subscriber client from factory
+      this.redisSubscriber = getRedisSubscriber();
       
       // Subscribe to patterns for device metrics and logs
       const metricsPattern = 'device:*:metrics';

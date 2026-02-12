@@ -12,11 +12,11 @@ CREATE TABLE IF NOT EXISTS shell_audit_log (
   created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 
--- Indexes for efficient querying
-CREATE INDEX idx_shell_audit_device ON shell_audit_log(device_uuid, timestamp DESC);
-CREATE INDEX idx_shell_audit_user ON shell_audit_log(user_id, timestamp DESC);
-CREATE INDEX idx_shell_audit_session ON shell_audit_log(session_id);
-CREATE INDEX idx_shell_audit_timestamp ON shell_audit_log(timestamp DESC);
+-- Indexes for efficient querying (idempotent)
+CREATE INDEX IF NOT EXISTS idx_shell_audit_device ON shell_audit_log(device_uuid, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_shell_audit_user ON shell_audit_log(user_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_shell_audit_session ON shell_audit_log(session_id);
+CREATE INDEX IF NOT EXISTS idx_shell_audit_timestamp ON shell_audit_log(timestamp DESC);
 
 -- Comment on table
 COMMENT ON TABLE shell_audit_log IS 'Audit log of shell commands executed via Remote Access';

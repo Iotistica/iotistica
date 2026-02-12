@@ -15,14 +15,22 @@
 -- 1. UPDATE ANOMALY_EVENTS TABLE
 -- ========================================
 
--- Rename device_id to agent_uuid for clarity
-ALTER TABLE anomaly_events 
-  RENAME COLUMN device_id TO agent_uuid;
+-- Rename device_id to agent_uuid for clarity (idempotent)
+DO $$ 
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'anomaly_events' AND column_name = 'device_id'
+  ) THEN
+    ALTER TABLE anomaly_events 
+    RENAME COLUMN device_id TO agent_uuid;
+  END IF;
+END $$;
 
--- Add device tracking columns
+-- Add device tracking columns (idempotent)
 ALTER TABLE anomaly_events 
-  ADD COLUMN device_name TEXT NOT NULL DEFAULT 'Unknown',
-  ADD COLUMN device_type TEXT CHECK (device_type IN ('modbus', 'opcua', 'bacnet', 'mqtt-sensor', 'agent-system'));
+  ADD COLUMN IF NOT EXISTS device_name TEXT NOT NULL DEFAULT 'Unknown',
+  ADD COLUMN IF NOT EXISTS device_type TEXT CHECK (device_type IN ('modbus', 'opcua', 'bacnet', 'mqtt-sensor', 'agent-system'));
 
 -- Update fingerprint documentation (breaking change - see notes below)
 COMMENT ON COLUMN anomaly_events.fingerprint IS 'Hash of device+metric+method+severity for correlation. NOTE: Old fingerprints (without device) will not correlate with new ones.';
@@ -44,21 +52,21 @@ CREATE INDEX IF NOT EXISTS idx_anomaly_events_agent_uuid
 -- ========================================
 
 -- Keep affected_devices column (already correct naming)
--- Add device identification columns
+-- Add device identification columns (idempotent)
 ALTER TABLE anomaly_incidents
-  ADD COLUMN device_name TEXT NOT NULL DEFAULT 'Unknown',
-  ADD COLUMN device_type TEXT,
-  ADD COLUMN affected_agents JSONB;
+  ADD COLUMN IF NOT EXISTS device_name TEXT NOT NULL DEFAULT 'Unknown',
+  ADD COLUMN IF NOT EXISTS device_type TEXT,
+  ADD COLUMN IF NOT EXISTS affected_agents JSONB;
 
 -- Add index for device queries
 CREATE INDEX IF NOT EXISTS idx_anomaly_incidents_device_name 
   ON anomaly_incidents(device_name);
 
--- Add acknowledgment tracking columns
+-- Add acknowledgment tracking columns (idempotent)
 ALTER TABLE anomaly_incidents 
-  ADD COLUMN acknowledged_at TIMESTAMPTZ,
-  ADD COLUMN acknowledged_by TEXT,
-  ADD COLUMN resolution_notes TEXT;
+  ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS acknowledged_by TEXT,
+  ADD COLUMN IF NOT EXISTS resolution_notes TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_anomaly_incidents_acknowledged_at 
   ON anomaly_incidents(acknowledged_at);
@@ -74,9 +82,9 @@ COMMENT ON COLUMN anomaly_incidents.device_type IS 'Device source type: modbus, 
 -- ========================================
 
 -- Keep affected_devices column (already correct naming)
--- Add device name for better alert context
+-- Add device name for better alert context (idempotent)
 ALTER TABLE anomaly_alerts
-  ADD COLUMN device_name TEXT NOT NULL DEFAULT 'Unknown';
+  ADD COLUMN IF NOT EXISTS device_name TEXT NOT NULL DEFAULT 'Unknown';
 
 COMMENT ON COLUMN anomaly_alerts.affected_devices IS 'JSONB array of monitored device names';
 COMMENT ON COLUMN anomaly_alerts.device_name IS 'Primary device name for this alert';

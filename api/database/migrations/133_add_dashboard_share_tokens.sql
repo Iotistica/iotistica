@@ -26,9 +26,18 @@ ALTER COLUMN share_token SET NOT NULL;
 ALTER TABLE dashboard_layouts 
 ALTER COLUMN share_token SET DEFAULT gen_random_uuid();
 
--- Add unique constraint
-ALTER TABLE dashboard_layouts 
-ADD CONSTRAINT unique_share_token UNIQUE (share_token);
+-- Add unique constraint (idempotent)
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint 
+    WHERE conname = 'unique_share_token' 
+    AND conrelid = 'dashboard_layouts'::regclass
+  ) THEN
+    ALTER TABLE dashboard_layouts 
+    ADD CONSTRAINT unique_share_token UNIQUE (share_token);
+  END IF;
+END $$;
 
 -- ============================================================================
 -- Create index for efficient share token lookups

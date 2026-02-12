@@ -1133,7 +1133,11 @@ export class DeviceSensorSyncService {
              health_last_poll = $3,
              health_error_count = $4,
              health_last_error = $5,
-             health_updated_at = NOW()
+             health_updated_at = NOW(),
+             deployment_status = CASE
+               WHEN deployment_status IN ('pending', 'draft') THEN 'deployed'
+               ELSE deployment_status
+             END
            WHERE device_uuid = $6 AND name = $7`,
           [
             status,

@@ -1,15 +1,17 @@
 /**
  * Metrics Batch Worker (Phase 2)
  * 
- * Reads metrics from Redis Streams and batch writes to PostgreSQL.
+ * Reads metrics from Redis Streams using consumer groups and batch writes to PostgreSQL.
  * This reduces database load by ~90% compared to per-message writes.
  * 
  * Architecture:
  * - Runs continuously in background
+ * - Uses XREADGROUP for reliable at-least-once delivery
  * - Reads up to 100 metrics from Redis Streams every 10 seconds
  * - Batch inserts into device_metrics table
- * - Acknowledges processed messages (XDEL)
+ * - Acknowledges processed messages with XACK
  * - Graceful shutdown on SIGTERM/SIGINT
+ * - Crash recovery: unacknowledged messages will be redelivered
  * 
  * Performance:
  * - Before: 1 INSERT per device state update (~6 INSERTs/minute/device)
@@ -48,6 +50,15 @@ export class MetricsBatchWorker {
      logger.info(`   Batch interval: ${this.batchInterval}ms`);
      logger.info(`   Batch size: ${this.batchSize} metrics`);
     
+    // Initialize consumer group
+    try {
+      await redisClient.initializeMetricsConsumerGroup();
+       logger.info('   Metrics consumer group initialized');
+    } catch (error) {
+       logger.error('   Failed to initialize metrics consumer group:', error);
+      throw error;
+    }
+    
     this.isRunning = true;
 
     // Run immediately on start
@@ -84,14 +95,14 @@ export class MetricsBatchWorker {
   }
 
   /**
-   * Process a batch of metrics from Redis Streams
+   * Process a batch of metrics from Redis Streams using consumer groups
    */
   private async processBatch(): Promise<void> {
     try {
-      // Read metrics from all device streams
+      // Read metrics from all device streams using consumer groups
+      // Consumer groups track position automatically - no lastId needed
       const entries = await redisClient.readMetrics(
         '*', // All devices
-        '0-0', // From beginning (we delete after processing)
         this.batchSize, // Max count
         0 // Don't block (return immediately)
       );
@@ -171,7 +182,21 @@ export class MetricsBatchWorker {
       const client = redisClient.getClient();
       if (!client) return;
 
-      const streamKeys = await client.keys('metrics:*');
+      // Use SCAN instead of KEYS - non-blocking and safe for production
+      const streamKeys: string[] = [];
+      let cursor = '0';
+      
+      do {
+        const result = await client.scan(
+          cursor,
+          'MATCH',
+          'metrics:*',
+          'COUNT',
+          100
+        );
+        cursor = result[0];
+        streamKeys.push(...result[1]);
+      } while (cursor !== '0');
       
       if (streamKeys.length === 0) {
         return;

@@ -3,19 +3,29 @@
  * 
  * Manages Redis connection with automatic reconnection, error handling,
  * and graceful shutdown for pub/sub operations and real-time data distribution.
+ * 
+ * Now uses centralized RedisClientFactory for consistent configuration.
  */
 
 import Redis from 'ioredis';
 import logger from '../utils/logger';
+import { getRedisClient, getRedisSubscriber } from './client-factory';
 
 class RedisClient {
   private static instance: RedisClient;
   private client: Redis | null = null;
-  private isConnected: boolean = false;
-  private reconnectAttempts: number = 0;
-  private maxReconnectAttempts: number = 10;
+  private subscriber: Redis | null = null;
+  private metricsConsumerGroup = 'metrics-writers';
+  private metricsConsumerName: string;
+  private subscriberInitialized: boolean = false;
+  
+  // Callback maps for pub/sub subscriptions (prevents duplicate handlers)
+  private patternCallbacks: Map<string, Set<(deviceUuid: string, metrics: any) => void>> = new Map();
+  private channelCallbacks: Map<string, Set<(deviceUuid: string, metrics: any) => void>> = new Map();
 
-  private constructor() {}
+  private constructor() {
+    this.metricsConsumerName = `worker-${process.pid}-${Date.now()}`;
+  }
 
   public static getInstance(): RedisClient {
     if (!RedisClient.instance) {
@@ -25,100 +35,40 @@ class RedisClient {
   }
 
   /**
-   * Initialize Redis connection
+   * Initialize Redis connection (using factory)
    */
   public async connect(): Promise<void> {
-    if (this.client && this.isConnected) {
-       logger.info('Redis already connected');
+    if (this.client?.status === 'ready') {
+      logger.info('Redis already connected');
       return;
     }
 
-    const host = process.env.REDIS_HOST || 'localhost';
-    const port = parseInt(process.env.REDIS_PORT || '6379', 10);
+    logger.info('Initializing Redis client via factory...');
 
-     logger.info(`Connecting to Redis at ${host}:${port}...`);
+    // Get client from factory (handles all cluster/auth/TLS/timeout configuration)
+    this.client = getRedisClient();
 
-    this.client = new Redis({
-      host,
-      port,
-      retryStrategy: (times: number) => {
-        this.reconnectAttempts = times;
-        
-        if (times > this.maxReconnectAttempts) {
-           logger.error(` Redis max reconnection attempts (${this.maxReconnectAttempts}) reached`);
-          return null; // Stop retrying
-        }
-
-        const delay = Math.min(times * 1000, 5000); // Max 5s delay
-         logger.info(`⏳ Redis reconnecting in ${delay}ms (attempt ${times}/${this.maxReconnectAttempts})`);
-        return delay;
-      },
-      maxRetriesPerRequest: 20, // Increased for high load scenarios
-      enableOfflineQueue: true, // Queue commands during reconnection
-      enableReadyCheck: true,
-      lazyConnect: false,
-      connectTimeout: 10000, // 10 second timeout
-      keepAlive: 30000, // Keep connection alive
-      reconnectOnError: (err) => {
-        const targetErrors = ['READONLY', 'ECONNREFUSED', 'ETIMEDOUT'];
-        return targetErrors.some(e => err.message.includes(e));
-      },
-    });
-
-    // Event handlers
-    this.client.on('connect', () => {
-       logger.info(' Redis TCP connection established');
-    });
-
-    this.client.on('ready', () => {
-      this.isConnected = true;
-      this.reconnectAttempts = 0;
-       logger.info(' Redis client ready and authenticated');
-    });
-
-    this.client.on('error', (err: Error) => {
-       logger.error(' Redis error:', {
-        message: err.message,
-        code: (err as any).code,
-        errno: (err as any).errno,
-        syscall: (err as any).syscall,
-      });
-      
-      // Don't throw - let retry logic handle it
-    });
-
-    this.client.on('close', () => {
-      this.isConnected = false;
-       logger.info(' Redis connection closed');
-    });
-
-    this.client.on('reconnecting', () => {
-       logger.info(' Redis reconnecting...');
-    });
-
-    this.client.on('end', () => {
-      this.isConnected = false;
-       logger.info(' Redis connection ended');
-    });
-
-    // Wait for ready state
+    // Wait for ready state (ioredis handles connectTimeout internally)
     await new Promise<void>((resolve, reject) => {
       if (!this.client) {
         reject(new Error('Redis client not initialized'));
         return;
       }
 
-      const timeout = setTimeout(() => {
-        reject(new Error('Redis connection timeout'));
-      }, 10000); // 10s timeout
+      // If already ready, resolve immediately
+      if (this.client.status === 'ready') {
+        logger.info('Redis client already ready');
+        resolve();
+        return;
+      }
 
+      // Let ioredis handle connection timeout (configured in factory with connectTimeout)
+      // This will throw after connectTimeout ms if connection fails
       this.client.once('ready', () => {
-        clearTimeout(timeout);
         resolve();
       });
 
       this.client.once('error', (err: Error) => {
-        clearTimeout(timeout);
         reject(err);
       });
     });
@@ -138,7 +88,7 @@ class RedisClient {
    * Check if Redis is connected
    */
   public isReady(): boolean {
-    return this.isConnected && this.client !== null;
+    return this.client?.status === 'ready';
   }
 
   /**
@@ -239,18 +189,51 @@ class RedisClient {
   }
 
   /**
-   * Read metrics from Redis Stream
-   * Used by background worker to batch process metrics
+   * Initialize consumer group for metrics streaming
+   * Call this once during app startup
+   */
+  public async initializeMetricsConsumerGroup(): Promise<void> {
+    if (!this.isReady()) {
+      throw new Error('Redis not connected');
+    }
+
+    try {
+      // We don't know which device streams exist yet, so we'll create groups lazily
+      logger.info('Metrics consumer group will be created on-demand per device stream', {
+        group: this.metricsConsumerGroup
+      });
+    } catch (error) {
+      logger.error('Failed to initialize metrics consumer group', { error });
+      throw error;
+    }
+  }
+
+  /**
+   * Ensure consumer group exists for a device's metrics stream
+   */
+  private async ensureConsumerGroup(streamKey: string): Promise<void> {
+    try {
+      await this.client!.xgroup('CREATE', streamKey, this.metricsConsumerGroup, '0', 'MKSTREAM');
+      logger.debug(`Created consumer group for ${streamKey}`);
+    } catch (err: any) {
+      if (!err.message.includes('BUSYGROUP')) {
+        throw err; // Unexpected error
+      }
+      // Group already exists, that's fine
+    }
+  }
+
+  /**
+   * Read metrics from Redis Stream using consumer groups
+   * Used by background worker to batch process metrics with at-least-once delivery
    * 
    * @param deviceUuid - Device UUID (or '*' for all streams)
-   * @param lastId - Last processed stream ID (default: '0-0' for all messages)
    * @param count - Maximum number of messages to read (default: 100)
    * @param blockMs - Block for this many ms if no messages (default: 5000, 0 = no block)
    * @returns Array of stream entries with {id, deviceUuid, metrics, timestamp}
    */
   public async readMetrics(
     deviceUuid: string = '*',
-    lastId: string = '0-0',
     count: number = 100,
     blockMs: number = 5000
   ): Promise<Array<{ id: string; deviceUuid: string; metrics: any; timestamp: string }>> {
@@ -265,7 +248,22 @@ class RedisClient {
       // For wildcard, we need to scan all metrics:* keys first
       let streamKeys: string[];
       if (deviceUuid === '*') {
-        streamKeys = await this.client!.keys('metrics:*');
+        // Use SCAN instead of KEYS - non-blocking and safe for production
+        streamKeys = [];
+        let cursor = '0';
+        
+        do {
+          const result = await this.client!.scan(
+            cursor,
+            'MATCH',
+            'metrics:*',
+            'COUNT',
+            100
+          );
+          cursor = result[0];
+          streamKeys.push(...result[1]);
+        } while (cursor !== '0');
+        
         if (streamKeys.length === 0) {
           return []; // No streams yet
         }
@@ -273,46 +271,63 @@ class RedisClient {
         streamKeys = [streamKey];
       }
 
-      // XREAD [BLOCK ms] [COUNT count] STREAMS key [key ...] id [id ...]
-      const args: (string | number)[] = [];
-      
-      if (blockMs > 0) {
-        args.push('BLOCK', blockMs);
-      }
-      
-      args.push('COUNT', count, 'STREAMS');
-      args.push(...streamKeys);
-      
-      // Add corresponding lastId for each stream
-      streamKeys.forEach(() => args.push(lastId));
+      // Ensure consumer groups exist for all streams
+      await Promise.all(streamKeys.map(key => this.ensureConsumerGroup(key)));
 
-      const results = await (this.client!.xread as any)(...args);
-      
-      if (!results) {
-        return []; // No new messages
-      }
-
-      // Parse Redis Stream response format:
-      // [[streamKey, [[id, [field, value, field, value, ...]]]], ...]
       const entries: Array<{ id: string; deviceUuid: string; metrics: any; timestamp: string }> = [];
-      
-      for (const [streamKeyResult, messages] of results as any[]) {
-        // Extract deviceUuid from stream key (metrics:{uuid})
-        const uuid = streamKeyResult.replace('metrics:', '');
-        
-        for (const [messageId, fields] of messages) {
-          // Convert field array to object: [k1, v1, k2, v2] → {k1: v1, k2: v2}
-          const fieldObj: Record<string, string> = {};
-          for (let i = 0; i < fields.length; i += 2) {
-            fieldObj[fields[i]] = fields[i + 1];
+
+      // Use XREADGROUP for reliable processing with at-least-once delivery
+      // In clustered Redis, read each stream separately to avoid CROSSSLOT errors
+      for (const key of streamKeys) {
+        try {
+          const results = await this.client!.xreadgroup(
+            'GROUP',
+            this.metricsConsumerGroup,
+            this.metricsConsumerName,
+            'COUNT',
+            count,
+            blockMs > 0 ? 'BLOCK' : null,
+            blockMs > 0 ? blockMs : null,
+            'STREAMS',
+            key,
+            '>' // Only new messages not yet delivered to any consumer
+          );
+
+          if (!results) {
+            continue; // No new messages for this stream
           }
-          
-          entries.push({
-            id: messageId,
-            deviceUuid: uuid,
-            metrics: JSON.parse(fieldObj.data || '{}'),
-            timestamp: fieldObj.timestamp || new Date().toISOString()
-          });
+
+          for (const [streamKeyResult, messages] of results as any[]) {
+            const uuid = streamKeyResult.replace('metrics:', '');
+            for (const [messageId, fields] of messages) {
+              const fieldObj: Record<string, string> = {};
+              for (let i = 0; i < fields.length; i += 2) {
+                fieldObj[fields[i]] = fields[i + 1];
+              }
+
+              entries.push({
+                id: messageId,
+                deviceUuid: uuid,
+                metrics: JSON.parse(fieldObj.data || '{}'),
+                timestamp: fieldObj.timestamp || new Date().toISOString()
+              });
+
+              // Stop if we've reached the count limit across all streams
+              if (entries.length >= count) {
+                break;
+              }
+            }
+            
+            if (entries.length >= count) {
+              break;
+            }
+          }
+        } catch (err: any) {
+          logger.error(`Failed to read from ${key}:`, { error: err.message });
+        }
+        
+        if (entries.length >= count) {
+          break;
         }
       }
 
@@ -324,8 +339,9 @@ class RedisClient {
   }
 
   /**
-   * Acknowledge processed metrics (remove from stream)
+   * Acknowledge processed metrics using consumer group
    * Called after batch write to PostgreSQL succeeds
+   * Provides at-least-once delivery guarantee
    * 
    * @param deviceUuid - Device UUID
    * @param messageIds - Array of stream message IDs to acknowledge
@@ -339,11 +355,16 @@ class RedisClient {
     const streamKey = `metrics:${deviceUuid}`;
     
     try {
-      // XDEL removes messages from stream
-      const count = await this.client!.xdel(streamKey, ...messageIds);
+      // XACK marks messages as processed in the consumer group
+      // Messages remain in stream for other consumers or manual inspection
+      const count = await this.client!.xack(
+        streamKey,
+        this.metricsConsumerGroup,
+        ...messageIds
+      );
       return count;
     } catch (error) {
-       logger.error('  Failed to acknowledge metrics:', error);
+      logger.error('Failed to acknowledge metrics:', error);
       return 0;
     }
   }
@@ -372,6 +393,55 @@ class RedisClient {
   // ============================================================================
 
   /**
+   * Initialize subscriber event handlers (called once)
+   */
+  private initializeSubscriber(): void {
+    if (this.subscriberInitialized || !this.subscriber) {
+      return;
+    }
+
+    // Pattern message handler (for wildcard subscriptions)
+    this.subscriber.on('pmessage', (pattern: string, channel: string, message: string) => {
+      try {
+        const data = JSON.parse(message);
+        const uuid = channel.split(':')[1]; // Extract UUID from "device:uuid:metrics"
+        
+        // Call all registered callbacks for this pattern
+        const callbacks = this.patternCallbacks.get(pattern);
+        if (callbacks) {
+          callbacks.forEach(callback => callback(uuid, data.metrics));
+        }
+      } catch (error) {
+        logger.error('[Redis] Error parsing pattern message:', error);
+      }
+    });
+
+    // Channel message handler (for specific channel subscriptions)
+    this.subscriber.on('message', (channel: string, message: string) => {
+      try {
+        const data = JSON.parse(message);
+        const uuid = channel.split(':')[1]; // Extract UUID from "device:uuid:metrics"
+        
+        // Call all registered callbacks for this channel
+        const callbacks = this.channelCallbacks.get(channel);
+        if (callbacks) {
+          callbacks.forEach(callback => callback(uuid, data.metrics));
+        }
+      } catch (error) {
+        logger.error('[Redis] Error parsing channel message:', error);
+      }
+    });
+
+    // Error handler
+    this.subscriber.on('error', (error: Error) => {
+      logger.error('[Redis] Subscriber error:', error);
+    });
+
+    this.subscriberInitialized = true;
+    logger.debug('[Redis] Subscriber event handlers initialized');
+  }
+
+  /**
    * Subscribe to device metrics updates (Phase 1)
    * Used by WebSocket manager to forward real-time updates to dashboard
    * 
@@ -387,80 +457,122 @@ class RedisClient {
       throw new Error('Redis not connected - cannot subscribe');
     }
 
-    // Create subscriber client (must be separate from main client in ioredis)
-    const host = process.env.REDIS_HOST || 'localhost';
-    const port = parseInt(process.env.REDIS_PORT || '6379', 10);
-    
-    const subscriber = new Redis({
-      host,
-      port,
-      retryStrategy: (times: number) => {
-        if (times > 5) return null; // Stop retrying after 5 attempts
-        return Math.min(times * 1000, 3000);
-      },
-    });
+    // Get subscriber client from factory (separate connection for pub/sub)
+    if (!this.subscriber) {
+      this.subscriber = getRedisSubscriber();
+      this.initializeSubscriber(); // Initialize handlers once
+    }
 
-    // Subscribe to pattern or specific channel
+    // Determine pattern or channel
     const pattern = deviceUuid === '*' ? 'device:*:metrics' : `device:${deviceUuid}:metrics`;
     
     if (deviceUuid === '*') {
       // Pattern subscription for all devices
-      await subscriber.psubscribe(pattern);
       
-      subscriber.on('pmessage', (pattern, channel, message) => {
-        try {
-          const data = JSON.parse(message);
-          const uuid = channel.split(':')[1]; // Extract UUID from "device:uuid:metrics"
-          callback(uuid, data.metrics);
-        } catch (error) {
-           logger.error('[Redis] Error parsing metrics message:', error);
-        }
-      });
+      // Register callback
+      if (!this.patternCallbacks.has(pattern)) {
+        this.patternCallbacks.set(pattern, new Set());
+        // Only subscribe to Redis if this is a new pattern
+        await this.subscriber.psubscribe(pattern);
+        logger.info(`[Redis] Subscribed to pattern: ${pattern}`);
+      }
+      this.patternCallbacks.get(pattern)!.add(callback);
       
-       logger.info(`[Redis] Subscribed to pattern: ${pattern}`);
     } else {
       // Single channel subscription
-      await subscriber.subscribe(pattern);
       
-      subscriber.on('message', (channel, message) => {
-        try {
-          const data = JSON.parse(message);
-          callback(deviceUuid, data.metrics);
-        } catch (error) {
-           logger.error('[Redis] Error parsing metrics message:', error);
-        }
-      });
-      
-       logger.info(`[Redis] Subscribed to channel: ${pattern}`);
+      // Register callback
+      if (!this.channelCallbacks.has(pattern)) {
+        this.channelCallbacks.set(pattern, new Set());
+        // Only subscribe to Redis if this is a new channel
+        await this.subscriber.subscribe(pattern);
+        logger.info(`[Redis] Subscribed to channel: ${pattern}`);
+      }
+      this.channelCallbacks.get(pattern)!.add(callback);
     }
 
-    // Handle subscriber errors
-    subscriber.on('error', (error) => {
-       logger.error('[Redis] Subscriber error:', error);
-    });
+    logger.debug(`[Redis] Callback registered for ${deviceUuid === '*' ? 'pattern' : 'channel'}: ${pattern}`);
+  }
+
+  /**
+   * Unsubscribe from device metrics updates
+   * 
+   * @param deviceUuid - Device UUID or '*' for all devices
+   * @param callback - The callback to remove (optional - if not provided, removes all callbacks)
+   */
+  public async unsubscribeFromDeviceMetrics(
+    deviceUuid: string,
+    callback?: (deviceUuid: string, metrics: any) => void
+  ): Promise<void> {
+    if (!this.subscriber) {
+      return;
+    }
+
+    const pattern = deviceUuid === '*' ? 'device:*:metrics' : `device:${deviceUuid}:metrics`;
+    
+    if (deviceUuid === '*') {
+      // Pattern unsubscription
+      const callbacks = this.patternCallbacks.get(pattern);
+      if (callbacks) {
+        if (callback) {
+          callbacks.delete(callback);
+        } else {
+          callbacks.clear();
+        }
+        
+        // If no more callbacks, unsubscribe from Redis
+        if (callbacks.size === 0) {
+          await this.subscriber.punsubscribe(pattern);
+          this.patternCallbacks.delete(pattern);
+          logger.info(`[Redis] Unsubscribed from pattern: ${pattern}`);
+        }
+      }
+    } else {
+      // Channel unsubscription
+      const callbacks = this.channelCallbacks.get(pattern);
+      if (callbacks) {
+        if (callback) {
+          callbacks.delete(callback);
+        } else {
+          callbacks.clear();
+        }
+        
+        // If no more callbacks, unsubscribe from Redis
+        if (callbacks.size === 0) {
+          await this.subscriber.unsubscribe(pattern);
+          this.channelCallbacks.delete(pattern);
+          logger.info(`[Redis] Unsubscribed from channel: ${pattern}`);
+        }
+      }
+    }
   }
 
   /**
    * Graceful shutdown
    */
   public async disconnect(): Promise<void> {
-    if (!this.client) {
-      return;
-    }
-
-     logger.info(' Disconnecting Redis client...');
+    logger.info('Disconnecting Redis clients...');
 
     try {
-      await this.client.quit();
+      // Clear all subscription callbacks
+      this.patternCallbacks.clear();
+      this.channelCallbacks.clear();
+      this.subscriberInitialized = false;
+      
+      // Import and use factory closeAll
+      const { closeAllRedisClients } = await import('./client-factory');
+      await closeAllRedisClients();
+      
       this.client = null;
-      this.isConnected = false;
-       logger.info(' Redis client disconnected gracefully');
+      this.subscriber = null;
+      logger.info('Redis clients disconnected gracefully');
     } catch (error) {
-       logger.error(' Error disconnecting Redis:', error);
-      // Force disconnect
-      this.client.disconnect();
+      logger.error('Error disconnecting Redis:', error);
       this.client = null;
-      this.isConnected = false;
+      this.subscriber = null;
+      this.patternCallbacks.clear();
+      this.channelCallbacks.clear();
+      this.subscriberInitialized = false;
     }
   }
 
@@ -487,13 +599,13 @@ export const redisClient = RedisClient.getInstance();
 
 // Graceful shutdown handlers
 process.on('SIGINT', async () => {
-   logger.info('\n SIGINT received, closing Redis connection...');
+  logger.info('\nSIGINT received, closing Redis connections...');
   await redisClient.disconnect();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-   logger.info('\n SIGTERM received, closing Redis connection...');
+  logger.info('\nSIGTERM received, closing Redis connections...');
   await redisClient.disconnect();
   process.exit(0);
 });

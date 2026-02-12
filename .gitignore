@@ -88,3 +88,6 @@ agent/src/features/protocol-adapters/
 values-secret.yaml
 **/values-secret.yaml
 k8s/**/values-secret.yaml
+
+/.env.cloud
+/.env.bacnet-unicast

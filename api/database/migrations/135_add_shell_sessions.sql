@@ -22,11 +22,11 @@ CREATE TABLE IF NOT EXISTS shell_sessions (
         CHECK (status IN ('creating', 'active', 'detached', 'terminated'))
 );
 
--- Create indexes for efficient queries
-CREATE INDEX idx_shell_sessions_device ON shell_sessions(device_uuid);
-CREATE INDEX idx_shell_sessions_status ON shell_sessions(status);
-CREATE INDEX idx_shell_sessions_last_activity ON shell_sessions(last_activity);
-CREATE INDEX idx_shell_sessions_device_status ON shell_sessions(device_uuid, status);
+-- Create indexes for efficient queries (idempotent)
+CREATE INDEX IF NOT EXISTS idx_shell_sessions_device ON shell_sessions(device_uuid);
+CREATE INDEX IF NOT EXISTS idx_shell_sessions_status ON shell_sessions(status);
+CREATE INDEX IF NOT EXISTS idx_shell_sessions_last_activity ON shell_sessions(last_activity);
+CREATE INDEX IF NOT EXISTS idx_shell_sessions_device_status ON shell_sessions(device_uuid, status);
 
 -- Grant permissions (optional - adjust role as needed for production)
 -- Note: Role may not exist in all environments, handle gracefully

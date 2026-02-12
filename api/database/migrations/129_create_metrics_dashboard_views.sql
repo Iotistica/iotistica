@@ -137,7 +137,9 @@ COMMENT ON MATERIALIZED VIEW endpoint_devices IS 'List of actual endpoint device
 CREATE MATERIALIZED VIEW IF NOT EXISTS recent_anomalies AS
 SELECT 
     ae.timestamp_ms,
-    ae.device_id as agent_id,
+    ae.agent_uuid as agent_id,
+    ae.device_name,
+    ae.device_type,
     ae.metric,
     ae.observed_value,
     ae.anomaly_score,
@@ -153,10 +155,10 @@ SELECT
     ae.event_count,
     -- Join with devices table for agent info
     d.device_name as agent_name,
-    d.uuid as agent_uuid,
+    d.uuid as agent_uuid_full,
     d.is_online as agent_is_online
 FROM anomaly_events ae
-LEFT JOIN devices d ON ae.device_id = d.uuid::text
+LEFT JOIN devices d ON ae.agent_uuid = d.uuid::text
 WHERE ae.timestamp_ms > EXTRACT(EPOCH FROM (NOW() - INTERVAL '24 hours'))::BIGINT * 1000
 ORDER BY ae.timestamp_ms DESC;
 
@@ -258,7 +260,7 @@ SELECT
     MAX(anomaly_score) as max_anomaly_score,
     AVG(anomaly_score) FILTER (WHERE anomaly_score IS NOT NULL) as avg_anomaly_score
 FROM readings
-GROUP BY bucket, agent_uuid, device_name, protocol, metric_name, unit
+GROUP BY bucket, device_uuid, extra->>'deviceName', protocol, metric_name, unit
 WITH NO DATA;
 
 -- 1-hour rollups (for longer time ranges - last week/month)
@@ -279,7 +281,7 @@ SELECT
     -- Quality ratio (0-1)
     SUM(CASE WHEN quality = 'good' THEN 1 ELSE 0 END)::float / NULLIF(COUNT(*), 0) as quality_ratio
 FROM readings
-GROUP BY bucket, agent_uuid, device_name, protocol, metric_name, unit
+GROUP BY bucket, device_uuid, extra->>'deviceName', protocol, metric_name, unit
 WITH NO DATA;
 
 -- Auto-refresh policies for continuous aggregates

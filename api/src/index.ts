@@ -505,17 +505,6 @@ async function startServer() {
     // Don't exit - will run in unlicensed mode with limited features
   }
 
-  // Initialize Neo4j database for Digital Twin graph
-  try {
-    logger.info('Connecting to Neo4j database...');
-    const { neo4jService } = await import('./services/neo4j.service');
-    await neo4jService.connect();
-    logger.info('Neo4j database connected successfully');
-  } catch (error) {
-    logger.warn('Neo4j connection failed', { error });
-    // Don't exit - Digital Twin graph features will be unavailable
-  }
-
   // Start heartbeat monitor for device connectivity
   try {
     const heartbeatMonitor = await import('./services/heartbeat-monitor');
@@ -592,6 +581,12 @@ async function startServer() {
 
   // Initialize MQTT manager for device messages
   (async () => {
+    // Delay MQTT initialization to allow EMQX HTTP auth webhook to become ready
+    // This prevents "Not authorized" errors during startup race condition
+    const mqttStartupDelay = parseInt(process.env.MQTT_STARTUP_DELAY_MS || '15000');
+    logger.info(`⏳ Delaying MQTT initialization for ${mqttStartupDelay}ms to allow EMQX webhook to become ready`);
+    await new Promise(resolve => setTimeout(resolve, mqttStartupDelay));
+    
     try {
       const mqttManager = await initializeMqtt();
       // Set MQTT manager on WebSocket manager for shell command forwarding
