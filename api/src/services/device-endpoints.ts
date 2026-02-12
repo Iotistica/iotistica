@@ -321,7 +321,7 @@ export class DeviceSensorSyncService {
       // 4. Publish event
       await eventPublisher.publish(
         'device_config.deployed',
-        'device',
+        'agent',
         deviceUuid,
         {
           version: newVersion,
@@ -796,7 +796,7 @@ export class DeviceSensorSyncService {
       // 5. Publish event
       await eventPublisher.publish(
         'device_sensor.updated',
-        'device',
+        'agent',
         deviceUuid,
         {
           endpoint_name: updatedEndpoint.name,
@@ -920,7 +920,7 @@ export class DeviceSensorSyncService {
       // 7. Publish event
       await eventPublisher.publish(
         'device_sensor.added',
-        'device',
+        'agent',
         deviceUuid,
         {
           sensor_name: sensorConfig.name,
@@ -1000,7 +1000,7 @@ export class DeviceSensorSyncService {
       // 4. Publish event
       await eventPublisher.publish(
         'device_sensor.pending_deletion',
-        'device',
+        'agent',
         deviceUuid,
         {
           sensor_name: sensorToDelete.name,
@@ -1084,7 +1084,7 @@ export class DeviceSensorSyncService {
       if (sensorToDelete) {
         await eventPublisher.publish(
           'device_sensor.deleted',
-          'device',
+          'agent',
           deviceUuid,
           {
             sensor_name: sensorToDelete.name,

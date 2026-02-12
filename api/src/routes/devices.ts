@@ -579,7 +579,7 @@ router.patch('/devices/:uuid/active', async (req, res) => {
     // 🎉 EVENT SOURCING: Publish device online/offline event
     await eventPublisher.publish(
       is_active ? 'device.online' : 'device.offline',
-      'device',
+      'agent',
       uuid,
       {
         device_name: device.device_name,
@@ -1645,7 +1645,7 @@ router.post('/devices/:uuid/update-agent', async (req, res) => {
     // Publish event
     await eventPublisher.publish(
       'device.agent.update.triggered',
-      'device',
+      'agent',
       uuid,
       {
         version: version || 'latest',
@@ -1879,7 +1879,7 @@ router.delete('/devices/:uuid/virtual', jwtAuth, async (req, res) => {
     // For now, we keep the device record but mark it as terminated
 
     await logAuditEvent({
-      eventType: 'device.virtual_agent.destroyed' as any,
+      eventType: 'device.deployment.destroyed' as any,
       deviceUuid: uuid,
       severity: AuditSeverity.INFO,
       details: {
@@ -1902,7 +1902,7 @@ router.delete('/devices/:uuid/virtual', jwtAuth, async (req, res) => {
     });
 
     await logAuditEvent({
-      eventType: 'device.virtual_agent.destroy_failed' as any,
+      eventType: 'device.deployment.destroy_failed' as any,
       deviceUuid: req.params.uuid,
       severity: AuditSeverity.ERROR,
       details: {

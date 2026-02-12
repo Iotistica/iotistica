@@ -360,7 +360,7 @@ router.post('/jobs/execute', async (req: Request, res: Response) => {
     for (const deviceUuid of deviceUuids) {
       await eventPublisher.publish(
         'job.queued',
-        'device',
+        'agent',
         deviceUuid,
         {
           job_id: jobId,

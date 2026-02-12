@@ -191,6 +191,35 @@ export class ProvisioningService {
       // 4. Create default target state (needed for when pod comes online)
       await this.createDefaultTargetState(uuid, agentVersion, provisioningKeyId);
 
+      // Log deployment start (Event Sourcing)
+      const { logAuditEvent, AuditEventType, AuditSeverity } = await import('../utils/audit-logger.js');
+      const { EventPublisher } = await import('../services/event-sourcing.js');
+      
+      const eventPublisher = new EventPublisher('device_provisioning', undefined, {
+        type: 'system',
+        id: 'provisioning_service'
+      });
+      
+      await eventPublisher.publish(
+        'device.deployment.started',
+        'agent',
+        uuid,
+        {
+          device_name: deviceName,
+          device_type: 'virtual',
+          fleet_id: fleetId,
+          namespace: device.k8s_namespace,
+          initiated_at: new Date().toISOString()
+        },
+        {
+          severity: 'info',
+          impact: 'medium',
+          metadata: {
+            step: 'kubernetes_deployment_creation'
+          }
+        }
+      );
+
       // 5. Deploy to K8s with plaintext provisioning key
       try {
         await virtualAgentDeployer.deploy({
@@ -201,6 +230,29 @@ export class ProvisioningService {
           namespace: device.k8s_namespace || undefined
         });
 
+        await DeviceModel.update(uuid, { deployment_status: 'deploying' });
+        
+        // Log successful K8s deployment creation (Event Sourcing)
+        await eventPublisher.publish(
+          'device.deployed',
+          'agent',
+          uuid,
+          {
+            device_name: deviceName,
+            device_type: 'virtual',
+            namespace: device.k8s_namespace,
+            deployment_name: device.helm_release_name,
+            completed_at: new Date().toISOString()
+          },
+          {
+            severity: 'info',
+            impact: 'medium',
+            metadata: {
+              step: 'kubernetes_deployment_created'
+            }
+          }
+        );
+        
         logger.info('Virtual agent deployment initiated', {
           deviceUuid: uuid.substring(0, 8) + '...',
           namespace: device.k8s_namespace
@@ -212,10 +264,33 @@ export class ProvisioningService {
         });
 
         // Update device status to failed
+        const errorMsg = deployError instanceof Error ? deployError.message : String(deployError);
         await DeviceModel.update(device.uuid, {
           deployment_status: 'failed',
           status: 'offline'
         });
+        
+        // Log deployment failure (Event Sourcing)
+        await eventPublisher.publish(
+          'device.deployment.failed',
+          'agent',
+          uuid,
+          {
+            device_name: deviceName,
+            device_type: 'virtual',
+            error: errorMsg,
+            namespace: device.k8s_namespace,
+            failed_at: new Date().toISOString()
+          },
+          {
+            severity: 'error',
+            impact: 'high',
+            metadata: {
+              step: 'kubernetes_deployment_creation',
+              error_type: 'deployment_error'
+            }
+          }
+        );
 
         throw new Error(`Virtual agent deployment failed: ${deployError instanceof Error ? deployError.message : String(deployError)}`);
       }
@@ -239,7 +314,7 @@ export class ProvisioningService {
       // 7. Event publishing
       await eventPublisher.publish(
         'device.virtual-agent.deployed',
-        'device',
+        'agent',
         uuid,
         {
           device_name: deviceName,
@@ -480,7 +555,7 @@ export class ProvisioningService {
 
     // fire and forget
     eventPublisher.publish( 'device.provisioned',
-      'device',
+      'agent',
       uuid,
       {
         device_name: deviceName,

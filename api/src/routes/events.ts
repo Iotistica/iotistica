@@ -266,7 +266,7 @@ router.get('/events/device/:deviceUuid', async (req, res) => {
     logger.info(`Fetching events for device: ${deviceUuid}`);
 
     // Get events for this device
-    let events = await EventStore.getAggregateEvents('device', deviceUuid, sinceEventId);
+    let events = await EventStore.getAggregateEvents('agent', deviceUuid, sinceEventId);
 
     // Filter by event type if specified
     if (eventType) {
@@ -355,7 +355,7 @@ router.get('/events/chain/:correlationId', async (req, res) => {
  * GET /api/v1/events/recent
  * Query params:
  *   - limit: number of events to return (default 100, max 500)
- *   - aggregateType: filter by aggregate type (e.g., 'device', 'app')
+ *   - aggregateType: filter by aggregate type (e.g., 'agent', 'app')
  */
 router.get('/events/recent', async (req, res) => {
   try {
@@ -566,7 +566,7 @@ function categorizeEvent(eventType: string): string {
   if (eventType.startsWith('current_state.')) return 'telemetry';
   if (eventType.startsWith('reconciliation.')) return 'system';
   if (eventType.startsWith('container.')) return 'container';
-  if (eventType.startsWith('device.')) return 'device';
+  if (eventType.startsWith('device.')) return 'agent';
   if (eventType.startsWith('app.')) return 'application';
   if (eventType.startsWith('job.')) return 'job';
   return 'other';

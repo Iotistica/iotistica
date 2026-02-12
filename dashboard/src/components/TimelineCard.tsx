@@ -152,7 +152,7 @@ export function TimelineCard({
   const getEventColor = (type: string, category: string) => {
     // Color by category first, then specific types
     switch (category) {
-      case "device":
+      case "agent":
         if (type === "device.online") {
           return {
             bg: "bg-green-50 dark:bg-green-950/30",

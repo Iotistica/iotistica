@@ -80,7 +80,13 @@ export async function processDeviceStateReport(
     });
     
     // Ensure device exists and mark as online
-    await DeviceModel.getOrCreate(uuid);
+    const device = await DeviceModel.getOrCreate(uuid);
+    if (!device) {
+      logger.warn('Device state report from unregistered device - skipping', {
+        deviceUuid: uuid.substring(0, 8) + '...',
+      });
+      continue; // Skip this device
+    }
 
     // Update current state (including version from agent report)
     await DeviceCurrentStateModel.update(
@@ -125,7 +131,7 @@ export async function processDeviceStateReport(
     if (EventSourcingConfig.shouldPublishStateUpdate(stateChanged)) {
       await eventPublisher.publish(
         'current_state.updated',
-        'device',
+        'agent',
         uuid,
         {
           apps: deviceState.apps || {},

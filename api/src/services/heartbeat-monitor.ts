@@ -176,7 +176,7 @@ export class HeartbeatMonitor {
           //  EVENT SOURCING: Publish device offline event
           await this.eventPublisher.publish(
             'device.offline',
-            'device',
+            'agent',
             device.uuid,
             {
               device_name: device.device_name,
@@ -262,7 +262,7 @@ export class HeartbeatMonitor {
           //  EVENT SOURCING: Publish device offline event
           await this.eventPublisher.publish(
             'device.offline',
-            'device',
+            'agent',
             device.uuid,
             {
               device_name: device.device_name,

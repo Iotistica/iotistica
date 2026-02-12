@@ -301,7 +301,7 @@ export class EventStore {
     const result = await pool.query(
       `SELECT * FROM events 
        WHERE aggregate_id = $1 
-         AND aggregate_type = 'device'
+         AND aggregate_type = 'agent'
          AND timestamp >= $2 
          AND timestamp <= $3
        ORDER BY timestamp ASC, id ASC`,
@@ -351,7 +351,7 @@ export class EventStore {
     const eventsResult = await pool.query(
       `SELECT * FROM events 
        WHERE aggregate_id = $1 
-         AND aggregate_type = 'device'
+         AND aggregate_type = 'agent'
          AND timestamp <= $2
        ORDER BY timestamp ASC, id ASC`,
       [deviceUuid, atTime]
@@ -416,7 +416,7 @@ export class EventStore {
     const eventsResult = await pool.query(
       `SELECT * FROM events 
        WHERE aggregate_id = $1 
-         AND aggregate_type = 'device'
+         AND aggregate_type = 'agent'
          AND timestamp > $2 
          AND timestamp <= $3
        ORDER BY timestamp ASC`,
@@ -751,7 +751,7 @@ export async function publishTargetStateChange(
 
   return publisher.publish(
     'target_state.updated',
-    'device',
+    'agent',
     deviceUuid,
     {
       old_state: oldState,
@@ -774,7 +774,7 @@ export async function publishCurrentStateChange(
 
   return publisher.publish(
     'current_state.updated',
-    'device',
+    'agent',
     deviceUuid,
     { state: newState }
   );
@@ -792,7 +792,7 @@ export async function publishReconciliationCycle(
 
   const startEventId = await publisher.publish(
     'reconciliation.started',
-    'device',
+    'agent',
     deviceUuid,
     { diff }
   );
@@ -812,7 +812,7 @@ export async function publishReconciliationCycle(
 
   const completedEventId = await publisher.publish(
     'reconciliation.completed',
-    'device',
+    'agent',
     deviceUuid,
     {
       actions_count: actionEventIds.length,

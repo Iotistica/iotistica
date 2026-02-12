@@ -57,8 +57,17 @@ router.get('/device/:uuid/state', deviceAuth, async (req, res) => {
     const { uuid } = req.params;
     const ifNoneMatch = req.headers['if-none-match'];
 
-    // Get or create device
-    await DeviceModel.getOrCreate(uuid);
+    // Check if device exists (don't auto-create)
+    const device = await DeviceModel.getOrCreate(uuid);
+    if (!device) {
+      logger.warn('Device not registered - rejecting state poll', {
+        deviceUuid: uuid.substring(0, 8) + '...',
+      });
+      return res.status(404).json({
+        error: 'Device not registered',
+        message: 'Please complete device registration before polling state'
+      });
+    }
 
     // Get target state
     const targetState = await DeviceTargetStateModel.get(uuid);
@@ -287,7 +296,7 @@ router.post('/devices/:uuid/target-state', deviceAuth, validateTargetStateConfig
     // 🎉 EVENT SOURCING: Publish target state updated event
     await eventPublisher.publish(
       'target_state.updated',
-      'device',
+      'agent',
       uuid,
       {
         new_state: { apps, config },
@@ -397,7 +406,7 @@ router.put('/devices/:uuid/target-state', validateTargetStateConfigMiddleware, a
     //EVENT SOURCING: Publish target state updated event
     await eventPublisher.publish(
       'target_state.updated',
-      'device',
+      'agent',
       uuid,
       {
         new_state: { apps, config },

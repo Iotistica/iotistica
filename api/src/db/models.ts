@@ -123,17 +123,29 @@ export interface DeviceMetrics {
  */
 export class DeviceModel {
   /**
-   * Get or create device by UUID
+   * Get or mark device online by UUID
+   * NOTE: Does NOT create device if it doesn't exist (prevents empty device records)
+   * Device creation must happen through proper registration flows
    * Also logs when a device comes back online after being offline
    */
-  static async getOrCreate(uuid: string): Promise<Device> {
+  static async getOrCreate(uuid: string): Promise<Device | null> {
     // First, check if device exists and was offline
     const existingDevice = await this.getByUuid(uuid);
-    const wasOffline = existingDevice && !existingDevice.is_online;
+    
+    // If device doesn't exist, return null (don't auto-create)
+    // This prevents empty device records from being created by state polling
+    if (!existingDevice) {
+      logger.warn('Device does not exist - state polling before registration?', {
+        deviceUuid: uuid.substring(0, 8) + '...',
+        note: 'Device must complete registration before polling state'
+      });
+      return null;
+    }
+    
+    const wasOffline = !existingDevice.is_online;
     
     // Don't auto-set online for virtual agents that haven't registered yet
-    const isVirtualAgentPending = existingDevice && 
-                                  existingDevice.device_type === 'virtual' && 
+    const isVirtualAgentPending = existingDevice.device_type === 'virtual' && 
                                   existingDevice.provisioning_state === 'pending';
     
     if (isVirtualAgentPending) {
@@ -141,12 +153,12 @@ export class DeviceModel {
       return existingDevice;
     }
     
+    // Mark existing device as online
     const result = await query<Device>(
-      `INSERT INTO devices (uuid, is_online, is_active)
-       VALUES ($1, true, true)
-       ON CONFLICT (uuid) DO UPDATE SET
+      `UPDATE devices SET
          is_online = true,
          last_connectivity_event = CURRENT_TIMESTAMP
+       WHERE uuid = $1
        RETURNING *`,
       [uuid]
     );
@@ -167,7 +179,7 @@ export class DeviceModel {
         const eventPublisher = new EventPublisher('device_connectivity');
         await eventPublisher.publish(
           'device.online',
-          'device',
+          'agent',
           uuid,
           {
             device_name: existingDevice.device_name || 'Unknown',
@@ -442,8 +454,11 @@ export class DeviceTargetStateModel {
     config: any = {},
     needsDeployment: boolean = false // Default to false for initial setup
   ): Promise<DeviceTargetState> {
-    // Ensure device exists
-    await DeviceModel.getOrCreate(deviceUuid);
+    // Ensure device exists (don't auto-create)
+    const device = await DeviceModel.getOrCreate(deviceUuid);
+    if (!device) {
+      throw new Error(`Device ${deviceUuid} not found - cannot set target state`);
+    }
 
     const result = await query<DeviceTargetState>(
       `INSERT INTO device_target_state (device_uuid, apps, config, version, needs_deployment, updated_at)
@@ -572,8 +587,11 @@ export class DeviceCurrentStateModel {
     systemInfo: any = {},
     version?: number
   ): Promise<DeviceCurrentState> {
-    // Ensure device exists
-    await DeviceModel.getOrCreate(deviceUuid);
+    // Ensure device exists (don't auto-create)
+    const device = await DeviceModel.getOrCreate(deviceUuid);
+    if (!device) {
+      throw new Error(`Device ${deviceUuid} not found - cannot update current state`);
+    }
 
     const result = await query<DeviceCurrentState>(
       `INSERT INTO device_current_state (device_uuid, apps, config, system_info, version, reported_at)

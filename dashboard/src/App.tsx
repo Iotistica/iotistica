@@ -106,10 +106,9 @@ export default function App() {
   }, [devices, selectedDeviceId]);
 
   // Persist selectedDeviceId to localStorage whenever it changes
+  // Always save (even empty string) to maintain consistency
   useEffect(() => {
-    if (selectedDeviceId) {
-      localStorage.setItem('selectedDeviceId', selectedDeviceId);
-    }
+    localStorage.setItem('selectedDeviceId', selectedDeviceId || "");
   }, [selectedDeviceId]);
 
   // Persist current view to localStorage so refresh keeps agent view
@@ -196,8 +195,9 @@ export default function App() {
           return prev;
         });
         
-        // Validate and preserve selected device across refreshes
-        if (transformedDevices.length > 0) {
+        // ONLY set fallback device on initial load (not on subsequent polls)
+        // This preserves user's selection across refreshes and prevents auto-switching
+        if (isFirstLoad && transformedDevices.length > 0) {
           // Check if the currently selected device exists in the fetched list
           const selectedExists = selectedDeviceId && transformedDevices.some(d => d.id === selectedDeviceId);
           

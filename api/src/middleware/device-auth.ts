@@ -214,6 +214,15 @@ export async function deviceAuth(
       return;
     }
 
+    // Check if device has completed registration (has API key hash)
+    if (!device.device_api_key_hash) {
+      res.status(403).json({
+        error: 'Forbidden',
+        message: 'Device registration incomplete. Please complete device registration first.'
+      });
+      return;
+    }
+
     const isValidKey = await bcrypt.compare(apiKey, device.device_api_key_hash);
     
 
@@ -350,6 +359,15 @@ export async function deviceAuthFromBody(
       res.status(403).json({
         error: 'Forbidden',
         message: 'Device is inactive'
+      });
+      return;
+    }
+
+    // Check if device has completed registration (has API key hash)
+    if (!device.device_api_key_hash) {
+      res.status(403).json({
+        error: 'Forbidden',
+        message: 'Device registration incomplete. Please complete device registration first.'
       });
       return;
     }

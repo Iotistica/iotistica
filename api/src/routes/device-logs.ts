@@ -159,8 +159,17 @@ router.post('/device/:uuid/logs',
       }
     }
     
-    // Ensure device exists (lightweight check)
-    await DeviceModel.getOrCreate(uuid);
+    // Ensure device exists (lightweight check, don't auto-create)
+    const device = await DeviceModel.getOrCreate(uuid);
+    if (!device) {
+      logger.warn('Log upload from unregistered device - rejecting', {
+        deviceUuid: uuid.substring(0, 8) + '...',
+      });
+      return res.status(404).json({
+        error: 'Device not registered',
+        message: 'Please complete device registration before uploading logs'
+      });
+    }
     
     // CRITICAL: Express body-parser auto-decompresses gzip/deflate BEFORE our handler runs
     // If original encoding was gzip/deflate, the body is now decompressed (raw JSON)

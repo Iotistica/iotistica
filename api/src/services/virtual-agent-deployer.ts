@@ -184,11 +184,15 @@ export class VirtualAgentDeployer {
         deploymentName: name
       });
 
-    } catch (error) {
+    } catch (error: any) {
       logger.error('Virtual agent deployment failed', {
         deviceUuid: config.deviceUuid,
         error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
+        errorBody: error?.body ? JSON.stringify(error.body) : undefined,
+        statusCode: error?.statusCode,
+        response: error?.response,
+        stack: error instanceof Error ? error.stack : undefined,
+        fullError: JSON.stringify(error, Object.getOwnPropertyNames(error))
       });
 
       // Update device status to failed
@@ -264,6 +268,14 @@ export class VirtualAgentDeployer {
         logger.warn('Secret already exists, replacing', { namespace, secretName });
         await this.coreApi.replaceNamespacedSecret(secretName, namespace, secret);
       } else {
+        logger.error('Failed to create Secret', {
+          namespace,
+          secretName,
+          error: error.message,
+          errorBody: error?.body ? JSON.stringify(error.body) : undefined,
+          statusCode: error?.statusCode,
+          fullError: JSON.stringify(error, Object.getOwnPropertyNames(error))
+        });
         throw error;
       }
     }
@@ -304,6 +316,14 @@ export class VirtualAgentDeployer {
         // PVC already exists, this is OK - reuse it
         logger.debug('PersistentVolumeClaim already exists, reusing', { namespace, pvcName });
       } else {
+        logger.error('Failed to create PVC', {
+          namespace,
+          pvcName,
+          error: error.message,
+          errorBody: error?.body ? JSON.stringify(error.body) : undefined,
+          statusCode: error?.statusCode,
+          fullError: JSON.stringify(error, Object.getOwnPropertyNames(error))
+        });
         throw error;
       }
     }
@@ -429,6 +449,14 @@ export class VirtualAgentDeployer {
         logger.warn('Deployment already exists, replacing', { namespace, name });
         await this.appsApi.replaceNamespacedDeployment(name, namespace, deployment);
       } else {
+        logger.error('Failed to create deployment', {
+          namespace,
+          name,
+          error: error.message,
+          errorBody: error?.body ? JSON.stringify(error.body) : undefined,
+          statusCode: error?.statusCode,
+          fullError: JSON.stringify(error, Object.getOwnPropertyNames(error))
+        });
         throw error;
       }
     }

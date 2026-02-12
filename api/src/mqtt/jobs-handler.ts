@@ -336,7 +336,7 @@ export class JobsHandler {
 
     await this.eventPublisher.publish(
       eventType,
-      'device',
+      'agent',
       deviceUuid,
       eventData,
       {
