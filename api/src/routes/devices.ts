@@ -386,6 +386,9 @@ router.post('/devices', jwtAuth, async (req, res) => {
     const { v4: uuidv4 } = require('uuid');
     const deviceUuid = uuidv4();
     
+    // Append short UUID suffix to ensure uniqueness (same pattern as physical agents)
+    const uniqueDeviceName = `${deviceName}-${deviceUuid.slice(0, 8)}`;
+    
     const type = deviceType || 'gateway';
     const isVirtual = type === 'virtual';
 
@@ -393,7 +396,8 @@ router.post('/devices', jwtAuth, async (req, res) => {
     if (isVirtual) {
       logger.info('Creating virtual agent via unified endpoint', {
         deviceUuid: deviceUuid.substring(0, 8) + '...',
-        deviceName,
+        deviceName: uniqueDeviceName,
+        originalName: deviceName,
         fleetId,
         namespace
       });
@@ -406,7 +410,7 @@ router.post('/devices', jwtAuth, async (req, res) => {
       const provisioningResponse = await provisioningService.registerDevice(
         {
           uuid: deviceUuid,
-          deviceName,
+          deviceName: uniqueDeviceName,
           deviceType: 'virtual',
           deviceApiKey,
           provisioningApiKey: 'virtual-agent-auto-generated', // Will be server-generated
@@ -432,7 +436,8 @@ router.post('/devices', jwtAuth, async (req, res) => {
       return res.status(202).json({
         success: true,
         deviceUuid,
-        deviceName,
+        deviceName: uniqueDeviceName,
+        originalName: deviceName,
         deviceType: 'virtual',
         deploymentStatus: 'deploying',
         namespace: namespace || process.env.VIRTUAL_AGENT_NAMESPACE || 'virtual-agents',
@@ -458,7 +463,7 @@ router.post('/devices', jwtAuth, async (req, res) => {
       RETURNING *`,
       [
         deviceUuid,
-        deviceName,
+        uniqueDeviceName,
         type,
         ipAddress || null,
         macAddress || null,
@@ -489,7 +494,8 @@ router.post('/devices', jwtAuth, async (req, res) => {
       severity: AuditSeverity.INFO,
       deviceUuid: deviceUuid,
       details: {
-        deviceName,
+        deviceName: uniqueDeviceName,
+        originalName: deviceName,
         deviceType: type,
         ipAddress,
         macAddress,
@@ -498,7 +504,8 @@ router.post('/devices', jwtAuth, async (req, res) => {
     });
 
     logger.info('Device pre-registered', {
-      deviceName,
+      deviceName: uniqueDeviceName,
+      originalName: deviceName,
       deviceId: deviceUuid,
       deviceType: type
     });

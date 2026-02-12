@@ -280,18 +280,22 @@ class RedisClient {
       // In clustered Redis, read each stream separately to avoid CROSSSLOT errors
       for (const key of streamKeys) {
         try {
-          const results = await this.client!.xreadgroup(
+          // Build xreadgroup args - conditionally include BLOCK option
+          const xreadgroupArgs: any[] = [
             'GROUP',
             this.metricsConsumerGroup,
             this.metricsConsumerName,
             'COUNT',
-            count,
-            blockMs > 0 ? 'BLOCK' : null,
-            blockMs > 0 ? blockMs : null,
-            'STREAMS',
-            key,
-            '>' // Only new messages not yet delivered to any consumer
-          );
+            count
+          ];
+          
+          if (blockMs > 0) {
+            xreadgroupArgs.push('BLOCK', blockMs);
+          }
+          
+          xreadgroupArgs.push('STREAMS', key, '>');
+          
+          const results = await (this.client!.xreadgroup as any)(...xreadgroupArgs);
 
           if (!results) {
             continue; // No new messages for this stream
