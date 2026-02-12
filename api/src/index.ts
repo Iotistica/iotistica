@@ -32,7 +32,7 @@ import { router as deviceSensorsRoutes } from './routes/device-sensors';
 import { router as trafficRoutes } from './routes/traffic';
 import { router as deviceTagsRoutes } from './routes/device-tags';
 import dashboardLayoutsRoutes from './routes/dashboard-layouts';
-import mosquittoAuthRoutes from './routes/mosquitto-auth';
+import mosquittoAuthRoutes from './routes/mqtt-auth';
 import { router as noderedStorageRoutes } from './routes/nodered-storage';
 import { router as metricsCatalogRoutes } from './routes/metrics-catalog';
 import { trafficLogger} from "./middleware/traffic-logger";
