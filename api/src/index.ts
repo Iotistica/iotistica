@@ -341,7 +341,7 @@ app.use(API_BASE, devicesRoutes);
 
 // User management and admin - moderate rate limiting + JWT auth
 app.use(`${API_BASE}/users`, jwtAuth, adminRateLimit, usersRoutes);
-app.use(API_BASE, jwtAuth, adminRateLimit, adminRoutes);
+app.use(`${API_BASE}/admin`, jwtAuth, adminRateLimit, adminRoutes);
 
 // Device data ingestion - high rate limits (supports 16Hz sensor data)
 app.use(API_BASE, deviceDataRateLimit, deviceLogsRoutes);
