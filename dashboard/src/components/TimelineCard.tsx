@@ -218,6 +218,15 @@ export function TimelineCard({
           badgeText: "text-teal-700 dark:text-teal-300",
           badgeBorder: "border-teal-200 dark:border-teal-800",
         };
+      case "provisioning":
+        return {
+          bg: "bg-orange-50 dark:bg-orange-950/30",
+          text: "text-orange-600 dark:text-orange-400",
+          border: "border-orange-200 dark:border-orange-800",
+          badgeBg: "bg-orange-100 dark:bg-orange-900/50",
+          badgeText: "text-orange-700 dark:text-orange-300",
+          badgeBorder: "border-orange-200 dark:border-orange-800",
+        };
       default:
         return {
           bg: "bg-gray-50 dark:bg-gray-900/50",

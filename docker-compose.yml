@@ -128,7 +128,6 @@ services:
             - CLOUD_API_URL=${CLOUD_API_URL:-http://host.docker.internal:4002}
             # Note: Agent expects CLOUD_API_ENDPOINT, but deployer reads CLOUD_API_URL and passes as CLOUD_API_ENDPOINT
             - MQTT_BROKER_URL_VIRTUAL=${MQTT_BROKER_URL_VIRTUAL:-mqtt://host.docker.internal:5883}
-            - VIRTUAL_AGENT_NAMESPACE=${VIRTUAL_AGENT_NAMESPACE:-virtual-agents}
         ports:
             - "${API_PORT_EXT:-4002}:3002"
             - "3443:3443"

@@ -34,6 +34,7 @@ import { buildApiUrl } from '@/config/api';
 import type { MetricDataCardConfig, ThresholdLine } from './MetricDataCard';
 import { Plus, Trash2, Check, ChevronsUpDown } from 'lucide-react';
 import { Checkbox } from './ui/checkbox';
+import { Badge } from './ui/badge';
 import { cn } from './ui/utils';
 
 interface MetricDataCardConfigDialogProps {
@@ -44,12 +45,14 @@ interface MetricDataCardConfigDialogProps {
 }
 
 interface EndpointDevice {
-  agent_uuid: string;
-  agent_name: string;
   device_name: string;
   protocol: string;
+  last_seen: string;
   metric_count: string;
   available_metrics: string[];
+  overall_quality_percentage: number;
+  agent_count: number;
+  agent_uuids: string[];
 }
 
 export function MetricDataCardConfigDialog({
@@ -71,6 +74,7 @@ export function MetricDataCardConfigDialog({
   const [thresholds, setThresholds] = useState<ThresholdLine[]>(initialConfig?.thresholds || []);
   const [showThresholds, setShowThresholds] = useState<boolean>((initialConfig?.thresholds?.length || 0) > 0);
   const [showStats, setShowStats] = useState<boolean>(initialConfig?.showStats ?? true);
+  const [registeredDevices, setRegisteredDevices] = useState<Map<string, { isOnline: boolean }>>(new Map());
 
   // Update form fields when initialConfig changes (for editing existing widgets)
   useEffect(() => {
@@ -116,19 +120,40 @@ export function MetricDataCardConfigDialog({
   const fetchDevices = async () => {
     try {
       setLoading(true);
-      const url = buildApiUrl('/api/v1/metrics/devices');
-      const response = await fetch(url, {
+      
+      // Fetch devices with metric data
+      const metricsUrl = buildApiUrl('/api/v1/metrics/devices');
+      const metricsResponse = await fetch(metricsUrl, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('accessToken')}`,
         },
       });
 
-      if (!response.ok) {
+      if (!metricsResponse.ok) {
         throw new Error('Failed to fetch devices');
       }
 
-      const result = await response.json();
-      setDevices(result.devices || []);
+      const metricsResult = await metricsResponse.json();
+      setDevices(metricsResult.devices || []);
+      
+      // Fetch registered devices to check status
+      const devicesUrl = buildApiUrl('/api/v1/devices?limit=1000');
+      const devicesResponse = await fetch(devicesUrl, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('accessToken')}`,
+        },
+      });
+      
+      if (devicesResponse.ok) {
+        const devicesData = await devicesResponse.json();
+        const deviceMap = new Map();
+        devicesData.devices?.forEach((d: any) => {
+          deviceMap.set(d.uuid, {
+            isOnline: d.is_online || false
+          });
+        });
+        setRegisteredDevices(deviceMap);
+      }
     } catch (err) {
       console.error('Error fetching devices:', err);
     } finally {
@@ -193,24 +218,54 @@ export function MetricDataCardConfigDialog({
                       {loading ? "Loading devices..." : "No devices found."}
                     </CommandEmpty>
                     <CommandGroup>
-                      {devices.map((device) => (
-                        <CommandItem
-                          key={device.device_name}
-                          value={device.device_name}
-                          onSelect={(currentValue) => {
-                            setSelectedDevice(currentValue === selectedDevice ? "" : currentValue);
-                            setDeviceOpen(false);
-                          }}
-                        >
-                          <Check
-                            className={cn(
-                              "mr-2 h-4 w-4",
-                              selectedDevice === device.device_name ? "opacity-100" : "opacity-0"
-                            )}
-                          />
-                          {device.device_name} ({device.protocol}) - {device.metric_count} metrics
-                        </CommandItem>
-                      ))}
+                      {devices.map((device) => {
+                        // Check if any of the device's agents are registered and online
+                        const hasOnlineAgent = device.agent_uuids?.some(uuid => {
+                          const deviceInfo = registeredDevices.get(uuid);
+                          return deviceInfo && deviceInfo.isOnline;
+                        });
+                        
+                        const hasRegisteredAgent = device.agent_uuids?.some(uuid => 
+                          registeredDevices.has(uuid)
+                        );
+                        
+                        const isDeleted = !hasRegisteredAgent;
+                        const isOffline = hasRegisteredAgent && !hasOnlineAgent;
+                        
+                        return (
+                          <CommandItem
+                            key={device.device_name}
+                            value={device.device_name}
+                            onSelect={(currentValue) => {
+                              setSelectedDevice(currentValue === selectedDevice ? "" : currentValue);
+                              setDeviceOpen(false);
+                            }}
+                            className={isDeleted || isOffline ? 'opacity-50' : ''}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                selectedDevice === device.device_name ? "opacity-100" : "opacity-0"
+                              )}
+                            />
+                            <div className="flex items-center justify-between w-full gap-2">
+                              <span>
+                                {device.device_name} ({device.protocol}) - {device.metric_count} metrics
+                              </span>
+                              {isDeleted && (
+                                <Badge variant="outline" className="text-xs bg-red-50 text-red-600 border-red-200">
+                                  Deleted
+                                </Badge>
+                              )}
+                              {!isDeleted && isOffline && (
+                                <Badge variant="outline" className="text-xs bg-gray-100 text-gray-600 border-gray-300">
+                                  Offline
+                                </Badge>
+                              )}
+                            </div>
+                          </CommandItem>
+                        );
+                      })}
                     </CommandGroup>
                   </CommandList>
                 </Command>

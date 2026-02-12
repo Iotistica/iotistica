@@ -42,7 +42,6 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
     );
   }
   
-  const [isConnected, setIsConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -64,7 +63,7 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
   // Agent filtering
   const [selectedAgentUuid, setSelectedAgentUuid] = useState<string>('all');
   
-  // Build agents list from devices prop (sidebar source)
+  // Fetch registered devices from database
   const agents = useMemo(() => {
     const agentsList = devices.map(device => ({
       uuid: device.deviceUuid,
@@ -137,8 +136,6 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
       addChartDataPoint(dataPoint);
       lastChartUpdateRef.current = now;
     }
-    
-    setIsConnected(data.connected || false);
   }, [updateBrokerStats, addChartDataPoint]);
 
   // Fetch historical MQTT data to populate chart on initial load
@@ -255,7 +252,7 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
     } finally {
       setLoading(false);
     }
-  }, [updateBrokerStats, updateTopics, handleMqttStats, setIsConnected, setLoading, setInitialLoadComplete]);
+  }, [updateBrokerStats, updateTopics, handleMqttStats, setLoading, setInitialLoadComplete]);
   
   // Manual refresh function
   const handleManualRefresh = useCallback(async () => {
@@ -310,19 +307,6 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
       }
     };
   }, [refreshInterval, fetchMqttData]);
-
-  // Filter topics based on selected agent
-  const filteredTopics = useMemo(() => {
-    if (selectedAgentUuid === 'all') {
-      return topics;
-    }
-    
-    // Filter topics that belong to the selected agent
-    // Topics typically follow pattern: iot/device/{uuid}/... or device/{uuid}/...
-    return topics.filter(topic => 
-      topic.topic.match(new RegExp(`^(?:iot\\/)?(?:agent|device)\\/${selectedAgentUuid}\\/`))
-    );
-  }, [topics, selectedAgentUuid]);
 
   // Calculate current stats - use latest chart data point if available for more accurate real-time values
   const currentStats = useMemo(() => {
@@ -445,27 +429,14 @@ export function MqttPage({ device, devices = [] }: MqttPageProps) {
                       ))}
                     </SelectContent>
                   </Select>
-                  {selectedAgentUuid !== 'all' && (
-                    <span className="text-sm text-muted-foreground">
-                      Showing {filteredTopics.length} topic{filteredTopics.length !== 1 ? 's' : ''}
-                    </span>
-                  )}
                 </div>
-                
-                {filteredTopics.length === 0 && selectedAgentUuid !== 'all' ? (
-                  <div className="card p-8 text-center">
-                    <p className="text-muted-foreground mb-2">No MQTT topics found for this device</p>
-                    <p className="text-sm text-muted-foreground">
-                      Device may be offline or not publishing any messages
-                    </p>
-                  </div>
-                ) : (
-                  <MqttBrokerCard 
-                    deviceId={device.deviceUuid} 
-                    topics={filteredTopics}
-                    isConnected={isConnected}
-                  />
-                )}
+
+                {/* MQTT Broker Card */}
+                <MqttBrokerCard 
+                  deviceId={device.deviceUuid}
+                  topics={topics}
+                  isConnected={true}
+                />
               </div>
 
               {/* MQTT Metrics Card */}

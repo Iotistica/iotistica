@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Copy, Check, RefreshCw, X } from "lucide-react";
+import { Copy, Check, RefreshCw, X, Trash2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -47,6 +47,8 @@ export function AddEditDeviceDialog({
   const [provisioningKey, setProvisioningKey] = useState("");
   const [provisioningKeyId, setProvisioningKeyId] = useState<string | null>(null);
   const [isLoadingKey, setIsLoadingKey] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [tags, setTags] = useState<Record<string, string>>({});
   const [tagDefinitions, setTagDefinitions] = useState<TagDefinition[]>([]);
   const [newTagKey, setNewTagKey] = useState("");
@@ -251,6 +253,54 @@ export function AddEditDeviceDialog({
     onOpenChange(false);
   };
 
+  const handleDelete = async () => {
+    if (!device || !device.deviceUuid) {
+      toast.error('No device to delete');
+      return;
+    }
+
+    // Show confirmation dialog
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!device || !device.deviceUuid) return;
+
+    setShowDeleteConfirm(false);
+    setIsDeleting(true);
+
+    try {
+      const url = buildApiUrl(`/api/v1/devices/${device.deviceUuid}/virtual`);
+      const response = await fetch(url, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to delete device');
+      }
+
+      const result = await response.json();
+      toast.success(result.message || 'Device deleted successfully');
+      
+      // Close dialog and notify the app to refresh its device list
+      onOpenChange(false);
+      window.dispatchEvent(new CustomEvent('device-deleted', {
+        detail: { deviceUuid: device.deviceUuid }
+      }));
+
+    } catch (error: any) {
+      console.error('Error deleting device:', error);
+      toast.error(error.message || 'Failed to delete device');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const copyInstallCommand = () => {
     navigator.clipboard.writeText(installCommand);
     setCopiedCommand(true);
@@ -327,7 +377,8 @@ export function AddEditDeviceDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[95vh] overflow-hidden flex flex-col">
         <DialogHeader className="flex-shrink-0">
           <DialogTitle>{isEditMode ? "Edit Agent" : "Add Agent"}</DialogTitle>
@@ -597,17 +648,94 @@ export function AddEditDeviceDialog({
               Close
             </Button>
           ) : (
-            <>
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleSave}>
-                {isEditMode ? "Update" : "Add"}
-              </Button>
-            </>
+            <div className="flex w-full justify-between items-center">
+              {isEditMode && device?.type === 'virtual' ? (
+                <>
+                  <Button 
+                    variant="destructive" 
+                    onClick={handleDelete}
+                    disabled={isDeleting}
+                  >
+                    {isDeleting ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        Deleting...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete Agent
+                      </>
+                    )}
+                  </Button>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => onOpenChange(false)}>
+                      Cancel
+                    </Button>
+                    <Button onClick={handleSave}>
+                      {isEditMode ? "Update" : "Add"}
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <div className="flex gap-2 ml-auto">
+                  <Button variant="outline" onClick={() => onOpenChange(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleSave}>
+                    {isEditMode ? "Update" : "Add"}
+                  </Button>
+                </div>
+              )}
+            </div>
           )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Agent</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete "{device?.name || device?.deviceUuid}"?
+              <br /><br />
+              This will remove the agent and everything running with it, including its devices.
+              <br /><br />
+              It will also delete its data and keys.
+              <br />
+              <strong className="text-destructive">This action cannot be undone.</strong>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowDeleteConfirm(false)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete Agent
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

@@ -306,6 +306,22 @@ export default function App() {
     return () => window.removeEventListener('open-device-tags', handleOpenTags);
   }, [devices]);
 
+  // Listen for delete events to update device list without full refresh
+  useEffect(() => {
+    const handleDeviceDeleted = (event: Event) => {
+      const customEvent = event as CustomEvent<{ deviceUuid: string }>;
+      const deletedDevice = devices.find(d => d.deviceUuid === customEvent.detail.deviceUuid);
+
+      if (!deletedDevice) return;
+
+      setDevices(prev => prev.filter(d => d.deviceUuid !== customEvent.detail.deviceUuid));
+      setSelectedDeviceId(prev => (prev === deletedDevice.id ? null : prev));
+    };
+
+    window.addEventListener('device-deleted', handleDeviceDeleted);
+    return () => window.removeEventListener('device-deleted', handleDeviceDeleted);
+  }, [devices]);
+
   // Listen for kiosk mode changes
   useEffect(() => {
     const handleKioskModeChange = (event: Event) => {

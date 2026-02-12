@@ -566,6 +566,7 @@ function categorizeEvent(eventType: string): string {
   if (eventType.startsWith('current_state.')) return 'telemetry';
   if (eventType.startsWith('reconciliation.')) return 'system';
   if (eventType.startsWith('container.')) return 'container';
+  if (eventType.startsWith('device_sensor.')) return 'provisioning';
   if (eventType.startsWith('device.')) return 'agent';
   if (eventType.startsWith('app.')) return 'application';
   if (eventType.startsWith('job.')) return 'job';
@@ -588,6 +589,10 @@ function generateEventTitle(eventType: string): string {
     'device.provisioned': 'Device Provisioned',
     'device.online': 'Device Online',
     'device.offline': 'Device Offline',
+    'device_sensor.added': 'Device Added',
+    'device_sensor.updated': 'Device Updated',
+    'device_sensor.pending_deletion': 'Device Pending Deletion',
+    'device_sensor.deleted': 'Device Deleted',
     'app.deployed': 'Application Deployed',
     'app.removed': 'Application Removed',
     'job.scheduled': 'Job Scheduled',

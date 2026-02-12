@@ -1865,18 +1865,26 @@ router.delete('/devices/:uuid/virtual', jwtAuth, async (req, res) => {
       });
     }
 
-    logger.info('Destroying virtual agent', {
+    logger.info('Destroying virtual agent (hard delete)', {
       deviceUuid: uuid.substring(0, 8) + '...',
       deviceName: device.device_name,
       namespace: device.k8s_namespace
     });
 
-    // Destroy K8s resources (deployment + secret)
-    await virtualAgentDeployer.destroy(uuid);
+    // 1. Destroy K8s resources (deployment, service, PVC, secret)
+    try {
+      await virtualAgentDeployer.destroy(uuid);
+      logger.info('K8s resources destroyed', { deviceUuid: uuid.substring(0, 8) + '...' });
+    } catch (k8sError: any) {
+      logger.warn('K8s cleanup partially failed (continuing with database deletion)', {
+        error: k8sError.message,
+        deviceUuid: uuid.substring(0, 8) + '...'
+      });
+    }
 
-    // Optionally delete device record from database
-    // await DeviceModel.delete(uuid);
-    // For now, we keep the device record but mark it as terminated
+    // 2. Delete device record from database
+    await DeviceModel.delete(uuid);
+    logger.info('Device record deleted from database', { deviceUuid: uuid.substring(0, 8) + '...' });
 
     await logAuditEvent({
       eventType: 'device.deployment.destroyed' as any,
@@ -1884,12 +1892,13 @@ router.delete('/devices/:uuid/virtual', jwtAuth, async (req, res) => {
       severity: AuditSeverity.INFO,
       details: {
         deviceName: device.device_name,
-        namespace: device.k8s_namespace
+        namespace: device.k8s_namespace,
+        hardDelete: true
       }
     }).catch(err => logger.error('Audit log failed', err));
 
     res.json({
-      message: 'Virtual agent destroyed successfully',
+      message: 'Virtual agent deleted successfully (K8s + database)',
       deviceUuid: uuid,
       deviceName: device.device_name
     });
