@@ -1401,27 +1401,44 @@ export class ConfigManager extends EventEmitter {
 
 		// Determine which protocols were affected by changes (added or modified endpoints)
 		const changedEndpoints = [...changeType.added, ...changeType.modified];
-		const affectedProtocols = [...new Set(changedEndpoints.map((e: any) => e.protocol))];
+	
+	// CRITICAL: Also include OPC UA endpoints with null/empty data_points for auto-discovery
+	// This handles the case where device is synced from cloud without nodes
+	const opcuaWithoutNodes = newEndpoints.filter((e: any) => 
+		e.protocol === 'opcua' && 
+		e.connection?.endpointUrl &&
+		(!e.data_points || e.data_points.length === 0)
+	);
+	
+	// Combine changed endpoints with OPC UA endpoints needing discovery
+	const allEndpointsNeedingDiscovery = [...changedEndpoints, ...opcuaWithoutNodes];
+	const affectedProtocols = [...new Set(allEndpointsNeedingDiscovery.map((e: any) => e.protocol))];
 
-		if (affectedProtocols.length === 0) {
-			this.logger?.debugSync('No protocols affected by endpoint changes, skipping discovery', {
-				component: LogComponents.configManager,
-			});
-			return;
-		}
+	if (affectedProtocols.length === 0) {
+		this.logger?.debugSync('No protocols affected by endpoint changes, skipping discovery', {
+			component: LogComponents.configManager,
+		});
+		return;
+	}
+	
+	if (opcuaWithoutNodes.length > 0) {
+		this.logger?.infoSync('Triggered auto-discovery for OPC UA devices without nodes', {
+			component: LogComponents.configManager,
+			deviceCount: opcuaWithoutNodes.length,
+			devices: opcuaWithoutNodes.map((e: any) => e.name)
+		});
+	}
 
-		// Filter endpoints that support discovery (only for affected protocols)
-		// Discovery validates connectivity for:
-		// - Modbus: slaveRange (scan multiple slaves) or slaveId (single slave)
-		// - OPC-UA: discovery URLs
-		// - SNMP: IP ranges or specific hosts
-		// - MQTT: topic discovery
-		// - BACnet: device discovery
-		const discoverableEndpoints = changedEndpoints.filter((e: any) => {
-			// Include endpoints with explicit discovery configuration
-			if (e.connection?.slaveRange) return true; // Modbus multi-slave discovery
+	// Filter endpoints that support discovery (only for affected protocols)
+	// Discovery validates connectivity for:
+	// - Modbus: slaveRange (scan multiple slaves) or slaveId (single slave)
+	// - OPC-UA: discovery URLs
+	// - SNMP: IP ranges or specific hosts
+	// - MQTT: topic discovery
+	// - BACnet: device discovery
+	const discoverableEndpoints = allEndpointsNeedingDiscovery.filter((e: any) => {
 			if (e.connection?.slaveId) return true; // Modbus single slave discovery
-			if (e.protocol === 'opcua' && e.connection?.discoveryUrls) return true;
+			if (e.protocol === 'opcua' && e.connection?.endpointUrl) return true; // OPC UA discovery via endpoint
 			if (e.protocol === 'snmp' && e.connection?.host) return true;
 			if (e.protocol === 'mqtt' && e.connection?.discoveryRoots) return true;
 			if (e.protocol === 'bacnet') return true; // BACnet uses broadcast discovery

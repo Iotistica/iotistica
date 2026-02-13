@@ -83,11 +83,11 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
       // OPC UA uses auto-discovery, nodes are optional
       // User can add nodes manually or let discovery populate them
 
-      // Combine config with data points
+      // Combine config with data points (omit dataPoints if empty for auto-discovery)
       const finalConfig: OPCUADeviceConfig = {
         ...opcuaConfig,
-        dataPoints: opcuaDataPoints,
-      };
+        ...(opcuaDataPoints.length > 0 && { dataPoints: opcuaDataPoints }),
+      } as OPCUADeviceConfig;
 
       try {
         setLoading(true);

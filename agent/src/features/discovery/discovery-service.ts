@@ -491,16 +491,18 @@ export class DiscoveryService extends EventEmitter {
       deviceNames: allDiscovered.map(d => d.name)
     });
 
-    // Save to database (unless skipDbWrites flag is set)
-    const saveResults = options.skipDbWrites 
-      ? { saved: 0, skipped: allDiscovered.length }
-      : await this.saveToDatabase(allDiscovered, traceId);
+    // Save to database
+    // skipDbWrites: true = update existing records only, don't create new
+    // skipDbWrites: false = full save (create + update)
+    const saveResults = await this.saveToDatabase(allDiscovered, traceId, options.skipDbWrites || false);
 
     if (options.skipDbWrites) {
-      this.logger?.debugSync('Skipping DB writes (reconcile already synced endpoints)', {
+      this.logger?.debugSync('Discovery in update-only mode (reconcile creates records)', {
         component: LogComponents.discovery,
         traceId,
         devicesValidated: allDiscovered.length,
+        updatedCount: saveResults.saved,
+        skippedCount: saveResults.skipped,
         protocols: selectedProtocols
       });
     }
@@ -911,13 +913,22 @@ export class DiscoveryService extends EventEmitter {
    * Save discovered sensors to SQLite with enabled=false
    * Devices are saved with enabled=false so they don't start polling until user approves
    */
-  private async saveToDatabase(discovered: DiscoveredDevice[], traceId: string): Promise<{ saved: number; skipped: number }> {
+  private async saveToDatabase(discovered: DiscoveredDevice[], traceId: string, updateOnly: boolean = false): Promise<{ saved: number; skipped: number }> {
     if (discovered.length === 0) {
       this.logger?.debugSync('No discovered endpoints to save', {
         component: LogComponents.discovery,
         traceId
       });
       return { saved: 0, skipped: 0 };
+    }
+    
+    if (updateOnly) {
+      this.logger?.debugSync('Discovery running in update-only mode', {
+        component: LogComponents.discovery,
+        traceId,
+        discoveredCount: discovered.length,
+        mode: 'update-existing-only'
+      });
     }
 
 
@@ -938,19 +949,41 @@ export class DiscoveryService extends EventEmitter {
 
     for (const sensor of discovered) {
       try {
-        // Check if sensor already exists by fingerprint OR name
+        // Check if sensor already exists by fingerprint OR name OR endpointUrl (OPC UA)
         // Fingerprint match: Same device (even if moved)
         // Name match: Device rediscovered (fingerprint may change due to dynamic register values)
+        // EndpointUrl match (OPC UA): Custom-named device at same endpoint (e.g., "MyPLC" at opc.tcp://10.0.0.60:4840)
         const existingByFingerprint = existingSensors.find(s => 
           s.metadata?.fingerprint === sensor.fingerprint
         );
         const existingByName = existingSensors.find(s => 
           s.name === sensor.name
         );
+        const existingByEndpointUrl = sensor.protocol === 'opcua' 
+          ? existingSensors.find(s => 
+              s.protocol === 'opcua' && 
+              s.connection?.endpointUrl === sensor.connection?.endpointUrl
+            )
+          : undefined;
         
-        const existing = existingByFingerprint || existingByName;
+        const existing = existingByFingerprint || existingByName || existingByEndpointUrl;
         
         if (existing) {
+          // Log match type for debugging
+          const matchType = existingByFingerprint ? 'fingerprint' : 
+                           existingByName ? 'name' : 
+                           existingByEndpointUrl ? 'endpointUrl' : 'unknown';
+          if (matchType === 'endpointUrl') {
+            this.logger?.infoSync(`Matched discovered device to existing by endpointUrl`, {
+              component: LogComponents.discovery,
+              traceId,
+              existingName: existing.name,
+              discoveredName: sensor.name,
+              endpointUrl: sensor.connection?.endpointUrl,
+              willUpdate: true
+            });
+          }
+          
           // Check if config changed
           const configChanged = JSON.stringify(existing.connection) !== JSON.stringify(sensor.connection);
           const fingerprintChanged = existing.metadata?.fingerprint !== sensor.fingerprint;
@@ -974,15 +1007,30 @@ export class DiscoveryService extends EventEmitter {
           if (profileChanged || dataPointsChanged) {
             // CRITICAL: Profile or data points changed - must update and revalidate
             const reason = profileChanged ? 'Profile changed' : 'Data points changed (same profile)';
-            this.logger?.warnSync(`${reason} for "${sensor.name}" - updating configuration`, {
+            this.logger?.warnSync(`${reason} for "${existing.name}" - updating configuration`, {
               component: LogComponents.discovery,
               traceId,
+              existingName: existing.name,
+              discoveredName: sensor.name,
               oldProfile: existingProfile,
               newProfile: newProfile,
               oldDataPoints: existing.data_points?.length || 0,
               newDataPoints: sensor.dataPoints?.length || 0,
               profileChanged,
               dataPointsChanged
+            });
+            
+            // Log discovered dataPoints before saving
+            this.logger?.infoSync(`Updating device with discovered nodes`, {
+              component: LogComponents.discovery,
+              traceId,
+              deviceName: existing.name,
+              protocol: sensor.protocol,
+              dataPointsCount: sensor.dataPoints?.length || 0,
+              sampleNodes: sensor.dataPoints?.slice(0, 3).map(dp => ({
+                nodeId: dp.nodeId,
+                name: dp.name || dp.address
+              }))
             });
             
             // Update device with new profile config and data points
@@ -995,6 +1043,36 @@ export class DiscoveryService extends EventEmitter {
               },
               lastSeenAt: new Date()
             });
+            
+            // Verify the update was successful
+            this.logger?.infoSync(`Database update complete`, {
+              component: LogComponents.discovery,
+              traceId,
+              deviceName: existing.name,
+              updatedDataPoints: sensor.dataPoints?.length || 0,
+              operation: 'DeviceEndpointModel.update'
+            });
+            
+            // Read back from database to verify persistence
+            const updatedDevice = await DeviceEndpointModel.getByName(existing.name);
+            if (updatedDevice) {
+              this.logger?.infoSync(`Verified data persisted to database`, {
+                component: LogComponents.discovery,
+                traceId,
+                deviceName: existing.name,
+                persistedDataPoints: updatedDevice.data_points?.length || 0,
+                samplePersistedNodes: updatedDevice.data_points?.slice(0, 3).map(dp => ({
+                  nodeId: dp.nodeId,
+                  name: dp.name || dp.address
+                }))
+              });
+            } else {
+              this.logger?.errorSync(`Failed to verify database update - device not found`, new Error('Device not found after update'), {
+                component: LogComponents.discovery,
+                traceId,
+                deviceName: existing.name
+              });
+            }
             
             // CRITICAL: Force Sensor Publish to reload endpoints (profile changed)
             // This ensures polling uses the new COMAP addresses immediately
@@ -1016,7 +1094,7 @@ export class DiscoveryService extends EventEmitter {
             
             saved++; // Count as saved (updated)
             savedDevices.push({
-              name: sensor.name,
+              name: existing.name, // Use existing name, not auto-generated one
               protocol: sensor.protocol,
               confidence: sensor.confidence || 'updated'
             });
@@ -1056,6 +1134,26 @@ export class DiscoveryService extends EventEmitter {
             });
             continue;
           }
+        }
+
+        // When updateOnly mode is enabled, skip creating new devices
+        // Reconcile is responsible for creating records from cloud sync
+        if (updateOnly) {
+          this.logger?.debugSync(`Skipping new device creation (update-only mode)`, {
+            component: LogComponents.discovery,
+            traceId,
+            deviceName: sensor.name,
+            protocol: sensor.protocol,
+            endpointUrl: sensor.connection?.endpointUrl,
+            reason: 'reconcile-creates-records'
+          });
+          skipped++;
+          skippedDevices.push({
+            name: sensor.name,
+            protocol: sensor.protocol,
+            reason: 'update_only_mode'
+          });
+          continue;
         }
 
         // Convert to DeviceEndpoint format and save

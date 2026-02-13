@@ -98,8 +98,9 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
                 const childNodeId = ref.nodeId.toString();
                 const currentPath = [...pathSegments, nodeName];
                 
-                // Skip standard OPC UA system folders at root level
-                if (depth === 0 && ['Server', 'Types', 'Views', 'Aliases'].includes(nodeName)) {
+                // Skip standard OPC UA system folders at root level (IEC 62541)
+                // ServerInfo contains metadata like ProfileName, SensorCount which pollute data_points
+                if (depth === 0 && ['Server', 'ServerInfo', 'Types', 'Views', 'Aliases'].includes(nodeName)) {
                   continue;
                 }
                 
@@ -114,17 +115,23 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
                   const actualNodeClass = nodeClass.value.value;
                   
                   if (actualNodeClass === 2) {
-                    // Verified variable - add to data points
-                    const variableName = currentPath.join('_').toLowerCase().replace(/[^a-z0-9_]/g, '_');
+                    // Extract semantic metric name from browseName prefix (OPC UA standard)
+                    // Format: "Temperature_Sensor1" → metric: "temperature"
+                    // If no underscore, use full browseName in lowercase
+                    const metricName = nodeName.includes('_') 
+                      ? nodeName.split('_')[0].toLowerCase()
+                      : nodeName.toLowerCase();
                     
                     dataPoints.push({
                       nodeId: childNodeId,
-                      name: variableName
+                      name: metricName
                     });
                     
                     this.logger?.debugSync(`Discovered variable: ${currentPath.join('/')}`, {
                       component: LogComponents.discovery + "] [" + this.protocol as any,
                       nodeId: childNodeId,
+                      browseName: nodeName,
+                      metricName,
                       depth
                     });
                   } else if (actualNodeClass === 1) {
@@ -180,6 +187,19 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
           url,
           dataPointCount: dataPoints.length
         });
+        
+        // Log sample of discovered nodes for verification
+        if (dataPoints.length > 0) {
+          this.logger?.infoSync(`OPC UA nodes discovered and ready to save`, {
+            component: LogComponents.discovery + "] [" + this.protocol as any,
+            endpointUrl: url,
+            totalNodes: dataPoints.length,
+            sampleNodes: dataPoints.slice(0, 5).map(dp => ({
+              nodeId: dp.nodeId,
+              name: dp.name
+            }))
+          });
+        }
         
         await client.disconnect();
 

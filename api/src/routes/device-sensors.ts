@@ -112,18 +112,23 @@ router.post('/devices/:uuid/sensors', async (req, res) => {
     // If validation-only mode, return validated config without persisting
     if (validateOnly) {
       // Normalize the sensor config
-      const validatedSensor = {
+      // For OPC UA: omit dataPoints if empty (auto-discovery will populate)
+      const validatedSensor: any = {
         name: sensorConfig.name,
         protocol: sensorConfig.protocol,
         enabled: sensorConfig.enabled !== undefined ? sensorConfig.enabled : true,
         connection: sensorConfig.connection,
-        dataPoints: sensorConfig.dataPoints,
         pollInterval: sensorConfig.pollInterval || 5000,
         metadata: {
           createdAt: new Date().toISOString(),
           createdBy: (req as any).user?.username || (req as any).user?.email || 'dashboard'
         }
       };
+      
+      // Only include dataPoints if present and not empty (or if not OPC UA)
+      if (sensorConfig.dataPoints && (sensorConfig.dataPoints.length > 0 || sensorConfig.protocol !== 'opcua')) {
+        validatedSensor.dataPoints = sensorConfig.dataPoints;
+      }
 
       logger.info('Returning validated sensor (not persisting):', validatedSensor.name);
       

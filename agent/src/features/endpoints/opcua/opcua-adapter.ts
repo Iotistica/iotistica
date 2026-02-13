@@ -1055,7 +1055,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 
       // If all metric nodes are invalid but we have metadata, that's ok (metadata-only device)
       if (validDataPoints.length === 0 && metadataCount === 0) {
-        throw new Error(`All NodeIDs failed validation for device ${device.name}`);
+        throw new Error(`All NodeIDs failed validation for device ${device.name}. Possibly no data points discovered for thsi device.`);
       }
 
       // Read metadata nodes once on connect (separate from time-series)

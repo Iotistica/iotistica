@@ -153,11 +153,42 @@ publicRouter.post('/', async (req, res) => {
       for (const dp of data_points) {
         const isSensorGroup = dp.folder && dp.prefix && dp.model && dp.count;
         const isNode = dp.name && dp.nodeId;
+        
         if (!isSensorGroup && !isNode) {
           return res.status(400).json({
             error: 'Invalid data point',
             message: 'Each OPC UA data point must be either a sensor group (folder, prefix, model, count, unit, config) or node (name, nodeId)'
           });
+        }
+        
+        // Enforce OPC UA naming convention (IEC 62541 best practices)
+        if (isSensorGroup) {
+          // Prefix must use format: MetricType_ (e.g., "Temperature_", "Pressure_", "Flow_")
+          if (!dp.prefix.includes('_') || !dp.prefix.endsWith('_')) {
+            return res.status(400).json({
+              error: 'Invalid OPC UA prefix',
+              message: `Prefix "${dp.prefix}" must follow format "MetricType_" (e.g., "Temperature_", "Pressure_", "Flow_"). This ensures proper metric extraction following OPC UA standards.`
+            });
+          }
+          
+          // Model must be lowercase semantic name (matches prefix without underscore)
+          if (!/^[a-z_]+$/.test(dp.model)) {
+            return res.status(400).json({
+              error: 'Invalid OPC UA model',
+              message: `Model "${dp.model}" must be lowercase with underscores only (e.g., "temperature", "pressure", "flow_rate"). This is the semantic metric name used in data collection.`
+            });
+          }
+          
+          // Validate prefix and model consistency (warn if mismatch)
+          const expectedModel = dp.prefix.replace(/_$/, '').toLowerCase();
+          if (dp.model !== expectedModel) {
+            logger.warn('OPC UA sensor group prefix/model mismatch', {
+              prefix: dp.prefix,
+              model: dp.model,
+              expected: expectedModel,
+              message: 'Prefix should match model (e.g., "Temperature_" → "temperature")'
+            });
+          }
         }
       }
     }
@@ -297,11 +328,42 @@ router.post('/', async (req, res) => {
       for (const dp of data_points) {
         const isSensorGroup = dp.folder && dp.prefix && dp.model && dp.count;
         const isNode = dp.name && dp.nodeId;
+        
         if (!isSensorGroup && !isNode) {
           return res.status(400).json({
             error: 'Invalid data point',
             message: 'Each OPC UA data point must be either a sensor group (folder, prefix, model, count, unit, config) or node (name, nodeId)'
           });
+        }
+        
+        // Enforce OPC UA naming convention (IEC 62541 best practices)
+        if (isSensorGroup) {
+          // Prefix must use format: MetricType_ (e.g., "Temperature_", "Pressure_", "Flow_")
+          if (!dp.prefix.includes('_') || !dp.prefix.endsWith('_')) {
+            return res.status(400).json({
+              error: 'Invalid OPC UA prefix',
+              message: `Prefix "${dp.prefix}" must follow format "MetricType_" (e.g., "Temperature_", "Pressure_", "Flow_"). This ensures proper metric extraction following OPC UA standards.`
+            });
+          }
+          
+          // Model must be lowercase semantic name (matches prefix without underscore)
+          if (!/^[a-z_]+$/.test(dp.model)) {
+            return res.status(400).json({
+              error: 'Invalid OPC UA model',
+              message: `Model "${dp.model}" must be lowercase with underscores only (e.g., "temperature", "pressure", "flow_rate"). This is the semantic metric name used in data collection.`
+            });
+          }
+          
+          // Validate prefix and model consistency (warn if mismatch)
+          const expectedModel = dp.prefix.replace(/_$/, '').toLowerCase();
+          if (dp.model !== expectedModel) {
+            logger.warn('OPC UA sensor group prefix/model mismatch', {
+              prefix: dp.prefix,
+              model: dp.model,
+              expected: expectedModel,
+              message: 'Prefix should match model (e.g., "Temperature_" → "temperature")'
+            });
+          }
         }
       }
     }
