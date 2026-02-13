@@ -13,7 +13,7 @@ Architecture:
 Environment Variables:
 - TRANSPORT: transport type ('tcp' or 'rtu', default: 'tcp')
 - MODBUS_PROFILE: initial profile (default: 'Generic')
-- MODBUS_SLAVES: number of slave IDs (default: 3)
+- SLAVES: number of slave IDs (default: 3)
 - MODBUS_PORT: Modbus TCP port (default: 502) or RTU serial port (e.g., '/dev/ttyUSB0')
 - MODBUS_BAUDRATE: RTU baudrate (default: 19200)
 - MODBUS_BYTESIZE: RTU bytesize (default: 8)
@@ -411,7 +411,7 @@ def setup_modbus_server(slaves=3):
 def run_modbus_server():
     """Run Modbus TCP or RTU server (blocking call)"""
     transport = os.environ.get("TRANSPORT", "tcp").lower()
-    slaves = int(os.environ.get("MODBUS_SLAVES", 3))
+    slaves = int(os.environ.get("SLAVES", 3))
     
     logger.info(f"Starting Modbus {transport.upper()} server ({slaves} slaves)")
     context = setup_modbus_server(slaves=slaves)
@@ -1122,7 +1122,7 @@ def clear_access_log():
 @app.route('/api/status', methods=['GET'])
 def get_status():
     """Get simulator status (for GUI polling)"""
-    slaves_count = int(os.environ.get("MODBUS_SLAVES", 3))
+    slaves_count = int(os.environ.get("SLAVES", 3))
     
     # Build slave states
     slave_states = []

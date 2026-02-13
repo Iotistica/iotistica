@@ -467,7 +467,7 @@ export class VirtualDeviceManager {
       env.TRANSPORT = 'tcp';
       env.PROFILE = profile;
       env.PORT = String(port);
-      env.MODBUS_SLAVES = String(slaveCount || 40);
+      env.SLAVES = String(slaveCount || 40);
       env.API_URL = apiUrl;
       env.GUI_PORT = String(port + 1000); // Web GUI on offset port (e.g., 1502)
     } else if (protocol === 'opcua') {
