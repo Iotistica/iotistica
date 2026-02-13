@@ -813,19 +813,18 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       );
     }
 
-    // Validate data points
-    if (!dataPoints || dataPoints.length === 0) {
-      throw new Error(`Device ${device.name}: at least one data point is required`);
-    }
-
-    for (const dp of dataPoints) {
-      if (!dp.name) {
-        throw new Error(`Device ${device.name}: data point name is required`);
-      }
-      if (!dp.nodeId) {
-        throw new Error(
-          `Device ${device.name}: nodeId is required for data point ${dp.name}`
-        );
+    // Validate data points (if provided)
+    // Empty dataPoints triggers auto-discovery mode
+    if (dataPoints && dataPoints.length > 0) {
+      for (const dp of dataPoints) {
+        if (!dp.name) {
+          throw new Error(`Device ${device.name}: data point name is required`);
+        }
+        if (!dp.nodeId) {
+          throw new Error(
+            `Device ${device.name}: nodeId is required for data point ${dp.name}`
+          );
+        }
       }
     }
 

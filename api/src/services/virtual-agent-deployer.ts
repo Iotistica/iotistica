@@ -25,6 +25,16 @@ export interface VirtualAgentConfig {
     cpu?: string; // default: '1000m'
     memory?: string; // default: '2Gi'
   };
+  metadata?: {
+    opcuaProfile?: string; // OPC UA profile name to load
+    modbusProfile?: string; // Modbus profile name (future)
+    [key: string]: any;
+  };
+  endpoints?: Array<{
+    protocol: string;
+    connection?: any;
+    dataPoints?: any[];
+  }>;
 }
 
 export interface DeploymentStatus {
@@ -442,7 +452,8 @@ export class VirtualAgentDeployer {
                     mountPath: '/app/data'
                   }
                 ]
-              }
+              },
+              ...this.buildSimulatorSidecars(config)
             ],
             volumes: [
               {
@@ -643,6 +654,81 @@ export class VirtualAgentDeployer {
       });
       throw error;
     }
+  }
+
+  /**
+   * Build simulator sidecar containers based on device endpoints
+   */
+  private buildSimulatorSidecars(config: VirtualAgentConfig): any[] {
+    const sidecars: any[] = [];
+    
+    // Check if device has OPC UA endpoints
+    const hasOPCUA = config.endpoints?.some(ep => ep.protocol === 'opcua');
+    
+    if (hasOPCUA) {
+      const opcuaProfile = this.getOPCUAProfileForDevice(config);
+      
+      sidecars.push({
+        name: 'opcua-simulator',
+        image: process.env.OPCUA_SIMULATOR_IMAGE || 'iotistic/opcua-simulator:latest',
+        imagePullPolicy: process.env.OPCUA_SIMULATOR_PULL_POLICY as any || 'Always',
+        env: [
+          { name: 'PROFILE', value: opcuaProfile },
+          { name: 'OPCUA_API_URL', value: this.cloudApiUrl },
+          { name: 'WEB_PORT', value: '5002' }
+        ],
+        ports: [
+          { containerPort: 4840, protocol: 'TCP', name: 'opcua' },
+          { containerPort: 5002, protocol: 'TCP', name: 'web' }
+        ],
+        securityContext: {
+          allowPrivilegeEscalation: false,
+          runAsNonRoot: true,
+          capabilities: {
+            drop: ['ALL']
+          }
+        },
+        resources: {
+          requests: {
+            cpu: '100m',
+            memory: '128Mi'
+          },
+          limits: {
+            cpu: '500m',
+            memory: '512Mi'
+          }
+        }
+      });
+      
+      logger.info('Added OPC UA simulator sidecar', { 
+        deviceUuid: config.deviceUuid,
+        profile: opcuaProfile 
+      });
+    }
+    
+    // Future: Add Modbus, BACnet, etc. simulators
+    
+    return sidecars;
+  }
+
+  /**
+   * Extract OPC UA profile name from device configuration
+   */
+  private getOPCUAProfileForDevice(config: VirtualAgentConfig): string {
+    // Check if device metadata specifies profile
+    if (config.metadata?.opcuaProfile) {
+      return config.metadata.opcuaProfile;
+    }
+    
+    // Default to device name sanitized
+    const sanitized = config.deviceName?.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase() || 'default';
+    
+    logger.info('Using default OPC UA profile name', { 
+      deviceUuid: config.deviceUuid,
+      profile: sanitized 
+    });
+    
+    return sanitized;
   }
 }
 

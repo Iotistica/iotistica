@@ -373,7 +373,7 @@ router.get('/devices/:uuid', async (req, res) => {
  */
 router.post('/devices', jwtAuth, async (req, res) => {
   try {
-    const { deviceName, deviceType, ipAddress, macAddress, fleetId, namespace, tags } = req.body;
+    const { deviceName, deviceType, ipAddress, macAddress, fleetId, namespace, tags, metadata, endpoints } = req.body;
 
     if (!deviceName) {
       return res.status(400).json({
@@ -415,7 +415,9 @@ router.post('/devices', jwtAuth, async (req, res) => {
           deviceApiKey,
           provisioningApiKey: 'virtual-agent-auto-generated', // Will be server-generated
           applicationId: fleetId ? parseInt(fleetId) : undefined,
-          namespace
+          namespace,
+          metadata, // Pass OPC UA profile metadata
+          endpoints // Pass protocol endpoints
         },
         req.ip,
         req.get('user-agent')

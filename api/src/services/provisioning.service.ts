@@ -60,6 +60,8 @@ export interface RegistrationRequest {
   // Virtual agent specific fields
   isVirtual?: boolean;
   namespace?: string;
+  metadata?: Record<string, any>; // OPC UA profile metadata, etc.
+  endpoints?: Array<{protocol: string; [key: string]: any}>; // Protocol endpoints (opcua, modbus, etc.)
 }
 
 export interface KeyExchangeRequest {
@@ -227,7 +229,9 @@ export class ProvisioningService {
           deviceName: device.device_name,
           provisioningKey: generatedProvisioningKey, // Plaintext, injected to K8s Secret
           fleetId: device.fleet_id,
-          namespace: device.k8s_namespace || undefined
+          namespace: device.k8s_namespace || undefined,
+          metadata: (data as any).metadata, // OPC UA profile metadata
+          endpoints: (data as any).endpoints // Protocol endpoints
         });
 
         await DeviceModel.update(uuid, { deployment_status: 'deploying' });
