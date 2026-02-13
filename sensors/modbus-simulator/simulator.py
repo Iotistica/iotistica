@@ -53,7 +53,7 @@ from profile_loader import load_profile_data
 # =============================================================================
 # SHARED STATE (accessed by both Modbus server and Flask GUI)
 # =============================================================================
-ACTIVE_PROFILE = os.environ.get("MODBUS_PROFILE", "Generic")
+ACTIVE_PROFILE = os.environ.get("PROFILE", "Generic")
 profile_data = load_profile_data()
 profile_loaded = False  # Track if profile was successfully loaded
 
@@ -144,7 +144,7 @@ def retry_profile_loading():
                 profile_data.update(new_profile_data)
                 
                 # Set active profile
-                desired_profile = os.environ.get("MODBUS_PROFILE", "Generic")
+                desired_profile = os.environ.get("PROFILE", "Generic")
                 if desired_profile in profile_data:
                     ACTIVE_PROFILE = desired_profile
                 elif profile_data:
@@ -419,7 +419,7 @@ def run_modbus_server():
     try:
         if transport == "rtu":
             # Modbus RTU over serial
-            port = os.environ.get("MODBUS_PORT", "/dev/ttyUSB0")
+            port = os.environ.get("PORT", "/dev/ttyUSB0")
             baudrate = int(os.environ.get("MODBUS_BAUDRATE", 19200))
             bytesize = int(os.environ.get("MODBUS_BYTESIZE", 8))
             parity = os.environ.get("MODBUS_PARITY", "N")
@@ -438,7 +438,7 @@ def run_modbus_server():
             )
         else:
             # Modbus TCP (default)
-            port = int(os.environ.get("MODBUS_PORT", 502))
+            port = int(os.environ.get("PORT", 502))
             host = os.environ.get("MODBUS_HOST", "0.0.0.0")
             
             logger.info(f"TCP config: {host}:{port}")
@@ -650,7 +650,7 @@ def save_profile():
             data_points.append(dp_copy)
         
         # Save to API
-        api_url = os.environ.get("MODBUS_API_URL", "http://api:3002")
+        api_url = os.environ.get("API_URL", "http://api:3002")
         api_token = os.environ.get("API_TOKEN", "")
         
         payload = {

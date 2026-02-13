@@ -43,7 +43,7 @@ def load_profile_data():
     import ssl
     import time
     
-    API_URL = os.environ.get("OPCUA_API_URL", "http://api:3002")
+    API_URL = os.environ.get("API_URL", "http://api:3002")
     
     # Create SSL context that accepts self-signed certificates
     ssl_context = ssl.create_default_context()

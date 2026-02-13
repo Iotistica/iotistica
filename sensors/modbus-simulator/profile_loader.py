@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def load_profile_data():
     """Load profile data points from API (shared by simulator and GUI)"""
-    API_URL = os.environ.get("MODBUS_API_URL", "http://api:3002")
+    API_URL = os.environ.get("API_URL", "http://api:3002")
     API_TOKEN = os.environ.get("API_TOKEN", "")
     VERIFY_SSL = os.environ.get("VERIFY_SSL", "false").lower() == "true"
     

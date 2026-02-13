@@ -137,7 +137,7 @@ async def main():
     profile_name = os.getenv('PROFILE') or (sys.argv[1] if len(sys.argv) > 1 else 'factory')
     
     # Parse port from environment variable or default to 4840
-    port = int(os.getenv('OPCUA_PORT', '4840'))
+    port = int(os.getenv('PORT', '4840'))
     endpoint = f'opc.tcp://0.0.0.0:{port}/iotistic/simulator'
     
     # Check for state file override (set by web GUI)

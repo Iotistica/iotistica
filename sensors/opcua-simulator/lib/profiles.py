@@ -200,7 +200,7 @@ def get_profile_with_api_fallback(name: str, api_url: Optional[str] = None) -> S
     """
     # Determine API URL
     if api_url is None:
-        api_url = os.getenv('OPCUA_API_URL')
+        api_url = os.getenv('API_URL')
     
     # Try API first if URL is provided
     if api_url:

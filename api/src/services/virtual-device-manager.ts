@@ -465,15 +465,15 @@ export class VirtualDeviceManager {
 
     if (protocol === 'modbus') {
       env.TRANSPORT = 'tcp';
-      env.MODBUS_PROFILE = profile;
-      env.MODBUS_PORT = String(port);
+      env.PROFILE = profile;
+      env.PORT = String(port);
       env.MODBUS_SLAVES = String(slaveCount || 40);
-      env.MODBUS_API_URL = apiUrl;
+      env.API_URL = apiUrl;
       env.GUI_PORT = String(port + 1000); // Web GUI on offset port (e.g., 1502)
     } else if (protocol === 'opcua') {
       env.PROFILE = profile;
-      env.OPCUA_PORT = String(port);
-      env.OPCUA_API_URL = apiUrl;
+      env.PORT = String(port);
+      env.API_URL = apiUrl;
     }
 
     return env;
