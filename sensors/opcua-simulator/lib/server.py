@@ -8,7 +8,7 @@ from typing import List
 from asyncua import Server, ua
 from .nodes import NodeManager
 from .updater import ValueUpdater
-from .profiles import get_profile
+from .profiles import get_profile_with_api_fallback
 from .types import Sensor
 
 logging.basicConfig(level=logging.INFO)
@@ -51,8 +51,8 @@ class OPCUASimulator:
         # Create example test node
         await self.node_manager.create_example_node()
         
-        # Create nodes from profile
-        profile = get_profile(self.profile_name)
+        # Create nodes from profile (tries API first, falls back to local JSON)
+        profile = get_profile_with_api_fallback(self.profile_name)
         await self.node_manager.create_from_profile(profile)
         
         # Get all created sensors

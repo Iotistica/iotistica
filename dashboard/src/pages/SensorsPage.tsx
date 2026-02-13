@@ -15,9 +15,9 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AddSensorDialog } from '@/components/sensors/AddSensorDialog';
-import { EditSensorDialog } from '@/components/sensors/EditSensorDialog';
-import { SensorSummaryCards } from '@/components/sensors/SensorSummaryCards';
+import { AddSensorDialog } from '@/components/devices/AddSensorDialog';
+import { EditSensorDialog } from '@/components/devices/EditSensorDialog';
+import { SensorSummaryCards } from '@/components/devices/SensorSummaryCards';
 import { toast } from 'sonner';
 import { buildApiUrl } from '@/config/api';
 import { Device } from "../components/DeviceSidebar";
@@ -171,13 +171,12 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       }
     ],
     opcua: [
-      {
-        name: 'example_node',
-        nodeId: 'ns=2;s=Example',
-        namespace: 2,
-        dataType: 'float',
-        browseName: 'Example Node'
-      }
+      // Leave empty [] for auto-discovery - agent will browse OPC UA node tree
+      // Or specify nodes manually to limit scope:
+      // {
+      //   name: 'example_node',
+      //   nodeId: 'ns=2;s=Example'
+      // }
     ],
     mqtt: [
       {
@@ -673,10 +672,14 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         setDataPointsError('Data points must be a JSON array');
         return false;
       }
-      if (parsed.length === 0) {
-        setDataPointsError('At least one data point is required');
+      
+      // OPC UA and SNMP can auto-discover data points - allow empty array
+      const autoDiscoveryProtocols = ['opcua', 'snmp'];
+      if (parsed.length === 0 && !autoDiscoveryProtocols.includes(profileFormData.protocol)) {
+        setDataPointsError('At least one data point is required for Modbus protocol');
         return false;
       }
+      
       setDataPointsError('');
       toast.success('Valid JSON!');
       return true;
@@ -706,8 +709,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         toast.error('Data points must be a JSON array');
         return;
       }
-      if (dataPoints.length === 0) {
-        toast.error('At least one data point is required');
+      
+      // OPC UA and SNMP can auto-discover data points - allow empty array
+      const autoDiscoveryProtocols = ['opcua', 'snmp'];
+      if (dataPoints.length === 0 && !autoDiscoveryProtocols.includes(profileFormData.protocol)) {
+        toast.error('At least one data point is required for Modbus protocol');
         return;
       }
     } catch (err) {
@@ -1399,7 +1405,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="profile-datapoints">Data Points (JSON Array) *</Label>
+                  <Label htmlFor="profile-datapoints">
+                    Data Points (JSON Array) 
+                    {profileFormData.protocol === 'modbus' && ' *'}
+                    {['opcua', 'snmp'].includes(profileFormData.protocol) && ' (Optional - Auto-Discovery)'}
+                  </Label>
                   <div className="flex gap-2">
                     <Button
                       type="button"
@@ -1426,7 +1436,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                     setProfileFormData({ ...profileFormData, data_points: e.target.value });
                     setDataPointsError('');
                   }}
-                  placeholder="Paste JSON array of data points..."
+                  placeholder={
+                    ['opcua', 'snmp'].includes(profileFormData.protocol)
+                      ? 'Leave empty [] to auto-discover, or paste specific data points JSON...'
+                      : 'Paste JSON array of data points...'
+                  }
                   rows={15}
                   className={`font-mono text-xs ${dataPointsError ? 'border-red-500' : ''}`}
                 />
@@ -1434,8 +1448,18 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                   <p className="text-sm text-red-600">{dataPointsError}</p>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  Each data point must include protocol-specific fields. 
-                  Click "Load Template" to see an example structure for {profileFormData.protocol}.
+                  {['opcua', 'snmp'].includes(profileFormData.protocol) ? (
+                    <>
+                      <strong>Auto-Discovery:</strong> Leave data points empty [] for {profileFormData.protocol.toUpperCase()} - 
+                      the agent will automatically discover available nodes/variables. 
+                      Or specify nodes manually to limit discovery scope.
+                    </>
+                  ) : (
+                    <>
+                      Each data point must include protocol-specific fields. 
+                      Click "Load Template" to see an example structure for {profileFormData.protocol}.
+                    </>
+                  )}
                 </p>
               </div>
 
@@ -1452,8 +1476,9 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                     )}
                     {profileFormData.protocol === 'opcua' && (
                       <>
-                        <li>OPC-UA: name, nodeId, namespace, dataType, browseName</li>
-                        <li>Example: {"{"}"name": "temperature", "nodeId": "ns=2;s=Temp", "namespace": 2, "dataType": "float"{"}"}</li>
+                        <li><strong>Auto-Discovery:</strong> Leave empty [] to browse entire OPC UA node tree</li>
+                        <li>Manual: name, nodeId (e.g., {"{"}"name": "temperature", "nodeId": "ns=2;s=Temp"{"}"}</li>
+                        <li>Agent recursively browses from Objects folder, filters Variables (NodeClass=2)</li>
                       </>
                     )}
                     {profileFormData.protocol === 'mqtt' && (

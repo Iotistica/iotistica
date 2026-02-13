@@ -1562,16 +1562,27 @@ router.post('/devices/:uuid/update-agent', async (req, res) => {
       });
     }
 
-    // Get MQTT connection details from environment
-    const brokerUrl = process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883';
-    const mqttUsername = process.env.MQTT_USERNAME;
+    // Get MQTT connection details from unified broker config (same as provisioning)
+    const { getDefaultBrokerConfig, buildBrokerUrl } = await import('../utils/mqtt-broker-config');
+    const brokerConfig = await getDefaultBrokerConfig();
+    
+    if (!brokerConfig) {
+      return res.status(500).json({
+        error: 'MQTT broker not configured',
+        message: 'Cannot trigger agent update - MQTT broker configuration missing'
+      });
+    }
+    
+    const brokerUrl = buildBrokerUrl(brokerConfig);
+    const mqttUsername = brokerConfig.username || process.env.MQTT_USERNAME;
     const mqttPassword = process.env.MQTT_PASSWORD;
 
     logger.info('Triggering agent update', {
       deviceUuid: uuid,
       version: version || 'latest',
       scheduled: !!scheduled_time,
-      force
+      force,
+      brokerSource: brokerConfig.id === 0 ? 'environment' : `database (${brokerConfig.name})`
     });
 
     // Create MQTT client

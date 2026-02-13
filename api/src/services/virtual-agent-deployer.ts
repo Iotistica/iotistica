@@ -119,12 +119,16 @@ export class VirtualAgentDeployer {
     this.defaultNamespace = process.env.VIRTUAL_AGENT_NAMESPACE || 'virtual-agents';
     this.agentImage = process.env.AGENT_IMAGE || 'iotistic/agent:latest';
     this.cloudApiUrl = process.env.CLOUD_API_URL || 'https://api1.iotistica.com:443';
-    this.mqttBrokerUrl = process.env.MQTT_BROKER_URL || 'mqtts://mqtt1.iotistica.com:8883';
+    
+    // Use unified broker config (same as device provisioning)
+    // This will be fetched async in deploy() method
+    this.mqttBrokerUrl = ''; // Populated async from database
 
     logger.info('VirtualAgentDeployer configured', {
       defaultNamespace: this.defaultNamespace,
       agentImage: this.agentImage,
-      cloudApiUrl: this.cloudApiUrl
+      cloudApiUrl: this.cloudApiUrl,
+      note: 'MQTT broker URL fetched from database at deploy time'
     });
   }
 
@@ -151,11 +155,24 @@ export class VirtualAgentDeployer {
     const name = this.sanitizeDnsName(config.deviceName); // Use device name instead of UUID
     const secretName = `${name}-prov-key`;
 
+    // Fetch MQTT broker config (same config works for all if using public URL)
+    const { getBrokerConfigForExternalDevice, buildBrokerUrl } = await import('../utils/mqtt-broker-config');
+    const brokerConfig = await getBrokerConfigForExternalDevice(config.deviceUuid);
+    
+    if (!brokerConfig) {
+      throw new Error('MQTT broker not configured - cannot deploy virtual agent');
+    }
+    
+    // Set instance variable for use in createDeployment()
+    this.mqttBrokerUrl = buildBrokerUrl(brokerConfig);
+
     logger.info('Starting virtual agent deployment', {
       deviceUuid: config.deviceUuid.substring(0, 8) + '...',
       deviceName: config.deviceName,
       namespace,
-      deploymentName: name
+      deploymentName: name,
+      mqttBroker: this.mqttBrokerUrl,
+      mqttBrokerSource: brokerConfig.id === 0 ? 'environment' : `database (${brokerConfig.name})`
     });
 
     try {

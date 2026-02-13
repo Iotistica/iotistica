@@ -1,10 +1,11 @@
 """
-Sensor profile loading from JSON configuration files
+Sensor profile loading from JSON configuration files and API
 """
 import json
 import logging
+import os
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -110,3 +111,109 @@ def get_profile(name: str) -> SensorProfile:
 def list_profiles() -> List[str]:
     """Get list of available profile names"""
     return list(PROFILES.keys())
+
+
+def load_profile_from_api(profile_name: str, api_url: str) -> SensorProfile:
+    """Load profile from API endpoint
+    
+    API returns format:
+    {
+        "ProfileName": {
+            "dataPoints": [{folder, prefix, model, count, ...}],
+            "metadata": {"description": "..."}
+        }
+    }
+    """
+    import urllib.request
+    import ssl
+    import time
+    
+    # Create SSL context that accepts self-signed certificates
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            url = f"{api_url}/api/v1/profiles/datapoints?protocol=opcua"
+            req = urllib.request.Request(url, headers={'User-Agent': 'opcua-simulator/2.0'})
+            
+            with urllib.request.urlopen(req, timeout=5, context=ssl_context) as response:
+                all_profiles = json.loads(response.read().decode())
+                
+                # Find profile (case-insensitive)
+                profile_data = None
+                for key, value in all_profiles.items():
+                    if key.lower() == profile_name.lower():
+                        profile_data = value
+                        profile_name = key  # Use actual case from API
+                        break
+                
+                if not profile_data:
+                    available = ', '.join(all_profiles.keys())
+                    raise ValueError(f"Profile '{profile_name}' not found in API. Available: {available}")
+                
+                # Extract sensors from dataPoints field
+                sensors = profile_data.get('dataPoints', [])
+                if not sensors:
+                    raise ValueError(f"Profile '{profile_name}' has no sensors/dataPoints")
+                
+                # Extract description from metadata
+                metadata = profile_data.get('metadata', {})
+                description = metadata.get('description', '')
+                
+                # Validate sensor groups
+                for sensor_group in sensors:
+                    required = {'folder', 'prefix', 'model', 'count'}
+                    missing = required - set(sensor_group.keys())
+                    if missing:
+                        raise ValueError(f"Sensor group missing fields {missing}: {sensor_group}")
+                
+                logger.info(f"Loaded profile '{profile_name}' from API ({len(sensors)} sensor groups)")
+                
+                return SensorProfile(
+                    name=profile_name,
+                    description=description,
+                    sensors=sensors
+                )
+                
+        except urllib.error.URLError as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"API attempt {attempt + 1} failed, retrying... {e}")
+                time.sleep(1)
+            else:
+                raise ValueError(f"API failed after {max_retries} attempts: {e}")
+        except Exception as e:
+            raise ValueError(f"Failed to load profile from API: {e}")
+
+
+def get_profile_with_api_fallback(name: str, api_url: Optional[str] = None) -> SensorProfile:
+    """Get profile - try API first if available, fallback to local JSON
+    
+    Args:
+        name: Profile name to load
+        api_url: API base URL (e.g., 'http://api:3002'). If None, uses OPCUA_API_URL env var.
+    
+    Returns:
+        SensorProfile instance
+    """
+    # Determine API URL
+    if api_url is None:
+        api_url = os.getenv('OPCUA_API_URL')
+    
+    # Try API first if URL is provided
+    if api_url:
+        try:
+            return load_profile_from_api(name, api_url)
+        except Exception as e:
+            logger.warning(f"Failed to load profile '{name}' from API, falling back to local: {e}")
+    
+    # Fallback to local JSON files
+    name_lower = name.lower()
+    if name_lower not in PROFILES:
+        available_local = ', '.join(PROFILES.keys())
+        raise ValueError(f"Profile '{name}' not found locally. Available: {available_local}")
+    
+    logger.info(f"Using local profile '{name}'")
+    return PROFILES[name_lower]

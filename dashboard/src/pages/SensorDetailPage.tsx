@@ -8,8 +8,8 @@ import { Activity, TrendingUp } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { SensorConnectionChart } from '@/components/sensors/SensorConnectionChart';
-import { SensorErrorChart } from '@/components/sensors/SensorErrorChart';
+import { SensorConnectionChart } from '@/components/devices/SensorConnectionChart';
+import { SensorErrorChart } from '@/components/devices/SensorErrorChart';
 
 interface SensorDetail {
   name: string;

@@ -13,29 +13,39 @@ import {
   handleAnomalyEvent,
   handleJobMessage
 } from './handlers';
+import { getDefaultBrokerConfig, buildBrokerUrl } from '../utils/mqtt-broker-config';
 
 let mqttManager: MqttManager | null = null;
 
 /**
  * Initialize MQTT service
+ * Uses same broker configuration system as device provisioning:
+ * 1. Environment variables (MQTT_BROKER_HOST/PORT/PROTOCOL)
+ * 2. Default broker from mqtt_broker_config table
  */
 export async function initializeMqtt(): Promise<MqttManager | null> {
-  const mqttBrokerUrl = process.env.MQTT_BROKER_URL || process.env.MQTT_BROKER;
+  // Use unified broker configuration (same as device provisioning)
+  const brokerConfig = await getDefaultBrokerConfig();
+  
+  if (!brokerConfig) {
+    logger.warn('MQTT broker not configured. Set MQTT_BROKER_HOST/PORT/PROTOCOL or configure default broker in database.');
+    return null;
+  }
+  
+  const mqttBrokerUrl = buildBrokerUrl(brokerConfig);
   
   logger.info('🔍 MQTT INITIALIZATION STARTING', {
-    MQTT_BROKER_URL: process.env.MQTT_BROKER_URL,
-    MQTT_BROKER: process.env.MQTT_BROKER,
-    resolvedUrl: mqttBrokerUrl,
+    source: brokerConfig.id === 0 ? 'environment' : 'database',
+    brokerName: brokerConfig.name,
+    brokerUrl: mqttBrokerUrl,
+    protocol: brokerConfig.protocol,
+    host: brokerConfig.host,
+    port: brokerConfig.port,
+    useTls: brokerConfig.use_tls,
     MQTT_CLIENT_ID: process.env.MQTT_CLIENT_ID,
-    MQTT_USERNAME: process.env.MQTT_USERNAME,
     HOSTNAME: process.env.HOSTNAME,
     hasPassword: !!process.env.MQTT_PASSWORD
   });
-  
-  if (!mqttBrokerUrl) {
-    logger.warn('MQTT broker not configured. Set MQTT_BROKER_URL to enable MQTT features.');
-    return null;
-  }
 
   // If already connected, return existing instance
   if (mqttManager && mqttManager.isConnected()) {
@@ -60,21 +70,24 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
     mqttManager = new MqttManager({
       brokerUrl: mqttBrokerUrl,
       clientId: process.env.MQTT_CLIENT_ID || `api-${process.env.HOSTNAME || 'server'}`,
-      username: process.env.MQTT_USERNAME,
+      username: brokerConfig.username || process.env.MQTT_USERNAME,
       password: process.env.MQTT_PASSWORD,
-      reconnectPeriod: parseInt(process.env.MQTT_RECONNECT_PERIOD || '5000'),
-      keepalive: parseInt(process.env.MQTT_KEEPALIVE || '60'),
-      clean: true, // Use clean session to avoid stale session state causing ECONNRESET
+      reconnectPeriod: brokerConfig.reconnect_period,
+      keepalive: brokerConfig.keep_alive,
+      clean: brokerConfig.clean_session,
       qos: (parseInt(process.env.MQTT_QOS || '1') as 0 | 1 | 2)
     });
 
     logger.info('🔌 MQTT CONFIG CREATED', {
+      source: brokerConfig.id === 0 ? 'environment' : `database (${brokerConfig.name})`,
       brokerUrl: mqttBrokerUrl,
       clientId: process.env.MQTT_CLIENT_ID || `api-${process.env.HOSTNAME || 'server'}`,
-      username: process.env.MQTT_USERNAME,
+      username: brokerConfig.username || process.env.MQTT_USERNAME,
       hasPassword: !!process.env.MQTT_PASSWORD,
-      reconnectPeriod: parseInt(process.env.MQTT_RECONNECT_PERIOD || '5000'),
-      keepalive: parseInt(process.env.MQTT_KEEPALIVE || '60')
+      reconnectPeriod: brokerConfig.reconnect_period,
+      keepalive: brokerConfig.keep_alive,
+      cleanSession: brokerConfig.clean_session,
+      useTls: brokerConfig.use_tls
     });
 
     // Initialize dictionary manager if key compaction enabled

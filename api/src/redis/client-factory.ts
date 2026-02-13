@@ -99,16 +99,23 @@ class RedisClientFactory {
     const redisOptions = {
       username: username,
       password: password,
-      tls: useTls ? { servername: tlsServerName } : undefined,
+      tls: useTls 
+        ? { 
+            servername: tlsServerName,
+            rejectUnauthorized: true, // Azure uses valid certs - always verify
+          } 
+        : undefined,
       maxRetriesPerRequest: options.maxRetriesPerRequest ?? 20,
       enableOfflineQueue: options.enableOfflineQueue ?? true,
       enableReadyCheck: true,
+      enableAutoPipelining: true, // Batch commands per event loop for better throughput
       lazyConnect: false,
       
       // Azure Redis failover can take 30-60s, so we need generous timeouts
       connectTimeout: 20000, // 20s for initial connection (Azure failover)
       commandTimeout: 10000, // 10s for hung commands during failover
       keepAlive: 30000, // TCP keepalive interval
+      maxLoadingRetryTime: 30000, // 30s to retry LOADING errors during Azure failover
       
       retryStrategy: options.retryStrategy || ((times: number) => {
         const maxAttempts = options.maxReconnectAttempts || 20; // Azure failover needs more attempts
@@ -116,16 +123,16 @@ class RedisClientFactory {
           logger.error(`Redis ${clientType} max reconnection attempts (${maxAttempts}) reached`);
           return null;
         }
-        // Exponential backoff: 1s, 2s, 3s, 4s, 5s (capped at 5s)
+        // Linear backoff capped at 5s: 1s, 2s, 3s, 4s, 5s, 5s...
         const delay = Math.min(times * 1000, 5000);
         logger.info(`⏳ Redis ${clientType} reconnecting in ${delay}ms (attempt ${times}/${maxAttempts})`);
         return delay;
       }),
       
       reconnectOnError: options.reconnectOnError || ((err: Error) => {
-        // Reconnect on common Azure Redis failover errors
+        // Reconnect on common Azure Redis failover errors (case-insensitive)
         const targetErrors = ['READONLY', 'ECONNREFUSED', 'ETIMEDOUT', 'MOVED', 'ASK', 'CLUSTERDOWN'];
-        return targetErrors.some(e => err.message.includes(e));
+        return targetErrors.some(e => err.message?.toUpperCase().includes(e));
       }),
     };
 
@@ -137,13 +144,15 @@ class RedisClientFactory {
         [{ host, port }],
         {
           redisOptions,
+          // Prevent DNS lookup issues with Azure internal addresses during MOVED/ASK redirects
+          dnsLookup: (address: string, callback: any) => callback(null, address),
           clusterRetryStrategy: (times: number) => {
             const maxAttempts = options.maxReconnectAttempts || 20; // Azure cluster failover
             if (times > maxAttempts) {
               logger.error(`Redis cluster ${clientType} max reconnection attempts (${maxAttempts}) reached`);
               return null;
             }
-            // Exponential backoff with longer delays for cluster failover
+            // Linear backoff capped at 5s: 1s, 2s, 3s, 4s, 5s, 5s...
             return Math.min(times * 1000, 5000);
           }
         }

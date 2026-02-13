@@ -799,13 +799,16 @@ export class ProvisioningService {
     // Detect virtual agents FIRST (before checking broker config)
     const isVirtual = device.device_type === 'virtual';
     
-    // Fetch broker configuration for external device (uses MQTT_BROKER_EXTERNAL_HOST if set)
+    // Fetch broker configuration (same config works for API and devices if using public URL)
     const brokerConfig = await getBrokerConfigForExternalDevice(device.uuid);
     
     if (brokerConfig) {
-      logger.info(`Using MQTT broker for external device: ${brokerConfig.name} (${buildBrokerUrl(brokerConfig)})`);
+      logger.info(`Using MQTT broker for device: ${brokerConfig.name} (${buildBrokerUrl(brokerConfig)})`, {
+        source: brokerConfig.id === 0 ? 'environment' : 'database',
+        deviceType: device.device_type
+      });
     } else {
-      logger.info('No broker config in database, using environment fallback');
+      logger.warn('No MQTT broker configured - device will not receive broker credentials');
     }
 
     // Build broker URL and config (with credentials)

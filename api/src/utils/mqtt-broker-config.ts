@@ -130,41 +130,19 @@ export async function getBrokerConfigForDevice(deviceUuid: string): Promise<Mqtt
 
 /**
  * Get broker configuration for external device provisioning
- * Uses MQTT_BROKER_EXTERNAL_HOST/PORT for devices connecting from outside K8s
+ * Uses same config as API - database URL works for both internal and external
+ * as long as it's a publicly routable address (not localhost)
  * 
- * Priority order:
- * 1. Environment variables with external host override (MQTT_BROKER_EXTERNAL_HOST)
- * 2. Environment MQTT_BROKER_TYPE preference ('local' or 'cloud')
- * 3. Device-specific broker from database
- * 4. Default broker from database
+ * Priority:
+ * 1. MQTT_BROKER_URL env (for dev override)
+ * 2. Database default broker (production)
  * 
  * @param deviceUuid - Device UUID
- * @returns Broker configuration with external address or null if not found
+ * @returns Broker configuration or null if not found
  */
 export async function getBrokerConfigForExternalDevice(deviceUuid: string): Promise<MqttBrokerConfig | null> {
-  try {
-    // Database-only provisioning - use default broker only
-    const result = await query(
-      `SELECT * FROM mqtt_broker_config 
-       WHERE is_default = true
-       LIMIT 1`
-    );
-    
-    if (result.rows.length > 0) {
-      console.log(`[MQTT Config] Using default broker for external device ${deviceUuid}:`, {
-        name: result.rows[0].name,
-        host: result.rows[0].host,
-        port: result.rows[0].port
-      });
-      return result.rows[0];
-    }
-    
-    console.log(`[MQTT Config] No default broker found for external device ${deviceUuid}`);
-    return null;
-  } catch (error) {
-    console.error(`[MQTT Config] Error fetching external broker config for device ${deviceUuid}:`, error);
-    return null;
-  }
+  // Use same config as API - public URLs work for everyone
+  return getDefaultBrokerConfig();
 }
 
 /**
@@ -192,36 +170,49 @@ function createConfigFromEnv(): MqttBrokerConfig {
 }
 
 /**
- * Create broker configuration from environment variables - EXTERNAL variant
- * This uses MQTT_BROKER_EXTERNAL_HOST/PORT for device connections outside K8s
- * Falls back to internal host if external not configured
- */
-function createConfigFromEnvExternal(): MqttBrokerConfig {
-  const config = createConfigFromEnv();
-  
-  // Use external host/port if configured (for devices connecting from outside K8s)
-  if (process.env.MQTT_BROKER_EXTERNAL_HOST) {
-    config.host = process.env.MQTT_BROKER_EXTERNAL_HOST;
-  }
-  if (process.env.MQTT_BROKER_EXTERNAL_PORT) {
-    config.port = parseInt(process.env.MQTT_BROKER_EXTERNAL_PORT, 10);
-  }
-  
-  return config;
-}
-
-/**
  * Get the default broker configuration
  * 
  * Priority order:
- * 1. Environment variables (if all required vars present)
- * 2. Default broker from mqtt_broker_config table
+ * 1. MQTT_BROKER_URL environment variable (full URL)
+ * 2. MQTT_BROKER_HOST/PORT/PROTOCOL environment variables (individual)
+ * 3. Default broker from mqtt_broker_config table
  * 
  * @returns Default broker configuration or null if not found
  */
 export async function getDefaultBrokerConfig(): Promise<MqttBrokerConfig | null> {
   try {
-    // Priority 1: Environment override
+    // Priority 1: MQTT_BROKER_URL (full URL)
+    const brokerUrl = process.env.MQTT_BROKER_URL;
+    if (brokerUrl) {
+      try {
+        const parsedUrl = new URL(brokerUrl);
+        const config = {
+          id: 0, // Virtual config from environment
+          name: 'Environment (MQTT_BROKER_URL)',
+          protocol: parsedUrl.protocol.replace(':', ''),
+          host: parsedUrl.hostname,
+          port: parseInt(parsedUrl.port || (parsedUrl.protocol === 'mqtts:' ? '8883' : '1883'), 10),
+          username: parsedUrl.username || process.env.MQTT_USERNAME || null,
+          use_tls: parsedUrl.protocol === 'mqtts:',
+          ca_cert: process.env.MQTT_BROKER_CA_CERT || null,
+          client_cert: process.env.MQTT_BROKER_CLIENT_CERT || null,
+          verify_certificate: process.env.MQTT_TLS_REJECT_UNAUTHORIZED !== 'false',
+          client_id_prefix: process.env.MQTT_CLIENT_ID_PREFIX || 'Iotistic',
+          keep_alive: parseInt(process.env.MQTT_KEEP_ALIVE || '60', 10),
+          clean_session: process.env.MQTT_CLEAN_SESSION !== 'false',
+          reconnect_period: parseInt(process.env.MQTT_RECONNECT_PERIOD || '1000', 10),
+          connect_timeout: parseInt(process.env.MQTT_CONNECT_TIMEOUT || '30000', 10),
+          broker_type: 'cloud'
+        };
+        console.log(`[MQTT Config] Using MQTT_BROKER_URL: ${config.protocol}://${config.host}:${config.port}`);
+        return config;
+      } catch (error) {
+        console.error('[MQTT Config] Failed to parse MQTT_BROKER_URL:', error);
+        // Fall through to other methods
+      }
+    }
+    
+    // Priority 2: Individual environment variables
     const envHost = process.env.MQTT_BROKER_HOST;
     const envPort = process.env.MQTT_BROKER_PORT;
     const envProtocol = process.env.MQTT_BROKER_PROTOCOL;
@@ -231,7 +222,7 @@ export async function getDefaultBrokerConfig(): Promise<MqttBrokerConfig | null>
       return createConfigFromEnv();
     }
     
-    // Priority 2: Default broker from database
+    // Priority 3: Default broker from database
     const result = await query(
       `SELECT * FROM mqtt_broker_config 
        WHERE is_default = true AND is_active = true 
