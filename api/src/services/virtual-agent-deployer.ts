@@ -662,24 +662,32 @@ export class VirtualAgentDeployer {
   private buildSimulatorSidecars(config: VirtualAgentConfig): any[] {
     const sidecars: any[] = [];
     
-    // Check if device has OPC UA endpoints
-    const hasOPCUA = config.endpoints?.some(ep => ep.protocol === 'opcua');
+    // Get all OPC UA endpoints
+    const opcuaEndpoints = config.endpoints?.filter(ep => ep.protocol === 'opcua') || [];
     
-    if (hasOPCUA) {
-      const opcuaProfile = this.getOPCUAProfileForDevice(config);
+    // Create a separate OPC UA simulator container for each endpoint
+    opcuaEndpoints.forEach((endpoint, index) => {
+      const port = 4840 + index; // Assign unique ports: 4840, 4841, 4842, etc.
+      const webPort = 5002 + index; // Unique web ports: 5002, 5003, 5004, etc.
+      const containerName = `opcua-sim-${port}`;
+      
+      // Get profile from endpoint connection or config metadata
+      const opcuaProfile = (endpoint.connection as any)?.profile || 
+                          config.metadata?.opcuaProfile || 
+                          this.getOPCUAProfileForDevice(config);
       
       sidecars.push({
-        name: 'opcua-simulator',
+        name: containerName,
         image: process.env.OPCUA_SIMULATOR_IMAGE || 'iotistic/opcua-simulator:latest',
         imagePullPolicy: process.env.OPCUA_SIMULATOR_PULL_POLICY as any || 'Always',
         env: [
+          { name: 'PORT', value: port.toString() }, // CRITICAL: Pass unique port
           { name: 'PROFILE', value: opcuaProfile },
-          { name: 'OPCUA_API_URL', value: this.cloudApiUrl },
-          { name: 'WEB_PORT', value: '5002' }
+          { name: 'API_URL', value: this.cloudApiUrl },
+          { name: 'LOG_LEVEL', value: process.env.LOG_LEVEL || 'INFO' }
         ],
         ports: [
-          { containerPort: 4840, protocol: 'TCP', name: 'opcua' },
-          { containerPort: 5002, protocol: 'TCP', name: 'web' }
+          { containerPort: port, protocol: 'TCP', name: 'opcua' }
         ],
         securityContext: {
           allowPrivilegeEscalation: false,
@@ -702,9 +710,12 @@ export class VirtualAgentDeployer {
       
       logger.info('Added OPC UA simulator sidecar', { 
         deviceUuid: config.deviceUuid,
-        profile: opcuaProfile 
+        containerName,
+        port,
+        profile: opcuaProfile,
+        endpointIndex: index
       });
-    }
+    });
     
     // Future: Add Modbus, BACnet, etc. simulators
     

@@ -195,6 +195,25 @@ export class DeviceSensorSyncService {
             ? 'deployed'
             : (existing?.deployment_status || 'deployed');
           
+          // CRITICAL: Preserve deployment metadata fields during reconciliation
+          // Virtual devices have metadata like {sidecar: true, profile: "...", image: "..."} 
+          // that must not be overwritten by agent reconciliation (agents don't know about these fields)
+          let mergedMetadata = endpoint.metadata || {};
+          
+          if (isReconciliation && existing?.metadata) {
+            const existingMeta = typeof existing.metadata === 'string' 
+              ? JSON.parse(existing.metadata) 
+              : existing.metadata;
+            
+            // During reconciliation, preserve deployment metadata fields
+            const preservedFields = ['sidecar', 'profile', 'image', 'containerConfig', 'createdAt', 'createdBy'];
+            preservedFields.forEach(field => {
+              if (existingMeta[field] !== undefined) {
+                mergedMetadata[field] = existingMeta[field];
+              }
+            });
+          }
+          
           await query(
             `UPDATE device_sensors SET
               name = $1,
@@ -218,7 +237,7 @@ export class DeviceSensorSyncService {
               endpoint.pollInterval,
               JSON.stringify(endpoint.connection),
               JSON.stringify(endpoint.dataPoints),
-              JSON.stringify(endpoint.metadata || {}),
+              JSON.stringify(mergedMetadata),
               userId || 'system',
               configVersion,
               deploymentStatus,
@@ -242,6 +261,24 @@ export class DeviceSensorSyncService {
           
           // Reuse UUID if name already exists, otherwise generate a new one
           const sensorUuid = endpoint.uuid || existingByNameMatch?.uuid || uuidv4();
+          
+          // CRITICAL: Preserve deployment metadata fields during reconciliation
+          // If device exists by name, merge metadata to preserve sidecar/profile/image fields
+          let mergedMetadata = endpoint.metadata || {};
+          
+          if (isReconciliation && existingByNameMatch?.metadata) {
+            const existingMeta = typeof existingByNameMatch.metadata === 'string'
+              ? JSON.parse(existingByNameMatch.metadata)
+              : existingByNameMatch.metadata;
+            
+            // During reconciliation, preserve deployment metadata fields
+            const preservedFields = ['sidecar', 'profile', 'image', 'containerConfig', 'createdAt', 'createdBy'];
+            preservedFields.forEach(field => {
+              if (existingMeta[field] !== undefined) {
+                mergedMetadata[field] = existingMeta[field];
+              }
+            });
+          }
           
           await query(
             `INSERT INTO device_sensors (
@@ -273,7 +310,7 @@ export class DeviceSensorSyncService {
               endpoint.pollInterval,
               JSON.stringify(endpoint.connection),
               JSON.stringify(endpoint.dataPoints),
-              JSON.stringify(endpoint.metadata || {}),
+              JSON.stringify(mergedMetadata),
               userId || 'system',
               userId || 'system',
               configVersion,

@@ -334,6 +334,10 @@ export class VirtualDeviceManager {
         const match = vd.connection.endpointUrl.match(/:(\d+)$/);
         port = match ? parseInt(match[1], 10) : 4840; // Fallback to default OPC UA port
       } else {
+        logger.error('Cannot extract port from connection', {
+          virtualDeviceUuid: vd.uuid,
+          connection: vd.connection
+        });
         throw new Error(`Cannot extract port from connection for device ${vd.uuid}`);
       }
       
@@ -414,7 +418,8 @@ export class VirtualDeviceManager {
         deviceUuid,
         deployment: helm_release_name,
         namespace: k8s_namespace,
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
       });
       throw error;
     }

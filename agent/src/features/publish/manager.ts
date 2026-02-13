@@ -1518,10 +1518,11 @@ export class PublishManager extends EventEmitter {
         `Fast reconnect for endpoint '${this.getSensorName()}' in ${delay}ms (attempt ${this.stats.reconnectAttempts + 1})`
       );
     } else {
-      // After initial attempts, use normal poll interval
-      delay = this.config.addrPollSec * 1000;
+      // After initial attempts, use normal poll interval (default 30s if not configured)
+      const pollInterval = this.config.addrPollSec || 30;
+      delay = pollInterval * 1000;
       this.logger?.debug(
-        `Scheduling reconnect for endpoint '${this.getSensorName()}' in ${this.config.addrPollSec}s`
+        `Scheduling reconnect for endpoint '${this.getSensorName()}' in ${pollInterval}s`
       );
     }
     
