@@ -123,8 +123,12 @@ class NodeManager:
             
             # Create sensor nodes in the deepest folder
             for i in range(count):
-                node_name = f"{prefix}_{i+1}"
-                node = await current_folder.add_variable(2, node_name, 0.0)
+                node_name = f"{prefix}{i+1}"
+                # Create string-based NodeID: ns=2;s=Production/Sensor1
+                # This format is required for agent validation
+                node_id_string = f"{folder_path[-1]}/{node_name}"
+                node_id = ua.NodeId(node_id_string, 2)
+                node = await current_folder.add_variable(node_id, node_name, 0.0)
                 await node.set_writable()
                 
                 # Set Description attribute with unit information (if available)

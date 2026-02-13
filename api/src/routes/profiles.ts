@@ -126,15 +126,32 @@ publicRouter.post('/', async (req, res) => {
       });
     }
 
-    // Basic data point validation
-    for (const dp of data_points) {
-      if (!dp.name || !dp.address || !dp.type || !dp.dataType) {
-        return res.status(400).json({
-          error: 'Invalid data point',
-          message: 'Each data point must have: name, address, type, dataType'
-        });
+    // Protocol-specific data point validation
+    if (protocol === 'modbus' && data_points.length > 0) {
+      // Modbus requires: name, address, type, dataType
+      for (const dp of data_points) {
+        if (!dp.name || dp.address === undefined || !dp.type || !dp.dataType) {
+          return res.status(400).json({
+            error: 'Invalid data point',
+            message: 'Each Modbus data point must have: name, address, type, dataType'
+          });
+        }
+      }
+    } else if (protocol === 'opcua' && data_points.length > 0) {
+      // OPC UA sensor groups: folder, prefix, model, count, unit, config
+      // OR manual nodes: name, nodeId
+      for (const dp of data_points) {
+        const isSensorGroup = dp.folder && dp.prefix && dp.model && dp.count;
+        const isNode = dp.name && dp.nodeId;
+        if (!isSensorGroup && !isNode) {
+          return res.status(400).json({
+            error: 'Invalid data point',
+            message: 'Each OPC UA data point must be either a sensor group (folder, prefix, model, count, unit, config) or node (name, nodeId)'
+          });
+        }
       }
     }
+    // Other protocols: no validation (auto-discovery or custom structure)
 
     const profile = await ProfileConfigModel.upsert(
       profile_name,
@@ -253,15 +270,32 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Basic data point validation
-    for (const dp of data_points) {
-      if (!dp.name || !dp.address || !dp.type || !dp.dataType) {
-        return res.status(400).json({
-          error: 'Invalid data point',
-          message: 'Each data point must have: name, address, type, dataType'
-        });
+    // Protocol-specific data point validation
+    if (protocol === 'modbus' && data_points.length > 0) {
+      // Modbus requires: name, address, type, dataType
+      for (const dp of data_points) {
+        if (!dp.name || dp.address === undefined || !dp.type || !dp.dataType) {
+          return res.status(400).json({
+            error: 'Invalid data point',
+            message: 'Each Modbus data point must have: name, address, type, dataType'
+          });
+        }
+      }
+    } else if (protocol === 'opcua' && data_points.length > 0) {
+      // OPC UA sensor groups: folder, prefix, model, count, unit, config
+      // OR manual nodes: name, nodeId
+      for (const dp of data_points) {
+        const isSensorGroup = dp.folder && dp.prefix && dp.model && dp.count;
+        const isNode = dp.name && dp.nodeId;
+        if (!isSensorGroup && !isNode) {
+          return res.status(400).json({
+            error: 'Invalid data point',
+            message: 'Each OPC UA data point must be either a sensor group (folder, prefix, model, count, unit, config) or node (name, nodeId)'
+          });
+        }
       }
     }
+    // Other protocols: no validation (auto-discovery or custom structure)
 
     const profile = await ProfileConfigModel.upsert(
       profile_name,

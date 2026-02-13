@@ -32,18 +32,23 @@ export interface VirtualDeviceSensor {
   name: string;
   protocol: string;
   connection: {
-    host: string;
-    port: number;
-    type: string; // e.g., "tcp" for Modbus
-    timeout: number; // Connection timeout in ms
-    slaveRange?: { // Modbus slave range (optional)
+    // Modbus format
+    host?: string;
+    port?: number;
+    type?: string;
+    timeout?: number;
+    slaveRange?: {
       start: number;
       end: number;
     };
+    // OPC UA format
+    endpointUrl?: string;
+    securityMode?: string;
+    securityPolicy?: string;
   };
-  data_points?: any[]; // Data points from profile
+  data_points?: any[];
   metadata: {
-    sidecar: boolean; // Indicates this is a sidecar device
+    sidecar: boolean;
     profile: string;
     image: string;
     containerConfig: {
@@ -118,55 +123,92 @@ export class VirtualDeviceManager {
 
     // 3. Auto-assign port
     const existingDevices = await this.getVirtualDevices(config.deviceUuid);
-    const usedPorts = existingDevices.map(d => d.connection.port);
+    
+    // Extract ports from both formats (Modbus uses 'port', OPC UA uses 'endpointUrl')
+    const usedPorts = existingDevices.map(d => {
+      if (d.connection.port) {
+        // Modbus format: { host, port, type }
+        return d.connection.port;
+      } else if (d.connection.endpointUrl) {
+        // OPC UA format: { endpointUrl: "opc.tcp://localhost:4840" }
+        const match = d.connection.endpointUrl.match(/:(\d+)$/);
+        return match ? parseInt(match[1], 10) : null;
+      }
+      return null;
+    }).filter((p): p is number => p !== null);
+    
     const nextPort = this.findNextAvailablePort(usedPorts, config.protocol);
 
     // 4. Build container config
     const image = config.image || `iotistic/${config.protocol}-simulator:latest`;
     const containerEnv = this.buildContainerEnv(config.protocol, config.profile, nextPort, config.slaveCount);
 
-    // 5. Build connection object
+    // 5. Build connection object (protocol-specific format)
     const slaveCount = config.slaveCount || 1;
-    const connectionObj: any = {
-      host: 'localhost',
-      port: nextPort,
-      type: 'tcp',
-      timeout: 5000
-    };
-
-    // Add slaveRange if specified (Modbus only)
-    if (config.protocol === 'modbus' && slaveCount > 0) {
-      connectionObj.slaveRange = {
-        start: 1,
-        end: slaveCount
+    let connectionObj: any;
+    
+    if (config.protocol === 'opcua') {
+      // OPC UA: Use endpointUrl format
+      connectionObj = {
+        endpointUrl: `opc.tcp://localhost:${nextPort}`,
+        securityMode: 'None',
+        securityPolicy: 'None'
+      };
+    } else if (config.protocol === 'modbus') {
+      // Modbus: Use host/port format with slaveRange
+      connectionObj = {
+        host: 'localhost',
+        port: nextPort,
+        type: 'tcp',
+        timeout: 5000
+      };
+      
+      if (slaveCount > 0) {
+        connectionObj.slaveRange = {
+          start: 1,
+          end: slaveCount
+        };
+      }
+    } else {
+      // Default format for other protocols
+      connectionObj = {
+        host: 'localhost',
+        port: nextPort,
+        type: 'tcp',
+        timeout: 5000
       };
     }
 
     // 6. Use standard addEndpoint flow (dual-write: table + config)
     // This ensures virtual devices appear in target state like regular devices
+    
+    // Base config with all data (for database)
     const sensorConfig = {
       name: config.name,
       protocol: config.protocol,
       enabled: true,
       pollInterval: 5000,
       connection: connectionObj,
-      dataPoints: dataPoints,
-      metadata: {
-        sidecar: true, // Flag for K8s deployment (not for filtering)
-        profile: config.profile,
-        image,
-        containerConfig: {
-          env: containerEnv
-        },
-        createdAt: new Date().toISOString(),
-        createdBy: 'virtual-device-manager'
-      }
+      dataPoints: config.protocol === 'opcua' ? [] : dataPoints // OPC UA uses auto-discovery, Modbus needs register mappings
+    };
+
+    // K8s deployment metadata: Stored in database only, not in target state
+    const deploymentMetadata = {
+      sidecar: true,
+      profile: config.profile,
+      image,
+      containerConfig: {
+        env: containerEnv
+      },
+      createdAt: new Date().toISOString(),
+      createdBy: 'virtual-device-manager'
     };
 
     const result = await deviceSensorSync.addEndpoint(
       config.deviceUuid,
       sensorConfig,
-      'virtual-device-manager'
+      'virtual-device-manager',
+      deploymentMetadata // Pass separately so it only goes to DB, not target state
     );
 
     logger.info('Virtual device added via standard flow', {
@@ -282,7 +324,20 @@ export class VirtualDeviceManager {
     
     // Build sidecar container specs
     const sidecarContainers = virtualDevices.map(vd => {
-      const containerName = `${vd.protocol}-sim-${vd.connection.port}`;
+      // Extract port from connection (handles both Modbus and OPC UA formats)
+      let port: number;
+      if (vd.connection.port) {
+        // Modbus format: { host, port, type }
+        port = vd.connection.port;
+      } else if (vd.connection.endpointUrl) {
+        // OPC UA format: { endpointUrl: "opc.tcp://localhost:4840" }
+        const match = vd.connection.endpointUrl.match(/:(\d+)$/);
+        port = match ? parseInt(match[1], 10) : 4840; // Fallback to default OPC UA port
+      } else {
+        throw new Error(`Cannot extract port from connection for device ${vd.uuid}`);
+      }
+      
+      const containerName = `${vd.protocol}-sim-${port}`;
       const envArray = Object.entries(vd.metadata.containerConfig.env).map(([name, value]) => ({
         name,
         value: String(value)
@@ -292,7 +347,7 @@ export class VirtualDeviceManager {
         name: containerName,
         image: vd.metadata.image,
         env: envArray,
-        ports: [{ containerPort: vd.connection.port }],
+        ports: [{ containerPort: port }],
         resources: {
           limits: {
             cpu: '500m',

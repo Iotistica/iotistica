@@ -58,6 +58,46 @@ export class DeviceSensorSyncService {
   }
 
   /**
+   * Expand OPC UA sensor groups into individual nodes
+   * Converts: { folder, prefix, model, count, unit } → [ {name, nodeId} ]
+   * 
+   * CRITICAL: Must match OPC UA simulator nodeId format exactly
+   * Simulator creates: prefix_1, prefix_2, etc. (NO model name in node name)
+   * Example: Sensor_1, Sensor_2 (folder already indicates "Temperature")
+   */
+  private expandOPCUASensorGroups(sensorGroups: any[]): OPCUADataPoint[] {
+    const nodes: OPCUADataPoint[] = [];
+    
+    for (const group of sensorGroups) {
+      // Check if it's a sensor group (has count/model) or manual node (has nodeId)
+      if (group.nodeId) {
+        // Already an individual node - pass through
+        nodes.push(group);
+        continue;
+      }
+      
+      // Expand sensor group - MUST MATCH simulator pattern
+      const { folder, prefix, model, count, unit, config } = group;
+      
+      for (let i = 1; i <= count; i++) {
+        // Match simulator pattern: prefix_index (NO model name!)
+        // Simulator: f"{prefix}_{i+1}" → "Sensor_1", "Sensor_2", etc.
+        const sensorName = `${prefix}_${i}`;
+        const nodeId = `ns=2;s=${folder}/${sensorName}`;
+        
+        nodes.push({
+          name: sensorName,
+          nodeId: nodeId,
+          unit: unit,
+          dataType: 'number'
+        });
+      }
+    }
+    
+    return nodes;
+  }
+
+  /**
    * Mark endpoints as pending deployment
    * Called when user clicks Deploy button (POST /deploy)
    * Transitions 'draft' → 'pending', updates already 'pending' devices
@@ -841,7 +881,8 @@ export class DeviceSensorSyncService {
   async addEndpoint(
     deviceUuid: string,
     sensorConfig: EndpointDeviceConfig,
-    userId?: string
+    userId?: string,
+    deploymentMetadata?: any // K8s/deployment metadata - stored in DB only, not in target state
   ): Promise<any> {
     logger.info(`Adding endpoint "${sensorConfig.name}" for device ${deviceUuid.substring(0, 8)}...`);
 
@@ -896,7 +937,16 @@ export class DeviceSensorSyncService {
       }
 
       // 4. Add sensor to config (SOURCE OF TRUTH)
-      validExistingDevices.push(sensorConfig);
+      // For OPC UA: Remove dataPoints - agent discovers nodes from OPC UA server
+      // For Modbus: Keep dataPoints with register mappings (required)
+      let configForTargetState: any = sensorConfig;
+      
+      if (sensorConfig.protocol === 'opcua') {
+        const { dataPoints, ...opcuaConfig } = sensorConfig as any;
+        configForTargetState = opcuaConfig; // Remove dataPoints field entirely
+      }
+      
+      validExistingDevices.push(configForTargetState);
       config.endpoints = validExistingDevices;
 
       // 5. Save updated target state
@@ -914,8 +964,13 @@ export class DeviceSensorSyncService {
 
       const newVersion = updateResult.rows[0].version;
 
-      // 6. Insert ONLY the new sensor into table (don't touch existing sensors)
-      await this.syncConfigToTable(deviceUuid, [sensorConfig], newVersion, userId);
+      // 6. Insert ONLY the new sensor into table (with full dataPoints and deployment metadata)
+      // Database gets complete record with dataPoints (even for OPC UA) and deployment metadata
+      const sensorWithMetadata = deploymentMetadata 
+        ? { ...sensorConfig, metadata: deploymentMetadata }
+        : sensorConfig;
+      
+      await this.syncConfigToTable(deviceUuid, [sensorWithMetadata], newVersion, userId);
 
       // 7. Publish event
       await eventPublisher.publish(

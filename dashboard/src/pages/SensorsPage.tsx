@@ -91,6 +91,12 @@ interface Profile {
   profile_name: string;
   protocol: string;
   data_points: any[];
+  metadata?: {
+    description?: string;
+    [key: string]: any;
+  };
+  created_at?: string;
+  updated_at?: string;
 }
 
 export const SensorsPage: React.FC<SensorsPageProps> = ({ 
@@ -171,12 +177,30 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       }
     ],
     opcua: [
-      // Leave empty [] for auto-discovery - agent will browse OPC UA node tree
-      // Or specify nodes manually to limit scope:
-      // {
-      //   name: 'example_node',
-      //   nodeId: 'ns=2;s=Example'
-      // }
+      {
+        folder: 'Production',
+        prefix: 'Sensor_',
+        model: 'temperature',
+        count: 3,
+        unit: '°C',
+        config: { min: -50, max: 150 }
+      },
+      {
+        folder: 'Production',
+        prefix: 'Sensor_',
+        model: 'pressure',
+        count: 2,
+        unit: 'mbar',
+        config: { min: 0, max: 2000 }
+      },
+      {
+        folder: 'Production',
+        prefix: 'Sensor_',
+        model: 'flow',
+        count: 2,
+        unit: 'L/min',
+        config: { min: 0, max: 1000 }
+      }
     ],
     mqtt: [
       {
@@ -1290,7 +1314,9 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                   <SelectContent>
                     {profiles.map((profile) => (
                       <SelectItem key={profile.profile_name} value={profile.profile_name}>
-                        {profile.profile_name} ({profile.data_points?.length || 0} data points)
+                        {profile.profile_name}
+                        {profile.metadata?.description && ` - ${profile.metadata.description}`}
+                        {` (${profile.data_points?.length || 0} points)`}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1450,9 +1476,10 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                 <p className="text-xs text-muted-foreground">
                   {['opcua', 'snmp'].includes(profileFormData.protocol) ? (
                     <>
-                      <strong>Auto-Discovery:</strong> Leave data points empty [] for {profileFormData.protocol.toUpperCase()} - 
-                      the agent will automatically discover available nodes/variables. 
-                      Or specify nodes manually to limit discovery scope.
+                      <strong>OPC UA Sensor Groups:</strong> Use template format (folder, prefix, model, count, unit, config) to generate multiple sensors. 
+                      Models: temperature, pressure, flow, level, vibration, power. 
+                      <strong>Manual Nodes:</strong> Specify individual nodes (name, nodeId). 
+                      <strong>Auto-Discovery:</strong> Leave empty [] to discover all nodes automatically.
                     </>
                   ) : (
                     <>
@@ -1476,9 +1503,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                     )}
                     {profileFormData.protocol === 'opcua' && (
                       <>
+                        <li><strong>Sensor Groups (Recommended):</strong> folder, prefix, model, count, unit, config</li>
+                        <li>Example: {"{"}"folder": "Production", "prefix": "Sensor_", "model": "temperature", "count": 3, "unit": "°C", "config": {"{"}"min": -50, "max": 150{"}"}{"}"}</li>
+                        <li>Models: temperature, pressure, flow, level, vibration, power</li>
+                        <li><strong>Manual Nodes:</strong> name, nodeId (e.g., {"{"}"name": "temperature", "nodeId": "ns=2;s=Temp"{"}"}</li>
                         <li><strong>Auto-Discovery:</strong> Leave empty [] to browse entire OPC UA node tree</li>
-                        <li>Manual: name, nodeId (e.g., {"{"}"name": "temperature", "nodeId": "ns=2;s=Temp"{"}"}</li>
-                        <li>Agent recursively browses from Objects folder, filters Variables (NodeClass=2)</li>
                       </>
                     )}
                     {profileFormData.protocol === 'mqtt' && (
