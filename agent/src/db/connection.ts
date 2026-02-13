@@ -333,6 +333,19 @@ export async function gracefulShutdown(signal?: string): Promise<void> {
 		// This prevents "aborted" errors for queries in-flight during shutdown
 		await new Promise(resolve => setTimeout(resolve, 200));
 		
+		// CRITICAL: Checkpoint WAL before destroying database to prevent data loss
+		// During pod restarts, WAL file may be lost/corrupted if not flushed to main DB
+		// TRUNCATE mode ensures all WAL changes are written to main DB file
+		try {
+			await db.raw('PRAGMA wal_checkpoint(TRUNCATE);');
+			if (signal) {
+				console.log(`[${signal}] WAL checkpoint completed - data flushed to main DB`);
+			}
+		} catch (checkpointErr: any) {
+			console.error(`WAL checkpoint failed during shutdown:`, checkpointErr.message);
+			// Continue with shutdown even if checkpoint fails
+		}
+		
 		await db.destroy();
 		if (signal) {
 			console.log(`[${signal}] Database connection closed`);
