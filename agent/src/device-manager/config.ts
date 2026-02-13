@@ -192,6 +192,14 @@ export class ConfigManager extends EventEmitter {
 	}
 
 	/**
+	 * Load target configuration without triggering reconciliation
+	 * Used during initialization to populate targetConfig from database
+	 */
+	public loadTarget(config: DeviceConfig): void {
+		this.targetConfig = _.cloneDeep(config);
+	}
+
+	/**
 	 * Set target configuration
 	 */
 	public async setTarget(config: DeviceConfig): Promise<void> {

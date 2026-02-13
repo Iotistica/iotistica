@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2026-02-13 10:23:03
+# Generated: 2026-02-13 10:37:54
 # Agents: 1 to 1
 # Ports: 48481 to 48481
 
@@ -23,13 +23,13 @@ services:
       - agent-1-data:/app/data
       - ./certs/ca.crt:/app/certs/ca.crt:ro
     environment:
-      - LOG_LEVEL=debug
+    #   - LOG_LEVEL=debug
       - DEVICE_API_PORT=48481
       - CLOUD_API_ENDPOINT=https://localhost:3443
       - NODE_ENV=development
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=334360042eddd72fae5abf03343e0b21132d1497459bb6ba1e900d1a31b2b419
+      - PROVISIONING_KEY=2561de83c6159d06431a3de431539cfafde2eaa2b027ef5e078352e6f4644b93
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)
