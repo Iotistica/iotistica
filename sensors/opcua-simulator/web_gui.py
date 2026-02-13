@@ -112,7 +112,7 @@ def get_status():
         "sensor_count": sensor_count,
         "sensor_types": sensor_types,
         "available_profiles": list(profiles.keys()),
-        "endpoint": "opc.tcp://localhost:4840/iotistic/simulator"
+        "endpoint": "opc.tcp://localhost:4840"
     })
 
 @app.route('/api/profiles', methods=['GET'])

@@ -98,11 +98,15 @@ router.post('/devices/:uuid/sensors', async (req, res) => {
       });
     }
 
-    if (!sensorConfig.dataPoints || sensorConfig.dataPoints.length === 0) {
-      return res.status(400).json({
-        error: 'Validation failed',
-        message: 'At least one data point is required'
-      });
+    // OPC UA uses auto-discovery, dataPoints can be empty
+    // Other protocols (e.g., Modbus) require at least one data point
+    if (sensorConfig.protocol !== 'opcua') {
+      if (!sensorConfig.dataPoints || sensorConfig.dataPoints.length === 0) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          message: 'At least one data point is required'
+        });
+      }
     }
 
     // If validation-only mode, return validated config without persisting
@@ -194,7 +198,17 @@ router.put('/devices/:uuid/sensors/:name', async (req, res) => {
         });
       }
 
-      if (updates.dataPoints && (!Array.isArray(updates.dataPoints) || updates.dataPoints.length === 0)) {
+      // OPC UA uses auto-discovery, dataPoints can be empty
+      // Other protocols require at least one data point
+      if (updates.dataPoints && !Array.isArray(updates.dataPoints)) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          message: 'Data points must be an array'
+        });
+      }
+      
+      // Only enforce non-empty dataPoints for non-OPC UA protocols
+      if (updates.protocol && updates.protocol !== 'opcua' && updates.dataPoints && updates.dataPoints.length === 0) {
         return res.status(400).json({
           error: 'Validation failed',
           message: 'Data points must be a non-empty array'

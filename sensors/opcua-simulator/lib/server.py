@@ -20,7 +20,7 @@ class OPCUASimulator:
     
     def __init__(
         self,
-        endpoint: str = 'opc.tcp://0.0.0.0:4840/iotistic/simulator',
+        endpoint: str = 'opc.tcp://0.0.0.0:4840',
         profile_name: str = 'factory',
         update_interval: float = 1.0
     ):
@@ -138,7 +138,7 @@ async def main():
     
     # Parse port from environment variable or default to 4840
     port = int(os.getenv('PORT', '4840'))
-    endpoint = f'opc.tcp://0.0.0.0:{port}/iotistic/simulator'
+    endpoint = f'opc.tcp://0.0.0.0:{port}'
     
     # Check for state file override (set by web GUI)
     STATE_FILE = "/tmp/opcua_simulator_state.json"

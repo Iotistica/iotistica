@@ -130,10 +130,8 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
         return;
       }
 
-      if (opcuaDataPoints.length === 0) {
-        setError('Please add at least one node');
-        return;
-      }
+      // OPC UA uses auto-discovery, nodes are optional
+      // User can add nodes manually or let discovery populate them
 
       // Combine config with data points
       const finalConfig: OPCUADeviceConfig = {
@@ -180,9 +178,11 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
     if (!device) return false;
     
     if (device.protocol === 'modbus') {
+      // Modbus requires at least one register mapping
       return modbusFormValid && modbusDataPoints.length > 0;
     } else if (device.protocol === 'opcua') {
-      return opcuaFormValid && opcuaDataPoints.length > 0;
+      // OPC UA uses auto-discovery, nodes are optional
+      return opcuaFormValid;
     }
     return false;
   };
