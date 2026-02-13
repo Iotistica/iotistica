@@ -77,9 +77,19 @@ publicRouter.get('/datapoints', async (req, res) => {
     // Transform to dataPoints.json format
     const dataPointsFormat: Record<string, any> = {};
     for (const profile of profiles) {
+      // Parse data_points if it's a JSON string
+      const dataPoints = typeof profile.data_points === 'string' 
+        ? JSON.parse(profile.data_points) 
+        : profile.data_points;
+      
+      // Parse metadata if it's a JSON string
+      const metadata = profile.metadata 
+        ? (typeof profile.metadata === 'string' ? JSON.parse(profile.metadata) : profile.metadata)
+        : undefined;
+      
       dataPointsFormat[profile.profile_name] = {
-        dataPoints: profile.data_points,
-        ...(profile.metadata && { metadata: profile.metadata })
+        dataPoints: dataPoints,
+        ...(metadata && { metadata })
       };
     }
 

@@ -471,9 +471,8 @@ export class VirtualDeviceManager {
       env.MODBUS_API_URL = apiUrl;
       env.GUI_PORT = String(port + 1000); // Web GUI on offset port (e.g., 1502)
     } else if (protocol === 'opcua') {
-      env.OPCUA_PROFILE = profile;
+      env.PROFILE = profile;
       env.OPCUA_PORT = String(port);
-      env.OPCUA_ENDPOINT_COUNT = String(slaveCount || 10);
       env.OPCUA_API_URL = apiUrl;
     }
 

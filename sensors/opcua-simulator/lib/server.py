@@ -136,6 +136,10 @@ async def main():
     # Parse profile name from environment variable, command line, or default to 'factory'
     profile_name = os.getenv('PROFILE') or (sys.argv[1] if len(sys.argv) > 1 else 'factory')
     
+    # Parse port from environment variable or default to 4840
+    port = int(os.getenv('OPCUA_PORT', '4840'))
+    endpoint = f'opc.tcp://0.0.0.0:{port}/iotistic/simulator'
+    
     # Check for state file override (set by web GUI)
     STATE_FILE = "/tmp/opcua_simulator_state.json"
     try:
@@ -148,7 +152,8 @@ async def main():
     except Exception as e:
         logger.warning(f"Failed to read state file: {e}")
     
-    simulator = OPCUASimulator(profile_name=profile_name)
+    logger.info(f"Starting OPC UA simulator on port {port} with profile '{profile_name}'")
+    simulator = OPCUASimulator(endpoint=endpoint, profile_name=profile_name)
     await simulator.run()
 
 
