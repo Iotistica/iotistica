@@ -299,6 +299,17 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
+	 * Set logger (called after logger is initialized)
+	 */
+	public setLogger(logger: AgentLogger): void {
+		this.logger = logger;
+		// Also update DockerManager's logger
+		if (this.dockerManager) {
+			this.dockerManager.setLogger(logger);
+		}
+	}
+
+	/**
 	 * Initialize and load persisted state from database
 	 */
 	public async init(): Promise<void> {

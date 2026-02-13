@@ -149,6 +149,13 @@ export class ConfigManager extends EventEmitter {
 	}
 
 	/**
+	 * Set logger (called after logger is initialized)
+	 */
+	public setLogger(logger: AgentLogger): void {
+		this.logger = logger;
+	}
+
+	/**
 	 * Initialize config manager
 	 */
 	public async init(): Promise<void> {

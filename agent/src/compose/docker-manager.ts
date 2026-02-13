@@ -74,6 +74,13 @@ export class DockerManager extends EventEmitter {
 		}
 	}
 
+	/**
+	 * Set logger (called after logger is initialized)
+	 */
+	public setLogger(logger: AgentLogger): void {
+		this.logger = logger;
+	}
+
 	// ========================================================================
 	// EVENT-DRIVEN RECONCILIATION
 	// ========================================================================

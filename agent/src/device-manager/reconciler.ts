@@ -64,6 +64,9 @@ export class StateReconciler extends EventEmitter {
 	 */
 	public setLogger(logger: AgentLogger): void {
 		this.logger = logger;
+		
+		// Propagate logger to ConfigManager for dynamic log level updates
+		this.configManager.setLogger(logger);
 	}
 
 	constructor(logger?: AgentLogger) {
