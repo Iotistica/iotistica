@@ -23,8 +23,16 @@ class NodeManager:
         """Create simple test variable with string NodeID"""
         objects = self.server.nodes.objects
         my_variable_nodeid = ua.NodeId("MyVariable", 2)  # ns=2;s=MyVariable
-        my_variable = await objects.add_variable(my_variable_nodeid, "MyVariable", 42.0)
-        await my_variable.set_writable()
+        
+        # Check if example node already exists (handles Flask debug mode reloads)
+        try:
+            my_variable = self.server.get_node(my_variable_nodeid)
+            await my_variable.read_browse_name()
+            logger.debug("Example node already exists, skipping creation")
+        except Exception:
+            # Node doesn't exist, create it
+            my_variable = await objects.add_variable(my_variable_nodeid, "MyVariable", 42.0)
+            await my_variable.set_writable()
         
         # Set Description attribute (for discovery and unit extraction)
         try:
@@ -52,9 +60,15 @@ class NodeManager:
         """Create nodes from sensor profile definition"""
         objects = self.server.nodes.objects
         
-        # Create main folder
-        main_folder = await objects.add_folder(2, profile.name)
-        logger.info(f"Created main folder: {profile.name}")
+        # Create main folder (check if exists first)
+        main_folder_nodeid = ua.NodeId(profile.name, 2)
+        try:
+            main_folder = self.server.get_node(main_folder_nodeid)
+            await main_folder.read_browse_name()
+            logger.info(f"Main folder '{profile.name}' already exists")
+        except Exception:
+            main_folder = await objects.add_folder(main_folder_nodeid, profile.name)
+            logger.info(f"Created main folder: {profile.name}")
         
         folders_created = {}
         total_nodes = 0
@@ -72,9 +86,16 @@ class NodeManager:
             
             # Level 1: Main folder (required)
             if folder_name not in folders_created:
-                folder = await main_folder.add_folder(2, folder_name)
-                folders_created[folder_name] = folder
-                logger.debug(f"  Created folder: {folder_name}")
+                try:
+                    folder = await main_folder.add_folder(2, folder_name)
+                    folders_created[folder_name] = folder
+                    logger.debug(f"  Created folder: {folder_name}")
+                except Exception as e:
+                    # Folder already exists, get it
+                    folder_nodeid = ua.NodeId(folder_name, 2)
+                    folder = self.server.get_node(folder_nodeid)
+                    folders_created[folder_name] = folder
+                    logger.debug(f"  Folder '{folder_name}' already exists")
             else:
                 folder = folders_created[folder_name]
             
@@ -87,9 +108,15 @@ class NodeManager:
                 subfolder_key = f"{folder_name}/{subfolder_name}"
                 
                 if subfolder_key not in folders_created:
-                    subfolder = await current_folder.add_folder(2, subfolder_name)
-                    folders_created[subfolder_key] = subfolder
-                    logger.debug(f"    Created subfolder: {subfolder_name}")
+                    try:
+                        subfolder = await current_folder.add_folder(2, subfolder_name)
+                        folders_created[subfolder_key] = subfolder
+                        logger.debug(f"    Created subfolder: {subfolder_name}")
+                    except Exception:
+                        subfolder_nodeid = ua.NodeId(subfolder_name, 2)
+                        subfolder = self.server.get_node(subfolder_nodeid)
+                        folders_created[subfolder_key] = subfolder
+                        logger.debug(f"    Subfolder '{subfolder_name}' already exists")
                 else:
                     subfolder = folders_created[subfolder_key]
                 
@@ -102,9 +129,15 @@ class NodeManager:
                 zone_key = f"{'/'.join(folder_path)}/{zone_name}"
                 
                 if zone_key not in folders_created:
-                    zone_folder = await current_folder.add_folder(2, zone_name)
-                    folders_created[zone_key] = zone_folder
-                    logger.debug(f"      Created zone: {zone_name}")
+                    try:
+                        zone_folder = await current_folder.add_folder(2, zone_name)
+                        folders_created[zone_key] = zone_folder
+                        logger.debug(f"      Created zone: {zone_name}")
+                    except Exception:
+                        zone_nodeid = ua.NodeId(zone_name, 2)
+                        zone_folder = self.server.get_node(zone_nodeid)
+                        folders_created[zone_key] = zone_folder
+                        logger.debug(f"      Zone '{zone_name}' already exists")
                 else:
                     zone_folder = folders_created[zone_key]
                 
@@ -128,8 +161,17 @@ class NodeManager:
                 # This format is required for agent validation
                 node_id_string = f"{folder_path[-1]}/{node_name}"
                 node_id = ua.NodeId(node_id_string, 2)
-                node = await current_folder.add_variable(node_id, node_name, 0.0)
-                await node.set_writable()
+                
+                # Check if node already exists (handles Flask debug mode reloads)
+                try:
+                    node = self.server.get_node(node_id)
+                    # Node exists, verify it's accessible
+                    await node.read_browse_name()
+                    logger.debug(f"Node {node_id_string} already exists, skipping creation")
+                except Exception:
+                    # Node doesn't exist, create it
+                    node = await current_folder.add_variable(node_id, node_name, 0.0)
+                    await node.set_writable()
                 
                 # Set Description attribute with unit information (if available)
                 try:
