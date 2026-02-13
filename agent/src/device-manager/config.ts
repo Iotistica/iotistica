@@ -1223,19 +1223,20 @@ export class ConfigManager extends EventEmitter {
 			return;
 		}
 
-		const loggingConfig = this.getLoggingConfig();
+		// Use change.new directly (targetConfig not updated yet when this event fires)
+		const newLogLevel = (change.new?.level ?? process.env.LOG_LEVEL ?? "info") as LogLevel;
 		
 		// Update log level dynamically
-		this.logger.setLogLevel(loggingConfig.logLevel as LogLevel);
+		this.logger.setLogLevel(newLogLevel);
 		
 		this.logger.infoSync('Logging configuration updated from cloud - DYNAMIC UPDATE APPLIED', {
 			component: LogComponents.configManager,
 			oldLogLevel: change.old?.level,
-			newLogLevel: loggingConfig.logLevel,
-			enableFilePersistence: loggingConfig.enableFilePersistence,
-			enableCompression: loggingConfig.enableCompression,
-			logBatchSize: loggingConfig.logBatchSize,
-			logFlushIntervalMs: loggingConfig.logFlushIntervalMs,
+			newLogLevel: newLogLevel,
+			enableFilePersistence: change.new?.enableFilePersistence,
+			enableCompression: change.new?.enableCompression,
+			logBatchSize: change.new?.logBatchSize,
+			logFlushIntervalMs: change.new?.logFlushIntervalMs,
 		});
 	}
 
