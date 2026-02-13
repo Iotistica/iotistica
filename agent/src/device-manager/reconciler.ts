@@ -138,6 +138,20 @@ export class StateReconciler extends EventEmitter {
 		await this.containerManager.init();
 		await this.configManager.init();
 
+		// Load target config into ConfigManager from loaded target state
+		// This ensures getLoggingConfig() returns correct values during agent startup
+		// WITHOUT triggering reconciliation (which happens later)
+		if (this.targetState.config) {
+			this.configManager['targetConfig'] = _.cloneDeep(this.targetState.config);
+			
+			this.logger?.infoSync('Loaded target config into ConfigManager', {
+				component: LogComponents.stateReconciler,
+				operation: 'init',
+				hasLogging: !!this.targetState.config.logging,
+				logLevel: this.targetState.config.logging?.level,
+			});
+		}
+
 		this.logger?.infoSync('StateReconciler initialized', {
 			component: LogComponents.stateReconciler,
 			operation: 'init',
