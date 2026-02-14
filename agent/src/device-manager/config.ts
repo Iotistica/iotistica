@@ -802,6 +802,15 @@ export class ConfigManager extends EventEmitter {
 
 			// Sync each device to SQLite
 			for (const device of devices) {
+				this.logger?.infoSync('=== PROCESSING DEVICE FOR DB SYNC ===', {
+					component: LogComponents.configManager,
+					operation: 'syncEndpointsToDatabase',
+					deviceUuid: device.uuid,
+					deviceName: device.name,
+					protocol: device.protocol,
+					targetDataPointsCount: device.dataPoints?.length || 0
+				});
+				
 				// Normalize property names from cloud API (camelCase) to SQLite (snake_case)
 				const normalizedDevice = this.normalizeDevice(device as ProtocolAdapterDevice);
 
@@ -811,6 +820,14 @@ export class ConfigManager extends EventEmitter {
 					: await DeviceEndpointModel.getByName(normalizedDevice.name);
 
 				if (existing) {
+					this.logger?.infoSync('Found existing device in DB', {
+						component: LogComponents.configManager,
+						operation: 'syncEndpointsToDatabase',
+						deviceUuid: existing.uuid,
+						deviceName: existing.name,
+						existingDataPointsCount: existing.data_points?.length || 0
+					});
+					
 					// CRITICAL: Preserve discovered data_points if target state has empty array
 					// This prevents reconciliation from overwriting discovery results
 					// Flow: Discovery finds nodes → saves to DB → cloud syncs → reconcile runs
@@ -821,16 +838,26 @@ export class ConfigManager extends EventEmitter {
 						(!normalizedDevice.data_points || normalizedDevice.data_points.length === 0);
 					
 					if (shouldPreserveDataPoints) {
-						this.logger?.infoSync('Preserving discovered data_points during reconciliation', {
+						this.logger?.infoSync('✅ PRESERVING discovered data_points (UPDATE path)', {
 							component: LogComponents.configManager,
 							deviceUuid: normalizedDevice.uuid || existing.uuid,
 							deviceName: normalizedDevice.name,
 							existingDataPointsCount: existing.data_points?.length || 0,
-							targetDataPointsCount: normalizedDevice.data_points?.length || 0
+							targetDataPointsCount: normalizedDevice.data_points?.length || 0,
+							reason: 'DB has nodes, target state empty - keeping DB nodes'
 						});
 						
 						// Keep existing data_points from discovery
 						normalizedDevice.data_points = existing.data_points;
+					} else {
+						this.logger?.infoSync('Will use target state data_points (UPDATE path)', {
+							component: LogComponents.configManager,
+							deviceUuid: normalizedDevice.uuid || existing.uuid,
+							deviceName: normalizedDevice.name,
+							existingDataPointsCount: existing.data_points?.length || 0,
+							targetDataPointsCount: normalizedDevice.data_points?.length || 0,
+							reason: shouldPreserveDataPoints ? 'n/a' : 'Target has nodes OR both empty'
+						});
 					}
 					
 					await DeviceEndpointModel.updateByUuid(
@@ -845,6 +872,63 @@ export class ConfigManager extends EventEmitter {
 						dataPointsCount: normalizedDevice.data_points?.length || 0
 					});
 				} else {
+					this.logger?.infoSync('Device NOT found in DB (will CREATE)', {
+						component: LogComponents.configManager,
+						operation: 'syncEndpointsToDatabase',
+						deviceUuid: normalizedDevice.uuid,
+						deviceName: normalizedDevice.name,
+						targetDataPointsCount: normalizedDevice.data_points?.length || 0
+					});
+					
+					// CRITICAL: Check for discovered data_points in discovery cache
+					// When a new device is created during reconciliation, the cloud doesn't have
+					// the discovered nodes yet, so dataPoints will be empty. But discovery may have
+					// just run and cached the results. Check cache before creating with empty array.
+					const endpointUrl = normalizedDevice.connection?.endpointUrl;
+					if (endpointUrl && this.discoveryService) {
+						this.logger?.infoSync('Checking discovery cache for new device', {
+							component: LogComponents.configManager,
+							operation: 'syncEndpointsToDatabase',
+							endpointUrl,
+							hasDiscoveryService: !!this.discoveryService,
+							hasGetMethod: !!this.discoveryService.getDiscoveredDevice
+						});
+						
+						const discoveredDevice = this.discoveryService.getDiscoveredDevice?.(endpointUrl);
+						if (discoveredDevice && discoveredDevice.dataPoints && discoveredDevice.dataPoints.length > 0) {
+							this.logger?.infoSync('✅ USING cached discovered data_points (CREATE path)', {
+								component: LogComponents.configManager,
+								deviceUuid: normalizedDevice.uuid,
+								deviceName: normalizedDevice.name,
+								endpointUrl,
+								cachedDataPointsCount: discoveredDevice.dataPoints.length,
+								reason: 'Found in discovery cache - using cached nodes'
+							});
+							
+							// Use discovered data_points instead of empty array from target state
+							normalizedDevice.data_points = discoveredDevice.dataPoints;
+						} else {
+							this.logger?.warnSync('⚠️ Discovery cache MISS for new device', {
+								component: LogComponents.configManager,
+								deviceUuid: normalizedDevice.uuid,
+								deviceName: normalizedDevice.name,
+								endpointUrl,
+								cacheHit: !!discoveredDevice,
+								hasDataPoints: discoveredDevice?.dataPoints?.length || 0,
+								reason: 'Will create with empty data_points - discovery may not have run yet'
+							});
+						}
+					} else {
+						this.logger?.warnSync('⚠️ Cannot check discovery cache', {
+							component: LogComponents.configManager,
+							deviceUuid: normalizedDevice.uuid,
+							deviceName: normalizedDevice.name,
+							hasEndpointUrl: !!endpointUrl,
+							hasDiscoveryService: !!this.discoveryService,
+							reason: endpointUrl ? 'No discoveryService' : 'No endpointUrl'
+						});
+					}
+					
 					await DeviceEndpointModel.create(normalizedDevice);
 					this.logger?.infoSync('Added endpoint to database', {
 						component: LogComponents.configManager,

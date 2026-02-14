@@ -134,6 +134,12 @@ export class DiscoveryService extends EventEmitter {
     liveCount: number;
     samplePayload?: string;
   }>; // HYBRID: Observer data from runtime MQTT adapter
+  
+  // CRITICAL: Cache discovered devices for reconciliation to access
+  // When discovery runs with skipDbWrites, the discovered nodes aren't saved to DB
+  // But reconciliation needs them when creating new device records
+  // Map: endpointUrl → discovered device with data_points
+  private discoveredDevicesCache: Map<string, DiscoveredDevice> = new Map();
 
   /**
    * Create discovery service
@@ -287,6 +293,26 @@ export class DiscoveryService extends EventEmitter {
     
     // Note: plugins Map is intentionally NOT cleared - it's needed for service lifetime
     // Only transient data (observer data, listeners) is cleared
+  }
+
+  /**
+   * Get discovered device data from cache
+   * Used by ConfigManager to retrieve data_points for new devices during reconciliation
+   * 
+   * @param endpointUrl - The OPC UA/Modbus/SNMP endpoint URL
+   * @returns Discovered device with data_points, or undefined if not found
+   */
+  public getDiscoveredDevice(endpointUrl: string): DiscoveredDevice | undefined {
+    const device = this.discoveredDevicesCache.get(endpointUrl);
+    if (device) {
+      this.logger?.debugSync('Retrieved discovered device from cache', {
+        component: LogComponents.discovery,
+        endpointUrl,
+        dataPointsCount: device.dataPoints?.length || 0,
+        cacheSize: this.discoveredDevicesCache.size
+      });
+    }
+    return device;
   }
 
   /**
@@ -496,6 +522,38 @@ export class DiscoveryService extends EventEmitter {
     // skipDbWrites: false = full save (create + update)
     const saveResults = await this.saveToDatabase(allDiscovered, traceId, options.skipDbWrites || false);
 
+    // CRITICAL: Cache discovered devices for reconciliation to access
+    // When skipDbWrites is true, new devices don't get saved to DB yet
+    // But reconciliation needs the discovered data_points when creating records
+		this.logger?.infoSync('=== CACHING DISCOVERED DEVICES ===', {
+			component: LogComponents.discovery,
+			traceId,
+			discoveredCount: allDiscovered.length,
+			skipDbWrites: options.skipDbWrites || false
+		});
+		
+		for (const device of allDiscovered) {
+			const endpointUrl = device.connection?.endpointUrl || device.metadata?.endpointUrl;
+			if (endpointUrl) {
+				this.discoveredDevicesCache.set(endpointUrl, device);
+				this.logger?.infoSync('✅ Cached discovered device', {
+					component: LogComponents.discovery,
+					traceId,
+					deviceName: device.name,
+					endpointUrl,
+					dataPointsCount: device.dataPoints?.length || 0,
+					cacheSize: this.discoveredDevicesCache.size
+				});
+			} else {
+				this.logger?.warnSync('⚠️ Cannot cache device (no endpointUrl)', {
+					component: LogComponents.discovery,
+					traceId,
+					deviceName: device.name,
+					protocol: device.protocol
+				});
+			}
+		}
+
     if (options.skipDbWrites) {
       this.logger?.debugSync('Discovery in update-only mode (reconcile creates records)', {
         component: LogComponents.discovery,
@@ -503,7 +561,8 @@ export class DiscoveryService extends EventEmitter {
         devicesValidated: allDiscovered.length,
         updatedCount: saveResults.saved,
         skippedCount: saveResults.skipped,
-        protocols: selectedProtocols
+        protocols: selectedProtocols,
+        cachedDevices: this.discoveredDevicesCache.size
       });
     }
 
