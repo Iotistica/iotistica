@@ -1,0 +1,95 @@
+# Vertical Pod Autoscaler for Virtual Agents
+# 
+# Automatically adjusts CPU and memory requests/limits based on actual usage.
+# VPA learns optimal resource allocation over time and updates deployments.
+#
+# Prerequisites:
+#   kubectl apply -f https://github.com/kubernetes/autoscaler/releases/latest/download/vertical-pod-autoscaler.yaml
+#
+# Apply with: kubectl apply -f k8s/virtual-agent-vpa.yaml
+
+---
+# VPA for agent containers (learns optimal agent resources)
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: virtual-agent-vpa
+  namespace: virtual-agents
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: "*"  # Apply to all deployments in namespace
+  updatePolicy:
+    updateMode: "Auto"  # Auto-update pods (recreates with new resources)
+    # Alternative: "Initial" (only sets resources on creation)
+    # Alternative: "Off" (just recommends, doesn't apply)
+  resourcePolicy:
+    containerPolicies:
+    # Policy for main agent container
+    - containerName: agent
+      minAllowed:
+        cpu: 200m       # Never go below 200m CPU
+        memory: 512Mi   # Never go below 512Mi RAM
+      maxAllowed:
+        cpu: 4000m      # Cap at 4 CPUs
+        memory: 8Gi     # Cap at 8Gi RAM
+      controlledResources: ["cpu", "memory"]
+      mode: Auto
+      
+    # Policy for OPC UA simulator sidecars (wildcard match)
+    - containerName: opcua-sim-*
+      minAllowed:
+        cpu: 50m
+        memory: 64Mi
+      maxAllowed:
+        cpu: 500m
+        memory: 512Mi
+      controlledResources: ["cpu", "memory"]
+      mode: Auto
+
+---
+# VPA for development namespace (more conservative limits)
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: virtual-agent-dev-vpa
+  namespace: virtual-agents-dev
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: "*"
+  updatePolicy:
+    updateMode: "Initial"  # Only set on creation, don't update running pods
+  resourcePolicy:
+    containerPolicies:
+    - containerName: agent
+      minAllowed:
+        cpu: 100m
+        memory: 256Mi
+      maxAllowed:
+        cpu: 2000m
+        memory: 4Gi
+      controlledResources: ["cpu", "memory"]
+      
+    - containerName: opcua-sim-*
+      minAllowed:
+        cpu: 50m
+        memory: 64Mi
+      maxAllowed:
+        cpu: 300m
+        memory: 256Mi
+      controlledResources: ["cpu", "memory"]
+
+---
+# Monitoring: Query VPA recommendations
+# kubectl describe vpa virtual-agent-vpa -n virtual-agents
+# 
+# Example output:
+#   Recommendation:
+#     Container Recommendations:
+#       Container Name:  agent
+#       Lower Bound:     cpu: 250m, memory: 600Mi
+#       Target:          cpu: 400m, memory: 800Mi
+#       Upper Bound:     cpu: 1500m, memory: 2Gi
