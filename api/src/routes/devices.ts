@@ -256,6 +256,7 @@ router.get('/devices', jwtAuth, async (req, res) => {
           current_apps_count: currentState ? Object.keys(currentState.apps || {}).length : 0,
           last_reported: currentState?.reported_at,
           created_at: device.created_at,
+          fleet_id: device.fleet_id || null,
           metrics: {
             cpu: device.cpu_usage,
             memory: device.memory_usage,

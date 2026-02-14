@@ -253,7 +253,7 @@ export class VirtualAgentDeployer {
             name: namespace,
             labels: {
               'app.kubernetes.io/managed-by': 'iotistic-api',
-              'iotistic.com/namespace-type': 'virtual-agents'
+              'iotistica.com/namespace-type': 'virtual-agents'
             }
           }
         });
@@ -278,7 +278,7 @@ export class VirtualAgentDeployer {
         namespace,
         labels: {
           'app.kubernetes.io/managed-by': 'iotistic-api',
-          'iotistic.com/secret-type': 'provisioning-key'
+          'iotistica.com/secret-type': 'provisioning-key'
         }
       },
       type: 'Opaque',
@@ -321,7 +321,7 @@ export class VirtualAgentDeployer {
         namespace,
         labels: {
           'app.kubernetes.io/managed-by': 'iotistic-api',
-          'iotistic.com/pvc-type': 'agent-data'
+          'iotistica.com/pvc-type': 'agent-data'
         }
       },
       spec: {
@@ -376,8 +376,8 @@ export class VirtualAgentDeployer {
           app: 'virtual-agent',
           'app.kubernetes.io/name': 'virtual-agent',
           'app.kubernetes.io/managed-by': 'iotistic-api',
-          'iotistic.com/device-uuid': config.deviceUuid,
-          'iotistic.com/fleet-id': config.fleetId
+          'iotistica.com/device-uuid': config.deviceUuid,
+          'iotistica.com/fleet-id': config.fleetId
         }
       },
       spec: {
@@ -391,7 +391,7 @@ export class VirtualAgentDeployer {
           metadata: {
             labels: {
               app: name,
-              'iotistic.com/device-uuid': config.deviceUuid
+              'iotistica.com/device-uuid': config.deviceUuid
             }
           },
           spec: {

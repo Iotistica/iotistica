@@ -9,18 +9,21 @@
   import { MetricsHistoryProvider } from "./contexts/MetricsHistoryContext";
   import { MqttProvider } from "./contexts/MqttContext";
 import { SystemMetricsProvider } from "./contexts/SystemMetricsContext";
+import { FleetProvider } from "./contexts/FleetContext";
 
 createRoot(document.getElementById("root")!).render(
   <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
     <AuthProvider>
-      <DeviceStateProvider>
-        <MetricsHistoryProvider>
-          <SystemMetricsProvider>
-            <MqttProvider>
-              <App />
-            </MqttProvider>
-          </SystemMetricsProvider>        </MetricsHistoryProvider>
-      </DeviceStateProvider>
+      <FleetProvider>
+        <DeviceStateProvider>
+          <MetricsHistoryProvider>
+            <SystemMetricsProvider>
+              <MqttProvider>
+                <App />
+              </MqttProvider>
+            </SystemMetricsProvider>        </MetricsHistoryProvider>
+        </DeviceStateProvider>
+      </FleetProvider>
     </AuthProvider>
   </ThemeProvider>
 );  

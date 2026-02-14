@@ -1077,7 +1077,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             {deviceType === 'virtual' && (
               <Button onClick={handleOpenVirtualDeviceDialog}>
                 <Plus className="w-4 h-4 mr-2" />
-                Add Virtual Device
+                Add Device
               </Button>
             )}
             <Button onClick={handleOpenProfileDialog}>
@@ -1267,7 +1267,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         <Dialog open={addVirtualDeviceDialogOpen} onOpenChange={setAddVirtualDeviceDialogOpen}>
           <DialogContent className="max-w-4xl w-full">
             <DialogHeader>
-              <DialogTitle>Add Virtual Device</DialogTitle>
+              <DialogTitle>Add Device</DialogTitle>
               <DialogDescription>
                 Virtual devices are protocol simulators that run as sidecar containers.
                 The agent connects to them via localhost just like physical devices.

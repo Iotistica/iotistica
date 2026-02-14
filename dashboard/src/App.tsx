@@ -14,7 +14,7 @@ import { Toaster } from "./components/ui/sonner";
 import { Sheet, SheetContent } from "./components/ui/sheet";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
-import { Menu, Activity, BarChart3, Radio, CalendarClock, Package, Shield, FileText, Terminal } from "lucide-react";
+import { Menu, Activity, BarChart3, Radio, CalendarClock, Package, Shield, FileText, Terminal, Layers } from "lucide-react";
 import { buildApiUrl } from "./config/api";
 import { SensorHealthDashboard } from "./pages/SensorHealthDashboard";
 import { SensorsPage } from "./pages/SensorsPage";
@@ -31,11 +31,13 @@ import TagDefinitionsPage from "./pages/TagDefinitionsPage";
 import { DigitalTwinPage } from "./pages/DigitalTwinPage";
 import { EventDebuggerPage } from "./pages/EventDebuggerPage";
 import { AuditPage } from "./pages/audit";
+import { FleetsPage } from "./pages/FleetsPage";
 
 import { toast } from "sonner";
 import { Header } from "./components/Header";
 import { useDeviceState } from "./contexts/DeviceStateContext";
 import { useAuth } from "./contexts/AuthContext";
+import { useFleet } from "./contexts/FleetContext";
 import { LoginPage } from "./pages/LoginPage";
 import { UserManagementPage } from "./pages/UserManagementPage";
 
@@ -53,11 +55,15 @@ export default function App() {
   // Auth context
   const { user, isAuthenticated, isLoading: isAuthLoading, login, logout } = useAuth();
   
+  // Fleet context - for auto-assigning devices to selected fleet
+  const { selectedFleetId } = useFleet();
+  
   // Initialize selectedDeviceId from localStorage if available
   const [selectedDeviceId, setSelectedDeviceId] = useState(() => {
     return localStorage.getItem('selectedDeviceId') || "";
   });
   const viewOptions = [
+    'fleets',
     'metrics',
     'sensors',
     'endpoints',
@@ -94,7 +100,7 @@ export default function App() {
     const stored = localStorage.getItem('currentView');
     return stored && viewOptions.includes(stored as View) ? (stored as View) : 'metrics';
   });
-  const isGlobalView = currentView === 'dashboard' || currentView === 'mqtt' || currentView === 'audit' || currentView === 'security';
+  const isGlobalView = currentView === 'dashboard' || currentView === 'mqtt' || currentView === 'audit' || currentView === 'security' || currentView === 'fleets';
   const [debugMode, setDebugMode] = useState(false);
   const [isKioskMode, setIsKioskMode] = useState<boolean>(() => {
     return localStorage.getItem('dashboard-kiosk-mode') === 'true';
@@ -160,6 +166,7 @@ export default function App() {
         const data = await response.json();
         
         console.log('Devices API response:', data);
+        console.log('[FLEET DEBUG] Raw devices with fleet_id:', data.devices.map((d: any) => ({ uuid: d.uuid, name: d.device_name, fleet_id: d.fleet_id })));
         
         // Transform API response to match Device interface
         // CRITICAL: Use stable UUID as ID instead of index to prevent React remounts
@@ -182,6 +189,7 @@ export default function App() {
           disk: apiDevice.storage_usage && apiDevice.storage_total 
             ? Math.round((parseFloat(apiDevice.storage_usage) / parseFloat(apiDevice.storage_total) * 100)) 
             : 0,
+          fleet_id: apiDevice.fleet_id || undefined,
         }));
 
         // Only update state if devices actually changed (use callback for React optimization)
@@ -379,7 +387,8 @@ export default function App() {
             deviceName: deviceData.name,
             deviceType: deviceData.type,
             ipAddress: deviceData.ipAddress,
-            macAddress: deviceData.macAddress
+            macAddress: deviceData.macAddress,
+            fleet_id: deviceData.fleet_id || null
           })
         });
         
@@ -447,6 +456,7 @@ export default function App() {
         const requestBody: any = {
           deviceName: deviceData.name,
           deviceType: deviceData.type,
+          fleet_id: selectedFleetId || null, // Auto-assign to selected fleet from sidebar
         };
         
         // Add physical device fields
@@ -720,6 +730,14 @@ export default function App() {
       {!isKioskMode && (
         <div className="bg-card border-b border-border px-6 py-2 flex items-center gap-3">
           <Button
+            variant={currentView === 'fleets' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setCurrentView('fleets')}
+          >
+            <Layers className="w-4 h-4 mr-2" />
+            Fleets
+          </Button>
+          <Button
             variant={!isGlobalView ? 'default' : 'outline'}
             size="sm"
             onClick={() => setCurrentView('metrics')}
@@ -782,6 +800,9 @@ export default function App() {
         <div className="flex-1 flex flex-col overflow-y-auto">
           {isGlobalView ? (
             <>
+              {currentView === 'fleets' && (
+                <FleetsPage />
+              )}
               {currentView === 'dashboard' && (
                 <div className="h-full overflow-hidden">
                   <GlobalDashboardPage 
