@@ -88,6 +88,31 @@ export async function processDeviceStateReport(
       continue; // Skip this device
     }
 
+    // 🔐 SECURITY: Cleanup provisioning key for virtual agents after provisioning
+    // Agent only reports state AFTER successful provisioning (provisioning_state = 'provisioned')
+    // Cleanup is idempotent - will gracefully handle if Secret already deleted
+    if (device.device_type === 'virtual' && device.provisioning_state === 'registered') {
+      logger.debug('Virtual agent state report - checking if provisioning key cleanup needed', {
+        deviceUuid: uuid.substring(0, 8) + '...',
+        deviceName: device.device_name,
+        provisioningState: device.provisioning_state
+      });
+
+      // Trigger cleanup (non-blocking, idempotent)
+      (async () => {
+        try {
+          const { virtualAgentDeployer } = await import('./virtual-agent-deployer');
+          await virtualAgentDeployer.cleanupProvisioningKey(uuid);
+        } catch (error) {
+          // Cleanup is idempotent - Secret might already be deleted, which is fine
+          logger.debug('Provisioning key cleanup completed or already done', {
+            deviceUuid: uuid.substring(0, 8) + '...',
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      })();
+    }
+
     // Update current state (including version from agent report)
     await DeviceCurrentStateModel.update(
       uuid,

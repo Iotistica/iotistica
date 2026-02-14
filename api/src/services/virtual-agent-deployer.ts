@@ -568,6 +568,122 @@ export class VirtualAgentDeployer {
   }
 
   /**
+   * Cleanup provisioning key after successful provisioning
+   * Idempotent - safe to call multiple times
+   * Returns immediately if Secret already deleted (cheap check)
+   */
+  async cleanupProvisioningKey(deviceUuid: string): Promise<void> {
+    try {
+      const device = await DeviceModel.getByUuid(deviceUuid);
+      if (!device) {
+        throw new Error('Device not found');
+      }
+
+      if (device.device_type !== 'virtual') {
+        throw new Error('Not a virtual agent');
+      }
+
+      const namespace = device.k8s_namespace || this.defaultNamespace;
+      const name = device.helm_release_name || this.sanitizeDnsName(device.device_name);
+      const secretName = `${name}-prov-key`;
+
+      // OPTIMIZATION: Check if Secret exists first (cheap check)
+      // If already deleted, cleanup is done - exit early
+      try {
+        await this.coreApi.readNamespacedSecret(secretName, namespace);
+        // Secret exists - proceed with cleanup
+      } catch (error: any) {
+        if (error.statusCode === 404) {
+          // Secret already deleted - cleanup already done, exit early
+          logger.debug('Provisioning Secret already deleted - cleanup already complete', {
+            deviceUuid: deviceUuid.substring(0, 8) + '...',
+            namespace,
+            secretName
+          });
+          return; // Early exit - nothing to do
+        }
+        // Other error - rethrow
+        throw error;
+      }
+
+      logger.info('Cleaning up provisioning key after successful provisioning', {
+        deviceUuid: deviceUuid.substring(0, 8) + '...',
+        namespace,
+        deploymentName: name
+      });
+
+      // 1. Delete the provisioning Secret
+      try {
+        await this.coreApi.deleteNamespacedSecret(secretName, namespace);
+        logger.info('Provisioning Secret deleted', { namespace, secretName });
+      } catch (error: any) {
+        if (error.statusCode === 404) {
+          logger.debug('Provisioning Secret already deleted (race condition)', { namespace, secretName });
+        } else {
+          logger.error('Failed to delete provisioning Secret', {
+            namespace,
+            secretName,
+            error: error instanceof Error ? error.message : String(error)
+          });
+          throw error;
+        }
+      }
+
+      // 2. Patch deployment to remove PROVISIONING_KEY env var
+      try {
+        const deployment = await this.appsApi.readNamespacedDeployment(name, namespace);
+        const agentContainer = deployment.body.spec?.template.spec?.containers.find(c => c.name === 'agent');
+        
+        if (agentContainer && agentContainer.env) {
+          // Check if PROVISIONING_KEY still exists
+          const hasProvKeyEnv = agentContainer.env.some(e => e.name === 'PROVISIONING_KEY');
+          
+          if (hasProvKeyEnv) {
+            // Remove PROVISIONING_KEY from env array
+            agentContainer.env = agentContainer.env.filter(e => e.name !== 'PROVISIONING_KEY');
+            
+            // Patch deployment
+            await this.appsApi.patchNamespacedDeployment(
+              name,
+              namespace,
+              deployment.body,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              { headers: { 'Content-Type': 'application/merge-patch+json' } }
+            );
+            
+            logger.info('Deployment patched to remove PROVISIONING_KEY env var', { namespace, deploymentName: name });
+          } else {
+            logger.debug('PROVISIONING_KEY already removed from deployment', { namespace, deploymentName: name });
+          }
+        }
+      } catch (error: any) {
+        logger.error('Failed to patch deployment', {
+          namespace,
+          name,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        // Don't throw - Secret deletion is more important than deployment patch
+      }
+
+      logger.info('Provisioning key cleanup completed successfully', {
+        deviceUuid: deviceUuid.substring(0, 8) + '...'
+      });
+
+    } catch (error) {
+      logger.error('Failed to cleanup provisioning key', {
+        deviceUuid,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Destroy a virtual agent (delete deployment and secret)
    */
   async destroy(deviceUuid: string): Promise<void> {
@@ -689,6 +805,15 @@ export class VirtualAgentDeployer {
         ports: [
           { containerPort: port, protocol: 'TCP', name: 'opcua' }
         ],
+        readinessProbe: {
+          tcpSocket: {
+            port: port
+          },
+          initialDelaySeconds: 5,
+          periodSeconds: 10,
+          timeoutSeconds: 5,
+          failureThreshold: 3
+        },
         securityContext: {
           allowPrivilegeEscalation: false,
           runAsNonRoot: true,

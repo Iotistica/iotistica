@@ -266,6 +266,22 @@ export class ConfigManager extends EventEmitter {
 	public getDiscoveryTargets(protocol: string): any[] {
 		const endpoints = this.targetConfig.endpoints || [];
 		
+		// DETAILED DEBUG: Log ALL endpoints in targetConfig
+		this.logger?.infoSync('=== DISCOVERY DEBUG: ALL ENDPOINTS IN MEMORY ===', {
+			component: LogComponents.configManager,
+			operation: 'getDiscoveryTargets',
+			protocol,
+			totalEndpoints: endpoints.length,
+			endpoints: endpoints.map((e: any) => ({
+				uuid: e.uuid,
+				name: e.name,
+				protocol: e.protocol,
+				connection: e.connection,
+				connectionString: e.connectionString,
+				dataPointsCount: e.dataPoints?.length || 0
+			}))
+		});
+		
 		const filtered = endpoints.filter((endpoint: any) => {
 			if (endpoint.protocol !== protocol) return false;
 
@@ -279,13 +295,39 @@ export class ConfigManager extends EventEmitter {
 				}
 			}
 
+			// Log each endpoint evaluation
+			this.logger?.infoSync(`Evaluating endpoint for ${protocol} discovery`, {
+				component: LogComponents.configManager,
+				operation: 'getDiscoveryTargets',
+				endpointUuid: endpoint.uuid,
+				endpointName: endpoint.name,
+				endpointProtocol: endpoint.protocol,
+				connection: connection,
+				dataPoints: endpoint.dataPoints
+			});
+
 			switch (protocol) {
 				case 'modbus':
 					// Accept endpoints with slaveRange (scan multiple slaves) OR slaveId (single slave)
 					return connection?.slaveRange !== undefined || connection?.slaveId !== undefined;
 				case 'opcua':
-					return connection?.endpointUrl && 
-						(!endpoint.dataPoints || endpoint.dataPoints.length === 0);
+					const hasEndpointUrl = !!connection?.endpointUrl;
+					const hasNoDataPoints = !endpoint.dataPoints || endpoint.dataPoints.length === 0;
+					const shouldDiscover = hasEndpointUrl && hasNoDataPoints;
+					
+					this.logger?.infoSync('OPC UA endpoint discovery check', {
+						component: LogComponents.configManager,
+						operation: 'getDiscoveryTargets',
+						endpointUuid: endpoint.uuid,
+						endpointName: endpoint.name,
+						hasEndpointUrl,
+						hasNoDataPoints,
+						shouldDiscover,
+						endpointUrl: connection?.endpointUrl,
+						dataPointsLength: endpoint.dataPoints?.length || 0
+					});
+					
+					return shouldDiscover;
 				case 'snmp':
 					return connection?.community && 
 						(!endpoint.dataPoints || endpoint.dataPoints.length === 0);
@@ -541,6 +583,33 @@ export class ConfigManager extends EventEmitter {
 			operation: 'reconcile',
 		});
 
+		// DETAILED DEBUG: Log target and current state before reconciliation
+		this.logger?.infoSync('=== RECONCILIATION: TARGET STATE ===', {
+			component: LogComponents.configManager,
+			operation: 'reconcile',
+			targetEndpointsCount: this.targetConfig.endpoints?.length || 0,
+			targetEndpoints: this.targetConfig.endpoints?.map((e: any) => ({
+				uuid: e.uuid,
+				name: e.name,
+				protocol: e.protocol,
+				connection: e.connection,
+				dataPointsCount: e.dataPoints?.length || 0
+			}))
+		});
+
+		this.logger?.infoSync('=== RECONCILIATION: CURRENT STATE ===', {
+			component: LogComponents.configManager,
+			operation: 'reconcile',
+			currentEndpointsCount: this.currentConfig.endpoints?.length || 0,
+			currentEndpoints: this.currentConfig.endpoints?.map((e: any) => ({
+				uuid: e.uuid,
+				name: e.name,
+				protocol: e.protocol,
+				connection: e.connection,
+				dataPointsCount: e.dataPoints?.length || 0
+			}))
+		});
+
 		const result: ConfigReconciliationResult = {
 			success: true,
 			devicesRegistered: 0,
@@ -692,23 +761,41 @@ export class ConfigManager extends EventEmitter {
 		const devices = this.targetConfig.endpoints || [];
 
 		if (!devices || !Array.isArray(devices) || devices.length === 0) {
-			this.logger?.debugSync('No endpoints to sync to database', {
+			this.logger?.warnSync('=== SYNC TO DB: NO ENDPOINTS TO SYNC ===', {
 				component: LogComponents.configManager,
 				operation: 'syncEndpointsToDatabase',
 			});
 			return;
 		}
 
-		this.logger?.infoSync('Syncing endpoints to database', {
+		this.logger?.infoSync('=== SYNCING ENDPOINTS TO DATABASE ===', {
 			component: LogComponents.configManager,
 			totalEndpoints: devices.length,
-			endpointNames: devices.map((d: any) => d.name),
-			endpointsWithUuids: devices.filter((d: any) => d.uuid).length,
+			endpoints: devices.map((d: any) => ({
+				uuid: d.uuid,
+				name: d.name,
+				protocol: d.protocol,
+				connection: d.connection,
+				dataPointsCount: d.dataPoints?.length || 0
+			}))
 		});
 
 		try {
 			// Get current devices from SQLite to detect deletions
 			const currentDevices = await DeviceEndpointModel.getAll();
+			
+			this.logger?.infoSync('=== CURRENT ENDPOINTS IN DB (BEFORE SYNC) ===', {
+				component: LogComponents.configManager,
+				operation: 'syncEndpointsToDatabase',
+				currentCount: currentDevices.length,
+				currentDevices: currentDevices.map(d => ({
+					uuid: d.uuid,
+					name: d.name,
+					protocol: d.protocol,
+					dataPointsCount: d.data_points?.length || 0
+				}))
+			});
+			
 			const targetDeviceUuids = new Set(
 				devices.map((d: any) => d.uuid).filter(Boolean)
 			);
@@ -1135,11 +1222,20 @@ export class ConfigManager extends EventEmitter {
 			if (snapshots.length > 0) {
 				this.currentConfig = JSON.parse(snapshots[0].state);
 
-			this.logger?.infoSync('Loaded current config from database', {
-				component: LogComponents.configManager,
-				operation: 'loadCurrentConfig',
-				deviceCount: this.currentConfig.endpoints?.length || 0,
-			});
+				// DETAILED DEBUG: Log what was loaded from database
+				this.logger?.infoSync('=== LOADED CONFIG FROM DATABASE ===', {
+					component: LogComponents.configManager,
+					operation: 'loadCurrentConfig',
+					deviceCount: this.currentConfig.endpoints?.length || 0,
+					endpoints: this.currentConfig.endpoints?.map((e: any) => ({
+						uuid: e.uuid,
+						name: e.name,
+						protocol: e.protocol,
+						connection: e.connection,
+						dataPointsCount: e.dataPoints?.length || 0
+					})),
+					createdAt: snapshots[0].createdAt
+				});
 			} else {
 				this.logger?.debugSync('No current config in database, starting fresh', {
 					component: LogComponents.configManager,

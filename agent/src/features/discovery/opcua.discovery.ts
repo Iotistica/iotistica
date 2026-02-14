@@ -33,65 +33,78 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
     // Get discovery targets from endpoints (those with endpointUrl but no dataPoints)
     const discoveryTargets = this.configManager?.getDiscoveryTargets?.('opcua') || [];
     
-    if (discoveryTargets.length === 0) {
-      this.logger?.debugSync('No OPC-UA discovery targets configured (need endpointUrl without dataPoints)', {
-        component: LogComponents.discovery + "] [" + this.protocol as any,
-        protocol: this.protocol
-      });
-      return [];
-    }
+		this.logger?.infoSync('=== OPC UA DISCOVERY PLUGIN: RECEIVED TARGETS ===', {
+			component: LogComponents.discovery + "] [" + this.protocol as any,
+			protocol: this.protocol,
+			targetCount: discoveryTargets.length,
+			targets: discoveryTargets.map((t: any) => ({
+				uuid: t.uuid,
+				name: t.name,
+				protocol: t.protocol,
+				connection: t.connection,
+				dataPointsCount: t.dataPoints?.length || 0
+			}))
+		});
+		
+		if (discoveryTargets.length === 0) {
+			this.logger?.warnSync('No OPC-UA discovery targets configured (need endpointUrl without dataPoints)', {
+				component: LogComponents.discovery + "] [" + this.protocol as any,
+				protocol: this.protocol
+			});
+			return [];
+		}
 
-    this.logger?.debugSync(`Starting OPC-UA discovery (${discoveryTargets.length} targets)`, {
-      component: LogComponents.discovery + "] [" + this.protocol as any,
-      protocol: this.protocol,
-      phase: 'discovery',
-      targetCount: discoveryTargets.length
-    });
+		this.logger?.debugSync(`Starting OPC-UA discovery (${discoveryTargets.length} targets)`, {
+			component: LogComponents.discovery + "] [" + this.protocol as any,
+			protocol: this.protocol,
+			phase: 'discovery',
+			targetCount: discoveryTargets.length
+		});
 
-    for (const endpoint of discoveryTargets) {
-      const url = endpoint.connection?.endpointUrl;
-      if (!url) continue;
+		for (const endpoint of discoveryTargets) {
+			const url = endpoint.connection?.endpointUrl;
+			if (!url) continue;
 
-      try {
-        const { OPCUAClient } = await import('node-opcua-client');
+			try {
+				const { OPCUAClient } = await import('node-opcua-client');
 
-        const client = OPCUAClient.create({
-          applicationName: 'Iotistic Sensor Agent',
-          applicationUri: 'urn:iotistic:sensor-agent',
-          endpointMustExist : false,
-          connectionStrategy: {
-            maxRetry: 1,
-            initialDelay: 100,
-            maxDelay: 1000
-          }
-        });
+				const client = OPCUAClient.create({
+					applicationName: 'Iotistic Sensor Agent',
+					applicationUri: 'urn:iotistic:sensor-agent',
+					endpointMustExist : false,
+					connectionStrategy: {
+						maxRetry: 1,
+						initialDelay: 100,
+						maxDelay: 1000
+					}
+				});
 
-        await client.connect(url);
-        const endpoints = await client.getEndpoints();
-        
-        // Create session to browse the node tree
-        const session = await client.createSession();
-        const dataPoints: Array<{ nodeId: string; name: string }> = [];
-        
-        try {
-          // Recursive tree browsing function
-          const browseRecursive = async (
-            nodeId: string,
-            pathSegments: string[] = [],
-            depth: number = 0,
-            maxDepth: number = 10
-          ): Promise<void> => {
-            // Protection against infinite loops
-            if (depth > maxDepth) {
-              this.logger?.warnSync(`Max depth ${maxDepth} reached, stopping recursion`, {
-                component: LogComponents.discovery + "] [" + this.protocol as any,
-                path: pathSegments.join('/')
-              });
-              return;
-            }
-            
-            try {
-              const browseResult = await session.browse(nodeId);
+				await client.connect(url);
+				const endpoints = await client.getEndpoints();
+				
+				// Create session to browse the node tree
+				const session = await client.createSession();
+				const dataPoints: Array<{ nodeId: string; name: string }> = [];
+				
+				try {
+					// Recursive tree browsing function
+					const browseRecursive = async (
+						nodeId: string,
+						pathSegments: string[] = [],
+						depth: number = 0,
+						maxDepth: number = 10
+					): Promise<void> => {
+						// Protection against infinite loops
+						if (depth > maxDepth) {
+							this.logger?.warnSync(`Max depth ${maxDepth} reached, stopping recursion`, {
+								component: LogComponents.discovery + "] [" + this.protocol as any,
+								path: pathSegments.join('/')
+							});
+							return;
+						}
+						
+						try {
+							const browseResult = await session.browse(nodeId);
               
               for (const ref of browseResult.references || []) {
                 const nodeName = ref.browseName?.name || '';
