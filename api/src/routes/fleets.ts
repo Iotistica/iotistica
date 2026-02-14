@@ -228,94 +228,28 @@ router.post('/fleets', jwtAuth, async (req, res) => {
     // Create K8s namespace for virtual fleets
     let k8s_namespace = null;
     if (fleet_type === 'virtual') {
-      k8s_namespace = `fleet-${fleet_id.replace('fleet-', '')}`;
-      
       try {
-        // Import K8s client
-        const k8s = await import('@kubernetes/client-node');
-        const kc = new k8s.KubeConfig();
+        // Use VirtualAgentDeployer service which has properly configured K8s client
+        const { virtualAgentDeployer } = await import('../services/virtual-agent-deployer.js');
         
-        // Try in-cluster config first, fallback to default
-        let configLoaded = false;
-        try {
-          kc.loadFromCluster();
-          configLoaded = true;
-          logger.debug('[FLEETS] Loaded in-cluster K8s config');
-        } catch (clusterError) {
-          try {
-            kc.loadFromDefault();
-            configLoaded = true;
-            logger.debug('[FLEETS] Loaded default K8s config');
-          } catch (defaultError) {
-            logger.warn('[FLEETS] K8s config not available (neither in-cluster nor kubeconfig)', {
-              clusterError: clusterError instanceof Error ? clusterError.message : String(clusterError),
-              defaultError: defaultError instanceof Error ? defaultError.message : String(defaultError)
-            });
-          }
-        }
+        k8s_namespace = await virtualAgentDeployer.createFleetNamespace({
+          fleet_id,
+          fleet_name,
+          customer_id,
+          agent_count,
+          devices_per_agent
+        });
         
-        if (!configLoaded) {
-          logger.warn('[FLEETS] K8s not available - fleet will be created without namespace');
-          k8s_namespace = null;
-        } else {
-          const coreApi = kc.makeApiClient(k8s.CoreV1Api);
-        
-          // Create namespace
-          await coreApi.createNamespace({
-            metadata: {
-              name: k8s_namespace,
-              labels: {
-                'app.kubernetes.io/managed-by': 'iotistic-api',
-                'iotistica.com/fleet-id': fleet_id,
-                'iotistica.com/fleet-name': fleet_name,
-                'iotistica.com/fleet-type': 'virtual',
-                'iotistica.com/customer-id': customer_id
-              },
-              annotations: {
-                'iotistica.com/agent-count': agent_count.toString(),
-                'iotistica.com/devices-per-agent': devices_per_agent.toString(),
-                'iotistica.com/total-devices': (agent_count * devices_per_agent).toString()
-              }
-            }
-          });
-          
-          // Calculate resource quotas based on agent count
-          // Each agent needs: 256Mi memory, 0.25 CPU
-          const totalMemory = `${agent_count * 256}Mi`;
-          const totalCpu = `${agent_count * 0.25}`;
-          
-          // Create ResourceQuota
-          await coreApi.createNamespacedResourceQuota(k8s_namespace, {
-            metadata: {
-              name: 'fleet-quota',
-              labels: {
-                'iotistica.com/fleet-id': fleet_id
-              }
-            },
-            spec: {
-              hard: {
-                'requests.cpu': totalCpu,
-                'requests.memory': totalMemory,
-                'limits.cpu': `${agent_count * 0.5}`,  // 2x burst
-                'limits.memory': `${agent_count * 512}Mi`,  // 2x burst
-                'pods': agent_count.toString()
-              }
-            }
-          });
-          
-          logger.info(`[FLEETS] Created K8s namespace for virtual fleet`, {
-            fleet_id,
-            namespace: k8s_namespace,
-            agent_count,
-            total_devices: agent_count * devices_per_agent,
-            quotas: { cpu: totalCpu, memory: totalMemory }
-          });
-        }
+        logger.info(`[FLEETS] Created K8s namespace for virtual fleet`, {
+          fleet_id,
+          namespace: k8s_namespace,
+          agent_count,
+          total_devices: agent_count * devices_per_agent
+        });
         
       } catch (k8sError: any) {
         logger.error('[FLEETS] Failed to create K8s namespace', {
           fleet_id,
-          namespace: k8s_namespace,
           error: k8sError instanceof Error ? k8sError.message : String(k8sError)
         });
         

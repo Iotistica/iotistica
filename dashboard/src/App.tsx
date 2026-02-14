@@ -514,7 +514,7 @@ export default function App() {
           cpu: 0,
           memory: 0,
           disk: 0,
-          fleet_id: deviceData.fleet_id || null,
+          fleet_id: deviceData.fleet_id || undefined,
         };
         
         setDevices(prev => [...prev, newDevice]);

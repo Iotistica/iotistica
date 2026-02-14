@@ -866,6 +866,82 @@ export class VirtualAgentDeployer {
     
     return sanitized;
   }
+
+  /**
+   * Create fleet namespace with ResourceQuota
+   */
+  async createFleetNamespace(params: {
+    fleet_id: string;
+    fleet_name: string;
+    customer_id: string;
+    agent_count: number;
+    devices_per_agent: number;
+  }): Promise<string> {
+    const namespace = `fleet-${params.fleet_id.replace('fleet-', '')}`;
+    
+    try {
+      // Create namespace
+      await this.coreApi.createNamespace({
+        metadata: {
+          name: namespace,
+          labels: {
+            'app.kubernetes.io/managed-by': 'iotistic-api',
+            'iotistica.com/fleet-id': params.fleet_id,
+            'iotistica.com/fleet-name': params.fleet_name,
+            'iotistica.com/fleet-type': 'virtual',
+            'iotistica.com/customer-id': params.customer_id
+          },
+          annotations: {
+            'iotistica.com/agent-count': params.agent_count.toString(),
+            'iotistica.com/devices-per-agent': params.devices_per_agent.toString(),
+            'iotistica.com/total-devices': (params.agent_count * params.devices_per_agent).toString()
+          }
+        }
+      });
+      
+      logger.info('Fleet namespace created', { namespace, fleet_id: params.fleet_id });
+      
+      // Calculate resource quotas based on agent count
+      // Each agent needs: 256Mi memory, 0.25 CPU
+      const totalMemory = `${params.agent_count * 256}Mi`;
+      const totalCpu = `${params.agent_count * 0.25}`;
+      
+      // Create ResourceQuota
+      await this.coreApi.createNamespacedResourceQuota(namespace, {
+        metadata: {
+          name: 'fleet-quota',
+          labels: {
+            'iotistica.com/fleet-id': params.fleet_id
+          }
+        },
+        spec: {
+          hard: {
+            'requests.cpu': totalCpu,
+            'requests.memory': totalMemory,
+            'limits.cpu': `${params.agent_count * 0.5}`,  // 2x burst
+            'limits.memory': `${params.agent_count * 512}Mi`,  // 2x burst
+            'pods': params.agent_count.toString()
+          }
+        }
+      });
+      
+      logger.info('Fleet ResourceQuota created', {
+        namespace,
+        fleet_id: params.fleet_id,
+        quotas: { cpu: totalCpu, memory: totalMemory, pods: params.agent_count }
+      });
+      
+      return namespace;
+      
+    } catch (error: any) {
+      logger.error('Failed to create fleet namespace', {
+        fleet_id: params.fleet_id,
+        namespace,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
+  }
 }
 
 // Export singleton instance

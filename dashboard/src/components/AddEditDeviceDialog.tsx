@@ -249,7 +249,7 @@ export function AddEditDeviceDialog({
       }
     }
 
-    const fleetIdForSave = selectedFleetId === UNASSIGNED_FLEET_ID ? null : selectedFleetId;
+    const fleetIdForSave = selectedFleetId === UNASSIGNED_FLEET_ID ? undefined : selectedFleetId;
     const deviceDataToSave = {
       ...(device?.id ? { id: device.id } : {}),
       deviceUuid: device?.deviceUuid || generateUuid(),
