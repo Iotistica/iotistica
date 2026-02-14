@@ -1211,29 +1211,45 @@ export class ConfigManager extends EventEmitter {
 				}
 			}
 			
-			// Normalize property names (camelCase → snake_case)
-			const normalizedDevice = {
-				protocol: device.protocol as 'modbus' | 'can' | 'opcua',
-				enabled: device.enabled !== undefined ? device.enabled : true,
-				poll_interval: device.pollInterval || 5000,
-				connection: connection,
-				data_points: (device as any).dataPoints || (device as any).registers || [],
-				metadata: metadata
-			};
-			
-			// Try to update first
-			const existing = await DeviceSensorModel.getByName(device.name);
-			
-			if (existing) {
-				// Device exists - update it
-				await DeviceSensorModel.update(device.name, normalizedDevice);
-				
-				this.logger?.infoSync('Device updated in sensors table', {
-					component: LogComponents.configManager,
-					operation: 'updateDevice',
-					deviceName: device.name,
-				});
-			} else {
+		// Get existing device first to check for data_points preservation
+		const existing = await DeviceSensorModel.getByName(device.name);
+		
+		// Prepare data_points with preservation logic
+		let dataPoints = (device as any).dataPoints || (device as any).registers || [];
+		
+		// CRITICAL: Preserve discovered data_points if target state has empty array
+		// Same logic as syncEndpointsToDatabase() - don't overwrite discovery results
+		if (existing && existing.data_points && existing.data_points.length > 0 && 
+				(!dataPoints || dataPoints.length === 0)) {
+			this.logger?.debugSync('Preserving existing data_points in updateEndpoint', {
+				component: LogComponents.configManager,
+				deviceName: device.name,
+				existingCount: existing.data_points.length
+			});
+			dataPoints = existing.data_points;
+		}
+		
+		// Normalize property names (camelCase → snake_case)
+		// Normalize property names (camelCase → snake_case)
+const normalizedDevice = {
+    protocol: device.protocol as 'modbus' | 'can' | 'opcua',
+    enabled: device.enabled !== undefined ? device.enabled : true,
+    poll_interval: device.pollInterval || 5000,
+    connection: connection,
+    data_points: dataPoints,
+    metadata: metadata
+};
+
+if (existing) {
+    // Device exists - update it
+    await DeviceSensorModel.update(device.name, normalizedDevice);
+    
+    this.logger?.infoSync('Device updated in sensors table', {
+        component: LogComponents.configManager,
+        operation: 'updateDevice',
+        deviceName: device.name,
+    });
+} else {
 				// Device doesn't exist - create it (upsert behavior)
 				await DeviceSensorModel.create({
 					name: device.name,

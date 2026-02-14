@@ -525,34 +525,18 @@ export class DiscoveryService extends EventEmitter {
     // CRITICAL: Cache discovered devices for reconciliation to access
     // When skipDbWrites is true, new devices don't get saved to DB yet
     // But reconciliation needs the discovered data_points when creating records
-		this.logger?.infoSync('=== CACHING DISCOVERED DEVICES ===', {
-			component: LogComponents.discovery,
-			traceId,
-			discoveredCount: allDiscovered.length,
-			skipDbWrites: options.skipDbWrites || false
-		});
-		
 		for (const device of allDiscovered) {
 			const endpointUrl = device.connection?.endpointUrl || device.metadata?.endpointUrl;
 			if (endpointUrl) {
 				this.discoveredDevicesCache.set(endpointUrl, device);
-				this.logger?.infoSync('✅ Cached discovered device', {
-					component: LogComponents.discovery,
-					traceId,
-					deviceName: device.name,
-					endpointUrl,
-					dataPointsCount: device.dataPoints?.length || 0,
-					cacheSize: this.discoveredDevicesCache.size
-				});
-			} else {
-				this.logger?.warnSync('⚠️ Cannot cache device (no endpointUrl)', {
-					component: LogComponents.discovery,
-					traceId,
-					deviceName: device.name,
-					protocol: device.protocol
-				});
 			}
 		}
+		
+		this.logger?.debugSync('Cached discovered devices for reconciliation', {
+			component: LogComponents.discovery,
+			traceId,
+			cachedCount: this.discoveredDevicesCache.size
+		});
 
     if (options.skipDbWrites) {
       this.logger?.debugSync('Discovery in update-only mode (reconcile creates records)', {
