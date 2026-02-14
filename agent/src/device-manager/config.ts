@@ -811,6 +811,28 @@ export class ConfigManager extends EventEmitter {
 					: await DeviceEndpointModel.getByName(normalizedDevice.name);
 
 				if (existing) {
+					// CRITICAL: Preserve discovered data_points if target state has empty array
+					// This prevents reconciliation from overwriting discovery results
+					// Flow: Discovery finds nodes → saves to DB → cloud syncs → reconcile runs
+					// Without this check, reconcile would overwrite with cloud's empty array
+					const shouldPreserveDataPoints = 
+						existing.data_points && 
+						existing.data_points.length > 0 && 
+						(!normalizedDevice.data_points || normalizedDevice.data_points.length === 0);
+					
+					if (shouldPreserveDataPoints) {
+						this.logger?.infoSync('Preserving discovered data_points during reconciliation', {
+							component: LogComponents.configManager,
+							deviceUuid: normalizedDevice.uuid || existing.uuid,
+							deviceName: normalizedDevice.name,
+							existingDataPointsCount: existing.data_points?.length || 0,
+							targetDataPointsCount: normalizedDevice.data_points?.length || 0
+						});
+						
+						// Keep existing data_points from discovery
+						normalizedDevice.data_points = existing.data_points;
+					}
+					
 					await DeviceEndpointModel.updateByUuid(
 						normalizedDevice.uuid || existing.uuid!,
 						normalizedDevice
@@ -819,7 +841,8 @@ export class ConfigManager extends EventEmitter {
 						component: LogComponents.configManager,
 						deviceUuid: normalizedDevice.uuid || existing.uuid,
 						deviceName: normalizedDevice.name,
-						protocol: normalizedDevice.protocol
+						protocol: normalizedDevice.protocol,
+						dataPointsCount: normalizedDevice.data_points?.length || 0
 					});
 				} else {
 					await DeviceEndpointModel.create(normalizedDevice);
@@ -827,7 +850,8 @@ export class ConfigManager extends EventEmitter {
 						component: LogComponents.configManager,
 						deviceUuid: normalizedDevice.uuid,
 						deviceName: normalizedDevice.name,
-						protocol: normalizedDevice.protocol
+						protocol: normalizedDevice.protocol,
+						dataPointsCount: normalizedDevice.data_points?.length || 0
 					});
 				}
 			}
