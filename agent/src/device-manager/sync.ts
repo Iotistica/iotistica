@@ -29,6 +29,7 @@ import type { HttpClient } from '../lib/http-client.js';
 import { createHttpClient, FetchHttpClient } from '../lib/http-client.js';
 import { RetryPolicy, CircuitBreaker, AsyncLock, isAuthError } from '../utils/retry-policy';
 import { createHash } from 'crypto';
+import { MetadataModel } from '../db/models/metadata.model.js';
 
 interface DeviceStateReport {
 	[deviceUuid: string]: {
@@ -324,6 +325,22 @@ export class CloudSync extends EventEmitter {
 	 * Start polling cloud for target state
 	 */
 	public async startPoll(): Promise<void> {
+		// Load persisted ETag from database to avoid unnecessary full polls after restart
+		try {
+			const persistedETag = await MetadataModel.get('target_state_etag');
+			if (persistedETag) {
+				this.targetStateETag = persistedETag;
+				this.logger?.infoSync('Loaded persisted target state ETag', {
+					component: LogComponents.cloudSync,
+					etag: persistedETag
+				});
+			}
+		} catch (error) {
+			this.logger?.warnSync('Failed to load persisted ETag', {
+				component: LogComponents.cloudSync,
+				error: error instanceof Error ? error.message : String(error)
+			});
+		}
 		if (this.isPolling) {
 			this.logger?.warnSync('CloudSync already polling', { component: LogComponents.cloudSync });
 			return;
@@ -615,7 +632,7 @@ export class CloudSync extends EventEmitter {
 				throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 			}
 		
-		// Get ETag for next request
+		// Get ETag for next request and persist to database
 		const etag = response.headers.get('etag');
 		this.logger?.debugSync('ETag received from server', {
 			component: LogComponents.cloudSync,
@@ -624,6 +641,13 @@ export class CloudSync extends EventEmitter {
 		});
 		if (etag) {
 			this.targetStateETag = etag;
+			// Persist ETag to survive pod restarts
+			await MetadataModel.set('target_state_etag', etag).catch(err => {
+				this.logger?.warnSync('Failed to persist ETag', {
+					component: LogComponents.cloudSync,
+					error: err instanceof Error ? err.message : String(err)
+				});
+			});
 		}
 		
 		// Parse response
