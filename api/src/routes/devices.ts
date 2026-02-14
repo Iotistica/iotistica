@@ -374,7 +374,7 @@ router.get('/devices/:uuid', async (req, res) => {
  */
 router.post('/devices', jwtAuth, async (req, res) => {
   try {
-    const { deviceName, deviceType, ipAddress, macAddress, fleetId, namespace, tags, metadata, endpoints } = req.body;
+    const { deviceName, deviceType, ipAddress, macAddress, fleet_id, namespace, tags, metadata, endpoints } = req.body;
 
     if (!deviceName) {
       return res.status(400).json({
@@ -399,7 +399,7 @@ router.post('/devices', jwtAuth, async (req, res) => {
         deviceUuid: deviceUuid.substring(0, 8) + '...',
         deviceName: uniqueDeviceName,
         originalName: deviceName,
-        fleetId,
+        fleet_id,
         namespace
       });
 
@@ -415,7 +415,7 @@ router.post('/devices', jwtAuth, async (req, res) => {
           deviceType: 'virtual',
           deviceApiKey,
           provisioningApiKey: 'virtual-agent-auto-generated', // Will be server-generated
-          applicationId: fleetId ? parseInt(fleetId) : undefined,
+          fleet_id: fleet_id || null,
           namespace,
           metadata, // Pass OPC UA profile metadata
           endpoints // Pass protocol endpoints
@@ -457,12 +457,13 @@ router.post('/devices', jwtAuth, async (req, res) => {
         device_type, 
         ip_address, 
         mac_address,
+        fleet_id,
         is_online, 
         is_active,
         provisioning_state,
         created_at, 
         modified_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
       RETURNING *`,
       [
         deviceUuid,
@@ -470,6 +471,7 @@ router.post('/devices', jwtAuth, async (req, res) => {
         type,
         ipAddress || null,
         macAddress || null,
+        fleet_id || null,
         false, // Not online until agent connects
         false,  // Not active until agent connects with provisioning key
         'pending' // Waiting for agent to provision
@@ -1757,7 +1759,7 @@ router.post('/devices/virtual', jwtAuth, async (req, res) => {
         deviceType: 'virtual',
         deviceApiKey,
         provisioningApiKey: 'virtual-agent-auto-generated', // Will be server-generated
-        applicationId: fleetId ? parseInt(fleetId) : undefined,
+        fleet_id: fleetId || null,
         namespace
       },
       req.ip,

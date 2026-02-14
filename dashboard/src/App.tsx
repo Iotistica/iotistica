@@ -463,10 +463,8 @@ export default function App() {
         if (!isVirtual) {
           requestBody.ipAddress = deviceData.ipAddress;
           requestBody.macAddress = deviceData.macAddress;
-        } else {
-          // Add virtual agent fields
-          requestBody.fleetId = 'default'; // TODO: Get from user selection
         }
+        // Note: Virtual agents use fleet_id from above (no separate fleetId field)
         
         // Add tags if provided
         if (deviceData.tags && Object.keys(deviceData.tags).length > 0) {
