@@ -584,7 +584,7 @@ export class ConfigManager extends EventEmitter {
 		});
 
 		// DETAILED DEBUG: Log target and current state before reconciliation
-		this.logger?.infoSync('=== RECONCILIATION: TARGET STATE ===', {
+		this.logger?.debugSync('=== RECONCILIATION: TARGET STATE ===', {
 			component: LogComponents.configManager,
 			operation: 'reconcile',
 			targetEndpointsCount: this.targetConfig.endpoints?.length || 0,
@@ -597,7 +597,7 @@ export class ConfigManager extends EventEmitter {
 			}))
 		});
 
-		this.logger?.infoSync('=== RECONCILIATION: CURRENT STATE ===', {
+		this.logger?.debugSync('=== RECONCILIATION: CURRENT STATE ===', {
 			component: LogComponents.configManager,
 			operation: 'reconcile',
 			currentEndpointsCount: this.currentConfig.endpoints?.length || 0,
@@ -768,7 +768,7 @@ export class ConfigManager extends EventEmitter {
 			return;
 		}
 
-		this.logger?.infoSync('=== SYNCING ENDPOINTS TO DATABASE ===', {
+		this.logger?.debugSync('=== SYNCING ENDPOINTS TO DATABASE ===', {
 			component: LogComponents.configManager,
 			totalEndpoints: devices.length,
 			endpoints: devices.map((d: any) => ({
@@ -784,7 +784,7 @@ export class ConfigManager extends EventEmitter {
 			// Get current devices from SQLite to detect deletions
 			const currentDevices = await DeviceEndpointModel.getAll();
 			
-			this.logger?.infoSync('=== CURRENT ENDPOINTS IN DB (BEFORE SYNC) ===', {
+			this.logger?.debugSync('=== CURRENT ENDPOINTS IN DB (BEFORE SYNC) ===', {
 				component: LogComponents.configManager,
 				operation: 'syncEndpointsToDatabase',
 				currentCount: currentDevices.length,
@@ -802,7 +802,7 @@ export class ConfigManager extends EventEmitter {
 
 			// Sync each device to SQLite
 			for (const device of devices) {
-				this.logger?.infoSync('=== PROCESSING DEVICE FOR DB SYNC ===', {
+				this.logger?.debugSync('=== PROCESSING DEVICE FOR DB SYNC ===', {
 					component: LogComponents.configManager,
 					operation: 'syncEndpointsToDatabase',
 					deviceUuid: device.uuid,
@@ -838,7 +838,7 @@ export class ConfigManager extends EventEmitter {
 						(!normalizedDevice.data_points || normalizedDevice.data_points.length === 0);
 					
 					if (shouldPreserveDataPoints) {
-						this.logger?.infoSync('✅ PRESERVING discovered data_points (UPDATE path)', {
+						this.logger?.debugSync('✅ PRESERVING discovered data_points (UPDATE path)', {
 							component: LogComponents.configManager,
 							deviceUuid: normalizedDevice.uuid || existing.uuid,
 							deviceName: normalizedDevice.name,
@@ -886,7 +886,7 @@ export class ConfigManager extends EventEmitter {
 					// just run and cached the results. Check cache before creating with empty array.
 					const endpointUrl = normalizedDevice.connection?.endpointUrl;
 					if (endpointUrl && this.discoveryService) {
-						this.logger?.infoSync('Checking discovery cache for new device', {
+						this.logger?.debugSync('Checking discovery cache for new device', {
 							component: LogComponents.configManager,
 							operation: 'syncEndpointsToDatabase',
 							endpointUrl,
@@ -896,7 +896,7 @@ export class ConfigManager extends EventEmitter {
 						
 						const discoveredDevice = this.discoveryService.getDiscoveredDevice?.(endpointUrl);
 						if (discoveredDevice && discoveredDevice.dataPoints && discoveredDevice.dataPoints.length > 0) {
-							this.logger?.infoSync('✅ USING cached discovered data_points (CREATE path)', {
+							this.logger?.debugSync('✅ USING cached discovered data_points (CREATE path)', {
 								component: LogComponents.configManager,
 								deviceUuid: normalizedDevice.uuid,
 								deviceName: normalizedDevice.name,
@@ -908,7 +908,7 @@ export class ConfigManager extends EventEmitter {
 							// Use discovered data_points instead of empty array from target state
 							normalizedDevice.data_points = discoveredDevice.dataPoints;
 						} else {
-							this.logger?.warnSync('⚠️ Discovery cache MISS for new device', {
+							this.logger?.debugSync('⚠️ Discovery cache MISS for new device', {
 								component: LogComponents.configManager,
 								deviceUuid: normalizedDevice.uuid,
 								deviceName: normalizedDevice.name,
@@ -930,8 +930,7 @@ export class ConfigManager extends EventEmitter {
 					}
 					
 					// Log full structure before INSERT to debug data_points issue
-					this.logger?.infoSync('=== ABOUT TO INSERT INTO DB ===', {
-						component: LogComponents.configManager,
+				this.logger?.debugSync('=== ABOUT TO INSERT INTO DB ===', {
 						operation: 'syncEndpointsToDatabase - CREATE',
 						deviceUuid: normalizedDevice.uuid,
 						deviceName: normalizedDevice.name,
