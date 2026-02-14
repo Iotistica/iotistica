@@ -445,12 +445,12 @@ export class FeatureInitializer {
     // 2. ConfigManager after direct-connection endpoints (slaveId only) are added
     this.features.discoveryService.on('discovery-complete', async (data: any) => {
 
-      // Reload protocol adapters and Sensor Publish for ALL triggers
+      // Reload protocol adapters and Sensor Publish for manual/scheduled discovery
+      // For config-change triggers, wait for reconciliation-complete instead to avoid race conditions
       // - first_boot: Initial discovery scan
-      // - config-change: Endpoints added/modified via cloud (skipDbWrites mode)
       // - manual: User-triggered discovery
-      // Note: For config-change with skipDbWrites, savedCount will be 0 (DB already synced by reconcile)
-      const shouldReload = data.trigger === 'config-change' || data.savedCount > 0;
+      // - config-change: Skip here, reload after reconciliation completes
+      const shouldReload = data.trigger !== 'config-change' && data.savedCount > 0;
       
       if (shouldReload) {
         try {
@@ -513,6 +513,57 @@ export class FeatureInitializer {
       component: LogComponents.agent,
       note: 'Sensor Publish will reload automatically when discovery finds new enabled endpoints'
     });
+
+    // Listen for reconciliation-complete to reload after config changes (avoids race with discovery)
+    if (this.context.stateReconciler) {
+      this.context.stateReconciler.on('reconciliation-complete', async () => {
+        try {
+          logger.infoSync('Reloading protocol adapters after reconciliation complete', {
+            component: LogComponents.agent,
+            trigger: 'reconciliation-complete'
+          });
+
+          // Stop protocol adapters
+          if (this.features.sensors) {
+            await this.features.sensors.stop();
+            this.features.sensors = undefined;
+          }
+
+          // Stop Sensor Publish
+          if (this.features.sensorPublish) {
+            await this.features.sensorPublish.stop();
+            this.features.sensorPublish = undefined;
+          }
+
+          // Reinitialize protocol adapters (will read endpoints from database)
+          await this.initProtocolAdapters();
+
+          // Reinitialize Sensor Publish (will read endpoints from database)
+          await this.initSensorPublish();
+
+          // Update CloudSync's endpoints reference
+          if (this.cloudSync && this.features.sensors) {
+            this.cloudSync.setEndpoints(this.features.sensors);
+            logger.infoSync('Updated CloudSync endpoints reference after reload', {
+              component: LogComponents.agent
+            });
+          }
+
+          logger.infoSync('Protocol adapters reloaded after reconciliation', {
+            component: LogComponents.agent
+          });
+        } catch (error) {
+          logger.errorSync('Failed to reload after reconciliation', error as Error, {
+            component: LogComponents.agent
+          });
+        }
+      });
+
+      logger.infoSync('Reconciliation reload watcher initialized', {
+        component: LogComponents.agent,
+        note: 'Protocol adapters reload after reconciliation completes (not during discovery)'
+      });
+    }
   }
 
   private async initAgentUpdater(): Promise<void> {
