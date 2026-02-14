@@ -929,13 +929,31 @@ export class ConfigManager extends EventEmitter {
 						});
 					}
 					
+					// Log full structure before INSERT to debug data_points issue
+					this.logger?.infoSync('=== ABOUT TO INSERT INTO DB ===', {
+						component: LogComponents.configManager,
+						operation: 'syncEndpointsToDatabase - CREATE',
+						deviceUuid: normalizedDevice.uuid,
+						deviceName: normalizedDevice.name,
+						protocol: normalizedDevice.protocol,
+						dataPointsCount: normalizedDevice.data_points?.length || 0,
+						firstDataPoint: normalizedDevice.data_points?.[0] || null,
+						allDataPoints: normalizedDevice.data_points || []
+					});
+					
 					await DeviceEndpointModel.create(normalizedDevice);
+					
+					// CRITICAL: Verify what was actually saved to DB
+					const verifyInsert = await DeviceEndpointModel.getByUuid(normalizedDevice.uuid!);
+					
 					this.logger?.infoSync('Added endpoint to database', {
 						component: LogComponents.configManager,
 						deviceUuid: normalizedDevice.uuid,
 						deviceName: normalizedDevice.name,
 						protocol: normalizedDevice.protocol,
-						dataPointsCount: normalizedDevice.data_points?.length || 0
+						dataPointsCount: normalizedDevice.data_points?.length || 0,
+						dbDataPointsCount: verifyInsert?.data_points?.length || 0,
+						dbFirstDataPoint: verifyInsert?.data_points?.[0] || null
 					});
 				}
 			}
