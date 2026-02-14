@@ -105,171 +105,170 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 						
 						try {
 							const browseResult = await session.browse(nodeId);
-              
-              for (const ref of browseResult.references || []) {
-                const nodeName = ref.browseName?.name || '';
-                const childNodeId = ref.nodeId.toString();
-                const currentPath = [...pathSegments, nodeName];
-                
-                // Skip standard OPC UA system folders at root level (IEC 62541)
-                // ServerInfo contains metadata like ProfileName, SensorCount which pollute data_points
-                if (depth === 0 && ['Server', 'ServerInfo', 'Types', 'Views', 'Aliases'].includes(nodeName)) {
-                  continue;
-                }
-                
-                // NodeClass: 1 = Object/Folder, 2 = Variable
-                // Verify the actual NodeClass by reading node attributes
-                try {
-                  const nodeClass = await session.read({
-                    nodeId: childNodeId,
-                    attributeId: 2 // NodeClass attribute
-                  });
-                  
-                  const actualNodeClass = nodeClass.value.value;
-                  
-                  if (actualNodeClass === 2) {
-                    // Extract semantic metric name from browseName prefix (OPC UA standard)
-                    // Format: "Temperature_Sensor1" → metric: "temperature"
-                    // If no underscore, use full browseName in lowercase
-                    const metricName = nodeName.includes('_') 
-                      ? nodeName.split('_')[0].toLowerCase()
-                      : nodeName.toLowerCase();
-                    
-                    dataPoints.push({
-                      nodeId: childNodeId,
-                      name: metricName
-                    });
-                    
-                    this.logger?.debugSync(`Discovered variable: ${currentPath.join('/')}`, {
-                      component: LogComponents.discovery + "] [" + this.protocol as any,
-                      nodeId: childNodeId,
-                      browseName: nodeName,
-                      metricName,
-                      depth
-                    });
-                  } else if (actualNodeClass === 1) {
-                    // Verified folder - recurse into it
-                    this.logger?.debugSync(`Browsing into folder: ${currentPath.join('/')}`, {
-                      component: LogComponents.discovery + "] [" + this.protocol as any,
-                      nodeId: childNodeId,
-                      depth
-                    });
-                    
-                    await browseRecursive(childNodeId, currentPath, depth + 1, maxDepth);
-                  }
-                } catch (readError) {
-                  // If we can't read NodeClass, skip this node
-                  this.logger?.debugSync(`Skipping node (cannot read NodeClass): ${currentPath.join('/')}`, {
-                    component: LogComponents.discovery + "] [" + this.protocol as any,
-                    nodeId: childNodeId,
-                    error: readError instanceof Error ? readError.message : String(readError)
-                  });
-                }
-              }
-            } catch (browseError) {
-              this.logger?.debugSync(`Failed to browse node: ${pathSegments.join('/')}`, {
-                component: LogComponents.discovery + "] [" + this.protocol as any,
-                error: browseError instanceof Error ? browseError.message : String(browseError),
-                depth
-              });
-            }
-          };
-          
-          // Start recursive browsing from Objects folder
-          const ObjectsNodeId = 'ns=0;i=85'; // Standard Objects folder
-          await browseRecursive(ObjectsNodeId, [], 0);
-        } catch (browseError) {
-          this.logger?.warnSync('Failed to browse OPC UA tree recursively, using default node', {
-            component: LogComponents.discovery + "] [" + this.protocol as any,
-            error: browseError instanceof Error ? browseError.message : String(browseError)
-          });
-          
-          // Fallback to example node if browsing fails
-          if (dataPoints.length === 0) {
-            dataPoints.push({
-              nodeId: 'ns=2;s=MyVariable',
-              name: 'example_node'
-            });
-          }
-        } finally {
-          await session.close();
-        }
-        
-        this.logger?.debugSync(`OPC UA recursive tree browsing complete: discovered ${dataPoints.length} nodes`, {
-          component: LogComponents.discovery + "] [" + this.protocol as any,
-          url,
-          dataPointCount: dataPoints.length
-        });
-        
-        // Log sample of discovered nodes for verification
-        if (dataPoints.length > 0) {
-          this.logger?.infoSync(`OPC UA nodes discovered and ready to save`, {
-            component: LogComponents.discovery + "] [" + this.protocol as any,
-            endpointUrl: url,
-            totalNodes: dataPoints.length,
-            sampleNodes: dataPoints.slice(0, 5).map(dp => ({
-              nodeId: dp.nodeId,
-              name: dp.name
-            }))
-          });
-        }
-        
-        await client.disconnect();
+							
+							for (const ref of browseResult.references || []) {
+								const nodeName = ref.browseName?.name || '';
+								const childNodeId = ref.nodeId.toString();
+								const currentPath = [...pathSegments, nodeName];
+								
+								// Skip standard OPC UA system folders at root level (IEC 62541)
+								// ServerInfo contains metadata like ProfileName, SensorCount which pollute data_points
+								if (depth === 0 && ['Server', 'ServerInfo', 'Types', 'Views', 'Aliases'].includes(nodeName)) {
+									continue;
+								}
+								
+								// NodeClass: 1 = Object/Folder, 2 = Variable
+								// Verify the actual NodeClass by reading node attributes
+								try {
+									const nodeClass = await session.read({
+										nodeId: childNodeId,
+										attributeId: 2 // NodeClass attribute
+									});
+									
+									const actualNodeClass = nodeClass.value.value;
+									
+									if (actualNodeClass === 2) {
+										// Extract semantic metric name from browseName prefix (OPC UA standard)
+										// Format: "Temperature_Sensor1" → metric: "temperature"
+										// If no underscore, use full browseName in lowercase
+										const metricName = nodeName.includes('_') 
+											? nodeName.split('_')[0].toLowerCase()
+											: nodeName.toLowerCase();
+										
+										dataPoints.push({
+											nodeId: childNodeId,
+											name: metricName
+										});
+										
+										this.logger?.debugSync(`Discovered variable: ${currentPath.join('/')}`, {
+											component: LogComponents.discovery + "] [" + this.protocol as any,
+											nodeId: childNodeId,
+											browseName: nodeName,
+											metricName,
+											depth
+										});
+									} else if (actualNodeClass === 1) {
+										// Verified folder - recurse into it
+										this.logger?.debugSync(`Browsing into folder: ${currentPath.join('/')}`, {
+											component: LogComponents.discovery + "] [" + this.protocol as any,
+											nodeId: childNodeId,
+											depth
+										});
+										
+										await browseRecursive(childNodeId, currentPath, depth + 1, maxDepth);
+									}
+								} catch (readError) {
+									// If we can't read NodeClass, skip this node
+									this.logger?.debugSync(`Skipping node (cannot read NodeClass): ${currentPath.join('/')}`, {
+										component: LogComponents.discovery + "] [" + this.protocol as any,
+										nodeId: childNodeId,
+										error: readError instanceof Error ? readError.message : String(readError)
+									});
+								}
+							}
+						} catch (browseError) {
+							this.logger?.debugSync(`Failed to browse node: ${pathSegments.join('/')}`, {
+								component: LogComponents.discovery + "] [" + this.protocol as any,
+								error: browseError instanceof Error ? browseError.message : String(browseError),
+								depth
+							});
+						}
+					};
+					
+					// Start recursive browsing from Objects folder
+					const ObjectsNodeId = 'ns=0;i=85'; // Standard Objects folder
+					await browseRecursive(ObjectsNodeId, [], 0);
+				} catch (browseError) {
+					this.logger?.warnSync('Failed to browse OPC UA tree recursively, using default node', {
+						component: LogComponents.discovery + "] [" + this.protocol as any,
+						error: browseError instanceof Error ? browseError.message : String(browseError)
+					});
+					
+					// Fallback to example node if browsing fails
+					if (dataPoints.length === 0) {
+						dataPoints.push({
+							nodeId: 'ns=2;s=MyVariable',
+							name: 'example_node'
+						});
+					}
+				} finally {
+					await session.close();
+				}
+				
+				this.logger?.debugSync(`OPC UA recursive tree browsing complete: discovered ${dataPoints.length} nodes`, {
+					component: LogComponents.discovery + "] [" + this.protocol as any,
+					url,
+					dataPointCount: dataPoints.length
+				});
+				
+				// Log sample of discovered nodes for verification
+				if (dataPoints.length > 0) {
+					this.logger?.infoSync(`OPC UA nodes discovered and ready to save`, {
+						component: LogComponents.discovery + "] [" + this.protocol as any,
+						endpointUrl: url,
+						totalNodes: dataPoints.length,
+						sampleNodes: dataPoints.slice(0, 5).map(dp => ({
+							nodeId: dp.nodeId,
+							name: dp.name
+						}))
+					});
+				}
+				
+				await client.disconnect();
 
-        if (endpoints.length > 0) {
-          const endpoint = endpoints[0];
-          
-          // Extract ApplicationUri from endpoint (most stable OPC-UA identifier)
-          const applicationUri = endpoint.server?.applicationUri || `urn:${new URL(url).hostname}:unknown`;
-          
-          // Generate cryptographic fingerprint
-          const fingerprint = generateOPCUAFingerprint(applicationUri);
-          
-          const certThumbprint = endpoint.serverCertificate 
-            ? endpoint.serverCertificate.toString('hex').substring(0, 16)
-            : 'nocert';
+				if (endpoints.length > 0) {
+					const endpoint = endpoints[0];
+					
+					// Extract ApplicationUri from endpoint (most stable OPC-UA identifier)
+					const applicationUri = endpoint.server?.applicationUri || `urn:${new URL(url).hostname}:unknown`;
+					
+					// Generate cryptographic fingerprint
+					const fingerprint = generateOPCUAFingerprint(applicationUri);
+					
+					const certThumbprint = endpoint.serverCertificate 
+						? endpoint.serverCertificate.toString('hex').substring(0, 16)
+						: 'nocert';
 
-          discovered.push({
-            name: `opcua_${new URL(url).hostname}_${new URL(url).port}`,
-            protocol: 'opcua' as const,
-            fingerprint,
-            connection: {
-              endpointUrl: url,
-              securityMode: 'None',
-              securityPolicy: 'None'
-            },
-            dataPoints: dataPoints.length > 0 ? dataPoints : [{
-              nodeId: 'ns=2;s=MyVariable',
-              name: 'example_node'
-            }],
-            confidence: 'medium',
-            discoveredAt: new Date().toISOString(),
-            validated: false,
-            metadata: {
-              endpointUrl: url,
-              applicationUri,
-              availableEndpoints: endpoints.length,
-              serverCertificateThumbprint: certThumbprint,
-              discoveryMethod: 'endpoint_discovery'
-            }
-          });
+					discovered.push({
+						name: `opcua_${new URL(url).hostname}_${new URL(url).port}`,
+						protocol: 'opcua' as const,
+						fingerprint,
+						connection: {
+							endpointUrl: url,
+							securityMode: 'None',
+							securityPolicy: 'None'
+						},
+						dataPoints: dataPoints.length > 0 ? dataPoints : [{
+							nodeId: 'ns=2;s=MyVariable',
+							name: 'example_node'
+						}],
+						confidence: 'medium',
+						discoveredAt: new Date().toISOString(),
+						validated: false,
+						metadata: {
+							endpointUrl: url,
+							applicationUri,
+							availableEndpoints: endpoints.length,
+							serverCertificateThumbprint: certThumbprint,
+							discoveryMethod: 'endpoint_discovery'
+						}
+					});
 
-          this.logger?.debugSync(`Discovered OPC-UA endpoint at ${url}`, {
-            component: LogComponents.discovery + "] [" + this.protocol as any,
-            endpoints: endpoints.length,
-            phase: 'discovery'
-          });
-        }
-      } catch (error) {
-        this.logger?.debugSync(`No OPC-UA server at ${url}`, {
-          component: LogComponents.discovery + "] [" + this.protocol as any
-        });
-      }
-    }
+					this.logger?.debugSync(`Discovered OPC-UA endpoint at ${url}`, {
+						component: LogComponents.discovery + "] [" + this.protocol as any,
+						endpoints: endpoints.length,
+						phase: 'discovery'
+					});
+				}
+			} catch (error) {
+				this.logger?.debugSync(`No OPC-UA server at ${url}`, {
+					component: LogComponents.discovery + "] [" + this.protocol as any
+				});
+			}
+		}
 
-    return discovered;
-  }
-
+		return discovered;
+	}
   /**
    * Phase 2: Validate server (read ServerInfo)
    */
