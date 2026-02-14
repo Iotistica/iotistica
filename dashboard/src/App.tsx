@@ -37,7 +37,6 @@ import { toast } from "sonner";
 import { Header } from "./components/Header";
 import { useDeviceState } from "./contexts/DeviceStateContext";
 import { useAuth } from "./contexts/AuthContext";
-import { useFleet } from "./contexts/FleetContext";
 import { LoginPage } from "./pages/LoginPage";
 import { UserManagementPage } from "./pages/UserManagementPage";
 
@@ -56,7 +55,6 @@ export default function App() {
   const { user, isAuthenticated, isLoading: isAuthLoading, login, logout } = useAuth();
   
   // Fleet context - for auto-assigning devices to selected fleet
-  const { selectedFleetId } = useFleet();
   
   // Initialize selectedDeviceId from localStorage if available
   const [selectedDeviceId, setSelectedDeviceId] = useState(() => {
@@ -456,7 +454,7 @@ export default function App() {
         const requestBody: any = {
           deviceName: deviceData.name,
           deviceType: deviceData.type,
-          fleet_id: selectedFleetId || null, // Auto-assign to selected fleet from sidebar
+          fleet_id: deviceData.fleet_id || null,
         };
         
         // Add physical device fields
@@ -464,7 +462,6 @@ export default function App() {
           requestBody.ipAddress = deviceData.ipAddress;
           requestBody.macAddress = deviceData.macAddress;
         }
-        // Note: Virtual agents use fleet_id from above (no separate fleetId field)
         
         // Add tags if provided
         if (deviceData.tags && Object.keys(deviceData.tags).length > 0) {
@@ -517,6 +514,7 @@ export default function App() {
           cpu: 0,
           memory: 0,
           disk: 0,
+          fleet_id: deviceData.fleet_id || null,
         };
         
         setDevices(prev => [...prev, newDevice]);

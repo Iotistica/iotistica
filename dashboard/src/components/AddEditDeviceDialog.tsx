@@ -18,6 +18,9 @@ import { toast } from "sonner";
 import { Device } from "./DeviceSidebar";
 import { buildApiUrl } from "../config/api";
 import { getTagDefinitions, type TagDefinition } from "../services/deviceTags";
+import { useFleet } from "../contexts/FleetContext";
+
+const UNASSIGNED_FLEET_ID = "__unassigned__";
 
 interface AddEditDeviceDialogProps {
   open: boolean;
@@ -66,6 +69,9 @@ export function AddEditDeviceDialog({
     memory: 0,
     disk: 0,
   });
+  const { selectedFleetId: contextFleetId } = useFleet();
+  const [fleetOptions, setFleetOptions] = useState<Array<{ fleet_id: string; fleet_name: string }>>([]);
+  const [selectedFleetId, setSelectedFleetId] = useState<string>(UNASSIGNED_FLEET_ID);
 
   // Install command
   const installCommand = `curl -sfL https://apps.iotistica.com/agent/install | sh`;
@@ -90,11 +96,12 @@ export function AddEditDeviceDialog({
   const fetchProvisioningKey = async (isRegenerate = false) => {
     setIsLoadingKey(true);
     try {
+      const provisioningFleetId = selectedFleetId === UNASSIGNED_FLEET_ID ? 'unassigned' : selectedFleetId;
       const response = await fetch(buildApiUrl('/api/v1/provisioning-keys/generate'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          fleetId: 'default-fleet',
+          fleetId: provisioningFleetId,
           newKey: isRegenerate,
           previousKeyId: isRegenerate ? provisioningKeyId : undefined,
         }),
@@ -117,6 +124,24 @@ export function AddEditDeviceDialog({
       toast.error(error.message || 'Failed to generate provisioning key');
     } finally {
       setIsLoadingKey(false);
+    }
+  };
+
+  const loadFleets = async () => {
+    try {
+      const token = localStorage.getItem('accessToken');
+      const response = await fetch(buildApiUrl('/api/v1/fleets'), {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setFleetOptions(data.fleets || []);
+      } else {
+        setFleetOptions([]);
+      }
+    } catch (error) {
+      console.error('Error loading fleets:', error);
+      setFleetOptions([]);
     }
   };
 
@@ -144,6 +169,7 @@ export function AddEditDeviceDialog({
         memory: device.memory,
         disk: device.disk,
       });
+      setSelectedFleetId(device.fleet_id || UNASSIGNED_FLEET_ID);
       
       // Fetch tags from API for this device
       const fetchDeviceTags = async () => {
@@ -174,21 +200,21 @@ export function AddEditDeviceDialog({
         cpu: 0,
         memory: 0,
         disk: 0,
-      });      setTags({});
-      if (!provisioningKey) {
-        fetchProvisioningKey(false);
-      }
+      });
+      setTags({});
+      setSelectedFleetId(contextFleetId || UNASSIGNED_FLEET_ID);
     }
 
     loadTagDefinitions();
+    loadFleets();
   }, [open]); // Only re-run when dialog opens/closes
 
   // Generate key when switching to standalone type
   useEffect(() => {
-    if (open && !isEditMode && formData.type === 'standalone' && !provisioningKey) {
+    if (open && !isEditMode && formData.type === 'standalone') {
       fetchProvisioningKey(false);
     }
-  }, [open, formData.type, isEditMode]);
+  }, [open, formData.type, isEditMode, selectedFleetId]);
 
   const handleSave = () => {
     // Required field validation
@@ -223,6 +249,7 @@ export function AddEditDeviceDialog({
       }
     }
 
+    const fleetIdForSave = selectedFleetId === UNASSIGNED_FLEET_ID ? null : selectedFleetId;
     const deviceDataToSave = {
       ...(device?.id ? { id: device.id } : {}),
       deviceUuid: device?.deviceUuid || generateUuid(),
@@ -235,6 +262,7 @@ export function AddEditDeviceDialog({
       cpu: formData.cpu,
       memory: formData.memory,
       disk: formData.disk,
+      fleet_id: fleetIdForSave,
       tags: tags,
       ...(formData.type === 'standalone' && provisioningKey ? { provisioningKey } : {}),
     };
@@ -426,6 +454,39 @@ export function AddEditDeviceDialog({
                   </SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+          )}
+
+          {!isEditMode && (
+            <div className="space-y-2 text-left">
+              <Label htmlFor="fleet-select" className="text-left">Fleet</Label>
+              <Select
+                value={selectedFleetId}
+                onValueChange={setSelectedFleetId}
+              >
+                <SelectTrigger id="fleet-select" className="h-11">
+                  <SelectValue placeholder="Select fleet" className="leading-none" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={UNASSIGNED_FLEET_ID}>
+                    <div className="flex flex-col">
+                      <span>Unassigned</span>
+                      <span className="text-xs text-muted-foreground">Not linked to a fleet</span>
+                    </div>
+                  </SelectItem>
+                  {fleetOptions.map((fleet) => (
+                    <SelectItem key={fleet.fleet_id} value={fleet.fleet_id}>
+                      <div className="flex flex-col">
+                        <span>{fleet.fleet_name}</span>
+                        <span className="text-xs text-muted-foreground">{fleet.fleet_id}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Defaults to the current fleet filter in the sidebar.
+              </p>
             </div>
           )}
 
