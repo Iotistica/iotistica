@@ -32,18 +32,59 @@ export interface TagValue {
   deviceCount: number;
 }
 
+// Request deduplication: cache and pending requests
+const tagsCache = new Map<string, { data: Record<string, string>; timestamp: number }>();
+const pendingRequests = new Map<string, Promise<Record<string, string>>>();
+const CACHE_TTL = 30000; // 30 seconds
+
 /**
- * Get all tags for a device
+ * Get all tags for a device (with caching and request deduplication)
  */
 export async function getDeviceTags(deviceUuid: string): Promise<Record<string, string>> {
-  const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/tags`));
-  
-  if (!response.ok) {
-    throw new Error('Failed to fetch device tags');
+  // Check cache
+  const cached = tagsCache.get(deviceUuid);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
   }
+
+  // Check if request is already pending
+  const pending = pendingRequests.get(deviceUuid);
+  if (pending) {
+    return pending;
+  }
+
+  // Create new request
+  const request = (async () => {
+    try {
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/tags`));
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch device tags');
+      }
+      
+      const data: DeviceTagsResponse = await response.json();
+      
+      // Update cache
+      tagsCache.set(deviceUuid, { data: data.tags, timestamp: Date.now() });
+      
+      return data.tags;
+    } finally {
+      // Remove from pending
+      pendingRequests.delete(deviceUuid);
+    }
+  })();
+
+  // Store as pending
+  pendingRequests.set(deviceUuid, request);
   
-  const data: DeviceTagsResponse = await response.json();
-  return data.tags;
+  return request;
+}
+
+/**
+ * Invalidate cached tags for a device
+ */
+export function invalidateDeviceTagsCache(deviceUuid: string): void {
+  tagsCache.delete(deviceUuid);
 }
 
 /**
@@ -66,6 +107,9 @@ export async function setDeviceTag(
     const error = await response.json();
     throw new Error(error.message || 'Failed to add tag');
   }
+  
+  // Invalidate cache after update
+  invalidateDeviceTagsCache(deviceUuid);
 }
 
 /**
@@ -83,6 +127,9 @@ export async function deleteDeviceTag(
     const error = await response.json();
     throw new Error(error.message || 'Failed to delete tag');
   }
+  
+  // Invalidate cache after deletion
+  invalidateDeviceTagsCache(deviceUuid);
 }
 
 /**

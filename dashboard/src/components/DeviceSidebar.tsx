@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { getDeviceTags } from "@/services/deviceTags";
+import { getDeviceTags, invalidateDeviceTagsCache } from "@/services/deviceTags";
 import { buildApiUrl } from "@/config/api";
 import { useFleet } from "@/contexts/FleetContext";
 import { Monitor, Smartphone, Server, Laptop, Search, Plus, Filter, Edit, X, ChevronRight, Container, Layers } from "lucide-react";
@@ -97,7 +97,13 @@ function DeviceTagsPills({ deviceUuid }: { deviceUuid: string }) {
   };
 
   useEffect(() => {
-    fetchTags();
+    // Stagger requests with random delay to prevent overwhelming API
+    const delay = Math.random() * 2000; // 0-2 second random delay
+    const timer = setTimeout(() => {
+      fetchTags();
+    }, delay);
+    
+    return () => clearTimeout(timer);
   }, [deviceUuid]);
 
   // Listen for tag updates from other components (e.g., AddEditDeviceDialog)
@@ -106,6 +112,7 @@ function DeviceTagsPills({ deviceUuid }: { deviceUuid: string }) {
       const customEvent = event as CustomEvent<{ deviceUuid: string }>;
       if (customEvent.detail.deviceUuid === deviceUuid) {
         console.log('[DeviceTagsPills] Tags updated externally, reloading...');
+        invalidateDeviceTagsCache(deviceUuid);
         fetchTags();
       }
     };
