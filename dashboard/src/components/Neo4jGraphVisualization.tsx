@@ -219,8 +219,6 @@ export const Neo4jGraphVisualization: React.FC = () => {
           style: {
             'border-width': 5,
             'border-color': '#fff',
-            'box-shadow-blur': 30,
-            'box-shadow-opacity': 1,
           },
         },
         {
@@ -236,8 +234,6 @@ export const Neo4jGraphVisualization: React.FC = () => {
           style: {
             'border-width': 4,
             'border-color': '#60a5fa',
-            'box-shadow-blur': 25,
-            'box-shadow-opacity': 1,
           },
         },
       ],
