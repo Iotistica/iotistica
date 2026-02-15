@@ -123,17 +123,11 @@ export function FleetsPage() {
   return (
     <div className="flex-1 bg-background overflow-auto">
       <div className="p-4 md:p-6 lg:p-8 space-y-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-2xl font-bold text-foreground mb-2">Fleet Management</h2>
-            <p className="text-muted-foreground">
-              Manage virtual and physical device fleets
-            </p>
-          </div>
-          <Button onClick={() => setShowCreateDialog(true)}>
-            <Plus className="w-4 h-4 mr-2" />
-            New Fleet
-          </Button>
+        <div className="mb-6">
+          <h2 className="text-2xl font-bold text-foreground mb-2">Fleet Management</h2>
+          <p className="text-muted-foreground">
+            Manage virtual and physical device fleets
+          </p>
         </div>
 
         {/* Metrics */}
@@ -150,28 +144,34 @@ export function FleetsPage() {
           ))}
         </div>
 
-        {/* Filters */}
-        <div className="flex items-center gap-2">
-          <Button
-            variant={filter === 'all' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setFilter('all')}
-          >
-            All
-          </Button>
-          <Button
-            variant={filter === 'virtual' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setFilter('virtual')}
-          >
-            Virtual
-          </Button>
-          <Button
-            variant={filter === 'physical' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setFilter('physical')}
-          >
-            Physical
+        {/* Filters and New Fleet Button */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Button
+              variant={filter === 'all' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setFilter('all')}
+            >
+              All
+            </Button>
+            <Button
+              variant={filter === 'virtual' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setFilter('virtual')}
+            >
+              Virtual
+            </Button>
+            <Button
+              variant={filter === 'physical' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setFilter('physical')}
+            >
+              Physical
+            </Button>
+          </div>
+          <Button onClick={() => setShowCreateDialog(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            New Fleet
           </Button>
         </div>
 

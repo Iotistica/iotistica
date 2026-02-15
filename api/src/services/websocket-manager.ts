@@ -46,6 +46,9 @@ export class WebSocketManager {
   
   // Shell command buffers (per session) - for audit logging
   private commandBuffers: Map<string, string> = new Map(); // sessionId -> accumulated command string
+  
+  // Track if MQTT shell listeners are already registered to prevent duplicates
+  private shellListenersRegistered = false;
 
   setMqttMonitor(monitor: any): void {
     this.mqttMonitor = monitor;
@@ -54,29 +57,18 @@ export class WebSocketManager {
 
   setMqttManager(manager: any): void {
     this.mqttManager = manager;
-    logger.info('🐚 [SHELL] MQTT Manager instance set for shell commands');
     
-    // Subscribe to shell-output topic for all devices
-    if (manager) {
-      manager.subscribeTopic('iot/device/+/agent/shell-output', 1).then(() => {
-        logger.info('🐚 [SHELL] ✅ Subscribed to shell-output topic: iot/device/+/agent/shell-output');
-      }).catch((err: any) => {
-        logger.error('🐚 [SHELL] ❌ Failed to subscribe to shell-output topic:', err);
-      });
+    // Only register shell listeners once, ever
+    if (!this.shellListenersRegistered && manager) {
+      this.shellListenersRegistered = true;
       
-      // Handle shell output messages
+      // Subscribe to shell-output topic
+      manager.subscribeTopic('iot/device/+/agent/shell-output', 1);
+      
+      // Register ONE event listener for agent messages (shell-output)
       manager.on('agent', (payload: any) => {
-        logger.info('🐚 [SHELL] Agent event received', {
-          deviceUuid: payload.deviceUuid?.substring(0, 8) + '...',
-          subTopic: payload.subTopic,
-          hasMessage: !!payload.message
-        });
-        
         if (payload.subTopic === 'shell-output') {
-          logger.info('🐚 [SHELL] ✅ Matched shell-output subTopic, calling handleShellOutput');
           this.handleShellOutput(payload.deviceUuid, payload.message);
-        } else {
-          logger.debug('🐚 [SHELL] Ignoring non-shell agent message', { subTopic: payload.subTopic });
         }
       });
     }
@@ -87,6 +79,12 @@ export class WebSocketManager {
    * Phase 1: Real-time distribution via Redis pub/sub
    */
   async initializeRedis(): Promise<void> {
+    // Prevent duplicate initialization
+    if (this.redisSubscriber) {
+      logger.info('  Redis already initialized, skipping');
+      return;
+    }
+    
     try {
       const { redisClient } = await import('../redis/client');
       const { getRedisSubscriber } = await import('../redis/client-factory');
@@ -101,7 +99,7 @@ export class WebSocketManager {
       const logsPattern = 'device:*:logs';
       await this.redisSubscriber.psubscribe(metricsPattern, logsPattern);
       
-      // Handle incoming messages
+      //Handle incoming messages
       this.redisSubscriber.on('pmessage', (pattern: string, channel: string, message: string) => {
         try {
           const data = JSON.parse(message);
@@ -1191,11 +1189,6 @@ export class WebSocketManager {
    * Handle shell output from MQTT - forward to WebSocket clients and buffer in session
    */
   private handleShellOutput(deviceUuid: string, message: any): void {
-    logger.info(`🐚 [SHELL] ⬅️ Received shell output from MQTT`, {
-      deviceUuid: deviceUuid.substring(0, 8) + '...',
-      messageStructure: JSON.stringify(message).substring(0, 200)
-    });
-    
     // Unwrap the message structure: { format: 'json', data: { output: '...', timestamp: '...', sessionId: '...' } }
     const outputData = message?.data || message;
     const sessionId = outputData?.sessionId;

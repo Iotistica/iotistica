@@ -156,10 +156,6 @@ export class ShellHandler {
         rows: 24,
         cwd,
         env: process.env as { [key: string]: string },
-        // Explicitly handle flow control to prevent echo issues
-        handleFlowControl: false,
-        // Use flowing mode for consistent character handling
-        useConpty: os.platform() === 'win32' ? true : undefined,
       });
 
       this.sessionActive = true;

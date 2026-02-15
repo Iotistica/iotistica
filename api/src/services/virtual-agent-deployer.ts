@@ -48,12 +48,13 @@ export interface DeploymentStatus {
 
 export class VirtualAgentDeployer {
   private k8sConfig: k8s.KubeConfig;
-  private coreApi: k8s.CoreV1Api;
-  private appsApi: k8s.AppsV1Api;
+  private coreApi: k8s.CoreV1Api | null = null;
+  private appsApi: k8s.AppsV1Api | null = null;
   private defaultNamespace: string;
   private agentImage: string;
   private cloudApiUrl: string;
   private mqttBrokerUrl: string;
+  private k8sAvailable: boolean = false;
 
   constructor() {
     // Initialize K8s config
@@ -112,18 +113,23 @@ export class VirtualAgentDeployer {
         });
         configLoaded = true;
       } catch (fallbackError) {
-        logger.error('❌ Failed to initialize K8s config - Virtual agents will not work', { 
+        logger.warn('⚠️ K8s config not available - Virtual agent deployment disabled', { 
           serviceAccountFilesExist: allServiceAccountFilesExist,
           kubeconfigPath: process.env.KUBECONFIG || '~/.kube/config',
-          error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+          error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+          hint: 'This is normal for local development without K8s. Virtual agents will not be deployable.'
         });
-        throw new Error('Failed to initialize Kubernetes configuration - ensure K8s is enabled in Docker Desktop and kubeconfig is accessible');
+        this.k8sAvailable = false;
+        // Don't throw - just mark K8s as unavailable
       }
     }
 
-    // Create API clients
-    this.coreApi = this.k8sConfig.makeApiClient(k8s.CoreV1Api);
-    this.appsApi = this.k8sConfig.makeApiClient(k8s.AppsV1Api);
+    // Create API clients only if K8s is available
+    if (configLoaded) {
+      this.coreApi = this.k8sConfig.makeApiClient(k8s.CoreV1Api);
+      this.appsApi = this.k8sConfig.makeApiClient(k8s.AppsV1Api);
+      this.k8sAvailable = true;  // Tentatively true, will verify on first use
+    }
 
     // Load configuration from environment
     this.defaultNamespace = process.env.VIRTUAL_AGENT_NAMESPACE || 'virtual-agents';
@@ -161,9 +167,43 @@ export class VirtualAgentDeployer {
    * Deploy a virtual agent to Kubernetes
    */
   async deploy(config: VirtualAgentConfig): Promise<void> {
+    // Check if K8s is available
+    if (!this.k8sAvailable) {
+      throw new Error('Kubernetes is not configured. Virtual agent deployment is disabled. Enable Kubernetes in Docker Desktop or provide a valid kubeconfig to deploy virtual agents.');
+    }
+    
     const namespace = config.namespace || this.defaultNamespace;
     const name = this.sanitizeDnsName(config.deviceName); // Use device name instead of UUID
     const secretName = `${name}-prov-key`;
+
+    // Query fleet configuration if fleetId provided
+    // This ensures pod resources match the fleet quota
+    let fleetConfig = null;
+    if (config.fleetId) {
+      const { query } = await import('../db/connection');
+      const result = await query(
+        'SELECT agent_count, devices_per_agent, k8s_namespace FROM fleets WHERE fleet_id = $1',
+        [config.fleetId]
+      );
+      if (result.rows.length > 0) {
+        fleetConfig = result.rows[0];
+        logger.info('Fleet configuration loaded', {
+          fleetId: config.fleetId,
+          agentCount: fleetConfig.agent_count,
+          devicesPerAgent: fleetConfig.devices_per_agent
+        });
+      }
+    }
+
+    // Calculate per-agent resources based on fleet quota formula
+    // Fleet quota allocates per agent: 256Mi memory request, 0.25 CPU request
+    // Limits: 512Mi memory, 0.5 CPU
+    // Override only if not explicitly set in config.resourceLimits
+    if (!config.resourceLimits) {
+      config.resourceLimits = {};
+    }
+    config.resourceLimits.cpu = config.resourceLimits.cpu || '500m';   // 0.5 CPU limit
+    config.resourceLimits.memory = config.resourceLimits.memory || '512Mi'; // 512Mi memory limit
 
     // Fetch MQTT broker config (same config works for all if using public URL)
     const { getBrokerConfigForExternalDevice, buildBrokerUrl } = await import('../utils/mqtt-broker-config');
@@ -197,7 +237,10 @@ export class VirtualAgentDeployer {
       await this.createDeployment(namespace, name, secretName, config);
       logger.info('Deployment created', { namespace, deploymentName: name });
 
-      // 3. Update device status in database
+      // 3. Check for deployment errors (quota, image pull, etc.)
+      await this.checkDeploymentErrors(namespace, name, config.deviceUuid);
+
+      // 4. Update device status in database
       await DeviceModel.update(config.deviceUuid, {
         deployment_status: 'deploying',
         k8s_namespace: namespace,
@@ -438,12 +481,12 @@ export class VirtualAgentDeployer {
                 ],
                 resources: {
                   requests: {
-                    cpu: process.env.VIRTUAL_AGENT_CPU_REQUEST || '200m',
-                    memory: process.env.VIRTUAL_AGENT_MEMORY_REQUEST || '512Mi'
+                    cpu: process.env.VIRTUAL_AGENT_CPU_REQUEST || '250m',   // 0.25 cores per agent
+                    memory: process.env.VIRTUAL_AGENT_MEMORY_REQUEST || '256Mi' // 256Mi per agent
                   },
                   limits: {
-                    cpu: config.resourceLimits?.cpu || process.env.VIRTUAL_AGENT_CPU_LIMIT || '1000m',
-                    memory: config.resourceLimits?.memory || process.env.VIRTUAL_AGENT_MEMORY_LIMIT || '2Gi'
+                    cpu: config.resourceLimits?.cpu || process.env.VIRTUAL_AGENT_CPU_LIMIT || '500m',   // 0.5 cores burst
+                    memory: config.resourceLimits?.memory || process.env.VIRTUAL_AGENT_MEMORY_LIMIT || '512Mi' // 512Mi burst
                   }
                 },
                 volumeMounts: [
@@ -487,6 +530,83 @@ export class VirtualAgentDeployer {
         });
         throw error;
       }
+    }
+  }
+
+  /**
+   * Check for deployment errors by examining ReplicaSet and pod events
+   * This catches quota errors, image pull failures, etc.
+   */
+  private async checkDeploymentErrors(namespace: string, deploymentName: string, deviceUuid: string): Promise<void> {
+    try {
+      // Wait a moment for ReplicaSet to be created
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Get events in the namespace
+      const events = await this.coreApi.listNamespacedEvent(
+        namespace,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        `involvedObject.kind=ReplicaSet`
+      );
+
+      // Look for errors related to this deployment
+      const deploymentEvents = events.body.items.filter(event => 
+        event.involvedObject?.name?.startsWith(deploymentName) &&
+        event.type === 'Warning'
+      );
+
+      if (deploymentEvents.length > 0) {
+        const recentErrors = deploymentEvents
+          .slice(-3) // Last 3 errors
+          .map(e => `${e.reason}: ${e.message}`);
+
+        // Check for quota errors specifically
+        const quotaError = deploymentEvents.find(e => 
+          e.reason === 'FailedCreate' && e.message?.includes('exceeded quota')
+        );
+
+        if (quotaError) {
+          logger.error('Virtual agent deployment failed due to resource quota', {
+            deviceUuid,
+            namespace,
+            deploymentName,
+            error: quotaError.message,
+            allErrors: recentErrors
+          });
+          
+          // Update device with error details
+          await DeviceModel.update(deviceUuid, {
+            deployment_status: 'failed',
+            status: 'offline'
+          }).catch(() => {});
+
+          throw new Error(`Resource quota exceeded: ${quotaError.message}`);
+        }
+
+        // Log other warnings but don't fail immediately
+        logger.warn('Deployment warnings detected', {
+          deviceUuid,
+          namespace,
+          deploymentName,
+          warnings: recentErrors
+        });
+      } else {
+        logger.info('No deployment errors detected', { namespace, deploymentName });
+      }
+    } catch (error: any) {
+      // If this is our thrown quota error, re-throw it
+      if (error.message?.includes('Resource quota exceeded')) {
+        throw error;
+      }
+      // Otherwise just log and continue - event checking is best-effort
+      logger.warn('Could not check deployment events', {
+        namespace,
+        deploymentName,
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 
@@ -877,6 +997,11 @@ export class VirtualAgentDeployer {
     agent_count: number;
     devices_per_agent: number;
   }): Promise<string> {
+    // Check if K8s is available
+    if (!this.k8sAvailable || !this.coreApi) {
+      throw new Error('Kubernetes is not configured or unavailable. Virtual fleet namespaces require K8s cluster access.');
+    }
+
     const namespace = `fleet-${params.fleet_id.replace('fleet-', '')}`;
     
     try {
@@ -934,10 +1059,29 @@ export class VirtualAgentDeployer {
       return namespace;
       
     } catch (error: any) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // Check if this is an Azure exec auth error
+      if (errorMessage.includes('Cannot read properties of null') || 
+          errorMessage.includes('ExecAuth') ||
+          errorMessage.includes('getCredential')) {
+        logger.error('Failed to create fleet namespace - Azure AKS exec auth failed', {
+          fleet_id: params.fleet_id,
+          namespace,
+          error: errorMessage,
+          hint: 'Azure AKS exec authentication requires Azure CLI in container or service account tokens'
+        });
+        // Mark K8s as unavailable for future calls
+        this.k8sAvailable = false;
+        this.coreApi = null;
+        this.appsApi = null;
+        throw new Error('Kubernetes authentication failed. Azure AKS requires service account tokens when running in containers.');
+      }
+      
       logger.error('Failed to create fleet namespace', {
         fleet_id: params.fleet_id,
         namespace,
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage
       });
       throw error;
     }

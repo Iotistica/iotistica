@@ -702,9 +702,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    // Track if onData handler is already attached to prevent duplicates
-    let inputHandlerAttached = false;
-
     // Handle user input
     term.onData((data) => {
       console.log('[RemoteAccess] Terminal input received:', data.charCodeAt(0), 'WS state:', wsRef.current?.readyState, 'Session:', currentSessionIdRef.current?.substring(0, 8));

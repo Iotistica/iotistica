@@ -227,6 +227,8 @@ router.post('/fleets', jwtAuth, async (req, res) => {
 
     // Create K8s namespace for virtual fleets
     let k8s_namespace = null;
+    let namespaceWarning: string | undefined;
+    
     if (fleet_type === 'virtual') {
       try {
         // Use VirtualAgentDeployer service which has properly configured K8s client
@@ -248,14 +250,17 @@ router.post('/fleets', jwtAuth, async (req, res) => {
         });
         
       } catch (k8sError: any) {
+        const errorMessage = k8sError instanceof Error ? k8sError.message : String(k8sError);
+        
         logger.error('[FLEETS] Failed to create K8s namespace', {
           fleet_id,
-          error: k8sError instanceof Error ? k8sError.message : String(k8sError)
+          error: errorMessage
         });
         
         // K8s not available - continue without namespace
         logger.warn('[FLEETS] K8s not available - fleet created without namespace');
         k8s_namespace = null;
+        namespaceWarning = errorMessage;
       }
     }
 
@@ -299,7 +304,19 @@ router.post('/fleets', jwtAuth, async (req, res) => {
       agent_count: agent_count || null
     });
 
-    res.status(201).json(result.rows[0]);
+    const response: any = {
+      ...result.rows[0]
+    };
+    
+    // Include warning if namespace creation failed
+    if (fleet_type === 'virtual' && !k8s_namespace && namespaceWarning) {
+      response.warning = `Fleet created but K8s namespace creation failed: ${namespaceWarning}`;
+      response.namespace_status = 'failed';
+    } else if (fleet_type === 'virtual' && k8s_namespace) {
+      response.namespace_status = 'created';
+    }
+
+    res.status(201).json(response);
 
   } catch (error: any) {
     logger.error('[FLEETS] Error creating fleet:', error);

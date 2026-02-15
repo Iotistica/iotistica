@@ -155,28 +155,28 @@ services:
                 condition: service_healthy
         networks:
             - iotistic-net
-    # mosquitto:
-    #     image: iegomez/mosquitto-go-auth
-    #     restart: unless-stopped
-    #     container_name: iotistic-mosquitto
-    #     ports:
-    #       # TLS Ports (enabled - self-signed certificates)
-    #       # Note: Avoiding Windows Hyper-V reserved ranges (8825-9124)
-    #       - "${MOSQUITTO_TLS_PORT_EXT:-58883}:8883"   # MQTTS (TLS) - native MQTT (external: 58883)
-    #       - "${MOSQUITTO_WSS_PORT_EXT:-59002}:9002"   # WebSocket TLS (external: 59002)
-    #       # Non-TLS port for testing
-    #       - "${MOSQUITTO_PORT_EXT:-5883}:1883"        # MQTT (non-TLS)
-    #     volumes:
-    #       - ./mosquitto/mosquitto-tls.conf:/etc/mosquitto/mosquitto.conf
-    #       - ./mosquitto/certs:/mosquitto/certs
-    #     healthcheck:
-    #         test: ["CMD-SHELL", "timeout 5 mosquitto_sub -h localhost -p 1883 -u ${MQTT_USERNAME:-nodered} -P ${MQTT_PASSWORD:-secret} -t '$$SYS/#' -C 1 || exit 1"]
-    #         interval: 30s
-    #         timeout: 10s
-    #         retries: 3
-    #         start_period: 10s
-    #     networks:
-    #         - iotistic-net
+    mosquitto:
+        image: iegomez/mosquitto-go-auth
+        restart: unless-stopped
+        container_name: iotistic-mosquitto
+        ports:
+          # TLS Ports (enabled - self-signed certificates)
+          # Note: Avoiding Windows Hyper-V reserved ranges (8825-9124)
+          - "${MOSQUITTO_TLS_PORT_EXT:-58883}:8883"   # MQTTS (TLS) - native MQTT (external: 58883)
+          - "${MOSQUITTO_WSS_PORT_EXT:-59002}:9002"   # WebSocket TLS (external: 59002)
+          # Non-TLS port for testing
+          - "${MOSQUITTO_PORT_EXT:-5883}:1883"        # MQTT (non-TLS)
+        volumes:
+          - ./mosquitto/mosquitto-tls.conf:/etc/mosquitto/mosquitto.conf
+          - ./mosquitto/certs:/mosquitto/certs
+        healthcheck:
+            test: ["CMD-SHELL", "timeout 5 mosquitto_sub -h localhost -p 1883 -u ${MQTT_USERNAME:-nodered} -P ${MQTT_PASSWORD:-secret} -t '$$SYS/#' -C 1 || exit 1"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 10s
+        networks:
+            - iotistic-net
 
     emqx:
         image: emqx/emqx:latest

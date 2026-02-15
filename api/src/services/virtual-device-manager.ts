@@ -60,6 +60,7 @@ export interface VirtualDeviceSensor {
 export class VirtualDeviceManager {
   private k8sConfig?: k8s.KubeConfig;
   private appsApi?: k8s.AppsV1Api;
+  private coreApi?: k8s.CoreV1Api;
 
   constructor() {
     // Initialize K8s client for patching virtual agent deployments
@@ -84,6 +85,7 @@ export class VirtualDeviceManager {
       }
 
       this.appsApi = this.k8sConfig.makeApiClient(k8s.AppsV1Api);
+      this.coreApi = this.k8sConfig.makeApiClient(k8s.CoreV1Api);
     } catch (error) {
       logger.warn('VirtualDeviceManager: K8s config not available, virtual agent deployment patching disabled', {
         error: error instanceof Error ? error.message : String(error)
@@ -96,34 +98,111 @@ export class VirtualDeviceManager {
    * 
    * Flow:
    * 1. Validate parent device exists
-   * 2. Auto-assign port based on existing virtual devices
-   * 3. Insert into device_sensors table with profile metadata
-   * 4. If parent is K8s virtual agent, patch Deployment to add sidecar
+   * 2. Check fleet device limit (devices_per_agent)
+   * 3. Fetch profile data points
+   * 4. Auto-assign port based on existing virtual devices
+   * 5. Build container config and connection object
+   * 6. Insert into device_sensors table via standard addEndpoint flow
+   * 7. If parent is K8s virtual agent, update ResourceQuota and patch Deployment
    */
   async createVirtualDevice(config: VirtualDeviceConfig): Promise<VirtualDeviceSensor> {
+    logger.info('[VirtualDeviceManager] Starting virtual device creation', {
+      deviceUuid: config.deviceUuid,
+      name: config.name,
+      protocol: config.protocol,
+      profile: config.profile,
+      slaveCount: config.slaveCount
+    });
+
     // 1. Validate parent device exists
     const agent = await DeviceModel.getByUuid(config.deviceUuid);
     if (!agent) {
+      logger.error('[VirtualDeviceManager] Parent agent not found', {
+        deviceUuid: config.deviceUuid
+      });
       throw new Error(`Parent agent not found: ${config.deviceUuid}`);
     }
 
-    // 2. Fetch profile data points
+    logger.info('[VirtualDeviceManager] Parent agent found', {
+      agentUuid: agent.uuid,
+      agentName: agent.device_name,
+      agentType: agent.device_type,
+      helmRelease: agent.helm_release_name,
+      namespace: agent.k8s_namespace
+    });
+
+    // 2. Check fleet device limit (if agent belongs to a fleet)
+    if (agent.k8s_namespace?.startsWith('fleet-')) {
+      const fleetResult = await query(
+        'SELECT devices_per_agent FROM fleets WHERE k8s_namespace = $1',
+        [agent.k8s_namespace]
+      );
+
+      if (fleetResult.rows.length > 0) {
+        const devicesPerAgent = fleetResult.rows[0].devices_per_agent;
+        const existingDevices = await this.getVirtualDevices(config.deviceUuid);
+
+        logger.info('[VirtualDeviceManager] Checking fleet device limit', {
+          namespace: agent.k8s_namespace,
+          devicesPerAgent,
+          existingCount: existingDevices.length,
+          wouldExceed: existingDevices.length >= devicesPerAgent
+        });
+
+        if (existingDevices.length >= devicesPerAgent) {
+          logger.error('[VirtualDeviceManager] Fleet device limit exceeded', {
+            namespace: agent.k8s_namespace,
+            limit: devicesPerAgent,
+            existingCount: existingDevices.length
+          });
+          throw new Error(
+            `Fleet device limit exceeded: ${existingDevices.length}/${devicesPerAgent} virtual devices already created for this agent`
+          );
+        }
+      }
+    }
+
+    // 3. Fetch profile data points
+    logger.info('[VirtualDeviceManager] Fetching profile configuration', {
+      profile: config.profile,
+      protocol: config.protocol
+    });
+
     const profileResult = await query(
       'SELECT data_points FROM profile_configs WHERE profile_name = $1 AND protocol = $2',
       [config.profile, config.protocol]
     );
 
     if (profileResult.rows.length === 0) {
+      logger.error('[VirtualDeviceManager] Profile not found', {
+        profile: config.profile,
+        protocol: config.protocol
+      });
       throw new Error(`Profile '${config.profile}' not found for protocol '${config.protocol}'`);
     }
+
+    logger.info('[VirtualDeviceManager] Profile configuration loaded', {
+      profile: config.profile,
+      dataPointCount: profileResult.rows[0].data_points?.length || 0
+    });
 
     const dataPoints = typeof profileResult.rows[0].data_points === 'string'
       ? JSON.parse(profileResult.rows[0].data_points)
       : profileResult.rows[0].data_points;
 
-    // 3. Auto-assign port
+    // 4. Auto-assign port
+    logger.info('[VirtualDeviceManager] Checking existing virtual devices for port assignment', {
+      deviceUuid: config.deviceUuid
+    });
+
     const existingDevices = await this.getVirtualDevices(config.deviceUuid);
     
+    logger.info('[VirtualDeviceManager] Found existing virtual devices', {
+      deviceUuid: config.deviceUuid,
+      existingCount: existingDevices.length,
+      existing: existingDevices.map(d => ({ uuid: d.uuid, protocol: d.protocol, connection: d.connection }))
+    });
+
     // Extract ports from both formats (Modbus uses 'port', OPC UA uses 'endpointUrl')
     const usedPorts = existingDevices.map(d => {
       if (d.connection.port) {
@@ -137,13 +216,23 @@ export class VirtualDeviceManager {
       return null;
     }).filter((p): p is number => p !== null);
     
+    logger.info('[VirtualDeviceManager] Port analysis complete', {
+      usedPorts,
+      protocol: config.protocol
+    });
+
     const nextPort = this.findNextAvailablePort(usedPorts, config.protocol);
 
-    // 4. Build container config
+    logger.info('[VirtualDeviceManager] Assigned port for new virtual device', {
+      protocol: config.protocol,
+      assignedPort: nextPort
+    });
+
+    // 5. Build container config
     const image = config.image || `iotistic/${config.protocol}-simulator:latest`;
     const containerEnv = this.buildContainerEnv(config.protocol, config.profile, nextPort, config.slaveCount);
 
-    // 5. Build connection object (protocol-specific format)
+    // 6. Build connection object (protocol-specific format)
     const slaveCount = config.slaveCount || 1;
     let connectionObj: any;
     
@@ -179,7 +268,7 @@ export class VirtualDeviceManager {
       };
     }
 
-    // 6. Use standard addEndpoint flow (dual-write: table + config)
+    // 7. Use standard addEndpoint flow (dual-write: table + config)
     // This ensures virtual devices appear in target state like regular devices
     
     // Base config with all data (for database)
@@ -204,6 +293,12 @@ export class VirtualDeviceManager {
       createdBy: 'virtual-device-manager'
     };
 
+    logger.info('[VirtualDeviceManager] Adding virtual device endpoint to database', {
+      deviceUuid: config.deviceUuid,
+      sensorConfig,
+      deploymentMetadata
+    });
+
     const result = await deviceSensorSync.addEndpoint(
       config.deviceUuid,
       sensorConfig,
@@ -211,7 +306,7 @@ export class VirtualDeviceManager {
       deploymentMetadata // Pass separately so it only goes to DB, not target state
     );
 
-    logger.info('Virtual device added via standard flow', {
+    logger.info('[VirtualDeviceManager] Virtual device added via standard flow', {
       uuid: result.sensor.uuid,
       deviceUuid: config.deviceUuid,
       protocol: config.protocol,
@@ -220,7 +315,7 @@ export class VirtualDeviceManager {
       version: result.version
     });
 
-    // 7. Query database to get complete record with all fields
+    // 8. Query database to get complete record with all fields
     // This ensures we return the same structure as regular devices
     const dbResult = await query(
       `SELECT uuid, device_uuid, name, protocol, enabled, poll_interval,
@@ -238,9 +333,34 @@ export class VirtualDeviceManager {
 
     const dbRecord = dbResult.rows[0];
 
-    // 8. If parent is K8s virtual agent, patch Deployment
+    // 9. If parent is K8s virtual agent, patch Deployment
+    logger.info('[VirtualDeviceManager] Checking if K8s deployment patch needed', {
+      hasHelmRelease: !!agent.helm_release_name,
+      hasNamespace: !!agent.k8s_namespace,
+      helmRelease: agent.helm_release_name,
+      namespace: agent.k8s_namespace
+    });
+
     if (agent.helm_release_name && agent.k8s_namespace) {
+      logger.info('[VirtualDeviceManager] Patching K8s deployment with new sidecar', {
+        deviceUuid: config.deviceUuid,
+        helmRelease: agent.helm_release_name,
+        namespace: agent.k8s_namespace
+      });
+
+      // Update ResourceQuota before patching deployment
+      await this.updateFleetQuota(agent.k8s_namespace, config.deviceUuid);
+
       await this.patchVirtualAgentDeployment(config.deviceUuid, agent.helm_release_name, agent.k8s_namespace);
+      logger.info('[VirtualDeviceManager] K8s deployment patch completed successfully', {
+        deviceUuid: config.deviceUuid
+      });
+    } else {
+      logger.warn('[VirtualDeviceManager] Skipping K8s deployment patch - not a K8s virtual agent', {
+        deviceUuid: config.deviceUuid,
+        helmRelease: agent.helm_release_name,
+        namespace: agent.k8s_namespace
+      });
     }
 
     // 9. Return complete database record
@@ -304,7 +424,90 @@ export class VirtualDeviceManager {
     // If parent is K8s virtual agent, patch Deployment immediately
     // (virtual devices don't need agent reconciliation since they're sidecars)
     if (agent?.helm_release_name && agent?.k8s_namespace) {
+      // Update ResourceQuota before patching deployment
+      await this.updateFleetQuota(agent.k8s_namespace, deviceUuid);
+
       await this.patchVirtualAgentDeployment(deviceUuid, agent?.helm_release_name, agent?.k8s_namespace);
+    }
+  }
+
+  /**
+   * Update fleet ResourceQuota to account for virtual devices (sidecars)
+   * 
+   * Resource allocation:
+   * - Agent: 250m CPU request, 256Mi memory request, 500m CPU limit, 512Mi memory limit
+   * - Each sidecar: 100m CPU request, 128Mi memory request, 500m CPU limit, 512Mi memory limit
+   */
+  async updateFleetQuota(namespace: string, deviceUuid: string): Promise<void> {
+    if (!this.coreApi) {
+      logger.warn('[VirtualDeviceManager] K8s CoreAPI not available, skipping quota update', { namespace });
+      return;
+    }
+
+    try {
+      // Get virtual device count for this agent
+      const virtualDevices = await this.getVirtualDevices(deviceUuid);
+      const sidecarCount = virtualDevices.length;
+
+      // Calculate total resources: 1 agent + N sidecars
+      const totalCpuRequest = 250 + (sidecarCount * 100); // millis
+      const totalMemoryRequest = 256 + (sidecarCount * 128); // MiB
+      const totalCpuLimit = 500 + (sidecarCount * 500); // millis
+      const totalMemoryLimit = 512 + (sidecarCount * 512); // MiB
+
+      logger.info('[VirtualDeviceManager] Updating fleet quota for sidecars', {
+        namespace,
+        deviceUuid,
+        sidecarCount,
+        quotas: {
+          cpuRequest: `${totalCpuRequest}m`,
+          memoryRequest: `${totalMemoryRequest}Mi`,
+          cpuLimit: `${totalCpuLimit}m`,
+          memoryLimit: `${totalMemoryLimit}Mi`
+        }
+      });
+
+      // Update ResourceQuota
+      const quotaPatch = {
+        spec: {
+          hard: {
+            'requests.cpu': `${totalCpuRequest}m`,
+            'requests.memory': `${totalMemoryRequest}Mi`,
+            'limits.cpu': `${totalCpuLimit}m`,
+            'limits.memory': `${totalMemoryLimit}Mi`,
+            'pods': '1' // Still 1 pod (agent + sidecars)
+          }
+        }
+      };
+
+      await this.coreApi.patchNamespacedResourceQuota(
+        'fleet-quota',
+        namespace,
+        quotaPatch,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          headers: {
+            'Content-Type': 'application/strategic-merge-patch+json'
+          }
+        }
+      );
+
+      logger.info('[VirtualDeviceManager] Fleet quota updated successfully', {
+        namespace,
+        sidecarCount
+      });
+    } catch (error) {
+      logger.error('[VirtualDeviceManager] Failed to update fleet quota', {
+        namespace,
+        deviceUuid,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      // Don't throw - let the deployment attempt anyway in case quota isn't the issue
     }
   }
 
@@ -314,15 +517,43 @@ export class VirtualDeviceManager {
    * This reads all virtual devices for the agent and rebuilds the sidecar container list.
    */
   async patchVirtualAgentDeployment(deviceUuid: string, helm_release_name: string, k8s_namespace: string): Promise<void> {
+    logger.info('[VirtualDeviceManager] patchVirtualAgentDeployment called', {
+      deviceUuid,
+      helmRelease: helm_release_name,
+      namespace: k8s_namespace,
+      hasK8sApi: !!this.appsApi
+    });
+
     if (!this.appsApi) {
-      logger.warn('K8s API not available, skipping deployment patch', { deviceUuid });
+      logger.warn('[VirtualDeviceManager] K8s API not available, skipping deployment patch', { deviceUuid });
       return;
     }
 
     // Get all virtual devices for this agent
+    logger.info('[VirtualDeviceManager] Fetching all virtual devices for deployment patch', {
+      deviceUuid
+    });
+
     const virtualDevices = await this.getVirtualDevices(deviceUuid);
+
+    logger.info('[VirtualDeviceManager] Virtual devices loaded for patching', {
+      deviceUuid,
+      virtualDeviceCount: virtualDevices.length,
+      virtualDevices: virtualDevices.map(vd => ({
+        uuid: vd.uuid,
+        name: vd.name,
+        protocol: vd.protocol,
+        connection: vd.connection,
+        metadata: vd.metadata
+      }))
+    });
     
     // Build sidecar container specs
+    logger.info('[VirtualDeviceManager] Building sidecar container specs', {
+      deviceUuid,
+      virtualDeviceCount: virtualDevices.length
+    });
+
     const sidecarContainers = virtualDevices.map(vd => {
       // Extract port from connection (handles both Modbus and OPC UA formats)
       let port: number;
@@ -347,6 +578,14 @@ export class VirtualDeviceManager {
         value: String(value)
       }));
 
+      logger.info('[VirtualDeviceManager] Built sidecar container spec', {
+        virtualDeviceUuid: vd.uuid,
+        containerName,
+        image: vd.metadata.image,
+        port,
+        envVars: envArray
+      });
+
       return {
         name: containerName,
         image: vd.metadata.image,
@@ -365,21 +604,59 @@ export class VirtualDeviceManager {
       };
     });
 
+    logger.info('[VirtualDeviceManager] Sidecar containers built, fetching current deployment', {
+      deviceUuid,
+      sidecarCount: sidecarContainers.length,
+      sidecars: sidecarContainers.map(sc => ({ name: sc.name, image: sc.image }))
+    });
+
     try {
       // Get current deployment to preserve agent container
+      logger.info('[VirtualDeviceManager] Reading current K8s deployment', {
+        helmRelease: helm_release_name,
+        namespace: k8s_namespace
+      });
+
       const deployment = await this.appsApi.readNamespacedDeployment(
         helm_release_name,
         k8s_namespace
       );
 
+      logger.info('[VirtualDeviceManager] Current deployment fetched', {
+        helmRelease: helm_release_name,
+        namespace: k8s_namespace,
+        currentContainerCount: deployment.body.spec?.template.spec?.containers?.length || 0,
+        currentContainers: deployment.body.spec?.template.spec?.containers?.map(c => c.name) || []
+      });
+
       const agentContainer = deployment.body.spec?.template.spec?.containers?.[0];
       if (!agentContainer) {
+        logger.error('[VirtualDeviceManager] Agent container not found in deployment', {
+          helmRelease: helm_release_name,
+          namespace: k8s_namespace
+        });
         throw new Error('Agent container not found in deployment');
       }
 
+      logger.info('[VirtualDeviceManager] Agent container found, preparing patch', {
+        agentContainerName: agentContainer.name,
+        sidecarCount: sidecarContainers.length
+      });
+
       // Patch deployment with agent + sidecars
+      // Use RollingUpdate with maxSurge=0 to avoid quota issues:
+      // - Terminates old pod before creating new one (respects quota limits)
+      // - Maintains rollout tracking and rollback capability (safer than Recreate)
+      // - If new pod fails, deployment stays at 0/1 and can be easily fixed/rolled back
       const patch = {
         spec: {
+          strategy: {
+            type: 'RollingUpdate',
+            rollingUpdate: {
+              maxSurge: 0,        // Don't create extra pods during update (stays within quota)
+              maxUnavailable: 1   // Allow 1 pod unavailable (enables old pod termination)
+            }
+          },
           template: {
             spec: {
               containers: [
@@ -390,6 +667,13 @@ export class VirtualDeviceManager {
           }
         }
       };
+
+      logger.info('[VirtualDeviceManager] Applying deployment patch to K8s', {
+        helmRelease: helm_release_name,
+        namespace: k8s_namespace,
+        totalContainers: 1 + sidecarContainers.length,
+        patch: JSON.stringify(patch, null, 2)
+      });
 
       await this.appsApi.patchNamespacedDeployment(
         helm_release_name,
@@ -407,7 +691,7 @@ export class VirtualDeviceManager {
         }
       );
 
-      logger.info('Virtual agent deployment patched with sidecars', {
+      logger.info('[VirtualDeviceManager] Virtual agent deployment patched with sidecars successfully', {
         deviceUuid,
         deployment: helm_release_name,
         namespace: k8s_namespace,

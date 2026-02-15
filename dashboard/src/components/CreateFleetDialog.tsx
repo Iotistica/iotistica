@@ -145,7 +145,15 @@ export function CreateFleetDialog({
       }
 
       const data = await response.json();
-      toast.success(`Fleet "${formData.fleet_name}" created successfully`);
+      
+      // Check if there's a warning (e.g., namespace creation failed)
+      if (data.warning) {
+        toast.warning(`Fleet "${formData.fleet_name}" created with issues: ${data.warning}`, {
+          duration: 8000, // Show longer for warnings
+        });
+      } else {
+        toast.success(`Fleet "${formData.fleet_name}" created successfully`);
+      }
       
       // Reset form
       setFormData({

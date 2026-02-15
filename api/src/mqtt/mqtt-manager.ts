@@ -546,12 +546,6 @@ export class MqttManager extends EventEmitter {
       });
 
       this.client.on('message', (topic, payload) => {
-        logger.debug('📨 MQTT MESSAGE RECEIVED', { 
-          topic, 
-          payloadSize: payload.length,
-          payloadPreview: payload.toString().substring(0, 100)
-        });
-        // Handle message asynchronously (deduplication is async)
         this.handleMessage(topic, payload).catch(error => {
           logger.error('Error in MQTT message handler', { 
             topic, 
@@ -996,9 +990,6 @@ export class MqttManager extends EventEmitter {
     // Update last message timestamp for health monitoring
     this.lastMessageTimestamp = Date.now();
     
-    // DEBUG: Log all incoming messages
-    logger.info('MQTT message received', { topic, payloadLength: payload.length });
-    
     try {
       // Parse topic
       const parsed = this.parseTopic(topic);
@@ -1098,13 +1089,6 @@ export class MqttManager extends EventEmitter {
       // Dispatch to appropriate handler
       const handler = this.messageHandlers[messageType];
       if (handler) {
-        logger.info('Dispatching to handler', {
-          messageType,
-          deviceUuid: deviceUuid.substring(0, 8) + '...',
-          subTopic,
-          rest: rest.join('/'),
-          hasData: !!data
-        });
         handler(deviceUuid, subTopic, data, rest);
       } else {
         logger.warn('Unknown message type', {
@@ -1130,7 +1114,7 @@ export class MqttManager extends EventEmitter {
   /**
    * Handle agent message
    */
-  private handleAgentMessage(deviceUuid: string, subTopic: string | undefined, data: any, rest: string[] = []): void {
+  private handleAgentMessage(deviceUuid: string, subTopic: string | undefined, data: any, rest: string[] = [], msgTrackId?: string): void {
     this.emitTyped('agent', { deviceUuid, subTopic: subTopic || 'unknown', message: data });
   }
 
