@@ -685,6 +685,9 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         white: '#e5e5e5',
       },
       allowTransparency: true,
+      disableStdin: false,
+      // Explicitly disable local echo - server will echo back
+      convertEol: false,
     });
 
     const fitAddon = new FitAddon();
@@ -698,6 +701,9 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
+
+    // Track if onData handler is already attached to prevent duplicates
+    let inputHandlerAttached = false;
 
     // Handle user input
     term.onData((data) => {
