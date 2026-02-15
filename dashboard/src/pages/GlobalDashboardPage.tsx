@@ -704,7 +704,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     const device = devices.find(d => d.deviceUuid === deviceId);
     if (!device) return;
 
-    const newId = `device-${Date.now()}`;
+    const newId = `device-${crypto.randomUUID()}`;
     const newWidget: DashboardWidget = {
       i: newId,
       x: 0,
@@ -730,7 +730,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
     if (type === 'METRIC_DATA') {
       // Open config dialog for metric data widgets
-      setConfiguringWidgetId(`metric-${Date.now()}`);
+      setConfiguringWidgetId(`metric-${crypto.randomUUID()}`);
       setIsEditingWidget(false);  // Flag as new widget, not editing
       setShowMetricConfigDialog(true);
       return;
@@ -738,7 +738,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
     if (type === 'METRIC_VALUE') {
       // Open config dialog for metric value widgets
-      setConfiguringWidgetId(`metric-value-${Date.now()}`);
+      setConfiguringWidgetId(`metric-value-${crypto.randomUUID()}`);
       setIsEditingWidget(false);  // Flag as new widget, not editing
       setShowMetricValueConfigDialog(true);
       return;
@@ -746,14 +746,14 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
     if (type === 'TABLE') {
       // Open config dialog for table widgets
-      setConfiguringWidgetId(`table-${Date.now()}`);
+      setConfiguringWidgetId(`table-${crypto.randomUUID()}`);
       setIsEditingWidget(false);  // Flag as new widget, not editing
       setShowTableConfigDialog(true);
       return;
     }
 
     const widgetConfig = WIDGET_TYPES[type];
-    const newId = `${Date.now()}`;
+    const newId = `${crypto.randomUUID()}`;
     const newWidget: DashboardWidget = {
       i: newId,
       x: 0,

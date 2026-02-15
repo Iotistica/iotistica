@@ -197,7 +197,15 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
       };
     });
 
-    const chartDataWithGaps = detectGaps(chartData);
+    // Deduplicate by timeValue to prevent duplicate keys in charts
+    const uniqueChartData = chartData.reduce((acc, curr) => {
+      if (!acc.find(item => item.timeValue === curr.timeValue)) {
+        acc.push(curr);
+      }
+      return acc;
+    }, [] as typeof chartData);
+
+    const chartDataWithGaps = detectGaps(uniqueChartData);
     const gapTimes = chartDataWithGaps.filter(point => point.isGap).map(point => point.timeValue);
     const gapDotRenderer = createGapDotRenderer({ color: '#ef4444' });
 
