@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { getDeviceTags } from "@/services/deviceTags";
-import { Monitor, Smartphone, Server, Laptop, Search, Plus, Filter, Edit, X, ChevronRight, Container } from "lucide-react";
+import { buildApiUrl } from "@/config/api";
+import { useFleet } from "@/contexts/FleetContext";
+import { Monitor, Smartphone, Server, Laptop, Search, Plus, Filter, Edit, X, ChevronRight, Container, Layers } from "lucide-react";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
@@ -34,6 +36,7 @@ export interface Device {
   cpu: number;
   memory: number;
   disk: number;
+  fleet_id?: string; // Optional fleet assignment
 }
 
 interface DeviceSidebarProps {
@@ -161,6 +164,9 @@ function DeviceTagsPills({ deviceUuid }: { deviceUuid: string }) {
 }
 
 export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDevice , onSelectDevice, hasPendingChanges }: DeviceSidebarProps) {
+  // Get fleet context
+  const { selectedFleetId, setSelectedFleetId } = useFleet();
+  
   // Get unique statuses and types from actual devices using useMemo for performance
   const availableStatuses = useMemo<Device['status'][]>(() => 
     Array.from(new Set(devices.map(d => d.status))) as Device['status'][], 
@@ -177,7 +183,28 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
   });
   const [statusFilters, setStatusFilters] = useState<Device['status'][]>([]);
   const [typeFilters, setTypeFilters] = useState<Device['type'][]>([]);
+  const [fleets, setFleets] = useState<Array<{fleet_id: string; fleet_name: string}>>([]);
   const [filtersInitialized, setFiltersInitialized] = useState(false);
+
+  // Load available fleets
+  useEffect(() => {
+    const loadFleets = async () => {
+      try {
+        const token = localStorage.getItem('accessToken');
+        const response = await fetch(buildApiUrl('/api/v1/fleets'), {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          console.log('[FLEET DEBUG] Loaded fleets:', data.fleets);
+          setFleets(data.fleets || []);
+        }
+      } catch (error) {
+        console.error('Error loading fleets:', error);
+      }
+    };
+    loadFleets();
+  }, []);
 
   // Persist search query to localStorage
   useEffect(() => {
@@ -257,7 +284,18 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
                          device.ipAddress.includes(searchQuery);
     const matchesStatus = statusFilters.length === 0 || statusFilters.includes(device.status);
     const matchesType = typeFilters.length === 0 || typeFilters.includes(device.type);
-    return matchesSearch && matchesStatus && matchesType;
+    const matchesFleet = !selectedFleetId || (device as any).fleet_id === selectedFleetId;
+    
+    if (selectedFleetId) {
+      console.log('[FLEET FILTER]', {
+        deviceName: device.name,
+        deviceFleetId: (device as any).fleet_id,
+        selectedFleetId,
+        matches: matchesFleet
+      });
+    }
+    
+    return matchesSearch && matchesStatus && matchesType && matchesFleet;
   }).sort((a, b) => {
     if (a.status === b.status) return 0;
     if (a.status === 'online') return -1;
@@ -267,34 +305,55 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
 
   const hasActiveFilters = statusFilters.length < availableStatuses.length || 
                            typeFilters.length < availableTypes.length || 
-                           searchQuery.length > 0;
+                           searchQuery.length > 0 ||
+                           selectedFleetId !== '';
 
   const clearFilters = () => {
     setSearchQuery("");
     setStatusFilters(availableStatuses);
     setTypeFilters(availableTypes);
+    setSelectedFleetId('');
   };
 
   return (
     <TooltipProvider>
       <div className="w-full lg:w-80 lg:border-r border-border bg-card h-full flex flex-col overflow-hidden">
         <div className="p-6 border-b border-border flex-shrink-0">
-        <div className="flex items-start justify-between mb-2">
-          <div>
-            <h2 className="text-foreground mb-1">Agents</h2>
-            <p className="text-muted-foreground">
-              {devices.filter(d => d.status === "online").length} of {devices.length} online
-            </p>
-          </div>
+        <div className="flex items-start justify-end mb-2">
           <Button size="sm" onClick={onAddDevice}>
             <Plus className="w-4 h-4 mr-1" />
-            Add
+            Add agent
           </Button>
         </div>
       </div>
 
+      {/* Fleet Filter */}
+      {fleets.length > 0 && (
+        <div className="px-4 py-3 border-b border-border flex-shrink-0">
+          <div className="relative">
+            <Layers className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <select
+              value={selectedFleetId}
+              onChange={(e) => {
+                console.log('[FLEET DEBUG] Fleet selected:', e.target.value);
+                console.log('[FLEET DEBUG] Available devices:', devices.map(d => ({ name: d.name, fleet_id: (d as any).fleet_id })));
+                setSelectedFleetId(e.target.value);
+              }}
+              className="w-full h-9 pl-10 pr-3 text-sm border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="">All Fleets</option>
+              {fleets.map((fleet) => (
+                <option key={fleet.fleet_id} value={fleet.fleet_id}>
+                  {fleet.fleet_name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+
       {/* Search and Filter */}
-      <div className="p-4 space-y-3 border-b border-border flex-shrink-0">
+      <div className="px-4 py-3 space-y-3 border-b border-border flex-shrink-0">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <Input
@@ -311,7 +370,6 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="flex-1">
                 <Filter className="w-4 h-4 mr-2" />
-                Filters
                 {hasActiveFilters && (
                   <Badge className="ml-2 bg-blue-600" variant="secondary">
                     {statusFilters.map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(', ')}
@@ -380,10 +438,6 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
             </Button>
           )}
         </div>
-
-        <p className="text-muted-foreground">
-          Showing {filteredDevices.length} of {devices.length} agents
-        </p>
       </div>
 
       <div className="flex-1 overflow-y-auto">

@@ -58,6 +58,7 @@ import { LicenseValidator } from './services/license-validator';
 import licenseRoutes from './routes/license';
 import jwtAuth from './middleware/jwt-auth';
 import billingRoutes from './routes/billing';
+import fleetRoutes from './routes/fleets';
 import { websocketManager } from './services/websocket-manager';
 import { createHttpsServer } from './https-server';
 
@@ -362,6 +363,7 @@ app.use(API_BASE, deviceStateRoutes);
 app.use(API_BASE, imageRegistryRoutes);
 app.use(API_BASE, deviceJobsRoutes);
 app.use(API_BASE, rotationRoutes);
+app.use(API_BASE, fleetRoutes); // MUST be before profileRoutes (/:name catches everything)
 app.use(API_BASE, profileRoutes);
 app.use(API_BASE, digitalTwinGraphRoutes);
 app.use(API_BASE, mqttMetricsRoutes); // MQTT metrics from database

@@ -189,7 +189,7 @@ export const VirtualDeviceManager = ({
             </div>
             <Button onClick={handleOpenDialog} size="sm">
               <Plus className="h-4 w-4 mr-2" />
-              Add Virtual Device
+              Add Device
             </Button>
           </div>
         </CardHeader>
@@ -239,7 +239,7 @@ export const VirtualDeviceManager = ({
       <Dialog open={openDialog} onOpenChange={setOpenDialog}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>Add Virtual Device</DialogTitle>
+            <DialogTitle>Add Device</DialogTitle>
             <DialogDescription>
               Virtual devices are protocol simulators that run as sidecar containers.
               The agent connects to them via localhost just like physical devices.

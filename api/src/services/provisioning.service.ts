@@ -53,7 +53,7 @@ export interface RegistrationRequest {
   deviceApiKey: string;
   devicePublicKey?: string; // Ed25519/P-256 public key for PoP
   provisioningApiKey: string;
-  applicationId?: number;
+  fleet_id?: string; // Fleet ID (e.g., "fleet-abc123" or null)
   macAddress?: string;
   osVersion?: string;
   agentVersion?: string;
@@ -141,9 +141,10 @@ export class ProvisioningService {
       });
 
       // 1. Generate provisioning key server-side
-      const fleetId = data.applicationId?.toString() || 'default-fleet';
+      // Note: Provisioning key requires a fleet_id (NOT NULL), but device can have null fleet_id
+      const provKeyFleetId = data.fleet_id || 'unassigned';
       const provisioningKeyResult = await createProvisioningKey(
-        fleetId,
+        provKeyFleetId,
         1, // max_devices: 1 (one-time use for this specific virtual agent)
         1, // expires_in_days: 1 (short-lived for security)
         `Auto-generated for virtual agent: ${deviceName}`,
@@ -156,7 +157,8 @@ export class ProvisioningService {
       logger.info('Provisioning key generated for virtual agent', {
         deviceUuid: uuid.substring(0, 8) + '...',
         provisioningKeyId,
-        fleetId
+        provKeyFleetId,
+        deviceFleetId: data.fleet_id || null
       });
 
       // 2. Hash device API key
@@ -167,7 +169,7 @@ export class ProvisioningService {
         device_name: deviceName,
         device_type: 'virtual',
         device_api_key_hash: hashedApiKey,
-        fleet_id: fleetId,
+        fleet_id: data.fleet_id || null, // Device can have null fleet (not assigned to any fleet)
         provisioned_by_key_id: provisioningKeyId,
         mac_address: macAddress || null,
         os_version: osVersion || null,
@@ -209,7 +211,7 @@ export class ProvisioningService {
         {
           device_name: deviceName,
           device_type: 'virtual',
-          fleet_id: fleetId,
+          fleet_id: device.fleet_id,
           namespace: device.k8s_namespace,
           initiated_at: new Date().toISOString()
         },
@@ -309,7 +311,7 @@ export class ProvisioningService {
         details: {
           deviceName,
           deviceType: 'virtual',
-          fleetId,
+          fleetId: device.fleet_id,
           namespace: device.k8s_namespace,
           deploymentStatus: 'deploying'
         }
@@ -323,7 +325,7 @@ export class ProvisioningService {
         {
           device_name: deviceName,
           device_type: 'virtual',
-          fleet_id: fleetId,
+          fleet_id: device.fleet_id,
           namespace: device.k8s_namespace,
           created_at: now.toISOString()
         }
@@ -798,7 +800,7 @@ export class ProvisioningService {
     vpnCredentials?: { type: 'tailscale'; tailscale: any },
     challenge?: string
   ): Promise<ProvisioningResponse> {
-    const { uuid, deviceName, deviceType, applicationId } = data;
+    const { uuid, deviceName, deviceType, fleet_id } = data;
 
     // Detect virtual agents FIRST (before checking broker config)
     const isVirtual = device.device_type === 'virtual';
@@ -878,7 +880,7 @@ export class ProvisioningService {
       uuid: device.uuid,
       deviceName,
       deviceType,
-      applicationId,
+      applicationId: undefined, // Deprecated - use fleetId instead
       fleetId: provisioningKeyRecord.fleet_id,
       ...(challenge && { challenge }), // Include challenge if PoP enabled
       createdAt: device.created_at.toISOString(),

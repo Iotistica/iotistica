@@ -556,7 +556,7 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
 
   try {
     // Extract request data
-    const { uuid, deviceName, deviceType, deviceApiKey, devicePublicKey, applicationId, macAddress, osVersion, agentVersion } = req.body;
+    const { uuid, deviceName, deviceType, deviceApiKey, devicePublicKey, fleet_id, macAddress, osVersion, agentVersion } = req.body;
     const provisioningApiKey = req.headers.authorization?.replace('Bearer ', '');
 
     // Validate required fields
@@ -632,7 +632,7 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
         deviceApiKey,
         devicePublicKey,
         provisioningApiKey,
-        applicationId,
+        fleet_id,
         macAddress,
         osVersion,
         agentVersion
