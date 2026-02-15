@@ -117,7 +117,9 @@ const allowedOrigins = process.env.CORS_ORIGINS
       'http://localhost:4002',
       // Allow K8s fleet cluster to call provisioning API
       'https://api1.iotistica.com',
-      'http://api1.iotistica.com'
+      'http://api1.iotistica.com',
+      // Production dashboard
+      'https://tsdbdash.iotistica.com'
     ];
 
 // SECURITY: Validate CORS configuration on startup
