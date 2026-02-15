@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Responsive, WidthProvider, Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
+import { buildApiUrl } from '../config/api';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -147,7 +148,7 @@ export function CustomDashboardPage({ device }: CustomDashboardPageProps) {
     try {
       setIsLoading(true);
       // Try loading from API first
-      const response = await fetch(`http://localhost:4002/api/v1/dashboard-layouts/${device.deviceUuid}`, {
+      const response = await fetch(buildApiUrl(`/api/v1/dashboard-layouts/${device.deviceUuid}`), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
         }
@@ -221,7 +222,7 @@ export function CustomDashboardPage({ device }: CustomDashboardPageProps) {
 
   const saveLayoutToServer = async (widgetsToSave: DashboardWidget[], showFeedback = true) => {
     try {
-      const response = await fetch(`http://localhost:4002/api/v1/dashboard-layouts/${device.deviceUuid}`, {
+      const response = await fetch(buildApiUrl(`/api/v1/dashboard-layouts/${device.deviceUuid}`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

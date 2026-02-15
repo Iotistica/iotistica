@@ -8,8 +8,9 @@ import React, { useState} from 'react';
 import { Neo4jGraphVisualization } from '../components/Neo4jGraphVisualization';
 import { Upload, FileText, CheckCircle, XCircle } from 'lucide-react';
 import axios from 'axios';
+import { getApiUrl } from '../config/api';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3002';
+const API_BASE_URL = getApiUrl();
 
 interface UploadStats {
   floors: number;

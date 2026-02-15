@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Responsive, WidthProvider, Layout } from 'react-grid-layout';
+import { buildApiUrl } from '../config/api';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { Button } from '../components/ui/button';
@@ -308,7 +309,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
   const loadAvailableLayouts = async () => {
     try {
-      const response = await fetch(`http://localhost:4002/api/v1/dashboard-layouts/global/all`, {
+      const response = await fetch(buildApiUrl(`/api/v1/dashboard-layouts/global/all`), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
         }
@@ -327,7 +328,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     try {
       setIsLoading(true);
       
-      const response = await fetch(`http://localhost:4002/api/v1/dashboard-layouts/by-share-token/${shareToken}`, {
+      const response = await fetch(buildApiUrl(`/api/v1/dashboard-layouts/by-share-token/${shareToken}`), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
         }
@@ -368,7 +369,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       
       if (layoutId) {
         // Load specific layout by ID
-        const response = await fetch(`http://localhost:4002/api/v1/dashboard-layouts/by-id/${layoutId}`, {
+        const response = await fetch(buildApiUrl(`/api/v1/dashboard-layouts/by-id/${layoutId}`), {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
           }
@@ -392,7 +393,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       }
 
       // Load default layout
-      const response = await fetch(`http://localhost:4002/api/v1/dashboard-layouts/global`, {
+      const response = await fetch(buildApiUrl(`/api/v1/dashboard-layouts/global`), {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
         }
@@ -456,7 +457,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
   const saveLayoutToServer = async (widgetsToSave: DashboardWidget[], showFeedback = true) => {
     try {
-      const response = await fetch(`http://localhost:4002/api/v1/dashboard-layouts/global`, {
+      const response = await fetch(buildApiUrl('/api/v1/dashboard-layouts/global'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -517,7 +518,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
     setIsSaving(true);
     try {
-      const response = await fetch(`http://localhost:4002/api/v1/dashboard-layouts/global`, {
+      const response = await fetch(buildApiUrl('/api/v1/dashboard-layouts/global'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -557,7 +558,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
     setIsSaving(true);
     try {
-      const response = await fetch(`http://localhost:4002/api/v1/dashboard-layouts/${currentLayoutId}`, {
+      const response = await fetch(buildApiUrl(`/api/v1/dashboard-layouts/${currentLayoutId}`), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -593,7 +594,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     if (dashboardToDelete === null) return;
 
     try {
-      const response = await fetch(`http://localhost:4002/api/v1/dashboard-layouts/${dashboardToDelete}`, {
+      const response = await fetch(buildApiUrl(`/api/v1/dashboard-layouts/${dashboardToDelete}`), {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('accessToken')}`

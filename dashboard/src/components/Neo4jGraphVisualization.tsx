@@ -8,10 +8,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import cytoscape, { Core, NodeSingular } from 'cytoscape';
 import axios from 'axios';
+import { getApiUrl } from '../config/api';
 import { Building2, Layers, Box, Cpu, Radio, ChevronRight, ChevronLeft, Trash2, Link2, X, Info } from 'lucide-react';
 import { DeviceMappingPanel } from './DeviceMappingPanel';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4002';
+const API_BASE_URL = getApiUrl();
 
 interface GraphNode {
   id: string;

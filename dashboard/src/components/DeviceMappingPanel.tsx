@@ -10,6 +10,7 @@
 
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import { getApiUrl } from '../config/api';
 import { 
   Cpu, 
   Radio, 
@@ -22,7 +23,7 @@ import {
   WifiOff
 } from 'lucide-react';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4002';
+const API_BASE_URL = getApiUrl();
 
 interface Device {
   uuid: string;
