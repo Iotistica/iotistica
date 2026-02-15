@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Terminal as TerminalIcon, Power, Plus, Settings } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Label } from '@/components/ui/label';
+import { buildApiUrl } from '@/config/api';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
@@ -94,10 +95,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     setIsConnecting(true);
     console.log('[RemoteAccess] 🔌 Creating new WebSocket connection...');
     
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsHost = window.location.hostname;
-    const wsPort = import.meta.env.VITE_API_PORT || '4002';
-    const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/ws?deviceUuid=${deviceUuid}`;
+    const wsUrl = buildApiUrl(`/ws?deviceUuid=${deviceUuid}`).replace(/^http/, 'ws');
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;

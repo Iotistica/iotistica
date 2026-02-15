@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Terminal, RefreshCw, Download, Pause, Play } from "lucide-react";
+import { buildApiUrl } from "@/config/api";
 
 interface LogEntry {
   id?: number;
@@ -91,11 +92,7 @@ export function ContainerLogsCard({ deviceUuid, applications }: ContainerLogsCar
 
     setIsLoading(true);
     
-    // Determine WebSocket protocol based on current protocol
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsHost = window.location.hostname;
-    const wsPort = import.meta.env.VITE_API_PORT || '4002';
-    const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/ws?deviceUuid=${deviceUuid}`;
+    const wsUrl = buildApiUrl(`/ws?deviceUuid=${deviceUuid}`).replace(/^http/, 'ws');
 
     console.log('[ContainerLogs] Connecting to WebSocket:', wsUrl);
     const ws = new WebSocket(wsUrl);
