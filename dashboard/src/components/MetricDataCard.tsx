@@ -241,10 +241,11 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     switch (config.chartType) {
       case 'area':
         return (
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart {...commonProps}>
+          <ResponsiveContainer width="100%" height={200} key={`area-${config.widgetId}`}>
+            <AreaChart key={`chart-${config.widgetId}`} {...commonProps}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis 
+                id={`xaxis-${config.widgetId}`}
                 dataKey="timeValue"
                 type="number"
                 scale="time"
@@ -254,6 +255,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 tickFormatter={(value: number) => formatTimeValue(value)}
               />
               <YAxis 
+                id={`yaxis-${config.widgetId}`}
                 yAxisId="left"
                 orientation="left"
                 fontSize={12}
@@ -293,7 +295,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
               ))}
               {config.thresholdsEnabled && config.thresholds?.map((threshold, idx) => (
                 <ReferenceLine
-                  key={idx}
+                  key={`threshold-${config.widgetId}-${idx}`}
                   yAxisId="left"
                   y={threshold.value}
                   stroke={threshold.color}
@@ -313,10 +315,11 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
 
       case 'bar':
         return (
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart {...commonProps}>
+          <ResponsiveContainer width="100%" height={200} key={`bar-${config.widgetId}`}>
+            <BarChart key={`chart-${config.widgetId}`} {...commonProps}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis 
+                id={`xaxis-${config.widgetId}`}
                 dataKey="timeValue"
                 type="number"
                 scale="time"
@@ -326,6 +329,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 tickFormatter={(value: number) => formatTimeValue(value)}
               />
               <YAxis 
+                id={`yaxis-${config.widgetId}`}
                 yAxisId="left"
                 orientation="left"
                 fontSize={12}
@@ -361,7 +365,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
               ))}
               {config.thresholdsEnabled && config.thresholds?.map((threshold, idx) => (
                 <ReferenceLine
-                  key={idx}
+                  key={`threshold-${config.widgetId}-${idx}`}
                   yAxisId="left"
                   y={threshold.value}
                   stroke={threshold.color}
@@ -381,10 +385,11 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
 
       default: // line
         return (
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart {...commonProps}>
+          <ResponsiveContainer width="100%" height={200} key={`line-${config.widgetId}`}>
+            <LineChart key={`chart-${config.widgetId}`} {...commonProps}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis 
+                id={`xaxis-${config.widgetId}`}
                 dataKey="timeValue"
                 type="number"
                 scale="time"
@@ -394,6 +399,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 tickFormatter={(value: number) => formatTimeValue(value)}
               />
               <YAxis 
+                id={`yaxis-${config.widgetId}`}
                 yAxisId="left"
                 orientation="left"
                 fontSize={12}
@@ -432,7 +438,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
               ))}
               {config.thresholdsEnabled && config.thresholds?.map((threshold, idx) => (
                 <ReferenceLine
-                  key={idx}
+                  key={`threshold-${config.widgetId}-${idx}`}
                   yAxisId="left"
                   y={threshold.value}
                   stroke={threshold.color}

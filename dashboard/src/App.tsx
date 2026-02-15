@@ -257,8 +257,15 @@ export default function App() {
     [devices, selectedDeviceId]
   );
 
-  // Establish WebSocket connection for selected device
-  useWebSocketConnection(currentDevice?.deviceUuid || null);
+  // Only establish WebSocket connection if device is online
+  // Prevents connection errors for offline/pending devices
+  const wsDeviceUuid = useMemo(() => {
+    if (!currentDevice) return null;
+    // Only connect if device is online (not offline, pending, or warning)
+    return currentDevice.status === 'online' ? currentDevice.deviceUuid : null;
+  }, [currentDevice]);
+
+  useWebSocketConnection(wsDeviceUuid);
 
   // Handle network interfaces updates via WebSocket
   const handleNetworkInterfaces = useCallback((data: { interfaces: NetworkInterfaceData[] }) => {
@@ -286,8 +293,8 @@ export default function App() {
     }
   }, []);
 
-  // Subscribe to WebSocket channels
-  useWebSocket(currentDevice?.deviceUuid || null, 'network-interfaces', handleNetworkInterfaces);
+  // Subscribe to WebSocket channels (only for online devices)
+  useWebSocket(wsDeviceUuid, 'network-interfaces', handleNetworkInterfaces);
 
   // Clear data when device changes
   useEffect(() => {

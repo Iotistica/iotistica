@@ -419,15 +419,28 @@ export function AddEditDeviceDialog({
 
         <div className="space-y-4">
           {isEditMode && (
-            <div className="space-y-2">
-              <Label htmlFor="agent-uuid">Agent UUID</Label>
-              <Input
-                id="agent-uuid"
-                value={device?.deviceUuid || ""}
-                readOnly
-                disabled
-              />
-            </div>
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="agent-uuid">Agent UUID</Label>
+                <Input
+                  id="agent-uuid"
+                  value={device?.deviceUuid || ""}
+                  readOnly
+                  disabled
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="fleet-name">Fleet Name</Label>
+                <Input
+                  id="fleet-name"
+                  value={device?.fleet_id 
+                    ? fleetOptions.find(f => f.fleet_id === device.fleet_id)?.fleet_name || "Loading..." 
+                    : "Unassigned"}
+                  readOnly
+                  disabled
+                />
+              </div>
+            </>
           )}
           {!isEditMode && (
             <div className="space-y-2 text-left">

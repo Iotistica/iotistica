@@ -19,7 +19,7 @@ export interface VirtualAgentConfig {
   deviceUuid: string;
   deviceName: string;
   provisioningKey: string; // Server-generated, injected to pod
-  fleetId: string;
+  fleetId?: string | null; // Optional, null for unassigned devices
   namespace?: string; // defaults to 'virtual-agents'
   resourceLimits?: {
     cpu?: string; // default: '1000m'
@@ -377,7 +377,7 @@ export class VirtualAgentDeployer {
           'app.kubernetes.io/name': 'virtual-agent',
           'app.kubernetes.io/managed-by': 'iotistic-api',
           'iotistica.com/device-uuid': config.deviceUuid,
-          'iotistica.com/fleet-id': config.fleetId
+          'iotistica.com/fleet-id': config.fleetId || 'unassigned'
         }
       },
       spec: {
@@ -420,7 +420,7 @@ export class VirtualAgentDeployer {
                 },
                 env: [
                   { name: 'DEVICE_UUID', value: config.deviceUuid },
-                  { name: 'FLEET_ID', value: config.fleetId },
+                  { name: 'FLEET_ID', value: config.fleetId || 'unassigned' },
                   { name: 'REQUIRE_PROVISIONING', value: 'true' },
                   { name: 'IS_VIRTUAL_AGENT', value: 'true' },
                   { name: 'CLOUD_API_ENDPOINT', value: this.cloudApiUrl },

@@ -231,20 +231,32 @@ class WebSocketService {
         }
       };
 
-      this.socket.onerror = (error) => {
-        console.error('[WebSocket] Error:', error);
+      this.socket.onerror = () => {
+        console.warn('[WebSocket] Connection error (this is normal if device is offline or API is unavailable)');
         this.connectionPending = false;
+        // Don't log the error object as it doesn't contain useful info
       };
 
       this.socket.onclose = (event) => {
-        console.log('[WebSocket] Connection closed:', event.code, event.reason);
+        const connectionType = this.deviceUuid === 'global' ? 'global' : `device ${this.deviceUuid?.substring(0, 8)}`;
+        console.log(`[WebSocket] Connection closed for ${connectionType}:`, {
+          code: event.code,
+          reason: event.reason || 'No reason provided',
+          wasClean: event.wasClean
+        });
         this.socket = null;
         this.connectionPending = false;
 
-        // Only attempt reconnect if not intentionally closed
+        // Only attempt reconnect if not intentionally closed and within retry limit
         if (!this.isIntentionallyClosed && this.reconnectAttempts < this.maxReconnectAttempts) {
           this.reconnectAttempts++;
-          console.log(`[WebSocket] Reconnecting... (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+          
+          // Special handling for connection refused (device likely offline)
+          if (event.code === 1006) {
+            console.log(`[WebSocket] Device appears offline, will retry ${this.maxReconnectAttempts - this.reconnectAttempts} more time(s)`);
+          } else {
+            console.log(`[WebSocket] Reconnecting... (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+          }
           
           this.reconnectTimeout = setTimeout(() => {
             if (this.deviceUuid === 'global') {

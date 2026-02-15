@@ -164,7 +164,33 @@ export class ProvisioningService {
       // 2. Hash device API key
       const hashedApiKey = await bcrypt.hash(deviceApiKey, 10);
 
-      // 3. Create device record (pending deployment)
+      // 3. Determine namespace: use fleet namespace if fleet_id provided, otherwise use provided namespace or default
+      let targetNamespace = (data as any).namespace || process.env.VIRTUAL_AGENT_NAMESPACE || 'virtual-agents';
+      
+      if (data.fleet_id) {
+        // Fetch fleet's k8s_namespace from database
+        const fleetResult = await query(
+          'SELECT k8s_namespace FROM fleets WHERE fleet_id = $1',
+          [data.fleet_id]
+        );
+        
+        if (fleetResult.rows.length > 0 && fleetResult.rows[0].k8s_namespace) {
+          targetNamespace = fleetResult.rows[0].k8s_namespace;
+          logger.info('Using fleet namespace for virtual agent provisioning', {
+            fleet_id: data.fleet_id,
+            namespace: targetNamespace,
+            deviceUuid: uuid.substring(0, 8) + '...'
+          });
+        } else {
+          logger.warn('Fleet not found or has no k8s_namespace, using default', {
+            fleet_id: data.fleet_id,
+            defaultNamespace: targetNamespace,
+            deviceUuid: uuid.substring(0, 8) + '...'
+          });
+        }
+      }
+
+      // 4. Create device record (pending deployment)
       const deviceData: Partial<Device> = {
         device_name: deviceName,
         device_type: 'virtual',
@@ -175,7 +201,7 @@ export class ProvisioningService {
         os_version: osVersion || null,
         agent_version: agentVersion || null,
         deployment_status: 'pending',
-        k8s_namespace: (data as any).namespace || process.env.VIRTUAL_AGENT_NAMESPACE || 'virtual-agents',
+        k8s_namespace: targetNamespace,
         is_online: false, // Not online yet (pod not running)
         is_active: true,
         status: 'deploying',
@@ -189,10 +215,11 @@ export class ProvisioningService {
       logger.info('Virtual agent device record created', {
         deviceId: device.id,
         deviceUuid: uuid.substring(0, 8) + '...',
-        deploymentStatus: 'pending'
+        deploymentStatus: 'pending',
+        namespace: device.k8s_namespace
       });
 
-      // 4. Create default target state (needed for when pod comes online)
+      // 5. Create default target state (needed for when pod comes online)
       await this.createDefaultTargetState(uuid, agentVersion, provisioningKeyId);
 
       // Log deployment start (Event Sourcing)
@@ -224,7 +251,7 @@ export class ProvisioningService {
         }
       );
 
-      // 5. Deploy to K8s with plaintext provisioning key
+      // 6. Deploy to K8s with plaintext provisioning key
       try {
         await virtualAgentDeployer.deploy({
           deviceUuid: device.uuid,

@@ -176,6 +176,19 @@ interface GlobalDashboardPageProps {
 }
 
 export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboardPageProps) {
+  // Sanitize widgets to ensure all layout properties are valid numbers
+  const sanitizeWidgets = (widgets: any[]): DashboardWidget[] => {
+    return widgets.map(widget => ({
+      ...widget,
+      x: typeof widget.x === 'number' ? widget.x : 0,
+      y: typeof widget.y === 'number' ? widget.y : 0,
+      w: typeof widget.w === 'number' ? widget.w : 4,
+      h: typeof widget.h === 'number' ? widget.h : 4,
+      minW: typeof widget.minW === 'number' ? widget.minW : 2,
+      minH: typeof widget.minH === 'number' ? widget.minH : 2
+    }));
+  };
+
   const [widgets, setWidgets] = useState<DashboardWidget[]>([]);
   const [isEditMode, setIsEditMode] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -272,7 +285,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   }) => {
     try {
       localStorage.setItem(cachedLayoutKey, JSON.stringify({
-        widgets: data.widgets,
+        widgets: sanitizeWidgets(data.widgets),
         id: data.id ?? null,
         layoutName: data.layoutName ?? 'Cached',
         shareToken: data.shareToken ?? null
@@ -295,7 +308,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       if (!data.widgets || !Array.isArray(data.widgets) || data.widgets.length === 0) {
         return false;
       }
-      setWidgets(data.widgets);
+      setWidgets(sanitizeWidgets(data.widgets));
       setCurrentLayoutId(data.id ?? null);
       setCurrentLayoutName(data.layoutName || 'Cached');
       setCurrentShareToken(data.shareToken ?? null);
@@ -336,7 +349,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
       if (response.ok) {
         const data = await response.json();
-        setWidgets(data.widgets || []);
+        setWidgets(sanitizeWidgets(data.widgets || []));
         setCurrentLayoutId(data.id);
         setCurrentLayoutName(data.layoutName || 'Shared Dashboard');
         setCurrentShareToken(data.shareToken);
@@ -377,7 +390,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
         if (response.ok) {
           const data = await response.json();
-          setWidgets(data.widgets || []);
+          setWidgets(sanitizeWidgets(data.widgets || []));
           setCurrentLayoutId(layoutId);
           setCurrentLayoutName(data.layoutName || 'Default');
           setCurrentShareToken(data.shareToken);
@@ -402,7 +415,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       if (response.ok) {
         const data = await response.json();
         if (data.widgets && Array.isArray(data.widgets) && data.widgets.length > 0) {
-          setWidgets(data.widgets);
+          setWidgets(sanitizeWidgets(data.widgets));
           setCurrentLayoutId(data.id || null);
           setCurrentLayoutName(data.layoutName || 'Default');
           setCurrentShareToken(data.shareToken || null);
