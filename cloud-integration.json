@@ -1,0 +1,8 @@
+{
+  "azure": {
+    "storageAccount": "iotisticacosts9057",
+    "storageAccessKey": "xCcW3xx2ZdLBvVAMr5LE9ae/UP4l09mOdXQQd9GkF6CzDdLps/XArrpXDQfqcdiqYydBD19uXHTu+ASt82fDCw==",
+    "storageContainer": "cost-exports",
+    "subscriptionID": "833accc2-1856-4e07-bcef-06cef4efdef2"
+  }
+}

@@ -2044,4 +2044,76 @@ router.delete('/devices/:uuid/virtual', jwtAuth, async (req, res) => {
   }
 });
 
+/**
+ * Restart a virtual agent (delete pod, let Deployment recreate it)
+ * POST /api/v1/devices/:uuid/virtual/restart
+ */
+router.post('/devices/:uuid/virtual/restart', jwtAuth, async (req, res) => {
+  try {
+    const { uuid } = req.params;
+
+    const device = await DeviceModel.getByUuid(uuid);
+    if (!device) {
+      return res.status(404).json({
+        error: 'Device not found',
+        message: `Device ${uuid} not found`
+      });
+    }
+
+    if (device.device_type !== 'virtual') {
+      return res.status(400).json({
+        error: 'Not a virtual agent',
+        message: 'This endpoint is only for virtual agents'
+      });
+    }
+
+    logger.info('Restarting virtual agent', {
+      deviceUuid: uuid.substring(0, 8) + '...',
+      deviceName: device.device_name,
+      namespace: device.k8s_namespace
+    });
+
+    await virtualAgentDeployer.restart(uuid);
+
+    await logAuditEvent({
+      eventType: 'device.deployment.restarted' as any,
+      deviceUuid: uuid,
+      severity: AuditSeverity.INFO,
+      details: {
+        deviceName: device.device_name,
+        namespace: device.k8s_namespace
+      }
+    }).catch(err => logger.error('Audit log failed', err));
+
+    res.json({
+      message: 'Virtual agent restart initiated',
+      deviceUuid: uuid,
+      deviceName: device.device_name,
+      namespace: device.k8s_namespace,
+      note: 'Pod deleted - Kubernetes will automatically recreate it'
+    });
+
+  } catch (error: any) {
+    logger.error('Error restarting virtual agent', {
+      error: error.message,
+      stack: error.stack,
+      deviceId: req.params.uuid
+    });
+
+    await logAuditEvent({
+      eventType: 'device.deployment.restart_failed' as any,
+      deviceUuid: req.params.uuid,
+      severity: AuditSeverity.ERROR,
+      details: {
+        error: error.message
+      }
+    }).catch(err => logger.error('Audit log failed', err));
+
+    res.status(500).json({
+      error: 'Failed to restart virtual agent',
+      message: error.message
+    });
+  }
+});
+
 export default router;

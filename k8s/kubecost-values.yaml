@@ -1,0 +1,53 @@
+# Production Kubecost Configuration for Azure AKS
+# Cluster: dev-iotistica-aks-cluster
+
+global:
+  prometheus:
+    enabled: true
+    fqdn: http://kubecost-prometheus-server.kubecost.svc
+  clusterId: "dev-iotistica-aks-cluster"
+
+kubecostProductConfigs:
+  clusterName: "dev-iotistica-aks-cluster"
+  cloudProvider: "azure"
+  cluster_id: "dev-iotistica-aks-cluster"
+  cloudIntegrationSecret: "cloud-integration"
+  azureSubscriptionID: "833accc2-1856-4e07-bcef-06cef4efdef2"
+  azureStorageAccount: "iotisticacosts9057"
+  azureStorageContainer: "cost-exports"
+  
+# Persistent storage for cost data (30 days retention)
+persistentVolume:
+  enabled: true
+  size: 32Gi
+  storageClass: managed-premium  # Azure Premium SSD
+
+# Service exposed via Envoy Gateway (HTTPRoute: kubecost.iotistica.com)
+# Previous LoadBalancer IP: 20.200.115.208 (no longer needed)
+service:
+  type: ClusterIP
+  annotations:
+    # Exposed via Envoy Gateway at kubecost.iotistica.com
+    gateway.envoyproxy.io/exposed: "true"
+
+# Prometheus storage (metrics retention)
+prometheus:
+  server:
+    persistentVolume:
+      enabled: true
+      size: 32Gi
+      storageClass: managed-premium
+    retention: 15d
+  
+# Resource limits
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+# Enable network costs (requires Azure integration)
+networkCosts:
+  enabled: true

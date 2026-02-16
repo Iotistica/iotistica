@@ -1,0 +1,43 @@
+---
+# ServiceAccount for API to manage virtual agents
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: virtual-agents-manager
+  namespace: io-cluster-tsdb01
+automountServiceAccountToken: true
+---
+# Role: Permissions to manage virtual agents namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: virtual-agents-admin
+  namespace: virtual-agents-tsdb01
+rules:
+- apiGroups: [""]
+  resources: ["pods", "secrets", "configmaps", "services"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["resourcequotas"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list"]
+---
+# RoleBinding: Bind role to ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: virtual-agents-manager-binding
+  namespace: virtual-agents-tsdb01
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: virtual-agents-admin
+subjects:
+- kind: ServiceAccount
+  name: virtual-agents-manager
+  namespace: io-cluster-tsdb01

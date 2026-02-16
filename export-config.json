@@ -1,0 +1,41 @@
+{
+  "type": "ActualCost",
+  "timeframe": "MonthToDate",
+  "dataSet": {
+    "granularity": "Daily",
+    "configuration": {
+      "columns": [
+        "Date",
+        "ResourceId",
+        "ResourceType",
+        "ResourceLocation",
+        "ResourceGroup",
+        "SubscriptionId",
+        "SubscriptionName",
+        "Cost",
+        "UnitPrice",
+        "Quantity",
+        "MeterCategory",
+        "MeterSubCategory",
+        "Meter",
+        "Tags"
+      ]
+    }
+  },
+  "deliveryInfo": {
+    "destination": {
+      "resourceId": "/subscriptions/833accc2-1856-4e07-bcef-06cef4efdef2/resourceGroups/dev-iotistica-aks-rg/providers/Microsoft.Storage/storageAccounts/iotisticacosts9057",
+      "container": "cost-exports",
+      "rootFolderPath": "kubecost"
+    }
+  },
+  "schedule": {
+    "status": "Active",
+    "recurrence": "Daily",
+    "recurrencePeriod": {
+      "from": "2026-02-16T00:00:00Z",
+      "to": "2027-02-16T00:00:00Z"
+    }
+  },
+  "format": "Csv"
+}

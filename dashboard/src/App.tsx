@@ -20,7 +20,7 @@ import { SensorHealthDashboard } from "./pages/DeviceHealthDashboard";
 import { SensorsPage } from "./pages/DevicesPage";
 import { EndpointsVisualizationPage } from "./pages/EndpointsVisualizationPage";
 import HousekeeperPage from "./pages/HousekeeperPage";
-import DeviceSettingsPage from "./pages/DeviceSettingsPage";
+import DeviceSettingsPage from "./pages/AgentSettingsPage";
 import AccountPage from "./pages/AccountPage";
 import { LogsPage } from "./pages/LogsPage";
 import { RemoteAccessPage } from "./pages/RemoteAccessPage";

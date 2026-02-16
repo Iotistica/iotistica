@@ -893,6 +893,93 @@ export class VirtualAgentDeployer {
   }
 
   /**
+   * Restart a virtual agent by deleting its pod(s)
+   * Kubernetes Deployment controller will automatically recreate the pod(s)
+   */
+  async restart(deviceUuid: string): Promise<void> {
+    try {
+      const device = await DeviceModel.getByUuid(deviceUuid);
+      if (!device) {
+        throw new Error('Device not found');
+      }
+
+      if (device.device_type !== 'virtual') {
+        throw new Error('Not a virtual agent');
+      }
+
+      const namespace = device.k8s_namespace || this.defaultNamespace;
+      const deploymentName = device.helm_release_name || this.sanitizeDnsName(device.device_name);
+
+      logger.info('Restarting virtual agent', {
+        deviceUuid: deviceUuid.substring(0, 8) + '...',
+        deviceName: device.device_name,
+        namespace,
+        deploymentName
+      });
+
+      // Delete pod(s) - Deployment controller will automatically recreate them
+      try {
+        const podList = await this.coreApi.listNamespacedPod(
+          namespace,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          `app=${deploymentName}`
+        );
+
+        const pods = podList.body.items;
+        
+        if (pods.length === 0) {
+          logger.warn('No pods found for virtual agent', {
+            deviceUuid: deviceUuid.substring(0, 8) + '...',
+            namespace,
+            deploymentName
+          });
+          throw new Error('No pods found for this virtual agent');
+        }
+
+        for (const pod of pods) {
+          const podName = pod.metadata?.name;
+          if (podName) {
+            await this.coreApi.deleteNamespacedPod(podName, namespace);
+            logger.info('Pod deleted (will be recreated by Deployment)', {
+              deviceUuid: deviceUuid.substring(0, 8) + '...',
+              podName,
+              namespace
+            });
+          }
+        }
+
+        // Update device status to deploying (will be updated by agent when it comes back online)
+        await DeviceModel.update(deviceUuid, {
+          deployment_status: 'deploying',
+          status: 'offline'
+        });
+
+        logger.info('Virtual agent restart initiated successfully', {
+          deviceUuid: deviceUuid.substring(0, 8) + '...',
+          podsDeleted: pods.length
+        });
+
+      } catch (error: any) {
+        if (error.statusCode === 404) {
+          throw new Error('Pod not found - virtual agent may not be deployed');
+        }
+        throw error;
+      }
+
+    } catch (error) {
+      logger.error('Failed to restart virtual agent', {
+        deviceUuid,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Build simulator sidecar containers based on device endpoints
    */
   private buildSimulatorSidecars(config: VirtualAgentConfig): any[] {

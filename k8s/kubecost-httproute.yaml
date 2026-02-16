@@ -1,0 +1,32 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: kubecost-httproute
+  namespace: kubecost
+  labels:
+    app.kubernetes.io/name: kubecost
+    app.kubernetes.io/component: cost-analyzer
+spec:
+  # Use a subdomain for Kubecost (add DNS A record: kubecost.iotistica.com -> 20.220.137.172)
+  hostnames:
+    - kubecost.iotistica.com
+  
+  # Reference the main Envoy Gateway
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: iotistica-gateway
+      namespace: envoy-gateway-system
+  
+  # Route all traffic to Kubecost service
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: kubecost-cost-analyzer
+          port: 9090
+          weight: 1

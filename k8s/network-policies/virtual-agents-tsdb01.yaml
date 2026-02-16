@@ -1,0 +1,69 @@
+---
+# Network Policy: Allow egress from virtual agents to core services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: virtual-agents-egress
+  namespace: virtual-agents-tsdb01
+spec:
+  podSelector:
+    matchLabels:
+      iotistica.com/component: virtual-agent
+  policyTypes:
+  - Egress
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow access to customer API in io-cluster-tsdb01
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: io-cluster-tsdb01
+    ports:
+    - protocol: TCP
+      port: 3002
+  # Allow access to customer MQTT in io-cluster-tsdb01
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: io-cluster-tsdb01
+    ports:
+    - protocol: TCP
+      port: 1883
+    - protocol: TCP
+      port: 9001
+  # Allow external HTTPS (for cloud services if needed)
+  - ports:
+    - protocol: TCP
+      port: 443
+---
+# Network Policy: Allow ingress to virtual agents from API
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: virtual-agents-ingress
+  namespace: virtual-agents-tsdb01
+spec:
+  podSelector:
+    matchLabels:
+      iotistica.com/component: virtual-agent
+  policyTypes:
+  - Ingress
+  ingress:
+  # Allow connections from API in customer namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: io-cluster-tsdb01
+    - podSelector:
+        matchLabels:
+          app: iotistic-api
+    ports:
+    - protocol: TCP
+      port: 48484  # Agent API port

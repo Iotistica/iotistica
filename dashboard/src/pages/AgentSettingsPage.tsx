@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Settings, Save, RefreshCw, AlertCircle, Server, Clock, Zap, Brain, FileText } from 'lucide-react';
+import { Settings, Save, RefreshCw, AlertCircle, Server, Clock, Zap, Brain, FileText, Power } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -116,6 +116,8 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
   const { getPendingConfig, updatePendingConfig, getTargetConfig,  saveTargetState, hasPendingChanges } = useDeviceState();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [deviceInfo, setDeviceInfo] = useState<any>(null);
 
   // Get current settings from pending state (or target state as fallback)
   const pendingConfig = getPendingConfig(deviceUuid);
@@ -141,8 +143,36 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
   const hasUnsavedChanges = hasPendingChanges(deviceUuid);
 
   useEffect(() => {
-    // Initialize - settings come from DeviceStateContext
-    setLoading(false);
+    // Fetch device info to check if it's a virtual agent
+    const fetchDeviceInfo = async () => {
+      try {
+        const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}`), {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          // API returns { device: {...}, target_state: {...}, current_state: {...} }
+          const deviceData = data.device || data;
+          console.log('[DeviceSettings] Device info loaded:', {
+            uuid: deviceUuid,
+            device_type: deviceData.device_type,
+            device_name: deviceData.device_name,
+            fullResponse: data
+          });
+          setDeviceInfo(deviceData);
+        } else {
+          console.error('[DeviceSettings] Failed to fetch device info:', response.status);
+        }
+      } catch (err) {
+        console.error('[DeviceSettings] Error fetching device info:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDeviceInfo();
   }, [deviceUuid]);
 
   const updateSetting = (path: string, value: any) => {
@@ -160,6 +190,45 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
       toast.error(`Failed to save settings: ${err.message}`);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRestartAgent = async () => {
+    if (!confirm('Restart virtual agent? This will delete the pod and recreate it.')) {
+      return;
+    }
+
+    setRestarting(true);
+    try {
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/virtual/restart`), {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to restart agent');
+      }
+
+      const result = await response.json();
+      toast.success('Virtual agent restart initiated - Pod will be recreated');
+      
+      // Update device status to deploying
+      if (deviceInfo) {
+        setDeviceInfo({
+          ...deviceInfo,
+          deployment_status: 'deploying',
+          status: 'offline'
+        });
+      }
+    } catch (err: any) {
+      console.error('Failed to restart agent:', err);
+      toast.error(`Failed to restart agent: ${err.message}`);
+    } finally {
+      setRestarting(false);
     }
   };
 
@@ -198,14 +267,53 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
               <Server className="h-5 w-5" />
               Agent Version
             </CardTitle>
-            <CardDescription>Current agent version</CardDescription>
+            <CardDescription>Current agent version and management</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className="text-sm">
-                v{settings.agent?.version || DEFAULT_SETTINGS.agent.version}
-              </Badge>
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-sm">
+                  v{settings.agent?.version || DEFAULT_SETTINGS.agent.version}
+                </Badge>
+                {deviceInfo?.device_type === 'virtual' && (
+                  <Badge variant="secondary" className="text-sm">
+                    Virtual Agent
+                  </Badge>
+                )}
+                {/* Debug: Show device type */}
+                {deviceInfo && (
+                  <Badge variant="outline" className="text-xs text-muted-foreground">
+                    Type: {deviceInfo.device_type || 'unknown'}
+                  </Badge>
+                )}
+              </div>
+              {deviceInfo?.device_type === 'virtual' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRestartAgent}
+                  disabled={restarting}
+                  className="gap-2"
+                >
+                  {restarting ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      Restarting...
+                    </>
+                  ) : (
+                    <>
+                      <Power className="h-4 w-4" />
+                      Restart Agent
+                    </>
+                  )}
+                </Button>
+              )}
             </div>
+            {deviceInfo?.device_type === 'virtual' && (
+              <p className="text-sm text-muted-foreground mt-3">
+                Restarting will delete the pod and let Kubernetes recreate it. Useful for applying new configurations or recovering from errors.
+              </p>
+            )}
           </CardContent>
         </Card>
 
