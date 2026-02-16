@@ -286,12 +286,7 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
                     Virtual Agent
                   </Badge>
                 )}
-                {/* Debug: Show device type */}
-                {deviceInfo && (
-                  <Badge variant="outline" className="text-xs text-muted-foreground">
-                    Type: {deviceInfo.device_type || 'unknown'}
-                  </Badge>
-                )}
+                
               </div>
               {deviceInfo?.device_type === 'virtual' && (
                 <Button
@@ -315,11 +310,7 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
                 </Button>
               )}
             </div>
-            {deviceInfo?.device_type === 'virtual' && (
-              <p className="text-sm text-muted-foreground mt-3">
-                Restarting will delete the pod and let Kubernetes recreate it. Useful for applying new configurations or recovering from errors.
-              </p>
-            )}
+           
           </CardContent>
         </Card>
 
