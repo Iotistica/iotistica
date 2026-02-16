@@ -29,6 +29,7 @@ export interface ThresholdLine {
 export interface MetricDataCardConfig {
   widgetId: string;
   title?: string;
+  agentName?: string;
   deviceName: string;
   metricName: string;
   chartType: 'line' | 'area' | 'bar';

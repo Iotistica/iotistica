@@ -556,12 +556,52 @@ router.post('/fleets/:fleet_id/start', jwtAuth, async (req, res) => {
 });
 
 // ============================================================================
-// DELETE /fleets/:fleet_id - Delete fleet (soft delete)
+// DELETE /fleets/:fleet_id - Delete fleet (soft delete + K8s namespace cleanup)
 // ============================================================================
 router.delete('/fleets/:fleet_id', jwtAuth, async (req, res) => {
   try {
     const { fleet_id } = req.params;
 
+    // First, get fleet info including k8s_namespace (before soft delete)
+    const fleetResult = await query(
+      `SELECT fleet_id, fleet_name, k8s_namespace, status FROM fleets WHERE fleet_id = $1`,
+      [fleet_id]
+    );
+
+    if (fleetResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Fleet not found',
+        fleet_id
+      });
+    }
+
+    const fleet = fleetResult.rows[0];
+
+    if (fleet.status === 'deleted') {
+      return res.status(404).json({
+        error: 'Fleet already deleted',
+        fleet_id
+      });
+    }
+
+    // If this is a virtual fleet with K8s namespace, delete it
+    if (fleet.k8s_namespace) {
+      try {
+        logger.info(`[FLEETS] Deleting K8s namespace for fleet: ${fleet_id}`, { namespace: fleet.k8s_namespace });
+        const { virtualAgentDeployer } = await import('../services/virtual-agent-deployer.js');
+        await virtualAgentDeployer.deleteFleetNamespace(fleet.k8s_namespace);
+        logger.info(`[FLEETS] K8s namespace deleted successfully`, { namespace: fleet.k8s_namespace, fleet_id });
+      } catch (error: any) {
+        // Log error but continue with soft delete - namespace may already be gone or K8s unavailable
+        logger.warn(`[FLEETS] Failed to delete K8s namespace (continuing with soft delete)`, {
+          fleet_id,
+          namespace: fleet.k8s_namespace,
+          error: error.message
+        });
+      }
+    }
+
+    // Perform soft delete in database
     const result = await query(
       `UPDATE fleets 
        SET status = 'deleted', stopped_at = CURRENT_TIMESTAMP
@@ -580,15 +620,16 @@ router.delete('/fleets/:fleet_id', jwtAuth, async (req, res) => {
     // Record event
     await query(
       `SELECT record_fleet_usage_event($1, $2, $3, $4)`,
-      [fleet_id, 'stopped', 'api', JSON.stringify({ deleted_via: 'api' })]
+      [fleet_id, 'stopped', 'api', JSON.stringify({ deleted_via: 'api', k8s_namespace_deleted: !!fleet.k8s_namespace })]
     );
 
-    logger.info(`[FLEETS] Deleted fleet: ${fleet_id}`);
+    logger.info(`[FLEETS] Deleted fleet: ${fleet_id}`, { k8s_namespace_deleted: !!fleet.k8s_namespace });
 
     res.json({
       fleet_id,
       status: 'deleted',
-      message: 'Fleet deleted successfully'
+      message: 'Fleet deleted successfully',
+      k8s_namespace_deleted: !!fleet.k8s_namespace
     });
 
   } catch (error: any) {

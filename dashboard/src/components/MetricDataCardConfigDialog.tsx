@@ -53,6 +53,7 @@ interface EndpointDevice {
   overall_quality_percentage: number;
   agent_count: number;
   agent_uuids: string[];
+  agent_names: string[];
 }
 
 export function MetricDataCardConfigDialog({
@@ -166,8 +167,12 @@ export function MetricDataCardConfigDialog({
       return;
     }
 
+    const selectedDeviceData = devices.find(d => d.device_name === selectedDevice);
+    const agentName = selectedDeviceData?.agent_names?.[0] || undefined;
+
     const config: MetricDataCardConfig = {
       widgetId: initialConfig?.widgetId || `metric-${Date.now()}`,
+      agentName,
       deviceName: selectedDevice,
       metricName: selectedMetric,
       chartType,

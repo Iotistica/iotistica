@@ -4,7 +4,7 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "../components/ui/card";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
-import { Layers, Server, DollarSign, AlertCircle, Plus, Play, Square, Pencil } from "lucide-react";
+import { Layers, Server, DollarSign, AlertCircle, Plus, Pencil } from "lucide-react";
 import { buildApiUrl } from "../config/api";
 import { toast } from "sonner";
 import { CreateFleetDialog } from "../components/CreateFleetDialog";
@@ -80,26 +80,6 @@ export function FleetsPage() {
     const budget = parseFloat(f.budget_limit || '0');
     return budget > 0 ? sum + budget : sum;
   }, 0);
-
-  const handleStartStop = async (fleetId: string, isActive: boolean) => {
-    try {
-      const token = localStorage.getItem('accessToken');
-      const action = isActive ? 'stop' : 'start';
-      const response = await fetch(buildApiUrl(`/api/v1/fleets/${fleetId}/${action}`), {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      
-      if (!response.ok) throw new Error(`Failed to ${action} fleet`);
-      
-      toast.success(`Fleet ${action}ed successfully`);
-      fetchFleets();
-    } catch (error: any) {
-      toast.error(error.message);
-    }
-  };
 
   const handleEdit = (fleet: Fleet) => {
     setEditingFleet(fleet);
@@ -330,30 +310,12 @@ export function FleetsPage() {
                     <div className="flex items-center gap-2 ml-4">
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="outline"
                         onClick={() => handleEdit(fleet)}
                       >
-                        <Pencil className="w-4 h-4" />
+                        <Pencil className="h-4 w-4 mr-2" />
+                        Edit
                       </Button>
-                      {fleet.fleet_type === 'virtual' && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleStartStop(fleet.fleet_id, fleet.status === 'active')}
-                        >
-                          {fleet.status === 'active' ? (
-                            <>
-                              <Square className="w-3 h-3 mr-1" />
-                              Stop
-                            </>
-                          ) : (
-                            <>
-                              <Play className="w-3 h-3 mr-1" />
-                              Start
-                            </>
-                          )}
-                        </Button>
-                      )}
                     </div>
                   </div>
                 ))}

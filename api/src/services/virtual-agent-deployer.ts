@@ -1086,6 +1086,39 @@ export class VirtualAgentDeployer {
       throw error;
     }
   }
+
+  /**
+   * Delete a fleet namespace and all its resources
+   * This cascades to delete all pods, deployments, quotas, etc. in the namespace
+   */
+  async deleteFleetNamespace(namespace: string): Promise<void> {
+    // Check if K8s is available
+    if (!this.k8sAvailable || !this.coreApi) {
+      logger.warn('Kubernetes is not configured or unavailable. Skipping namespace deletion.', { namespace });
+      return; // Don't throw error - allow soft delete to proceed
+    }
+
+    try {
+      // Delete the namespace (this cascades to all resources within)
+      await this.coreApi.deleteNamespace(namespace);
+      logger.info('Fleet namespace deleted successfully', { namespace });
+      
+    } catch (error: any) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // If namespace doesn't exist (404), that's okay - it's already gone
+      if (error.statusCode === 404 || errorMessage.includes('not found')) {
+        logger.info('Fleet namespace already deleted or not found', { namespace });
+        return;
+      }
+      
+      // Log error but don't throw - allow soft delete to proceed
+      logger.error('Failed to delete fleet namespace (will proceed with soft delete)', {
+        namespace,
+        error: errorMessage
+      });
+    }
+  }
 }
 
 // Export singleton instance

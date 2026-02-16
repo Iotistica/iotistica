@@ -793,7 +793,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           ? { 
               ...w, 
               metricConfig: config, 
-              title: config.title || `${config.metricName} - ${config.deviceName}`,
+              title: config.title || (config.agentName ? `${config.agentName} - ${config.deviceName} - ${config.metricName}` : `${config.deviceName} - ${config.metricName}`),
               _refreshTrigger: Date.now() // Trigger re-render to show threshold changes
             }
           : w
@@ -811,7 +811,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         minW: widgetConfig.minW,
         minH: widgetConfig.minH,
         type: 'METRIC_DATA',
-        title: config.title || `${config.metricName} - ${config.deviceName}`,
+        title: config.title || (config.agentName ? `${config.agentName} - ${config.deviceName} - ${config.metricName}` : `${config.deviceName} - ${config.metricName}`),
         metricConfig: config
       };
       setWidgets([...widgets, newWidget]);

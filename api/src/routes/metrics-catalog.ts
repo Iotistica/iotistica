@@ -37,6 +37,7 @@ router.get('/devices', async (req, res) => {
           protocol,
           last_seen,
           agent_uuid,
+          agent_name,
           overall_quality_percentage,
           unnest(available_metrics) as metric_name
         FROM endpoint_devices
@@ -65,7 +66,8 @@ router.get('/devices', async (req, res) => {
         array_agg(DISTINCT metric_name ORDER BY metric_name) as available_metrics,
         AVG(overall_quality_percentage) as overall_quality_percentage,
         COUNT(DISTINCT agent_uuid) as agent_count,
-        array_agg(DISTINCT agent_uuid::text) as agent_uuids
+        array_agg(DISTINCT agent_uuid::text) as agent_uuids,
+        array_agg(DISTINCT agent_name ORDER BY agent_name) as agent_names
       FROM unnested
       GROUP BY device_name, protocol
       ORDER BY last_seen DESC

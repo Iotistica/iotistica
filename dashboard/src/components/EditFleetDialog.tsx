@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "./ui/alert-dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Trash2 } from "lucide-react";
 import { buildApiUrl } from "../config/api";
 import { toast } from "sonner";
 
@@ -34,6 +36,8 @@ export function EditFleetDialog({ open, onOpenChange, fleet, onSuccess }: EditFl
     budget_limit: '',
   });
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     if (fleet) {
@@ -83,7 +87,38 @@ export function EditFleetDialog({ open, onOpenChange, fleet, onSuccess }: EditFl
     }
   };
 
+  const handleDelete = async () => {
+    if (!fleet) return;
+
+    setIsDeleting(true);
+    try {
+      const token = localStorage.getItem('accessToken');
+      const response = await fetch(buildApiUrl(`/api/v1/fleets/${fleet.fleet_id}`), {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to delete fleet');
+      }
+
+      toast.success('Fleet deleted successfully');
+      setShowDeleteConfirm(false);
+      onSuccess();
+      onOpenChange(false);
+    } catch (error: any) {
+      console.error('Error deleting fleet:', error);
+      toast.error(error.message || 'Failed to delete fleet');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
@@ -184,15 +219,56 @@ export function EditFleetDialog({ open, onOpenChange, fleet, onSuccess }: EditFl
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isSaving}>
-              {isSaving ? 'Saving...' : 'Save Changes'}
-            </Button>
+            <div className="flex items-center justify-between w-full">
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => setShowDeleteConfirm(true)}
+                disabled={isSaving || isDeleting}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete Fleet
+              </Button>
+              <div className="flex gap-2">
+                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={isSaving || isDeleting}>
+                  {isSaving ? 'Saving...' : 'Save Changes'}
+                </Button>
+              </div>
+            </div>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
+
+    {/* Delete Confirmation Dialog */}
+    <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete Fleet</AlertDialogTitle>
+          <AlertDialogDescription>
+            Are you sure you want to delete <strong>{fleet?.fleet_name}</strong>? This action cannot be undone and will:
+            <ul className="mt-2 ml-4 list-disc text-sm">
+              <li>Delete the Kubernetes namespace and all resources</li>
+              <li>Remove all virtual agents in this fleet</li>
+              <li>Remove all billing and usage data</li>
+            </ul>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={handleDelete}
+            disabled={isDeleting}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            {isDeleting ? 'Deleting...' : 'Delete Fleet'}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  </>
   );
 }
