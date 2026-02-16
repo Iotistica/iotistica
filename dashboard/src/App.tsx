@@ -113,7 +113,7 @@ export default function App() {
   }, [devices, selectedDeviceId]);
 
   // URL routing integration (no UI changes, just URL sync)
-  const { currentPath, navigateToAgent, navigateToGlobal } = useRouting();
+  const { currentPath, navigateToAgent, navigateToGlobal, navigateToFleet } = useRouting();
 
   // Sync URL with current view and selected device
   useEffect(() => {
@@ -144,6 +144,36 @@ export default function App() {
     setSelectedFleetId('');
     navigateToGlobal(view);
   }, [navigateToGlobal, setSelectedFleetId]);
+
+  const formatViewLabel = useCallback((view: string) => {
+    return view
+      .split('-')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }, []);
+
+  const breadcrumbs = useMemo(() => {
+    if (currentPath.type === 'agent') {
+      return [
+        { label: 'Fleets', onClick: () => handleGlobalViewChange('fleets') },
+        { label: currentPath.fleetId || 'Unassigned', onClick: () => navigateToFleet(currentPath.fleetId || 'unassigned') },
+        { label: selectedDevice?.name || currentPath.agentId || 'Agent' }
+      ];
+    }
+
+    if (currentPath.type === 'fleet') {
+      return [
+        { label: 'Fleets', onClick: () => handleGlobalViewChange('fleets') },
+        { label: currentPath.fleetId || 'Fleet' }
+      ];
+    }
+
+    if (currentPath.type === 'global') {
+      return [{ label: formatViewLabel(currentPath.view || 'fleets') }];
+    }
+
+    return [{ label: 'Fleets' }];
+  }, [currentPath, formatViewLabel, handleGlobalViewChange, navigateToFleet, selectedDevice]);
 
   // Persist selectedDeviceId to localStorage whenever it changes
   // Always save (even empty string) to maintain consistency
@@ -824,6 +854,31 @@ export default function App() {
               <Shield className="w-4 h-4 mr-2" />
               Security
             </Button>
+          </div>
+        </div>
+      )}
+
+      {!isKioskMode && (
+        <div className="bg-card border-b border-border px-6 py-2 text-sm">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            {breadcrumbs.map((crumb, index) => (
+              <div key={`${crumb.label}-${index}`} className="flex items-center gap-2">
+                {crumb.onClick ? (
+                  <button
+                    type="button"
+                    onClick={crumb.onClick}
+                    className="hover:text-foreground transition-colors"
+                  >
+                    {crumb.label}
+                  </button>
+                ) : (
+                  <span className="text-foreground">{crumb.label}</span>
+                )}
+                {index < breadcrumbs.length - 1 && (
+                  <span className="text-muted-foreground">/</span>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}
