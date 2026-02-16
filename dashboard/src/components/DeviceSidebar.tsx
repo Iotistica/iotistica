@@ -218,69 +218,112 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
     localStorage.setItem('deviceSidebar.searchQuery', searchQuery);
   }, [searchQuery]);
 
-  // Persist status filters to localStorage
+  // Initialize filters once from localStorage, then apply user intent when available options change
   useEffect(() => {
-    if (filtersInitialized) {
-      localStorage.setItem('deviceSidebar.statusFilters', JSON.stringify(statusFilters));
-    }
-  }, [statusFilters, filtersInitialized]);
-
-  // Persist type filters to localStorage
-  useEffect(() => {
-    if (filtersInitialized) {
-      localStorage.setItem('deviceSidebar.typeFilters', JSON.stringify(typeFilters));
-    }
-  }, [typeFilters, filtersInitialized]);
-
-  // Initialize filters once, then only remove invalid selections on refresh
-  useEffect(() => {
-    if (!filtersInitialized) {
-      if (availableStatuses.length > 0 || availableTypes.length > 0) {
-        // Try to load from localStorage first, fallback to all selected
-        const savedStatusFilters = localStorage.getItem('deviceSidebar.statusFilters');
-        const savedTypeFilters = localStorage.getItem('deviceSidebar.typeFilters');
-        
-        if (savedStatusFilters) {
-          try {
-            const parsed = JSON.parse(savedStatusFilters);
-            setStatusFilters(parsed.filter((s: Device['status']) => availableStatuses.includes(s)));
-          } catch {
-            setStatusFilters([...availableStatuses]);
-          }
-        } else {
-          setStatusFilters([...availableStatuses]);
-        }
-        
-        if (savedTypeFilters) {
-          try {
-            const parsed = JSON.parse(savedTypeFilters);
-            setTypeFilters(parsed.filter((t: Device['type']) => availableTypes.includes(t)));
-          } catch {
-            setTypeFilters([...availableTypes]);
-          }
-        } else {
-          setTypeFilters([...availableTypes]);
-        }
-        
-        setFiltersInitialized(true);
+    // Read user's filter intent from localStorage
+    const savedStatusFilters = localStorage.getItem('deviceSidebar.statusFilters');
+    const savedTypeFilters = localStorage.getItem('deviceSidebar.typeFilters');
+    
+    let statusIntent: Device['status'][] = [];
+    let typeIntent: Device['type'][] = [];
+    
+    if (savedStatusFilters) {
+      try {
+        statusIntent = JSON.parse(savedStatusFilters);
+      } catch {
+        statusIntent = [...availableStatuses];
       }
-      return;
+    } else {
+      statusIntent = [...availableStatuses];
+    }
+    
+    if (savedTypeFilters) {
+      try {
+        typeIntent = JSON.parse(savedTypeFilters);
+      } catch {
+        typeIntent = [...availableTypes];
+      }
+    } else {
+      typeIntent = [...availableTypes];
     }
 
-    setStatusFilters(prev => prev.filter(s => availableStatuses.includes(s)));
-    setTypeFilters(prev => prev.filter(t => availableTypes.includes(t)));
+    if (!filtersInitialized && (availableStatuses.length > 0 || availableTypes.length > 0)) {
+      // Save initial intent to localStorage if not already saved
+      if (!savedStatusFilters) {
+        localStorage.setItem('deviceSidebar.statusFilters', JSON.stringify(statusIntent));
+      }
+      if (!savedTypeFilters) {
+        localStorage.setItem('deviceSidebar.typeFilters', JSON.stringify(typeIntent));
+      }
+      setFiltersInitialized(true);
+    }
+    
+    // Apply only available filters from user intent
+    setStatusFilters(prev => {
+      const newFilters = statusIntent.filter(s => availableStatuses.includes(s));
+      if (JSON.stringify(prev.sort()) === JSON.stringify(newFilters.sort())) return prev;
+      return newFilters;
+    });
+    
+    setTypeFilters(prev => {
+      const newFilters = typeIntent.filter(t => availableTypes.includes(t));
+      if (JSON.stringify(prev.sort()) === JSON.stringify(newFilters.sort())) return prev;
+      return newFilters;
+    });
   }, [availableStatuses, availableTypes, filtersInitialized]);
 
   const toggleStatusFilter = (status: Device['status']) => {
-    setStatusFilters(prev =>
-      prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]
-    );
+    // Read current intent from localStorage
+    const savedStatusFilters = localStorage.getItem('deviceSidebar.statusFilters');
+    let currentIntent: Device['status'][] = [];
+    
+    if (savedStatusFilters) {
+      try {
+        currentIntent = JSON.parse(savedStatusFilters);
+      } catch {
+        currentIntent = [...availableStatuses];
+      }
+    } else {
+      currentIntent = [...availableStatuses];
+    }
+    
+    // Toggle the status in intent
+    const newIntent = currentIntent.includes(status)
+      ? currentIntent.filter(s => s !== status)
+      : [...currentIntent, status];
+    
+    // Save new intent to localStorage
+    localStorage.setItem('deviceSidebar.statusFilters', JSON.stringify(newIntent));
+    
+    // Update active filters (only available ones)
+    setStatusFilters(newIntent.filter(s => availableStatuses.includes(s)));
   };
 
   const toggleTypeFilter = (type: Device['type']) => {
-    setTypeFilters(prev =>
-      prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]
-    );
+    // Read current intent from localStorage
+    const savedTypeFilters = localStorage.getItem('deviceSidebar.typeFilters');
+    let currentIntent: Device['type'][] = [];
+    
+    if (savedTypeFilters) {
+      try {
+        currentIntent = JSON.parse(savedTypeFilters);
+      } catch {
+        currentIntent = [...availableTypes];
+      }
+    } else {
+      currentIntent = [...availableTypes];
+    }
+    
+    // Toggle the type in intent
+    const newIntent = currentIntent.includes(type)
+      ? currentIntent.filter(t => t !== type)
+      : [...currentIntent, type];
+    
+    // Save new intent to localStorage
+    localStorage.setItem('deviceSidebar.typeFilters', JSON.stringify(newIntent));
+    
+    // Update active filters (only available ones)
+    setTypeFilters(newIntent.filter(t => availableTypes.includes(t)));
   };
 
   const allStatusesSelected = availableStatuses.length > 0 && statusFilters.length === availableStatuses.length;
@@ -317,6 +360,8 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
 
   const clearFilters = () => {
     setSearchQuery("");
+    localStorage.setItem('deviceSidebar.statusFilters', JSON.stringify(availableStatuses));
+    localStorage.setItem('deviceSidebar.typeFilters', JSON.stringify(availableTypes));
     setStatusFilters(availableStatuses);
     setTypeFilters(availableTypes);
     setSelectedFleetId('');
