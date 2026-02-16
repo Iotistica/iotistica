@@ -15,6 +15,33 @@ kubecostProductConfigs:
   azureSubscriptionID: "833accc2-1856-4e07-bcef-06cef4efdef2"
   azureStorageAccount: "iotisticacosts9057"
   azureStorageContainer: "cost-exports"
+
+# Basic Authentication - configured via environment variables
+kubecostFrontend:
+  extraEnv:
+    - name: BASIC_AUTH_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: kubecost-basic-auth
+          key: username
+    - name: BASIC_AUTH_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: kubecost-basic-auth
+          key: password
+
+kubecostModel:
+  extraEnv:
+    - name: BASIC_AUTH_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: kubecost-basic-auth
+          key: username
+    - name: BASIC_AUTH_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: kubecost-basic-auth
+          key: password
   
 # Persistent storage for cost data (30 days retention)
 persistentVolume:

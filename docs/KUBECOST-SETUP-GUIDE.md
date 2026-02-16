@@ -11,6 +11,7 @@ This document covers the complete installation and configuration of Kubecost for
 - Migration from LoadBalancer to Envoy Gateway (cost savings ~$30-40/month)
 - Azure Cost Management export configuration
 - DNS setup for public access via HTTPS
+- Basic authentication with nginx reverse proxy (password protection)
 
 ## Prerequisites
 
@@ -419,6 +420,262 @@ kubectl get httproute -n kubecost
 kubectl describe httproute -n kubecost kubecost-httproute
 ```
 
+## Step 8: Secure with Basic Authentication
+
+**Why**: Kubecost doesn't natively support basic authentication. We'll deploy an nginx reverse proxy to add password protection.
+
+### 8.1 Generate Password Hash
+
+Use a Kubernetes pod to generate a proper bcrypt password hash:
+
+```bash
+# Generate htpasswd hash using httpd container
+kubectl run --rm -i htpasswd-temp --image=httpd:2.4-alpine --restart=Never -- htpasswd -nbB admin 'YourSecurePassword'
+
+# Output example:
+# admin:$2y$05$wSUeeOqGdqjlRZ3VGBFd9.G3NK/p3TDK1K3D7aa8IQGC33Wk.dOLS
+
+# Copy the entire line (admin:$2y$05...) for next step
+```
+
+**Important**: Replace `YourSecurePassword` with a strong password. Save the complete output line.
+
+### 8.2 Create Nginx Auth Configuration
+
+Create `k8s/kubecost-nginx-auth.yaml`:
+
+```yaml
+---
+# htpasswd secret for nginx basic auth
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kubecost-nginx-auth
+  namespace: kubecost
+type: Opaque
+stringData:
+  # Paste the complete output from Step 8.1 here
+  # Format: username:$2y$05$...hash...
+  htpasswd: |
+    admin:$2y$05$wSUeeOqGdqjlRZ3VGBFd9.G3NK/p3TDK1K3D7aa8IQGC33Wk.dOLS
+
+---
+# Nginx ConfigMap with auth configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubecost-nginx-config
+  namespace: kubecost
+data:
+  nginx.conf: |
+    events {
+      worker_connections 1024;
+    }
+    
+    http {
+      server {
+        listen 8080;
+        
+        # Basic Authentication
+        auth_basic "Kubecost - Authentication Required";
+        auth_basic_user_file /etc/nginx/htpasswd/htpasswd;
+        
+        location / {
+          proxy_pass http://kubecost-cost-analyzer:9090;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        }
+      }
+    }
+
+---
+# Nginx deployment acting as auth proxy
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubecost-nginx-proxy
+  namespace: kubecost
+  labels:
+    app: kubecost-nginx-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubecost-nginx-proxy
+  template:
+    metadata:
+      labels:
+        app: kubecost-nginx-proxy
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 8080
+              name: http
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: htpasswd
+              mountPath: /etc/nginx/htpasswd
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: kubecost-nginx-config
+        - name: htpasswd
+          secret:
+            secretName: kubecost-nginx-auth
+
+---
+# Service for nginx proxy
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubecost-nginx-proxy
+  namespace: kubecost
+  labels:
+    app: kubecost-nginx-proxy
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: kubecost-nginx-proxy
+```
+
+**Important**: Update the `htpasswd:` field with your own password hash from Step 8.1.
+
+### 8.3 Deploy Nginx Auth Proxy
+
+```bash
+# Apply nginx configuration
+kubectl apply -f k8s/kubecost-nginx-auth.yaml
+
+# Verify deployment
+kubectl get pods -n kubecost -l app=kubecost-nginx-proxy
+
+# Wait for pod to be ready
+kubectl wait --for=condition=ready pod -l app=kubecost-nginx-proxy -n kubecost --timeout=60s
+```
+
+**Expected Output**:
+```
+secret/kubecost-nginx-auth created
+configmap/kubecost-nginx-config created
+deployment.apps/kubecost-nginx-proxy created
+service/kubecost-nginx-proxy created
+
+pod/kubecost-nginx-proxy-xxxxx condition met
+```
+
+### 8.4 Update HTTPRoute to Use Nginx Proxy
+
+Edit `k8s/kubecost-httproute.yaml` to route through nginx instead of directly to Kubecost:
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: kubecost-httproute
+  namespace: kubecost
+spec:
+  hostnames:
+    - kubecost.iotistica.com
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: iotistica-gateway
+      namespace: envoy-gateway-system
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: kubecost-nginx-proxy  # Changed from kubecost-cost-analyzer
+          port: 8080                   # Changed from 9090
+```
+
+Apply the updated route:
+
+```bash
+# Update HTTPRoute
+kubectl apply -f k8s/kubecost-httproute.yaml
+
+# Verify route accepted
+kubectl get httproute -n kubecost kubecost-httproute -o yaml | grep -A 10 "status:"
+```
+
+### 8.5 Test Authentication
+
+```bash
+# Check nginx logs for authentication attempts
+kubectl logs -n kubecost deployment/kubecost-nginx-proxy --tail=20
+
+# Test backend connectivity from nginx
+kubectl exec -n kubecost deployment/kubecost-nginx-proxy -- wget -qO- http://kubecost-cost-analyzer:9090/healthz
+```
+
+**Expected Log Output**:
+```
+10.0.1.29 - - [16/Feb/2026:12:36:07 +0000] "GET / HTTP/1.1" 401 581 "-"
+10.0.1.29 - admin [16/Feb/2026:12:36:26 +0000] "GET / HTTP/1.1" 200 2847 "-"
+```
+
+- `401` = Authentication required (before login)
+- `200` = Successful authentication and access
+
+### 8.6 Access with Credentials
+
+Open browser to: **https://kubecost.iotistica.com**
+
+You should see a browser authentication prompt:
+
+- **Username**: `admin`
+- **Password**: `YourSecurePassword` (the password you used in Step 8.1)
+
+**Troubleshooting Authentication**:
+- If credentials don't work, verify the htpasswd hash is correct
+- Clear browser cache (Ctrl+Shift+Delete)
+- Try incognito/private mode
+- Check nginx logs: `kubectl logs -n kubecost deployment/kubecost-nginx-proxy`
+
+### 8.7 Update Password (Future)
+
+To change the password:
+
+```bash
+# 1. Generate new hash
+kubectl run --rm -i htpasswd-temp --image=httpd:2.4-alpine --restart=Never -- htpasswd -nbB admin 'NewPassword'
+
+# 2. Update k8s/kubecost-nginx-auth.yaml with new hash
+
+# 3. Apply changes
+kubectl apply -f k8s/kubecost-nginx-auth.yaml
+
+# 4. Restart nginx to load new credentials
+kubectl rollout restart deployment/kubecost-nginx-proxy -n kubecost
+
+# 5. Wait for restart
+kubectl wait --for=condition=ready pod -l app=kubecost-nginx-proxy -n kubecost --timeout=60s
+```
+
 ## Troubleshooting
 
 ### Issue: Pods Stuck in ContainerCreating
@@ -500,6 +757,53 @@ az storage blob list \
 
 **Action**: Wait 48 hours for first complete billing cycle.
 
+### Issue: Basic Authentication Not Working
+
+**Symptom**: Login credentials rejected, auth prompt reappears
+
+**Diagnosis**:
+```bash
+# Check nginx logs for auth attempts
+kubectl logs -n kubecost deployment/kubecost-nginx-proxy --tail=20
+
+# Verify htpasswd file loaded
+kubectl exec -n kubecost deployment/kubecost-nginx-proxy -- cat /etc/nginx/htpasswd/htpasswd
+
+# Check nginx pod status
+kubectl get pods -n kubecost -l app=kubecost-nginx-proxy
+```
+
+**Common Causes**:
+
+1. **Incorrect password hash format**
+   - Symptom: Logs show username but still `401` response
+   - Example log: `10.0.1.29 - admin [16/Feb/2026:12:36:26 +0000] "GET / HTTP/1.1" 401`
+   - Solution: Regenerate hash using proper bcrypt format:
+     ```bash
+     kubectl run --rm -i htpasswd-temp --image=httpd:2.4-alpine --restart=Never -- htpasswd -nbB admin 'YourPassword'
+     # Update k8s/kubecost-nginx-auth.yaml with new hash
+     kubectl apply -f k8s/kubecost-nginx-auth.yaml
+     kubectl rollout restart deployment/kubecost-nginx-proxy -n kubecost
+     ```
+
+2. **Browser cached old credentials**
+   - Solution: Clear browser cache and try incognito/private mode
+   - Chrome: Settings → Privacy → Clear browsing data → Passwords and cached images
+
+3. **Nginx pod not restarted after secret update**
+   - Solution: Force pod restart:
+     ```bash
+     kubectl rollout restart deployment/kubecost-nginx-proxy -n kubecost
+     kubectl wait --for=condition=ready pod -l app=kubecost-nginx-proxy -n kubecost --timeout=60s
+     ```
+
+**Successful Authentication**:
+```bash
+# Nginx logs should show 200 status after successful login
+kubectl logs -n kubecost deployment/kubecost-nginx-proxy --tail=5
+# Expected: 10.0.1.29 - admin [16/Feb/2026:12:36:26 +0000] "GET / HTTP/1.1" 200 2847
+```
+
 ## Cost Analysis
 
 ### Before Migration
@@ -517,6 +821,12 @@ az storage blob list \
 ## Using Kubecost
 
 Access dashboard: **https://kubecost.iotistica.com**
+
+**Authentication Required**:
+- Username: `admin`
+- Password: (set during Step 8.1)
+
+Browser will prompt for credentials on first access. Credentials are cached per session.
 
 ### Key Features
 
@@ -578,8 +888,14 @@ cp k8s/kubecost-values.yaml k8s/kubecost-values.yaml.backup
 # Backup HTTPRoute
 kubectl get httproute -n kubecost kubecost-httproute -o yaml > k8s/kubecost-httproute.backup.yaml
 
-# Backup secret (encrypted)
+# Backup nginx auth configuration
+cp k8s/kubecost-nginx-auth.yaml k8s/kubecost-nginx-auth.yaml.backup
+
+# Backup cloud integration secret (encrypted)
 kubectl get secret -n kubecost cloud-integration -o yaml > k8s/cloud-integration.backup.yaml
+
+# Backup nginx auth secret (encrypted, contains password hash)
+kubectl get secret -n kubecost kubecost-nginx-auth -o yaml > k8s/kubecost-nginx-auth-secret.backup.yaml
 ```
 
 ### Monitor Resource Usage
@@ -609,18 +925,30 @@ Successfully deployed Kubecost with:
 - ✅ Azure cost integration (daily exports)
 - ✅ Cost-optimized networking (shared Envoy Gateway)
 - ✅ Secure HTTPS access (https://kubecost.iotistica.com)
+- ✅ Basic authentication (nginx reverse proxy)
 - ✅ Persistent storage (15-day Prometheus retention)
 - ✅ ~$30-40/month savings (eliminated dedicated LoadBalancer)
 
+**Architecture Flow**:
+```
+Browser → Envoy Gateway → HTTPRoute → Nginx Proxy (Basic Auth) → Kubecost
+```
+
 **Next Steps**:
-1. Wait 24-48 hours for Azure billing data to populate
-2. Configure cost alerts and budgets
-3. Review namespace cost allocations
-4. Implement cost optimization recommendations
-5. Set up scheduled cost reports
+1. Verify authentication works at https://kubecost.iotistica.com
+2. Wait 24-48 hours for Azure billing data to populate
+3. Configure cost alerts and budgets
+4. Review namespace cost allocations
+5. Implement cost optimization recommendations
+6. Set up scheduled cost reports
+7. Document credentials in secure password manager
 
 ---
 
-**Document Version**: 1.0  
+**Document Version**: 1.1  
 **Last Updated**: February 16, 2026  
 **Cluster**: dev-iotistica-aks-cluster (canadacentral)
+
+**Changelog**:
+- v1.1 (Feb 16, 2026): Added Step 8 - Basic Authentication with nginx reverse proxy
+- v1.0 (Feb 16, 2026): Initial documentation - Kubecost installation and Azure integration

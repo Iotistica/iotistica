@@ -18,7 +18,7 @@ spec:
       name: iotistica-gateway
       namespace: envoy-gateway-system
   
-  # Route all traffic to Kubecost service
+  # Route all traffic to nginx proxy (with basic auth)
   rules:
     - matches:
         - path:
@@ -27,6 +27,6 @@ spec:
       backendRefs:
         - group: ""
           kind: Service
-          name: kubecost-cost-analyzer
-          port: 9090
+          name: kubecost-nginx-proxy
+          port: 8080
           weight: 1
