@@ -36,9 +36,11 @@ import { FleetsPage } from "./pages/FleetsPage";
 import { toast } from "sonner";
 import { Header } from "./components/Header";
 import { useDeviceState } from "./contexts/DeviceStateContext";
+import { useFleet } from "./contexts/FleetContext";
 import { useAuth } from "./contexts/AuthContext";
 import { LoginPage } from "./pages/LoginPage";
 import { UserManagementPage } from "./pages/UserManagementPage";
+import { useRouting } from "./hooks/useRouting";
 
 // Initialize API traffic tracking
 import "./lib/apiInterceptor";
@@ -55,6 +57,7 @@ export default function App() {
   const { user, isAuthenticated, isLoading: isAuthLoading, login, logout } = useAuth();
   
   // Fleet context - for auto-assigning devices to selected fleet
+  const { setSelectedFleetId } = useFleet();
   
   // Initialize selectedDeviceId from localStorage if available
   const [selectedDeviceId, setSelectedDeviceId] = useState(() => {
@@ -108,6 +111,39 @@ export default function App() {
   const selectedDevice = useMemo(() => {
     return devices.find((d) => d.id === selectedDeviceId) || devices[0];
   }, [devices, selectedDeviceId]);
+
+  // URL routing integration (no UI changes, just URL sync)
+  const { currentPath, navigateToAgent, navigateToGlobal } = useRouting();
+
+  // Sync URL with current view and selected device
+  useEffect(() => {
+    if (currentPath.type === 'agent' && currentPath.agentId) {
+      // Agent view from URL
+      const device = devices.find(d => d.deviceUuid === currentPath.agentId);
+      if (device) {
+        setSelectedDeviceId(device.id);
+        setSelectedFleetId(currentPath.fleetId || device.fleet_id || '');
+        setCurrentView('metrics'); // Default to metrics view for agents
+      }
+    } else if (currentPath.type === 'fleet' && currentPath.fleetId) {
+      // Fleet view from URL: show agents view with fleet preselected
+      setSelectedFleetId(currentPath.fleetId);
+      setCurrentView('metrics');
+    } else if (currentPath.type === 'global') {
+      // Global view from URL
+      const view = currentPath.view as View;
+      if (viewOptions.includes(view)) {
+        setCurrentView(view);
+      }
+      setSelectedFleetId('');
+    }
+  }, [currentPath, devices, setSelectedFleetId]);
+
+  const handleGlobalViewChange = useCallback((view: View) => {
+    setCurrentView(view);
+    setSelectedFleetId('');
+    navigateToGlobal(view);
+  }, [navigateToGlobal, setSelectedFleetId]);
 
   // Persist selectedDeviceId to localStorage whenever it changes
   // Always save (even empty string) to maintain consistency
@@ -312,6 +348,7 @@ export default function App() {
       if (device) {
         setSelectedDeviceId(device.id);
         setCurrentView('tags');
+        navigateToAgent(device.deviceUuid, device.fleet_id);
       }
     };
 
@@ -549,8 +586,13 @@ export default function App() {
   };
 
   const handleSelectDevice = (deviceId: string) => {
+    const device = devices.find((d) => d.id === deviceId);
     setSelectedDeviceId(deviceId);
     setSidebarOpen(false); // Close sidebar on mobile after selection
+
+    if (device) {
+      navigateToAgent(device.deviceUuid, device.fleet_id);
+    }
   };
 
   // Deployment actions (agent-specific)
@@ -721,11 +763,11 @@ export default function App() {
           userEmail={user?.email || ''}
           userName={user?.username || ''}
           deviceUuid={selectedDevice?.deviceUuid}
-          onAccountClick={() => setCurrentView('account')}
-          onUsersClick={() => setCurrentView('users')}
-          onProfileClick={() => setCurrentView('profile')}
-          onTagDefinitionsClick={() => setCurrentView('tag-definitions')}
-          onDigitalTwinClick={() => setCurrentView('digital-twin')}
+          onAccountClick={() => handleGlobalViewChange('account')}
+          onUsersClick={() => handleGlobalViewChange('users')}
+          onProfileClick={() => handleGlobalViewChange('profile')}
+          onTagDefinitionsClick={() => handleGlobalViewChange('tag-definitions')}
+          onDigitalTwinClick={() => handleGlobalViewChange('digital-twin')}
           userRole={user?.role || 'viewer'}
         />
       )}
@@ -736,24 +778,24 @@ export default function App() {
           <Button
             variant={currentView === 'fleets' ? 'default' : 'outline'}
             size="sm"
-            onClick={() => setCurrentView('fleets')}
+            onClick={() => handleGlobalViewChange('fleets')}
           >
             <Layers className="w-4 h-4 mr-2" />
             Fleets
           </Button>
-          <Button
+          {/* <Button
             variant={!isGlobalView ? 'default' : 'outline'}
             size="sm"
             onClick={() => setCurrentView('metrics')}
           >
             <Activity className="w-4 h-4 mr-2" />
             Agents
-          </Button>
+          </Button> */}
           <div className="flex items-center gap-2 overflow-x-auto">
             <Button
               variant={currentView === 'dashboard' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setCurrentView('dashboard')}
+              onClick={() => handleGlobalViewChange('dashboard')}
             >
               <BarChart3 className="w-4 h-4 mr-2" />
               Dashboards
@@ -761,7 +803,7 @@ export default function App() {
             <Button
               variant={currentView === 'mqtt' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setCurrentView('mqtt')}
+              onClick={() => handleGlobalViewChange('mqtt')}
             >
               <Radio className="w-4 h-4 mr-2" />
               MQTT
@@ -769,7 +811,7 @@ export default function App() {
             <Button
               variant={currentView === 'audit' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setCurrentView('audit')}
+              onClick={() => handleGlobalViewChange('audit')}
             >
               <FileText className="w-4 h-4 mr-2" />
               Audit & Activity
@@ -777,7 +819,7 @@ export default function App() {
             <Button
               variant={currentView === 'security' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setCurrentView('security')}
+              onClick={() => handleGlobalViewChange('security')}
             >
               <Shield className="w-4 h-4 mr-2" />
               Security
@@ -813,6 +855,7 @@ export default function App() {
                     devices={devices} 
                     onDeviceSelect={(device) => {
                       setSelectedDeviceId(device.id);
+                      navigateToAgent(device.deviceUuid, device.fleet_id);
                     }} 
                   />
                 </div>

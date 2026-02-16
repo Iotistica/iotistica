@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useRouting } from "../hooks/useRouting";
 import { MetricCard } from "../components/ui/metric-card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -28,6 +29,7 @@ interface Fleet {
 }
 
 export function FleetsPage() {
+  const { navigateToFleet } = useRouting();
   const [fleets, setFleets] = useState<Fleet[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedType, setSelectedType] = useState<string[]>([]);
@@ -266,7 +268,8 @@ export function FleetsPage() {
                 {filteredFleets.map((fleet) => (
                   <div
                     key={fleet.fleet_id}
-                    className="flex items-center justify-between p-4 border border-border rounded-lg hover:border-muted-foreground/20 transition-colors"
+                    className="flex items-center justify-between p-4 border border-border rounded-lg hover:border-muted-foreground/20 transition-colors cursor-pointer"
+                    onClick={() => navigateToFleet(fleet.fleet_id)}
                   >
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-2">
@@ -311,7 +314,10 @@ export function FleetsPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleEdit(fleet)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleEdit(fleet);
+                        }}
                       >
                         <Pencil className="h-4 w-4 mr-2" />
                         Edit
