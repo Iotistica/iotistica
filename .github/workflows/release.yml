@@ -387,7 +387,7 @@ jobs:
                 inputs: {
                   release_version: releaseVersion,
                   client_name: 'client1',
-                  cluster_name: 'k3scl01',
+                  cluster_name: 'dev-iotistica-aks-cluster',
                   clean_before_deploy: 'false'
                 }
               });
