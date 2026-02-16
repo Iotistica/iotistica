@@ -14,14 +14,6 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { buildApiUrl } from '@/config/api';
 import { useDeviceState } from '@/contexts/DeviceStateContext';
@@ -126,7 +118,6 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
   const [saving, setSaving] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [deviceInfo, setDeviceInfo] = useState<any>(null);
-  const [showRestartDialog, setShowRestartDialog] = useState(false);
 
   // Get current settings from pending state (or target state as fallback)
   const pendingConfig = getPendingConfig(deviceUuid);
@@ -202,8 +193,11 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
     }
   };
 
-  const confirmRestartAgent = async () => {
-    setShowRestartDialog(false);
+  const handleRestartAgent = async () => {
+    if (!confirm('Restart virtual agent? This will delete the pod and recreate it.')) {
+      return;
+    }
+
     setRestarting(true);
     try {
       const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/virtual/restart`), {
@@ -295,11 +289,11 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
               </div>
               {deviceInfo?.device_type === 'virtual' && (
                 <Button
-                  variant="default"
+                  variant="outline"
                   size="sm"
-                  onClick={() => setShowRestartDialog(true)}
+                  onClick={handleRestartAgent}
                   disabled={restarting}
-                  className="gap-2 bg-orange-600 hover:bg-orange-700 text-white"
+                  className="gap-2"
                 >
                   {restarting ? (
                     <>
@@ -671,44 +665,6 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
           </Card>
         )}
       </div>
-
-      {/* Restart Agent Confirmation Dialog */}
-      <Dialog open={showRestartDialog} onOpenChange={setShowRestartDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Restart Virtual Agent</DialogTitle>
-            <DialogDescription>
-              This will delete the pod and let Kubernetes recreate it. The agent will be temporarily offline during the restart.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setShowRestartDialog(false)}
-              disabled={restarting}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={confirmRestartAgent}
-              disabled={restarting}
-            >
-              {restarting ? (
-                <>
-                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                  Restarting...
-                </>
-              ) : (
-                <>
-                  <Power className="h-4 w-4 mr-2" />
-                  Restart Agent
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
