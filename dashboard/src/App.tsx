@@ -113,6 +113,7 @@ export default function App() {
     const stored = localStorage.getItem('currentView');
     return stored && viewOptions.includes(stored as View) ? (stored as View) : 'metrics';
   });
+  const [fleetNameById, setFleetNameById] = useState<Record<string, string>>({});
   const isGlobalView = currentView === 'dashboard' || currentView === 'mqtt' || currentView === 'audit' || currentView === 'security' || currentView === 'fleets';
   const [debugMode, setDebugMode] = useState(false);
   const [isKioskMode, setIsKioskMode] = useState<boolean>(() => {
@@ -153,6 +154,41 @@ export default function App() {
     }
   }, [agentViews, currentPath, devices, setSelectedFleetId]);
 
+  useEffect(() => {
+    const fleetId = currentPath.type === 'agent'
+      ? currentPath.fleetId
+      : currentPath.type === 'fleet'
+      ? currentPath.fleetId
+      : undefined;
+
+    if (!fleetId || fleetNameById[fleetId]) {
+      return;
+    }
+
+    const loadFleetName = async () => {
+      try {
+        const token = localStorage.getItem('accessToken');
+        const response = await fetch(buildApiUrl(`/api/v1/fleets/${fleetId}`), {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to load fleet');
+        }
+
+        const data = await response.json();
+        const fleetName = data?.fleet_name || fleetId;
+        setFleetNameById((prev) => (prev[fleetId] ? prev : { ...prev, [fleetId]: fleetName }));
+      } catch (error) {
+        setFleetNameById((prev) => (prev[fleetId] ? prev : { ...prev, [fleetId]: fleetId }));
+      }
+    };
+
+    loadFleetName();
+  }, [currentPath, fleetNameById]);
+
   const handleGlobalViewChange = useCallback((view: View) => {
     setSelectedFleetId('');
     navigateToGlobal(view);
@@ -173,17 +209,19 @@ export default function App() {
 
   const breadcrumbs = useMemo(() => {
     if (currentPath.type === 'agent') {
+      const fleetLabel = fleetNameById[currentPath.fleetId || ''] || currentPath.fleetId || 'Unassigned';
       return [
         { label: 'Fleets', onClick: () => handleGlobalViewChange('fleets') },
-        { label: currentPath.fleetId || 'Unassigned', onClick: () => navigateToFleet(currentPath.fleetId || 'unassigned') },
+        { label: fleetLabel, onClick: () => navigateToFleet(currentPath.fleetId || 'unassigned') },
         { label: selectedDevice?.name || currentPath.agentId || 'Agent' }
       ];
     }
 
     if (currentPath.type === 'fleet') {
+      const fleetLabel = fleetNameById[currentPath.fleetId || ''] || currentPath.fleetId || 'Fleet';
       return [
         { label: 'Fleets', onClick: () => handleGlobalViewChange('fleets') },
-        { label: currentPath.fleetId || 'Fleet' }
+        { label: fleetLabel }
       ];
     }
 
