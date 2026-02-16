@@ -14,7 +14,6 @@ import {
 } from '../components/ui/dropdown-menu';
 import { 
   Plus, 
-  Settings, 
   Trash2, 
   Lock, 
   Unlock,
@@ -304,6 +303,8 @@ export function CustomDashboardPage({ device }: CustomDashboardPageProps) {
     };
     setWidgets([...widgets, newWidget]);
     setHasUnsavedChanges(true);
+    // Automatically switch to edit mode after adding a widget
+    setIsEditMode(true);
   };
 
   const removeWidget = (id: string) => {
@@ -425,11 +426,12 @@ export function CustomDashboardPage({ device }: CustomDashboardPageProps) {
         );
       
       case 'APPLICATIONS':
+        const apps = deviceState?.currentState?.apps ? Object.values(deviceState.currentState.apps) : [];
         return (
           <div className="h-full overflow-auto">
-            {deviceState?.currentState?.applications && deviceState.currentState.applications.length > 0 ? (
+            {apps.length > 0 ? (
               <div className="space-y-2">
-                {deviceState.currentState.applications.slice(0, 5).map((app: any) => (
+                {apps.slice(0, 5).map((app: any) => (
                   <div key={app.appId} className="flex items-center justify-between p-2 bg-secondary rounded">
                     <span className="text-sm font-medium">{app.appName}</span>
                     <Badge variant="outline" className="text-xs">

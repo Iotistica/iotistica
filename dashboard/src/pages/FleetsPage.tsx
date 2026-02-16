@@ -2,11 +2,13 @@ import { useState, useEffect } from "react";
 import { MetricCard } from "../components/ui/metric-card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
-import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card";
-import { Layers, Server, DollarSign, AlertCircle, Plus, Play, Square } from "lucide-react";
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "../components/ui/card";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
+import { Layers, Server, DollarSign, AlertCircle, Plus, Play, Square, Pencil } from "lucide-react";
 import { buildApiUrl } from "../config/api";
 import { toast } from "sonner";
 import { CreateFleetDialog } from "../components/CreateFleetDialog";
+import { EditFleetDialog } from "../components/EditFleetDialog";
 
 interface Fleet {
   fleet_id: string;
@@ -28,17 +30,16 @@ interface Fleet {
 export function FleetsPage() {
   const [fleets, setFleets] = useState<Fleet[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [filter, setFilter] = useState<'all' | 'virtual' | 'physical'>('all');
+  const [selectedType, setSelectedType] = useState<string[]>([]);
+  const [selectedStatus, setSelectedStatus] = useState<string[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [editingFleet, setEditingFleet] = useState<Fleet | null>(null);
+  const [showEditDialog, setShowEditDialog] = useState(false);
 
   const fetchFleets = async () => {
     try {
       const token = localStorage.getItem('accessToken');
-      const url = filter === 'all' 
-        ? buildApiUrl('/api/v1/fleets')
-        : buildApiUrl(`/api/v1/fleets?fleet_type=${filter}`);
-      
-      const response = await fetch(url, {
+      const response = await fetch(buildApiUrl('/api/v1/fleets'), {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -58,7 +59,18 @@ export function FleetsPage() {
 
   useEffect(() => {
     fetchFleets();
-  }, [filter]);
+  }, []);
+
+  // Apply filters
+  const filteredFleets = fleets.filter(fleet => {
+    if (selectedType.length > 0 && !selectedType.includes(fleet.fleet_type)) {
+      return false;
+    }
+    if (selectedStatus.length > 0 && !selectedStatus.includes(fleet.status)) {
+      return false;
+    }
+    return true;
+  });
 
   // Calculate metrics
   const virtualFleets = fleets.filter(f => f.fleet_type === 'virtual');
@@ -87,6 +99,11 @@ export function FleetsPage() {
     } catch (error: any) {
       toast.error(error.message);
     }
+  };
+
+  const handleEdit = (fleet: Fleet) => {
+    setEditingFleet(fleet);
+    setShowEditDialog(true);
   };
 
   const metrics = [
@@ -123,14 +140,17 @@ export function FleetsPage() {
   return (
     <div className="flex-1 bg-background overflow-auto">
       <div className="p-4 md:p-6 lg:p-8 space-y-6">
-        <div className="mb-6">
-          <h2 className="text-2xl font-bold text-foreground mb-2">Fleet Management</h2>
-          <p className="text-muted-foreground">
-            Manage virtual and physical device fleets
-          </p>
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">Fleet Management</h1>
+            <p className="text-sm text-muted-foreground">
+              Monitor and manage your device fleets
+            </p>
+          </div>
         </div>
 
-        {/* Metrics */}
+        {/* Summary Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {metrics.map((metric, index) => (
             <MetricCard
@@ -144,31 +164,93 @@ export function FleetsPage() {
           ))}
         </div>
 
-        {/* Filters and New Fleet Button */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Button
-              variant={filter === 'all' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setFilter('all')}
-            >
-              All
-            </Button>
-            <Button
-              variant={filter === 'virtual' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setFilter('virtual')}
-            >
-              Virtual
-            </Button>
-            <Button
-              variant={filter === 'physical' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setFilter('physical')}
-            >
-              Physical
-            </Button>
-          </div>
+        {/* Filters and Actions */}
+        <div className="flex items-center justify-between gap-4">
+          {fleets.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-foreground">Type:</label>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="min-w-[160px] justify-between">
+                      {selectedType.length === 0 ? 'All' : `${selectedType.length} selected`}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-56">
+                    <DropdownMenuCheckboxItem
+                      checked={selectedType.length === 0}
+                      onSelect={(e) => e.preventDefault()}
+                      onCheckedChange={(checked) => setSelectedType(checked ? [] : selectedType)}
+                    >
+                      All ({fleets.length})
+                    </DropdownMenuCheckboxItem>
+                    {['virtual', 'physical', 'mixed'].map(type => {
+                      const count = fleets.filter(f => f.fleet_type === type).length;
+                      if (count === 0) return null;
+                      return (
+                        <DropdownMenuCheckboxItem
+                          key={type}
+                          checked={selectedType.includes(type)}
+                          onSelect={(e) => e.preventDefault()}
+                          onCheckedChange={(checked) => {
+                            setSelectedType(prev =>
+                              checked
+                                ? [...prev.filter(t => t !== type), type]
+                                : prev.filter(t => t !== type)
+                            );
+                          }}
+                        >
+                          {type.charAt(0).toUpperCase() + type.slice(1)} ({count})
+                        </DropdownMenuCheckboxItem>
+                      );
+                    })}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-foreground">Status:</label>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="min-w-[160px] justify-between">
+                      {selectedStatus.length === 0 ? 'All' : `${selectedStatus.length} selected`}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-56">
+                    <DropdownMenuCheckboxItem
+                      checked={selectedStatus.length === 0}
+                      onSelect={(e) => e.preventDefault()}
+                      onCheckedChange={(checked) => setSelectedStatus(checked ? [] : selectedStatus)}
+                    >
+                      All ({fleets.length})
+                    </DropdownMenuCheckboxItem>
+                    {['active', 'stopped'].map(status => {
+                      const count = fleets.filter(f => f.status === status).length;
+                      if (count === 0) return null;
+                      return (
+                        <DropdownMenuCheckboxItem
+                          key={status}
+                          checked={selectedStatus.includes(status)}
+                          onSelect={(e) => e.preventDefault()}
+                          onCheckedChange={(checked) => {
+                            setSelectedStatus(prev =>
+                              checked
+                                ? [...prev.filter(s => s !== status), status]
+                                : prev.filter(s => s !== status)
+                            );
+                          }}
+                        >
+                          {status.charAt(0).toUpperCase() + status.slice(1)} ({count})
+                        </DropdownMenuCheckboxItem>
+                      );
+                    })}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+          ) : (
+            <div />
+          )}
           <Button onClick={() => setShowCreateDialog(true)}>
             <Plus className="w-4 h-4 mr-2" />
             New Fleet
@@ -176,95 +258,123 @@ export function FleetsPage() {
         </div>
 
         {/* Fleets List */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {isLoading ? (
-            <div className="col-span-full text-center py-12 text-muted-foreground">
-              Loading fleets...
-            </div>
-          ) : fleets.length === 0 ? (
-            <div className="col-span-full text-center py-12 text-muted-foreground">
-              No fleets found. Create your first fleet to get started.
-            </div>
-          ) : (
-            fleets.map((fleet) => (
-              <Card key={fleet.fleet_id}>
-                <CardHeader>
-                  <div className="flex items-start justify-between">
+        <Card>
+          <CardHeader>
+            <CardTitle>Fleets</CardTitle>
+            <CardDescription>
+              {filteredFleets.length} {filteredFleets.length === 1 ? 'fleet' : 'fleets'} found
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <Server className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                <p className="text-lg font-medium mb-2">Loading fleets...</p>
+              </div>
+            ) : fleets.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <Server className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                <p className="text-lg font-medium mb-2">No fleets yet</p>
+                <p className="text-sm">Create your first fleet to get started</p>
+              </div>
+            ) : filteredFleets.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                No fleets match the selected filters.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filteredFleets.map((fleet) => (
+                  <div
+                    key={fleet.fleet_id}
+                    className="flex items-center justify-between p-4 border border-border rounded-lg hover:border-muted-foreground/20 transition-colors"
+                  >
                     <div className="flex-1">
-                      <CardTitle className="text-lg">{fleet.fleet_name}</CardTitle>
-                      <div className="flex items-center gap-2 mt-2">
+                      <div className="flex items-center gap-3 mb-2">
+                        <h3 className="text-lg font-semibold text-foreground">{fleet.fleet_name}</h3>
                         <Badge variant={fleet.fleet_type === 'virtual' ? 'default' : 'secondary'}>
                           {fleet.fleet_type}
                         </Badge>
                         <Badge variant={fleet.status === 'active' ? 'default' : 'secondary'}>
                           {fleet.status}
                         </Badge>
+                        <Badge variant="outline" className="text-xs">
+                          {fleet.environment}
+                        </Badge>
                       </div>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="text-sm space-y-1">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Devices:</span>
-                      <span className="font-medium">{fleet.device_count} ({fleet.online_count} online)</span>
-                    </div>
-                    {fleet.environment && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Environment:</span>
-                        <span className="font-medium">{fleet.environment}</span>
-                      </div>
-                    )}
-                    {fleet.location && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Location:</span>
-                        <span className="font-medium text-xs">{fleet.location}</span>
-                      </div>
-                    )}
-                    {fleet.billing_enabled && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Cost:</span>
-                        <span className="font-medium">
-                          ${fleet.current_cost}
-                          {fleet.budget_limit && ` / $${fleet.budget_limit}`}
-                        </span>
-                      </div>
-                    )}
-                  </div>
 
-                  {fleet.fleet_type === 'virtual' && (
-                    <div className="flex gap-2 pt-2">
+                      <div className="flex flex-wrap gap-6 text-sm text-muted-foreground">
+                        <div>
+                          <span className="font-medium">Devices:</span>{' '}
+                          {fleet.device_count} ({fleet.online_count} online)
+                        </div>
+                        {fleet.location && (
+                          <div>
+                            <span className="font-medium">Location:</span>{' '}
+                            {fleet.location}
+                          </div>
+                        )}
+                        {fleet.billing_enabled && (
+                          <div>
+                            <span className="font-medium">Cost:</span>{' '}
+                            ${fleet.current_cost}
+                            {fleet.budget_limit && ` / $${fleet.budget_limit}`}
+                          </div>
+                        )}
+                        <div>
+                          <span className="font-medium">Created:</span>{' '}
+                          {new Date(fleet.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 ml-4">
                       <Button
                         size="sm"
-                        variant="outline"
-                        className="flex-1"
-                        onClick={() => handleStartStop(fleet.fleet_id, fleet.status === 'active')}
+                        variant="ghost"
+                        onClick={() => handleEdit(fleet)}
                       >
-                        {fleet.status === 'active' ? (
-                          <>
-                            <Square className="w-3 h-3 mr-1" />
-                            Stop
-                          </>
-                        ) : (
-                          <>
-                            <Play className="w-3 h-3 mr-1" />
-                            Start
-                          </>
-                        )}
+                        <Pencil className="w-4 h-4" />
                       </Button>
+                      {fleet.fleet_type === 'virtual' && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleStartStop(fleet.fleet_id, fleet.status === 'active')}
+                        >
+                          {fleet.status === 'active' ? (
+                            <>
+                              <Square className="w-3 h-3 mr-1" />
+                              Stop
+                            </>
+                          ) : (
+                            <>
+                              <Play className="w-3 h-3 mr-1" />
+                              Start
+                            </>
+                          )}
+                        </Button>
+                      )}
                     </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Create Fleet Dialog */}
       <CreateFleetDialog
         open={showCreateDialog}
         onOpenChange={setShowCreateDialog}
+        onSuccess={fetchFleets}
+      />
+
+      {/* Edit Fleet Dialog */}
+      <EditFleetDialog
+        open={showEditDialog}
+        onOpenChange={setShowEditDialog}
+        fleet={editingFleet}
         onSuccess={fetchFleets}
       />
     </div>
