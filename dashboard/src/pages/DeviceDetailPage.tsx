@@ -11,7 +11,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { SensorConnectionChart } from '@/components/devices/DeviceConnectionChart';
 import { SensorErrorChart } from '@/components/devices/DeviceErrorChart';
 
-interface SensorDetail {
+interface DeviceDetail {
   name: string;
   protocol: string;
   status: string;
@@ -23,7 +23,7 @@ interface SensorDetail {
   location?: string;
 }
 
-interface SensorHistory {
+interface DeviceHistory {
   reported_at: string;
   connected: boolean;
   healthy: boolean;
@@ -31,20 +31,20 @@ interface SensorHistory {
   last_error: string | null;
 }
 
-interface SensorDetailPageProps {
+interface DeviceDetailPageProps {
   deviceUuid: string;
   sensorName: string;
   onClose: () => void;
 }
 
-export const SensorDetailPage: React.FC<SensorDetailPageProps> = ({ 
+export const DeviceDetailPage: React.FC<DeviceDetailPageProps> = ({ 
   deviceUuid, 
   sensorName,
   onClose,
 }) => {
   
-  const [sensor, setSensor] = useState<SensorDetail | null>(null);
-  const [history, setHistory] = useState<SensorHistory[]>([]);
+  const [sensor, setSensor] = useState<DeviceDetail | null>(null);
+  const [history, setHistory] = useState<DeviceHistory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 

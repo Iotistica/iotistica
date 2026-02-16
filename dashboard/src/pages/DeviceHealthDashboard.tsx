@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { SensorSummaryCards } from '@/components/devices/DeviceSummaryCards';
 import { SensorTable } from '@/components/devices/DeviceTable';
 import { PipelineHealth } from '@/components/devices/PipelineHealth';
-import { SensorDetailPage } from './DeviceDetailPage';
+import { DeviceDetailPage } from './DeviceDetailPage';
 import { AddSensorDialog } from '@/components/devices/AddDeviceDialog';
 import { useSensorHealth } from '@/hooks/useSensorHealth';
 import { toast } from 'sonner';
@@ -139,7 +139,7 @@ export const SensorHealthDashboard: React.FC<SensorHealthDashboardProps> = ({ de
       <Dialog open={selectedSensor !== null} onOpenChange={(open) => !open && setSelectedSensor(null)}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           {selectedSensor && (
-            <SensorDetailPage 
+            <DeviceDetailPage 
               deviceUuid={deviceUuid}
               sensorName={selectedSensor}
               onClose={() => setSelectedSensor(null)}

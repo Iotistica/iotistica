@@ -66,13 +66,13 @@ export function Header({
     <header className="bg-card border-b border-border sticky top-0 z-50">
       <div className="px-4 md:px-6 py-3 flex items-center justify-between">
         {/* Logo */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
             <Server className="w-6 h-6 text-white" />
           </div>
-          <div>
-            <h1 className="text-lg font-extrabold text-foreground leading-tight">Iotistica</h1>
-            <p className="text-xs text-muted-foreground hidden sm:block">Your Device Management Platform</p>
+          <div className="leading-tight">
+            <h1 className="text-5xl md:text-6xl font-black text-foreground tracking-tight">Iotistica</h1>
+            <p className="text-sm md:text-base font-semibold text-muted-foreground">Your Device Management Platform</p>
           </div>
         </div>
 

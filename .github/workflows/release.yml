@@ -386,7 +386,7 @@ jobs:
                 ref: 'main',
                 inputs: {
                   release_version: releaseVersion,
-                  client_name: 'client1',
+                  client_name: 'tsdb',
                   cluster_name: 'dev-iotistica-aks-cluster',
                   clean_before_deploy: 'false'
                 }
@@ -395,7 +395,7 @@ jobs:
               console.log('✅ K8s deployment workflow triggered successfully');
               console.log(`   Repository: Iotistica/iot-k8s`);
               console.log(`   Version: ${releaseVersion}`);
-              console.log(`   Client: client1`);
+              console.log(`   Client: tsdb`);
             } catch (error) {
               console.error('❌ Failed to trigger K8s deployment:', error.message);
               throw error;
