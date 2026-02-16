@@ -66,12 +66,12 @@ Redis connection string
 Mosquitto MQTT broker URL
 */}}
 {{- define "iotistic.mosquitto.url" -}}
-mqtt://{{ include "iotistic.fullname" . }}-mosquitto:{{ .Values.mosquitto.ports.mqtt }}
+mqtt://{{ include "iotistic.fullname" . }}-mosquitto.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.mosquitto.ports.mqtt }}
 {{- end }}
 
 {{/*
 Mosquitto host
 */}}
 {{- define "iotistic.mosquitto.host" -}}
-{{ include "iotistic.fullname" . }}-mosquitto
+{{ include "iotistic.fullname" . }}-mosquitto.{{ .Release.Namespace }}.svc.cluster.local
 {{- end }}

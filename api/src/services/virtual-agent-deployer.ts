@@ -474,7 +474,8 @@ export class VirtualAgentDeployer {
                     valueFrom: {
                       secretKeyRef: {
                         name: secretName,
-                        key: 'provisioningKey'
+                        key: 'provisioningKey',
+                        optional: true  // Allow pod to restart after provisioning key is deleted
                       }
                     }
                   }

@@ -47,6 +47,7 @@ export interface DeviceStateReport {
     sensor_health?: any;
     protocol_adapters_health?: any;
     endpoints_health?: Record<string, any>; // Endpoint health from agent
+    provisioning_state?: string; // Provisioning state from agent (e.g., 'provisioned', 'registered')
   };
 }
 
@@ -89,13 +90,19 @@ export async function processDeviceStateReport(
     }
 
     // 🔐 SECURITY: Cleanup provisioning key for virtual agents after provisioning
-    // Agent only reports state AFTER successful provisioning (provisioning_state = 'provisioned')
+    // Agent reports with provisioning_state = 'provisioned' after successful provisioning
+    // Trigger cleanup when we receive first state report from provisioned agent
     // Cleanup is idempotent - will gracefully handle if Secret already deleted
-    if (device.device_type === 'virtual' && device.provisioning_state === 'registered') {
-      logger.debug('Virtual agent state report - checking if provisioning key cleanup needed', {
+    const shouldCleanup = device.device_type === 'virtual' && 
+                          deviceState.provisioning_state === 'provisioned' &&
+                          device.provisioning_state !== 'provisioned';
+    
+    if (shouldCleanup) {
+      logger.info('Virtual agent just completed provisioning - triggering cleanup', {
         deviceUuid: uuid.substring(0, 8) + '...',
         deviceName: device.device_name,
-        provisioningState: device.provisioning_state
+        oldState: device.provisioning_state,
+        newState: deviceState.provisioning_state
       });
 
       // Trigger cleanup (non-blocking, idempotent)
