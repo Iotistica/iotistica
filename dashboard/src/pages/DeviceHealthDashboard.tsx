@@ -9,11 +9,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { SensorSummaryCards } from '@/components/devices/SensorSummaryCards';
-import { SensorTable } from '@/components/devices/SensorTable';
+import { SensorSummaryCards } from '@/components/devices/DeviceSummaryCards';
+import { SensorTable } from '@/components/devices/DeviceTable';
 import { PipelineHealth } from '@/components/devices/PipelineHealth';
-import { SensorDetailPage } from './SensorDetailPage';
-import { AddSensorDialog } from '@/components/devices/AddSensorDialog';
+import { SensorDetailPage } from './DeviceDetailPage';
+import { AddSensorDialog } from '@/components/devices/AddDeviceDialog';
 import { useSensorHealth } from '@/hooks/useSensorHealth';
 import { toast } from 'sonner';
 import { useDeviceState } from '@/contexts/DeviceStateContext';

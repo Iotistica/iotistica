@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { DeviceSidebar, Device } from "./components/DeviceSidebar";
-import { AddEditDeviceDialog } from "./components/AddEditDeviceDialog";
+import { DeviceSidebar, Device } from "./components/AgentSidebar";
+import { AddEditDeviceDialog } from "./components/AddEditAgentDialog";
 import { useWebSocketConnection, useWebSocket } from "./hooks/useWebSocket";
 import type { NetworkInterfaceData } from "./services/websocket";
 import { SystemMetrics } from "./components/SystemMetrics";
@@ -16,8 +16,8 @@ import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
 import { Menu, Activity, BarChart3, Radio, CalendarClock, Package, Shield, FileText, Terminal, Layers } from "lucide-react";
 import { buildApiUrl } from "./config/api";
-import { SensorHealthDashboard } from "./pages/SensorHealthDashboard";
-import { SensorsPage } from "./pages/SensorsPage";
+import { SensorHealthDashboard } from "./pages/DeviceHealthDashboard";
+import { SensorsPage } from "./pages/DevicesPage";
 import { EndpointsVisualizationPage } from "./pages/EndpointsVisualizationPage";
 import HousekeeperPage from "./pages/HousekeeperPage";
 import DeviceSettingsPage from "./pages/DeviceSettingsPage";
@@ -26,7 +26,7 @@ import { LogsPage } from "./pages/LogsPage";
 import { RemoteAccessPage } from "./pages/RemoteAccessPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { GlobalDashboardPage } from "./pages/GlobalDashboardPage";
-import DeviceTagsPage from "./pages/DeviceTagsPage";
+import DeviceTagsPage from "./pages/AgentTagsPage";
 import TagDefinitionsPage from "./pages/TagDefinitionsPage";
 import { DigitalTwinPage } from "./pages/DigitalTwinPage";
 import { EventDebuggerPage } from "./pages/EventDebuggerPage";
@@ -393,6 +393,7 @@ export default function App() {
             deviceType: deviceData.type,
             ipAddress: deviceData.ipAddress,
             macAddress: deviceData.macAddress,
+            location: (deviceData as any).location,
             fleet_id: deviceData.fleet_id || null
           })
         });

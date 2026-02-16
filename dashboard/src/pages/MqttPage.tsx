@@ -5,7 +5,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Users, MessageSquare, Zap, TrendingUp, Filter } from "lucide-react";
 import { MetricCard } from "../components/ui/metric-card";
-import { Device } from "../components/DeviceSidebar";
+import { Device } from "../components/AgentSidebar";
 import MqttBrokerCard from "../components/MqttBrokerCard";
 import MqttMetricsCard from "../components/MqttMetricsCard";
 import type { MqttStatsData } from "@/services/websocket";

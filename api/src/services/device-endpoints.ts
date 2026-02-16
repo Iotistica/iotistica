@@ -30,6 +30,7 @@ export interface EndpointDeviceConfig {
   connection: any;
   dataPoints: (ModbusDataPoint | OPCUADataPoint | any)[];  // Typed for Modbus/OPC-UA, any for other protocols
   metadata?: any;
+  location?: string; // Physical location for Azure Digital Twins
 }
 
 export class DeviceSensorSyncService {
@@ -175,7 +176,7 @@ export class DeviceSensorSyncService {
     try {
       // Get existing sensors from table (fetch full records to compare changes AND health status)
       const existingResult = await query(
-        'SELECT name, uuid, enabled, poll_interval, connection, data_points, metadata, deployment_status, health_connected FROM device_sensors WHERE device_uuid = $1',
+        'SELECT name, uuid, enabled, poll_interval, connection, data_points, metadata, deployment_status, health_connected, location FROM device_sensors WHERE device_uuid = $1',
         [deviceUuid]
       );
       const existingByUuid = new Map(existingResult.rows.map((r: any) => [r.uuid, r]));
@@ -223,13 +224,14 @@ export class DeviceSensorSyncService {
               connection = $5,
               data_points = $6,
               metadata = $7,
-              updated_by = $8,
-              config_version = $9,
+              location = $8,
+              updated_by = $9,
+              config_version = $10,
               synced_to_config = true,
-              deployment_status = $10,
-              config_id = $11
+              deployment_status = $11,
+              config_id = $12
               -- CRITICAL: DO NOT update health_* fields here - they come from updateEndpointHealth()
-            WHERE device_uuid = $12 AND uuid = $13`,
+            WHERE device_uuid = $13 AND uuid = $14`,
             [
               endpoint.name,
               endpoint.protocol,
@@ -238,6 +240,7 @@ export class DeviceSensorSyncService {
               JSON.stringify(endpoint.connection),
               JSON.stringify(endpoint.dataPoints),
               JSON.stringify(mergedMetadata),
+              (endpoint as any).location || null,
               userId || 'system',
               configVersion,
               deploymentStatus,
@@ -283,9 +286,9 @@ export class DeviceSensorSyncService {
           await query(
             `INSERT INTO device_sensors (
               device_uuid, uuid, name, protocol, enabled, poll_interval,
-              connection, data_points, metadata, created_by, updated_by,
+              connection, data_points, metadata, location, created_by, updated_by,
               config_version, synced_to_config, deployment_status, config_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, true, $13, $14)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, true, $14, $15)
             ON CONFLICT (device_uuid, name) DO UPDATE SET
               uuid = EXCLUDED.uuid,
               protocol = EXCLUDED.protocol,
@@ -294,6 +297,7 @@ export class DeviceSensorSyncService {
               connection = EXCLUDED.connection,
               data_points = EXCLUDED.data_points,
               metadata = EXCLUDED.metadata,
+              location = EXCLUDED.location,
               updated_by = EXCLUDED.updated_by,
               config_version = EXCLUDED.config_version,
               synced_to_config = EXCLUDED.synced_to_config,
@@ -311,6 +315,7 @@ export class DeviceSensorSyncService {
               JSON.stringify(endpoint.connection),
               JSON.stringify(endpoint.dataPoints),
               JSON.stringify(mergedMetadata),
+              (endpoint as any).location || null,
               userId || 'system',
               userId || 'system',
               configVersion,
@@ -802,7 +807,7 @@ export class DeviceSensorSyncService {
     try {
       // 1. Check if endpoint exists in device_sensors table (source of truth)
       const tableResult = await query(
-        `SELECT id, uuid, name, protocol, enabled, poll_interval, connection, data_points, metadata
+        `SELECT id, uuid, name, protocol, enabled, poll_interval, connection, data_points, metadata, location
          FROM device_sensors 
          WHERE device_uuid = $1 AND (uuid::text = $2 OR name = $2)`,
         [deviceUuid, endpointIdentifier]
@@ -821,6 +826,7 @@ export class DeviceSensorSyncService {
         protocol: updates.protocol ?? existingEndpoint.protocol,
         enabled: updates.enabled ?? existingEndpoint.enabled,
         poll_interval: updates.pollInterval ?? existingEndpoint.poll_interval,
+        location: updates.location ?? existingEndpoint.location,
         connection: updates.connection 
           ? JSON.stringify(updates.connection) 
           : (typeof existingEndpoint.connection === 'string' 
@@ -848,10 +854,11 @@ export class DeviceSensorSyncService {
            connection = $5,
            data_points = $6,
            metadata = $7,
-           updated_by = $8,
+           location = $8,
+           updated_by = $9,
            updated_at = NOW(),
            synced_to_config = false
-         WHERE device_uuid = $9 AND uuid = $10`,
+         WHERE device_uuid = $10 AND uuid = $11`,
         [
           updatedEndpoint.name,
           updatedEndpoint.protocol,
@@ -860,6 +867,7 @@ export class DeviceSensorSyncService {
           updatedEndpoint.connection,
           updatedEndpoint.data_points,
           updatedEndpoint.metadata,
+          updatedEndpoint.location,
           userId || 'system',
           deviceUuid,
           existingEndpoint.uuid

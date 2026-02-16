@@ -2,10 +2,7 @@
  * MQTT Page - Shows MQTT broker status and metrics
  */
 
-import { useState } from "react";
-import { Activity } from "lucide-react";
-import { Badge } from "../components/ui/badge";
-import { Device } from "../components/DeviceSidebar";
+import { Device } from "../components/AgentSidebar";
 import { ApplicationsCard, Application } from "../components/ApplicationsCard";
 
 interface ApplicationPageProps {
@@ -31,45 +28,6 @@ export function ApplicationPage({
   onToggleServiceStatus = () => {},
 } : ApplicationPageProps) {
 
-  // Calculate running and total apps/services
-  const runningApps = applications.filter(app => app.status === "running").length;
-  const totalApps = applications.length;
-  
-  // Calculate sync status for applications
-  const syncingApps = applications.filter(app => app.syncStatus === "syncing").length;
-  const errorApps = applications.filter(app => app.syncStatus === "error").length;
-  const pendingApps = applications.filter(app => app.syncStatus === "pending").length;
-  const syncedApps = applications.filter(app => app.syncStatus === "synced").length;
-  
-  // Show total apps count as the main value
-  const getAppValue = () => {
-    return totalApps === 0 ? "0" : `${totalApps}`;
-  };
-  
-  // Determine the subtitle for applications - show aggregate status
-  const getAppSubtitle = () => {
-    if (totalApps === 0) return "No apps";
-    
-    const statuses = [];
-    
-    if (errorApps > 0) statuses.push(`${errorApps} Error`);
-    if (syncingApps > 0) statuses.push(`${syncingApps} Syncing`);
-    if (pendingApps > 0) statuses.push(`${pendingApps} Pending`);
-    if (syncedApps > 0) statuses.push(`${syncedApps} Synced`);
-    
-    return statuses.join(', ') || `${totalApps} Running`;
-  };
-  
-  const getAppSubtitleColor = () => {
-    // Priority: Error (red) > Syncing (blue) > Pending (yellow) > default (gray)
-    if (errorApps > 0) return "text-red-600";
-    if (syncingApps > 0) return "text-blue-600";
-    if (pendingApps > 0) return "text-yellow-600";
-    return "text-gray-500";
-  };
-
-
-
   return (
     <div className="flex-1 bg-background overflow-auto">
       <div className="p-4 md:p-6 lg:p-8 space-y-6">
@@ -84,15 +42,8 @@ export function ApplicationPage({
 
         {/* Application Card */}
          <ApplicationsCard
-              deviceId={device.id}
               deviceUuid={device.deviceUuid}
               deviceStatus={device.status}
-              applications={applications}
-              onAddApplication={onAddApplication}
-              onUpdateApplication={onUpdateApplication}
-              onRemoveApplication={onRemoveApplication}
-              onToggleStatus={onToggleAppStatus}
-              onToggleServiceStatus={onToggleServiceStatus}
             />
 
       </div>

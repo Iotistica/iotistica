@@ -31,6 +31,7 @@ export interface Device {
   status: "online" | "offline" | "warning" | "pending";
   ipAddress: string;
   macAddress?: string;
+  location?: string;
   lastSeen: string;
   lastConnectivity?: string; // Store raw timestamp
   cpu: number;

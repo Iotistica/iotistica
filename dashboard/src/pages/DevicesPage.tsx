@@ -15,12 +15,12 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AddSensorDialog } from '@/components/devices/AddSensorDialog';
-import { EditSensorDialog } from '@/components/devices/EditSensorDialog';
-import { SensorSummaryCards } from '@/components/devices/SensorSummaryCards';
+import { AddSensorDialog } from '@/components/devices/AddDeviceDialog';
+import { EditSensorDialog } from '@/components/devices/EditDeviceDialog';
+import { SensorSummaryCards } from '@/components/devices/DeviceSummaryCards';
 import { toast } from 'sonner';
 import { buildApiUrl } from '@/config/api';
-import { Device } from "../components/DeviceSidebar";
+import { Device } from "../components/AgentSidebar";
 import { useDeviceState } from '@/contexts/DeviceStateContext';
 
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Copy, Check, RefreshCw, X, Trash2 } from "lucide-react";
+import { Copy, Check, RefreshCw, X, Trash2, ChevronsUpDown } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -14,8 +14,22 @@ import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Badge } from "./ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "./ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "./ui/popover";
+import { cn } from "./ui/utils";
 import { toast } from "sonner";
-import { Device } from "./DeviceSidebar";
+import { Device } from "./AgentSidebar";
 import { buildApiUrl } from "../config/api";
 import { getTagDefinitions, type TagDefinition } from "../services/deviceTags";
 import { useFleet } from "../contexts/FleetContext";
@@ -63,6 +77,7 @@ export function AddEditDeviceDialog({
     description: "",
     ipAddress: "",
     macAddress: "",
+    location: "",
     lastSeen: "Never",
     status: "offline" as Device['status'],
     cpu: 0,
@@ -72,6 +87,8 @@ export function AddEditDeviceDialog({
   const { selectedFleetId: contextFleetId } = useFleet();
   const [fleetOptions, setFleetOptions] = useState<Array<{ fleet_id: string; fleet_name: string }>>([]);
   const [selectedFleetId, setSelectedFleetId] = useState<string>(UNASSIGNED_FLEET_ID);
+  const [locations, setLocations] = useState<string[]>([]);
+  const [locationOpen, setLocationOpen] = useState(false);
 
   // Install command
   const installCommand = `curl -sfL https://apps.iotistica.com/agent/install | sh`;
@@ -145,6 +162,24 @@ export function AddEditDeviceDialog({
     }
   };
 
+  const loadLocations = async () => {
+    try {
+      const token = localStorage.getItem('accessToken');
+      const response = await fetch(buildApiUrl('/api/v1/devices/locations'), {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setLocations(data.locations || []);
+      } else {
+        setLocations([]);
+      }
+    } catch (error) {
+      console.error('Error loading locations:', error);
+      setLocations([]);
+    }
+  };
+
   // Separate effect for initializing form when dialog opens
   useEffect(() => {
     if (!open) {
@@ -163,6 +198,7 @@ export function AddEditDeviceDialog({
         description: "",
         ipAddress: device.ipAddress,
         macAddress: device.macAddress || "",
+        location: (device as any).location || "",
         lastSeen: device.lastSeen,
         status: device.status,
         cpu: device.cpu,
@@ -195,6 +231,7 @@ export function AddEditDeviceDialog({
         description: "",
         ipAddress: "",
         macAddress: "",
+        location: "",
         lastSeen: "Never",
         status: "offline",
         cpu: 0,
@@ -207,6 +244,7 @@ export function AddEditDeviceDialog({
 
     loadTagDefinitions();
     loadFleets();
+    loadLocations();
   }, [open]); // Only re-run when dialog opens/closes
 
   // Generate key when switching to standalone type
@@ -257,6 +295,7 @@ export function AddEditDeviceDialog({
       type: formData.type,
       ipAddress: formData.ipAddress,
       macAddress: formData.macAddress,
+      location: formData.location,
       lastSeen: formData.lastSeen,
       status: formData.status,
       cpu: formData.cpu,
@@ -651,6 +690,60 @@ export function AddEditDeviceDialog({
                 onChange={(e) => setFormData(prev => ({ ...prev, macAddress: e.target.value }))}
               />
             </div>
+          </div>
+          )}
+
+          {formData.type === 'standalone' && (
+          <div className="space-y-2">
+            <Label>Location (optional)</Label>
+            <Popover open={locationOpen} onOpenChange={setLocationOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={locationOpen}
+                  className="w-full justify-between font-normal"
+                >
+                  {formData.location || "Select or enter location..."}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-full p-0" align="start">
+                <Command>
+                  <CommandInput 
+                    placeholder="Search or type new location..." 
+                    value={formData.location}
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, location: value }))}
+                  />
+                  <CommandList>
+                    <CommandEmpty>Type to add a new location</CommandEmpty>
+                    <CommandGroup>
+                      {locations.map((loc) => (
+                        <CommandItem
+                          key={loc}
+                          value={loc}
+                          onSelect={(currentValue) => {
+                            setFormData(prev => ({ ...prev, location: currentValue }));
+                            setLocationOpen(false);
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              formData.location === loc ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          {loc}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            <p className="text-xs text-muted-foreground">
+              Specify the physical location for Digital Twins integration
+            </p>
           </div>
           )}
     

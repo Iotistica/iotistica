@@ -322,24 +322,25 @@ router.get('/devices/:uuid/device-health', async (req, res) => {
 
     const result = await query(
       `SELECT 
-        name,
-        protocol,
-        enabled,
-        poll_interval,
-        connection,
-        data_points,
-        metadata,
-        updated_at,
-        synced_to_config,
-        health_status,
-        health_connected,
-        health_last_poll,
-        health_error_count,
-        health_last_error,
-        health_updated_at
-      FROM device_sensors
+        ds.name,
+        ds.protocol,
+        ds.enabled,
+        ds.poll_interval,
+        ds.connection,
+        ds.data_points,
+        ds.metadata,
+        ds.updated_at,
+        ds.synced_to_config,
+        ds.health_status,
+        ds.health_connected,
+        ds.health_last_poll,
+        ds.health_error_count,
+        ds.health_last_error,
+        ds.health_updated_at,
+        ds.location
+      FROM device_sensors ds
       WHERE ${whereClause}
-      ORDER BY protocol, name`,
+      ORDER BY ds.protocol, ds.name`,
       params
     );
 
@@ -357,7 +358,8 @@ router.get('/devices/:uuid/device-health', async (req, res) => {
       lastPoll: row.health_last_poll || null,
       errorCount: row.health_error_count ?? 0,
       lastError: row.health_last_error || null,
-      lastSeen: row.health_updated_at || null
+      lastSeen: row.health_updated_at || null,
+      location: row.location || null
     }));
 
     const summary = {

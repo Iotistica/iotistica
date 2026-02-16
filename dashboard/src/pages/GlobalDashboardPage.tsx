@@ -62,7 +62,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '../components/ui/tooltip';
-import { Device } from '../components/DeviceSidebar';
+import { Device } from '../components/AgentSidebar';
 import { MetricDataCard, type MetricDataCardConfig } from '../components/MetricDataCard';
 import { MetricDataCardConfigDialog } from '../components/MetricDataCardConfigDialog';
 import MetricValueCard, { type MetricValueCardConfig } from '../components/MetricValueCard';

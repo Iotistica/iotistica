@@ -1,4 +1,4 @@
-import { Device } from '../components/DeviceSidebar';
+import { Device } from '../components/AgentSidebar';
 
 /**
  * Simple utility to check if device actions (Add App, Add Job, Add Sensor) are allowed

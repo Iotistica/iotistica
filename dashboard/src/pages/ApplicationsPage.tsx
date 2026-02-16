@@ -1,5 +1,5 @@
 import { Application, ApplicationsCard } from "../components/ApplicationsCard";
-import { Device } from "../components/DeviceSidebar";
+import { Device } from "../components/AgentSidebar";
 import { MetricCard } from "../components/ui/metric-card";
 import { Package, Layers, Activity, AlertCircle } from "lucide-react";
 import { ContainerLogsCard } from "../components/ContainerLogsCard";

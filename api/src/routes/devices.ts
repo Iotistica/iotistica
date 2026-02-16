@@ -38,13 +38,13 @@ export const router = express.Router();
 router.patch('/devices/:uuid', async (req, res) => {
   try {
     const { uuid } = req.params;
-    const { deviceName, deviceType, ipAddress, macAddress } = req.body;
+    const { deviceName, deviceType, ipAddress, macAddress, location } = req.body;
 
     // Validate at least one field is present
-    if (!deviceName && !deviceType && !ipAddress && !macAddress) {
+    if (!deviceName && !deviceType && !ipAddress && !macAddress && location === undefined) {
       return res.status(400).json({
         error: 'No fields to update',
-        message: 'At least one of deviceName, deviceType, ipAddress, or macAddress must be provided.'
+        message: 'At least one of deviceName, deviceType, ipAddress, macAddress, or location must be provided.'
       });
     }
 
@@ -62,6 +62,7 @@ router.patch('/devices/:uuid', async (req, res) => {
     if (deviceType) updateFields['device_type'] = deviceType;
     if (ipAddress) updateFields['ip_address'] = ipAddress;
     if (macAddress) updateFields['mac_address'] = macAddress;
+    if (location !== undefined) updateFields['location'] = location || null;
     updateFields['modified_at'] = new Date();
 
     const updatedDevice = await DeviceModel.update(uuid, updateFields);
@@ -75,7 +76,8 @@ router.patch('/devices/:uuid', async (req, res) => {
         deviceName,
         deviceType,
         ipAddress,
-        macAddress
+        macAddress,
+        location
       }
     });
 
@@ -87,6 +89,7 @@ router.patch('/devices/:uuid', async (req, res) => {
         deviceType: updatedDevice.device_type,
         ipAddress: updatedDevice.ip_address,
         macAddress: updatedDevice.mac_address,
+        location: updatedDevice.location,
         isOnline: updatedDevice.is_online,
         isActive: updatedDevice.is_active,
         modifiedAt: updatedDevice.modified_at
@@ -184,6 +187,37 @@ const eventPublisher = new EventPublisher();
 // ============================================================================
 
 /**
+ * Get distinct locations from devices and endpoint devices
+ * GET /api/v1/devices/locations
+ */
+router.get('/devices/locations', jwtAuth, async (req, res) => {
+  try {
+    // Get distinct locations from both agents and endpoint devices
+    const result = await query(`
+      SELECT DISTINCT location
+      FROM (
+        SELECT location FROM devices WHERE location IS NOT NULL AND location != ''
+        UNION
+        SELECT extra->>'location' as location FROM readings 
+        WHERE extra->>'location' IS NOT NULL AND extra->>'location' != ''
+        AND time > NOW() - INTERVAL '30 days'
+      ) locations
+      ORDER BY location
+    `);
+    
+    res.json({
+      locations: result.rows.map(row => row.location)
+    });
+  } catch (error: any) {
+    logger.error('Error fetching locations:', error);
+    res.status(500).json({
+      error: 'Failed to fetch locations',
+      message: error.message
+    });
+  }
+});
+
+/**
  * List all devices
  * GET /api/v1/devices
  */
@@ -235,6 +269,7 @@ router.get('/devices', jwtAuth, async (req, res) => {
           name: device.device_name,
           device_name: device.device_name,
           device_type: device.device_type,
+          location: device.location,
           state: device.is_online ? 'active' : 'inactive',
           provisioning_state: device.provisioning_state,
           status: device.status,

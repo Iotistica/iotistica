@@ -26,7 +26,7 @@ import {
   Legend,
   ReferenceLine,
 } from "recharts";
-import { Device } from "./DeviceSidebar";
+import { Device } from "./AgentSidebar";
 import { NetworkingCard, NetworkInterface } from "./NetworkingCard";
 import { GeneralInfoCard } from "./GeneralInfoCard";
 import { buildApiUrl } from "@/config/api";

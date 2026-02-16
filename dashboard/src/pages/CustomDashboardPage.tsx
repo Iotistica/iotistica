@@ -30,7 +30,7 @@ import {
   GripVertical
 } from 'lucide-react';
 import { useDeviceState } from '../contexts/DeviceStateContext';
-import { Device } from '../components/DeviceSidebar';
+import { Device } from '../components/AgentSidebar';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 

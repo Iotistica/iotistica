@@ -22,6 +22,7 @@ export interface Device {
   last_connectivity_event?: Date;
   ip_address?: string;
   mac_address?: string;
+  location?: string;
   os_version?: string;
   agent_version?: string;
   memory_usage?: number;

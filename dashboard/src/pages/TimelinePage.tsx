@@ -1,5 +1,5 @@
 import { Badge } from "../components/ui/badge";
-import { Device } from "../components/DeviceSidebar";
+import { Device } from "../components/AgentSidebar";
 import { TimelineCard } from "../components/TimelineCard";
 
 interface TimelinePageProps {

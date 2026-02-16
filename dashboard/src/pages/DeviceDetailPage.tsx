@@ -8,8 +8,8 @@ import { Activity, TrendingUp } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { SensorConnectionChart } from '@/components/devices/SensorConnectionChart';
-import { SensorErrorChart } from '@/components/devices/SensorErrorChart';
+import { SensorConnectionChart } from '@/components/devices/DeviceConnectionChart';
+import { SensorErrorChart } from '@/components/devices/DeviceErrorChart';
 
 interface SensorDetail {
   name: string;
@@ -20,6 +20,7 @@ interface SensorDetail {
   errorCount: number;
   lastError: string | null;
   lastSeen: string;
+  location?: string;
 }
 
 interface SensorHistory {
@@ -66,7 +67,8 @@ export const SensorDetailPage: React.FC<SensorDetailPageProps> = ({
             lastPoll: currentSensor.lastPoll,
             errorCount: currentSensor.errorCount,
             lastError: currentSensor.lastError,
-            lastSeen: currentSensor.lastSeen
+            lastSeen: currentSensor.lastSeen,
+            location: currentSensor.location || null
           };
           setSensor(nextSensor);
 
@@ -158,6 +160,12 @@ export const SensorDetailPage: React.FC<SensorDetailPageProps> = ({
               <p className="text-sm text-muted-foreground">Status</p>
               <StatusBadge status={sensor.status} />
             </div>
+            {sensor.location && (
+            <div>
+              <p className="text-sm text-muted-foreground">Location</p>
+              <p className="text-sm font-medium">{sensor.location}</p>
+            </div>
+            )}
             <div>
               <p className="text-sm text-muted-foreground">Error Count</p>
               <p className="text-2xl font-bold text-destructive">{sensor.errorCount}</p>

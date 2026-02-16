@@ -4,7 +4,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Plus, RefreshCw, Trash2, XCircle, Eye, FileText, AlertTriangle } from 'lucide-react';
 import { buildApiUrl } from '@/config/api';
-import { Device } from './DeviceSidebar';
+import { Device } from './AgentSidebar';
 import { canPerformDeviceActions, getDisabledActionMessage } from '@/utils/devicePermissions';
 import AddJobModal from './jobs/AddJobModal';
 import JobDetailsModal from './jobs/JobDetailsModal';
