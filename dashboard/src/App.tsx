@@ -89,6 +89,18 @@ export default function App() {
     'event-debugger'
   ] as const;
   type View = typeof viewOptions[number];
+  const agentViews: View[] = [
+    'metrics',
+    'sensors',
+    'endpoints',
+    'jobs',
+    'applications',
+    'logs',
+    'remote-access',
+    'settings',
+    'tags',
+    'event-debugger'
+  ];
 
   const [devices, setDevices] = useState<Device[]>([]);
   const devicesRef = useRef<Device[]>([]); // Ref to access devices without causing re-renders
@@ -120,10 +132,12 @@ export default function App() {
     if (currentPath.type === 'agent' && currentPath.agentId) {
       // Agent view from URL
       const device = devices.find(d => d.deviceUuid === currentPath.agentId);
+      const routeView = currentPath.view as View | undefined;
+      const targetView = routeView && agentViews.includes(routeView) ? routeView : 'metrics';
       if (device) {
         setSelectedDeviceId(device.id);
         setSelectedFleetId(currentPath.fleetId || device.fleet_id || '');
-        setCurrentView('metrics'); // Default to metrics view for agents
+        setCurrentView(targetView);
       }
     } else if (currentPath.type === 'fleet' && currentPath.fleetId) {
       // Fleet view from URL: show agents view with fleet preselected
@@ -137,13 +151,18 @@ export default function App() {
       }
       setSelectedFleetId('');
     }
-  }, [currentPath, devices, setSelectedFleetId]);
+  }, [agentViews, currentPath, devices, setSelectedFleetId]);
 
   const handleGlobalViewChange = useCallback((view: View) => {
-    setCurrentView(view);
     setSelectedFleetId('');
     navigateToGlobal(view);
   }, [navigateToGlobal, setSelectedFleetId]);
+
+  const handleAgentViewChange = useCallback((view: View) => {
+    if (selectedDevice?.deviceUuid) {
+      navigateToAgent(selectedDevice.deviceUuid, selectedDevice.fleet_id, view);
+    }
+  }, [navigateToAgent, selectedDevice]);
 
   const formatViewLabel = useCallback((view: string) => {
     return view
@@ -378,7 +397,7 @@ export default function App() {
       if (device) {
         setSelectedDeviceId(device.id);
         setCurrentView('tags');
-        navigateToAgent(device.deviceUuid, device.fleet_id);
+        navigateToAgent(device.deviceUuid, device.fleet_id, 'tags');
       }
     };
 
@@ -617,11 +636,12 @@ export default function App() {
 
   const handleSelectDevice = (deviceId: string) => {
     const device = devices.find((d) => d.id === deviceId);
-    setSelectedDeviceId(deviceId);
     setSidebarOpen(false); // Close sidebar on mobile after selection
 
     if (device) {
-      navigateToAgent(device.deviceUuid, device.fleet_id);
+      const targetView = isGlobalView ? 'metrics' : currentView;
+      const view = agentViews.includes(targetView) ? targetView : 'metrics';
+      navigateToAgent(device.deviceUuid, device.fleet_id, view);
     }
   };
 
@@ -910,7 +930,7 @@ export default function App() {
                     devices={devices} 
                     onDeviceSelect={(device) => {
                       setSelectedDeviceId(device.id);
-                      navigateToAgent(device.deviceUuid, device.fleet_id);
+                      navigateToAgent(device.deviceUuid, device.fleet_id, 'metrics');
                     }} 
                   />
                 </div>
@@ -986,7 +1006,7 @@ export default function App() {
             <Button
               variant={currentView === 'metrics' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setCurrentView('metrics')}
+              onClick={() => handleAgentViewChange('metrics')}
             >
               <BarChart3 className="w-4 h-4 mr-2" />
               System
@@ -994,7 +1014,7 @@ export default function App() {
             <Button
               variant={currentView === 'sensors' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setCurrentView('sensors')}
+              onClick={() => handleAgentViewChange('sensors')}
             >
               <Activity className="w-4 h-4 mr-2" />
               Devices
@@ -1009,7 +1029,7 @@ export default function App() {
             <Button
               variant={currentView === 'jobs' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setCurrentView('jobs')}
+              onClick={() => handleAgentViewChange('jobs')}
             >
               <CalendarClock className="w-4 h-4 mr-2" />
               Jobs
@@ -1017,7 +1037,7 @@ export default function App() {
             <Button
               variant={currentView === 'applications' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setCurrentView('applications')}
+              onClick={() => handleAgentViewChange('applications')}
             >
               <Package className="w-4 h-4 mr-2" />
               Applications
@@ -1057,7 +1077,7 @@ export default function App() {
             <Button
               variant={currentView === 'logs' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setCurrentView('logs')}
+              onClick={() => handleAgentViewChange('logs')}
             >
               <FileText className="w-4 h-4 mr-2" />
               Logs
@@ -1065,7 +1085,7 @@ export default function App() {
             <Button
               variant={currentView === 'remote-access' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setCurrentView('remote-access')}
+              onClick={() => handleAgentViewChange('remote-access')}
             >
               <Terminal className="w-4 h-4 mr-2" />
               Remote Access
@@ -1073,7 +1093,7 @@ export default function App() {
             <Button
               variant={currentView === 'settings' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setCurrentView('settings')}
+              onClick={() => handleAgentViewChange('settings')}
             >
               <Shield className="w-4 h-4 mr-2" />
               Settings

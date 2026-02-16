@@ -22,6 +22,7 @@ createRoot(document.getElementById("root")!).render(
               <MqttProvider>
                 <BrowserRouter>
                   <Routes>
+                    <Route path="/fleets/:fleetId/agents/:agentId/:view" element={<App />} />
                     <Route path="/fleets/:fleetId/agents/:agentId" element={<App />} />
                     <Route path="/fleets/:fleetId" element={<App />} />
                     <Route path="*" element={<App />} />
