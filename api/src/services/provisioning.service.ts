@@ -526,6 +526,65 @@ export class ProvisioningService {
       var keyRecord = provisioningKeyRecord.keyRecord;
     }
 
+    // Ensure fleet exists in fleets table before provisioning device
+    try {
+      const fleetCheck = await query(
+        'SELECT fleet_id FROM fleets WHERE fleet_id = $1',
+        [keyRecord.fleet_id]
+      );
+
+      if (fleetCheck.rows.length === 0) {
+        // Fleet doesn't exist - auto-create it
+        logger.info('Auto-creating fleet for provisioning', {
+          fleet_id: keyRecord.fleet_id,
+          device_uuid: uuid.substring(0, 8) + '...',
+          device_type: deviceType
+        });
+
+        const fleetName = keyRecord.fleet_id === 'default-fleet' 
+          ? 'Default Fleet'
+          : keyRecord.fleet_id.replace(/-/g, ' ').replace(/^fleet\s*/i, 'Fleet ');
+
+        await query(
+          `INSERT INTO fleets (
+            fleet_id, 
+            fleet_name, 
+            customer_id, 
+            fleet_type, 
+            description,
+            status,
+            created_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+          ON CONFLICT (fleet_id) DO NOTHING`,
+          [
+            keyRecord.fleet_id,
+            fleetName,
+            '00000000-0000-0000-0000-000000000001', // Default customer for single-tenant
+            'physical', // Standalone devices are physical
+            `Auto-created fleet during device provisioning (key: ${keyRecord.id})`,
+            'active'
+          ]
+        );
+
+        logger.info('Fleet auto-created successfully', {
+          fleet_id: keyRecord.fleet_id,
+          fleet_name: fleetName
+        });
+      } else {
+        logger.debug('Fleet already exists', {
+          fleet_id: keyRecord.fleet_id,
+          device_uuid: uuid.substring(0, 8) + '...'
+        });
+      }
+    } catch (fleetError) {
+      // Log but don't fail provisioning - fleet creation is non-critical for device functionality
+      logger.warn('Failed to auto-create fleet (non-fatal)', {
+        fleet_id: keyRecord.fleet_id,
+        device_uuid: uuid.substring(0, 8) + '...',
+        error: fleetError instanceof Error ? fleetError.message : String(fleetError)
+      });
+    }
+
     const [
       hashedApiKey,
       mqttCredentials,
