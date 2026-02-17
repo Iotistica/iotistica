@@ -34,6 +34,7 @@ import {
 import { EventPublisher } from './event-sourcing';
 import {
   getBrokerConfigForExternalDevice,
+  getStandaloneBrokerConfig,
   buildBrokerUrl,
   formatBrokerConfigForClient
 } from '../utils/mqtt-broker-config';
@@ -832,16 +833,37 @@ export class ProvisioningService {
     // Detect virtual agents FIRST (before checking broker config)
     const isVirtual = device.device_type === 'virtual';
     
-    // Fetch broker configuration (same config works for API and devices if using public URL)
-    const brokerConfig = await getBrokerConfigForExternalDevice(device.uuid);
+    // Fetch broker configuration based on agent type
+    let brokerConfig;
+    if (isVirtual) {
+      // Virtual agents: Use env variable (K8s internal DNS for low-latency)
+      brokerConfig = await getBrokerConfigForExternalDevice(device.uuid);
+      logger.info('Virtual agent: Using env variable or database config', {
+        deviceType: device.device_type,
+        hasConfig: !!brokerConfig,
+        source: brokerConfig?.id === 0 ? 'environment' : 'database'
+      });
+    } else {
+      // Standalone agents: Skip env variables, use database config for public URL
+      brokerConfig = await getStandaloneBrokerConfig();
+      logger.info('Standalone agent: Using database config (skipping env variables)', {
+        deviceType: device.device_type,
+        hasConfig: !!brokerConfig,
+        brokerUrl: brokerConfig ? buildBrokerUrl(brokerConfig) : 'none'
+      });
+    }
     
     if (brokerConfig) {
       logger.info(`Using MQTT broker for device: ${brokerConfig.name} (${buildBrokerUrl(brokerConfig)})`, {
         source: brokerConfig.id === 0 ? 'environment' : 'database',
-        deviceType: device.device_type
+        deviceType: device.device_type,
+        isVirtual
       });
     } else {
-      logger.warn('No MQTT broker configured - device will not receive broker credentials');
+      logger.warn('No MQTT broker configured - device will not receive broker credentials', {
+        deviceType: device.device_type,
+        isVirtual
+      });
     }
 
     // Build broker URL and config (with credentials)
@@ -849,13 +871,20 @@ export class ProvisioningService {
     let brokerUrl;
     
     if (brokerConfig && !isVirtual) {
-      // Use database broker config for physical devices
+      // Use database broker config for physical/standalone devices
       finalBrokerConfig = formatBrokerConfigForClient(brokerConfig, mqttCredentials);
       brokerUrl = buildBrokerUrl(brokerConfig);
+      logger.info('Standalone agent: Configured with public MQTT broker', {
+        brokerUrl,
+        host: finalBrokerConfig.host,
+        port: finalBrokerConfig.port
+      });
     } else if (brokerConfig && isVirtual) {
-      // Virtual agents: Use database config but override host if it's localhost
+      // Virtual agents: Use env variable config or database config
       finalBrokerConfig = formatBrokerConfigForClient(brokerConfig, mqttCredentials);
+      brokerUrl = buildBrokerUrl(brokerConfig);
       
+      // Override localhost for virtual agents (they need cluster DNS or host.docker.internal)
       if (finalBrokerConfig.host === 'localhost' || finalBrokerConfig.host === '127.0.0.1') {
         finalBrokerConfig.host = 'host.docker.internal';
         logger.info('Virtual agent: Overriding localhost broker host to host.docker.internal', {
@@ -864,39 +893,27 @@ export class ProvisioningService {
           originalHost: brokerConfig.host,
           newHost: finalBrokerConfig.host
         });
+        brokerUrl = buildBrokerUrl({ ...brokerConfig, host: finalBrokerConfig.host });
       }
       
-      brokerUrl = buildBrokerUrl({ ...brokerConfig, host: finalBrokerConfig.host });
+      logger.info('Virtual agent: Configured with K8s internal MQTT broker', {
+        brokerUrl,
+        host: finalBrokerConfig.host,
+        port: finalBrokerConfig.port
+      });
     } else {
-      // Fallback to environment variables
-      // Virtual agents need external broker URL (host.docker.internal) since they run in K8s pods
-      const envBrokerUrl = isVirtual 
-        ? (process.env.MQTT_BROKER_URL_VIRTUAL || 'mqtt://host.docker.internal:5883')
-        : (process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883');
+      // No broker config found - error condition
+      const errorMsg = isVirtual 
+        ? 'Virtual agent provisioning failed: No MQTT broker configured (check MQTT_BROKER_URL env)'
+        : 'Standalone agent provisioning failed: No MQTT broker in database (check mqtt_broker_config table)';
       
-      logger.info(`Using ${isVirtual ? 'virtual' : 'standard'} broker URL for ${device.device_type} device`, { 
-        brokerUrl: envBrokerUrl,
-        isVirtual,
+      logger.error(errorMsg, {
         deviceType: device.device_type,
-        hasDeploymentStatus: !!device.deployment_status
+        isVirtual,
+        uuid: device.uuid
       });
       
-      const parsedUrl = new URL(envBrokerUrl);
-      
-      finalBrokerConfig = {
-        protocol: parsedUrl.protocol.replace(':', ''),
-        host: parsedUrl.hostname,
-        port: parseInt(parsedUrl.port || '1883', 10),
-        username: mqttCredentials.username,
-        password: mqttCredentials.password,
-        useTls: parsedUrl.protocol === 'mqtts:',
-        clientIdPrefix: 'Iotistic',
-        keepAlive: 60,
-        cleanSession: true,
-        reconnectPeriod: 1000,
-        connectTimeout: 30000
-      };
-      brokerUrl = envBrokerUrl;
+      throw new Error(errorMsg);
     }
 
     // Fetch API TLS configuration

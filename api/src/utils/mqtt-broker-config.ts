@@ -146,6 +146,38 @@ export async function getBrokerConfigForExternalDevice(deviceUuid: string): Prom
 }
 
 /**
+ * Get broker configuration for standalone (non-virtual) agents
+ * Skips environment variables and goes directly to database to avoid K8s internal DNS
+ * 
+ * This is specifically for provisioning physical/local agents that need public URLs.
+ * Virtual agents should use getBrokerConfigForExternalDevice() which respects env vars.
+ * 
+ * @returns Database broker configuration or null if not found
+ */
+export async function getStandaloneBrokerConfig(): Promise<MqttBrokerConfig | null> {
+  try {
+    // Query database directly, skipping environment variables
+    const result = await query(
+      `SELECT * FROM mqtt_broker_config 
+       WHERE is_default = true AND is_active = true 
+       LIMIT 1`
+    );
+    
+    if (result.rows.length === 0) {
+      console.warn('[MQTT Config] No default broker found in database for standalone agent');
+      return null;
+    }
+    
+    const config = result.rows[0];
+    console.log(`[MQTT Config] Standalone agent database broker: ${config.protocol}://${config.host}:${config.port}`);
+    return config;
+  } catch (error) {
+    console.error('[MQTT Config] Error fetching standalone broker config:', error);
+    return null;
+  }
+}
+
+/**
  * Create broker configuration from environment variables
  */
 function createConfigFromEnv(): MqttBrokerConfig {
