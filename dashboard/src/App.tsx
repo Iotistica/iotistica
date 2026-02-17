@@ -278,6 +278,8 @@ export default function App() {
   const formatViewLabel = useCallback((view: string) => {
     // Special mappings for views with different display names
     const viewLabelMap: Record<string, string> = {
+      'sensors': 'Devices',
+      'metrics': 'System',
       'devices': 'Devices',
       'system': 'System',
       'endpoints': 'Endpoints',
