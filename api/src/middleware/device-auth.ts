@@ -22,7 +22,7 @@ interface CachedDeviceAuth {
   device_type: string;
   is_active: boolean;
   device_api_key_hash: string;
-  fleet_id?: string;
+  fleet_uuid?: string;
   cached_at: number;
 }
 
@@ -96,7 +96,7 @@ async function storeInCache(device: any): Promise<void> {
       device_type: device.device_type,
       is_active: device.is_active,
       device_api_key_hash: device.device_api_key_hash,
-      fleet_id: device.fleet_id,
+      fleet_uuid: device.fleet_uuid,
       cached_at: Date.now() / 1000,
     };
 
@@ -133,7 +133,7 @@ declare global {
         deviceName: string;
         deviceType: string;
         isActive: boolean;
-        fleetId?: string;
+        fleetUuid?: string;
       };
     }
   }
@@ -185,7 +185,7 @@ export async function deviceAuth(
     // Cache miss - fetch from database
     if (!device) {
       const result = await query(
-        `SELECT id, uuid, device_name, device_type, is_active, device_api_key_hash, fleet_id
+        `SELECT id, uuid, device_name, device_type, is_active, device_api_key_hash, fleet_uuid
          FROM devices
          WHERE uuid = $1`,
         [deviceUuid]
@@ -248,7 +248,7 @@ export async function deviceAuth(
       deviceName: device.device_name,
       deviceType: device.device_type,
       isActive: device.is_active,
-      fleetId: device.fleet_id
+      fleetUuid: device.fleet_uuid
     };
 
     const duration = Date.now() - startTime;
@@ -339,7 +339,7 @@ export async function deviceAuthFromBody(
 
     // Rest of logic is same as deviceAuth
     const result = await query(
-      `SELECT id, uuid, device_name, device_type, is_active, device_api_key_hash, fleet_id
+      `SELECT id, uuid, device_name, device_type, is_active, device_api_key_hash, fleet_uuid
        FROM devices
        WHERE uuid = $1`,
       [deviceUuid]
@@ -388,7 +388,7 @@ export async function deviceAuthFromBody(
       deviceName: device.device_name,
       deviceType: device.device_type,
       isActive: device.is_active,
-      fleetId: device.fleet_id
+      fleetUuid: device.fleet_uuid
     };
 
     next();
