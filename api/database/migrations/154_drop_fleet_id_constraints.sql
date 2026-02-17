@@ -5,8 +5,8 @@
 
 BEGIN;
 
--- Drop UNIQUE constraint on fleet_id if it exists
-ALTER TABLE fleets DROP CONSTRAINT IF EXISTS fleets_fleet_id_key;
+-- Drop UNIQUE constraint on fleet_id if it exists (CASCADE to drop dependent index)
+ALTER TABLE fleets DROP CONSTRAINT IF EXISTS fleets_fleet_id_key CASCADE;
 
 -- Make fleet_id nullable (remove NOT NULL constraint)
 ALTER TABLE fleets ALTER COLUMN fleet_id DROP NOT NULL;

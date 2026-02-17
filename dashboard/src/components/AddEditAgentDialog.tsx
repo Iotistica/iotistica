@@ -91,7 +91,7 @@ export function AddEditDeviceDialog({
   const [locationOpen, setLocationOpen] = useState(false);
 
   // Install command
-  const installCommand = `curl -sfL https://apps.iotistica.com/agent/install | sh`;
+  const installCommand = `curl -sfL https://iotistica.com/agent/install | sh`;
 
   // Load tag definitions
   const loadTagDefinitions = async () => {
