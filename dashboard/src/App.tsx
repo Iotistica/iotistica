@@ -14,7 +14,7 @@ import { Toaster } from "./components/ui/sonner";
 import { Sheet, SheetContent } from "./components/ui/sheet";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
-import { Menu, Activity, BarChart3, Radio, CalendarClock, Package, Shield, FileText, Terminal, Layers } from "lucide-react";
+import { Menu, Activity, BarChart3, Radio, CalendarClock, Package, Shield, FileText, Terminal, Layers, Plus } from "lucide-react";
 import { buildApiUrl } from "./config/api";
 import { SensorHealthDashboard } from "./pages/DeviceHealthDashboard";
 import { SensorsPage } from "./pages/DevicesPage";
@@ -278,8 +278,8 @@ export default function App() {
   const formatViewLabel = useCallback((view: string) => {
     // Special mappings for views with different display names
     const viewLabelMap: Record<string, string> = {
-      'sensors': 'Devices',
-      'metrics': 'System',
+      'devices': 'Devices',
+      'system': 'System',
       'endpoints': 'Endpoints',
       'mqtt': 'MQTT',
       'jobs': 'Jobs',
@@ -1018,25 +1018,84 @@ export default function App() {
 
       {!isKioskMode && (
         <div className="bg-card border-b border-border px-6 py-2 text-sm">
-          <div className="flex items-center gap-2 text-muted-foreground">
-            {breadcrumbs.map((crumb, index) => (
-              <div key={`${crumb.label}-${index}`} className="flex items-center gap-2">
-                {crumb.onClick ? (
-                  <button
-                    type="button"
-                    onClick={crumb.onClick}
-                    className="hover:text-foreground transition-colors"
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              {breadcrumbs.map((crumb, index) => (
+                <div key={`${crumb.label}-${index}`} className="flex items-center gap-2">
+                  {crumb.onClick ? (
+                    <button
+                      type="button"
+                      onClick={crumb.onClick}
+                      className="hover:text-foreground transition-colors"
+                    >
+                      {crumb.label}
+                    </button>
+                  ) : (
+                    <span className="text-foreground">{crumb.label}</span>
+                  )}
+                  {index < breadcrumbs.length - 1 && (
+                    <span className="text-muted-foreground">/</span>
+                  )}
+                </div>
+              ))}
+            </div>
+            {!isGlobalView && (
+              <div className="flex items-center gap-2 shrink-0">
+                {hasUnsavedChanges && (
+                  <Button
+                    onClick={handleSaveDraft}
+                    size="sm"
+                    variant="outline"
+                    className="border-yellow-300 bg-yellow-50 text-yellow-700 hover:bg-yellow-100"
                   >
-                    {crumb.label}
-                  </button>
-                ) : (
-                  <span className="text-foreground">{crumb.label}</span>
+                    Save Draft
+                  </Button>
                 )}
-                {index < breadcrumbs.length - 1 && (
-                  <span className="text-muted-foreground">/</span>
+                <Button
+                  onClick={handleDeploy}
+                  size="sm"
+                  disabled={!needsDeployment}
+                  variant="ghost"
+                  style={needsDeployment ? {
+                    backgroundColor: '#d97706',
+                    color: 'white',
+                    fontWeight: 500
+                  } : {
+                    backgroundColor: '#9ca3af',
+                    color: 'white',
+                    cursor: 'not-allowed'
+                  }}
+                  className="hover:opacity-90"
+                >
+                  Deploy
+                </Button>
+                {needsDeployment && (
+                  <Button
+                    onClick={handleCancelDeploy}
+                    size="sm"
+                    variant="outline"
+                    className="border-red-300 hover:bg-red-50 text-red-600"
+                  >
+                    {hasUnsavedChanges && !deviceState?.targetState?.needsDeployment ? 'Discard' : 'Cancel'}
+                  </Button>
+                )}
+                {devicesWithPendingChanges.length > 1 && (
+                  <Button
+                    onClick={handleDeployAll}
+                    size="sm"
+                    variant="ghost"
+                    style={{
+                      backgroundColor: '#ea580c',
+                      color: 'white',
+                      fontWeight: 600
+                    }}
+                    className="hover:opacity-90"
+                  >
+                    Deploy All ({devicesWithPendingChanges.length})
+                  </Button>
                 )}
               </div>
-            ))}
+            )}
           </div>
         </div>
       )}
@@ -1240,59 +1299,13 @@ export default function App() {
             </Button>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              {hasUnsavedChanges && (
-                <Button
-                  onClick={handleSaveDraft}
-                  size="sm"
-                  variant="outline"
-                  className="border-yellow-300 bg-yellow-50 text-yellow-700 hover:bg-yellow-100"
-                >
-                  Save Draft
-                </Button>
-              )}
               <Button
-                onClick={handleDeploy}
+                onClick={handleAddDevice}
                 size="sm"
-                disabled={!needsDeployment}
-                variant="ghost"
-                style={needsDeployment ? {
-                  backgroundColor: '#d97706',
-                  color: 'white',
-                  fontWeight: 500
-                } : {
-                  backgroundColor: '#9ca3af',
-                  color: 'white',
-                  cursor: 'not-allowed'
-                }}
-                className="hover:opacity-90"
               >
-                Deploy
+                <Plus className="w-4 h-4 mr-1" />
+                Add agent
               </Button>
-              {needsDeployment && (
-                <Button
-                  onClick={handleCancelDeploy}
-                  size="sm"
-                  variant="outline"
-                  className="border-red-300 hover:bg-red-50 text-red-600"
-                >
-                  {hasUnsavedChanges && !deviceState?.targetState?.needsDeployment ? 'Discard' : 'Cancel'}
-                </Button>
-              )}
-              {devicesWithPendingChanges.length > 1 && (
-                <Button
-                  onClick={handleDeployAll}
-                  size="sm"
-                  variant="ghost"
-                  style={{
-                    backgroundColor: '#ea580c',
-                    color: 'white',
-                    fontWeight: 600
-                  }}
-                  className="hover:opacity-90"
-                >
-                  Deploy All ({devicesWithPendingChanges.length})
-                </Button>
-              )}
             </div>
             {/* <Button
               variant={currentView === 'tags' ? 'default' : 'outline'}

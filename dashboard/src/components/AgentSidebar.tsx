@@ -371,15 +371,6 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
   return (
     <TooltipProvider>
       <div className="w-full lg:w-80 lg:border-r border-border bg-card h-full flex flex-col overflow-hidden">
-        <div className="p-6 border-b border-border flex-shrink-0">
-        <div className="flex items-start justify-end mb-2">
-          <Button size="sm" onClick={onAddDevice}>
-            <Plus className="w-4 h-4 mr-1" />
-            Add agent
-          </Button>
-        </div>
-      </div>
-
       {/* Fleet Filter */}
       {fleets.length > 0 && (
         <div className="px-4 py-3 border-b border-border flex-shrink-0">
