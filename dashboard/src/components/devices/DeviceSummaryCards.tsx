@@ -4,13 +4,14 @@
  */
 
 import React from 'react';
-import { Activity, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { Activity, CheckCircle, XCircle, AlertTriangle, Clock } from 'lucide-react';
 import { MetricCard } from '@/components/ui/metric-card';
 
 interface SensorSummary {
   total: number;
   online: number;
   offline: number;
+  pending: number;
   errors: number;
 }
 
@@ -20,34 +21,51 @@ interface SensorSummaryCardsProps {
 
 export const SensorSummaryCards: React.FC<SensorSummaryCardsProps> = ({ summary }) => {
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-      <MetricCard
-        label="Total Devices"
-        value={summary.total}
-        icon={Activity}
-        iconColor="blue"
-      />
+    <div className="flex flex-row gap-4 w-full overflow-x-auto">
+      <div className="flex-1 min-w-[200px]">
+        <MetricCard
+          label="Total Devices"
+          value={summary.total}
+          icon={Activity}
+          iconColor="blue"
+        />
+      </div>
       
-      <MetricCard
-        label="Online"
-        value={summary.online}
-        icon={CheckCircle}
-        iconColor="green"
-      />
+      <div className="flex-1 min-w-[200px]">
+        <MetricCard
+          label="Online"
+          value={summary.online}
+          icon={CheckCircle}
+          iconColor="green"
+        />
+      </div>
       
-      <MetricCard
-        label="Offline"
-        value={summary.offline}
-        icon={XCircle}
-        iconColor="red"
-      />
+      <div className="flex-1 min-w-[200px]">
+        <MetricCard
+          label="Offline"
+          value={summary.offline}
+          icon={XCircle}
+          iconColor="red"
+        />
+      </div>
       
-      <MetricCard
-        label="Errors"
-        value={summary.errors}
-        icon={AlertTriangle}
-        iconColor="orange"
-      />
+      <div className="flex-1 min-w-[200px]">
+        <MetricCard
+          label="Pending"
+          value={summary.pending}
+          icon={Clock}
+          iconColor="gray"
+        />
+      </div>
+      
+      <div className="flex-1 min-w-[200px]">
+        <MetricCard
+          label="Errors"
+          value={summary.errors}
+          icon={AlertTriangle}
+          iconColor="orange"
+        />
+      </div>
     </div>
   );
 };

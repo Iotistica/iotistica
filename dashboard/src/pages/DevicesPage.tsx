@@ -885,7 +885,8 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             summary={{
               total: sensors.length,
               online: sensors.filter(s => s.state === 'CONNECTED' && s.healthy).length,
-              offline: sensors.filter(s => s.state === 'DISCONNECTED' || s.state === 'PENDING').length,
+              offline: sensors.filter(s => s.state === 'DISCONNECTED').length,
+              pending: sensors.filter(s => s.state === 'PENDING').length,
               errors: sensors.filter(s => s.lastError && s.state !== 'PENDING').length,
             }}
           />
