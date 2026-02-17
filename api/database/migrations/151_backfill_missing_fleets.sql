@@ -59,7 +59,7 @@ SELECT DISTINCT
     ELSE INITCAP(REPLACE(d.fleet_id, '-', ' '))
   END as fleet_name,
   -- Default customer for single-tenant deployments
-  '00000000-0000-0000-0000-000000000001' as customer_id,
+  '00000000-0000-0000-0000-000000000001'::uuid as customer_id,
   -- Determine fleet type from device types
   CASE 
     WHEN bool_and(d.device_type = 'virtual') THEN 'virtual'
@@ -85,6 +85,7 @@ ON CONFLICT (fleet_id) DO NOTHING;
 DO $$
 DECLARE
   created_count INTEGER;
+  rec RECORD;
 BEGIN
   -- Count fleets created by this migration
   SELECT COUNT(*) INTO created_count

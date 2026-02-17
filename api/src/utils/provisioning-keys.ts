@@ -13,7 +13,7 @@ const BCRYPT_ROUNDS = 10;
 export interface ProvisioningKey {
   id: string;
   key_hash: string;
-  fleet_id: string;
+  fleet_uuid: string; // UUID reference to fleets table
   description?: string;
   max_devices: number;
   devices_provisioned: number;
@@ -84,7 +84,7 @@ export async function validateProvisioningKey(
         severity: AuditSeverity.WARNING,
         details: {
           keyId: record.id,
-          fleetId: record.fleet_id,
+          fleetUuid: record.fleet_uuid,
           limit: record.max_devices,
           provisioned: record.devices_provisioned
         }
@@ -104,7 +104,7 @@ export async function validateProvisioningKey(
         severity: AuditSeverity.WARNING,
         details: {
           keyId: record.id,
-          fleetId: record.fleet_id,
+          fleetUuid: record.fleet_uuid,
           expiredAt: record.expires_at
         }
       });
@@ -160,7 +160,7 @@ export async function incrementProvisioningKeyUsage(keyId: string): Promise<void
  * Create a new provisioning key
  */
 export async function createProvisioningKey(
-  fleetId: string,
+  fleetUuid: string,
   maxDevices: number = 100,
   expiresInDays: number = 365,
   description?: string,
@@ -175,10 +175,10 @@ export async function createProvisioningKey(
   expiresAt.setDate(expiresAt.getDate() + expiresInDays);
 
   const result = await query<{ id: string }>(
-    `INSERT INTO provisioning_keys (key_hash, key_hash_fast, fleet_id, description, max_devices, expires_at, created_by)
+    `INSERT INTO provisioning_keys (key_hash, key_hash_fast, fleet_uuid, description, max_devices, expires_at, created_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING id`,
-    [keyHash, keyHashFast, fleetId, description, maxDevices, expiresAt, createdBy]
+    [keyHash, keyHashFast, fleetUuid, description, maxDevices, expiresAt, createdBy]
   );
 
   const keyId = result.rows[0].id;
@@ -189,7 +189,7 @@ export async function createProvisioningKey(
     severity: AuditSeverity.INFO,
     details: {
       keyId,
-      fleetId,
+      fleetUuid,
       maxDevices,
       expiresAt: expiresAt.toISOString()
     }
@@ -219,12 +219,12 @@ export async function revokeProvisioningKey(keyId: string, reason?: string): Pro
 /**
  * List all provisioning keys for a fleet
  */
-export async function listProvisioningKeys(fleetId: string): Promise<ProvisioningKey[]> {
+export async function listProvisioningKeys(fleetUuid: string): Promise<ProvisioningKey[]> {
   const result = await query<ProvisioningKey>(
     `SELECT * FROM provisioning_keys 
-     WHERE fleet_id = $1 
+     WHERE fleet_uuid = $1 
      ORDER BY created_at DESC`,
-    [fleetId]
+    [fleetUuid]
   );
 
   return result.rows;

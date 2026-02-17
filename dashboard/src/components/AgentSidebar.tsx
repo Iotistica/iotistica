@@ -37,7 +37,7 @@ export interface Device {
   cpu: number;
   memory: number;
   disk: number;
-  fleet_id?: string; // Optional fleet assignment
+  fleet_uuid?: string; // Optional fleet assignment (UUID)
 }
 
 interface DeviceSidebarProps {
@@ -191,7 +191,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
   });
   const [statusFilters, setStatusFilters] = useState<Device['status'][]>([]);
   const [typeFilters, setTypeFilters] = useState<Device['type'][]>([]);
-  const [fleets, setFleets] = useState<Array<{fleet_id: string; fleet_name: string}>>([]);
+  const [fleets, setFleets] = useState<Array<{fleet_uuid: string; fleet_name: string; fleet_id?: string}>>([]);
   const [filtersInitialized, setFiltersInitialized] = useState(false);
 
   // Load available fleets
@@ -335,12 +335,12 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
                          device.ipAddress.includes(searchQuery);
     const matchesStatus = statusFilters.length === 0 || statusFilters.includes(device.status);
     const matchesType = typeFilters.length === 0 || typeFilters.includes(device.type);
-    const matchesFleet = !selectedFleetId || (device as any).fleet_id === selectedFleetId;
+    const matchesFleet = !selectedFleetId || (device as any).fleet_uuid === selectedFleetId;
     
     if (selectedFleetId) {
       console.log('[FLEET FILTER]', {
         deviceName: device.name,
-        deviceFleetId: (device as any).fleet_id,
+        deviceFleetUuid: (device as any).fleet_uuid,
         selectedFleetId,
         matches: matchesFleet
       });
@@ -380,14 +380,14 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
               value={selectedFleetId}
               onChange={(e) => {
                 console.log('[FLEET DEBUG] Fleet selected:', e.target.value);
-                console.log('[FLEET DEBUG] Available devices:', devices.map(d => ({ name: d.name, fleet_id: (d as any).fleet_id })));
+                console.log('[FLEET DEBUG] Available devices:', devices.map(d => ({ name: d.name, fleet_uuid: (d as any).fleet_uuid })));
                 setSelectedFleetId(e.target.value);
               }}
               className="w-full h-9 pl-10 pr-3 text-sm border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
             >
               <option value="">All Fleets</option>
               {fleets.map((fleet) => (
-                <option key={fleet.fleet_id} value={fleet.fleet_id}>
+                <option key={fleet.fleet_uuid || fleet.fleet_id} value={fleet.fleet_uuid || fleet.fleet_id}>
                   {fleet.fleet_name}
                 </option>
               ))}

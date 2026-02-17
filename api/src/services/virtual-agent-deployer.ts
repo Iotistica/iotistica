@@ -19,7 +19,7 @@ export interface VirtualAgentConfig {
   deviceUuid: string;
   deviceName: string;
   provisioningKey: string; // Server-generated, injected to pod
-  fleetId?: string | null; // Optional, null for unassigned devices
+  fleetUuid?: string | null; // Optional, null for unassigned devices
   namespace?: string; // defaults to 'virtual-agents'
   resourceLimits?: {
     cpu?: string; // default: '1000m'
@@ -176,19 +176,19 @@ export class VirtualAgentDeployer {
     const name = this.sanitizeDnsName(config.deviceName); // Use device name instead of UUID
     const secretName = `${name}-prov-key`;
 
-    // Query fleet configuration if fleetId provided
+    // Query fleet configuration if fleetUuid provided
     // This ensures pod resources match the fleet quota
     let fleetConfig = null;
-    if (config.fleetId) {
+    if (config.fleetUuid) {
       const { query } = await import('../db/connection');
       const result = await query(
-        'SELECT agent_count, devices_per_agent, k8s_namespace FROM fleets WHERE fleet_id = $1',
-        [config.fleetId]
+        'SELECT agent_count, devices_per_agent, k8s_namespace FROM fleets WHERE fleet_uuid = $1',
+        [config.fleetUuid]
       );
       if (result.rows.length > 0) {
         fleetConfig = result.rows[0];
         logger.info('Fleet configuration loaded', {
-          fleetId: config.fleetId,
+          fleetUuid: config.fleetUuid,
           agentCount: fleetConfig.agent_count,
           devicesPerAgent: fleetConfig.devices_per_agent
         });
@@ -420,7 +420,7 @@ export class VirtualAgentDeployer {
           'app.kubernetes.io/name': 'virtual-agent',
           'app.kubernetes.io/managed-by': 'iotistic-api',
           'iotistica.com/device-uuid': config.deviceUuid,
-          'iotistica.com/fleet-id': config.fleetId || 'unassigned'
+          'iotistica.com/fleet-uuid': config.fleetUuid || 'unassigned'
         }
       },
       spec: {
@@ -463,7 +463,7 @@ export class VirtualAgentDeployer {
                 },
                 env: [
                   { name: 'DEVICE_UUID', value: config.deviceUuid },
-                  { name: 'FLEET_ID', value: config.fleetId || 'unassigned' },
+                  { name: 'FLEET_UUID', value: config.fleetUuid || 'unassigned' },
                   { name: 'REQUIRE_PROVISIONING', value: 'true' },
                   { name: 'IS_VIRTUAL_AGENT', value: 'true' },
                   { name: 'CLOUD_API_ENDPOINT', value: this.cloudApiUrl },
@@ -1079,7 +1079,7 @@ export class VirtualAgentDeployer {
    * Create fleet namespace with ResourceQuota
    */
   async createFleetNamespace(params: {
-    fleet_id: string;
+    fleet_uuid: string;
     fleet_name: string;
     customer_id: string;
     agent_count: number;
@@ -1090,7 +1090,7 @@ export class VirtualAgentDeployer {
       throw new Error('Kubernetes is not configured or unavailable. Virtual fleet namespaces require K8s cluster access.');
     }
 
-    const namespace = `fleet-${params.fleet_id.replace('fleet-', '')}`;
+    const namespace = `fleet-${params.fleet_uuid.substring(0, 8)}`; // Use first 8 chars of UUID for namespace
     
     try {
       // Create namespace
@@ -1099,7 +1099,7 @@ export class VirtualAgentDeployer {
           name: namespace,
           labels: {
             'app.kubernetes.io/managed-by': 'iotistic-api',
-            'iotistica.com/fleet-id': params.fleet_id,
+            'iotistica.com/fleet-uuid': params.fleet_uuid,
             'iotistica.com/fleet-name': params.fleet_name,
             'iotistica.com/fleet-type': 'virtual',
             'iotistica.com/customer-id': params.customer_id
@@ -1112,7 +1112,7 @@ export class VirtualAgentDeployer {
         }
       });
       
-      logger.info('Fleet namespace created', { namespace, fleet_id: params.fleet_id });
+      logger.info('Fleet namespace created', { namespace, fleet_uuid: params.fleet_uuid });
       
       // Calculate resource quotas based on agent count
       // Each agent needs: 256Mi memory, 0.25 CPU
@@ -1124,7 +1124,7 @@ export class VirtualAgentDeployer {
         metadata: {
           name: 'fleet-quota',
           labels: {
-            'iotistica.com/fleet-id': params.fleet_id
+            'iotistica.com/fleet-uuid': params.fleet_uuid
           }
         },
         spec: {
@@ -1140,7 +1140,7 @@ export class VirtualAgentDeployer {
       
       logger.info('Fleet ResourceQuota created', {
         namespace,
-        fleet_id: params.fleet_id,
+        fleet_uuid: params.fleet_uuid,
         quotas: { cpu: totalCpu, memory: totalMemory, pods: params.agent_count }
       });
       
@@ -1154,7 +1154,7 @@ export class VirtualAgentDeployer {
           errorMessage.includes('ExecAuth') ||
           errorMessage.includes('getCredential')) {
         logger.error('Failed to create fleet namespace - Azure AKS exec auth failed', {
-          fleet_id: params.fleet_id,
+          fleet_uuid: params.fleet_uuid,
           namespace,
           error: errorMessage,
           hint: 'Azure AKS exec authentication requires Azure CLI in container or service account tokens'
@@ -1167,7 +1167,7 @@ export class VirtualAgentDeployer {
       }
       
       logger.error('Failed to create fleet namespace', {
-        fleet_id: params.fleet_id,
+        fleet_uuid: params.fleet_uuid,
         namespace,
         error: errorMessage
       });

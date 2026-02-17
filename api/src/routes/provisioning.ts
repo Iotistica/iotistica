@@ -180,8 +180,24 @@ router.post('/provisioning-keys', async (req, res) => {
 
     logger.info(`🔑 Creating provisioning key for fleet: ${fleetId}`);
 
+    // Resolve fleet UUID from identifier (could be UUID or legacy fleet_id)
+    const fleetResult = await query(
+      'SELECT fleet_uuid FROM fleets WHERE fleet_uuid::text = $1 OR fleet_id = $1',
+      [fleetId]
+    );
+    
+    if (fleetResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Fleet not found',
+        message: `Fleet with identifier '${fleetId}' does not exist. Create the fleet first.`
+      });
+    }
+    
+    const fleetUuid = fleetResult.rows[0].fleet_uuid;
+    logger.info(`Resolved fleet UUID: ${fleetUuid}`);
+
     const { id, key } = await createProvisioningKey(
-      fleetId,
+      fleetUuid,
       maxDevices,
       expiresInDays,
       description,
@@ -230,12 +246,26 @@ router.get('/provisioning-keys', async (req, res) => {
 
     logger.info(`Listing provisioning keys for fleet: ${fleetId}`);
 
-    const keys = await listProvisioningKeys(fleetId);
+    // Resolve fleet UUID from identifier (could be UUID or legacy fleet_id)
+    const fleetResult = await query(
+      'SELECT fleet_uuid FROM fleets WHERE fleet_uuid::text = $1 OR fleet_id = $1',
+      [fleetId]
+    );
+    
+    if (fleetResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Fleet not found',
+        message: `Fleet with identifier '${fleetId}' does not exist.`
+      });
+    }
+    
+    const fleetUuid = fleetResult.rows[0].fleet_uuid;
+
+    const keys = await listProvisioningKeys(fleetUuid);
 
     // Remove sensitive data before sending
     const sanitizedKeys = keys.map(k => ({
       id: k.id,
-      fleet_id: k.fleet_id,
       description: k.description,
       max_devices: k.max_devices,
       devices_provisioned: k.devices_provisioned,
@@ -248,7 +278,6 @@ router.get('/provisioning-keys', async (req, res) => {
     }));
 
     res.json({
-      fleet_id: fleetId,
       count: sanitizedKeys.length,
       keys: sanitizedKeys
     });
@@ -370,9 +399,26 @@ router.post('/provisioning-keys/generate', async (req, res) => {
       }
     }
 
+    // Resolve fleet UUID from identifier (could be UUID or legacy fleet_id)
+    const fleetResult = await query(
+      'SELECT fleet_uuid, fleet_name FROM fleets WHERE fleet_uuid::text = $1 OR fleet_id = $1',
+      [fleetId]
+    );
+    
+    if (fleetResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Fleet not found',
+        message: `Fleet with identifier '${fleetId}' does not exist. Create the fleet first.`
+      });
+    }
+    
+    const fleetUuid = fleetResult.rows[0].fleet_uuid;
+    const fleetName = fleetResult.rows[0].fleet_name;
+    logger.info(`Resolved fleet for virtual agent: ${fleetName} (${fleetUuid})`);
+
     // Create new provisioning key (1 device, 30 days expiry)
     const { id, key } = await createProvisioningKey(
-      fleetId,
+      fleetUuid,
       1, // maxDevices - single device
       30, // expiresInDays - 30 days
       'Dashboard-generated provisioning key',
@@ -556,7 +602,7 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
 
   try {
     // Extract request data
-    const { uuid, deviceName, deviceType, deviceApiKey, devicePublicKey, fleet_id, macAddress, osVersion, agentVersion } = req.body;
+    const { uuid, deviceName, deviceType, deviceApiKey, devicePublicKey, macAddress, osVersion, agentVersion } = req.body;
     const provisioningApiKey = req.headers.authorization?.replace('Bearer ', '');
 
     // Validate required fields
@@ -632,7 +678,6 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
         deviceApiKey,
         devicePublicKey,
         provisioningApiKey,
-        fleet_id,
         macAddress,
         osVersion,
         agentVersion

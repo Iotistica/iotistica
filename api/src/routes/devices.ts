@@ -291,7 +291,7 @@ router.get('/devices', jwtAuth, async (req, res) => {
           current_apps_count: currentState ? Object.keys(currentState.apps || {}).length : 0,
           last_reported: currentState?.reported_at,
           created_at: device.created_at,
-          fleet_id: device.fleet_id || null,
+          fleet_uuid: device.fleet_uuid || null,
           metrics: {
             cpu: device.cpu_usage,
             memory: device.memory_usage,
@@ -409,7 +409,7 @@ router.get('/devices/:uuid', async (req, res) => {
  */
 router.post('/devices', jwtAuth, async (req, res) => {
   try {
-    const { deviceName, deviceType, ipAddress, macAddress, fleet_id, namespace, tags, metadata, endpoints } = req.body;
+    const { deviceName, deviceType, ipAddress, macAddress, namespace, tags, metadata, endpoints } = req.body;
 
     if (!deviceName) {
       return res.status(400).json({
@@ -430,40 +430,13 @@ router.post('/devices', jwtAuth, async (req, res) => {
 
     // ===== VIRTUAL AGENT PATH =====
     if (isVirtual) {
-      // Determine namespace: use fleet namespace if fleet_id provided, otherwise use provided namespace or default
+      // Determine namespace: use provided namespace or default
       let targetNamespace = namespace || process.env.VIRTUAL_AGENT_NAMESPACE || 'virtual-agents';
-      
-      if (fleet_id) {
-        // Fetch fleet's k8s_namespace from database
-        const fleetResult = await query(
-          'SELECT k8s_namespace FROM fleets WHERE fleet_id = $1',
-          [fleet_id]
-        );
-        
-        if (fleetResult.rows.length > 0 && fleetResult.rows[0].k8s_namespace) {
-          targetNamespace = fleetResult.rows[0].k8s_namespace;
-          logger.info('Using fleet namespace for virtual agent deployment', {
-            fleet_id,
-            namespace: targetNamespace
-          });
-        } else if (fleetResult.rows.length === 0) {
-          return res.status(400).json({
-            error: 'Invalid fleet_id',
-            message: `Fleet ${fleet_id} not found`
-          });
-        } else {
-          logger.warn('Fleet has no k8s_namespace, using default', {
-            fleet_id,
-            defaultNamespace: targetNamespace
-          });
-        }
-      }
       
       logger.info('Creating virtual agent via unified endpoint', {
         deviceUuid: deviceUuid.substring(0, 8) + '...',
         deviceName: uniqueDeviceName,
         originalName: deviceName,
-        fleet_id,
         namespace: targetNamespace
       });
 
@@ -479,7 +452,6 @@ router.post('/devices', jwtAuth, async (req, res) => {
           deviceType: 'virtual',
           deviceApiKey,
           provisioningApiKey: 'virtual-agent-auto-generated', // Will be server-generated
-          fleet_id: fleet_id || null,
           namespace: targetNamespace,
           metadata, // Pass OPC UA profile metadata
           endpoints // Pass protocol endpoints
@@ -508,7 +480,6 @@ router.post('/devices', jwtAuth, async (req, res) => {
         deviceType: 'virtual',
         deploymentStatus: 'deploying',
         namespace: targetNamespace,
-        fleet_id: fleet_id || null,
         message: 'Virtual agent deployment initiated'
       });
     }
@@ -522,7 +493,7 @@ router.post('/devices', jwtAuth, async (req, res) => {
         device_type, 
         ip_address, 
         mac_address,
-        fleet_id,
+        fleet_uuid,
         is_online, 
         is_active,
         provisioning_state,
@@ -536,7 +507,7 @@ router.post('/devices', jwtAuth, async (req, res) => {
         type,
         ipAddress || null,
         macAddress || null,
-        fleet_id || null,
+        null,  // fleet_uuid - not assigned yet
         false, // Not online until agent connects
         false,  // Not active until agent connects with provisioning key
         'pending' // Waiting for agent to provision
@@ -1813,16 +1784,16 @@ router.post('/devices/virtual', jwtAuth, async (req, res) => {
     let targetNamespace = namespace || process.env.VIRTUAL_AGENT_NAMESPACE || 'virtual-agents';
     
     if (fleetId) {
-      // Fetch fleet's k8s_namespace from database
+      // Fetch fleet's k8s_namespace from database using fleet_uuid
       const fleetResult = await query(
-        'SELECT k8s_namespace FROM fleets WHERE fleet_id = $1',
+        'SELECT k8s_namespace FROM fleets WHERE fleet_uuid = $1',
         [fleetId]
       );
       
       if (fleetResult.rows.length > 0 && fleetResult.rows[0].k8s_namespace) {
         targetNamespace = fleetResult.rows[0].k8s_namespace;
         logger.info('Using fleet namespace for virtual agent deployment', {
-          fleet_id: fleetId,
+          fleetId,
           namespace: targetNamespace
         });
       } else if (fleetResult.rows.length === 0) {
@@ -1832,7 +1803,7 @@ router.post('/devices/virtual', jwtAuth, async (req, res) => {
         });
       } else {
         logger.warn('Fleet has no k8s_namespace, using default', {
-          fleet_id: fleetId,
+          fleetId,
           defaultNamespace: targetNamespace
         });
       }
@@ -1853,7 +1824,6 @@ router.post('/devices/virtual', jwtAuth, async (req, res) => {
         deviceType: 'virtual',
         deviceApiKey,
         provisioningApiKey: 'virtual-agent-auto-generated', // Will be server-generated
-        fleet_id: fleetId || null,
         namespace: targetNamespace
       },
       req.ip,
@@ -1877,8 +1847,7 @@ router.post('/devices/virtual', jwtAuth, async (req, res) => {
       deviceUuid,
       deviceName,
       deploymentStatus: 'deploying',
-      namespace: targetNamespace,
-      fleetId: fleetId || null
+      namespace: targetNamespace
     });
 
   } catch (error: any) {

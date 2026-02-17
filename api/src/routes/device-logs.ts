@@ -28,7 +28,7 @@ import {
 import { logger } from '../utils/logger';
 import deviceAuth, { deviceAuthFromBody } from '../middleware/device-auth';
 import { redisLogQueue } from '../services/redis-log-queue';
-import { redisSensorQueue } from '../services/redis-sensor-queue';
+import { redisSensorQueue } from '../services/redis-device-queue';
 
 
 export const router = express.Router();

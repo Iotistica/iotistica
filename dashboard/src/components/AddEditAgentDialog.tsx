@@ -85,7 +85,7 @@ export function AddEditDeviceDialog({
     disk: 0,
   });
   const { selectedFleetId: contextFleetId } = useFleet();
-  const [fleetOptions, setFleetOptions] = useState<Array<{ fleet_id: string; fleet_name: string }>>([]);
+  const [fleetOptions, setFleetOptions] = useState<Array<{ fleet_uuid: string; fleet_name: string }>>([]);
   const [selectedFleetId, setSelectedFleetId] = useState<string>(UNASSIGNED_FLEET_ID);
   const [locations, setLocations] = useState<string[]>([]);
   const [locationOpen, setLocationOpen] = useState(false);
@@ -205,7 +205,7 @@ export function AddEditDeviceDialog({
         memory: device.memory,
         disk: device.disk,
       });
-      setSelectedFleetId(device.fleet_id || UNASSIGNED_FLEET_ID);
+      setSelectedFleetId(device.fleet_uuid || UNASSIGNED_FLEET_ID);
       
       // Fetch tags from API for this device
       const fetchDeviceTags = async () => {
@@ -301,7 +301,7 @@ export function AddEditDeviceDialog({
       cpu: formData.cpu,
       memory: formData.memory,
       disk: formData.disk,
-      fleet_id: fleetIdForSave,
+      fleet_uuid: fleetIdForSave,
       tags: tags,
       ...(formData.type === 'standalone' && provisioningKey ? { provisioningKey } : {}),
     };
@@ -472,8 +472,8 @@ export function AddEditDeviceDialog({
                 <Label htmlFor="fleet-name">Fleet Name</Label>
                 <Input
                   id="fleet-name"
-                  value={device?.fleet_id 
-                    ? fleetOptions.find(f => f.fleet_id === device.fleet_id)?.fleet_name || "Loading..." 
+                  value={device?.fleet_uuid 
+                    ? fleetOptions.find(f => f.fleet_uuid === device.fleet_uuid)?.fleet_name || "Loading..." 
                     : "Unassigned"}
                   readOnly
                   disabled
@@ -527,10 +527,10 @@ export function AddEditDeviceDialog({
                     </div>
                   </SelectItem>
                   {fleetOptions.map((fleet) => (
-                    <SelectItem key={fleet.fleet_id} value={fleet.fleet_id}>
+                    <SelectItem key={fleet.fleet_uuid} value={fleet.fleet_uuid}>
                       <div className="flex flex-col">
                         <span>{fleet.fleet_name}</span>
-                        <span className="text-xs text-muted-foreground">{fleet.fleet_id}</span>
+                        <span className="text-xs text-muted-foreground">{fleet.fleet_uuid}</span>
                       </div>
                     </SelectItem>
                   ))}

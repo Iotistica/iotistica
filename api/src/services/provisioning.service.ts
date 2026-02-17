@@ -54,7 +54,6 @@ export interface RegistrationRequest {
   deviceApiKey: string;
   devicePublicKey?: string; // Ed25519/P-256 public key for PoP
   provisioningApiKey: string;
-  fleet_id?: string; // Fleet ID (e.g., "fleet-abc123" or null)
   macAddress?: string;
   osVersion?: string;
   agentVersion?: string;
@@ -75,7 +74,7 @@ export interface ProvisioningResponse {
   deviceName: string;
   deviceType: string;
   applicationId?: number;
-  fleetId: string;
+  fleetUuid?: string | null; // Changed from fleetId to fleetUuid (UUID)
   challenge?: string; // PoP challenge (if public key provided)
   createdAt: string;
   mqtt: {
@@ -141,11 +140,38 @@ export class ProvisioningService {
         deviceType
       });
 
-      // 1. Generate provisioning key server-side
-      // Note: Provisioning key requires a fleet_id (NOT NULL), but device can have null fleet_id
-      const provKeyFleetId = data.fleet_id || 'unassigned';
+      // 1. Resolve or create virtual-agents fleet
+      const { v4: uuidv4 } = require('uuid');
+      let virtualFleetUuid: string;
+      
+      const virtualFleetCheck = await query(
+        `SELECT fleet_uuid FROM fleets WHERE fleet_name = $1`,
+        ['Virtual Agents']
+      );
+      
+      if (virtualFleetCheck.rows.length === 0) {
+        // Create virtual-agents fleet
+        virtualFleetUuid = uuidv4();
+        await query(
+          `INSERT INTO fleets (fleet_uuid, fleet_name, customer_id, fleet_type, description, status, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+          [
+            virtualFleetUuid,
+            'Virtual Agents',
+            '00000000-0000-0000-0000-000000000001',
+            'virtual',
+            'Auto-created fleet for virtual agents',
+            'active'
+          ]
+        );
+        logger.info('Created virtual-agents fleet', { fleet_uuid: virtualFleetUuid });
+      } else {
+        virtualFleetUuid = virtualFleetCheck.rows[0].fleet_uuid;
+      }
+      
+      // 2. Generate provisioning key server-side
       const provisioningKeyResult = await createProvisioningKey(
-        provKeyFleetId,
+        virtualFleetUuid,
         1, // max_devices: 1 (one-time use for this specific virtual agent)
         1, // expires_in_days: 1 (short-lived for security)
         `Auto-generated for virtual agent: ${deviceName}`,
@@ -158,45 +184,24 @@ export class ProvisioningService {
       logger.info('Provisioning key generated for virtual agent', {
         deviceUuid: uuid.substring(0, 8) + '...',
         provisioningKeyId,
-        provKeyFleetId,
-        deviceFleetId: data.fleet_id || null
+        fleetUuid: virtualFleetUuid
       });
 
       // 2. Hash device API key
       const hashedApiKey = await bcrypt.hash(deviceApiKey, 10);
 
-      // 3. Determine namespace: use fleet namespace if fleet_id provided, otherwise use provided namespace or default
+      // 3. Determine namespace: use fleet namespace if provided, otherwise use default
       let targetNamespace = (data as any).namespace || process.env.VIRTUAL_AGENT_NAMESPACE || 'virtual-agents';
       
-      if (data.fleet_id) {
-        // Fetch fleet's k8s_namespace from database
-        const fleetResult = await query(
-          'SELECT k8s_namespace FROM fleets WHERE fleet_id = $1',
-          [data.fleet_id]
-        );
-        
-        if (fleetResult.rows.length > 0 && fleetResult.rows[0].k8s_namespace) {
-          targetNamespace = fleetResult.rows[0].k8s_namespace;
-          logger.info('Using fleet namespace for virtual agent provisioning', {
-            fleet_id: data.fleet_id,
-            namespace: targetNamespace,
-            deviceUuid: uuid.substring(0, 8) + '...'
-          });
-        } else {
-          logger.warn('Fleet not found or has no k8s_namespace, using default', {
-            fleet_id: data.fleet_id,
-            defaultNamespace: targetNamespace,
-            deviceUuid: uuid.substring(0, 8) + '...'
-          });
-        }
-      }
+      // Note: Virtual agents don't require fleet assignment at creation time
+      // Fleet membership can be updated later via API
 
       // 4. Create device record (pending deployment)
       const deviceData: Partial<Device> = {
         device_name: deviceName,
         device_type: 'virtual',
         device_api_key_hash: hashedApiKey,
-        fleet_id: data.fleet_id || null, // Device can have null fleet (not assigned to any fleet)
+        fleet_uuid: null, // Virtual agents may not be assigned to fleet initially
         provisioned_by_key_id: provisioningKeyId,
         mac_address: macAddress || null,
         os_version: osVersion || null,
@@ -239,7 +244,7 @@ export class ProvisioningService {
         {
           device_name: deviceName,
           device_type: 'virtual',
-          fleet_id: device.fleet_id,
+          fleet_uuid: device.fleet_uuid,
           namespace: device.k8s_namespace,
           initiated_at: new Date().toISOString()
         },
@@ -258,7 +263,7 @@ export class ProvisioningService {
           deviceUuid: device.uuid,
           deviceName: device.device_name,
           provisioningKey: generatedProvisioningKey, // Plaintext, injected to K8s Secret
-          fleetId: device.fleet_id,
+          fleetUuid: device.fleet_uuid,
           namespace: device.k8s_namespace || undefined,
           metadata: (data as any).metadata, // OPC UA profile metadata
           endpoints: (data as any).endpoints // Protocol endpoints
@@ -339,7 +344,7 @@ export class ProvisioningService {
         details: {
           deviceName,
           deviceType: 'virtual',
-          fleetId: device.fleet_id,
+          fleetUuid: device.fleet_uuid,
           namespace: device.k8s_namespace,
           deploymentStatus: 'deploying'
         }
@@ -353,7 +358,7 @@ export class ProvisioningService {
         {
           device_name: deviceName,
           device_type: 'virtual',
-          fleet_id: device.fleet_id,
+          fleet_uuid: device.fleet_uuid,
           namespace: device.k8s_namespace,
           created_at: now.toISOString()
         }
@@ -365,7 +370,7 @@ export class ProvisioningService {
         uuid: device.uuid,
         deviceName: device.device_name,
         deviceType: device.device_type,
-        fleetId: device.fleet_id,
+        fleetUuid: device.fleet_uuid,
         createdAt: device.created_at.toISOString(),
         mqtt: {
           username: '',
@@ -527,62 +532,41 @@ export class ProvisioningService {
     }
 
     // Ensure fleet exists in fleets table before provisioning device
+    let fleetUuid: string | null = null;
     try {
+      if (!keyRecord.fleet_uuid) {
+        throw new Error('Provisioning key missing fleet_uuid - run migration 153');
+      }
+
       const fleetCheck = await query(
-        'SELECT fleet_id FROM fleets WHERE fleet_id = $1',
-        [keyRecord.fleet_id]
+        'SELECT fleet_uuid, fleet_name FROM fleets WHERE fleet_uuid = $1',
+        [keyRecord.fleet_uuid]
       );
 
       if (fleetCheck.rows.length === 0) {
-        // Fleet doesn't exist - auto-create it
-        logger.info('Auto-creating fleet for provisioning', {
-          fleet_id: keyRecord.fleet_id,
+        // Fleet doesn't exist - this should not happen after migration 153
+        logger.error('Provisioning key references non-existent fleet', {
           device_uuid: uuid.substring(0, 8) + '...',
-          device_type: deviceType
+          fleet_uuid: keyRecord.fleet_uuid,
+          provisioning_key_id: keyRecord.id
         });
-
-        const fleetName = keyRecord.fleet_id === 'default-fleet' 
-          ? 'Default Fleet'
-          : keyRecord.fleet_id.replace(/-/g, ' ').replace(/^fleet\s*/i, 'Fleet ');
-
-        await query(
-          `INSERT INTO fleets (
-            fleet_id, 
-            fleet_name, 
-            customer_id, 
-            fleet_type, 
-            description,
-            status,
-            created_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
-          ON CONFLICT (fleet_id) DO NOTHING`,
-          [
-            keyRecord.fleet_id,
-            fleetName,
-            '00000000-0000-0000-0000-000000000001', // Default customer for single-tenant
-            'physical', // Standalone devices are physical
-            `Auto-created fleet during device provisioning (key: ${keyRecord.id})`,
-            'active'
-          ]
-        );
-
-        logger.info('Fleet auto-created successfully', {
-          fleet_id: keyRecord.fleet_id,
-          fleet_name: fleetName
-        });
+        throw new Error(`Fleet ${keyRecord.fleet_uuid} not found - data integrity issue`);
       } else {
-        logger.debug('Fleet already exists', {
-          fleet_id: keyRecord.fleet_id,
+        // Fleet exists - use its UUID
+        fleetUuid = fleetCheck.rows[0].fleet_uuid;
+        logger.debug('Fleet validated for provisioning', {
+          fleet_uuid: fleetUuid,
+          fleet_name: fleetCheck.rows[0].fleet_name,
           device_uuid: uuid.substring(0, 8) + '...'
         });
       }
     } catch (fleetError) {
-      // Log but don't fail provisioning - fleet creation is non-critical for device functionality
-      logger.warn('Failed to auto-create fleet (non-fatal)', {
-        fleet_id: keyRecord.fleet_id,
+      // Fleet validation failed - this is a critical error
+      logger.error('Fleet validation failed during provisioning', {
         device_uuid: uuid.substring(0, 8) + '...',
         error: fleetError instanceof Error ? fleetError.message : String(fleetError)
       });
+      throw fleetError;
     }
 
     const [
@@ -600,7 +584,7 @@ export class ProvisioningService {
       device_name: deviceName,
       device_type: deviceType,
       device_api_key_hash: hashedApiKey,
-      fleet_id: keyRecord.fleet_id,
+      fleet_uuid: fleetUuid || undefined,
       provisioned_by_key_id: keyRecord.id,
       mac_address: macAddress || null,
       os_version: osVersion || null,
@@ -653,7 +637,7 @@ export class ProvisioningService {
       {
         device_name: deviceName,
         device_type: deviceType,
-        fleet_id: keyRecord.fleet_id,
+        fleet_uuid: fleetUuid,
         provisioned_at: now.toISOString(),
         ip_address: ipAddress,
         mac_address: macAddress,
@@ -672,7 +656,7 @@ export class ProvisioningService {
       details: {
         deviceName,
         macAddress,
-        fleetId: keyRecord.fleet_id,
+        fleetUuid: fleetUuid,
         mqttUsername: mqttCredentials.username
       }
     }).catch(err => logger.error('audit failed', err));
@@ -887,7 +871,7 @@ export class ProvisioningService {
     vpnCredentials?: { type: 'tailscale'; tailscale: any },
     challenge?: string
   ): Promise<ProvisioningResponse> {
-    const { uuid, deviceName, deviceType, fleet_id } = data;
+    const { uuid, deviceName, deviceType } = data;
 
     // Detect virtual agents FIRST (before checking broker config)
     const isVirtual = device.device_type === 'virtual';
@@ -983,8 +967,8 @@ export class ProvisioningService {
       uuid: device.uuid,
       deviceName,
       deviceType,
-      applicationId: undefined, // Deprecated - use fleetId instead
-      fleetId: provisioningKeyRecord.fleet_id,
+      applicationId: undefined, // Deprecated - use fleetUuid instead
+      fleetUuid: device.fleet_uuid, // Use the resolved UUID from device
       ...(challenge && { challenge }), // Include challenge if PoP enabled
       createdAt: device.created_at.toISOString(),
       mqtt: {

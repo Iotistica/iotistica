@@ -62,7 +62,7 @@ export function EditFleetDialog({ open, onOpenChange, fleet, onSuccess }: EditFl
       const token = localStorage.getItem('accessToken');
       const fleetIdentifier = fleet.fleet_uuid || fleet.fleet_id;
       const response = await fetch(buildApiUrl(`/api/v1/fleets/${fleetIdentifier}`), {
-        method: 'PUT',
+        method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'

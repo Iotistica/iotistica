@@ -139,8 +139,8 @@ export default function App() {
       const targetView = routeView && agentViews.includes(routeView) ? routeView : 'metrics';
       if (device) {
         const mappedFleetId = currentPath.fleetId
-          ? fleetIdByUuid[currentPath.fleetId] || device.fleet_id || ''
-          : device.fleet_id || '';
+          ? fleetIdByUuid[currentPath.fleetId] || device.fleet_uuid || ''
+          : device.fleet_uuid || '';
         setSelectedDeviceId(device.id);
         setSelectedFleetId(mappedFleetId);
         setCurrentView(targetView);
@@ -219,10 +219,10 @@ export default function App() {
 
   const handleAgentViewChange = useCallback((view: View) => {
     if (selectedDevice?.deviceUuid) {
-      const fleetUuid = selectedDevice.fleet_id
-        ? fleetUuidById[selectedDevice.fleet_id]
+      const fleetUuid = selectedDevice.fleet_uuid
+        ? selectedDevice.fleet_uuid
         : undefined;
-      navigateToAgent(selectedDevice.deviceUuid, fleetUuid || selectedDevice.fleet_id, view);
+      navigateToAgent(selectedDevice.deviceUuid, fleetUuid, view);
     }
   }, [fleetUuidById, navigateToAgent, selectedDevice]);
 
@@ -385,7 +385,7 @@ export default function App() {
         const data = await response.json();
         
         console.log('Devices API response:', data);
-        console.log('[FLEET DEBUG] Raw devices with fleet_id:', data.devices.map((d: any) => ({ uuid: d.uuid, name: d.device_name, fleet_id: d.fleet_id })));
+        console.log('[FLEET DEBUG] Raw devices with fleet_uuid:', data.devices.map((d: any) => ({ uuid: d.uuid, name: d.device_name, fleet_uuid: d.fleet_uuid })));
         
         // Transform API response to match Device interface
         // CRITICAL: Use stable UUID as ID instead of index to prevent React remounts
@@ -408,7 +408,7 @@ export default function App() {
           disk: apiDevice.storage_usage && apiDevice.storage_total 
             ? Math.round((parseFloat(apiDevice.storage_usage) / parseFloat(apiDevice.storage_total) * 100)) 
             : 0,
-          fleet_id: apiDevice.fleet_id || undefined,
+          fleet_uuid: apiDevice.fleet_uuid || undefined, // API returns fleet_uuid
         }));
 
         // Only update state if devices actually changed (use callback for React optimization)
@@ -533,10 +533,10 @@ export default function App() {
       if (device) {
         setSelectedDeviceId(device.id);
         setCurrentView('tags');
-        const fleetUuid = device.fleet_id
-          ? fleetUuidById[device.fleet_id]
+        const fleetUuid = device.fleet_uuid
+          ? device.fleet_uuid
           : undefined;
-        navigateToAgent(device.deviceUuid, fleetUuid || device.fleet_id, 'tags');
+        navigateToAgent(device.deviceUuid, fleetUuid, 'tags');
       }
     };
 
@@ -619,7 +619,7 @@ export default function App() {
             ipAddress: deviceData.ipAddress,
             macAddress: deviceData.macAddress,
             location: (deviceData as any).location,
-            fleet_id: deviceData.fleet_id || null
+            fleet_uuid: deviceData.fleet_uuid || null
           })
         });
         
@@ -687,7 +687,7 @@ export default function App() {
         const requestBody: any = {
           deviceName: deviceData.name,
           deviceType: deviceData.type,
-          fleet_id: deviceData.fleet_id || null,
+          fleet_uuid: deviceData.fleet_uuid || null,
         };
         
         // Add physical device fields
@@ -747,7 +747,7 @@ export default function App() {
           cpu: 0,
           memory: 0,
           disk: 0,
-          fleet_id: deviceData.fleet_id || undefined,
+          fleet_uuid: deviceData.fleet_uuid || undefined,
         };
         
         setDevices(prev => [...prev, newDevice]);
@@ -780,8 +780,8 @@ export default function App() {
     if (device) {
       const targetView = isGlobalView ? 'metrics' : currentView;
       const view = agentViews.includes(targetView) ? targetView : 'metrics';
-      const fleetUuid = await resolveFleetUuid(device.fleet_id);
-      navigateToAgent(device.deviceUuid, fleetUuid || device.fleet_id, view);
+      const fleetUuid = device.fleet_uuid || await resolveFleetUuid(device.fleet_uuid);
+      navigateToAgent(device.deviceUuid, fleetUuid, view);
     }
   };
 
@@ -1129,8 +1129,8 @@ export default function App() {
                     devices={devices} 
                     onDeviceSelect={(device) => {
                       setSelectedDeviceId(device.id);
-                      void resolveFleetUuid(device.fleet_id).then((fleetUuid) => {
-                        navigateToAgent(device.deviceUuid, fleetUuid || device.fleet_id, 'metrics');
+                      void resolveFleetUuid(device.fleet_uuid).then((fleetUuid) => {
+                        navigateToAgent(device.deviceUuid, fleetUuid || device.fleet_uuid, 'metrics');
                       });
                     }} 
                   />

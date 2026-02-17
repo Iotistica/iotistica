@@ -35,7 +35,8 @@ export interface Device {
   network_interfaces?: any; // JSONB - network interface data
   // Security fields
   device_api_key_hash?: string;
-  fleet_id?: string;
+  fleet_id?: string;  // Legacy - use fleet_uuid
+  fleet_uuid?: string; // Preferred - UUID reference to fleets.fleet_uuid
   provisioned_at?: Date;
   provisioned_by_key_id?: string;
   mqtt_username?: string;
