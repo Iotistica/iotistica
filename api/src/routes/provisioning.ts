@@ -246,9 +246,9 @@ router.get('/provisioning-keys', async (req, res) => {
 
     logger.info(`Listing provisioning keys for fleet: ${fleetId}`);
 
-    // Resolve fleet UUID from identifier (could be UUID or legacy fleet_id)
+    // Resolve fleet UUID from identifier
     const fleetResult = await query(
-      'SELECT fleet_uuid FROM fleets WHERE fleet_uuid::text = $1 OR fleet_id = $1',
+      'SELECT fleet_uuid FROM fleets WHERE fleet_uuid::text = $1',
       [fleetId]
     );
     
