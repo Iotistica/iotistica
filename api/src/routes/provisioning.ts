@@ -180,9 +180,9 @@ router.post('/provisioning-keys', async (req, res) => {
 
     logger.info(`🔑 Creating provisioning key for fleet: ${fleetId}`);
 
-    // Resolve fleet UUID from identifier (could be UUID or legacy fleet_id)
+    // Resolve fleet UUID from identifier
     const fleetResult = await query(
-      'SELECT fleet_uuid FROM fleets WHERE fleet_uuid::text = $1 OR fleet_id = $1',
+      'SELECT fleet_uuid FROM fleets WHERE fleet_uuid::text = $1',
       [fleetId]
     );
     
@@ -399,9 +399,9 @@ router.post('/provisioning-keys/generate', async (req, res) => {
       }
     }
 
-    // Resolve fleet UUID from identifier (could be UUID or legacy fleet_id)
+    // Resolve fleet UUID from identifier
     const fleetResult = await query(
-      'SELECT fleet_uuid, fleet_name FROM fleets WHERE fleet_uuid::text = $1 OR fleet_id = $1',
+      'SELECT fleet_uuid, fleet_name FROM fleets WHERE fleet_uuid::text = $1',
       [fleetId]
     );
     
