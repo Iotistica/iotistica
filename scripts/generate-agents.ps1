@@ -38,7 +38,7 @@ param(
     [string]$ApiUrl = "https://api.iotistica.com",
     #[string]$ApiUrl = "https://localhost:3443",
     #[string]$ApiUrl = "https://localhost:3443",
-    [string]$FleetId = "default-fleet",
+    [string]$FleetId = "71156440-0730-4c63-b211-3fbd8200d652",
     
     # Cleanup Mode
     [switch]$Cleanup,
