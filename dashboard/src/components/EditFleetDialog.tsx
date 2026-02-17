@@ -10,6 +10,7 @@ import { buildApiUrl } from "../config/api";
 import { toast } from "sonner";
 
 interface Fleet {
+  fleet_uuid?: string;
   fleet_id: string;
   fleet_name: string;
   fleet_type: 'virtual' | 'physical' | 'mixed';
@@ -59,7 +60,8 @@ export function EditFleetDialog({ open, onOpenChange, fleet, onSuccess }: EditFl
     setIsSaving(true);
     try {
       const token = localStorage.getItem('accessToken');
-      const response = await fetch(buildApiUrl(`/api/v1/fleets/${fleet.fleet_id}`), {
+      const fleetIdentifier = fleet.fleet_uuid || fleet.fleet_id;
+      const response = await fetch(buildApiUrl(`/api/v1/fleets/${fleetIdentifier}`), {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -93,7 +95,8 @@ export function EditFleetDialog({ open, onOpenChange, fleet, onSuccess }: EditFl
     setIsDeleting(true);
     try {
       const token = localStorage.getItem('accessToken');
-      const response = await fetch(buildApiUrl(`/api/v1/fleets/${fleet.fleet_id}`), {
+      const fleetIdentifier = fleet.fleet_uuid || fleet.fleet_id;
+      const response = await fetch(buildApiUrl(`/api/v1/fleets/${fleetIdentifier}`), {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`

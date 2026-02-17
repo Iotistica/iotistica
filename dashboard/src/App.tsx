@@ -20,7 +20,7 @@ import { SensorHealthDashboard } from "./pages/DeviceHealthDashboard";
 import { SensorsPage } from "./pages/DevicesPage";
 import { EndpointsVisualizationPage } from "./pages/EndpointsVisualizationPage";
 import HousekeeperPage from "./pages/HousekeeperPage";
-import DeviceSettingsPage from "./pages/AgentSettingsPage";
+import AgentSettingsPage from "./pages/AgentSettingsPage";
 import AccountPage from "./pages/AccountPage";
 import { LogsPage } from "./pages/LogsPage";
 import { RemoteAccessPage } from "./pages/RemoteAccessPage";
@@ -114,6 +114,8 @@ export default function App() {
     return stored && viewOptions.includes(stored as View) ? (stored as View) : 'metrics';
   });
   const [fleetNameById, setFleetNameById] = useState<Record<string, string>>({});
+  const [fleetUuidById, setFleetUuidById] = useState<Record<string, string>>({});
+  const [fleetIdByUuid, setFleetIdByUuid] = useState<Record<string, string>>({});
   const isGlobalView = currentView === 'dashboard' || currentView === 'mqtt' || currentView === 'audit' || currentView === 'security' || currentView === 'fleets';
   const [debugMode, setDebugMode] = useState(false);
   const [isKioskMode, setIsKioskMode] = useState<boolean>(() => {
@@ -136,13 +138,17 @@ export default function App() {
       const routeView = currentPath.view as View | undefined;
       const targetView = routeView && agentViews.includes(routeView) ? routeView : 'metrics';
       if (device) {
+        const mappedFleetId = currentPath.fleetId
+          ? fleetIdByUuid[currentPath.fleetId] || device.fleet_id || ''
+          : device.fleet_id || '';
         setSelectedDeviceId(device.id);
-        setSelectedFleetId(currentPath.fleetId || device.fleet_id || '');
+        setSelectedFleetId(mappedFleetId);
         setCurrentView(targetView);
       }
     } else if (currentPath.type === 'fleet' && currentPath.fleetId) {
       // Fleet view from URL: show agents view with fleet preselected
-      setSelectedFleetId(currentPath.fleetId);
+      const mappedFleetId = fleetIdByUuid[currentPath.fleetId] || '';
+      setSelectedFleetId(mappedFleetId);
       setCurrentView('metrics');
     } else if (currentPath.type === 'global') {
       // Global view from URL
@@ -152,7 +158,7 @@ export default function App() {
       }
       setSelectedFleetId('');
     }
-  }, [agentViews, currentPath, devices, setSelectedFleetId]);
+  }, [agentViews, currentPath, devices, fleetIdByUuid, setSelectedFleetId]);
 
   useEffect(() => {
     const fleetId = currentPath.type === 'agent'
@@ -179,8 +185,25 @@ export default function App() {
         }
 
         const data = await response.json();
+        const resolvedFleetId = data?.fleet_id || fleetId;
+        const resolvedFleetUuid = data?.fleet_uuid as string | undefined;
         const fleetName = data?.fleet_name || fleetId;
-        setFleetNameById((prev) => (prev[fleetId] ? prev : { ...prev, [fleetId]: fleetName }));
+
+        setFleetNameById((prev) => {
+          if (prev[fleetId] && (!resolvedFleetUuid || prev[resolvedFleetUuid])) {
+            return prev;
+          }
+          const next = { ...prev, [fleetId]: fleetName, [resolvedFleetId]: fleetName };
+          if (resolvedFleetUuid) {
+            next[resolvedFleetUuid] = fleetName;
+          }
+          return next;
+        });
+
+        if (resolvedFleetUuid && resolvedFleetId) {
+          setFleetUuidById((prev) => (prev[resolvedFleetId] ? prev : { ...prev, [resolvedFleetId]: resolvedFleetUuid }));
+          setFleetIdByUuid((prev) => (prev[resolvedFleetUuid] ? prev : { ...prev, [resolvedFleetUuid]: resolvedFleetId }));
+        }
       } catch (error) {
         setFleetNameById((prev) => (prev[fleetId] ? prev : { ...prev, [fleetId]: fleetId }));
       }
@@ -196,9 +219,61 @@ export default function App() {
 
   const handleAgentViewChange = useCallback((view: View) => {
     if (selectedDevice?.deviceUuid) {
-      navigateToAgent(selectedDevice.deviceUuid, selectedDevice.fleet_id, view);
+      const fleetUuid = selectedDevice.fleet_id
+        ? fleetUuidById[selectedDevice.fleet_id]
+        : undefined;
+      navigateToAgent(selectedDevice.deviceUuid, fleetUuid || selectedDevice.fleet_id, view);
     }
-  }, [navigateToAgent, selectedDevice]);
+  }, [fleetUuidById, navigateToAgent, selectedDevice]);
+
+  const resolveFleetUuid = useCallback(async (fleetId?: string) => {
+    if (!fleetId) {
+      return undefined;
+    }
+
+    const cached = fleetUuidById[fleetId];
+    if (cached) {
+      return cached;
+    }
+
+    try {
+      const token = localStorage.getItem('accessToken');
+      const response = await fetch(buildApiUrl(`/api/v1/fleets/${fleetId}`), {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to load fleet');
+      }
+
+      const data = await response.json();
+      const resolvedFleetId = data?.fleet_id || fleetId;
+      const resolvedFleetUuid = data?.fleet_uuid as string | undefined;
+      const fleetName = data?.fleet_name || fleetId;
+
+      setFleetNameById((prev) => {
+        if (prev[fleetId] && (!resolvedFleetUuid || prev[resolvedFleetUuid])) {
+          return prev;
+        }
+        const next = { ...prev, [fleetId]: fleetName, [resolvedFleetId]: fleetName };
+        if (resolvedFleetUuid) {
+          next[resolvedFleetUuid] = fleetName;
+        }
+        return next;
+      });
+
+      if (resolvedFleetUuid && resolvedFleetId) {
+        setFleetUuidById((prev) => (prev[resolvedFleetId] ? prev : { ...prev, [resolvedFleetId]: resolvedFleetUuid }));
+        setFleetIdByUuid((prev) => (prev[resolvedFleetUuid] ? prev : { ...prev, [resolvedFleetUuid]: resolvedFleetId }));
+      }
+
+      return resolvedFleetUuid;
+    } catch (error) {
+      return undefined;
+    }
+  }, [fleetUuidById]);
 
   const formatViewLabel = useCallback((view: string) => {
     return view
@@ -435,7 +510,10 @@ export default function App() {
       if (device) {
         setSelectedDeviceId(device.id);
         setCurrentView('tags');
-        navigateToAgent(device.deviceUuid, device.fleet_id, 'tags');
+        const fleetUuid = device.fleet_id
+          ? fleetUuidById[device.fleet_id]
+          : undefined;
+        navigateToAgent(device.deviceUuid, fleetUuid || device.fleet_id, 'tags');
       }
     };
 
@@ -672,14 +750,15 @@ export default function App() {
     login(accessToken, refreshToken, userData);
   };
 
-  const handleSelectDevice = (deviceId: string) => {
+  const handleSelectDevice = async (deviceId: string) => {
     const device = devices.find((d) => d.id === deviceId);
     setSidebarOpen(false); // Close sidebar on mobile after selection
 
     if (device) {
       const targetView = isGlobalView ? 'metrics' : currentView;
       const view = agentViews.includes(targetView) ? targetView : 'metrics';
-      navigateToAgent(device.deviceUuid, device.fleet_id, view);
+      const fleetUuid = await resolveFleetUuid(device.fleet_id);
+      navigateToAgent(device.deviceUuid, fleetUuid || device.fleet_id, view);
     }
   };
 
@@ -968,7 +1047,9 @@ export default function App() {
                     devices={devices} 
                     onDeviceSelect={(device) => {
                       setSelectedDeviceId(device.id);
-                      navigateToAgent(device.deviceUuid, device.fleet_id, 'metrics');
+                      void resolveFleetUuid(device.fleet_id).then((fleetUuid) => {
+                        navigateToAgent(device.deviceUuid, fleetUuid || device.fleet_id, 'metrics');
+                      });
                     }} 
                   />
                 </div>
@@ -1251,7 +1332,7 @@ export default function App() {
             <RemoteAccessPage deviceUuid={selectedDevice.deviceUuid} />
           )}
           {currentView === 'settings' && (
-            <DeviceSettingsPage deviceUuid={selectedDevice.deviceUuid} />
+            <AgentSettingsPage deviceUuid={selectedDevice.deviceUuid} />
           )}
           {currentView === 'tags' && (
             <DeviceTagsPage deviceUuid={selectedDevice.deviceUuid} />

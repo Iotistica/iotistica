@@ -8,11 +8,10 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Settings, Save, RefreshCw, AlertCircle, Server, Clock, Zap, Brain, FileText, Power } from 'lucide-react';
+import { Settings,  RefreshCw,  Server, Clock, Zap, Brain, FileText, Power } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
@@ -120,7 +119,7 @@ const DEFAULT_SETTINGS = {
   }
 };
 
-export default function DeviceSettingsPage({ deviceUuid }: Props) {
+export default function AgentSettingsPage({ deviceUuid }: Props) {
   const { getPendingConfig, updatePendingConfig, getTargetConfig,  saveTargetState, hasPendingChanges } = useDeviceState();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

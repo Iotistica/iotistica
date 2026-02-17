@@ -12,6 +12,7 @@ import { CreateFleetDialog } from "../components/CreateFleetDialog";
 import { EditFleetDialog } from "../components/EditFleetDialog";
 
 interface Fleet {
+  fleet_uuid?: string;
   fleet_id: string;
   fleet_name: string;
   customer_id: string;
@@ -269,7 +270,7 @@ export function FleetsPage() {
                   <div
                     key={fleet.fleet_id}
                     className="flex items-center justify-between p-4 border border-border rounded-lg hover:border-muted-foreground/20 transition-colors cursor-pointer"
-                    onClick={() => navigateToFleet(fleet.fleet_id)}
+                    onClick={() => navigateToFleet(fleet.fleet_uuid || fleet.fleet_id)}
                   >
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-2">

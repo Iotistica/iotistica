@@ -10,6 +10,14 @@ import { jwtAuth } from '../middleware/jwt-auth';
 
 const router = express.Router();
 
+const resolveFleetByIdentifier = async (fleetIdentifier: string) => {
+  const result = await query(
+    'SELECT * FROM fleets WHERE fleet_id = $1 OR fleet_uuid::text = $1',
+    [fleetIdentifier]
+  );
+  return result.rows[0] || null;
+};
+
 // ============================================================================
 // POST /fleets/virtual/estimate - Estimate virtual fleet cost (PUBLIC - no auth)
 // ============================================================================
@@ -61,7 +69,7 @@ router.get('/fleets', jwtAuth, async (req, res) => {
 
     let queryText = `
       SELECT 
-        f.fleet_id, f.fleet_name, f.customer_id, f.fleet_type, f.status,
+        f.fleet_uuid, f.fleet_id, f.fleet_name, f.customer_id, f.fleet_type, f.status,
         f.environment, f.location, f.billing_enabled, f.current_cost,
         f.budget_limit, f.created_at, f.updated_at,
         COUNT(d.uuid) as device_count,
@@ -96,7 +104,7 @@ router.get('/fleets', jwtAuth, async (req, res) => {
 
     queryText += `
       GROUP BY 
-        f.fleet_id, f.fleet_name, f.customer_id, f.fleet_type, f.status,
+        f.fleet_uuid, f.fleet_id, f.fleet_name, f.customer_id, f.fleet_type, f.status,
         f.environment, f.location, f.billing_enabled, f.current_cost,
         f.budget_limit, f.created_at, f.updated_at
       ORDER BY f.created_at DESC
@@ -125,22 +133,24 @@ router.get('/fleets/:fleet_id', jwtAuth, async (req, res) => {
   try {
     const { fleet_id } = req.params;
 
-    const result = await query(
-      'SELECT * FROM get_fleet_stats($1)',
+    // Resolve fleet by ID or UUID
+    const fleetInfo = await query(
+      'SELECT * FROM fleets WHERE fleet_id = $1 OR fleet_uuid::text = $1',
       [fleet_id]
     );
 
-    if (result.rows.length === 0) {
+    if (fleetInfo.rows.length === 0) {
       return res.status(404).json({
         error: 'Fleet not found',
         fleet_id
       });
     }
 
-    // Get fleet base info
-    const fleetInfo = await query(
-      'SELECT * FROM fleets WHERE fleet_id = $1',
-      [fleet_id]
+    const resolvedFleetId = fleetInfo.rows[0].fleet_id as string;
+
+    const result = await query(
+      'SELECT * FROM get_fleet_stats($1)',
+      [resolvedFleetId]
     );
 
     // Get devices in fleet
@@ -153,7 +163,7 @@ router.get('/fleets/:fleet_id', jwtAuth, async (req, res) => {
       FROM devices d
       WHERE d.fleet_id = $1
       ORDER BY d.device_name`,
-      [fleet_id]
+      [resolvedFleetId]
     );
 
     res.json({
@@ -388,7 +398,15 @@ router.patch('/fleets/:fleet_id', jwtAuth, async (req, res) => {
       });
     }
 
-    params.push(fleet_id);
+    const fleet = await resolveFleetByIdentifier(fleet_id);
+    if (!fleet) {
+      return res.status(404).json({
+        error: 'Fleet not found',
+        fleet_id
+      });
+    }
+
+    params.push(fleet.fleet_id);
 
     const result = await query(
       `UPDATE fleets SET ${updates.join(', ')}
@@ -404,7 +422,7 @@ router.patch('/fleets/:fleet_id', jwtAuth, async (req, res) => {
       });
     }
 
-    logger.info(`[FLEETS] Updated fleet: ${fleet_id}`, req.body);
+    logger.info(`[FLEETS] Updated fleet: ${fleet.fleet_id}`, { fleet_id, ...req.body });
 
     res.json(result.rows[0]);
 
@@ -425,19 +443,14 @@ router.post('/fleets/:fleet_id/stop', jwtAuth, async (req, res) => {
     const { fleet_id } = req.params;
 
     // Get fleet info
-    const fleetInfo = await query(
-      'SELECT * FROM fleets WHERE fleet_id = $1',
-      [fleet_id]
-    );
+    const fleet = await resolveFleetByIdentifier(fleet_id);
 
-    if (fleetInfo.rows.length === 0) {
+    if (!fleet) {
       return res.status(404).json({
         error: 'Fleet not found',
         fleet_id
       });
     }
-
-    const fleet = fleetInfo.rows[0];
 
     if (fleet.status === 'stopped') {
       return res.status(400).json({
@@ -450,27 +463,28 @@ router.post('/fleets/:fleet_id/stop', jwtAuth, async (req, res) => {
       `UPDATE fleets 
        SET status = 'stopped', stopped_at = CURRENT_TIMESTAMP
        WHERE fleet_id = $1`,
-      [fleet_id]
+      [fleet.fleet_id]
     );
 
     // Record event
     await query(
       `SELECT record_fleet_usage_event($1, $2, $3, $4)`,
-      [fleet_id, 'stopped', 'api', JSON.stringify({ stopped_via: 'api' })]
+      [fleet.fleet_id, 'stopped', 'api', JSON.stringify({ stopped_via: 'api' })]
     );
 
     // Get device count
     const devices = await query(
       'SELECT COUNT(*) as count FROM devices WHERE fleet_id = $1',
-      [fleet_id]
+      [fleet.fleet_id]
     );
 
-    logger.info(`[FLEETS] Stopped fleet: ${fleet_id}`, {
+    logger.info(`[FLEETS] Stopped fleet: ${fleet.fleet_id}`, {
       device_count: devices.rows[0].count
     });
 
     res.json({
-      fleet_id,
+      fleet_id: fleet.fleet_id,
+      fleet_uuid: fleet.fleet_uuid,
       status: 'stopped',
       stopped_at: new Date().toISOString(),
       device_count: parseInt(devices.rows[0].count),
@@ -494,19 +508,14 @@ router.post('/fleets/:fleet_id/start', jwtAuth, async (req, res) => {
     const { fleet_id } = req.params;
 
     // Get fleet info
-    const fleetInfo = await query(
-      'SELECT * FROM fleets WHERE fleet_id = $1',
-      [fleet_id]
-    );
+    const fleet = await resolveFleetByIdentifier(fleet_id);
 
-    if (fleetInfo.rows.length === 0) {
+    if (!fleet) {
       return res.status(404).json({
         error: 'Fleet not found',
         fleet_id
       });
     }
-
-    const fleet = fleetInfo.rows[0];
 
     if (fleet.status === 'active') {
       return res.status(400).json({
@@ -519,27 +528,28 @@ router.post('/fleets/:fleet_id/start', jwtAuth, async (req, res) => {
       `UPDATE fleets 
        SET status = 'active', started_at = CURRENT_TIMESTAMP, stopped_at = NULL
        WHERE fleet_id = $1`,
-      [fleet_id]
+      [fleet.fleet_id]
     );
 
     // Record event
     await query(
       `SELECT record_fleet_usage_event($1, $2, $3, $4)`,
-      [fleet_id, 'started', 'api', JSON.stringify({ started_via: 'api' })]
+      [fleet.fleet_id, 'started', 'api', JSON.stringify({ started_via: 'api' })]
     );
 
     // Get device count
     const devices = await query(
       'SELECT COUNT(*) as count FROM devices WHERE fleet_id = $1',
-      [fleet_id]
+      [fleet.fleet_id]
     );
 
-    logger.info(`[FLEETS] Started fleet: ${fleet_id}`, {
+    logger.info(`[FLEETS] Started fleet: ${fleet.fleet_id}`, {
       device_count: devices.rows[0].count
     });
 
     res.json({
-      fleet_id,
+      fleet_id: fleet.fleet_id,
+      fleet_uuid: fleet.fleet_uuid,
       status: 'active',
       started_at: new Date().toISOString(),
       device_count: parseInt(devices.rows[0].count),
@@ -563,19 +573,14 @@ router.delete('/fleets/:fleet_id', jwtAuth, async (req, res) => {
     const { fleet_id } = req.params;
 
     // First, get fleet info including k8s_namespace (before soft delete)
-    const fleetResult = await query(
-      `SELECT fleet_id, fleet_name, k8s_namespace, status FROM fleets WHERE fleet_id = $1`,
-      [fleet_id]
-    );
+    const fleet = await resolveFleetByIdentifier(fleet_id);
 
-    if (fleetResult.rows.length === 0) {
+    if (!fleet) {
       return res.status(404).json({
         error: 'Fleet not found',
         fleet_id
       });
     }
-
-    const fleet = fleetResult.rows[0];
 
     if (fleet.status === 'deleted') {
       return res.status(404).json({
@@ -587,14 +592,14 @@ router.delete('/fleets/:fleet_id', jwtAuth, async (req, res) => {
     // If this is a virtual fleet with K8s namespace, delete it
     if (fleet.k8s_namespace) {
       try {
-        logger.info(`[FLEETS] Deleting K8s namespace for fleet: ${fleet_id}`, { namespace: fleet.k8s_namespace });
+        logger.info(`[FLEETS] Deleting K8s namespace for fleet: ${fleet.fleet_id}`, { namespace: fleet.k8s_namespace });
         const { virtualAgentDeployer } = await import('../services/virtual-agent-deployer.js');
         await virtualAgentDeployer.deleteFleetNamespace(fleet.k8s_namespace);
-        logger.info(`[FLEETS] K8s namespace deleted successfully`, { namespace: fleet.k8s_namespace, fleet_id });
+        logger.info(`[FLEETS] K8s namespace deleted successfully`, { namespace: fleet.k8s_namespace, fleet_id: fleet.fleet_id });
       } catch (error: any) {
         // Log error but continue with soft delete - namespace may already be gone or K8s unavailable
         logger.warn(`[FLEETS] Failed to delete K8s namespace (continuing with soft delete)`, {
-          fleet_id,
+          fleet_id: fleet.fleet_id,
           namespace: fleet.k8s_namespace,
           error: error.message
         });
@@ -607,7 +612,7 @@ router.delete('/fleets/:fleet_id', jwtAuth, async (req, res) => {
        SET status = 'deleted', stopped_at = CURRENT_TIMESTAMP
        WHERE fleet_id = $1 AND status != 'deleted'
        RETURNING *`,
-      [fleet_id]
+      [fleet.fleet_id]
     );
 
     if (result.rows.length === 0) {
@@ -620,13 +625,14 @@ router.delete('/fleets/:fleet_id', jwtAuth, async (req, res) => {
     // Record event
     await query(
       `SELECT record_fleet_usage_event($1, $2, $3, $4)`,
-      [fleet_id, 'stopped', 'api', JSON.stringify({ deleted_via: 'api', k8s_namespace_deleted: !!fleet.k8s_namespace })]
+      [fleet.fleet_id, 'stopped', 'api', JSON.stringify({ deleted_via: 'api', k8s_namespace_deleted: !!fleet.k8s_namespace })]
     );
 
-    logger.info(`[FLEETS] Deleted fleet: ${fleet_id}`, { k8s_namespace_deleted: !!fleet.k8s_namespace });
+    logger.info(`[FLEETS] Deleted fleet: ${fleet.fleet_id}`, { k8s_namespace_deleted: !!fleet.k8s_namespace });
 
     res.json({
-      fleet_id,
+      fleet_id: fleet.fleet_id,
+      fleet_uuid: fleet.fleet_uuid,
       status: 'deleted',
       message: 'Fleet deleted successfully',
       k8s_namespace_deleted: !!fleet.k8s_namespace
@@ -648,9 +654,17 @@ router.get('/fleets/:fleet_id/billing', jwtAuth, async (req, res) => {
   try {
     const { fleet_id } = req.params;
 
+    const fleet = await resolveFleetByIdentifier(fleet_id);
+    if (!fleet) {
+      return res.status(404).json({
+        error: 'Fleet not found',
+        fleet_id
+      });
+    }
+
     const result = await query(
       `SELECT * FROM fleet_billing_summary WHERE fleet_id = $1`,
-      [fleet_id]
+      [fleet.fleet_id]
     );
 
     if (result.rows.length === 0) {
@@ -660,7 +674,10 @@ router.get('/fleets/:fleet_id/billing', jwtAuth, async (req, res) => {
       });
     }
 
-    res.json(result.rows[0]);
+    res.json({
+      ...result.rows[0],
+      fleet_uuid: fleet.fleet_uuid
+    });
 
   } catch (error: any) {
     logger.error('[FLEETS] Error getting billing summary:', error);
@@ -679,16 +696,25 @@ router.get('/fleets/:fleet_id/usage-events', jwtAuth, async (req, res) => {
     const { fleet_id } = req.params;
     const { limit = 50 } = req.query;
 
+    const fleet = await resolveFleetByIdentifier(fleet_id);
+    if (!fleet) {
+      return res.status(404).json({
+        error: 'Fleet not found',
+        fleet_id
+      });
+    }
+
     const result = await query(
       `SELECT * FROM fleet_usage_events
        WHERE fleet_id = $1
        ORDER BY event_timestamp DESC
        LIMIT $2`,
-      [fleet_id, limit]
+      [fleet.fleet_id, limit]
     );
 
     res.json({
-      fleet_id,
+      fleet_id: fleet.fleet_id,
+      fleet_uuid: fleet.fleet_uuid,
       events: result.rows,
       total: result.rowCount
     });
