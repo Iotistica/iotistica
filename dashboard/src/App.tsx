@@ -276,7 +276,21 @@ export default function App() {
   }, [fleetUuidById]);
 
   const formatViewLabel = useCallback((view: string) => {
-    return view
+    // Special mappings for views with different display names
+    const viewLabelMap: Record<string, string> = {
+      'sensors': 'Devices',
+      'metrics': 'System',
+      'endpoints': 'Endpoints',
+      'mqtt': 'MQTT',
+      'jobs': 'Jobs',
+      'applications': 'Applications',
+      'logs': 'Logs',
+      'remote-access': 'Remote Access',
+      'settings': 'Settings'
+    };
+    
+    // Return mapped label if exists, otherwise capitalize the view
+    return viewLabelMap[view] || view
       .split('-')
       .map(word => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
@@ -285,11 +299,18 @@ export default function App() {
   const breadcrumbs = useMemo(() => {
     if (currentPath.type === 'agent') {
       const fleetLabel = fleetNameById[currentPath.fleetId || ''] || currentPath.fleetId || 'Unassigned';
-      return [
+      const crumbs = [
         { label: 'Fleets', onClick: () => handleGlobalViewChange('fleets') },
         { label: fleetLabel, onClick: () => navigateToFleet(currentPath.fleetId || 'unassigned') },
-        { label: selectedDevice?.name || currentPath.agentId || 'Agent' }
+        { label: selectedDevice?.name || currentPath.agentId || 'Agent', onClick: currentPath.view ? () => navigateToAgent(currentPath.agentId || '', currentPath.fleetId) : undefined }
       ];
+      
+      // Add the sub-view if present (System, Devices, Jobs, Logs, etc.)
+      if (currentPath.view) {
+        crumbs.push({ label: formatViewLabel(currentPath.view), onClick: undefined });
+      }
+      
+      return crumbs;
     }
 
     if (currentPath.type === 'fleet') {
@@ -305,7 +326,7 @@ export default function App() {
     }
 
     return [{ label: 'Fleets' }];
-  }, [currentPath, formatViewLabel, handleGlobalViewChange, navigateToFleet, selectedDevice]);
+  }, [currentPath, formatViewLabel, handleGlobalViewChange, navigateToFleet, navigateToAgent, selectedDevice]);
 
   // Persist selectedDeviceId to localStorage whenever it changes
   // Always save (even empty string) to maintain consistency

@@ -46,6 +46,7 @@
     "react-grid-layout": "^1.5.2",
     "react-hook-form": "^7.55.0",
     "react-resizable-panels": "^2.1.7",
+    "react-router-dom": "^6.28.0",
     "reactflow": "^11.11.4",
     "recharts": "^2.15.2",
     "sonner": "^2.0.3",
