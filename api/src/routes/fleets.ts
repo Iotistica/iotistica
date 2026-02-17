@@ -228,6 +228,15 @@ router.post('/fleets', jwtAuth, async (req, res) => {
     const { v4: uuidv4 } = require('uuid');
     const fleet_uuid = uuidv4(); // Generate UUID for use in K8s namespace creation
     
+    // Generate legacy fleet_id from fleet_name for backward compatibility
+    // Use first 8 chars of UUID to ensure uniqueness
+    const base_fleet_id = fleet_name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .substring(0, 80); // Leave room for UUID suffix
+    const fleet_id = `${base_fleet_id}-${fleet_uuid.substring(0, 8)}`; // Max 100 chars total
+    
     // Prepare deployment config for virtual fleets
     const deployment_config = fleet_type === 'virtual' ? {
       agent_count,
@@ -277,18 +286,27 @@ router.post('/fleets', jwtAuth, async (req, res) => {
 
     const result = await query(
       `INSERT INTO fleets (
-        fleet_uuid, fleet_name, customer_id, fleet_type, description,
+        fleet_uuid, fleet_id, fleet_name, customer_id, fleet_type, description,
         environment, location, tags, billing_enabled, billing_mode, budget_limit,
         deployment_config, k8s_namespace, target_device_count
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      ON CONFLICT (fleet_uuid) DO NOTHING
       RETURNING *`,
       [
-        fleet_uuid, fleet_name, customer_id, fleet_type, description,
+        fleet_uuid, fleet_id, fleet_name, customer_id, fleet_type, description,
         environment, location, JSON.stringify(tags), billing_enabled,
         billing_mode, budget_limit, JSON.stringify(deployment_config),
         k8s_namespace, fleet_type === 'virtual' ? agent_count * devices_per_agent : null
       ]
     );
+
+    // Check if fleet was created (ON CONFLICT might have skipped insert)
+    if (!result.rows || result.rows.length === 0) {
+      return res.status(409).json({
+        error: 'Fleet with this UUID already exists',
+        fleet_uuid
+      });
+    }
 
     // Record creation event
     await query(
