@@ -126,6 +126,23 @@ export default function App() {
   // Track last URL fleet ID to prevent overriding manual selections
   const lastUrlFleetIdRef = useRef<string | undefined>(undefined);
   
+  // Track last viewed agent/fleet for restoration when returning from global views
+  const [lastViewedAgent, setLastViewedAgent] = useState<{deviceId: string, deviceUuid: string, fleetUuid: string} | null>(() => {
+    try {
+      const stored = localStorage.getItem('lastViewedAgent');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
+  
+  // Persist last viewed agent to localStorage
+  useEffect(() => {
+    if (lastViewedAgent) {
+      localStorage.setItem('lastViewedAgent', JSON.stringify(lastViewedAgent));
+    }
+  }, [lastViewedAgent]);
+  
   // Memoize selected device to prevent unnecessary re-renders
   const selectedDevice = useMemo(() => {
     return devices.find((d) => d.id === selectedDeviceId) || devices[0];
@@ -146,6 +163,13 @@ export default function App() {
           ? fleetIdByUuid[currentPath.fleetId] || device.fleet_uuid || ''
           : device.fleet_uuid || '';
         setSelectedDeviceId(device.id);
+        
+        // Save as last viewed agent for restoration when returning from global views
+        setLastViewedAgent({
+          deviceId: device.id,
+          deviceUuid: device.deviceUuid,
+          fleetUuid: currentPath.fleetId || device.fleet_uuid || ''
+        });
         
         // Only update fleet if URL fleet ID actually changed (not just device poll)
         if (lastUrlFleetIdRef.current !== currentPath.fleetId) {
@@ -247,7 +271,18 @@ export default function App() {
 
   const handleGlobalViewChange = useCallback((view: View) => {
     if (view === 'home') {
-      // Home: Show agents sidebar with all fleets, select first agent
+      // Try to restore last viewed agent first
+      if (lastViewedAgent && devices.some(d => d.id === lastViewedAgent.deviceId)) {
+        const device = devices.find(d => d.id === lastViewedAgent.deviceId);
+        if (device) {
+          setSelectedDeviceId(device.id);
+          setSelectedFleetId(device.fleet_uuid || '');
+          setCurrentView('metrics');
+          navigateToAgent(device.deviceUuid, device.fleet_uuid || lastViewedAgent.fleetUuid, 'metrics');
+          return;
+        }
+      }
+      // Fallback: Show agents sidebar with all fleets, select first agent
       setSelectedFleetId('');
       setCurrentView('metrics');
       if (devices.length > 0) {
@@ -257,10 +292,10 @@ export default function App() {
         navigateToGlobal('home');
       }
     } else {
-      setSelectedFleetId('');
+      // Don't clear fleet selection when going to global view - preserve for later restoration
       navigateToGlobal(view);
     }
-  }, [navigateToGlobal, setSelectedFleetId, devices, setCurrentView, navigateToAgent]);
+  }, [navigateToGlobal, setSelectedFleetId, devices, setCurrentView, navigateToAgent, lastViewedAgent, setSelectedDeviceId]);
 
   const handleAgentViewChange = useCallback((view: View) => {
     if (selectedDevice?.deviceUuid) {
@@ -831,6 +866,14 @@ export default function App() {
       const targetView = isGlobalView ? 'metrics' : currentView;
       const view = agentViews.includes(targetView) ? targetView : 'metrics';
       const fleetUuid = device.fleet_uuid || await resolveFleetUuid(device.fleet_uuid);
+      
+      // Save as last viewed agent for restoration
+      setLastViewedAgent({
+        deviceId: device.id,
+        deviceUuid: device.deviceUuid,
+        fleetUuid: fleetUuid || ''
+      });
+      
       navigateToAgent(device.deviceUuid, fleetUuid, view);
     }
   };
