@@ -422,18 +422,11 @@ export default function App() {
   const breadcrumbs = useMemo(() => {
     if (currentPath.type === 'agent') {
       const fleetLabel = fleetNameById[currentPath.fleetId || ''] || currentPath.fleetId || 'Unassigned';
-      const crumbs = [
+      return [
         { label: 'Home', onClick: () => handleGlobalViewChange('home') },
         { label: fleetLabel, onClick: () => navigateToFleet(currentPath.fleetId || 'unassigned') },
         { label: selectedDevice?.name || currentPath.agentId || 'Agent', onClick: currentPath.view ? () => navigateToAgent(currentPath.agentId || '', currentPath.fleetId) : undefined }
       ];
-      
-      // Add the sub-view if present (System, Devices, Jobs, Logs, etc.)
-      if (currentPath.view) {
-        crumbs.push({ label: formatViewLabel(currentPath.view), onClick: undefined });
-      }
-      
-      return crumbs;
     }
 
     if (currentPath.type === 'fleet') {
