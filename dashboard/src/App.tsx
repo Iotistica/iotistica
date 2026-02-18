@@ -57,7 +57,7 @@ export default function App() {
   const { user, isAuthenticated, isLoading: isAuthLoading, login, logout } = useAuth();
   
   // Fleet context - for auto-assigning devices to selected fleet
-  const { setSelectedFleetId } = useFleet();
+  const { selectedFleetId, setSelectedFleetId } = useFleet();
   
   // Initialize selectedDeviceId from localStorage if available
   const [selectedDeviceId, setSelectedDeviceId] = useState(() => {
@@ -122,6 +122,9 @@ export default function App() {
     return localStorage.getItem('dashboard-kiosk-mode') === 'true';
   });
   
+  // Track last URL fleet ID to prevent overriding manual selections
+  const lastUrlFleetIdRef = useRef<string | undefined>(undefined);
+  
   // Memoize selected device to prevent unnecessary re-renders
   const selectedDevice = useMemo(() => {
     return devices.find((d) => d.id === selectedDeviceId) || devices[0];
@@ -142,13 +145,35 @@ export default function App() {
           ? fleetIdByUuid[currentPath.fleetId] || device.fleet_uuid || ''
           : device.fleet_uuid || '';
         setSelectedDeviceId(device.id);
-        setSelectedFleetId(mappedFleetId);
+        
+        // Only update fleet if URL fleet ID actually changed (not just device poll)
+        if (lastUrlFleetIdRef.current !== currentPath.fleetId) {
+          console.log('[URL SYNC] URL fleet ID changed:', { 
+            from: lastUrlFleetIdRef.current, 
+            to: currentPath.fleetId,
+            mappedTo: mappedFleetId 
+          });
+          lastUrlFleetIdRef.current = currentPath.fleetId;
+          setSelectedFleetId(mappedFleetId);
+        }
+        
         setCurrentView(targetView);
       }
     } else if (currentPath.type === 'fleet' && currentPath.fleetId) {
       // Fleet view from URL: show agents view with fleet preselected
       const mappedFleetId = fleetIdByUuid[currentPath.fleetId] || '';
-      setSelectedFleetId(mappedFleetId);
+      
+      // Only update fleet if URL fleet ID actually changed
+      if (lastUrlFleetIdRef.current !== currentPath.fleetId) {
+        console.log('[URL SYNC] URL fleet ID changed (fleet view):', { 
+          from: lastUrlFleetIdRef.current, 
+          to: currentPath.fleetId,
+          mappedTo: mappedFleetId 
+        });
+        lastUrlFleetIdRef.current = currentPath.fleetId;
+        setSelectedFleetId(mappedFleetId);
+      }
+      
       setCurrentView('metrics');
     } else if (currentPath.type === 'global') {
       // Global view from URL
@@ -156,8 +181,15 @@ export default function App() {
       if (viewOptions.includes(view)) {
         setCurrentView(view);
       }
-      setSelectedFleetId('');
+      
+      // Only clear fleet if URL type actually changed to global
+      if (lastUrlFleetIdRef.current !== undefined) {
+        console.log('[URL SYNC] Switched to global view, clearing fleet');
+        lastUrlFleetIdRef.current = undefined;
+        setSelectedFleetId('');
+      }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentViews, currentPath, devices, fleetIdByUuid, setSelectedFleetId]);
 
   useEffect(() => {

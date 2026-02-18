@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { getDeviceTags, invalidateDeviceTagsCache } from "@/services/deviceTags";
 import { buildApiUrl } from "@/config/api";
 import { useFleet } from "@/contexts/FleetContext";
+import { useRouting } from "@/hooks/useRouting";
 import { Monitor, Smartphone, Server, Laptop, Search, Plus, Filter, Edit, X, ChevronRight, Container, Layers } from "lucide-react";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
@@ -175,6 +176,9 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
   // Get fleet context
   const { selectedFleetId, setSelectedFleetId } = useFleet();
   
+  // Get routing context
+  const { currentPath, navigateToAgent } = useRouting();
+  
   // Get unique statuses and types from actual devices using useMemo for performance
   const availableStatuses = useMemo<Device['status'][]>(() => 
     Array.from(new Set(devices.map(d => d.status))) as Device['status'][], 
@@ -330,35 +334,56 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
   const allStatusesSelected = availableStatuses.length > 0 && statusFilters.length === availableStatuses.length;
   const allTypesSelected = availableTypes.length > 0 && typeFilters.length === availableTypes.length;
 
-  const filteredDevices = devices.filter(device => {
-    const matchesSearch = device.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         device.ipAddress.includes(searchQuery);
-    const matchesStatus = statusFilters.length === 0 || statusFilters.includes(device.status);
-    const matchesType = typeFilters.length === 0 || typeFilters.includes(device.type);
-    
-    // Fleet matching: check both fleet_uuid and fleet_id (legacy support)
-    const deviceFleetId = (device as any).fleet_uuid || (device as any).fleet_id;
-    const matchesFleet = !selectedFleetId || deviceFleetId === selectedFleetId;
-    
-    console.log('[FILTER DEBUG]', {
-      deviceName: device.name,
-      deviceFleetUuid: (device as any).fleet_uuid,
-      deviceFleetId: (device as any).fleet_id,
+  const filteredDevices = useMemo(() => {
+    console.log('[FILTER INPUT]', {
+      totalDevices: devices.length,
       selectedFleetId,
-      matchesSearch,
-      matchesStatus,
-      matchesType,
-      matchesFleet,
-      finalResult: matchesSearch && matchesStatus && matchesType && matchesFleet
+      statusFilters,
+      typeFilters,
+      searchQuery,
+      deviceFleetIds: devices.map(d => ({
+        name: d.name,
+        fleet_uuid: (d as any).fleet_uuid,
+        fleet_id: (d as any).fleet_id,
+        status: d.status,
+        type: d.type
+      }))
     });
-    
-    return matchesSearch && matchesStatus && matchesType && matchesFleet;
-  }).sort((a, b) => {
-    if (a.status === b.status) return 0;
-    if (a.status === 'online') return -1;
-    if (b.status === 'online') return 1;
-    return 0;
-  });
+
+    const filtered = devices.filter(device => {
+      const matchesSearch = device.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                           device.ipAddress.includes(searchQuery);
+      const matchesStatus = statusFilters.length === 0 || statusFilters.includes(device.status);
+      const matchesType = typeFilters.length === 0 || typeFilters.includes(device.type);
+      
+      // Fleet matching: check both fleet_uuid and fleet_id (legacy support)
+      const deviceFleetId = (device as any).fleet_uuid || (device as any).fleet_id;
+      const matchesFleet = !selectedFleetId || deviceFleetId === selectedFleetId;
+      
+      if (!matchesFleet && selectedFleetId) {
+        console.log('[FILTER MISS]', {
+          device: device.name,
+          deviceFleetId,
+          selectedFleetId,
+          match: deviceFleetId === selectedFleetId
+        });
+      }
+      
+      return matchesSearch && matchesStatus && matchesType && matchesFleet;
+    }).sort((a, b) => {
+      if (a.status === b.status) return 0;
+      if (a.status === 'online') return -1;
+      if (b.status === 'online') return 1;
+      return 0;
+    });
+
+    console.log('[FILTER RESULT]', {
+      filteredCount: filtered.length,
+      devices: filtered.map(d => ({ name: d.name, fleet_uuid: (d as any).fleet_uuid, fleet_id: (d as any).fleet_id }))
+    });
+
+    return filtered;
+  }, [devices, selectedFleetId, statusFilters, typeFilters, searchQuery]);
 
   const hasActiveFilters = statusFilters.length < availableStatuses.length || 
                            typeFilters.length < availableTypes.length || 
@@ -385,9 +410,20 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
             <select
               value={selectedFleetId}
               onChange={(e) => {
-                console.log('[FLEET DEBUG] Fleet selected:', e.target.value);
-                console.log('[FLEET DEBUG] Available devices:', devices.map(d => ({ name: d.name, fleet_uuid: (d as any).fleet_uuid })));
-                setSelectedFleetId(e.target.value);
+                const newFleetId = e.target.value;
+                console.log('[FLEET DEBUG] Fleet selected:', newFleetId);
+                console.log('[FLEET DEBUG] Current path:', currentPath);
+                
+                // Update context
+                setSelectedFleetId(newFleetId);
+                
+                // If viewing an agent AND selecting a specific fleet (not "All Fleets"), update URL
+                if (currentPath.type === 'agent' && currentPath.agentId && newFleetId) {
+                  console.log('[FLEET DEBUG] Navigating to agent with fleet:', newFleetId);
+                  navigateToAgent(currentPath.agentId, newFleetId, currentPath.view);
+                }
+                // If selecting "All Fleets" while on agent view, stay on current URL but context updated
+                // The filter will show all devices, and URL sync won't override because we're not changing URL
               }}
               className="w-full h-9 pl-10 pr-3 text-sm border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
             >
