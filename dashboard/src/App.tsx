@@ -1089,14 +1089,6 @@ export default function App() {
           onTagDefinitionsClick={() => handleGlobalViewChange('tag-definitions')}
           onDigitalTwinClick={() => handleGlobalViewChange('digital-twin')}
           userRole={user?.role || 'viewer'}
-          needsDeployment={needsDeployment}
-          hasUnsavedChanges={hasUnsavedChanges}
-          onDeploy={handleDeploy}
-          onCancelDeploy={handleCancelDeploy}
-          onSaveDraft={handleSaveDraft}
-          devicesWithPendingChanges={devicesWithPendingChanges.length}
-          onDeployAll={handleDeployAll}
-          isGlobalView={isGlobalView}
         />
       )}
 
@@ -1426,7 +1418,75 @@ export default function App() {
               Settings
             </Button>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-3 shrink-0">
+              {/* Deploy Buttons - Only show for agent views */}
+              {!isGlobalView && (
+                <>
+                  {hasUnsavedChanges && (
+                    <Button
+                      onClick={handleSaveDraft}
+                      size="sm"
+                      variant="outline"
+                      className="border-yellow-300 bg-yellow-50 text-yellow-700 hover:bg-yellow-100"
+                      style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem' }}
+                    >
+                      Save Draft
+                    </Button>
+                  )}
+                  <Button
+                    onClick={handleDeploy}
+                    size="sm"
+                    disabled={!needsDeployment}
+                    variant="ghost"
+                    style={needsDeployment ? {
+                      backgroundColor: '#d97706',
+                      color: 'white',
+                      fontWeight: 500,
+                      fontSize: '1.1rem',
+                      padding: '0.6rem 1.25rem'
+                    } : {
+                      backgroundColor: '#9ca3af',
+                      color: 'white',
+                      cursor: 'not-allowed',
+                      fontSize: '1.1rem',
+                      padding: '0.6rem 1.25rem'
+                    }}
+                    className="hover:opacity-90"
+                  >
+                    Deploy
+                  </Button>
+                  {needsDeployment && (
+                    <Button
+                      onClick={handleCancelDeploy}
+                      size="sm"
+                      variant="outline"
+                      className="border-red-300 hover:bg-red-50 text-red-600"
+                      style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem' }}
+                    >
+                      {hasUnsavedChanges && !needsDeployment ? 'Discard' : 'Cancel'}
+                    </Button>
+                  )}
+                  {devicesWithPendingChanges.length > 1 && (
+                    <Button
+                      onClick={handleDeployAll}
+                      size="sm"
+                      variant="ghost"
+                      style={{
+                        backgroundColor: '#ea580c',
+                        color: 'white',
+                        fontWeight: 600,
+                        fontSize: '1.1rem',
+                        padding: '0.6rem 1.25rem'
+                      }}
+                      className="hover:opacity-90"
+                    >
+                      Deploy All ({devicesWithPendingChanges.length})
+                    </Button>
+                  )}
+                  {/* Spacer between deploy buttons and Add agent */}
+                  <div className="w-4" />
+                </>
+              )}
               <Button
                 onClick={handleAddDevice}
                 size="sm"

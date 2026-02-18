@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Server, User, LogIn, Settings, HelpCircle, LogOut, MessageSquare, Tag, Building2 } from "lucide-react";
+import { User, LogIn, Settings, HelpCircle, LogOut, MessageSquare, Tag } from "lucide-react";
 import { Button } from "./ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import {
@@ -27,15 +27,6 @@ interface HeaderProps {
   onTagDefinitionsClick?: () => void; // Callback for opening tag definitions page
   onDigitalTwinClick?: () => void; // Callback for opening digital twin page
   userRole?: string; // User role for conditional UI
-  // Deploy button props
-  needsDeployment?: boolean;
-  hasUnsavedChanges?: boolean;
-  onDeploy?: () => void;
-  onCancelDeploy?: () => void;
-  onSaveDraft?: () => void;
-  devicesWithPendingChanges?: number;
-  onDeployAll?: () => void;
-  isGlobalView?: boolean;
 }
 
 export function Header({
@@ -49,15 +40,7 @@ export function Header({
   onUsersClick = () => {},
   onProfileClick = () => {},
   onTagDefinitionsClick = () => {},
-  userRole = 'viewer',
-  needsDeployment = false,
-  hasUnsavedChanges = false,
-  onDeploy = () => {},
-  onCancelDeploy = () => {},
-  onSaveDraft = () => {},
-  devicesWithPendingChanges = 0,
-  onDeployAll = () => {},
-  isGlobalView = false
+  userRole = 'viewer'
 }: HeaderProps) {
   // AI Chat state
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -95,77 +78,10 @@ export function Header({
           </div>
         </div>
 
-        {/* Right Side - Deploy Button + Profile/Login */}
+        {/* Right Side - Profile/Login */}
         <div className="flex items-center gap-3">
           {isAuthenticated ? (
             <>
-              {/* Deploy Buttons - Only show for agent views */}
-              {!isGlobalView && (
-                <>
-                  {hasUnsavedChanges && (
-                    <Button
-                      onClick={onSaveDraft}
-                      size="sm"
-                      variant="outline"
-                      className="border-yellow-300 bg-yellow-50 text-yellow-700 hover:bg-yellow-100"
-                      style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem' }}
-                    >
-                      Save Draft
-                    </Button>
-                  )}
-                  <Button
-                    onClick={onDeploy}
-                    size="sm"
-                    disabled={!needsDeployment}
-                    variant="ghost"
-                    style={needsDeployment ? {
-                      backgroundColor: '#d97706',
-                      color: 'white',
-                      fontWeight: 500,
-                      fontSize: '1.1rem',
-                      padding: '0.6rem 1.25rem'
-                    } : {
-                      backgroundColor: '#9ca3af',
-                      color: 'white',
-                      cursor: 'not-allowed',
-                      fontSize: '1.1rem',
-                      padding: '0.6rem 1.25rem'
-                    }}
-                    className="hover:opacity-90"
-                  >
-                    Deploy
-                  </Button>
-                  {needsDeployment && (
-                    <Button
-                      onClick={onCancelDeploy}
-                      size="sm"
-                      variant="outline"
-                      className="border-red-300 hover:bg-red-50 text-red-600"
-                      style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem' }}
-                    >
-                      {hasUnsavedChanges && !needsDeployment ? 'Discard' : 'Cancel'}
-                    </Button>
-                  )}
-                  {devicesWithPendingChanges > 1 && (
-                    <Button
-                      onClick={onDeployAll}
-                      size="sm"
-                      variant="ghost"
-                      style={{
-                        backgroundColor: '#ea580c',
-                        color: 'white',
-                        fontWeight: 600,
-                        fontSize: '1.1rem',
-                        padding: '0.6rem 1.25rem'
-                      }}
-                      className="hover:opacity-90"
-                    >
-                      Deploy All ({devicesWithPendingChanges})
-                    </Button>
-                  )}
-                </>
-              )}
-              
               {/* AI Chat Button */}
               {deviceUuid && (
                 <Button

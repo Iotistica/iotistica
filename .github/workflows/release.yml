@@ -33,7 +33,7 @@ on:
       client_name:
         description: 'K8s client name (namespace)'
         required: false
-        default: 'tsdb'
+        default: 'demo'
         type: string
 
 permissions:
@@ -391,7 +391,7 @@ jobs:
                 ref: 'main',
                 inputs: {
                   release_version: releaseVersion,
-                  client_name: '${{ github.event.inputs.client_name || 'tsdb' }}',
+                  client_name: '${{ github.event.inputs.client_name || 'demo' }}',
                   cluster_name: 'dev-iotistica-aks-cluster',
                   clean_before_deploy: 'false'
                 }
@@ -400,7 +400,7 @@ jobs:
               console.log('✅ K8s deployment workflow triggered successfully');
               console.log(`   Repository: Iotistica/iot-k8s`);
               console.log(`   Version: ${releaseVersion}`);
-              console.log(`   Client: ${{ github.event.inputs.client_name || 'tsdb' }}`);
+              console.log(`   Client: ${{ github.event.inputs.client_name || 'demo' }}`);
             } catch (error) {
               console.error('❌ Failed to trigger K8s deployment:', error.message);
               throw error;
