@@ -66,7 +66,7 @@ export function Header({
   
   return (
     <header className="bg-card border-b border-border sticky top-0 z-50">
-      <div className="px-6 md:px-8 py-8 flex items-center justify-between">
+      <div className="px-6 md:px-8 py-3 flex items-center justify-between">
         {/* Logo */}
         <div className="flex items-center cursor-pointer" onClick={onHomeClick}>
           <div className="leading-snug">
