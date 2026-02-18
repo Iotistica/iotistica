@@ -1066,16 +1066,18 @@ export default function App() {
             variant={currentView === 'home' ? 'default' : 'outline'}
             size="sm"
             onClick={() => handleGlobalViewChange('home')}
+            style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem' }}
           >
-            <Home className="w-4 h-4 mr-2" />
+            <Home className="w-5 h-5 mr-2" />
             Home
           </Button>
           <Button
             variant={currentView === 'fleets' ? 'default' : 'outline'}
             size="sm"
             onClick={() => handleGlobalViewChange('fleets')}
+            style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem' }}
           >
-            <Layers className="w-4 h-4 mr-2" />
+            <Layers className="w-5 h-5 mr-2" />
             Fleets
           </Button>
           {/* <Button
@@ -1091,32 +1093,36 @@ export default function App() {
               variant={currentView === 'dashboard' ? 'default' : 'outline'}
               size="sm"
               onClick={() => handleGlobalViewChange('dashboard')}
+              style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem' }}
             >
-              <BarChart3 className="w-4 h-4 mr-2" />
+              <BarChart3 className="w-5 h-5 mr-2" />
               Dashboards
             </Button>
             <Button
               variant={currentView === 'mqtt' ? 'default' : 'outline'}
               size="sm"
               onClick={() => handleGlobalViewChange('mqtt')}
+              style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem' }}
             >
-              <Radio className="w-4 h-4 mr-2" />
+              <Radio className="w-5 h-5 mr-2" />
               MQTT
             </Button>
             <Button
               variant={currentView === 'audit' ? 'default' : 'outline'}
               size="sm"
               onClick={() => handleGlobalViewChange('audit')}
+              style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem' }}
             >
-              <FileText className="w-4 h-4 mr-2" />
+              <FileText className="w-5 h-5 mr-2" />
               Audit & Activity
             </Button>
             <Button
               variant={currentView === 'security' ? 'default' : 'outline'}
               size="sm"
               onClick={() => handleGlobalViewChange('security')}
+              style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem' }}
             >
-              <Shield className="w-4 h-4 mr-2" />
+              <Shield className="w-5 h-5 mr-2" />
               Security
             </Button>
           </div>
@@ -1310,17 +1316,19 @@ export default function App() {
             <div className="bg-card border-b border-border px-6 py-3 flex items-center justify-between gap-4">
             <div className="flex items-center gap-2 overflow-x-auto flex-1 pr-2">
             <Button
-              variant={currentView === 'metrics' ? 'default' : 'outline'}
+              variant={currentView === 'metrics' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => handleAgentViewChange('metrics')}
+              className="text-sm"
             >
               <BarChart3 className="w-4 h-4 mr-2" />
               System
             </Button>
             <Button
-              variant={currentView === 'sensors' ? 'default' : 'outline'}
+              variant={currentView === 'sensors' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => handleAgentViewChange('sensors')}
+              className="text-sm"
             >
               <Activity className="w-4 h-4 mr-2" />
               Devices
@@ -1333,17 +1341,19 @@ export default function App() {
               Endpoints Viz
             </Button> */}
             <Button
-              variant={currentView === 'jobs' ? 'default' : 'outline'}
+              variant={currentView === 'jobs' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => handleAgentViewChange('jobs')}
+              className="text-sm"
             >
               <CalendarClock className="w-4 h-4 mr-2" />
               Jobs
             </Button>
             <Button
-              variant={currentView === 'applications' ? 'default' : 'outline'}
+              variant={currentView === 'applications' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => handleAgentViewChange('applications')}
+              className="text-sm"
             >
               <Package className="w-4 h-4 mr-2" />
               Applications
@@ -1381,25 +1391,28 @@ export default function App() {
               Housekeeping
             </Button> */}
             <Button
-              variant={currentView === 'logs' ? 'default' : 'outline'}
+              variant={currentView === 'logs' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => handleAgentViewChange('logs')}
+              className="text-sm"
             >
               <FileText className="w-4 h-4 mr-2" />
               Logs
             </Button>
             <Button
-              variant={currentView === 'remote-access' ? 'default' : 'outline'}
+              variant={currentView === 'remote-access' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => handleAgentViewChange('remote-access')}
+              className="text-sm"
             >
               <Terminal className="w-4 h-4 mr-2" />
               Remote Access
             </Button>
             <Button
-              variant={currentView === 'settings' ? 'default' : 'outline'}
+              variant={currentView === 'settings' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => handleAgentViewChange('settings')}
+              className="text-sm"
             >
               <Shield className="w-4 h-4 mr-2" />
               Settings
