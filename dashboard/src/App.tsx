@@ -14,7 +14,7 @@ import { Toaster } from "./components/ui/sonner";
 import { Sheet, SheetContent } from "./components/ui/sheet";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
-import { Menu, Activity, BarChart3, Radio, CalendarClock, Package, Shield, FileText, Terminal, Layers, Plus, Home } from "lucide-react";
+import { Menu, Activity, BarChart3, Radio, CalendarClock, Package, Shield, FileText, Terminal, Layers, Plus, Home, Bell, HelpCircle } from "lucide-react";
 import { buildApiUrl } from "./config/api";
 import { SensorHealthDashboard } from "./pages/DeviceHealthDashboard";
 import { SensorsPage } from "./pages/DevicesPage";
@@ -1069,69 +1069,93 @@ export default function App() {
 
       {/* Global Menu - Hidden in kiosk mode */}
       {!isKioskMode && (
-        <div className="bg-card border-b border-border px-6 py-2 flex items-center gap-3">
-          <Button
-            variant={currentView === 'home' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => handleGlobalViewChange('home')}
-            style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
-          >
-            <Home className="w-5 h-5 mr-2" />
-            Home
-          </Button>
-          <Button
-            variant={currentView === 'fleets' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => handleGlobalViewChange('fleets')}
-            style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
-          >
-            <Layers className="w-5 h-5 mr-2" />
-            Fleets
-          </Button>
-          {/* <Button
-            variant={!isGlobalView ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setCurrentView('metrics')}
-          >
-            <Activity className="w-4 h-4 mr-2" />
-            Agents
-          </Button> */}
-          <div className="flex items-center gap-2 overflow-x-auto">
+        <div className="bg-card border-b border-border px-6 py-2 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
             <Button
-              variant={currentView === 'dashboard' ? 'default' : 'outline'}
+              variant={currentView === 'home' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => handleGlobalViewChange('dashboard')}
+              onClick={() => handleGlobalViewChange('home')}
               style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
             >
-              <BarChart3 className="w-5 h-5 mr-2" />
-              Dashboards
+              <Home className="w-5 h-5 mr-2" />
+              Home
             </Button>
             <Button
-              variant={currentView === 'mqtt' ? 'default' : 'outline'}
+              variant={currentView === 'fleets' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => handleGlobalViewChange('mqtt')}
+              onClick={() => handleGlobalViewChange('fleets')}
               style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
             >
-              <Radio className="w-5 h-5 mr-2" />
-              MQTT
+              <Layers className="w-5 h-5 mr-2" />
+              Fleets
+            </Button>
+            {/* <Button
+              variant={!isGlobalView ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setCurrentView('metrics')}
+            >
+              <Activity className="w-4 h-4 mr-2" />
+              Agents
+            </Button> */}
+            <div className="flex items-center gap-2 overflow-x-auto">
+              <Button
+                variant={currentView === 'dashboard' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => handleGlobalViewChange('dashboard')}
+                style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
+              >
+                <BarChart3 className="w-5 h-5 mr-2" />
+                Dashboards
+              </Button>
+              <Button
+                variant={currentView === 'mqtt' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => handleGlobalViewChange('mqtt')}
+                style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
+              >
+                <Radio className="w-5 h-5 mr-2" />
+                MQTT
+              </Button>
+              <Button
+                variant={currentView === 'audit' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => handleGlobalViewChange('audit')}
+                style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
+              >
+                <FileText className="w-5 h-5 mr-2" />
+                Audit & Activity
+              </Button>
+              <Button
+                variant={currentView === 'security' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => handleGlobalViewChange('security')}
+                style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
+              >
+                <Shield className="w-5 h-5 mr-2" />
+                Security
+              </Button>
+            </div>
+          </div>
+          
+          {/* Right Side Items */}
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => toast.info("Notifications")}
+              style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
+            >
+              <Bell className="w-5 h-5 mr-2" />
+              Notifications
             </Button>
             <Button
-              variant={currentView === 'audit' ? 'default' : 'outline'}
+              variant="outline"
               size="sm"
-              onClick={() => handleGlobalViewChange('audit')}
+              onClick={() => toast.info("Help & Support")}
               style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
             >
-              <FileText className="w-5 h-5 mr-2" />
-              Audit & Activity
-            </Button>
-            <Button
-              variant={currentView === 'security' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => handleGlobalViewChange('security')}
-              style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
-            >
-              <Shield className="w-5 h-5 mr-2" />
-              Security
+              <HelpCircle className="w-5 h-5 mr-2" />
+              Help & Support
             </Button>
           </div>
         </div>

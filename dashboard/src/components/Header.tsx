@@ -185,15 +185,6 @@ export function Header({
 
               <ThemeToggle />
 
-              <Button
-                variant="ghost"
-                size="icon"
-                className="hidden md:flex"
-                onClick={() => toast.info("Help & Documentation")}
-              >
-                <HelpCircle className="w-5 h-5" />
-              </Button>
-
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="flex items-center gap-2 px-2">
