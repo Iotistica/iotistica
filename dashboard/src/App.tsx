@@ -179,24 +179,25 @@ export default function App() {
             mappedTo: mappedFleetId 
           });
           lastUrlFleetIdRef.current = currentPath.fleetId;
-          setSelectedFleetId(mappedFleetId);
+          // Use fleet UUID directly from URL (don't convert to ID) - sidebar expects UUID
+          const fleetUuid = currentPath.fleetId || device.fleet_uuid || '';
+          setSelectedFleetId(fleetUuid);
         }
         
         setCurrentView(targetView);
       }
     } else if (currentPath.type === 'fleet' && currentPath.fleetId) {
       // Fleet view from URL: show agents view with fleet preselected
-      const mappedFleetId = fleetIdByUuid[currentPath.fleetId] || '';
       
       // Only update fleet if URL fleet ID actually changed
       if (lastUrlFleetIdRef.current !== currentPath.fleetId) {
         console.log('[URL SYNC] URL fleet ID changed (fleet view):', { 
           from: lastUrlFleetIdRef.current, 
-          to: currentPath.fleetId,
-          mappedTo: mappedFleetId 
+          to: currentPath.fleetId
         });
         lastUrlFleetIdRef.current = currentPath.fleetId;
-        setSelectedFleetId(mappedFleetId);
+        // Use fleet UUID directly from URL (don't convert to ID) - sidebar expects UUID
+        setSelectedFleetId(currentPath.fleetId);
       }
       
       setCurrentView('metrics');
