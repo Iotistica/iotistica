@@ -14,7 +14,7 @@ import { Toaster } from "./components/ui/sonner";
 import { Sheet, SheetContent } from "./components/ui/sheet";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
-import { Menu, Activity, BarChart3, Radio, CalendarClock, Package, Shield, FileText, Terminal, Layers, Plus } from "lucide-react";
+import { Menu, Activity, BarChart3, Radio, CalendarClock, Package, Shield, FileText, Terminal, Layers, Plus, Home } from "lucide-react";
 import { buildApiUrl } from "./config/api";
 import { SensorHealthDashboard } from "./pages/DeviceHealthDashboard";
 import { SensorsPage } from "./pages/DevicesPage";
@@ -64,6 +64,7 @@ export default function App() {
     return localStorage.getItem('selectedDeviceId') || "";
   });
   const viewOptions = [
+    'home',
     'fleets',
     'metrics',
     'sensors',
@@ -245,9 +246,21 @@ export default function App() {
   }, [currentPath, fleetNameById]);
 
   const handleGlobalViewChange = useCallback((view: View) => {
-    setSelectedFleetId('');
-    navigateToGlobal(view);
-  }, [navigateToGlobal, setSelectedFleetId]);
+    if (view === 'home') {
+      // Home: Show agents sidebar with all fleets, select first agent
+      setSelectedFleetId('');
+      setCurrentView('metrics');
+      if (devices.length > 0) {
+        setSelectedDeviceId(devices[0].id);
+        navigateToAgent(devices[0].deviceUuid, devices[0].fleet_uuid, 'metrics');
+      } else {
+        navigateToGlobal('home');
+      }
+    } else {
+      setSelectedFleetId('');
+      navigateToGlobal(view);
+    }
+  }, [navigateToGlobal, setSelectedFleetId, devices, setCurrentView, navigateToAgent]);
 
   const handleAgentViewChange = useCallback((view: View) => {
     if (selectedDevice?.deviceUuid) {
@@ -320,7 +333,12 @@ export default function App() {
       'applications': 'Applications',
       'logs': 'Logs',
       'remote-access': 'Remote Access',
-      'settings': 'Settings'
+      'settings': 'Settings',
+      'dashboard': 'Dashboards',
+      'home': 'Home',
+      'fleets': 'Fleets',
+      'audit': 'Audit & Activity',
+      'security': 'Security'
     };
     
     // Return mapped label if exists, otherwise capitalize the view
@@ -334,7 +352,7 @@ export default function App() {
     if (currentPath.type === 'agent') {
       const fleetLabel = fleetNameById[currentPath.fleetId || ''] || currentPath.fleetId || 'Unassigned';
       const crumbs = [
-        { label: 'Fleets', onClick: () => handleGlobalViewChange('fleets') },
+        { label: 'Home', onClick: () => handleGlobalViewChange('home') },
         { label: fleetLabel, onClick: () => navigateToFleet(currentPath.fleetId || 'unassigned') },
         { label: selectedDevice?.name || currentPath.agentId || 'Agent', onClick: currentPath.view ? () => navigateToAgent(currentPath.agentId || '', currentPath.fleetId) : undefined }
       ];
@@ -350,16 +368,16 @@ export default function App() {
     if (currentPath.type === 'fleet') {
       const fleetLabel = fleetNameById[currentPath.fleetId || ''] || currentPath.fleetId || 'Fleet';
       return [
-        { label: 'Fleets', onClick: () => handleGlobalViewChange('fleets') },
+        { label: 'Home', onClick: () => handleGlobalViewChange('home') },
         { label: fleetLabel }
       ];
     }
 
     if (currentPath.type === 'global') {
-      return [{ label: formatViewLabel(currentPath.view || 'fleets') }];
+      return [{ label: formatViewLabel(currentPath.view || 'home') }];
     }
 
-    return [{ label: 'Fleets' }];
+    return [{ label: 'Home' }];
   }, [currentPath, formatViewLabel, handleGlobalViewChange, navigateToFleet, navigateToAgent, selectedDevice]);
 
   // Persist selectedDeviceId to localStorage whenever it changes
@@ -985,6 +1003,7 @@ export default function App() {
           userEmail={user?.email || ''}
           userName={user?.username || ''}
           deviceUuid={selectedDevice?.deviceUuid}
+          onHomeClick={() => handleGlobalViewChange('home')}
           onAccountClick={() => handleGlobalViewChange('account')}
           onUsersClick={() => handleGlobalViewChange('users')}
           onProfileClick={() => handleGlobalViewChange('profile')}
@@ -997,6 +1016,14 @@ export default function App() {
       {/* Global Menu - Hidden in kiosk mode */}
       {!isKioskMode && (
         <div className="bg-card border-b border-border px-6 py-2 flex items-center gap-3">
+          <Button
+            variant={currentView === 'home' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => handleGlobalViewChange('home')}
+          >
+            <Home className="w-4 h-4 mr-2" />
+            Home
+          </Button>
           <Button
             variant={currentView === 'fleets' ? 'default' : 'outline'}
             size="sm"

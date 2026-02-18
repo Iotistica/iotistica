@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 5 agents
-# Generated: 2026-02-17 20:01:55
+# Generated: 2026-02-17 20:12:13
 # Agents: 1 to 5
 # Ports: 48481 to 48485
 
@@ -26,7 +26,7 @@ services:
       - NODE_ENV=development
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=b344787b90018075f14976bd2292e9c173f996634aa5bb5983aa54fe254cf514
+      - PROVISIONING_KEY=144d9cc3b7763756f77769e407fbf948fbfdb732212f400e10d58cbd44d710ff
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)
@@ -59,7 +59,7 @@ services:
       - NODE_ENV=development
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=73322b111b46836c56a30a96aa4002cfd158428247bb20123b6c14af447ec9d4
+      - PROVISIONING_KEY=4706e6872978370c07c0d2ea019d02e8b9f3900d6d1605a9e1ecddc23e952079
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)
@@ -92,7 +92,7 @@ services:
       - NODE_ENV=development
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=37bfd163e3a6ee368ea3046bfbbd096ddb9a6c36235657c134542e1a951b8995
+      - PROVISIONING_KEY=3bbea80711538787ade06361223e432c81066742c55d890a8735e6dcc1db599e
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)
@@ -125,7 +125,7 @@ services:
       - NODE_ENV=development
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=a6e5901881676613a519b84ace3c793bd860edd6a1ca44746dd3d19c6ba43f12
+      - PROVISIONING_KEY=ad218643eb095993ae8bd5ac7ffa010e88f28e7fbd673a092e396de39c8408cd
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)
@@ -158,7 +158,7 @@ services:
       - NODE_ENV=development
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=635ef9f5c38ed3519f778f24fee315d36940ca47d08dd14239f100b4fba6c988
+      - PROVISIONING_KEY=a6c7d4e6fb1a1e1e1e2e5cc0d11a03ae64b9de195f9b93d5eb1646b64fcdf027
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)

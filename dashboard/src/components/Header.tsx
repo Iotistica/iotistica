@@ -20,6 +20,7 @@ interface HeaderProps {
   userEmail?: string;
   userName?: string;
   deviceUuid?: string; // Device UUID for deployment operations
+  onHomeClick?: () => void; // Callback for navigating to home
   onAccountClick?: () => void; // Callback for opening account page
   onUsersClick?: () => void; // Callback for opening user management page
   onProfileClick?: () => void; // Callback for opening profile page
@@ -34,6 +35,7 @@ export function Header({
   userEmail = "john.doe@company.com",
   userName = "John Doe",
   deviceUuid,
+  onHomeClick = () => {},
   onAccountClick = () => {},
   onUsersClick = () => {},
   onProfileClick = () => {},
@@ -66,7 +68,7 @@ export function Header({
     <header className="bg-card border-b border-border sticky top-0 z-50">
       <div className="px-4 md:px-6 py-3 flex items-center justify-between">
         {/* Logo */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 cursor-pointer" onClick={onHomeClick}>
           <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
             <Server className="w-6 h-6 text-white" />
           </div>

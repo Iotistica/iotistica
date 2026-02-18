@@ -47,7 +47,7 @@ export function useRouting() {
     }
 
     // Global view
-    const view = segments[0] || 'fleets';
+    const view = segments[0] || 'home';
     return {
       type: 'global' as const,
       view

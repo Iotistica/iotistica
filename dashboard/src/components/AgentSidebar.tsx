@@ -451,7 +451,8 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
           />
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Status and Type Filters - Disabled */}
+        {/* <div className="flex items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="flex-1">
@@ -523,7 +524,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
               <X className="w-4 h-4" />
             </Button>
           )}
-        </div>
+        </div> */}
       </div>
 
       <div className="flex-1 overflow-y-auto">
