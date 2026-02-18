@@ -335,16 +335,22 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
                          device.ipAddress.includes(searchQuery);
     const matchesStatus = statusFilters.length === 0 || statusFilters.includes(device.status);
     const matchesType = typeFilters.length === 0 || typeFilters.includes(device.type);
-    const matchesFleet = !selectedFleetId || (device as any).fleet_uuid === selectedFleetId;
     
-    if (selectedFleetId) {
-      console.log('[FLEET FILTER]', {
-        deviceName: device.name,
-        deviceFleetUuid: (device as any).fleet_uuid,
-        selectedFleetId,
-        matches: matchesFleet
-      });
-    }
+    // Fleet matching: check both fleet_uuid and fleet_id (legacy support)
+    const deviceFleetId = (device as any).fleet_uuid || (device as any).fleet_id;
+    const matchesFleet = !selectedFleetId || deviceFleetId === selectedFleetId;
+    
+    console.log('[FILTER DEBUG]', {
+      deviceName: device.name,
+      deviceFleetUuid: (device as any).fleet_uuid,
+      deviceFleetId: (device as any).fleet_id,
+      selectedFleetId,
+      matchesSearch,
+      matchesStatus,
+      matchesType,
+      matchesFleet,
+      finalResult: matchesSearch && matchesStatus && matchesType && matchesFleet
+    });
     
     return matchesSearch && matchesStatus && matchesType && matchesFleet;
   }).sort((a, b) => {
