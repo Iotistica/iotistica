@@ -66,15 +66,15 @@ export function Header({
   
   return (
     <header className="bg-card border-b border-border sticky top-0 z-50">
-      <div className="px-4 md:px-6 py-3 flex items-center justify-between">
+      <div className="px-6 md:px-8 py-8 flex items-center justify-between">
         {/* Logo */}
-        <div className="flex items-center gap-4 cursor-pointer" onClick={onHomeClick}>
-          <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-            <Server className="w-6 h-6 text-white" />
-          </div>
-          <div className="leading-tight">
-            <h1 className="text-5xl md:text-6xl font-black text-foreground tracking-tight">Iotistica</h1>
-            <p className="text-sm md:text-base font-semibold text-muted-foreground">Your Device Management Platform</p>
+        <div className="flex items-center cursor-pointer" onClick={onHomeClick}>
+          <div className="leading-snug">
+            <h1 style={{ fontSize: '24px' }} className="font-black tracking-tight">
+              <span style={{ color: '#1e40af' }}>Iotis</span>
+              <span style={{ color: '#16a34a' }}>tica</span>
+            </h1>
+            <p style={{ fontSize: '1.25rem' }} className="font-semibold text-muted-foreground mt-1">Your Device Management Platform</p>
           </div>
         </div>
 

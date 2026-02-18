@@ -276,9 +276,12 @@ export default function App() {
         const device = devices.find(d => d.id === lastViewedAgent.deviceId);
         if (device) {
           setSelectedDeviceId(device.id);
-          setSelectedFleetId(device.fleet_uuid || '');
+          // Use the fleet from lastViewedAgent to restore exact fleet selection
+          const fleetUuid = lastViewedAgent.fleetUuid || device.fleet_uuid || '';
+          const fleetId = fleetIdByUuid[fleetUuid] || fleetUuid;
+          setSelectedFleetId(fleetId);
           setCurrentView('metrics');
-          navigateToAgent(device.deviceUuid, device.fleet_uuid || lastViewedAgent.fleetUuid, 'metrics');
+          navigateToAgent(device.deviceUuid, fleetUuid, 'metrics');
           return;
         }
       }
@@ -295,7 +298,7 @@ export default function App() {
       // Don't clear fleet selection when going to global view - preserve for later restoration
       navigateToGlobal(view);
     }
-  }, [navigateToGlobal, setSelectedFleetId, devices, setCurrentView, navigateToAgent, lastViewedAgent, setSelectedDeviceId]);
+  }, [navigateToGlobal, setSelectedFleetId, devices, setCurrentView, navigateToAgent, lastViewedAgent, setSelectedDeviceId, fleetIdByUuid]);
 
   const handleAgentViewChange = useCallback((view: View) => {
     if (selectedDevice?.deviceUuid) {

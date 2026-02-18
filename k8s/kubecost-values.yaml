@@ -10,11 +10,7 @@ global:
 kubecostProductConfigs:
   clusterName: "dev-iotistica-aks-cluster"
   cloudProvider: "azure"
-  cluster_id: "dev-iotistica-aks-cluster"
-  cloudIntegrationSecret: "cloud-integration"
-  azureSubscriptionID: "833accc2-1856-4e07-bcef-06cef4efdef2"
-  azureStorageAccount: "iotisticacosts9057"
-  azureStorageContainer: "cost-exports"
+  cloudIntegrationSecret: "kubecost-cloud-integration"
 
 # Basic Authentication - configured via environment variables
 kubecostFrontend:
