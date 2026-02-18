@@ -70,11 +70,11 @@ export function Header({
         {/* Logo */}
         <div className="flex items-center cursor-pointer" onClick={onHomeClick}>
           <div className="leading-snug">
-            <h1 style={{ fontSize: '24px' }} className="font-black tracking-tight">
-              <span style={{ color: '#1e40af' }}>Iotis</span>
-              <span style={{ color: '#16a34a' }}>tica</span>
+            <h1 style={{ fontSize: '40px' }} className="font-black tracking-tight">
+              <span style={{ color: '#1e40af' }}>Iot</span>
+              <span style={{ color: '#16a34a' }}>istica</span>
             </h1>
-            <p style={{ fontSize: '1.25rem' }} className="font-semibold text-muted-foreground mt-1">Your Device Management Platform</p>
+            <p style={{ fontSize: '1rem' }} className="font-semibold text-muted-foreground mt-1">Your Device Management Platform</p>
           </div>
         </div>
 
