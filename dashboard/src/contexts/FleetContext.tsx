@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
 interface FleetContextType {
   selectedFleetId: string;
@@ -8,7 +8,24 @@ interface FleetContextType {
 const FleetContext = createContext<FleetContextType | undefined>(undefined);
 
 export function FleetProvider({ children }: { children: ReactNode }) {
-  const [selectedFleetId, setSelectedFleetId] = useState<string>('');
+  // Initialize from localStorage
+  const [selectedFleetId, setSelectedFleetId] = useState<string>(() => {
+    try {
+      const stored = localStorage.getItem('selectedFleetId');
+      return stored || '';
+    } catch {
+      return '';
+    }
+  });
+
+  // Persist to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem('selectedFleetId', selectedFleetId);
+    } catch (error) {
+      console.error('Failed to save selectedFleetId to localStorage:', error);
+    }
+  }, [selectedFleetId]);
 
   return (
     <FleetContext.Provider value={{ selectedFleetId, setSelectedFleetId }}>

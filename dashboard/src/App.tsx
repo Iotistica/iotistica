@@ -207,11 +207,12 @@ export default function App() {
         setCurrentView(view);
       }
       
-      // Only clear fleet if URL type actually changed to global
+      // Don't clear fleet selection when going to global view - preserve for restoration
+      // when user returns via Home button
       if (lastUrlFleetIdRef.current !== undefined) {
-        console.log('[URL SYNC] Switched to global view, clearing fleet');
+        console.log('[URL SYNC] Switched to global view, preserving fleet selection');
         lastUrlFleetIdRef.current = undefined;
-        setSelectedFleetId('');
+        // REMOVED: setSelectedFleetId(''); - Keep fleet filter when going to global views
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -285,12 +286,19 @@ export default function App() {
           return;
         }
       }
-      // Fallback: Show agents sidebar with all fleets, select first agent
-      setSelectedFleetId('');
+      // Fallback: Show agents sidebar, preserve current fleet selection or show all
+      // Don't clear fleet selection - only set to '' if it wasn't already set
+      if (!selectedFleetId) {
+        setSelectedFleetId('');
+      }
       setCurrentView('metrics');
       if (devices.length > 0) {
-        setSelectedDeviceId(devices[0].id);
-        navigateToAgent(devices[0].deviceUuid, devices[0].fleet_uuid, 'metrics');
+        // If fleet is selected, use first device from that fleet; otherwise use first device overall
+        const deviceToSelect = devices.find(d => 
+          !selectedFleetId || (d as any).fleet_uuid === selectedFleetId || (d as any).fleet_id === selectedFleetId
+        ) || devices[0];
+        setSelectedDeviceId(deviceToSelect.id);
+        navigateToAgent(deviceToSelect.deviceUuid, (deviceToSelect as any).fleet_uuid, 'metrics');
       } else {
         navigateToGlobal('home');
       }
@@ -298,7 +306,7 @@ export default function App() {
       // Don't clear fleet selection when going to global view - preserve for later restoration
       navigateToGlobal(view);
     }
-  }, [navigateToGlobal, setSelectedFleetId, devices, setCurrentView, navigateToAgent, lastViewedAgent, setSelectedDeviceId, fleetIdByUuid]);
+  }, [navigateToGlobal, setSelectedFleetId, devices, setCurrentView, navigateToAgent, lastViewedAgent, setSelectedDeviceId, fleetIdByUuid, selectedFleetId]);
 
   const handleAgentViewChange = useCallback((view: View) => {
     if (selectedDevice?.deviceUuid) {
