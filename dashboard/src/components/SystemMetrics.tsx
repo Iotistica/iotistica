@@ -79,20 +79,22 @@ export function SystemMetrics({
   
   // Track previous device UUID to detect actual device changes
   const prevDeviceUuidRef = useRef<string | null>(null);
-  // Debug: Log what context returns
-  console.log('[SystemMetrics] Component render:', {
-    deviceUuid: device.deviceUuid.substring(0, 8) + '...',
-    persistedHistoryLength: persistedHistory.length,
-    persistedHistory: persistedHistory.slice(0, 3) // First 3 points for inspection
-  });
+  
+  // Track if we've already restored history for current device (prevent infinite loop)
+  const hasRestoredRef = useRef<string | null>(null);
   
   // Local state for history data (populated from context + new WebSocket/API data)
   const [cpuHistory, setCpuHistory] = useState<Array<{ time: string; value: number }>>([]);
   const [memoryHistory, setMemoryHistory] = useState<Array<{ time: string; used: number }>>([]);
   const [networkHistory, setNetworkHistory] = useState<Array<{ time: string; download: number; upload: number }>>([]);
   
-  // Initialize from persisted history on mount
+  // Initialize from persisted history on mount or device change (ONLY ONCE per device)
   useEffect(() => {
+    // Skip if we've already restored for this device
+    if (hasRestoredRef.current === device.deviceUuid) {
+      return;
+    }
+    
     console.log('[SystemMetrics] Restoration check:', {
       deviceUuid: device.deviceUuid.substring(0, 8) + '...',
       persistedCount: persistedHistory.length,
@@ -134,7 +136,10 @@ export function SystemMetrics({
     } else {
       console.log('[SystemMetrics] No persisted data to restore');
     }
-  }, [device.deviceUuid]); // Only restore when device changes
+    
+    // Mark this device as restored to prevent re-running
+    hasRestoredRef.current = device.deviceUuid;
+  }, [device.deviceUuid, persistedHistory]); // Run when device changes OR when persistedHistory updates
   
   // Check if we're still waiting for initial data
   const isLoading = device.cpu === 0 && device.memory === 0 && device.disk === 0;

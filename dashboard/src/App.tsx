@@ -271,42 +271,66 @@ export default function App() {
   }, [currentPath, fleetNameById]);
 
   const handleGlobalViewChange = useCallback((view: View) => {
+    console.log('[handleGlobalViewChange] Called with view:', view);
+    console.log('[handleGlobalViewChange] lastViewedAgent:', lastViewedAgent);
+    console.log('[handleGlobalViewChange] devices.length:', devices.length);
+    console.log('[handleGlobalViewChange] selectedFleetId:', selectedFleetId);
+    
     if (view === 'home') {
       // Try to restore last viewed agent first
-      if (lastViewedAgent && devices.some(d => d.id === lastViewedAgent.deviceId)) {
+      if (lastViewedAgent) {
+        console.log('[handleGlobalViewChange] Attempting to restore lastViewedAgent:', lastViewedAgent);
         const device = devices.find(d => d.id === lastViewedAgent.deviceId);
+        console.log('[handleGlobalViewChange] Found device:', device);
+        
         if (device) {
+          console.log('[handleGlobalViewChange] Restoring agent:', device.name);
           setSelectedDeviceId(device.id);
-          // Use the fleet from lastViewedAgent to restore exact fleet selection
+          // Use the fleet UUID directly (don't convert to ID) - sidebar expects UUID
           const fleetUuid = lastViewedAgent.fleetUuid || device.fleet_uuid || '';
-          const fleetId = fleetIdByUuid[fleetUuid] || fleetUuid;
-          setSelectedFleetId(fleetId);
+          console.log('[handleGlobalViewChange] Setting fleet UUID:', fleetUuid);
+          setSelectedFleetId(fleetUuid);
+          // CRITICAL: Update lastUrlFleetIdRef to prevent URL sync from overriding
+          lastUrlFleetIdRef.current = fleetUuid;
           setCurrentView('metrics');
           navigateToAgent(device.deviceUuid, fleetUuid, 'metrics');
           return;
+        } else {
+          console.log('[handleGlobalViewChange] Device not found in devices array');
         }
+      } else {
+        console.log('[handleGlobalViewChange] No lastViewedAgent available');
       }
+      
       // Fallback: Show agents sidebar, preserve current fleet selection or show all
+      console.log('[handleGlobalViewChange] Using fallback logic');
       // Don't clear fleet selection - only set to '' if it wasn't already set
       if (!selectedFleetId) {
+        console.log('[handleGlobalViewChange] No fleet selected, showing all');
         setSelectedFleetId('');
+      } else {
+        console.log('[handleGlobalViewChange] Preserving fleet selection:', selectedFleetId);
       }
+      
       setCurrentView('metrics');
       if (devices.length > 0) {
         // If fleet is selected, use first device from that fleet; otherwise use first device overall
         const deviceToSelect = devices.find(d => 
           !selectedFleetId || (d as any).fleet_uuid === selectedFleetId || (d as any).fleet_id === selectedFleetId
         ) || devices[0];
+        console.log('[handleGlobalViewChange] Selecting device:', deviceToSelect.name);
         setSelectedDeviceId(deviceToSelect.id);
         navigateToAgent(deviceToSelect.deviceUuid, (deviceToSelect as any).fleet_uuid, 'metrics');
       } else {
+        console.log('[handleGlobalViewChange] No devices available, navigating to home');
         navigateToGlobal('home');
       }
     } else {
-      // Don't clear fleet selection when going to global view - preserve for later restoration
+      // Going to other global views - preserve fleet selection and lastViewedAgent
+      console.log('[handleGlobalViewChange] Navigating to global view:', view);
       navigateToGlobal(view);
     }
-  }, [navigateToGlobal, setSelectedFleetId, devices, setCurrentView, navigateToAgent, lastViewedAgent, setSelectedDeviceId, fleetIdByUuid, selectedFleetId]);
+  }, [navigateToGlobal, setSelectedFleetId, devices, setCurrentView, navigateToAgent, lastViewedAgent, setSelectedDeviceId, selectedFleetId]);
 
   const handleAgentViewChange = useCallback((view: View) => {
     if (selectedDevice?.deviceUuid) {
