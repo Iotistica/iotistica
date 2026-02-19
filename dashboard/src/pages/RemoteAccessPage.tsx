@@ -25,8 +25,6 @@ interface RemoteAccessPageProps {
 }
 
 export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
-  console.log('[RemoteAccess] Component rendered with deviceUuid:', deviceUuid);
-  
   const { user } = useAuth();
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
@@ -38,6 +36,8 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   const currentDeviceUuidRef = useRef<string>(deviceUuid); // Track which device the current session belongs to
   const isAttachingRef = useRef<boolean>(false); // Prevent race conditions during session switching
   const isNewSessionRef = useRef<boolean>(false);
+  const inputBufferRef = useRef<string>(''); // Buffer for keystroke batching
+  const flushTimerRef = useRef<NodeJS.Timeout | null>(null); // Timer for flushing batched keystrokes
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -55,9 +55,8 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       const key = `remote-session-${deviceId}`;
       const state = { sessionId, sessions: sessionsList, timestamp: Date.now() };
       sessionStorage.setItem(key, JSON.stringify(state));
-      console.log('[RemoteAccess] Saved session state to sessionStorage:', key, state);
     } catch (error) {
-      console.error('[RemoteAccess] Failed to save session state:', error);
+      // Silently fail on storage errors
     }
   };
   
@@ -66,36 +65,26 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       const key = `remote-session-${deviceId}`;
       const stored = sessionStorage.getItem(key);
       if (!stored) {
-        console.log('[RemoteAccess] No stored session state for:', key);
         return null;
       }
       const state = JSON.parse(stored);
       // Expire after 1 hour
       if (Date.now() - state.timestamp > 3600000) {
-        console.log('[RemoteAccess] Session state expired for:', key);
         sessionStorage.removeItem(key);
         return null;
       }
-      console.log('[RemoteAccess] Loaded session state from sessionStorage:', key, state);
       return { sessionId: state.sessionId, sessions: state.sessions };
     } catch (error) {
-      console.error('[RemoteAccess] Failed to load session state:', error);
       return null;
     }
   };
 
   const connectWebSocket = (skipAutoConnect = false) => {
-    console.log('[RemoteAccess] 🔌 connectWebSocket() called - skipAutoConnect:', skipAutoConnect, '- STACK TRACE:');
-    console.trace();
-    console.log('[RemoteAccess] Current WS state:', wsRef.current?.readyState);
-    
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      console.log('[RemoteAccess] WebSocket already open, skipping');
       return;
     }
     
     setIsConnecting(true);
-    console.log('[RemoteAccess] 🔌 Creating new WebSocket connection...');
     
     const wsUrl = buildApiUrl(`/ws?deviceUuid=${deviceUuid}`).replace(/^http/, 'ws');
 
@@ -103,12 +92,10 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log('[RemoteAccess] ✅ WebSocket OPENED');
       setIsConnected(true);
       setIsConnecting(false);
       
       // Subscribe to shell channel
-      console.log('[RemoteAccess] ✅ Subscribing to shell channel');
       ws.send(JSON.stringify({
         type: 'subscribe',
         channel: 'shell',
@@ -120,15 +107,11 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
       // Auto-connect: List existing sessions (unless reconnecting to saved session)
       if (!skipAutoConnect) {
-        console.log('[RemoteAccess] ✅ Sending list-sessions and ENABLING auto-connect');
         ws.send(JSON.stringify({
           type: 'list-sessions',
           deviceUuid,
         }));
         autoConnectPendingRef.current = true;
-        console.log('[RemoteAccess] ✅ autoConnectPendingRef.current = true');
-      } else {
-        console.log('[RemoteAccess] ⏭️ Skipping auto-connect (reconnecting to saved session)');
       }
     };
 
@@ -137,12 +120,11 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         const message = JSON.parse(event.data);
         handleWebSocketMessage(message);
       } catch (error) {
-        console.error('[RemoteAccess] Error parsing WebSocket message:', error);
+        // Silently ignore parse errors
       }
     };
 
     ws.onerror = (error) => {
-      console.error('[RemoteAccess] WebSocket error:', error);
       setIsConnected(false);
       setIsConnecting(false);
       if (xtermRef.current) {
@@ -164,12 +146,10 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   const handleWebSocketMessage = (message: any) => {
     switch (message.type) {
       case 'session-created':
-        console.log('[RemoteAccess] 🆕 Received session-created for:', message.sessionId?.substring(0, 8));
         if (xtermRef.current) {
           xtermRef.current.writeln('\x1b[32m✓ Session created\x1b[0m');
         }
         // Auto-attach to newly created session
-        console.log('[RemoteAccess] 🆕 Auto-attaching to newly created session');
         if (wsRef.current && message.sessionId) {
           wsRef.current.send(JSON.stringify({
             type: 'attach-session',
@@ -182,8 +162,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         break;
 
       case 'session-attached': {
-        console.log('[RemoteAccess] 📨 Received session-attached for:', message.sessionId?.substring(0, 8), '- PTY restarted:', message.data?.ptyRestarted || message.ptyRestarted);
-        
         // Clear the attaching flag
         isAttachingRef.current = false;
         
@@ -192,7 +170,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         currentDeviceUuidRef.current = deviceUuid; // Track which device this session belongs to
         
         // Save session state immediately when attached
-        console.log('[RemoteAccess] Saving session state immediately after attach');
         saveSessionState(deviceUuid, message.sessionId, sessions);
         
         // Check for PTY restart (nested under data)
@@ -264,7 +241,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         break;
 
       case 'session-terminated':
-        console.log('[RemoteAccess] Received session-terminated message for:', message.sessionId?.substring(0, 8), 'current:', currentSessionId?.substring(0, 8));
         if (message.sessionId === currentSessionId) {
           setCurrentSessionId(null);
           currentSessionIdRef.current = null;
@@ -278,7 +254,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         break;
 
       case 'session-status':
-        console.log('[RemoteAccess] 📊 Received session-status:', message.data?.status, message.data?.message);
         setSessionStatus({
           status: message.data?.status,
           message: message.data?.message,
@@ -286,17 +261,12 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         
         // Clear status when session becomes active
         if (message.data?.status === 'active') {
-          setTimeout(() => setSessionStatus(null), 2000); // Clear after 2 seconds
+          setTimeout(() => setSessionStatus(null), 2000);
         }
         break;
 
       case 'all-sessions-cleared':
-        console.log('[RemoteAccess] 🗑️ ALL SESSIONS CLEARED - Server confirmed:', message.message);
-        console.log('[RemoteAccess] 🗑️ Clearing local state...');
-        
-        // Disable auto-connect to prevent duplicate session creation
         autoConnectPendingRef.current = false;
-        
         setCurrentSessionId(null);
         currentSessionIdRef.current = null;
         setSessions([]);
@@ -305,32 +275,17 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           xtermRef.current.writeln('\x1b[32m✓ All sessions cleared successfully!\x1b[0m');
           xtermRef.current.writeln('\x1b[90mCreating new session...\x1b[0m');
         }
-        // Create a fresh new session after clearing
-        console.log('[RemoteAccess] 🗑️ Will create new session in 500ms...');
         setTimeout(() => {
-          console.log('[RemoteAccess] 🗑️ Creating new session NOW');
           createNewSession();
         }, 500);
         break;
 
       case 'sessions-list':
-        console.log('[RemoteAccess] 📋 Received sessions-list');
         const sessionsList = message.data?.sessions || message.sessions || [];
-        console.log('[RemoteAccess] 📋 Total sessions from backend:', sessionsList.length);
-        console.log('[RemoteAccess] 📋 ALL sessions from backend:', sessionsList.map((s: SessionInfo) => ({
-          id: s.sessionId.substring(0, 8),
-          status: s.status,
-          userId: s.userId,
-          deviceUuid: s.deviceUuid.substring(0, 8),
-        })));
-        // Filter to show only creating/active sessions (exclude detached and terminated)
-        // Also filter by current user when available to avoid cross-user attach errors
         const currentUserId = user?.id !== undefined && user?.id !== null
           ? String(user.id)
           : null;
-        console.log('[RemoteAccess] 📋 Current userId for filtering:', currentUserId);
         const usableSessions = sessionsList.filter((s: SessionInfo) => {
-          // Only show sessions that are actively in use (not detached or terminated)
           const isUsableStatus = s.status === 'creating' || s.status === 'active';
           if (!isUsableStatus) {
             return false;
@@ -343,32 +298,19 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           }
           return String(s.userId) === currentUserId;
         });
-        console.log('[RemoteAccess] 📋 Usable sessions after filtering:', usableSessions.length, usableSessions.map((s: SessionInfo) => ({id: s.sessionId.substring(0, 8), status: s.status})));
         setSessions(usableSessions);
         
-        // Auto-connect logic: attach to most recent active/detached session OR create new
-        console.log('[RemoteAccess] 🤖 Auto-connect check - autoConnectPendingRef:', autoConnectPendingRef.current, 'currentSessionId:', currentSessionIdRef.current?.substring(0, 8));
-        
-        // SAFETY: Only run auto-connect if:
-        // 1. autoConnectPendingRef is true
-        // 2. We DON'T already have a current session (prevents creating duplicates during session switch)
         if (autoConnectPendingRef.current && !currentSessionIdRef.current) {
-          console.log('[RemoteAccess] 🤖 Auto-connect IS ACTIVE - processing...');
           autoConnectPendingRef.current = false;
           
           if (!user?.id) {
-            console.log('[RemoteAccess] User not ready yet, deferring auto-connect');
             autoConnectPendingRef.current = true;
             return;
           }
           
-          // Filter for active sessions only (creating sessions aren't ready to attach)
-          const existingSessions = usableSessions.filter((s: SessionInfo) =>
-            s.status === 'active'
-          );
+          const existingSessions = usableSessions.filter((s: SessionInfo) => s.status === 'active');
           
           if (existingSessions.length > 0) {
-            // Attach to most recent session
             const mostRecent = existingSessions.sort((a: SessionInfo, b: SessionInfo) => 
               new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
             )[0];
@@ -387,8 +329,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
               }));
             }
           } else {
-            // Create new session
-            console.log('[RemoteAccess] 🤖 No existing sessions found - creating new session');
             if (xtermRef.current) {
               xtermRef.current.writeln(`\x1b[90mCreating new session...\x1b[0m`);
             }
@@ -398,19 +338,13 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         break;
 
       case 'shell-output':
-        console.log('[RemoteAccess] shell-output received, sessionId:', message.sessionId?.substring(0, 8), 'current:', currentSessionIdRef.current?.substring(0, 8), 'hasOutput:', !!message.data?.output);
-        // Accept output if sessionId matches OR if sessionId is null (legacy agent messages)
         if (message.data?.output && (message.sessionId === currentSessionIdRef.current || !message.sessionId)) {
-          console.log('[RemoteAccess] Writing output to terminal:', message.data.output.length, 'chars');
           if (xtermRef.current) {
             xtermRef.current.write(message.data.output);
           }
-          // Clear PTY restart warning on first output
           if (ptyRestarted) {
             setPtyRestarted(false);
           }
-        } else {
-          console.warn('[RemoteAccess] shell-output NOT displayed. Session match:', message.sessionId === currentSessionIdRef.current, 'Has output:', !!message.data?.output, 'SessionId:', message.sessionId);
         }
         break;
 
@@ -429,7 +363,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
       case 'error':
         const errorMsg = message.error || message.message || JSON.stringify(message);
-        console.error('[RemoteAccess] Server error:', errorMsg);
         
         // If error is about session not found or access denied, clear stale sessionStorage and create new session
         if (
@@ -437,13 +370,12 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           errorMsg.includes('Access denied') ||
           errorMsg.includes('has been terminated')
         ) {
-          console.warn('[RemoteAccess] Session invalid - clearing stale sessionStorage');
           try {
             sessionStorage.removeItem(`remote-session-${deviceUuid}`);
             setCurrentSessionId(null);
             currentSessionIdRef.current = null;
           } catch (e) {
-            console.error('[RemoteAccess] Failed to clear sessionStorage:', e);
+            // Silently fail
           }
           if (xtermRef.current) {
             xtermRef.current.writeln(`\r\n\x1b[31m✗ ${errorMsg}\x1b[0m`);
@@ -462,24 +394,14 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   };
 
   const createNewSession = () => {
-    console.log('[RemoteAccess] ✨ createNewSession() called');
-    console.log('[RemoteAccess] ✨ Current state - currentSessionId:', currentSessionIdRef.current?.substring(0, 8), 'autoConnectPending:', autoConnectPendingRef.current, 'isAttaching:', isAttachingRef.current);
-    console.log('[RemoteAccess] ✨ STACK TRACE:');
-    console.trace();
-    
-    // SAFETY: Don't create a new session if we're in the middle of attaching to one
-    // (prevents accidental duplication during session switching)
     if (isAttachingRef.current) {
-      console.log('[RemoteAccess] ⚠️ BLOCKED: Currently attaching to a session - not creating duplicate');
       return;
     }
     
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      console.error('[RemoteAccess] WebSocket not connected');
       return;
     }
 
-    console.log('[RemoteAccess] ✨ Sending create-session message to backend');
     isNewSessionRef.current = true;
     const msg = {
       type: 'create-session',
@@ -558,7 +480,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       return;
     }
 
-    console.log('[RemoteAccess] Terminating session:', currentSessionIdRef.current.substring(0, 8));
     const msg = {
       type: 'terminate-session',
       data: { sessionId: currentSessionIdRef.current },
@@ -579,28 +500,40 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     wsRef.current.send(JSON.stringify(msg));
   };
 
+  const flushInputBuffer = () => {
+    if (inputBufferRef.current && wsRef.current?.readyState === WebSocket.OPEN && currentSessionIdRef.current) {
+      wsRef.current.send(JSON.stringify({
+        type: 'shell-input',
+        data: {
+          sessionId: currentSessionIdRef.current,
+          input: inputBufferRef.current,
+        },
+      }));
+      inputBufferRef.current = '';
+    }
+  };
+
   const sendInput = (data: string) => {
-    console.log('[RemoteAccess] sendInput called, WS state:', wsRef.current?.readyState, 'Session:', currentSessionIdRef.current?.substring(0, 8));
-    
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      console.warn('[RemoteAccess] sendInput blocked - WebSocket not open');
       return;
     }
 
     if (!currentSessionIdRef.current) {
-      console.warn('[RemoteAccess] sendInput blocked - No session ID');
       return;
     }
 
-    const msg = {
-      type: 'shell-input',
-      data: {
-        sessionId: currentSessionIdRef.current,
-        input: data,
-      },
-    };
-    console.log('[RemoteAccess] Sending shell-input message:', msg);
-    wsRef.current.send(JSON.stringify(msg));
+    // Add to buffer
+    inputBufferRef.current += data;
+    
+    // Clear existing timer and set new one to flush after 50ms
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+    }
+    
+    flushTimerRef.current = setTimeout(() => {
+      flushInputBuffer();
+      flushTimerRef.current = null;
+    }, 50);
   };
 
   const resizeSession = () => {
@@ -625,14 +558,11 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   };
 
   const disconnect = () => {
-    console.log('[RemoteAccess] disconnect() called, currentSessionId:', currentSessionId, 'currentSessionIdRef:', currentSessionIdRef.current);
-    console.log('[RemoteAccess] Current device:', deviceUuid, 'Session belongs to device:', currentDeviceUuidRef.current);
     if (wsRef.current) {
       // Terminate session when disconnect button clicked (clean break)
       // Browser navigation/unmount will detach (allowing reconnect)
       const sessionId = currentSessionIdRef.current || currentSessionId;
       if (sessionId) {
-        console.log('[RemoteAccess] Terminating session (disconnect button)');
         if (xtermRef.current) {
           // Ensure clean line breaks to avoid overlapping active command output
           xtermRef.current.write('\r\n');
@@ -641,8 +571,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         terminateSession();
         // Clear session from sessionStorage - user wants to disconnect
         sessionStorage.removeItem(`remote-session-${currentDeviceUuidRef.current}`);
-      } else {
-        console.log('[RemoteAccess] No current session to terminate');
       }
       
       // Mark as intentional disconnect to avoid "connection lost" message
@@ -725,21 +653,15 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
     // Handle user input
     term.onData((data) => {
-      console.log('[RemoteAccess] Terminal input received:', data.charCodeAt(0), 'WS state:', wsRef.current?.readyState, 'Session:', currentSessionIdRef.current?.substring(0, 8));
-      
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-        console.warn('[RemoteAccess] Cannot send input - WebSocket not open');
         return;
       }
 
       if (!currentSessionIdRef.current) {
-        console.warn('[RemoteAccess] Cannot send input - No session attached');
         term.write('\x1b[31m✗ Not attached to a session\x1b[0m\r\n');
         return;
       }
 
-      // Send all input directly (don't echo - server will echo back)
-      console.log('[RemoteAccess] Sending input to session:', currentSessionIdRef.current.substring(0, 8));
       sendInput(data);
     });
 
@@ -752,12 +674,15 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     window.addEventListener('resize', handleResize);
 
     return () => {
-      console.log('[RemoteAccess] Terminal cleanup - component unmounting');
-      console.log('[RemoteAccess] Current session at unmount:', currentSessionIdRef.current);
+      // Flush any remaining buffered input
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current);
+        flushInputBuffer();
+        flushTimerRef.current = null;
+      }
       
       // Save session state before cleanup
       if (currentSessionIdRef.current) {
-        console.log('[RemoteAccess] Saving session state before unmount');
         // Use the device the session belongs to, not the current deviceUuid
         const key = `remote-session-${currentDeviceUuidRef.current}`;
         const state = { 
@@ -766,10 +691,8 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           timestamp: Date.now() 
         };
         sessionStorage.setItem(key, JSON.stringify(state));
-        console.log('[RemoteAccess] Saved to sessionStorage during cleanup:', key, state);
         
         // Detach from session (allows reconnect) instead of terminating
-        console.log('[RemoteAccess] Detaching from session for later reconnect');
         detachFromSession();
       }
       
@@ -777,7 +700,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       
       // Close WebSocket and dispose terminal
       if (wsRef.current) {
-        console.log('[RemoteAccess] Closing WebSocket on unmount');
         isDisconnectingRef.current = true; // Mark as intentional disconnect
         if (wsRef.current.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({
@@ -807,17 +729,9 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   // Keep session state updated whenever currentSessionId or sessions change
   useEffect(() => {
     if (currentSessionId && currentDeviceUuidRef.current) {
-      console.log('[RemoteAccess] ===== SAVE EFFECT TRIGGERED =====');
-      console.log('[RemoteAccess] currentSessionId:', currentSessionId);
-      console.log('[RemoteAccess] currentDeviceUuidRef.current:', currentDeviceUuidRef.current);
-      console.log('[RemoteAccess] deviceUuid prop:', deviceUuid);
-      
       // Safety check: only save if session belongs to current device
       if (currentDeviceUuidRef.current === deviceUuid) {
-        console.log('[RemoteAccess] Device matches, saving session state');
         saveSessionState(currentDeviceUuidRef.current, currentSessionId, sessions);
-      } else {
-        console.warn('[RemoteAccess] SKIPPING SAVE - Device mismatch! Session device:', currentDeviceUuidRef.current, 'Current device:', deviceUuid);
       }
     }
   }, [currentSessionId, sessions, deviceUuid]); // Added deviceUuid back for safety check
@@ -832,7 +746,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       return;
     }
 
-    console.log('[RemoteAccess] User ready - requesting sessions list for auto-connect');
     wsRef.current.send(JSON.stringify({
       type: 'list-sessions',
       deviceUuid,
@@ -841,28 +754,18 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
   // Handle device switching - preserve and restore sessions
   useEffect(() => {
-    console.log('[RemoteAccess] ===== DEVICE SWITCHING EFFECT START =====');
-    console.log('[RemoteAccess] New deviceUuid:', deviceUuid);
-    console.log('[RemoteAccess] currentDeviceUuidRef.current (old device):', currentDeviceUuidRef.current);
-    console.log('[RemoteAccess] currentSessionId (state):', currentSessionId);
-    console.log('[RemoteAccess] currentSessionIdRef.current (ref):', currentSessionIdRef.current);
-    
     // Save and detach from previous device's session (if exists)
     if (currentSessionIdRef.current && currentDeviceUuidRef.current && currentDeviceUuidRef.current !== deviceUuid) {
-      console.log('[RemoteAccess] Saving session for previous device:', currentDeviceUuidRef.current);
       saveSessionState(currentDeviceUuidRef.current, currentSessionIdRef.current, sessions);
       
-      console.log('[RemoteAccess] Detaching from previous device session');
       detachFromSession();
     }
     
     // Clear session state immediately to prevent save effect from firing with wrong device
-    console.log('[RemoteAccess] Clearing currentSessionId state...');
     setCurrentSessionId(null);
     
     // Close WebSocket from previous device
     if (wsRef.current) {
-      console.log('[RemoteAccess] Closing WebSocket for previous device');
       isDisconnectingRef.current = true; // Mark as intentional disconnect
       if (wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({
@@ -876,21 +779,17 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     setIsConnected(false);
     
     // Now update the current device ref to the new device
-    console.log('[RemoteAccess] Updating currentDeviceUuidRef from', currentDeviceUuidRef.current, 'to', deviceUuid);
     currentDeviceUuidRef.current = deviceUuid;
     
     // Check if we have a saved session for this NEW device
     const savedState = loadSessionState(deviceUuid);
-    console.log('[RemoteAccess] Saved state for this device:', savedState);
     
     if (xtermRef.current) {
       xtermRef.current.clear();
       
       if (savedState?.sessionId) {
-        console.log('[RemoteAccess] Found saved session, will reconnect to:', savedState.sessionId);
-        xtermRef.current.writeln('\x1b[33m↻ Reconnecting to previous session...\x1b[0m');
+        xtermRef.current.writeln('\x1b[33m↻ Reconnecting to previous session...\\x1b[0m');
       } else {
-        console.log('[RemoteAccess] No saved session found');
         xtermRef.current.writeln('\x1b[33mClick "Connect" to start a shell session\x1b[0m');
       }
     }
@@ -906,16 +805,13 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     if (savedState?.sessionId) {
       // Store the session ID to reconnect to
       const sessionToReconnect = savedState.sessionId;
-      console.log('[RemoteAccess] Starting auto-reconnect sequence for session:', sessionToReconnect);
       
       // Connect WebSocket first (with auto-connect DISABLED to prevent race condition)
       connectWebSocket(true); // Pass true to skip auto-connect logic
       
       // Wait for WebSocket to establish, then reconnect
       const reconnectTimer = setTimeout(() => {
-        console.log('[RemoteAccess] Reconnect timer fired, WS state:', wsRef.current?.readyState);
         if (wsRef.current?.readyState === WebSocket.OPEN) {
-          console.log('[RemoteAccess] Sending attach-session message for:', sessionToReconnect);
           wsRef.current.send(JSON.stringify({
             type: 'attach-session',
             data: { 
@@ -924,7 +820,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
             },
           }));
         } else {
-          console.log('[RemoteAccess] WebSocket not ready, auto-reconnect failed');
+          // WebSocket not ready, auto-reconnect failed - will retry on next effect
         }
       }, 500);
       
