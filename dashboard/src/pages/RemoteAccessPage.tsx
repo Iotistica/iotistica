@@ -795,6 +795,59 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
               </div>
               
               <div className="flex items-center gap-2">
+                {/* Quick Command Buttons - first in toolbar */}
+                <Button
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => runCommand('iotctl status')}
+                  disabled={!currentSessionId}
+                >
+                  Status
+                </Button>
+                <Button
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => runCommand('iotctl diagnostics')}
+                  disabled={!currentSessionId}
+                >
+                  Diagnostics
+                </Button>
+                <Button
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => runCommand('iotctl config show')}
+                  disabled={!currentSessionId}
+                >
+                  Config
+                </Button>
+                <Button
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => runCommand('iotctl apps list')}
+                  disabled={!currentSessionId}
+                >
+                  Apps
+                </Button>
+                <Button
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => runCommand('iotctl services list')}
+                  disabled={!currentSessionId}
+                >
+                  Services
+                </Button>
+                <Button
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => runCommand('iotctl provision status')}
+                  disabled={!currentSessionId}
+                >
+                  Provision
+                </Button>
+
+                {/* Spacer */}
+                <div className="w-4" />
+
                 {/* Connection Status */}
                 <Badge 
                   variant={isConnected ? "default" : "secondary"}
@@ -802,6 +855,9 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
                 >
                   {isConnecting ? 'Connecting...' : isConnected ? 'Connected' : 'Disconnected'}
                 </Badge>
+                
+                {/* Spacer */}
+                <div className="flex-1" />
                 
                 {/* Connect/Disconnect Button */}
                 {!isConnected ? (
@@ -838,6 +894,9 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
                     </Button>
                   </>
                 )}
+
+                {/* Spacer to center the toolbar */}
+                <div className="flex-1" />
 
                 {/* Search in scrollback - 5000 line history */}
                 <Button
@@ -911,63 +970,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           </CardHeader>
 
           <CardContent className="flex-1 overflow-hidden p-6 flex flex-col">
-            {/* Command Palette - shows above terminal when connected but no active session */}
-            {isConnected && !currentSessionId && (
-              <div className="mb-4 p-4 bg-muted rounded-lg border border-muted-foreground/20">
-                <p className="text-xs uppercase tracking-wider text-muted-foreground mb-3">Quick Commands</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="justify-start text-left text-xs h-8"
-                    onClick={() => runCommand('iotctl status')}
-                  >
-                    Device Status
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="justify-start text-left text-xs h-8"
-                    onClick={() => runCommand('iotctl diagnostics')}
-                  >
-                    Diagnostics
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="justify-start text-left text-xs h-8"
-                    onClick={() => runCommand('iotctl config show')}
-                  >
-                    Config
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="justify-start text-left text-xs h-8"
-                    onClick={() => runCommand('iotctl apps list')}
-                  >
-                    Apps
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="justify-start text-left text-xs h-8"
-                    onClick={() => runCommand('iotctl services list')}
-                  >
-                    Services
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="justify-start text-left text-xs h-8"
-                    onClick={() => runCommand('iotctl provision status')}
-                  >
-                    Provision
-                  </Button>
-                </div>
-              </div>
-            )}
-            
             {/* Terminal area */}
             <div className="flex-1 overflow-hidden">
             
