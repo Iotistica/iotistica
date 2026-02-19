@@ -19,7 +19,7 @@
 
 import express from 'express';
 import { query } from '../db/connection';
-import { deviceSensorSync } from '../services/device-endpoints';
+import { deviceSensorSync } from '../services/agent-devices';
 import { logger } from '../utils/logger';
 import { VirtualDeviceManager } from '../services/virtual-device-manager';
 

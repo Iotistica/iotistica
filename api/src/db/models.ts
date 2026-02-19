@@ -6,7 +6,7 @@
 import { query, transaction } from './connection';
 import { PoolClient } from 'pg';
 import crypto from 'crypto';
-import { DeviceSensorSyncService } from '../services/device-endpoints';
+import { DeviceSensorSyncService } from '../services/agent-devices';
 import logger from '../utils/logger';
 
 // Types

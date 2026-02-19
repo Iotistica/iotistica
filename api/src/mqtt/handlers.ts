@@ -6,7 +6,7 @@
 
 import { query } from '../db/connection';
 import type { SensorData, MetricsData, StateMessage } from './mqtt-manager';
-import { processDeviceStateReport } from '../services/device-state';
+import { processDeviceStateReport } from '../services/agent-state';
 import { redisSensorQueue } from '../services/redis-device-queue';
 import { getAnomalyEventHandler, type AnomalyEvent } from './anomaly-handler';
 import logger from '../utils/logger';

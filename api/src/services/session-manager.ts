@@ -178,7 +178,8 @@ export class SessionManager {
     
     // Restart PTY if:
     // 1. Attaching to a different session than the one with active PTY
-    // 2. OR PTY is not active at all
+    // 2. OR PTY is not active after grace period
+    // 3. OR session is new (creating status) and no output received yet
     if (currentPtySessionId && currentPtySessionId !== sessionId) {
       logger.info(`🐚 [SESSION] Switching PTY from session ${currentPtySessionId.substring(0, 8)} to ${sessionId.substring(0, 8)}`);
       needsPtyRestart = true;
@@ -187,13 +188,18 @@ export class SessionManager {
       if (oldSession) {
         oldSession.devicePtyActive = false;
       }
-    } else if (session.info.status !== 'creating' && !session.devicePtyActive) {
+    } else if (!session.devicePtyActive) {
       const timeSinceCreation = Date.now() - session.info.createdAt.getTime();
-      if (timeSinceCreation > this.PTY_STARTUP_GRACE_PERIOD_MS) {
-        logger.warn(`🐚 [SESSION] PTY is not active for session ${sessionId.substring(0, 8)}... - will request restart`);
+      // For 'creating' sessions, give a shorter grace period (5 seconds)
+      const graceTime = session.info.status === 'creating' ? 5000 : this.PTY_STARTUP_GRACE_PERIOD_MS;
+      
+      if (timeSinceCreation > graceTime) {
+        logger.warn(`🐚 [SESSION] PTY is not active for session ${sessionId.substring(0, 8)}... (${Math.round(timeSinceCreation/1000)}s since creation, status: ${session.info.status}) - will request ${session.info.status === 'creating' ? 'start' : 'restart'}`);
         needsPtyRestart = true;
         // Reset PTY active flag so new output will be accepted
         session.devicePtyActive = false;
+      } else {
+        logger.info(`🐚 [SESSION] PTY not active yet for session ${sessionId.substring(0, 8)}..., but within grace period (${Math.round(timeSinceCreation/1000)}s/${Math.round(graceTime/1000)}s) - waiting for output`);
       }
     }
     

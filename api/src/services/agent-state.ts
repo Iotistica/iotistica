@@ -19,7 +19,7 @@ import {
 } from '../db/models';
 import { EventPublisher, objectsAreEqual } from './event-sourcing';
 import EventSourcingConfig from '../events/event-sourcing';
-import { deviceSensorSync } from './device-endpoints';
+import { deviceSensorSync } from './agent-devices';
 import logger from '../utils/logger';
 
 const eventPublisher = new EventPublisher();
@@ -140,10 +140,10 @@ export async function processDeviceStateReport(
     // endpoints_health is sent at root level, not in config
     // CRITICAL: Must happen BEFORE config sync to avoid race conditions
     if (deviceState.endpoints_health) {
-      logger.info(`Processing endpoint health for device ${uuid.substring(0, 8)}... (${Object.keys(deviceState.endpoints_health).length} endpoints)`);
+      logger.info(`Processing device health for agent ${uuid.substring(0, 8)}... (${Object.keys(deviceState.endpoints_health).length} endpoints)`);
       await deviceSensorSync.updateEndpointHealth(uuid, deviceState.endpoints_health);
     } else {
-      logger.debug(`No endpoints_health in state report for device ${uuid.substring(0, 8)}`);
+      logger.debug(`No endpoints_health in state report for agent ${uuid.substring(0, 8)}`);
     }
 
     // 🔄 RECONCILIATION: Sync agent's current state to device_sensors table

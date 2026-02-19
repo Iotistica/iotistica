@@ -511,6 +511,10 @@ export class WebSocketManager {
         this.handleShellInput(client, message);
         break;
 
+      case 'resize-session':
+        this.handleResizeSession(client, message);
+        break;
+
       case 'shell':
         // Legacy support: Forward shell commands to device via MQTT
         logger.info('🐚 [SHELL] Received legacy shell command from WebSocket', {
@@ -1559,6 +1563,43 @@ export class WebSocketManager {
         type: 'error',
         message: `Failed to send input: ${error.message}`,
       });
+    }
+  }
+
+  /**
+   * Handle terminal resize requests
+   */
+  private async handleResizeSession(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
+    try {
+      const sessionId = message.data?.sessionId;
+      const cols = message.data?.cols;
+      const rows = message.data?.rows;
+      
+      if (!sessionId || !cols || !rows) {
+        logger.warn('🐚 [SESSION] Invalid resize request - missing sessionId, cols, or rows');
+        return;
+      }
+
+      // Get session to find device UUID
+      const sessions = await sessionManager.listSessions();
+      const session = sessions.find(s => s.sessionId === sessionId);
+      
+      if (!session) {
+        logger.warn(`🐚 [SESSION] Cannot resize - session ${sessionId.substring(0, 8)}... not found`);
+        return;
+      }
+
+      // Forward resize command to device
+      await this.handleShellCommand(session.deviceUuid, {
+        action: 'resize',
+        sessionId,
+        cols,
+        rows,
+      });
+
+      logger.debug(`🐚 [SESSION] Forwarded resize (${cols}x${rows}) to session ${sessionId.substring(0, 8)}...`);
+    } catch (error: any) {
+      logger.error('🐚 [SESSION] Failed to handle resize:', error);
     }
   }
 

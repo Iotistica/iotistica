@@ -551,7 +551,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
                     </div>
                     <div
                       className={cn(
-                        "absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-card",
+                        "absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-card",
                         statusColors[device.status]
                       )}
                     />

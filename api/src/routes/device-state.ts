@@ -33,8 +33,8 @@ import { EventPublisher, objectsAreEqual } from '../services/event-sourcing';
 import EventSourcingConfig from '../events/event-sourcing';
 import deviceAuth, { deviceAuthFromBody } from '../middleware/device-auth';
 import { resolveAppsImages } from '../services/docker-registry';
-import { deviceSensorSync } from '../services/device-endpoints';
-import { processDeviceStateReport } from '../services/device-state';
+import { deviceSensorSync } from '../services/agent-devices';
+import { processDeviceStateReport } from '../services/agent-state';
 import logger from '../utils/logger';
 
 export const router = express.Router();

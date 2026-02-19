@@ -11,7 +11,7 @@
 
 import msgpack from 'msgpack-lite';
 import { createHash } from 'crypto';
-import { DeviceDictionaryService } from '../services/device-dictionary.service';
+import { DeviceDictionaryService } from '../services/agent-dictionary.service';
 
 // Domain types from agent (must match agent's DictionaryDomain type)
 type DictionaryDomain = 'key' | 'metric' | 'unit' | 'quality' | 'device';

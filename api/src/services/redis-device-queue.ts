@@ -186,7 +186,7 @@ interface RedisSensorEntry {
   isCompressed?: boolean; // Flag to distinguish entry types
 }
 
-class RedisSensorQueue {
+class RedisDeviceQueue {
   private redisIngestion: Redis; // Write-only: XADD
   private redisConsumer: Redis;  // Read-only: XREADGROUP, XACK, XAUTOCLAIM, XINFO
   private consumerGroup = 'sensor-writers';
@@ -253,17 +253,17 @@ class RedisSensorQueue {
     });
 
     this.redisIngestion.on('connect', () => {
-      logger.info('Redis sensor ingestion connected');
+      logger.info('Redis device ingestion connected');
       metrics.redisConnected = 1;
       metrics.redisReconnects++;
     });
 
     this.redisConsumer.on('error', (err) => {
-      logger.error('Redis sensor consumer connection error', { error: err.message });
+      logger.error('Redis device consumer connection error', { error: err.message });
     });
 
     this.redisConsumer.on('connect', () => {
-      logger.info('Redis sensor consumer connected');
+      logger.info('Redis device consumer connected');
     });
   }
 
@@ -318,7 +318,7 @@ class RedisSensorQueue {
     try {
       // Check Redis connection before attempting write
       if (this.redisIngestion.status !== 'ready' && this.redisIngestion.status !== 'connect') {
-        logger.error('Redis ingestion not ready, dropping compressed sensor batch', {
+        logger.error('Redis ingestion not ready, dropping compressed device batch', {
           status: this.redisIngestion.status,
           deviceUuid: entry.deviceUuid.substring(0, 8),
           sensorName: entry.sensorName,
@@ -1163,7 +1163,7 @@ class RedisSensorQueue {
       const uniqueSensors = new Set(allData.map(d => `${d.deviceUuid}/${d.sensorName}`)).size;
       const compressedCount = entries.filter(e => e.isCompressed).length;
       
-      logger.info('Processed sensor data batch from Redis', {
+      logger.info('Processed device data batch from Redis', {
         totalReadings: entries.length,
         compressedEntries: compressedCount,
         legacyEntries: entries.length - compressedCount,
@@ -1575,4 +1575,4 @@ class RedisSensorQueue {
 }
 
 // Singleton instance
-export const redisSensorQueue = new RedisSensorQueue();
+export const redisSensorQueue = new RedisDeviceQueue();

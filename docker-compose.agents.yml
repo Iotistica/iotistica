@@ -1,45 +1,14 @@
-# Auto-generated docker-compose file for 5 agents
-# Generated: 2026-02-17 20:12:13
-# Agents: 1 to 5
-# Ports: 48481 to 48485
+# Auto-generated docker-compose file for 1 agents
+# Generated: 2026-02-18 19:35:18
+# Agents: 2 to 2
+# Ports: 48482 to 48482
 
 services:
-  agent-1:
-    container_name: agent-1
-    image: iotistic/agent:latest
-    restart: always
-    mem_limit: 512m
-    mem_reservation: 256m
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    network_mode: host
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - agent-1-data:/app/data
-      - ./certs/ca.crt:/app/certs/ca.crt:ro
-    environment:
-      - DEVICE_API_PORT=48481
-      - CLOUD_API_ENDPOINT=https://api.iotistica.com
-      - NODE_ENV=development
-      # Bootstrap & Security (not dashboard-controlled)
-      - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=144d9cc3b7763756f77769e407fbf948fbfdb732212f400e10d58cbd44d710ff
-      - API_SECURITY_MODE=LOCALHOST_ONLY
-      - FIREWALL_ENABLED=false
-      # Testing & Development (not dashboard-controlled)
-      - SIMULATION_MODE=false
-      - SIMULATION_CONFIG={}
-      - SIMULATE_MEMORY_LEAK=false
-      - USE_MSGPACK_POC=true
-      - USE_KEY_COMPACTION_POC=false
-      - USE_DEFLATE_COMPRESSION=true
-      - ENABLE_HEAP_PROFILING=true
   agent-2:
     container_name: agent-2
-    image: iotistic/agent:latest
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
     restart: always
     mem_limit: 512m
     mem_reservation: 256m
@@ -55,110 +24,11 @@ services:
       - ./certs/ca.crt:/app/certs/ca.crt:ro
     environment:
       - DEVICE_API_PORT=48482
-      - CLOUD_API_ENDPOINT=https://api.iotistica.com
+      - CLOUD_API_ENDPOINT=https://localhost:3443
       - NODE_ENV=development
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=4706e6872978370c07c0d2ea019d02e8b9f3900d6d1605a9e1ecddc23e952079
-      - API_SECURITY_MODE=LOCALHOST_ONLY
-      - FIREWALL_ENABLED=false
-      # Testing & Development (not dashboard-controlled)
-      - SIMULATION_MODE=false
-      - SIMULATION_CONFIG={}
-      - SIMULATE_MEMORY_LEAK=false
-      - USE_MSGPACK_POC=true
-      - USE_KEY_COMPACTION_POC=false
-      - USE_DEFLATE_COMPRESSION=true
-      - ENABLE_HEAP_PROFILING=true
-  agent-3:
-    container_name: agent-3
-    image: iotistic/agent:latest
-    restart: always
-    mem_limit: 512m
-    mem_reservation: 256m
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    network_mode: host
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - agent-3-data:/app/data
-      - ./certs/ca.crt:/app/certs/ca.crt:ro
-    environment:
-      - DEVICE_API_PORT=48483
-      - CLOUD_API_ENDPOINT=https://api.iotistica.com
-      - NODE_ENV=development
-      # Bootstrap & Security (not dashboard-controlled)
-      - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=3bbea80711538787ade06361223e432c81066742c55d890a8735e6dcc1db599e
-      - API_SECURITY_MODE=LOCALHOST_ONLY
-      - FIREWALL_ENABLED=false
-      # Testing & Development (not dashboard-controlled)
-      - SIMULATION_MODE=false
-      - SIMULATION_CONFIG={}
-      - SIMULATE_MEMORY_LEAK=false
-      - USE_MSGPACK_POC=true
-      - USE_KEY_COMPACTION_POC=false
-      - USE_DEFLATE_COMPRESSION=true
-      - ENABLE_HEAP_PROFILING=true
-  agent-4:
-    container_name: agent-4
-    image: iotistic/agent:latest
-    restart: always
-    mem_limit: 512m
-    mem_reservation: 256m
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    network_mode: host
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - agent-4-data:/app/data
-      - ./certs/ca.crt:/app/certs/ca.crt:ro
-    environment:
-      - DEVICE_API_PORT=48484
-      - CLOUD_API_ENDPOINT=https://api.iotistica.com
-      - NODE_ENV=development
-      # Bootstrap & Security (not dashboard-controlled)
-      - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=ad218643eb095993ae8bd5ac7ffa010e88f28e7fbd673a092e396de39c8408cd
-      - API_SECURITY_MODE=LOCALHOST_ONLY
-      - FIREWALL_ENABLED=false
-      # Testing & Development (not dashboard-controlled)
-      - SIMULATION_MODE=false
-      - SIMULATION_CONFIG={}
-      - SIMULATE_MEMORY_LEAK=false
-      - USE_MSGPACK_POC=true
-      - USE_KEY_COMPACTION_POC=false
-      - USE_DEFLATE_COMPRESSION=true
-      - ENABLE_HEAP_PROFILING=true
-  agent-5:
-    container_name: agent-5
-    image: iotistic/agent:latest
-    restart: always
-    mem_limit: 512m
-    mem_reservation: 256m
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    network_mode: host
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - agent-5-data:/app/data
-      - ./certs/ca.crt:/app/certs/ca.crt:ro
-    environment:
-      - DEVICE_API_PORT=48485
-      - CLOUD_API_ENDPOINT=https://api.iotistica.com
-      - NODE_ENV=development
-      # Bootstrap & Security (not dashboard-controlled)
-      - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=a6c7d4e6fb1a1e1e1e2e5cc0d11a03ae64b9de195f9b93d5eb1646b64fcdf027
+      - PROVISIONING_KEY=915f05685997f5eb6dbaf6263fe93e4dc64cc1cdd70992c937f85bb494e04d28
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)
@@ -170,15 +40,7 @@ services:
       - USE_DEFLATE_COMPRESSION=true
       - ENABLE_HEAP_PROFILING=true
 volumes:
-  agent-1-data:
-    driver: local
   agent-2-data:
-    driver: local
-  agent-3-data:
-    driver: local
-  agent-4-data:
-    driver: local
-  agent-5-data:
     driver: local
 networks:
   iotistic-net:
