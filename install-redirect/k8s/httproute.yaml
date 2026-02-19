@@ -1,0 +1,34 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: install-redirect
+  namespace: iotistic-utils
+spec:
+  parentRefs:
+    - name: iotistica-gateway
+      namespace: envoy-gateway-system
+      sectionName: https  # Attach to HTTPS listener
+  hostnames:
+    - iotistica.com
+    - www.iotistica.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /agent/
+      backendRefs:
+        - name: install-redirect
+          port: 80
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            add:
+              X-Forwarded-Proto: https
+              X-Forwarded-For: "client-ip"
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            add:
+              X-Content-Type-Options: nosniff
+              X-Frame-Options: DENY
+              X-XSS-Protection: "1; mode=block"
+              Cache-Control: "public, max-age=3600"
