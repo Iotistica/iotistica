@@ -1171,19 +1171,24 @@ export class WebSocketManager {
       const topic = `iot/device/${deviceUuid}/agent/shell`;
       const payload = JSON.stringify(data);
       
-      logger.info(`🐚 [SHELL] ➡️ Publishing command to MQTT - STACK TRACE:`);
-      console.trace();
-      logger.info(`🐚 [SHELL] ➡️ Command details:`, {
+      logger.info(`🐚 [SHELL] ➡️ Publishing command to MQTT`, {
         deviceUuid: deviceUuid.substring(0, 8) + '...',
         topic,
         action: data.action,
         sessionId: data.sessionId?.substring(0, 8),
-        dataLength: data.data?.length || 0
+        payloadLength: payload.length,
+        payload: payload.substring(0, 200), // Log first 200 chars
+        mqttConnected: this.mqttManager?.isConnected(),
       });
       
+      const startTime = Date.now();
       await this.mqttManager.publish(topic, payload, 1);
+      const duration = Date.now() - startTime;
       
-      logger.info('🐚 [SHELL] ✅ Command published to MQTT successfully');
+      logger.info(`🐚 [SHELL] ✅ Command published to MQTT successfully`, {
+        durationMs: duration,
+        topic
+      });
     } catch (error) {
       logger.error('🐚 [SHELL] ❌ Failed to send shell command:', error);
     }
