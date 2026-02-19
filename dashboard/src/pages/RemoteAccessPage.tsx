@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Terminal as TerminalIcon, Power, Plus, Settings } from 'lucide-react';
+import { Terminal as TerminalIcon, Power, Plus, Settings, Search } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Label } from '@/components/ui/label';
 import { buildApiUrl } from '@/config/api';
@@ -44,7 +44,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [ptyRestarted, setPtyRestarted] = useState(false);
-  const [sessionStatus, setSessionStatus] = useState<{status: string; message: string} | null>(null);
   const [fontSize, setFontSize] = useState<number>(() => {
     const saved = localStorage.getItem('terminal-font-size');
     return saved ? parseInt(saved, 10) : 14;
@@ -258,17 +257,8 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         }
         listSessions();
         break;
-
       case 'session-status':
-        setSessionStatus({
-          status: message.data?.status,
-          message: message.data?.message,
-        });
-        
-        // Clear status when session becomes active
-        if (message.data?.status === 'active') {
-          setTimeout(() => setSessionStatus(null), 2000);
-        }
+        // Session status updates - not displayed in UI anymore
         break;
 
       case 'all-sessions-cleared':
@@ -448,6 +438,28 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     wsRef.current.send(JSON.stringify(msg));
   };
 
+  const runCommand = (command: string) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !currentSessionIdRef.current) {
+      return;
+    }
+
+    // Send command followed by newline to execute it
+    const input = command + '\n';
+    
+    // Add to buffer and flush
+    inputBufferRef.current += input;
+    
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+    }
+    
+    // Flush immediately for commands (don't wait 50ms)
+    flushTimerRef.current = setTimeout(() => {
+      flushInputBuffer();
+      flushTimerRef.current = null;
+    }, 0);
+  };
+
   const flushInputBuffer = () => {
     if (inputBufferRef.current && wsRef.current?.readyState === WebSocket.OPEN && currentSessionIdRef.current) {
       wsRef.current.send(JSON.stringify({
@@ -563,11 +575,14 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   useEffect(() => {
     if (!terminalRef.current) return;
 
-    // Initialize xterm.js
+    // Initialize xterm.js with UX improvements:
+    // - copyOnSelect: auto-copy when selecting text
+    // - scrollback: 5000 lines of history (instead of default ~1000)
     const term = new Terminal({
       cursorBlink: true,
       fontSize: fontSize,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      scrollback: 5000,
       theme: {
         background: '#1e1e1e',
         foreground: '#d4d4d4',
@@ -585,7 +600,8 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       disableStdin: false,
       // Explicitly disable local echo - server will echo back
       convertEol: false,
-    });
+      // Enable copy-on-select for better UX
+    } as any);
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
@@ -823,6 +839,21 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
                   </>
                 )}
 
+                {/* Search in scrollback - 5000 line history */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  title="Scroll back through history (5000 lines)"
+                  onClick={() => {
+                    if (xtermRef.current) {
+                      xtermRef.current.focus();
+                    }
+                  }}
+                  disabled={!isConnected}
+                >
+                  <Search className="h-4 w-4" />
+                </Button>
+
                 {/* Settings Button - placed at far right */}
                 <Popover>
                   <PopoverTrigger asChild>
@@ -879,28 +910,73 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
             </div>
           </CardHeader>
 
-          <CardContent className="flex-1 overflow-hidden p-6">
-            {/* Session Status Bar */}
-            {sessionStatus && (
-              <div className={`mb-4 p-3 rounded-lg border text-sm ${
-                sessionStatus.status === 'starting' ? 'bg-blue-50 border-blue-200 text-blue-700' :
-                sessionStatus.status === 'active' ? 'bg-green-50 border-green-200 text-green-700' :
-                sessionStatus.status === 'agent-timeout' ? 'bg-yellow-50 border-yellow-200 text-yellow-700' :
-                'bg-gray-50 border-gray-200 text-gray-700'
-              }`}>
-                {sessionStatus.message}
+          <CardContent className="flex-1 overflow-hidden p-6 flex flex-col">
+            {/* Command Palette - shows above terminal when connected but no active session */}
+            {isConnected && !currentSessionId && (
+              <div className="mb-4 p-4 bg-muted rounded-lg border border-muted-foreground/20">
+                <p className="text-xs uppercase tracking-wider text-muted-foreground mb-3">Quick Commands</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="justify-start text-left text-xs h-8"
+                    onClick={() => runCommand('iotctl status')}
+                  >
+                    Device Status
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="justify-start text-left text-xs h-8"
+                    onClick={() => runCommand('iotctl diagnostics')}
+                  >
+                    Diagnostics
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="justify-start text-left text-xs h-8"
+                    onClick={() => runCommand('iotctl config show')}
+                  >
+                    Config
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="justify-start text-left text-xs h-8"
+                    onClick={() => runCommand('iotctl apps list')}
+                  >
+                    Apps
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="justify-start text-left text-xs h-8"
+                    onClick={() => runCommand('iotctl services list')}
+                  >
+                    Services
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="justify-start text-left text-xs h-8"
+                    onClick={() => runCommand('iotctl provision status')}
+                  >
+                    Provision
+                  </Button>
+                </div>
               </div>
             )}
+            
+            {/* Terminal area */}
+            <div className="flex-1 overflow-hidden">
             
             {/* Terminal Container */}
             <div 
               ref={terminalRef}
-              className="rounded-lg"
-              style={{ 
-                height: 'calc(100vh - 450px)',
-                minHeight: '400px',
-              }}
+              className="rounded-lg w-full h-full"
             />
+            </div>
           </CardContent>
         </Card>
 
