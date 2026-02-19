@@ -37,6 +37,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   const currentSessionIdRef = useRef<string | null>(null);
   const currentDeviceUuidRef = useRef<string>(deviceUuid); // Track which device the current session belongs to
   const isAttachingRef = useRef<boolean>(false); // Prevent race conditions during session switching
+  const isNewSessionRef = useRef<boolean>(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -224,7 +225,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
             const lastChunk = buffer[buffer.length - 1];
             const hasPrompt = /[$#]\s*$/.test(lastChunk);
             
-            if (!hasPrompt && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            if (isNewSessionRef.current && !hasPrompt && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
               wsRef.current.send(JSON.stringify({
                 type: 'shell-input',
                 data: {
@@ -233,8 +234,8 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
                 },
               }));
             }
-          } else if (!buffer || buffer.length === 0 || isJustStartupBanner) {
-            // For new sessions, write a newline to establish cursor position
+          } else if (( !buffer || buffer.length === 0 || isJustStartupBanner) && isNewSessionRef.current) {
+            // For freshly created sessions only, write a newline to establish cursor position
             xtermRef.current.write('\r\n');
           }
           
@@ -244,6 +245,9 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
         // Send terminal size to backend for proper PTY configuration
         resizeSession();
+
+        // Clear new-session flag after attach handling
+        isNewSessionRef.current = false;
 
         // Refresh session list
         listSessions();
@@ -475,6 +479,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     }
 
     console.log('[RemoteAccess] ✨ Sending create-session message to backend');
+    isNewSessionRef.current = true;
     const msg = {
       type: 'create-session',
       deviceUuid,
