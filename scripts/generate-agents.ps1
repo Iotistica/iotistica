@@ -239,7 +239,7 @@ function New-ProvisioningKey {
     
     try {
         $body = @{
-            fleetUuid = $FleetUuid
+            fleetUuid = $FleetId
             newKey = $false
         } | ConvertTo-Json
 

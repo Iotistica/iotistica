@@ -59,7 +59,7 @@ for ($i = 0; $i -lt $Count; $i++) {
     
     # Prepare request body
     $body = @{
-        fleetId = $FleetId
+        fleetUuid = $FleetId
         newKey = $false
         metadata = @{
             index = $i

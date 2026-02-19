@@ -12,8 +12,8 @@ fleet:
   # Cloud API endpoint
   cloudApiEndpoint: "https://api1.iotistica.com:443"
   
-  # Fleet ID for provisioning
-  fleetId: "default-fleet"
+  # Fleet UUID for provisioning (required - must be set via helm --set)
+  fleetUuid: ""
 
 # Agent container configuration
 agent:

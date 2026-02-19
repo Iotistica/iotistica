@@ -57,16 +57,11 @@ for i in $(seq 0 $((COUNT - 1))); do
         RESPONSE=$(curl -s -X POST "${API_URL}/api/v1/provisioning-keys/generate" \
             -H "Authorization: Bearer ${AUTH_TOKEN}" \
             -H "Content-Type: application/json" \
-            -d '{"fleetId": "'${FLEET_ID}'", "newKey": false, "metadata": {"index": '${i}'}}')
+            -d '{"fleetUuid": "'${FLEET_ID}'", "newKey": false, "metadata": {"index": '${i}'}}')
     else
         RESPONSE=$(curl -s -X POST "${API_URL}/api/v1/provisioning-keys/generate" \
             -H "Content-Type: application/json" \
-            -d '{"fleetId": "'${FLEET_ID}'", "newKey": false, "metadata": {"index": '${i}'}}')
-    fi
-    
-    # Extract provisioning key from response (API returns .key field)
-    KEY=$(echo "$RESPONSE" | jq -r '.key // .provisioningKey // empty')
-    
+            -d '{"fleetUuid": "'${FLEET_ID}'", "newKey": false, "metadata": {"index": '${i}'}}')  
     if [ -n "$KEY" ] && [ "$KEY" != "null" ]; then
         echo "PROVISIONING_KEY_${i}=${KEY}" >> "$TEMP_FILE"
         SUCCESS=$((SUCCESS + 1))

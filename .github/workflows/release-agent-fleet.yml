@@ -21,6 +21,11 @@ on:
         required: false
         default: false
         type: boolean
+      fleet_uuid:
+        description: 'Fleet UUID for agent provisioning'
+        required: false
+        default: '71156440-0730-4c63-b211-3fbd8200d652'
+        type: string
       # Simulator configuration
       modbus_simulator_count:
         description: 'Number of Modbus simulators per agent (0-20)'
@@ -223,7 +228,7 @@ jobs:
         env:
           FLEET_SIZE: ${{ github.event.inputs.test_fleet_size }}
           API_URL: ${{ secrets.TEST_API_URL || 'https://api.iotistica.com' }}
-          FLEET_ID: 71156440-0730-4c63-b211-3fbd8200d652
+          FLEET_UUID: ${{ github.event.inputs.fleet_uuid }}
         run: |
           # Get simulator counts from inputs
           MODBUS_COUNT=${{ github.event.inputs.modbus_simulator_count }}
@@ -249,7 +254,7 @@ jobs:
             --namespace "$NAMESPACE" \
             --set fleet.replicaCount="$FLEET_SIZE" \
             --set fleet.cloudApiEndpoint="$API_URL" \
-            --set fleet.fleetId="$FLEET_ID" \
+            --set fleet.fleetUuid="$FLEET_UUID" \
             --set simulator.modbusCount="$MODBUS_COUNT" \
             --set opcuaSimulator.count="$OPCUA_COUNT" \
             --set opcuaSimulator.enabled="$OPCUA_ENABLED" \
@@ -313,7 +318,7 @@ jobs:
           echo "## Test Fleet Deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Fleet Size:** \`${{ github.event.inputs.test_fleet_size }}\` agents" >> $GITHUB_STEP_SUMMARY
-          echo "**Fleet ID:** \`71156440-0730-4c63-b211-3fbd8200d652\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Fleet UUID:** \`${{ github.event.inputs.fleet_uuid }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Pod Status" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

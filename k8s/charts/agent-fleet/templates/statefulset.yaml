@@ -68,7 +68,7 @@ spec:
               {{- end }}
               
               # Build complete JSON payload
-              PAYLOAD="{\"fleetId\":\"$FLEET_ID\",\"newKey\":false,\"deploymentType\":\"k8s-fleet\",${SIMULATOR_CONFIG}\"metadata\":{\"index\":$INDEX,\"podName\":\"$POD_NAME\"}}"
+              PAYLOAD="{\"fleetUuid\":\"$FLEET_UUID\",\"newKey\":false,\"deploymentType\":\"k8s-fleet\",${SIMULATOR_CONFIG}\"metadata\":{\"index\":$INDEX,\"podName\":\"$POD_NAME\"}}"
               
               echo "Request payload: $PAYLOAD"
               
@@ -105,8 +105,8 @@ spec:
                   fieldPath: metadata.name
             - name: CLOUD_API_ENDPOINT
               value: {{ .Values.fleet.cloudApiEndpoint | quote }}
-            - name: FLEET_ID
-              value: {{ .Values.fleet.fleetId | quote }}
+            - name: FLEET_UUID
+              value: {{ .Values.fleet.fleetUuid | quote }}
           volumeMounts:
             - name: provisioning
               mountPath: /provisioning
@@ -141,8 +141,8 @@ spec:
             # API_PORT set dynamically in command based on pod index
             - name: CLOUD_API_ENDPOINT
               value: {{ .Values.fleet.cloudApiEndpoint | quote }}
-            - name: FLEET_ID
-              value: {{ .Values.fleet.fleetId | quote }}
+            - name: FLEET_UUID
+              value: {{ .Values.fleet.fleetUuid | quote }}
             - name: NODE_ENV
               value: "production"
             # Get pod name from Downward API
@@ -154,7 +154,7 @@ spec:
             - name: POD_INDEX
               valueFrom:
                 fieldRef:
-                  fieldPath: metadata.annotations['statefulset.kubernetes.io/pod-name']
+                  fieldPath: metadata.name
             {{- range $key, $value := .Values.agent.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}

@@ -75,7 +75,7 @@ if (-not $ProvisioningKey) {
     try {
         # Call API to generate provisioning key
         $body = @{
-            fleetId = $FleetId
+            fleetUuid = $FleetId
             newKey = $false
         } | ConvertTo-Json
 
