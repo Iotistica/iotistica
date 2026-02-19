@@ -38,7 +38,7 @@ param(
     #[string]$ApiUrl = "https://api.iotistica.com",
     #[string]$ApiUrl = "https://localhost:3443",
     [string]$ApiUrl = "https://localhost:3443",
-    [string]$FleetId = "71156440-0730-4c63-b211-3fbd8200d652",
+    [string]$FleetUuid = "71156440-0730-4c63-b211-3fbd8200d652",
     
     # Cleanup Mode
     [switch]$Cleanup,
@@ -235,11 +235,11 @@ function Remove-AgentResources {
 
 # Generate provisioning key via API
 function New-ProvisioningKey {
-    param([string]$ApiUrl, [string]$FleetId)
+    param([string]$ApiUrl, [string]$FleetUuid)
     
     try {
         $body = @{
-            fleetId = $FleetId
+            fleetUuid = $FleetUuid
             newKey = $false
         } | ConvertTo-Json
 
@@ -345,7 +345,7 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
     
     # Generate provisioning key via API
     Write-Host "  Generating key for $agentName..." -ForegroundColor Gray
-    $apiKey = New-ProvisioningKey -ApiUrl $ApiUrl -FleetId $FleetId
+    $apiKey = New-ProvisioningKey -ApiUrl $ApiUrl -FleetUuid $FleetUuid
     $provisioningKeys += "${agentName}: $apiKey"
     
     $volumeName = "$agentName-data"

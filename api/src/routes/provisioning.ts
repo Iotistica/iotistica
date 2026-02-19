@@ -358,7 +358,7 @@ router.delete('/provisioning-keys/:keyId', async (req, res) => {
 router.post('/provisioning-keys/generate', async (req, res) => {
   try {
     const { 
-      fleetId = 'default-fleet', 
+      fleetUuid, 
       newKey = false, 
       previousKeyId,
       deploymentType,
@@ -402,19 +402,16 @@ router.post('/provisioning-keys/generate', async (req, res) => {
     // Resolve fleet UUID from identifier
     const fleetResult = await query(
       'SELECT fleet_uuid, fleet_name FROM fleets WHERE fleet_uuid::text = $1',
-      [fleetId]
+      [fleetUuid]
     );
     
     if (fleetResult.rows.length === 0) {
       return res.status(404).json({
         error: 'Fleet not found',
-        message: `Fleet with identifier '${fleetId}' does not exist. Create the fleet first.`
+        message: `Fleet with identifier '${fleetUuid}' does not exist. Create the fleet first.`
       });
     }
     
-    const fleetUuid = fleetResult.rows[0].fleet_uuid;
-    const fleetName = fleetResult.rows[0].fleet_name;
-    logger.info(`Resolved fleet for virtual agent: ${fleetName} (${fleetUuid})`);
 
     // Create new provisioning key (1 device, 30 days expiry)
     const { id, key } = await createProvisioningKey(

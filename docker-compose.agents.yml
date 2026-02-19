@@ -1,11 +1,11 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2026-02-18 20:13:50
-# Agents: 11 to 11
-# Ports: 48491 to 48491
+# Generated: 2026-02-19 08:25:00
+# Agents: 1 to 1
+# Ports: 48481 to 48481
 
 services:
-  agent-11:
-    container_name: agent-11
+  agent-1:
+    container_name: agent-1
     build:
       context: .
       dockerfile: agent/Dockerfile
@@ -20,15 +20,15 @@ services:
     network_mode: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - agent-11-data:/app/data
+      - agent-1-data:/app/data
       - ./certs/ca.crt:/app/certs/ca.crt:ro
     environment:
-      - DEVICE_API_PORT=48491
+      - DEVICE_API_PORT=48481
       - CLOUD_API_ENDPOINT=https://localhost:3443
       - NODE_ENV=development
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=a8418bbefc499025f5952c6ca477b1321210ef6d7c61cb63473dfbd9cb7d85ad
+      - PROVISIONING_KEY=dd086c59ed0c91ad26a5c4152b2fd1bac072c3bd72e50a9c7b12bc81ad9e3ac7
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)
@@ -40,7 +40,7 @@ services:
       - USE_DEFLATE_COMPRESSION=true
       - ENABLE_HEAP_PROFILING=true
 volumes:
-  agent-11-data:
+  agent-1-data:
     driver: local
 networks:
   iotistic-net:

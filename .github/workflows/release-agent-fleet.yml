@@ -223,7 +223,7 @@ jobs:
         env:
           FLEET_SIZE: ${{ github.event.inputs.test_fleet_size }}
           API_URL: ${{ secrets.TEST_API_URL || 'https://api.iotistica.com' }}
-          FLEET_ID: agent-fleet-test-${{ github.run_number }}
+          FLEET_ID: 71156440-0730-4c63-b211-3fbd8200d652
         run: |
           # Get simulator counts from inputs
           MODBUS_COUNT=${{ github.event.inputs.modbus_simulator_count }}
@@ -313,7 +313,7 @@ jobs:
           echo "## Test Fleet Deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Fleet Size:** \`${{ github.event.inputs.test_fleet_size }}\` agents" >> $GITHUB_STEP_SUMMARY
-          echo "**Fleet ID:** \`agent-fleet-test-${{ github.run_number }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Fleet ID:** \`71156440-0730-4c63-b211-3fbd8200d652\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Pod Status" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

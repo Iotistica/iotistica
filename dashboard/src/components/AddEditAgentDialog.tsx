@@ -113,12 +113,12 @@ export function AddEditDeviceDialog({
   const fetchProvisioningKey = async (isRegenerate = false) => {
     setIsLoadingKey(true);
     try {
-      const provisioningFleetId = selectedFleetId === UNASSIGNED_FLEET_ID ? 'unassigned' : selectedFleetId;
+      const provisioningFleetUuid = selectedFleetId === UNASSIGNED_FLEET_ID ? null : selectedFleetId;
       const response = await fetch(buildApiUrl('/api/v1/provisioning-keys/generate'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          fleetId: provisioningFleetId,
+          fleetUuid: provisioningFleetUuid,
           newKey: isRegenerate,
           previousKeyId: isRegenerate ? provisioningKeyId : undefined,
         }),
