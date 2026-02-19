@@ -264,13 +264,14 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         break;
 
       case 'session-terminated':
+        console.log('[RemoteAccess] Received session-terminated message for:', message.sessionId?.substring(0, 8), 'current:', currentSessionId?.substring(0, 8));
         if (message.sessionId === currentSessionId) {
           setCurrentSessionId(null);
           currentSessionIdRef.current = null;
         }
         if (xtermRef.current) {
           // Ensure clean newlines to avoid overlapping command output like 'top'
-          xtermRef.current.write('\r\n\r\n');
+          xtermRef.current.write('\r\n');
           xtermRef.current.writeln('\x1b[33m✓ Session terminated\x1b[0m');
         }
         listSessions();
@@ -647,7 +648,8 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       // Mark as intentional disconnect to avoid "connection lost" message
       isDisconnectingRef.current = true;
       
-      // Give the terminate message time to be sent before closing WebSocket
+      // Give the terminate message time to be sent AND the session-terminated response to be received
+      // before closing WebSocket (needs 300+ ms for round-trip)
       setTimeout(() => {
         if (wsRef.current) {
           // Only send if WebSocket is still open
@@ -660,7 +662,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           wsRef.current.close();
           wsRef.current = null;
         }
-      }, 150); // 150ms delay to ensure terminate message is processed
+      }, 500); // 500ms delay to ensure terminate message is sent AND response is received
     }
     setIsConnected(false);
     setCurrentSessionId(null);
