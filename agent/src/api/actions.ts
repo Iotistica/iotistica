@@ -238,10 +238,12 @@ export const getApp = async (appId: number) => {
 export const getDeviceState = async () => {
 	const deviceInfo = deviceManager.getDeviceInfo();
 	const currentState = await containerManager.getCurrentState();
+	const isOnline = cloudSync?.isOnline?.() ?? false;
 	
 	return {
 		...deviceInfo,
 		apps: Object.keys(currentState.apps).length,
+		is_online: isOnline,
 		status: 'Idle',
 	};
 };
