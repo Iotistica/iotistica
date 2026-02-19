@@ -157,6 +157,10 @@ export class ShellHandler {
 
       this.sessionActive = true;
 
+      // Send terminal reset sequence to ensure clean state (fixes interactive command artifacts)
+      // This clears any alternate screen buffers and resets cursor positioning
+      this.ptyProcess.write('\x1b[?1049l\x1b[2J\x1b[H');
+
       // Handle PTY output - buffer chunks instead of publishing per chunk
       // This reduces MQTT messages by 80-95% under heavy output
       this.ptyProcess.onData((data: string) => {
