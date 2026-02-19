@@ -3,7 +3,7 @@ name: Kubernetes - Deploy Agents Fleet
 on:
   push:
     paths:
-      - 'k8s/charts/agent-fleet/**'
+      - 'charts/agent-fleet/**'
   workflow_dispatch:
     inputs:
       deploy_test:
@@ -21,6 +21,10 @@ on:
         required: false
         default: false
         type: boolean
+      fleet_uuid:
+        description: 'Fleet UUID for the deployment'
+        required: true
+        type: string
       # Simulator configuration
       modbus_simulator_count:
         description: 'Number of Modbus simulators per agent (0-20)'
@@ -112,7 +116,7 @@ permissions:
   packages: write
 
 env:
-  CHART_PATH: ./k8s/charts/agent-fleet
+  CHART_PATH: ./charts/agent-fleet
   CHART_NAME: agent-fleet
 
 jobs:
@@ -144,9 +148,9 @@ jobs:
         run: |
           helm template test ${{ env.CHART_PATH }} \
             --set fleet.replicaCount=5 \
-            --set fleet.cloudApiEndpoint=https://api1.iotistica.com:443 \
-            --set fleet.fleetId=test-fleet \
-            --set agent.env.MQTT_BROKER_URL=mqtt://mqtt1.iotistica.com:1883 \
+            --set fleet.cloudApiEndpoint=https://api.iotistica.com:443 \
+            --set fleet.fleetUuid=test-uuid \
+            --set agent.env.MQTT_BROKER_URL=mqtts://mqtt.iotistica.com:8883 \
             --set agent.env.ENABLE_SENSOR_PUBLISH=true \
             --set agent.env.ANOMALY_DETECTION_ENABLED=false > /tmp/rendered.yaml
           
@@ -162,30 +166,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Configure kubectl
-        run: |
-          if [ -f "$HOME/.kube/config" ]; then
-            echo "Kubeconfig already exists at $HOME/.kube/config — skipping configuration."
-          elif [ -n "${{ secrets.KUBECONFIG }}" ]; then
-            mkdir -p "$HOME/.kube"
-
-            # Try base64 decode first, fall back to plain text
-            echo "${{ secrets.KUBECONFIG }}" | base64 -d > "$HOME/.kube/config" 2>/dev/null || \
-            echo "${{ secrets.KUBECONFIG }}" > "$HOME/.kube/config"
-            chmod 600 "$HOME/.kube/config"
-
-            echo "Kubeconfig configured successfully."
-          else
-            echo "KUBECONFIG secret not set — skipping deployment."
-            exit 1
-          fi
-
-          # Only switch context if config exists
-          if [ -f "$HOME/.kube/config" ]; then
-            kubectl config use-context k3scl01
-            echo "Current context: $(kubectl config current-context)"
-            kubectl cluster-info
-          fi
+      - name: Set Kubernetes context
+        uses: Azure/k8s-set-context@v4
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBECONFIG_IO_CL01 }}
 
       - name: Install Helm
         uses: azure/setup-helm@v3
@@ -196,7 +181,7 @@ jobs:
         if: ${{ github.event.inputs.clean_before_deploy == 'true' }}
         run: |
           set -e
-          NAMESPACE=agent-fleet-test
+          NAMESPACE="fleet-${{ github.event.inputs.fleet_uuid }}"
 
           echo "Deleting namespace (if exists)..."
           kubectl delete namespace "${NAMESPACE}" --ignore-not-found --wait
@@ -212,7 +197,7 @@ jobs:
 
       - name: Create test namespace
         run: |
-          NAMESPACE="agent-fleet-test"
+          NAMESPACE="fleet-${{ github.event.inputs.fleet_uuid }}"
           
           # Create namespace if it doesn't exist
           kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
@@ -222,8 +207,8 @@ jobs:
       - name: Deploy test fleet
         env:
           FLEET_SIZE: ${{ github.event.inputs.test_fleet_size }}
-          API_URL: ${{ secrets.TEST_API_URL || 'https://api1.iotistica.com:443' }}
-          FLEET_ID: agent-fleet-test-${{ github.run_number }}
+          API_URL: ${{ secrets.TEST_API_URL || 'https://api.iotistica.com:443' }}
+          FLEET_UUID: ${{ github.event.inputs.fleet_uuid }}
         run: |
           # Get simulator counts from inputs
           MODBUS_COUNT=${{ github.event.inputs.modbus_simulator_count }}
@@ -235,7 +220,7 @@ jobs:
           
           echo "📦 Configuration: Modbus=$MODBUS_COUNT, OPC-UA=$OPCUA_COUNT"
           
-          NAMESPACE="agent-fleet-test"
+          NAMESPACE="fleet-${FLEET_UUID}"
           RELEASE_NAME="agent-fleet-test-${{ github.run_number }}"
           
           echo "🚀 Deploying fleet with:"
@@ -249,7 +234,7 @@ jobs:
             --namespace "$NAMESPACE" \
             --set fleet.replicaCount="$FLEET_SIZE" \
             --set fleet.cloudApiEndpoint="$API_URL" \
-            --set fleet.fleetId="$FLEET_ID" \
+            --set fleet.fleetUuid="$FLEET_UUID" \
             --set simulator.modbusCount="$MODBUS_COUNT" \
             --set opcuaSimulator.count="$OPCUA_COUNT" \
             --set opcuaSimulator.enabled="$OPCUA_ENABLED" \
@@ -283,7 +268,7 @@ jobs:
 
       - name: Verify test fleet
         run: |
-          NAMESPACE="agent-fleet-test"
+          NAMESPACE="fleet-${{ github.event.inputs.fleet_uuid }}"
           RELEASE_NAME="agent-fleet-test-${{ github.run_number }}"
           
           echo "Waiting for pods to be ready..."
@@ -307,13 +292,13 @@ jobs:
 
       - name: Deployment summary
         run: |
-          NAMESPACE="agent-fleet-test"
+          NAMESPACE="fleet-${{ github.event.inputs.fleet_uuid }}"
           RELEASE_NAME="agent-fleet-test-${{ github.run_number }}"
           
           echo "## Test Fleet Deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Fleet Size:** \`${{ github.event.inputs.test_fleet_size }}\` agents" >> $GITHUB_STEP_SUMMARY
-          echo "**Fleet ID:** \`agent-fleet-test-${{ github.run_number }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Fleet UUID:** \`${{ github.event.inputs.fleet_uuid }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Pod Status" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

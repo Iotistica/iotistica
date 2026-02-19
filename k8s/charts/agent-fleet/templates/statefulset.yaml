@@ -141,8 +141,8 @@ spec:
             # API_PORT set dynamically in command based on pod index
             - name: CLOUD_API_ENDPOINT
               value: {{ .Values.fleet.cloudApiEndpoint | quote }}
-            - name: FLEET_UUID
-              value: {{ .Values.fleet.fleetUuid | quote }}
+            - name: FLEET_ID
+              value: {{ .Values.fleet.fleetId | quote }}
             - name: NODE_ENV
               value: "production"
             # Get pod name from Downward API
@@ -154,7 +154,7 @@ spec:
             - name: POD_INDEX
               valueFrom:
                 fieldRef:
-                  fieldPath: metadata.name
+                  fieldPath: metadata.annotations['statefulset.kubernetes.io/pod-name']
             {{- range $key, $value := .Values.agent.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}

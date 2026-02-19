@@ -12,7 +12,7 @@ fleet:
   # Cloud API endpoint
   cloudApiEndpoint: "https://api1.iotistica.com:443"
   
-  # Fleet UUID for provisioning (required - must be set via helm --set)
+  # Fleet UUID for provisioning (required)
   fleetUuid: ""
 
 # Agent container configuration
@@ -234,7 +234,7 @@ monitoring:
 # Node selection
 nodeSelector:
   # Example: workload: agent-fleet
-  role: workers
+  role: worker
 
 # Tolerations for dedicated node pools
 tolerations: []

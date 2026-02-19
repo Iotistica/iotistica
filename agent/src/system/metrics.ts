@@ -537,6 +537,10 @@ export async function getStorageInfo(): Promise<{
  */
 export async function getUptime(): Promise<number> {
 	try {
+		const isContainer = await isRunningInContainer();
+		if (isContainer) {
+			return Math.floor(process.uptime());
+		}
 		const timeInfo = await systeminformation.time();
 		return timeInfo.uptime;
 	} catch (error) {
