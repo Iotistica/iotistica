@@ -287,7 +287,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         if (xtermRef.current) {
           xtermRef.current.clear();
           xtermRef.current.writeln('\x1b[32m✓ All sessions cleared successfully!\x1b[0m');
-          xtermRef.current.writeln('\x1b[90mCreating new session...\x1b[0m');
         }
         setTimeout(() => {
           createNewSession();
