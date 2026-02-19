@@ -29,6 +29,7 @@ interface EditFleetDialogProps {
 
 export function EditFleetDialog({ open, onOpenChange, fleet, onSuccess }: EditFleetDialogProps) {
   const [formData, setFormData] = useState({
+    fleet_uuid: '',
     fleet_name: '',
     fleet_type: 'virtual' as 'virtual' | 'physical' | 'mixed',
     environment: 'dev',
@@ -43,6 +44,7 @@ export function EditFleetDialog({ open, onOpenChange, fleet, onSuccess }: EditFl
   useEffect(() => {
     if (fleet) {
       setFormData({
+        fleet_uuid: fleet.fleet_uuid || '',
         fleet_name: fleet.fleet_name,
         fleet_type: fleet.fleet_type,
         environment: fleet.environment,
@@ -133,6 +135,16 @@ export function EditFleetDialog({ open, onOpenChange, fleet, onSuccess }: EditFl
 
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="fleet_uuid">Fleet UUID</Label>
+              <Input
+                id="fleet_uuid"
+                value={formData.fleet_uuid}
+                readOnly
+                disabled
+              />
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="fleet_name">Fleet Name</Label>
               <Input
