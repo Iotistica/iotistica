@@ -187,7 +187,7 @@ jobs:
 
           # Only switch context if config exists
           if [ -f "$HOME/.kube/config" ]; then
-            kubectl config use-context k3scl02
+            kubectl config use-context k3scl01
             echo "Current context: $(kubectl config current-context)"
             kubectl cluster-info
           fi

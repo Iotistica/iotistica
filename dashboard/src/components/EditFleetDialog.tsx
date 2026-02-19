@@ -5,7 +5,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Trash2 } from "lucide-react";
+import { Trash2, Copy, Check } from "lucide-react";
 import { buildApiUrl } from "../config/api";
 import { toast } from "sonner";
 
@@ -40,6 +40,7 @@ export function EditFleetDialog({ open, onOpenChange, fleet, onSuccess }: EditFl
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [copiedUuid, setCopiedUuid] = useState(false);
 
   useEffect(() => {
     if (fleet) {
@@ -122,6 +123,19 @@ export function EditFleetDialog({ open, onOpenChange, fleet, onSuccess }: EditFl
     }
   };
 
+  const copyFleetUuid = async () => {
+    if (!formData.fleet_uuid) return;
+    try {
+      await navigator.clipboard.writeText(formData.fleet_uuid);
+      setCopiedUuid(true);
+      toast.success('Fleet UUID copied to clipboard');
+      setTimeout(() => setCopiedUuid(false), 2000);
+    } catch (error) {
+      console.error('Failed to copy Fleet UUID:', error);
+      toast.error('Failed to copy Fleet UUID');
+    }
+  };
+
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -137,12 +151,25 @@ export function EditFleetDialog({ open, onOpenChange, fleet, onSuccess }: EditFl
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="fleet_uuid">Fleet UUID</Label>
-              <Input
-                id="fleet_uuid"
-                value={formData.fleet_uuid}
-                readOnly
-                disabled
-              />
+              <div className="flex gap-2">
+                <Input
+                  id="fleet_uuid"
+                  value={formData.fleet_uuid}
+                  readOnly
+                  disabled
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={copyFleetUuid}
+                  disabled={!formData.fleet_uuid}
+                  title="Copy Fleet UUID to clipboard"
+                >
+                  {copiedUuid ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                </Button>
+              </div>
             </div>
 
             <div className="space-y-2">
