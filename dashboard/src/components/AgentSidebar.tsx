@@ -336,10 +336,14 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
 
   const filtersEnabled = false;
 
+  const normalizedFleetId = selectedFleetId === 'unassigned' || selectedFleetId === '__unassigned__'
+    ? ''
+    : selectedFleetId;
+
   const filteredDevices = useMemo(() => {
     console.log('[FILTER INPUT]', {
       totalDevices: devices.length,
-      selectedFleetId,
+      selectedFleetId: normalizedFleetId,
       statusFilters,
       typeFilters,
       searchQuery,
@@ -360,14 +364,14 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
       
       // Fleet matching: check both fleet_uuid and fleet_id (legacy support)
       const deviceFleetId = (device as any).fleet_uuid || (device as any).fleet_id;
-      const matchesFleet = !selectedFleetId || deviceFleetId === selectedFleetId;
+      const matchesFleet = !normalizedFleetId || deviceFleetId === normalizedFleetId;
       
-      if (!matchesFleet && selectedFleetId) {
+      if (!matchesFleet && normalizedFleetId) {
         console.log('[FILTER MISS]', {
           device: device.name,
           deviceFleetId,
-          selectedFleetId,
-          match: deviceFleetId === selectedFleetId
+          selectedFleetId: normalizedFleetId,
+          match: deviceFleetId === normalizedFleetId
         });
       }
       
@@ -385,7 +389,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
     });
 
     return filtered;
-  }, [devices, selectedFleetId, statusFilters, typeFilters, searchQuery]);
+  }, [devices, normalizedFleetId, statusFilters, typeFilters, searchQuery]);
 
   const hasActiveFilters = statusFilters.length < availableStatuses.length || 
                            typeFilters.length < availableTypes.length || 
