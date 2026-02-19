@@ -26,11 +26,11 @@ agent:
   # Configured for 40 modbus devices + 1 OPC-UA
   resources:
     requests:
-      cpu: 500m
-      memory: 1Gi
+      cpu: 100m
+      memory: 128Mi
     limits:
-      cpu: 2000m
-      memory: 3Gi
+      cpu: 500m
+      memory: 512Mi
   
   # Agent environment variables
   env:
@@ -46,7 +46,7 @@ agent:
     # Protocol adapters
     ENABLE_PROTOCOL_ADAPTERS: "true"
     ENABLE_SENSOR_PUBLISH: "false"  # Disabled - no OPC-UA server in K8s fleet
-    ENABLE_FIRST_BOOT_DISCOVERY: "true"
+    ENABLE_FIRST_BOOT_DISCOVERY: "false"  # Disable on K8s startup to prevent memory spike
     
     # Modbus configuration (sidecar)
     MODBUS_ENABLED: "true"
@@ -69,15 +69,15 @@ agent:
     MQTT_KEEPALIVE: "60"
     
     # Logging
-    LOG_LEVEL: "info"
-    LOG_COMPRESSION: "true"
+    LOG_LEVEL: "warn"  # Reduce to warn during K8s startup
+    LOG_COMPRESSION: "false"  # Disable compression during startup
     LOG_COMPRESSION_FORMAT: "deflate"  # gzip, deflate, or msgpack
     LOG_COMPRESSION_LEVEL: "6"         # 1-9, higher = better compression
     LOG_FILE_PERSISTENCE: "false"    # Disable file logging in K8s
     
     # Experimental POC features
-    USE_MSGPACK_POC: "true"            # MessagePack compression POC
-    USE_DEFLATE_COMPRESSION: "true"    # Deflate compression POC
+    USE_MSGPACK_POC: "false"           # Disable MessagePack during startup
+    USE_DEFLATE_COMPRESSION: "false"   # Disable Deflate compression during startup
     USE_KEY_COMPACTION_POC: "false"    # Key compaction POC (disabled)
     
     # Performance
@@ -85,7 +85,7 @@ agent:
     MEMORY_THRESHOLD_MB: "30"
     
     # Heap profiling (debugging memory usage)
-    ENABLE_HEAP_PROFILING: "true"
+    ENABLE_HEAP_PROFILING: "false"  # Disable in K8s to avoid memory spike
     
     # Security
     REQUIRE_PROVISIONING: "false"    # Pre-provisioned keys

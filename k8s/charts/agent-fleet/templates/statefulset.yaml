@@ -7,6 +7,10 @@ metadata:
 spec:
   replicas: {{ .Values.fleet.replicaCount }}
   serviceName: {{ include "agent-fleet.fullname" . }}-headless
+  # Create pods one at a time, wait for each to be ready before next
+  podManagementPolicy: OrderedReady
+  # Wait 60 seconds after pod is ready before considering it stable
+  minReadySeconds: 60
   selector:
     matchLabels:
       {{- include "agent-fleet.selectorLabels" . | nindent 6 }}
@@ -190,10 +194,10 @@ spec:
                 - |
                   POD_INDEX=$(echo $POD_NAME | grep -o '[0-9]*$')
                   API_PORT=$((48484 + POD_INDEX))
-                  wget -q -O- http://127.0.0.1:$API_PORT/ping || exit 1
-            initialDelaySeconds: 30
+                  wget -q --spider http://127.0.0.1:$API_PORT/ping || exit 1
+            initialDelaySeconds: 150
             periodSeconds: 30
-            timeoutSeconds: 5
+            timeoutSeconds: 10
             failureThreshold: 3
           readinessProbe:
             exec:
@@ -203,10 +207,10 @@ spec:
                 - |
                   POD_INDEX=$(echo $POD_NAME | grep -o '[0-9]*$')
                   API_PORT=$((48484 + POD_INDEX))
-                  wget -q -O- http://127.0.0.1:$API_PORT/ping || exit 1
-            initialDelaySeconds: 10
+                  wget -q --spider http://127.0.0.1:$API_PORT/ping || exit 1
+            initialDelaySeconds: 120
             periodSeconds: 10
-            timeoutSeconds: 5
+            timeoutSeconds: 10
             failureThreshold: 3
         
         # Modbus simulators (dynamic count: 0-3)

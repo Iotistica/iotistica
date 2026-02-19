@@ -734,14 +734,7 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
   const getPendingConfig = useCallback((deviceUuid: string) => {
     const config = deviceStates[deviceUuid]?.pendingChanges?.config ||
       deviceStates[deviceUuid]?.targetState?.config || {};
-    
-    console.log('[getPendingConfig] Returning config:', {
-      hasPendingChanges: !!deviceStates[deviceUuid]?.pendingChanges?.config,
-      hasTargetState: !!deviceStates[deviceUuid]?.targetState?.config,
-      endpoints: config.endpoints?.map((e: any) => ({ name: e.name, deploymentStatus: e.deploymentStatus })),
-      sensors: config.sensors?.map((s: any) => ({ name: s.name, deploymentStatus: s.deploymentStatus }))
-    });
-    
+
     return config;
   }, [deviceStates]);
   
