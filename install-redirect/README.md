@@ -91,7 +91,7 @@ Output:
 az container create \
   --resource-group iotistic \
   --name iotistic-redirector \
-  --image myregistry.azurecr.io/iotistic-install-redirect:latest \
+  --image iotistic/iotistic-redirect:latest \
   --environment-variables \
     AZURE_STORAGE_ACCOUNT="your-account" \
     AZURE_STORAGE_CONTAINER="scripts" \
@@ -163,8 +163,8 @@ In your `.github/workflows/build-device-agent-ci.yml`, add a step to build and p
 ```yaml
 - name: Build and push redirector Docker image
   run: |
-    docker build -t myregistry.azurecr.io/iotistic-install-redirect:latest install-redirect/
-    docker push myregistry.azurecr.io/iotistic-install-redirect:latest
+    docker build -t iotistic/iotistic-redirect:latest install-redirect/
+    docker push iotistic/iotistic-redirect:latest
 ```
 
 ### Update your website
