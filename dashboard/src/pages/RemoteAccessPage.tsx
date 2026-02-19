@@ -42,6 +42,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [ptyRestarted, setPtyRestarted] = useState(false);
+  const [sessionStatus, setSessionStatus] = useState<{status: string; message: string} | null>(null);
   const [fontSize, setFontSize] = useState<number>(() => {
     const saved = localStorage.getItem('terminal-font-size');
     return saved ? parseInt(saved, 10) : 14;
@@ -269,6 +270,19 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           xtermRef.current.writeln('\x1b[33m✓ Session terminated\x1b[0m');
         }
         listSessions();
+        break;
+
+      case 'session-status':
+        console.log('[RemoteAccess] 📊 Received session-status:', message.data?.status, message.data?.message);
+        setSessionStatus({
+          status: message.data?.status,
+          message: message.data?.message,
+        });
+        
+        // Clear status when session becomes active
+        if (message.data?.status === 'active') {
+          setTimeout(() => setSessionStatus(null), 2000); // Clear after 2 seconds
+        }
         break;
 
       case 'all-sessions-cleared':
@@ -1038,6 +1052,18 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           </CardHeader>
 
           <CardContent className="flex-1 overflow-hidden p-6">
+            {/* Session Status Bar */}
+            {sessionStatus && (
+              <div className={`mb-4 p-3 rounded-lg border text-sm ${
+                sessionStatus.status === 'starting' ? 'bg-blue-50 border-blue-200 text-blue-700' :
+                sessionStatus.status === 'active' ? 'bg-green-50 border-green-200 text-green-700' :
+                sessionStatus.status === 'agent-timeout' ? 'bg-yellow-50 border-yellow-200 text-yellow-700' :
+                'bg-gray-50 border-gray-200 text-gray-700'
+              }`}>
+                {sessionStatus.message}
+              </div>
+            )}
+            
             {/* Terminal Container */}
             <div 
               ref={terminalRef}

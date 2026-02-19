@@ -688,17 +688,6 @@ export class MqttManager extends EventEmitter {
   private routeMessage(topic: string, payload: Buffer): void {
     this.debugLog(`Received MQTT message: ${topic} (${payload.length} bytes)`);
     
-    // DEBUG: Log all subscription patterns when shell topic arrives
-    if (topic.includes('/agent/shell')) {
-      this.logger?.infoSync('[MQTT] Shell message received - checking handlers', {
-        component: LogComponents.mqtt,
-        topic,
-        payloadLength: payload.length,
-        totalHandlers: this.subscriptionHandlers.length,
-        patterns: this.subscriptionHandlers.map(s => s.pattern)
-      });
-    }
-    
     for (const subscription of this.subscriptionHandlers) {
       if (this.topicMatches(subscription.pattern, topic)) {
         try {

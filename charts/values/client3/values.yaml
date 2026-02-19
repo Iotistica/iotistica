@@ -13,7 +13,7 @@ redis:
     tag: "7-alpine"
   port: 6379
   maxMemory: 256mb
-  maxMemoryPolicy: volatile-lru
+  maxMemoryPolicy: allkeys-lru  # CRITICAL: Evict streams before OOM kill
   persistence:
     enabled: true
   storage:

@@ -222,7 +222,7 @@ jobs:
       - name: Deploy test fleet
         env:
           FLEET_SIZE: ${{ github.event.inputs.test_fleet_size }}
-          API_URL: ${{ secrets.TEST_API_URL || 'https://api1.iotistica.com:443' }}
+          API_URL: ${{ secrets.TEST_API_URL || 'https://api.iotistica.com' }}
           FLEET_ID: agent-fleet-test-${{ github.run_number }}
         run: |
           # Get simulator counts from inputs

@@ -489,11 +489,11 @@ class RedisDeviceQueue {
       if (duration > 100) {
         logger.warn('Slow Redis write (sensor batch)', logPayload);
       } else {
-        logger.info('Added sensor data to Redis stream', logPayload);
+        logger.info('Added device data to Redis stream', logPayload);
       }
     } catch (err: any) {
       circuitBreaker.recordFailure();
-      logger.error('Failed to add sensor data to Redis stream', {
+      logger.error('Failed to add device data to Redis stream', {
         count: sensorData.length,
         error: err.message,
         redisStatus: this.redisIngestion.status
@@ -552,7 +552,7 @@ class RedisDeviceQueue {
       fs.appendFileSync(this.diskSpoolCurrentFile, payload + '\n');
       this.diskSpoolCurrentSize += payloadSize;
       
-      logger.debug('Spooled sensor data to disk', {
+      logger.debug('Spooled device data to disk', {
         count: sensorData.length,
         file: path.basename(this.diskSpoolCurrentFile),
         sizeBytes: payloadSize,
@@ -676,7 +676,7 @@ class RedisDeviceQueue {
     // Each worker competes for messages via consumer group (load balancing)
     for (let i = 0; i < this.workerCount; i++) {
       this.workerLoop(i).catch(err => {
-        logger.error('Sensor worker loop crashed', { 
+        logger.error('Device worker loop crashed', { 
           workerId: i,
           error: err.message, 
           stack: err.stack 

@@ -7,7 +7,7 @@ interface SessionInfo {
   sessionId: string;
   deviceUuid: string;
   userId?: string;
-  status: 'creating' | 'active' | 'detached' | 'terminated';
+  status: 'creating' | 'starting' | 'active' | 'detached' | 'agent-timeout' | 'terminated';
   createdAt: Date;
   lastActivity: Date;
   terminatedAt?: Date;
@@ -28,12 +28,15 @@ interface ActiveSession {
   devicePtyActive: boolean;
   lastActivityWriteTime: number; // Debounce DB writes
   ptyStartedAt?: Date; // Track when PTY actually started
+  startCommandSentAt?: Date; // Track when start command was sent to agent
 }
 
 export class SessionManager {
   private sessions: Map<string, ActiveSession> = new Map();
   private activePtySession: Map<string, string> = new Map(); // deviceUuid -> sessionId with active PTY
   private cleanupInterval: NodeJS.Timeout | null = null;
+  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private statusChangeCallback?: (sessionId: string, status: string, message: string) => void;
   
   // Configuration
   private readonly BUFFER_MAX_CHUNKS = parseInt(process.env.SESSION_BUFFER_CHUNKS || '1000', 10); // ~1000 chunks
@@ -45,9 +48,11 @@ export class SessionManager {
   private readonly CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
   private readonly ACTIVITY_UPDATE_DEBOUNCE_MS = 5000; // Only update DB every 5 seconds
   private readonly PTY_STARTUP_GRACE_PERIOD_MS = 30000; // 30 seconds for PTY to start
+  private readonly AGENT_RESPONSE_TIMEOUT_MS = 10000; // 10 seconds for agent to respond
 
   constructor() {
     this.startCleanupJob();
+    this.startHealthCheck();
   }
 
   /**
@@ -766,12 +771,105 @@ export class SessionManager {
   }
 
   /**
+   * Register callback for status changes (used by WebSocket manager to notify clients)
+   */
+  setStatusChangeCallback(callback: (sessionId: string, status: string, message: string) => void): void {
+    this.statusChangeCallback = callback;
+  }
+
+  /**
+   * Mark that start command was sent to agent
+   * Transitions session from 'creating' to 'starting'
+   */
+  async markStartCommandSent(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      logger.warn(`🐚 [SESSION] Cannot mark start command sent - session ${sessionId.substring(0, 8)}... not found`);
+      return;
+    }
+
+    if (session.info.status === 'creating') {
+      session.info.status = 'starting';
+      session.startCommandSentAt = new Date();
+      
+      // Update database
+      await query(
+        `UPDATE shell_sessions SET status = $1 WHERE session_id = $2`,
+        ['starting', sessionId]
+      );
+
+      logger.info(`🐚 [SESSION] Session ${sessionId.substring(0, 8)}... status: creating → starting`);
+
+      // Notify WebSocket clients
+      this.notifyStatusChange(sessionId, 'starting', 'Connecting to agent...');
+    }
+  }
+
+  /**
+   * Start health check interval to detect agent timeouts
+   */
+  private startHealthCheck(): void {
+    this.healthCheckInterval = setInterval(() => {
+      this.checkSessionHealth();
+    }, 3000); // Check every 3 seconds
+    
+    logger.info('🐚 [SESSION] Health check started');
+  }
+
+  /**
+   * Check session health and detect agent timeouts
+   */
+  private async checkSessionHealth(): Promise<void> {
+    const now = Date.now();
+
+    for (const [sessionId, session] of this.sessions) {
+      // Only check sessions waiting for agent response
+      if (session.info.status === 'starting' && session.startCommandSentAt) {
+        const elapsed = now - session.startCommandSentAt.getTime();
+
+        if (elapsed > this.AGENT_RESPONSE_TIMEOUT_MS) {
+          logger.warn(`🐚 [SESSION] Agent timeout for session ${sessionId.substring(0, 8)}... (${Math.round(elapsed/1000)}s elapsed)`);
+          
+          session.info.status = 'agent-timeout';
+          
+          // Update database
+          await query(
+            `UPDATE shell_sessions SET status = $1 WHERE session_id = $2`,
+            ['agent-timeout', sessionId]
+          );
+
+          // Notify clients
+          this.notifyStatusChange(
+            sessionId,
+            'agent-timeout',
+            'Agent not responding. Check if agent is online and connected.'
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * Notify attached clients of status change
+   */
+  private notifyStatusChange(sessionId: string, status: string, message: string): void {
+    if (this.statusChangeCallback) {
+      this.statusChangeCallback(sessionId, status, message);
+    }
+  }
+
+  /**
    * Shutdown: cleanup all resources
    */
   async shutdown(): Promise<void> {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = null;
+    }
+
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
     }
 
     // Terminate all active sessions

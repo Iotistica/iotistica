@@ -71,6 +71,11 @@ export class WebSocketManager {
           this.handleShellOutput(payload.deviceUuid, payload.message);
         }
       });
+      
+      // Register status change callback from session manager
+      sessionManager.setStatusChangeCallback((sessionId, status, message) => {
+        this.notifySessionStatusChange(sessionId, status, message);
+      });
     }
   }
 
@@ -1106,6 +1111,28 @@ export class WebSocketManager {
     }
   }
 
+  /**
+   * Notify attached clients of session status change
+   */
+  private notifySessionStatusChange(sessionId: string, status: string, message: string): void {
+    const attachedClients = sessionManager.getAttachedClients(sessionId);
+    
+    logger.info(`🐚 [STATUS] Notifying ${attachedClients.size} clients of session ${sessionId.substring(0, 8)}... status change: ${status}`);
+
+    attachedClients.forEach(ws => {
+      if (ws.readyState === WebSocket.OPEN) {
+        this.send(ws, {
+          type: 'session-status',
+          sessionId,
+          data: {
+            status,
+            message,
+          },
+        });
+      }
+    });
+  }
+
   async shutdown(): Promise<void> {
     logger.info(' Shutting down...');
 
@@ -1176,19 +1203,11 @@ export class WebSocketManager {
         topic,
         action: data.action,
         sessionId: data.sessionId?.substring(0, 8),
-        payloadLength: payload.length,
-        payload: payload.substring(0, 200), // Log first 200 chars
-        mqttConnected: this.mqttManager?.isConnected(),
       });
       
-      const startTime = Date.now();
       await this.mqttManager.publish(topic, payload, 1);
-      const duration = Date.now() - startTime;
       
-      logger.info(`🐚 [SHELL] ✅ Command published to MQTT successfully`, {
-        durationMs: duration,
-        topic
-      });
+      logger.info('🐚 [SHELL] ✅ Command published to MQTT successfully');
     } catch (error) {
       logger.error('🐚 [SHELL] ❌ Failed to send shell command:', error);
     }
@@ -1273,9 +1292,12 @@ export class WebSocketManager {
         action: 'start',
         sessionId: session.sessionId,
       });
+      
+      // Mark that start command was sent (transitions status to 'starting')
+      await sessionManager.markStartCommandSent(session.sessionId);
 
       // Mark as expecting PTY (will be set to true when first output arrives)
-      logger.info(`🐚 [SESSION] Waiting for PTY to start for session ${session.sessionId.substring(0, 8)}...`);
+      logger.info(`🐚 [SESSION] Waiting for agent response for session ${session.sessionId.substring(0, 8)}...`);
 
       this.send(client.ws, {
         type: 'session-created',
