@@ -308,6 +308,18 @@ export function FleetsPage() {
                           <span className="font-medium">Created:</span>{' '}
                           {new Date(fleet.created_at).toLocaleDateString()}
                         </div>
+                        {fleet.fleet_uuid && (
+                          <div>
+                            <span className="font-medium">UUID:</span>{' '}
+                            <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono cursor-pointer hover:bg-muted/80" title="Click to copy" onClick={(e) => {
+                              e.stopPropagation();
+                              navigator.clipboard.writeText(fleet.fleet_uuid!);
+                              toast.success('Fleet UUID copied to clipboard');
+                            }}>
+                              {fleet.fleet_uuid.substring(0, 8)}...
+                            </code>
+                          </div>
+                        )}
                       </div>
                     </div>
 
