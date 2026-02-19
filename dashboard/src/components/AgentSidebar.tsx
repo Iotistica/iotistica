@@ -334,6 +334,8 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
   const allStatusesSelected = availableStatuses.length > 0 && statusFilters.length === availableStatuses.length;
   const allTypesSelected = availableTypes.length > 0 && typeFilters.length === availableTypes.length;
 
+  const filtersEnabled = false;
+
   const filteredDevices = useMemo(() => {
     console.log('[FILTER INPUT]', {
       totalDevices: devices.length,
@@ -353,8 +355,8 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
     const filtered = devices.filter(device => {
       const matchesSearch = device.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                            device.ipAddress.includes(searchQuery);
-      const matchesStatus = statusFilters.length === 0 || statusFilters.includes(device.status);
-      const matchesType = typeFilters.length === 0 || typeFilters.includes(device.type);
+      const matchesStatus = !filtersEnabled || statusFilters.length === 0 || statusFilters.includes(device.status);
+      const matchesType = !filtersEnabled || typeFilters.length === 0 || typeFilters.includes(device.type);
       
       // Fleet matching: check both fleet_uuid and fleet_id (legacy support)
       const deviceFleetId = (device as any).fleet_uuid || (device as any).fleet_id;
