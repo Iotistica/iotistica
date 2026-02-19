@@ -74,7 +74,10 @@ export class ShellHandler {
           this.stopSession();
           break;
         case 'input':
-          // Validate input is for the current session (prevent misrouted input)
+          // SECURITY: Validate input is for the current session
+          // Prevents misrouted input from cloud API or injection attacks where an attacker
+          // could route commands to a different user's active shell session.
+          // The cloud API must pass the correct sessionId, and we verify it matches before writing to PTY.
           if (message.sessionId && message.sessionId !== this.currentSessionId) {
             this.logger.warnSync('Input rejected - sessionId mismatch', {
               component: LogComponents.shell,
@@ -183,9 +186,6 @@ export class ShellHandler {
         });
         this.stopSession();
       });
-
-      // Send welcome message
-      this.sendOutput('\r\n\x1b[32m✓ Shell session started\x1b[0m\r\n');
       
       this.logger.infoSync('Shell session started', {
         component: LogComponents.shell,

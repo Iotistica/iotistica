@@ -102,10 +102,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         channel: 'shell',
       }));
 
-      if (xtermRef.current) {
-        xtermRef.current.writeln('\x1b[32m✓ Connected to WebSocket\x1b[0m');
-      }
-
       // If reconnecting to a saved session, attach immediately (driven by socket lifecycle, not timeout)
       if (reconnectSessionIdRef.current && user?.id) {
         const sessionToReconnect = reconnectSessionIdRef.current;
@@ -138,7 +134,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       }
     };
 
-    ws.onerror = (error) => {
+    ws.onerror = (_error) => {
       setIsConnected(false);
       setIsConnecting(false);
       if (xtermRef.current) {
@@ -194,7 +190,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
         if (xtermRef.current) {
           xtermRef.current.clear();
-          xtermRef.current.writeln('\x1b[32m✓ Attached to session\x1b[0m');
           
           // Display buffered output (check both data.buffer and buffer for compatibility)
           const buffer = message.data?.buffer || message.buffer;
@@ -248,9 +243,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       case 'session-detached':
         setCurrentSessionId(null);
         currentSessionIdRef.current = null;
-        if (xtermRef.current) {
-          xtermRef.current.writeln('\r\n\x1b[33m⚠ Session detached\x1b[0m');
-        }
         listSessions();
         break;
 
@@ -286,7 +278,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         setSessions([]);
         if (xtermRef.current) {
           xtermRef.current.clear();
-          xtermRef.current.writeln('\x1b[32m✓ All sessions cleared successfully!\x1b[0m');
         }
         setTimeout(() => {
           createNewSession();
@@ -328,10 +319,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
               new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
             )[0];
             
-            if (xtermRef.current) {
-              xtermRef.current.writeln(`\x1b[90mAttaching to existing session...\x1b[0m`);
-            }
-            
             if (wsRef.current) {
               wsRef.current.send(JSON.stringify({
                 type: 'attach-session',
@@ -342,9 +329,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
               }));
             }
           } else {
-            if (xtermRef.current) {
-              xtermRef.current.writeln(`\x1b[90mCreating new session...\x1b[0m`);
-            }
             createNewSession();
           }
         }
@@ -424,10 +408,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       },
     };
     wsRef.current.send(JSON.stringify(msg));
-
-    if (xtermRef.current) {
-      xtermRef.current.writeln('\x1b[90mCreating new session...\x1b[0m');
-    }
   };
 
 
@@ -588,7 +568,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       cursorBlink: true,
       fontSize: fontSize,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      rendererType: 'canvas', // Use canvas renderer for better performance with heavy output
       theme: {
         background: '#1e1e1e',
         foreground: '#d4d4d4',
@@ -755,12 +734,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     
     if (xtermRef.current) {
       xtermRef.current.clear();
-      
-      if (savedState?.sessionId) {
-        xtermRef.current.writeln('\x1b[33m↻ Reconnecting to previous session...\\x1b[0m');
-      } else {
-        xtermRef.current.writeln('\x1b[33mClick "Connect" to start a shell session\x1b[0m');
-      }
     }
     
     // Restore saved sessions list
