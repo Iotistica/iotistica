@@ -38,6 +38,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   const isNewSessionRef = useRef<boolean>(false);
   const inputBufferRef = useRef<string>(''); // Buffer for keystroke batching
   const flushTimerRef = useRef<NodeJS.Timeout | null>(null); // Timer for flushing batched keystrokes
+  const reconnectSessionIdRef = useRef<string | null>(null); // Session to reconnect to when socket opens
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -105,8 +106,21 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         xtermRef.current.writeln('\x1b[32m✓ Connected to WebSocket\x1b[0m');
       }
 
+      // If reconnecting to a saved session, attach immediately (driven by socket lifecycle, not timeout)
+      if (reconnectSessionIdRef.current && user?.id) {
+        const sessionToReconnect = reconnectSessionIdRef.current;
+        reconnectSessionIdRef.current = null; // Clear after using
+        
+        ws.send(JSON.stringify({
+          type: 'attach-session',
+          data: { 
+            sessionId: sessionToReconnect,
+            userId: user?.id,
+          },
+        }));
+      }
       // Auto-connect: List existing sessions (unless reconnecting to saved session)
-      if (!skipAutoConnect) {
+      else if (!skipAutoConnect) {
         ws.send(JSON.stringify({
           type: 'list-sessions',
           deviceUuid,
@@ -417,51 +431,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     }
   };
 
-  // COMMENTED OUT: Unused after UI simplification - keeping for reference
-  // const attachToSession = (sessionId: string) => {
-  //   console.log('[RemoteAccess] 🔄 attachToSession called for:', sessionId.substring(0, 8));
-  //   
-  //   // Prevent race conditions - don't allow multiple simultaneous attach operations
-  //   if (isAttachingRef.current) {
-  //     console.log('[RemoteAccess] ⚠️ BLOCKED: Already attaching to a session, ignoring duplicate call');
-  //     return;
-  //   }
-  //   
-  //   if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-  //     console.error('[RemoteAccess] WebSocket not connected');
-  //     return;
-  //   }
-  //
-  //   if (!sessionId) {
-  //     console.error('[RemoteAccess] Cannot attach - sessionId is null/undefined');
-  //     return;
-  //   }
-  //   
-  //   // Mark that we're in the process of attaching
-  //   isAttachingRef.current = true;
-  //   
-  //   // Disable auto-connect to prevent creating new session when listSessions is called
-  //   autoConnectPendingRef.current = false;
-  //   console.log('[RemoteAccess] 🔄 Auto-connect disabled for manual session switch');
-  //   
-  //   // Don't call detachFromSession when switching - just attach to new session
-  //   // Backend will handle moving client from old session to new one
-  //   
-  //   const msg = {
-  //     type: 'attach-session',
-  //     data: { 
-  //       sessionId,
-  //       userId: user?.id,
-  //     },
-  //   };
-  //   wsRef.current.send(JSON.stringify(msg));
-  //   console.log('[RemoteAccess] 🔄 Sent attach-session message');
-  //
-  //   if (xtermRef.current) {
-  //     xtermRef.current.clear();
-  //     xtermRef.current.writeln(`\x1b[90mSwitching to session ${sessionId.substring(0, 8)}...\x1b[0m`);
-  //   }
-  // };
 
   const detachFromSession = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !currentSessionId) {
@@ -620,6 +589,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       cursorBlink: true,
       fontSize: fontSize,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      rendererType: 'canvas', // Use canvas renderer for better performance with heavy output
       theme: {
         background: '#1e1e1e',
         foreground: '#d4d4d4',
@@ -801,30 +771,13 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       setSessions([]);
     }
     
-    // Auto-reconnect to previous session
+    // Auto-reconnect to previous session (socket lifecycle drives reconnection, not timeout)
     if (savedState?.sessionId) {
-      // Store the session ID to reconnect to
-      const sessionToReconnect = savedState.sessionId;
+      // Store session ID in ref - will be picked up by ws.onopen callback
+      reconnectSessionIdRef.current = savedState.sessionId;
       
-      // Connect WebSocket first (with auto-connect DISABLED to prevent race condition)
+      // Connect WebSocket (socket's onopen will handle reconnection)
       connectWebSocket(true); // Pass true to skip auto-connect logic
-      
-      // Wait for WebSocket to establish, then reconnect
-      const reconnectTimer = setTimeout(() => {
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({
-            type: 'attach-session',
-            data: { 
-              sessionId: sessionToReconnect,
-              userId: user?.id,
-            },
-          }));
-        } else {
-          // WebSocket not ready, auto-reconnect failed - will retry on next effect
-        }
-      }, 500);
-      
-      return () => clearTimeout(reconnectTimer);
     }
   }, [deviceUuid, user]);
 
