@@ -893,8 +893,8 @@ export default function App() {
     setSidebarOpen(false); // Close sidebar on mobile after selection
 
     if (device) {
-      // Always reset to 'metrics' (System tab) when changing agents to prevent stale UI state
-      const targetView = 'metrics';
+      // Preserve current tab selection when changing agents
+      const targetView = currentView;
       const fleetUuid = device.fleet_uuid || await resolveFleetUuid(device.fleet_uuid);
       
       // Save as last viewed agent for restoration
