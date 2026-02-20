@@ -344,8 +344,6 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
     console.log('[FILTER INPUT]', {
       totalDevices: devices.length,
       selectedFleetId: normalizedFleetId,
-      statusFilters,
-      typeFilters,
       searchQuery,
       deviceFleetIds: devices.map(d => ({
         name: d.name,
@@ -359,8 +357,6 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
     const filtered = devices.filter(device => {
       const matchesSearch = device.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                            device.ipAddress.includes(searchQuery);
-      const matchesStatus = !filtersEnabled || statusFilters.length === 0 || statusFilters.includes(device.status);
-      const matchesType = !filtersEnabled || typeFilters.length === 0 || typeFilters.includes(device.type);
       
       // Fleet matching: check both fleet_uuid and fleet_id (legacy support)
       const deviceFleetId = (device as any).fleet_uuid || (device as any).fleet_id;
@@ -375,7 +371,8 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
         });
       }
       
-      return matchesSearch && matchesStatus && matchesType && matchesFleet;
+      // Status and type filters are disabled - only apply search and fleet filters
+      return matchesSearch && matchesFleet;
     }).sort((a, b) => {
       if (a.status === b.status) return 0;
       if (a.status === 'online') return -1;
@@ -385,23 +382,16 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
 
     console.log('[FILTER RESULT]', {
       filteredCount: filtered.length,
-      devices: filtered.map(d => ({ name: d.name, fleet_uuid: (d as any).fleet_uuid, fleet_id: (d as any).fleet_id }))
+      devices: filtered.map(d => ({ name: d.name, status: d.status, fleet_uuid: (d as any).fleet_uuid, fleet_id: (d as any).fleet_id }))
     });
 
     return filtered;
-  }, [devices, normalizedFleetId, statusFilters, typeFilters, searchQuery]);
+  }, [devices, normalizedFleetId, searchQuery]);
 
-  const hasActiveFilters = statusFilters.length < availableStatuses.length || 
-                           typeFilters.length < availableTypes.length || 
-                           searchQuery.length > 0 ||
-                           selectedFleetId !== '';
+  const hasActiveFilters = searchQuery.length > 0 || selectedFleetId !== '';
 
   const clearFilters = () => {
     setSearchQuery("");
-    localStorage.setItem('deviceSidebar.statusFilters', JSON.stringify(availableStatuses));
-    localStorage.setItem('deviceSidebar.typeFilters', JSON.stringify(availableTypes));
-    setStatusFilters(availableStatuses);
-    setTypeFilters(availableTypes);
     setSelectedFleetId('');
   };
 
@@ -424,9 +414,11 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
                 setSelectedFleetId(newFleetId);
                 
                 // If viewing an agent AND selecting a specific fleet (not "All Fleets"), update URL
+                // IMPORTANT: Reset view to 'metrics' when switching fleets to avoid showing
+                // tabs/views from agents in the previous fleet
                 if (currentPath.type === 'agent' && currentPath.agentId && newFleetId) {
-                  console.log('[FLEET DEBUG] Navigating to agent with fleet:', newFleetId);
-                  navigateToAgent(currentPath.agentId, newFleetId, currentPath.view);
+                  console.log('[FLEET DEBUG] Navigating to agent with fleet:', newFleetId, 'resetting view to metrics');
+                  navigateToAgent(currentPath.agentId, newFleetId, 'metrics');
                 }
                 // If selecting "All Fleets" while on agent view, stay on current URL but context updated
                 // The filter will show all devices, and URL sync won't override because we're not changing URL

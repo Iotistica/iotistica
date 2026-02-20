@@ -136,7 +136,6 @@ export class VirtualAgentDeployer {
     this.agentImage = process.env.AGENT_IMAGE || 'iotistic/agent:latest';
     
     // Cloud API URL: Try to auto-discover from K8s HTTPRoute, fall back to env var or default
-    this.cloudApiUrl = 'https://api1.iotistica.com:443'; // Temporary, will be updated
     this.discoverCloudApiUrl().then((url) => {
       this.cloudApiUrl = url;
       logger.info('Cloud API URL discovered', { cloudApiUrl: this.cloudApiUrl });
@@ -243,6 +242,19 @@ export class VirtualAgentDeployer {
     const name = this.sanitizeDnsName(config.deviceName); // Use device name instead of UUID
     const secretName = `${name}-prov-key`;
 
+    // Ensure API URL discovery completes before creating sidecars
+    try {
+      this.cloudApiUrl = await this.discoverCloudApiUrl();
+      logger.info('Using discovered Cloud API URL for deployment', {
+        cloudApiUrl: this.cloudApiUrl
+      });
+    } catch (error) {
+      logger.warn('Proceeding with existing Cloud API URL', {
+        cloudApiUrl: this.cloudApiUrl,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+
     // Query fleet configuration if fleetUuid provided
     // This ensures pod resources match the fleet quota
     let fleetConfig = null;
@@ -301,7 +313,7 @@ export class VirtualAgentDeployer {
       logger.info('Provisioning key Secret created', { namespace, secretName });
 
       // 2. Create Deployment
-      await this.createDeployment(namespace, name, secretName, config);
+      await this.createDeployment(namespace, name, secretName, config, this.cloudApiUrl);
       logger.info('Deployment created', { namespace, deploymentName: name });
 
       // 3. Check for deployment errors (quota, image pull, etc.)
@@ -473,7 +485,8 @@ export class VirtualAgentDeployer {
     namespace: string,
     name: string,
     secretName: string,
-    config: VirtualAgentConfig
+    config: VirtualAgentConfig,
+    cloudApiUrl: string
   ): Promise<void> {
     // Create PVC for SQLite database persistence
     await this.createPersistentVolumeClaim(namespace, `${name}-data`);
@@ -533,7 +546,7 @@ export class VirtualAgentDeployer {
                   { name: 'FLEET_UUID', value: config.fleetUuid || 'unassigned' },
                   { name: 'REQUIRE_PROVISIONING', value: 'true' },
                   { name: 'IS_VIRTUAL_AGENT', value: 'true' },
-                  { name: 'CLOUD_API_ENDPOINT', value: this.cloudApiUrl },
+                  { name: 'CLOUD_API_ENDPOINT', value: cloudApiUrl },
                   { name: 'MQTT_BROKER_URL', value: this.mqttBrokerUrl },
                   { name: 'FIREWALL_ENABLED', value: 'false' },
                   {
@@ -564,7 +577,7 @@ export class VirtualAgentDeployer {
                   }
                 ]
               },
-              ...this.buildSimulatorSidecars(config)
+              ...this.buildSimulatorSidecars(config, cloudApiUrl)
             ],
             volumes: [
               {
@@ -1050,7 +1063,7 @@ export class VirtualAgentDeployer {
   /**
    * Build simulator sidecar containers based on device endpoints
    */
-  private buildSimulatorSidecars(config: VirtualAgentConfig): any[] {
+  private buildSimulatorSidecars(config: VirtualAgentConfig, cloudApiUrl: string): any[] {
     const sidecars: any[] = [];
     
     // Get all OPC UA endpoints
@@ -1074,7 +1087,7 @@ export class VirtualAgentDeployer {
         env: [
           { name: 'PORT', value: port.toString() }, // CRITICAL: Pass unique port
           { name: 'PROFILE', value: opcuaProfile },
-          { name: 'API_URL', value: this.cloudApiUrl },
+          { name: 'API_URL', value: cloudApiUrl },
           { name: 'LOG_LEVEL', value: process.env.LOG_LEVEL || 'INFO' }
         ],
         ports: [

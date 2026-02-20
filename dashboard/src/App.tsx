@@ -146,7 +146,8 @@ export default function App() {
   
   // Memoize selected device to prevent unnecessary re-renders
   const selectedDevice = useMemo(() => {
-    return devices.find((d) => d.id === selectedDeviceId) || devices[0];
+    // Don't fallback to devices[0] - allow undefined when no device is selected
+    return devices.find((d) => d.id === selectedDeviceId);
   }, [devices, selectedDeviceId]);
 
   // URL routing integration (no UI changes, just URL sync)
@@ -271,6 +272,41 @@ export default function App() {
 
     loadFleetName();
   }, [currentPath, fleetNameById]);
+
+  // Track previous fleet ID to detect when fleet selection changes
+  const prevFleetIdRef = useRef(selectedFleetId);
+
+  // Clear device selection if switching to empty fleet or if selected device doesn't belong to current fleet
+  useEffect(() => {
+    // Only run when fleet ID actually changes, not on every devices poll
+    if (prevFleetIdRef.current === selectedFleetId) {
+      return;
+    }
+    prevFleetIdRef.current = selectedFleetId;
+    
+    if (selectedFleetId) {
+      // Check if there are any devices in the selected fleet
+      const devicesInFleet = devices.filter(d => {
+        const deviceFleetId = (d as any).fleet_uuid || (d as any).fleet_id;
+        return deviceFleetId === selectedFleetId;
+      });
+      
+      // Clear selection if fleet is empty OR if currently selected device doesn't belong to this fleet
+      if (devicesInFleet.length === 0) {
+        console.log('[FLEET FILTER] Fleet has no agents, clearing device selection');
+        setSelectedDeviceId('');
+      } else if (selectedDeviceId && selectedDevice) {
+        const selectedDeviceFleetId = (selectedDevice as any).fleet_uuid || (selectedDevice as any).fleet_id;
+        if (selectedDeviceFleetId !== selectedFleetId) {
+          console.log('[FLEET FILTER] Selected device not in this fleet, clearing selection');
+          setSelectedDeviceId('');
+        }
+      }
+    } else {
+      // "All Fleets" selected - keep current selection if it exists
+      console.log('[FLEET FILTER] All fleets selected, keeping current device');
+    }
+  }, [selectedFleetId, devices, selectedDeviceId, selectedDevice]); // Only depend on fleet changes
 
   const handleGlobalViewChange = useCallback((view: View) => {
     console.log('[handleGlobalViewChange] Called with view:', view);
@@ -423,10 +459,20 @@ export default function App() {
   const breadcrumbs = useMemo(() => {
     if (currentPath.type === 'agent') {
       const fleetLabel = fleetNameById[currentPath.fleetId || ''] || currentPath.fleetId || 'Unassigned';
+      const agentLabel = selectedDevice?.name || 'Agent';
+      
+      // If no selected device, just show Home and Fleet
+      if (!selectedDevice) {
+        return [
+          { label: 'Home', onClick: () => handleGlobalViewChange('home') },
+          { label: fleetLabel, onClick: () => navigateToFleet(currentPath.fleetId || 'unassigned') }
+        ];
+      }
+      
       return [
         { label: 'Home', onClick: () => handleGlobalViewChange('home') },
         { label: fleetLabel, onClick: () => navigateToFleet(currentPath.fleetId || 'unassigned') },
-        { label: selectedDevice?.name || currentPath.agentId || 'Agent', onClick: currentPath.view ? () => navigateToAgent(currentPath.agentId || '', currentPath.fleetId) : undefined }
+        { label: agentLabel, onClick: currentPath.view ? () => navigateToAgent(currentPath.agentId || '', currentPath.fleetId) : undefined }
       ];
     }
 
@@ -443,7 +489,7 @@ export default function App() {
     }
 
     return [{ label: 'Home' }];
-  }, [currentPath, formatViewLabel, handleGlobalViewChange, navigateToFleet, navigateToAgent, selectedDevice]);
+  }, [currentPath, formatViewLabel, handleGlobalViewChange, navigateToFleet, navigateToAgent, selectedDevice, fleetNameById]);
 
   // Persist selectedDeviceId to localStorage whenever it changes
   // Always save (even empty string) to maintain consistency
@@ -893,9 +939,13 @@ export default function App() {
     setSidebarOpen(false); // Close sidebar on mobile after selection
 
     if (device) {
-      // Preserve current tab selection when changing agents
-      const targetView = currentView;
       const fleetUuid = device.fleet_uuid || await resolveFleetUuid(device.fleet_uuid);
+      
+      // Check if switching to a device in a different fleet - if so, reset view
+      // This prevents showing tabs/views from agents in the previous fleet
+      const previousFleet = selectedDevice?.fleet_uuid;
+      const isChangingFleets = previousFleet && previousFleet !== fleetUuid;
+      const targetView = isChangingFleets ? 'metrics' : currentView;
       
       // Save as last viewed agent for restoration
       setLastViewedAgent({
@@ -1283,15 +1333,135 @@ export default function App() {
           ) : devices.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center max-w-md px-4">
-                <p className="text-xl font-semibold text-foreground mb-2">No Devices Found</p>
-                <p className="text-muted-foreground mb-4">Get started by provisioning your first device.</p>
-                <Button onClick={handleAddDevice}>Add Device</Button>
+                <p className="text-xl font-semibold text-foreground mb-2">No Agents Found</p>
+                <p className="text-muted-foreground mb-4">Get started by adding your first agent.</p>
+                <Button onClick={handleAddDevice}>Add Agent</Button>
               </div>
             </div>
           ) : !selectedDevice ? (
-            <div className="flex items-center justify-center h-full">
-              <p className="text-gray-600">Select a device from the sidebar</p>
-            </div>
+            <>
+              {/* Mobile Header with Menu Button - Sticky at top - Hidden in kiosk mode */}
+              {!isKioskMode && !isGlobalView && (
+                <div className="lg:hidden bg-card border-b border-border p-4 flex items-center gap-3 sticky top-0 z-10">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setSidebarOpen(true)}
+                  >
+                    <Menu className="w-5 h-5" />
+                  </Button>
+                  <div className="flex-1 min-w-0">
+                    <h2 className="font-semibold text-foreground">Select An Agent</h2>
+                  </div>
+                </div>
+              )}
+
+              {/* View Toggle Buttons - Hidden in kiosk mode */}
+              {!isKioskMode && !isGlobalView && (
+                <div className="bg-card border-b border-border px-6 py-3 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-2 overflow-x-auto flex-1 pr-2">
+                    <Button
+                      variant={currentView === 'metrics' ? 'default' : 'ghost'}
+                      size="sm"
+                      onClick={() => handleAgentViewChange('metrics')}
+                      className="text-sm"
+                    >
+                      <BarChart3 className="w-4 h-4 mr-2" />
+                      System
+                    </Button>
+                    <Button
+                      variant={currentView === 'sensors' ? 'default' : 'ghost'}
+                      size="sm"
+                      onClick={() => handleAgentViewChange('sensors')}
+                      className="text-sm"
+                    >
+                      <Activity className="w-4 h-4 mr-2" />
+                      Devices
+                    </Button>
+                    <Button
+                      variant={currentView === 'jobs' ? 'default' : 'ghost'}
+                      size="sm"
+                      onClick={() => handleAgentViewChange('jobs')}
+                      className="text-sm"
+                    >
+                      <CalendarClock className="w-4 h-4 mr-2" />
+                      Jobs
+                    </Button>
+                    <Button
+                      variant={currentView === 'applications' ? 'default' : 'ghost'}
+                      size="sm"
+                      onClick={() => handleAgentViewChange('applications')}
+                      className="text-sm"
+                    >
+                      <Package className="w-4 h-4 mr-2" />
+                      Applications
+                    </Button>
+                    <Button
+                      variant={currentView === 'logs' ? 'default' : 'ghost'}
+                      size="sm"
+                      onClick={() => handleAgentViewChange('logs')}
+                      className="text-sm"
+                    >
+                      <FileText className="w-4 h-4 mr-2" />
+                      Logs
+                    </Button>
+                    <Button
+                      variant={currentView === 'remote-access' ? 'default' : 'ghost'}
+                      size="sm"
+                      onClick={() => handleAgentViewChange('remote-access')}
+                      className="text-sm"
+                    >
+                      <Terminal className="w-4 h-4 mr-2" />
+                      Remote Access
+                    </Button>
+                    <Button
+                      variant={currentView === 'settings' ? 'default' : 'ghost'}
+                      size="sm"
+                      onClick={() => handleAgentViewChange('settings')}
+                      className="text-sm"
+                    >
+                      <Shield className="w-4 h-4 mr-2" />
+                      Settings
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <Button
+                      onClick={handleAddDevice}
+                      size="sm"
+                    >
+                      <Plus className="w-4 h-4 mr-1" />
+                      Add agent
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Empty State Message */}
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center space-y-4 max-w-md">
+                  <div className="inline-block p-4 bg-blue-100 rounded-full mb-4">
+                    <Package className="w-8 h-8 text-blue-600" />
+                  </div>
+                  <h2 className="text-2xl font-bold text-foreground">No Agents Yet</h2>
+                  <p className="text-muted-foreground text-lg">
+                    Start your IoT journey! Add your first edge device to monitor sensors, manage applications, and unlock the power of real-time data.
+                  </p>
+                  <div className="pt-4 space-y-2">
+                    <p className="text-sm text-muted-foreground font-medium">
+                      Click the "Add Agent" button above to get started
+                    </p>
+                    <div className="flex justify-center gap-2 pt-2">
+                      <div className="inline-block px-3 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium">
+                        Virtual Agents
+                      </div>
+                      <div className="inline-block px-3 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium">
+                        Physical Devices
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
           ) : (
             <>
           {/* Mobile Header with Menu Button - Sticky at top - Hidden in kiosk mode */}
@@ -1561,12 +1731,12 @@ export default function App() {
               />
             )
           )}
-          {currentView === 'applications' && (
+          {currentView === 'applications' && selectedDevice && (
             <ApplicationsPage
               device={selectedDevice}
             />
           )}
-          {currentView === 'sensors' && (
+          {currentView === 'sensors' && selectedDevice && (
             debugMode 
               ? <SensorHealthDashboard deviceUuid={selectedDevice.deviceUuid} />
               : <SensorsPage 
@@ -1577,34 +1747,34 @@ export default function App() {
                   onDebugModeChange={setDebugMode}
                 />
           )}
-          {currentView === 'endpoints' && (
+          {currentView === 'endpoints' && selectedDevice && (
             <EndpointsVisualizationPage />
           )}
-          {currentView === 'jobs' && (
+          {currentView === 'jobs' && selectedDevice && (
             <JobsPage device={selectedDevice} />
           )}
-          {currentView === 'event-debugger' && (
+          {currentView === 'event-debugger' && selectedDevice && (
             <EventDebuggerPage deviceUuid={selectedDevice.deviceUuid} />
           )}
-          {currentView === 'usage' && (
+          {currentView === 'usage' && selectedDevice && (
             <UsagePage />
           )}
-          {currentView === 'analytics' && (
+          {currentView === 'analytics' && selectedDevice && (
             <AnalyticsPage device={selectedDevice} />
           )}
-          {currentView === 'maintenance' && (
+          {currentView === 'maintenance' && selectedDevice && (
             <HousekeeperPage />
           )}
-          {currentView === 'logs' && (
+          {currentView === 'logs' && selectedDevice && (
             <LogsPage deviceUuid={selectedDevice.deviceUuid} />
           )}
-          {currentView === 'remote-access' && (
+          {currentView === 'remote-access' && selectedDevice && (
             <RemoteAccessPage deviceUuid={selectedDevice.deviceUuid} />
           )}
-          {currentView === 'settings' && (
+          {currentView === 'settings' && selectedDevice && (
             <AgentSettingsPage deviceUuid={selectedDevice.deviceUuid} />
           )}
-          {currentView === 'tags' && (
+          {currentView === 'tags' && selectedDevice && (
             <DeviceTagsPage deviceUuid={selectedDevice.deviceUuid} />
           )}
           {currentView === 'tag-definitions' && (
