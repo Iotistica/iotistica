@@ -50,11 +50,13 @@ export class VirtualAgentDeployer {
   private k8sConfig: k8s.KubeConfig;
   private coreApi: k8s.CoreV1Api | null = null;
   private appsApi: k8s.AppsV1Api | null = null;
+  private rbacApi: k8s.RbacAuthorizationV1Api | null = null;
   private defaultNamespace: string;
   private agentImage: string;
   private cloudApiUrl: string;
   private mqttBrokerUrl: string;
   private k8sAvailable: boolean = false;
+  private apiServiceAccountNamespace: string = 'demo'; // Will be used for RoleBinding
 
   constructor() {
     // Initialize K8s config
@@ -128,11 +130,13 @@ export class VirtualAgentDeployer {
     if (configLoaded) {
       this.coreApi = this.k8sConfig.makeApiClient(k8s.CoreV1Api);
       this.appsApi = this.k8sConfig.makeApiClient(k8s.AppsV1Api);
+      this.rbacApi = this.k8sConfig.makeApiClient(k8s.RbacAuthorizationV1Api);
       this.k8sAvailable = true;  // Tentatively true, will verify on first use
     }
 
     // Load configuration from environment
     this.defaultNamespace = process.env.VIRTUAL_AGENT_NAMESPACE || 'virtual-agents';
+    this.apiServiceAccountNamespace = process.env.NAMESPACE || process.env.API_NAMESPACE || 'demo'; // Where iotistic-api SA is deployed
     this.agentImage = process.env.AGENT_IMAGE || 'iotistic/agent:latest';
     
     // Cloud API URL: Try to auto-discover from K8s HTTPRoute, fall back to env var or default
@@ -1156,6 +1160,79 @@ export class VirtualAgentDeployer {
   }
 
   /**
+   * Create per-namespace RoleBinding to predefined fleet-namespace-manager role
+   * 
+   * SAFER PATTERN: Instead of creating arbitrary Roles, we bind a predefined
+   * ClusterRole that contains safe, admin-approved permissions.
+   * 
+   * This limits the API's ability to escalate privileges:
+   * - API cannot define arbitrary permissions
+   * - API can only use permissions from predefined role
+   * - If API is compromised, attacker is limited to safe permission set
+   */
+  private async createFleetManagementRoleBinding(namespace: string, fleetUuid: string): Promise<void> {
+    if (!this.rbacApi) {
+      logger.warn('RBAC API not available, skipping fleet management rolebinding creation', { namespace });
+      return;
+    }
+
+    try {
+      // Create RoleBinding to bind iotistic-api SA to the predefined fleet-namespace-manager role
+      // This role is defined in the RBAC template and contains safe, approved permissions
+      const predefinedRole = 'iotistic-fleet-namespace-manager'; // Must match template ClusterRole name
+      
+      const roleBinding = {
+        apiVersion: 'rbac.authorization.k8s.io/v1',
+        kind: 'RoleBinding',
+        metadata: {
+          name: 'fleet-manager-binding',
+          namespace,
+          labels: {
+            'app.kubernetes.io/managed-by': 'iotistic-api',
+            'iotistica.com/fleet-uuid': fleetUuid
+          }
+        },
+        roleRef: {
+          apiGroup: 'rbac.authorization.k8s.io',
+          kind: 'ClusterRole',  // Bind to predefined ClusterRole (not arbitrary Role)
+          name: predefinedRole
+        },
+        subjects: [
+          {
+            kind: 'ServiceAccount',
+            name: 'iotistic-api',
+            namespace: this.apiServiceAccountNamespace
+          }
+        ]
+      };
+
+      await this.rbacApi.createNamespacedRoleBinding(namespace, roleBinding as any);
+      logger.info('Fleet management RoleBinding created', { 
+        namespace, 
+        fleetUuid,
+        bindingTo: `${this.apiServiceAccountNamespace}/iotistic-api`,
+        roleRefName: predefinedRole,
+        pattern: 'Binds predefined ClusterRole (safe permissions defined by admins)'
+      });
+
+    } catch (error: any) {
+      // Check if rolebinding already exists
+      if (error?.statusCode === 409 || error?.body?.reason === 'AlreadyExists') {
+        logger.debug('Fleet management RoleBinding already exists', { namespace, fleetUuid });
+        return;
+      }
+
+      logger.error('Failed to create fleet management RoleBinding', {
+        namespace,
+        fleetUuid,
+        error: error instanceof Error ? error.message : String(error),
+        statusCode: error?.statusCode
+      });
+      // Don't throw - fleet can still function, just with existing binding
+    }
+  }
+
+  /**
    * Create fleet namespace with ResourceQuota
    * 
    * Resource calculation accounting for protocol simulator sidecars
@@ -1283,6 +1360,10 @@ export class VirtualAgentDeployer {
           pods: params.agent_count
         }
       });
+
+      // Create RoleBinding to predefined fleet-namespace-manager role
+      // SAFER PATTERN: API binds to admin-defined role instead of creating arbitrary roles
+      await this.createFleetManagementRoleBinding(namespace, params.fleet_uuid);
       
       return namespace;
       
@@ -1323,8 +1404,12 @@ export class VirtualAgentDeployer {
   }
 
   /**
-   * Delete a fleet namespace and all its resources
-   * This cascades to delete all pods, deployments, quotas, etc. in the namespace
+   * Soft-delete a fleet namespace (mark for deletion, don't actually delete)
+   * 
+   * For security hardening, the API no longer has permission to DELETE namespaces.
+   * Instead, we mark namespaces with labels for a separate cleanup operator to handle.
+   * 
+   * This reduces blast radius: if API is compromised, attacker cannot delete namespaces directly.
    * 
    * SAFETY: This should ONLY be called from the DELETE /fleets/:id route
    * Never call this from device creation or other operations
@@ -1345,36 +1430,51 @@ export class VirtualAgentDeployer {
 
     // Check if K8s is available
     if (!this.k8sAvailable || !this.coreApi) {
-      logger.warn('Kubernetes is not configured or unavailable. Skipping namespace deletion.', { namespace });
-      return; // Don't throw error - allow soft delete to proceed
+      logger.warn('Kubernetes is not configured or unavailable. Skipping namespace soft-delete.', { namespace });
+      return; // Don't throw error - just skip K8s operations
     }
 
     try {
-      // Safety check 3: Count pods in namespace BEFORE deletion
-      const pods = await this.coreApi.listNamespacedPod(namespace);
-      logger.warn('About to delete fleet namespace - pod count', {
-        namespace,
-        podCount: pods.body.items?.length || 0
-      });
+      // Soft-delete: Mark namespace with labels for cleanup operator
+      // Do NOT actually delete the namespace (hardened security: API doesn't need delete permission)
+      
+      const now = new Date().toISOString();
+      const patch = {
+        metadata: {
+          labels: {
+            'iotistica.com/termination-requested': 'true',
+            'iotistica.com/deletion-timestamp': now,
+            'iotistica.com/delete-after-ttl': '604800' // 7 days in seconds
+          }
+        }
+      };
 
-      // Delete the namespace (this cascades to all resources within)
-      await this.coreApi.deleteNamespace(namespace);
-      logger.info('Fleet namespace deleted successfully', { namespace });
+      await this.coreApi.patchNamespace(namespace, patch);
+      
+      logger.info('Fleet namespace marked for soft-delete', { 
+        namespace,
+        deletionTimestamp: now,
+        ttlSeconds: 604800,
+        message: 'Actual deletion will be handled by external cleanup operator'
+      });
       
     } catch (error: any) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       
-      // If namespace doesn't exist (404), that's okay - it's already gone
+      // If namespace doesn't exist (404), that's okay - it's already dealt with
       if (error.statusCode === 404 || errorMessage.includes('not found')) {
-        logger.info('Fleet namespace already deleted or not found', { namespace });
+        logger.info('Fleet namespace not found (already deleted or never created)', { namespace });
         return;
       }
       
-      // Log error but don't throw - allow soft delete to proceed
-      logger.error('Failed to delete fleet namespace (will proceed with soft delete)', {
+      // For other errors, mark it anyway but log the issue
+      logger.warn('Failed to patch namespace for soft-delete', {
         namespace,
-        error: errorMessage
+        error: errorMessage,
+        hint: 'Namespace may need manual cleanup or operator intervention'
       });
+      
+      // Don't throw - gracefully degrade
     }
   }
 }
