@@ -26,7 +26,7 @@ export interface VirtualDeviceConfig {
   slaveCount?: number; // Number of slave IDs (Modbus) or endpoints (OPC-UA)
 }
 
-export interface VirtualDeviceSensor {
+export interface VirtualDevice {
   uuid: string;
   device_uuid: string;
   name: string;
@@ -61,6 +61,7 @@ export class VirtualDeviceManager {
   private k8sConfig?: k8s.KubeConfig;
   private appsApi?: k8s.AppsV1Api;
   private coreApi?: k8s.CoreV1Api;
+  private cloudApiUrl?: string;
 
   constructor() {
     // Initialize K8s client for patching virtual agent deployments
@@ -105,7 +106,7 @@ export class VirtualDeviceManager {
    * 6. Insert into device_sensors table via standard addEndpoint flow
    * 7. If parent is K8s virtual agent, update ResourceQuota and patch Deployment
    */
-  async createVirtualDevice(config: VirtualDeviceConfig): Promise<VirtualDeviceSensor> {
+  async createVirtualDevice(config: VirtualDeviceConfig): Promise<VirtualDevice> {
     logger.info('[VirtualDeviceManager] Starting virtual device creation', {
       deviceUuid: config.deviceUuid,
       name: config.name,
@@ -230,7 +231,7 @@ export class VirtualDeviceManager {
 
     // 5. Build container config
     const image = config.image || `iotistic/${config.protocol}-simulator:latest`;
-    const containerEnv = this.buildContainerEnv(config.protocol, config.profile, nextPort, config.slaveCount);
+    const containerEnv = await this.buildContainerEnv(config.protocol, config.profile, nextPort, config.slaveCount);
 
     // 6. Build connection object (protocol-specific format)
     const slaveCount = config.slaveCount || 1;
@@ -384,7 +385,7 @@ export class VirtualDeviceManager {
   /**
    * Get all virtual devices for a parent agent
    */
-  async getVirtualDevices(deviceUuid: string): Promise<VirtualDeviceSensor[]> {
+  async getVirtualDevices(deviceUuid: string): Promise<VirtualDevice[]> {
     const result = await query(
       `SELECT uuid, device_uuid, name, protocol, connection, data_points, metadata
        FROM device_sensors
@@ -740,13 +741,13 @@ export class VirtualDeviceManager {
   /**
    * Build container environment variables for simulator
    */
-  private buildContainerEnv(
+  private async buildContainerEnv(
     protocol: string, 
     profile: string, 
     port: number, 
     slaveCount?: number
-  ): Record<string, string> {
-    const apiUrl = process.env.CLOUD_API_URL || 'http://api:3002';
+  ): Promise<Record<string, string>> {
+    const apiUrl = await this.getCloudApiUrl();
 
     const env: Record<string, string> = {
       LOG_LEVEL: 'INFO'
@@ -766,5 +767,49 @@ export class VirtualDeviceManager {
     }
 
     return env;
+  }
+
+  private async getCloudApiUrl(): Promise<string> {
+    if (process.env.CLOUD_API_URL) {
+      return process.env.CLOUD_API_URL;
+    }
+
+    if (this.cloudApiUrl) {
+      return this.cloudApiUrl;
+    }
+
+    if (!this.k8sConfig) {
+      const fallbackUrl = 'http://api:3002';
+      logger.warn('[VirtualDeviceManager] K8s config not available, using fallback API URL', {
+        url: fallbackUrl
+      });
+      return fallbackUrl;
+    }
+
+    const namespace = process.env.NAMESPACE || 'demo';
+    const customApi = this.k8sConfig.makeApiClient(k8s.CustomObjectsApi);
+    const httproutes = await customApi.listNamespacedCustomObject(
+      'gateway.networking.k8s.io',
+      'v1',
+      namespace,
+      'httproutes'
+    );
+
+    const routes = (httproutes.body as any).items || [];
+    for (const route of routes) {
+      const backends = route.spec?.rules?.[0]?.backendRefs || [];
+      for (const backend of backends) {
+        if (backend.name?.includes('-api')) {
+          const hostname = route.spec?.hostnames?.[0];
+          if (hostname) {
+            const url = `https://${hostname}`;
+            this.cloudApiUrl = url;
+            return url;
+          }
+        }
+      }
+    }
+
+    throw new Error('No HTTPRoute found for API service');
   }
 }

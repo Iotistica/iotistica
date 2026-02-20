@@ -1439,25 +1439,11 @@ export default function App() {
               {/* Empty State Message */}
               <div className="flex items-center justify-center h-full">
                 <div className="text-center space-y-4 max-w-md">
-                  <div className="inline-block p-4 bg-blue-100 rounded-full mb-4">
-                    <Package className="w-8 h-8 text-blue-600" />
-                  </div>
                   <h2 className="text-2xl font-bold text-foreground">No Agents Yet</h2>
-                  <p className="text-muted-foreground text-lg">
-                    Start your IoT journey! Add your first edge device to monitor sensors, manage applications, and unlock the power of real-time data.
-                  </p>
                   <div className="pt-4 space-y-2">
                     <p className="text-sm text-muted-foreground font-medium">
                       Click the "Add Agent" button above to get started
                     </p>
-                    <div className="flex justify-center gap-2 pt-2">
-                      <div className="inline-block px-3 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium">
-                        Virtual Agents
-                      </div>
-                      <div className="inline-block px-3 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium">
-                        Physical Devices
-                      </div>
-                    </div>
                   </div>
                 </div>
               </div>
