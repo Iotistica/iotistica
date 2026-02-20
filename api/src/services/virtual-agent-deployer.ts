@@ -1144,6 +1144,16 @@ export class VirtualAgentDeployer {
 
   /**
    * Create fleet namespace with ResourceQuota
+   * 
+   * Resource calculation accounting for protocol simulator sidecars
+   * Supports: OPC UA, Modbus, BACnet, and other protocol simulators
+   * 
+   * Per-agent resource model:
+   *   - Agent container: 250m CPU, 256Mi memory (request), 500m CPU, 512Mi memory (limit)
+   *   - Per simulator/endpoint (1 per device): 100m CPU, 128Mi memory (request), 500m CPU, 512Mi memory (limit)
+   * 
+   * Resource calculation uses devices_per_agent to estimate simulator count
+   * (assumes 1 simulator per device = 1 protocol endpoint per device)
    */
   async createFleetNamespace(params: {
     fleet_uuid: string;
@@ -1158,6 +1168,10 @@ export class VirtualAgentDeployer {
     }
 
     const namespace = `fleet-${params.fleet_uuid.substring(0, 8)}`; // Use first 8 chars of UUID for namespace
+    
+    // Use devices_per_agent to estimate number of simulators per agent
+    // (each device typically has 1 protocol endpoint: OPC UA, Modbus, BACnet, etc)
+    const simulatorsPerAgent = params.devices_per_agent;
     
     try {
       // Create namespace
@@ -1181,12 +1195,37 @@ export class VirtualAgentDeployer {
       
       logger.info('Fleet namespace created', { namespace, fleet_uuid: params.fleet_uuid });
       
-      // Calculate resource quotas based on agent count
-      // Each agent needs: 256Mi memory, 0.25 CPU
-      const totalMemory = `${params.agent_count * 256}Mi`;
-      const totalCpu = `${params.agent_count * 0.25}`;
+      // Calculate resource quotas based on:
+      // 1. Agent count (specified by user)
+      // 2. Devices per agent (specified by user) = estimate of simulator count
+      // This accounts for OPC UA, Modbus, BACnet, and other protocol simulators
       
-      // Create ResourceQuota
+      // Base agent container resources
+      const agentCpuRequest = 0.25;        // 250m
+      const agentMemoryRequest = 256;      // 256Mi
+      const agentCpuLimit = 0.5;           // 500m
+      const agentMemoryLimit = 512;        // 512Mi
+      
+      // Per-simulator resources (applies to OPC UA, Modbus, BACnet, etc)
+      // Assumes 1 simulator per device (most common: 1 protocol endpoint per device)
+      const simulatorCpuRequest = 0.1;     // 100m per simulator
+      const simulatorMemoryRequest = 128;  // 128Mi per simulator
+      const simulatorCpuLimit = 0.5;       // 500m per simulator
+      const simulatorMemoryLimit = 512;    // 512Mi per simulator
+      
+      // Total per agent = agent + (simulator * devices_per_agent)
+      const cpuRequestPerAgent = agentCpuRequest + (simulatorCpuRequest * simulatorsPerAgent);
+      const memoryRequestPerAgent = agentMemoryRequest + (simulatorMemoryRequest * simulatorsPerAgent);
+      const cpuLimitPerAgent = agentCpuLimit + (simulatorCpuLimit * simulatorsPerAgent);
+      const memoryLimitPerAgent = agentMemoryLimit + (simulatorMemoryLimit * simulatorsPerAgent);
+      
+      // Calculate totals based on configured agent count
+      const totalCpuRequest = params.agent_count * cpuRequestPerAgent;
+      const totalMemoryRequest = params.agent_count * memoryRequestPerAgent;
+      const totalCpuLimit = params.agent_count * cpuLimitPerAgent;
+      const totalMemoryLimit = params.agent_count * memoryLimitPerAgent;
+      
+      // Create ResourceQuota with calculated resources
       await this.coreApi.createNamespacedResourceQuota(namespace, {
         metadata: {
           name: 'fleet-quota',
@@ -1196,19 +1235,40 @@ export class VirtualAgentDeployer {
         },
         spec: {
           hard: {
-            'requests.cpu': totalCpu,
-            'requests.memory': totalMemory,
-            'limits.cpu': `${params.agent_count * 0.5}`,  // 2x burst
-            'limits.memory': `${params.agent_count * 512}Mi`,  // 2x burst
+            'requests.cpu': `${totalCpuRequest}`,
+            'requests.memory': `${totalMemoryRequest}Mi`,
+            'limits.cpu': `${totalCpuLimit}`,
+            'limits.memory': `${totalMemoryLimit}Mi`,
             'pods': params.agent_count.toString()
           }
         }
       });
       
-      logger.info('Fleet ResourceQuota created', {
+      logger.info('Fleet ResourceQuota created based on devices_per_agent estimate', {
         namespace,
         fleet_uuid: params.fleet_uuid,
-        quotas: { cpu: totalCpu, memory: totalMemory, pods: params.agent_count }
+        fleetConfig: {
+          agentCount: params.agent_count,
+          devicesPerAgent: params.devices_per_agent,
+          totalDevices: params.agent_count * params.devices_per_agent,
+          estimatedSimulatorsPerAgent: simulatorsPerAgent
+        },
+        perAgentResources: {
+          agentContainer: { cpuRequest: `${agentCpuRequest * 1000}m`, memoryRequest: `${agentMemoryRequest}Mi` },
+          perSimulator: { cpuRequest: `${simulatorCpuRequest * 1000}m`, memoryRequest: `${simulatorMemoryRequest}Mi` },
+          totalPerAgent: { 
+            cpuRequest: `${cpuRequestPerAgent * 1000}m`, 
+            memoryRequest: `${memoryRequestPerAgent}Mi` 
+          },
+          supportedProtocols: ['OPC_UA', 'Modbus', 'BACnet', 'etc']
+        },
+        totalQuotas: {
+          cpuRequest: `${totalCpuRequest}`,
+          memoryRequest: `${totalMemoryRequest}Mi`,
+          cpuLimit: `${totalCpuLimit}`,
+          memoryLimit: `${totalMemoryLimit}Mi`,
+          pods: params.agent_count
+        }
       });
       
       return namespace;
@@ -1252,8 +1312,24 @@ export class VirtualAgentDeployer {
   /**
    * Delete a fleet namespace and all its resources
    * This cascades to delete all pods, deployments, quotas, etc. in the namespace
+   * 
+   * SAFETY: This should ONLY be called from the DELETE /fleets/:id route
+   * Never call this from device creation or other operations
    */
   async deleteFleetNamespace(namespace: string): Promise<void> {
+    // Safety check 1: Prevent deletion of system/default namespaces
+    const systemNamespaces = ['default', 'demo', 'kube-system', 'kube-public', 'kube-node-lease', 'virtual-agents'];
+    if (systemNamespaces.includes(namespace)) {
+      logger.error('SAFETY BLOCK: Attempted to delete system namespace - BLOCKED', { namespace });
+      throw new Error(`Cannot delete system namespace: ${namespace}`);
+    }
+
+    // Safety check 2: Verify namespace is fleet-managed
+    if (!namespace.startsWith('fleet-') && !namespace.startsWith('customer-')) {
+      logger.error('SAFETY BLOCK: Namespace does not match fleet naming pattern - BLOCKED', { namespace });
+      throw new Error(`Namespace does not appear to be a fleet namespace: ${namespace}`);
+    }
+
     // Check if K8s is available
     if (!this.k8sAvailable || !this.coreApi) {
       logger.warn('Kubernetes is not configured or unavailable. Skipping namespace deletion.', { namespace });
@@ -1261,6 +1337,13 @@ export class VirtualAgentDeployer {
     }
 
     try {
+      // Safety check 3: Count pods in namespace BEFORE deletion
+      const pods = await this.coreApi.listNamespacedPod(namespace);
+      logger.warn('About to delete fleet namespace - pod count', {
+        namespace,
+        podCount: pods.body.items?.length || 0
+      });
+
       // Delete the namespace (this cascades to all resources within)
       await this.coreApi.deleteNamespace(namespace);
       logger.info('Fleet namespace deleted successfully', { namespace });

@@ -609,10 +609,18 @@ router.delete('/fleets/:id', jwtAuth, async (req, res) => {
     // If this is a virtual fleet with K8s namespace, delete it
     if (fleet.k8s_namespace) {
       try {
-        logger.info(`[FLEETS] Deleting K8s namespace for fleet: ${fleet.fleet_uuid}`, { namespace: fleet.k8s_namespace });
-        const { virtualAgentDeployer } = await import('../services/virtual-agent-deployer.js');
-        await virtualAgentDeployer.deleteFleetNamespace(fleet.k8s_namespace);
-        logger.info(`[FLEETS] K8s namespace deleted successfully`, { namespace: fleet.k8s_namespace, fleet_uuid: fleet.fleet_uuid });
+        // Safety check: Verify namespace matches fleet
+        if (!fleet.k8s_namespace.startsWith('fleet-') && !fleet.k8s_namespace.startsWith('customer-')) {
+          logger.warn(`[FLEETS] Skipping deletion of non-fleet namespace (safety check)`, {
+            fleet_uuid: fleet.fleet_uuid,
+            namespace: fleet.k8s_namespace
+          });
+        } else {
+          logger.info(`[FLEETS] Deleting K8s namespace for fleet: ${fleet.fleet_uuid}`, { namespace: fleet.k8s_namespace });
+          const { virtualAgentDeployer } = await import('../services/virtual-agent-deployer.js');
+          await virtualAgentDeployer.deleteFleetNamespace(fleet.k8s_namespace);
+          logger.info(`[FLEETS] K8s namespace deleted successfully`, { namespace: fleet.k8s_namespace, fleet_uuid: fleet.fleet_uuid });
+        }
       } catch (error: any) {
         // Log error but continue with soft delete - namespace may already be gone or K8s unavailable
         logger.warn(`[FLEETS] Failed to delete K8s namespace (continuing with soft delete)`, {
