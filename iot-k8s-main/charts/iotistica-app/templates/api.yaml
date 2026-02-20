@@ -70,6 +70,7 @@ spec:
         {{- include "iotistic.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
     spec:
+      serviceAccountName: iotistic-api  # Use service account with RBAC permissions
       terminationGracePeriodSeconds: 60  # Allow 60s for graceful shutdown
       containers:
         - name: api

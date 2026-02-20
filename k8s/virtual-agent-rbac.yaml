@@ -16,7 +16,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: iotistic-api
-  namespace: default  # Change to your API namespace
+  namespace: demo  # API namespace
   labels:
     app: iotistic-api
     component: virtual-agent-deployer
@@ -35,6 +35,11 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list", "create", "delete"]
+
+  # Resource quotas (namespace limits)
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    verbs: ["get", "list", "create", "update", "delete"]
 
   # Secret management (provisioning keys)
   - apiGroups: [""]
@@ -68,7 +73,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: iotistic-api
-    namespace: default  # Change to your API namespace
+    namespace: demo  # API namespace
 roleRef:
   kind: ClusterRole
   name: virtual-agent-manager
@@ -120,7 +125,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: iotistic-api
-    namespace: default  # API's namespace
+    namespace: demo  # API's namespace
 roleRef:
   kind: Role
   name: virtual-agent-manager
