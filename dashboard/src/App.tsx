@@ -893,8 +893,8 @@ export default function App() {
     setSidebarOpen(false); // Close sidebar on mobile after selection
 
     if (device) {
-      const targetView = isGlobalView ? 'metrics' : currentView;
-      const view = agentViews.includes(targetView) ? targetView : 'metrics';
+      // Always reset to 'metrics' (System tab) when changing agents to prevent stale UI state
+      const targetView = 'metrics';
       const fleetUuid = device.fleet_uuid || await resolveFleetUuid(device.fleet_uuid);
       
       // Save as last viewed agent for restoration
@@ -904,7 +904,7 @@ export default function App() {
         fleetUuid: fleetUuid || ''
       });
       
-      navigateToAgent(device.deviceUuid, fleetUuid, view);
+      navigateToAgent(device.deviceUuid, fleetUuid, targetView);
     }
   };
 
@@ -1528,10 +1528,37 @@ export default function App() {
 
           {/* Conditional Content */}
           {currentView === 'metrics' && (
-            <SystemMetrics
-              device={selectedDevice}
-              networkInterfaces={networkInterfaces}
-            />
+            !selectedDevice ? (
+              <div className="flex flex-col items-center justify-center h-full min-h-[600px] bg-gradient-to-br from-slate-50/50 to-blue-50/50">
+                <div className="text-center space-y-4 max-w-md">
+                  <div className="inline-block p-4 bg-blue-100 rounded-full mb-4">
+                    <Package className="w-8 h-8 text-blue-600" />
+                  </div>
+                  <h2 className="text-2xl font-bold text-foreground">No Agents Yet</h2>
+                  <p className="text-muted-foreground text-lg">
+                    Start your IoT journey! Add your first edge device to monitor sensors, manage applications, and unlock the power of real-time data.
+                  </p>
+                  <div className="pt-4 space-y-2">
+                    <p className="text-sm text-muted-foreground font-medium">
+                      Click the "Add Agent" button above to get started
+                    </p>
+                    <div className="flex justify-center gap-2 pt-2">
+                      <div className="inline-block px-3 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium">
+                        Virtual Agents
+                      </div>
+                      <div className="inline-block px-3 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium">
+                        Physical Devices
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <SystemMetrics
+                device={selectedDevice}
+                networkInterfaces={networkInterfaces}
+              />
+            )
           )}
           {currentView === 'applications' && (
             <ApplicationsPage
