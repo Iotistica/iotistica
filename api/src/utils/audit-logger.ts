@@ -6,6 +6,9 @@
 import winston from 'winston';
 import { query } from '../db/connection';
 
+// Detect Kubernetes environment (KUBERNETES_SERVICE_HOST is auto-injected)
+const isKubernetes = !!process.env.KUBERNETES_SERVICE_HOST;
+
 // Winston logger configuration
 export const auditLogger = winston.createLogger({
   level: 'info',
@@ -16,21 +19,7 @@ export const auditLogger = winston.createLogger({
   ),
   defaultMeta: { service: 'Iotistic-api' },
   transports: [
-    // Write all logs to audit.log
-    new winston.transports.File({ 
-      filename: 'logs/audit.log',
-      maxsize: 10485760, // 10MB
-      maxFiles: 10,
-      tailable: true
-    }),
-    // Write error logs to error.log
-    new winston.transports.File({ 
-      filename: 'logs/error.log', 
-      level: 'error',
-      maxsize: 10485760,
-      maxFiles: 5
-    }),
-    // Console output for development
+    // Console output (always enabled, required for Kubernetes)
     new winston.transports.Console({
       format: winston.format.combine(
         winston.format.colorize(),
@@ -39,6 +28,22 @@ export const auditLogger = winston.createLogger({
     })
   ]
 });
+
+// Add file transports only if NOT in Kubernetes
+if (!isKubernetes) {
+  auditLogger.add(new winston.transports.File({ 
+    filename: 'logs/audit.log',
+    maxsize: 10485760, // 10MB
+    maxFiles: 10,
+    tailable: true
+  }));
+  auditLogger.add(new winston.transports.File({ 
+    filename: 'logs/error.log', 
+    level: 'error',
+    maxsize: 10485760,
+    maxFiles: 5
+  }));
+}
 
 // Severity levels
 export enum AuditSeverity {
