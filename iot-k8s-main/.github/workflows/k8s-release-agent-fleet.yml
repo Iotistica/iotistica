@@ -19,17 +19,27 @@ on:
       clean_before_deploy:
         description: 'If true, delete namespace before deploying'
         required: false
-        default: false
+        default: true
         type: boolean
       fleet_uuid:
         description: 'Fleet UUID for the deployment'
         required: true
         type: string
+      agent_memory_request:
+        description: 'Agent memory request (e.g., 128Mi)'
+        required: false
+        default: '256Mi'
+        type: string
+      agent_memory_limit:
+        description: 'Agent memory limit (e.g., 256Mi)'
+        required: false
+        default: '512Mi'
+        type: string
       # Simulator configuration
       modbus_simulator_count:
         description: 'Number of Modbus simulators per agent (0-20)'
         required: false
-        default: '1'
+        default: '0'
         type: choice
         options:
           - '0'
@@ -86,7 +96,7 @@ on:
       opcua_simulator_count:
         description: 'Number of OPC-UA simulators per agent (0-20)'
         required: false
-        default: '1'
+        default: '0'
         type: choice
         options:
           - '0'
@@ -247,10 +257,8 @@ jobs:
             --set agent.env.MODBUS_ENABLED="$([ $MODBUS_COUNT -gt 0 ] && echo true || echo false)" \
             --set agent.env.OPCUA_ENABLED="$OPCUA_ENABLED" \
             --set agent.env.ANOMALY_DETECTION_ENABLED=false \
-            --set agent.resources.requests.memory=128Mi \
-            --set agent.resources.limits.memory=256Mi \
-            --set simulator.resources.requests.memory=32Mi \
-            --set simulator.resources.limits.memory=64Mi \
+            --set agent.resources.requests.memory="${{ github.event.inputs.agent_memory_request }}" \
+            --set agent.resources.limits.memory="${{ github.event.inputs.agent_memory_limit }}" \
             --set persistence.size=100Mi \
             --timeout 60m \
             --wait
