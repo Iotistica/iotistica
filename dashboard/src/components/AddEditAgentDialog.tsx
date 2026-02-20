@@ -488,18 +488,18 @@ export function AddEditDeviceDialog({
                 value={formData.type}
                 onValueChange={(value: Device['type']) => setFormData(prev => ({ ...prev, type: value }))}
               >
-                <SelectTrigger id="device-type" className="h-11">
-                  <SelectValue placeholder="Select agent type" className="leading-none" />
+                <SelectTrigger id="device-type" className="h-11 text-left">
+                  <SelectValue placeholder="Select agent type" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="standalone">
-                    <div className="flex flex-col">
+                    <div className="flex flex-col items-start">
                       <span>Standalone Agent</span>
                       <span className="text-xs text-muted-foreground">Physical device or VM with manual installation</span>
                     </div>
                   </SelectItem>
                   <SelectItem value="virtual">
-                    <div className="flex flex-col">
+                    <div className="flex flex-col items-start">
                       <span>Virtual Agent</span>
                       <span className="text-xs text-muted-foreground">Cloud-hosted agent with automatic deployment</span>
                     </div>
@@ -516,19 +516,19 @@ export function AddEditDeviceDialog({
                 value={selectedFleetId}
                 onValueChange={setSelectedFleetId}
               >
-                <SelectTrigger id="fleet-select" className="h-11">
-                  <SelectValue placeholder="Select fleet" className="leading-none" />
+                <SelectTrigger id="fleet-select" className="h-11 text-left">
+                  <SelectValue placeholder="Select fleet" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={UNASSIGNED_FLEET_ID}>
-                    <div className="flex flex-col">
+                    <div className="flex flex-col items-start">
                       <span>Unassigned</span>
                       <span className="text-xs text-muted-foreground">Not linked to a fleet</span>
                     </div>
                   </SelectItem>
                   {fleetOptions.map((fleet) => (
                     <SelectItem key={fleet.fleet_uuid} value={fleet.fleet_uuid}>
-                      <div className="flex flex-col">
+                      <div className="flex flex-col items-start">
                         <span>{fleet.fleet_name}</span>
                         <span className="text-xs text-muted-foreground">{fleet.fleet_uuid}</span>
                       </div>
