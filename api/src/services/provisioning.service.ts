@@ -60,6 +60,7 @@ export interface RegistrationRequest {
   // Virtual agent specific fields
   isVirtual?: boolean;
   namespace?: string;
+  fleet_uuid?: string; // Fleet UUID for fleet assignment
   metadata?: Record<string, any>; // OPC UA profile metadata, etc.
   endpoints?: Array<{protocol: string; [key: string]: any}>; // Protocol endpoints (opcua, modbus, etc.)
 }
@@ -137,36 +138,56 @@ export class ProvisioningService {
       logger.info('Processing virtual agent registration', {
         deviceUuid: uuid.substring(0, 8) + '...',
         deviceName,
-        deviceType
+        deviceType,
+        hasFleetUuid: !!data.fleet_uuid
       });
 
-      // 1. Resolve or create virtual-agents fleet
+      // 1. Resolve fleet: use provided fleet_uuid or auto-create/find "Virtual Agents" fleet
       const { v4: uuidv4 } = require('uuid');
       let virtualFleetUuid: string;
       
-      const virtualFleetCheck = await query(
-        `SELECT fleet_uuid FROM fleets WHERE fleet_name = $1`,
-        ['Virtual Agents']
-      );
-      
-      if (virtualFleetCheck.rows.length === 0) {
-        // Create virtual-agents fleet
-        virtualFleetUuid = uuidv4();
-        await query(
-          `INSERT INTO fleets (fleet_uuid, fleet_name, customer_id, fleet_type, description, status, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-          [
-            virtualFleetUuid,
-            'Virtual Agents',
-            '00000000-0000-0000-0000-000000000001',
-            'virtual',
-            'Auto-created fleet for virtual agents',
-            'active'
-          ]
+      if (data.fleet_uuid) {
+        // Validate the provided fleet exists
+        const fleetCheck = await query(
+          `SELECT fleet_uuid, fleet_name FROM fleets WHERE fleet_uuid = $1`,
+          [data.fleet_uuid]
         );
-        logger.info('Created virtual-agents fleet', { fleet_uuid: virtualFleetUuid });
+        
+        if (fleetCheck.rows.length === 0) {
+          throw new Error(`Fleet not found: ${data.fleet_uuid}`);
+        }
+        
+        virtualFleetUuid = fleetCheck.rows[0].fleet_uuid;
+        logger.info('Using provided fleet for virtual agent', {
+          fleet_uuid: virtualFleetUuid,
+          fleet_name: fleetCheck.rows[0].fleet_name
+        });
       } else {
-        virtualFleetUuid = virtualFleetCheck.rows[0].fleet_uuid;
+        // Fall back to auto-create/find "Virtual Agents" fleet
+        const virtualFleetCheck = await query(
+          `SELECT fleet_uuid FROM fleets WHERE fleet_name = $1`,
+          ['Virtual Agents']
+        );
+        
+        if (virtualFleetCheck.rows.length === 0) {
+          // Create virtual-agents fleet
+          virtualFleetUuid = uuidv4();
+          await query(
+            `INSERT INTO fleets (fleet_uuid, fleet_name, customer_id, fleet_type, description, status, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+            [
+              virtualFleetUuid,
+              'Virtual Agents',
+              '00000000-0000-0000-0000-000000000001',
+              'virtual',
+              'Auto-created fleet for virtual agents',
+              'active'
+            ]
+          );
+          logger.info('Created virtual-agents fleet', { fleet_uuid: virtualFleetUuid });
+        } else {
+          virtualFleetUuid = virtualFleetCheck.rows[0].fleet_uuid;
+        }
       }
       
       // 2. Generate provisioning key server-side
@@ -192,16 +213,13 @@ export class ProvisioningService {
 
       // 3. Determine namespace: use fleet namespace if provided, otherwise use default
       let targetNamespace = (data as any).namespace || process.env.VIRTUAL_AGENT_NAMESPACE || 'virtual-agents';
-      
-      // Note: Virtual agents don't require fleet assignment at creation time
-      // Fleet membership can be updated later via API
 
       // 4. Create device record (pending deployment)
       const deviceData: Partial<Device> = {
         device_name: deviceName,
         device_type: 'virtual',
         device_api_key_hash: hashedApiKey,
-        fleet_uuid: null, // Virtual agents may not be assigned to fleet initially
+        fleet_uuid: virtualFleetUuid, // Assign to fleet (provided or auto-created "Virtual Agents")
         provisioned_by_key_id: provisioningKeyId,
         mac_address: macAddress || null,
         os_version: osVersion || null,
