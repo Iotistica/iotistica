@@ -190,7 +190,7 @@ export function EditFleetDialog({ open, onOpenChange, fleet, onSuccess }: EditFl
                   setFormData({ ...formData, fleet_type: value })
                 }
               >
-                <SelectTrigger id="fleet_type">
+                <SelectTrigger id="fleet_type" className="text-left">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

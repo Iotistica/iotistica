@@ -201,12 +201,12 @@ export function CreateFleetDialog({
                 setFormData({ ...formData, fleet_type: value })
               }
             >
-              <SelectTrigger>
+              <SelectTrigger className="text-left">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="physical">
-                  <div className="flex flex-col">
+                  <div className="flex flex-col items-start">
                     <span className="font-medium">Physical Fleet</span>
                     <span className="text-xs text-muted-foreground">
                       Organize existing hardware devices (no billing)
@@ -214,7 +214,7 @@ export function CreateFleetDialog({
                   </div>
                 </SelectItem>
                 <SelectItem value="virtual">
-                  <div className="flex flex-col">
+                  <div className="flex flex-col items-start">
                     <span className="font-medium">Virtual Fleet</span>
                     <span className="text-xs text-muted-foreground">
                       Deploy virtual agents in the cloud (billed hourly)
