@@ -326,7 +326,7 @@ spec:
       message: >
         Namespaces MUST follow pattern 'fleet-*' or 'customer-*' or 'billing'.
         System/cluster namespaces are managed by admins only.
-        Invalid name: {{request.object.metadata.name}}
+        Invalid name: {{ "{{" }}request.object.metadata.name{{ "}}" }}
       pattern:
         metadata:
           name: "fleet-*|customer-*|billing|demo"
@@ -361,8 +361,8 @@ spec:
       message: >
         RoleBinding subjects MUST be ServiceAccount 'iotistic-api' 
         from 'billing' namespace. 
-        Got: {{request.object.subjects[0].kind}}/{{request.object.subjects[0].name}} 
-        from {{request.object.subjects[0].namespace}}
+        Got: {{ "{{" }}request.object.subjects[0].kind{{ "}}" }}/{{ "{{" }}request.object.subjects[0].name{{ "}}" }} 
+        from {{ "{{" }}request.object.subjects[0].namespace{{ "}}" }}
       pattern:
         subjects:
         - kind: ServiceAccount
@@ -530,7 +530,7 @@ spec:
       message: >
         Images must be from approved registries.
         Approved: registry.iotistic.com/*, docker.io/iotistic/*, gcr.io/iotistic/*
-        Got: {{request.object.spec.containers[0].image}}
+        Got: {{ "{{" }}request.object.spec.containers[0].image{{ "}}" }}
       pattern:
         spec:
           containers:

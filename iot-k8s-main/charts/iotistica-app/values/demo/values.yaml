@@ -95,11 +95,11 @@ api:
   corsOrigins: "https://demo.iotistica.com,http://localhost:3000"
   resources:
     requests:
-      cpu: 256m        # Increased for fleet load
-      memory: 512Mi    # Increased for connection pool
+      cpu: 100m        # Reduced to fit 2-node AKS cluster capacity
+      memory: 256Mi    # Reduced to fit 2-node AKS cluster capacity
     limits:
-      cpu: 500m       # Increased for fleet load
-      memory: 1Gi      # Increased for connection pool (200 connections)
+      cpu: 500m       # Kept for burst capacity
+      memory: 1Gi      # Kept for burst capacity
   # Horizontal Pod Autoscaling for dynamic fleet scaling
   autoscaling:
     enabled: false     # Disabled for now

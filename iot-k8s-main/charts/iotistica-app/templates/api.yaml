@@ -76,6 +76,11 @@ spec:
         - name: api
           image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          securityContext:
+            runAsUser: 1000  # Numeric UID required for runAsNonRoot verification
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            privileged: false
           ports:
             - name: api
               containerPort: {{ .Values.api.port }}
