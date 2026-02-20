@@ -20,6 +20,7 @@ interface HeaderProps {
   userEmail?: string;
   userName?: string;
   deviceUuid?: string; // Device UUID for deployment operations
+  deviceName?: string; // Device/Agent name for AI chat display
   onHomeClick?: () => void; // Callback for navigating to home
   onAccountClick?: () => void; // Callback for opening account page
   onUsersClick?: () => void; // Callback for opening user management page
@@ -35,6 +36,7 @@ export function Header({
   userEmail = "john.doe@company.com",
   userName = "John Doe",
   deviceUuid,
+  deviceName,
   onHomeClick = () => {},
   onAccountClick = () => {},
   onUsersClick = () => {},
@@ -172,7 +174,8 @@ export function Header({
       {/* AI Chat Widget */}
       {deviceUuid && (
         <AIChatWidget 
-          deviceUuid={deviceUuid} 
+          deviceUuid={deviceUuid}
+          deviceName={deviceName}
           isOpen={isChatOpen} 
           onClose={() => setIsChatOpen(false)} 
         />

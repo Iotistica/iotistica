@@ -1095,6 +1095,7 @@ export default function App() {
           userEmail={user?.email || ''}
           userName={user?.username || ''}
           deviceUuid={selectedDevice?.deviceUuid}
+          deviceName={selectedDevice?.name}
           onHomeClick={() => handleGlobalViewChange('home')}
           onAccountClick={() => handleGlobalViewChange('account')}
           onUsersClick={() => handleGlobalViewChange('users')}

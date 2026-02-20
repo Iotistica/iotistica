@@ -23,42 +23,47 @@ interface Message {
 
 interface AIChatWidgetProps {
   deviceUuid: string;
+  deviceName?: string;
   isOpen: boolean;
   onClose: () => void;
 }
 
-export function AIChatWidget({ deviceUuid, isOpen, onClose }: AIChatWidgetProps) {
+export function AIChatWidget({ deviceUuid, deviceName, isOpen, onClose }: AIChatWidgetProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       role: 'assistant',
-      content: "Hi! I'm your IoT assistant. I can help you monitor devices, check logs, restart containers, and more. What would you like to know?",
+      content: "Hi! I'm your IoT assistant. I can help you monitor agents, check logs, restart containers, and more. What would you like to know?",
       timestamp: new Date(),
     },
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Format agent identifier for display
+  const agentIdentifier = deviceName ? `agent ${deviceName} [${deviceUuid}]` : `agent [${deviceUuid}]`;
+  
   const promptPresets = [
     {
       label: 'Health snapshot',
-      prompt: `Give me a health summary for device ${deviceUuid} covering uptime, CPU, memory, and any critical alerts over the past 24 hours.`,
+      prompt: `Give me a health summary for ${agentIdentifier} covering uptime, CPU, memory, and any critical alerts over the past 24 hours.`,
     },
     {
       label: 'Performance spikes',
-      prompt: `Analyze device ${deviceUuid} for any CPU or memory spikes during the last 4 hours and explain likely causes with supporting metrics.`,
+      prompt: `Analyze ${agentIdentifier} for any CPU or memory spikes during the last 4 hours and explain likely causes with supporting metrics.`,
     },
     {
       label: 'Error log digest',
-      prompt: `Review the most recent logs for device ${deviceUuid} and list the top recurring errors with timestamps and impacted services.`,
+      prompt: `Review the most recent logs for ${agentIdentifier} and list the top recurring errors with timestamps and impacted services.`,
     },
     {
       label: 'Container review',
-      prompt: `List all running containers on device ${deviceUuid}, highlight ones consuming the most resources, and recommend restarts if needed.`,
+      prompt: `List all running containers on ${agentIdentifier}, highlight ones consuming the most resources, and recommend restarts if needed.`,
     },
     {
       label: 'Connectivity issues',
-      prompt: `Investigate recent connectivity drops for device ${deviceUuid} and suggest remediation steps based on status history and metrics.`,
+      prompt: `Investigate recent connectivity drops for ${agentIdentifier} and suggest remediation steps based on status history and metrics.`,
     },
   ];
 
