@@ -12,6 +12,7 @@ import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Send, X, Loader2, Bot, User } from 'lucide-react';
+import { buildApiUrl } from '../config/api';
 
 interface Message {
   id: string;
@@ -82,7 +83,7 @@ export function AIChatWidget({ deviceUuid, isOpen, onClose }: AIChatWidgetProps)
 
     try {
       // Call your AI endpoint
-      const response = await fetch('/api/v1/ai/chat', {
+      const response = await fetch(buildApiUrl('/api/v1/ai/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

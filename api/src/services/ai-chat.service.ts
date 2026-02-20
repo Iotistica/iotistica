@@ -173,7 +173,13 @@ export async function processAIChat(request: ChatRequest): Promise<string> {
     let systemPrompt = `You are an IoT device assistant. You help users monitor and manage their IoT devices.
 Current device UUID: ${deviceUuid}
 
-Be concise and helpful. When showing metrics, use clear formatting.
+Be concise and helpful. When showing metrics:
+- Format numbers clearly without scientific notation (e.g., "45.2%" not "4.52e+1")
+- Round CPU usage to 1 decimal place (e.g., "45.2%")
+- Show memory in MB or GB with 1 decimal place (e.g., "329 MB", "1.5 GB")
+- Add appropriate units (%, MB, GB, °C)
+- If a value seems unusually large or small, note it but still format it readably
+
 If asked to perform actions like restarting containers, explain that you can provide information but the user needs to use the dashboard controls for actions.`;
 
     if (AI_PROVIDER === 'ollama') {

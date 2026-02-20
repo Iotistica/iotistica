@@ -94,11 +94,11 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
 
         return JSON.stringify({
           timeRange: `Last ${hours} hours`,
-          averageCpu: avgCpu.toFixed(1),
-          averageMemory: avgMem.toFixed(1),
-          currentCpu: latest.cpu_usage,
-          currentMemory: latest.memory_usage,
-          memoryTotal: latest.memory_total,
+          averageCpu: `${avgCpu.toFixed(1)}%`,
+          averageMemory: `${avgMem.toFixed(0)} MB`,
+          currentCpu: `${latest.cpu_usage?.toFixed(1) || 0}%`,
+          currentMemory: `${latest.memory_usage || 0} MB`,
+          memoryTotal: `${latest.memory_total || 0} MB`,
         });
       }
 
