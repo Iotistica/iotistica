@@ -261,11 +261,20 @@ router.post('/fleets', jwtAuth, async (req, res) => {
         });
         
       } catch (k8sError: any) {
-        const errorMessage = k8sError instanceof Error ? k8sError.message : String(k8sError);
+        const k8sBody = k8sError?.body || k8sError?.response?.body;
+        const k8sReason = k8sBody?.reason;
+        const k8sMessage = k8sBody?.message;
+        const statusCode = k8sError?.statusCode;
+        const errorMessage = k8sMessage
+          || (k8sError instanceof Error ? k8sError.message : String(k8sError));
         
         logger.error('[FLEETS] Failed to create K8s namespace', {
           fleet_uuid,
-          error: errorMessage
+          error: errorMessage,
+          statusCode,
+          k8sReason,
+          k8sMessage,
+          k8sBody
         });
         
         // K8s not available - continue without namespace
