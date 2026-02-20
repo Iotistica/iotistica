@@ -134,7 +134,18 @@ export class VirtualAgentDeployer {
     // Load configuration from environment
     this.defaultNamespace = process.env.VIRTUAL_AGENT_NAMESPACE || 'virtual-agents';
     this.agentImage = process.env.AGENT_IMAGE || 'iotistic/agent:latest';
-    this.cloudApiUrl = process.env.CLOUD_API_URL || 'https://api1.iotistica.com:443';
+    
+    // Cloud API URL: Try to auto-discover from K8s HTTPRoute, fall back to env var or default
+    this.cloudApiUrl = 'https://api1.iotistica.com:443'; // Temporary, will be updated
+    this.discoverCloudApiUrl().then((url) => {
+      this.cloudApiUrl = url;
+      logger.info('Cloud API URL discovered', { cloudApiUrl: this.cloudApiUrl });
+    }).catch((err) => {
+      logger.warn('Failed to discover Cloud API URL from K8s, using default', { 
+        error: err.message,
+        cloudApiUrl: this.cloudApiUrl 
+      });
+    });
     
     // Use unified broker config (same as device provisioning)
     // This will be fetched async in deploy() method
@@ -143,9 +154,65 @@ export class VirtualAgentDeployer {
     logger.info('VirtualAgentDeployer configured', {
       defaultNamespace: this.defaultNamespace,
       agentImage: this.agentImage,
-      cloudApiUrl: this.cloudApiUrl,
-      note: 'MQTT broker URL fetched from database at deploy time'
+      note: 'Cloud API URL will be auto-discovered from HTTPRoute, MQTT broker URL fetched from database at deploy time'
     });
+  }
+
+  /**
+   * Discover Cloud API URL from HTTPRoute resource
+   * Reads the hostname from the HTTPRoute that exposes this API service
+   */
+  private async discoverCloudApiUrl(): Promise<string> {
+    // Try environment variable first (explicit override)
+    if (process.env.CLOUD_API_URL) {
+      logger.info('Using CLOUD_API_URL from environment', { url: process.env.CLOUD_API_URL });
+      return process.env.CLOUD_API_URL;
+    }
+
+    // Try to discover from K8s HTTPRoute
+    if (!this.k8sAvailable) {
+      throw new Error('Kubernetes not available, cannot discover API URL');
+    }
+
+    try {
+      const namespace = process.env.NAMESPACE || 'demo';
+      
+      // Get all HTTPRoutes in the namespace
+      const customApi = this.k8sConfig.makeApiClient(k8s.CustomObjectsApi);
+      const httproutes = await customApi.listNamespacedCustomObject(
+        'gateway.networking.k8s.io',
+        'v1',
+        namespace,
+        'httproutes'
+      );
+
+      // Find HTTPRoute with backend pointing to our API service
+      const routes = (httproutes.body as any).items || [];
+      for (const route of routes) {
+        const backends = route.spec?.rules?.[0]?.backendRefs || [];
+        for (const backend of backends) {
+          // Check if this backend points to the API service
+          if (backend.name?.includes('-api')) {
+            const hostname = route.spec?.hostnames?.[0];
+            if (hostname) {
+              const url = `https://${hostname}`;
+              logger.info('Discovered Cloud API URL from HTTPRoute', { 
+                httproute: route.metadata?.name,
+                url 
+              });
+              return url;
+            }
+          }
+        }
+      }
+
+      throw new Error('No HTTPRoute found for API service');
+    } catch (error) {
+      logger.error('Failed to discover Cloud API URL', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
   }
 
   /**

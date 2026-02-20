@@ -89,6 +89,16 @@ spec:
               value: {{ .Values.api.port | quote }}
             - name: NODE_ENV
               value: {{ .Values.api.env.NODE_ENV | quote }}
+            
+            # Namespace for discovering HTTPRoute (used to auto-discover CLOUD_API_URL)
+            - name: NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            
+            # Cloud API URL for virtual agents to connect to (optional, auto-discovered from HTTPRoute if not set)
+            {{- if .Values.api.cloudApiUrl }}
+            - name: CLOUD_API_URL
+              value: {{ .Values.api.cloudApiUrl | quote }}
+            {{- end }}
 
             # --- AI / Azure OpenAI ---
             - name: AI_PROVIDER

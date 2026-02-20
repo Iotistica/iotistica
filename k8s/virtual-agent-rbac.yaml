@@ -55,7 +55,10 @@ rules:
   - apiGroups: [""]
     resources: ["services"]
     verbs: ["get", "list", "create", "update", "delete"]
-
+  # HTTPRoute reading (auto-discover Cloud API URL)
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
+    verbs: ["get", "list"]
   # Deployment management
   - apiGroups: ["apps"]
     resources: ["deployments"]
