@@ -493,13 +493,13 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
             />
             <FeatureToggle
               label="Remote Access"
-              description="Allow remote SSH/terminal access to device"
+              description="Allow remote terminal access to agent"
               enabled={settings.features?.enableDeviceRemoteAccess || false}
               onToggle={() => updateSetting('features.enableDeviceRemoteAccess', !(settings.features?.enableDeviceRemoteAccess || false))}
             />
             <FeatureToggle
-              label="Sensor Publishing"
-              description="Automatically publish sensor data to MQTT broker"
+              label="Metrics Publishing"
+              description="Automatically publish device data to MQTT broker"
               enabled={settings.features?.enableDeviceSensorPublish || false}
               onToggle={() => updateSetting('features.enableDeviceSensorPublish', !(settings.features?.enableDeviceSensorPublish || false))}
             />
