@@ -223,11 +223,11 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
         </p>
       </div>
 
-      {/* Profile Selector - Prominent */}
-      <div className="space-y-2 p-3 bg-muted/50 rounded-lg">
-        <Label htmlFor="profile" className="text-sm font-medium">Quick Start: Load Configuration Profile</Label>
+      {/* Profile Selector */}
+      <div className="space-y-1.5">
+        <Label htmlFor="profile" className="text-sm">Quick Start: Load Configuration Profile</Label>
         <Select value={selectedProfile} onValueChange={handleProfileSelect} disabled={loadingProfiles}>
-          <SelectTrigger id="profile">
+          <SelectTrigger id="profile" className="h-9">
             <SelectValue placeholder={loadingProfiles ? "Loading profiles..." : "Select a profile to auto-configure..."} />
           </SelectTrigger>
           <SelectContent>
@@ -250,6 +250,9 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
         {selectedProfile && selectedProfile !== '__none__' && (
           <p className="text-xs text-green-600">✓ Profile applied: {selectedProfile}</p>
         )}
+        <p className="text-xs text-muted-foreground">
+          Load a pre-configured profile to quickly set up common devices
+        </p>
       </div>
 
       {/* Connection Type */}

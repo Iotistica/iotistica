@@ -450,9 +450,7 @@ export function AddEditDeviceDialog({
         <DialogHeader className="flex-shrink-0">
           <DialogTitle>{isEditMode ? "Edit Agent" : "Add Agent"}</DialogTitle>
           <DialogDescription>
-            {isEditMode
-              ? "Update agent information and settings"
-              : "Add a new agent to your fleet"}
+         
           </DialogDescription>
         </DialogHeader>
 
@@ -678,6 +676,8 @@ export function AddEditDeviceDialog({
                 placeholder="192.168.1.10"
                 value={formData.ipAddress}
                 onChange={(e) => setFormData(prev => ({ ...prev, ipAddress: e.target.value }))}
+                disabled
+                className="bg-muted cursor-not-allowed"
               />
             </div>
 
@@ -688,6 +688,8 @@ export function AddEditDeviceDialog({
                 placeholder="00:1B:44:11:3A:B7"
                 value={formData.macAddress}
                 onChange={(e) => setFormData(prev => ({ ...prev, macAddress: e.target.value }))}
+                disabled
+                className="bg-muted cursor-not-allowed"
               />
             </div>
           </div>

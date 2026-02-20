@@ -584,7 +584,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       scrollback: 5000,
       theme: {
-        background: '#1e1e1e',
+        background: '#000000',
         foreground: '#d4d4d4',
         cursor: '#d4d4d4',
         black: '#000000',
