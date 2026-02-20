@@ -1166,12 +1166,19 @@ export class VirtualAgentDeployer {
         throw new Error('Kubernetes authentication failed. Azure AKS requires service account tokens when running in containers.');
       }
       
+      const k8sBody = error?.body || error?.response?.body;
+      const detailedMessage = k8sBody?.message || k8sBody?.status || errorMessage;
+
       logger.error('Failed to create fleet namespace', {
         fleet_uuid: params.fleet_uuid,
         namespace,
-        error: errorMessage
+        error: errorMessage,
+        statusCode: error?.statusCode,
+        k8sReason: k8sBody?.reason,
+        k8sMessage: k8sBody?.message,
+        k8sBody
       });
-      throw error;
+      throw new Error(`Failed to create namespace ${namespace}: ${detailedMessage}`);
     }
   }
 
