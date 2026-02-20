@@ -46,6 +46,16 @@ rules:
     resources: ["secrets"]
     verbs: ["get", "list", "create", "update", "delete"]
 
+  # Persistent volume claims (for virtual agent data storage)
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "create", "update", "delete"]
+
+  # Service management (virtual agent networking)
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "create", "update", "delete"]
+
   # Deployment management
   - apiGroups: ["apps"]
     resources: ["deployments"]
