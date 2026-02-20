@@ -42,6 +42,15 @@ metadata:
 spec:
   itemPath: "vaults/IOT-CLIENTS/items/redis-credentials-{{ .Release.Namespace }}"
 ---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: openai-credentials-{{ .Release.Namespace }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  # This item must contain a field/key named OPENAI_API_KEY
+  itemPath: "vaults/IOT-CLIENTS/items/openai-credentials-{{ .Release.Namespace }}"
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -79,6 +88,22 @@ spec:
               value: {{ .Values.api.port | quote }}
             - name: NODE_ENV
               value: {{ .Values.api.env.NODE_ENV | quote }}
+
+            # --- AI / Azure OpenAI ---
+            - name: AI_PROVIDER
+              value: {{ .Values.api.env.AI_PROVIDER | quote }}
+            - name: OPENAI_BASE_URL
+              value: {{ .Values.api.env.OPENAI_BASE_URL | quote }}
+            - name: OPENAI_MODEL
+              value: {{ .Values.api.env.OPENAI_MODEL | quote }}
+            - name: AZURE_OPENAI_API_VERSION
+              value: {{ .Values.api.env.AZURE_OPENAI_API_VERSION | quote }}
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.openai.SecretName }}
+                  key: key
+
             - name: DB_HOST
               valueFrom:
                 secretKeyRef:
@@ -254,8 +279,6 @@ spec:
         periodSeconds: 30
       selectPolicy: Max  # Use whichever policy allows faster scaling
 {{- end }}
-{{- end }}
-
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -274,3 +297,4 @@ spec:
           name: {{ include "iotistic.fullname" . }}-api
           port: 3002
           weight: 1
+{{- end }}

@@ -12,20 +12,20 @@ redis:
     repository: redis
     tag: "7-alpine"
   port: 6379
-  maxMemory: 256mb
+  maxMemory: 512mb
   maxMemoryPolicy: allkeys-lru  # CRITICAL: Evict streams before OOM kill
   persistence:
     enabled: true
   storage:
     size: 5Gi
-    storageClass: ""
+    storageClass: "local"
   resources:
     requests:
       cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 200m
       memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
 
 # Mosquitto MQTT broker
 mosquitto:
@@ -48,9 +48,9 @@ mosquitto:
   # - If empty with NodePort: falls back to internal service name (devices won't connect)
   # TLS configuration
   tlsSecret: mosquitto-tls         # Secret created by cert-manager
-  tlsCertName: mosquitto-client3
-  tlsIssuer: selfsigned-issuer
-  tlsCommonName: mqtt3.iotistica.com
+  tlsCertName: mosquitto-tls
+  tlsIssuer: letsencrypt-production
+  tlsCommonName: mqtt.iotistica.com
   resources:
     requests:
       cpu: 100m
@@ -73,7 +73,8 @@ mosquitto:
 mqttBroker:
 
   protocol: mqtt
-  host: "client3-release-iotistic-mosquitto"
+#  host: "mqtt2.iotistica.com"
+  host: "demo-release-iotistic-mosquitto.demo.svc.cluster.local"
   port: 1883
   useTls: false
   verifyCertificate: false
@@ -84,23 +85,20 @@ api:
   image:
     repository: iotistic/api
     tag: latest
-    pullPolicy: IfNotPresent  # Use local images only (prevents pulling from registry)
+    pullPolicy: Always  # Use local images only (prevents pulling from registry)
   replicas: 1  # Single replica for now
   port: 3002
   serviceType: ClusterIP
-  tlsSecret: api-tls         # Secret created by cert-manager
-  tlsCertName: api-client3
-  tlsIssuer: selfsigned-issuer
-  tlsCommonName: api3.iotistica.com
+  tlsCommonName: api.iotistica.com
   # CORS configuration for cross-origin requests from dashboard
   # Use wildcard pattern like "http://*:30000" to allow any IP on NodePort 30000
-  corsOrigins: "http://localhost:5173,http://localhost:3001,http://localhost:3000,http://*:30000"
+  corsOrigins: "https://demo.iotistica.com,http://localhost:3000"
   resources:
     requests:
-      cpu: 500m        # Increased for fleet load
+      cpu: 256m        # Increased for fleet load
       memory: 512Mi    # Increased for connection pool
     limits:
-      cpu: 1000m       # Increased for fleet load
+      cpu: 500m       # Increased for fleet load
       memory: 1Gi      # Increased for connection pool (200 connections)
   # Horizontal Pod Autoscaling for dynamic fleet scaling
   autoscaling:
@@ -112,9 +110,13 @@ api:
   env:
     NODE_ENV: development
     LOG_LEVEL: info
-    DB_POOL_SIZE: "200"  # Increased for large fleet deployments (100+ agents)
+    DB_POOL_SIZE: "20"  # Increased for large fleet deployments (100+ agents)
     DB_SSL: "true"
     DB_SSL_REJECT_UNAUTHORIZED: "false"
+    AI_PROVIDER: "openai"
+    OPENAI_BASE_URL: "https://iotistic-openai-7307.openai.azure.com"
+    OPENAI_MODEL: "gpt-4o-mini"
+    AZURE_OPENAI_API_VERSION: "2024-08-01-preview"
     MQTT_PERSIST_TO_DB: "true"
     MQTT_DB_SYNC_INTERVAL: "10000"
     MQTT_MONITOR_ENABLED: "true"
@@ -135,12 +137,23 @@ api:
   #
   # Option 3: Pass via --set flag:
   #   helm install --set mqtt.username=admin --set mqtt.password=secret
-  mqtt:
-    # Reference existing Kubernetes secret (recommended for production)
-    SecretName: "mqtt-credentials-client3"
   sql:
     # Reference existing Kubernetes secret (recommended for production)
-    SecretName: "sql-credentials-client3"
+    SecretName: "sql-credentials-demo"
+  mqtt:
+    # Reference existing Kubernetes secret (recommended for production)
+    SecretName: "mqtt-credentials-demo"
+  redis:
+    # Reference existing Kubernetes Secret containing Redis connection info
+    # Create with: kubectl create secret generic redis-credentials-demo \
+    #   --from-literal=host=<host> --from-literal=port=<port> \
+    #   --from-literal=password=<password> --from-literal=port_ext=<port_ext> \
+    #   --from-literal=tls=<true|false> --from-literal=cluster=<true|false>
+    SecretName: "redis-credentials-demo"
+    cluster: true  # Set to true if using Redis Cluster
+    tls: false   # Set to true if Redis requires TLS
+  openai:
+    SecretName: "openai-credentials-demo"
   # License configuration (optional)
   license:
     publicKey: ""
@@ -164,7 +177,7 @@ dashboard:
   port: 80
   serviceType: ClusterIP
 #  nodePort: 30000
-  tlsCommonName: dash3.iotistica.com
+  tlsCommonName: demo.iotistica.com
   # API URL for browser access
   # Options:
   # 1. Use node IP with NodePort: "http://<NODE_IP>:30002" (replace <NODE_IP> with your K8s node IP)
@@ -177,7 +190,7 @@ dashboard:
   #   - Set to: "http://<NODE_IP>:30002"
   # For production with ingress:
   #   - Set to your API ingress URL
-  apiUrl: ""  # Empty = auto-detect from browser
+  apiUrl: "https://tsdbapi.iotistica.com"
   resources:
     requests:
       cpu: 100m
@@ -186,7 +199,7 @@ dashboard:
       cpu: 200m
       memory: 256Mi
   env:
-    NODE_ENV: development
+    NODE_ENV: production
 
 # MQTT Monitor service
 mqttMonitor:
@@ -217,7 +230,7 @@ mqttMonitor:
   # See api.mqtt configuration above for security options
   mqtt:
     # Reference existing Kubernetes secret (recommended for production)
-    existingSecret: "mqtt-credentials-client3"
+    existingSecret: "mqtt-credentials-demo"
 
 # Housekeeper service - Database maintenance and cleanup
 housekeeper:
