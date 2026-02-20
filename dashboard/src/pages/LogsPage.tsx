@@ -86,11 +86,8 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
       const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/logs?${params}`));
       if (response.ok) {
         const data = await response.json();
-        console.log('[LogsPage] Fetched historical logs:', data.count, 'logs');
         setLogs(data.logs || []);
-      } else {
-        console.error('[LogsPage] Failed to fetch logs:', response.status);
-      }
+      } 
     } catch (error) {
       console.error('[LogsPage] Error fetching historical logs:', error);
     } finally {
@@ -132,12 +129,11 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
     
     const wsUrl = buildApiUrl(`/ws?deviceUuid=${deviceUuid}`).replace(/^http/, 'ws');
 
-    console.log('[LogsPage] Connecting to WebSocket:', wsUrl);
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log('[LogsPage] WebSocket connected');
+
       setWsConnected(true);
       ws.send(JSON.stringify({
         type: 'subscribe',
@@ -152,12 +148,7 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
         const message = JSON.parse(event.data);
         
         if (message.type === 'logs' && message.data?.logs) {
-          console.log('[LogsPage] 📥 WebSocket received:', {
-            count: message.data.logs.length,
-            source: message.source,
-            sample: message.data.logs[0] // Show first log entry
-          });
-          
+      
           // Normalize field names from WebSocket (camelCase) to match database format (snake_case)
           const normalizedLogs = message.data.logs.map((log: any) => ({
             ...log,
@@ -189,7 +180,6 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
     };
 
     ws.onclose = () => {
-      console.log('[LogsPage] WebSocket disconnected');
       setWsConnected(false);
       setIsLoading(false);
     };
@@ -246,13 +236,12 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
       
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         if (newPauseState) {
-          console.log('[LogsPage] Pausing log stream');
+
           wsRef.current.send(JSON.stringify({
             type: 'unsubscribe',
             channel: 'logs',
           }));
         } else {
-          console.log('[LogsPage] Resuming log stream');
           wsRef.current.send(JSON.stringify({
             type: 'subscribe',
             channel: 'logs',
@@ -355,14 +344,6 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
     return true;
   });
 
-  console.log('[LogsPage] Filtering logs:', {
-    totalLogs: logs.length,
-    filteredLogs: filteredLogs.length,
-    dateFrom,
-    dateTo,
-    firstLog: logs[0],
-    firstFilteredLog: filteredLogs[0]
-  });
 
   return (
     <div className="flex-1 bg-background overflow-auto">

@@ -122,6 +122,7 @@ export default function App() {
   const [isKioskMode, setIsKioskMode] = useState<boolean>(() => {
     return localStorage.getItem('dashboard-kiosk-mode') === 'true';
   });
+  const [isDeploying, setIsDeploying] = useState(false);
   
   // Track last URL fleet ID to prevent overriding manual selections
   const lastUrlFleetIdRef = useRef<string | undefined>(undefined);
@@ -924,38 +925,43 @@ export default function App() {
       return;
     }
 
-    const totalDevices = devicesWithPendingChanges.length;
-    toast.info(`Starting deployment to ${totalDevices} device(s)...`);
+    setIsDeploying(true);
+    try {
+      const totalDevices = devicesWithPendingChanges.length;
+      toast.info(`Starting deployment to ${totalDevices} device(s)...`);
 
-    let successCount = 0;
-    let failCount = 0;
+      let successCount = 0;
+      let failCount = 0;
 
-    for (const device of devicesWithPendingChanges) {
-      try {
-        const deviceState = getDeviceState(device.deviceUuid);
-        
-        // Save draft if there are unsaved changes
-        if (deviceState?.isDirty) {
-          await saveTargetState(device.deviceUuid);
+      for (const device of devicesWithPendingChanges) {
+        try {
+          const deviceState = getDeviceState(device.deviceUuid);
+          
+          // Save draft if there are unsaved changes
+          if (deviceState?.isDirty) {
+            await saveTargetState(device.deviceUuid);
+          }
+          
+          // Deploy
+          await syncTargetState(device.deviceUuid, 'dashboard');
+          window.dispatchEvent(new CustomEvent('deployment-started', { detail: { deviceUuid: device.deviceUuid } }));
+          successCount++;
+          toast.success(`✓ ${device.name} deployed (${successCount}/${totalDevices})`);
+        } catch (error: any) {
+          failCount++;
+          console.error(`Failed to deploy ${device.name}:`, error);
+          toast.error(`✗ ${device.name} failed: ${error.message || 'Unknown error'}`);
         }
-        
-        // Deploy
-        await syncTargetState(device.deviceUuid, 'dashboard');
-        window.dispatchEvent(new CustomEvent('deployment-started', { detail: { deviceUuid: device.deviceUuid } }));
-        successCount++;
-        toast.success(`✓ ${device.name} deployed (${successCount}/${totalDevices})`);
-      } catch (error: any) {
-        failCount++;
-        console.error(`Failed to deploy ${device.name}:`, error);
-        toast.error(`✗ ${device.name} failed: ${error.message || 'Unknown error'}`);
       }
-    }
 
-    // Final summary
-    if (failCount === 0) {
-      toast.success(`🎉 All ${successCount} device(s) deployed successfully!`);
-    } else {
-      toast.warning(`Deployment complete: ${successCount} succeeded, ${failCount} failed`);
+      // Final summary
+      if (failCount === 0) {
+        toast.success(`🎉 All ${successCount} device(s) deployed successfully!`);
+      } else {
+        toast.warning(`Deployment complete: ${successCount} succeeded, ${failCount} failed`);
+      }
+    } finally {
+      setIsDeploying(false);
     }
   };
 
@@ -965,6 +971,7 @@ export default function App() {
       return;
     }
 
+    setIsDeploying(true);
     try {
       if (hasUnsavedChanges) {
         toast.info("Saving changes...");
@@ -990,6 +997,8 @@ export default function App() {
       }
     } catch (error: any) {
       // Already handled above
+    } finally {
+      setIsDeploying(false);
     }
   };
 
@@ -1429,9 +1438,9 @@ export default function App() {
                   <Button
                     onClick={handleDeploy}
                     size="sm"
-                    disabled={!needsDeployment}
+                    disabled={!needsDeployment || isDeploying}
                     variant="ghost"
-                    style={needsDeployment ? {
+                    style={needsDeployment && !isDeploying ? {
                       backgroundColor: '#d97706',
                       color: 'white',
                       fontWeight: 500,
@@ -1446,7 +1455,7 @@ export default function App() {
                     }}
                     className="hover:opacity-90"
                   >
-                    Deploy
+                    {isDeploying ? 'Deploying...' : 'Deploy'}
                   </Button>
                   {needsDeployment && (
                     <Button
@@ -1464,16 +1473,23 @@ export default function App() {
                       onClick={handleDeployAll}
                       size="sm"
                       variant="ghost"
-                      style={{
+                      disabled={isDeploying}
+                      style={!isDeploying ? {
                         backgroundColor: '#ea580c',
                         color: 'white',
                         fontWeight: 600,
                         fontSize: '1.1rem',
                         padding: '0.6rem 1.25rem'
+                      } : {
+                        backgroundColor: '#9ca3af',
+                        color: 'white',
+                        cursor: 'not-allowed',
+                        fontSize: '1.1rem',
+                        padding: '0.6rem 1.25rem'
                       }}
                       className="hover:opacity-90"
                     >
-                      Deploy All ({devicesWithPendingChanges.length})
+                      {isDeploying ? 'Deploying...' : `Deploy All (${devicesWithPendingChanges.length})`}
                     </Button>
                   )}
                   {/* Spacer between deploy buttons and Add agent */}
