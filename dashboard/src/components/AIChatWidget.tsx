@@ -6,6 +6,8 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -36,6 +38,28 @@ export function AIChatWidget({ deviceUuid, isOpen, onClose }: AIChatWidgetProps)
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const promptPresets = [
+    {
+      label: 'Health snapshot',
+      prompt: `Give me a health summary for device ${deviceUuid} covering uptime, CPU, memory, and any critical alerts over the past 24 hours.`,
+    },
+    {
+      label: 'Performance spikes',
+      prompt: `Analyze device ${deviceUuid} for any CPU or memory spikes during the last 4 hours and explain likely causes with supporting metrics.`,
+    },
+    {
+      label: 'Error log digest',
+      prompt: `Review the most recent logs for device ${deviceUuid} and list the top recurring errors with timestamps and impacted services.`,
+    },
+    {
+      label: 'Container review',
+      prompt: `List all running containers on device ${deviceUuid}, highlight ones consuming the most resources, and recommend restarts if needed.`,
+    },
+    {
+      label: 'Connectivity issues',
+      prompt: `Investigate recent connectivity drops for device ${deviceUuid} and suggest remediation steps based on status history and metrics.`,
+    },
+  ];
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -104,8 +128,8 @@ export function AIChatWidget({ deviceUuid, isOpen, onClose }: AIChatWidgetProps)
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-96 h-[600px]">
-      <Card className="flex flex-col h-full shadow-2xl">
+    <div className="fixed bottom-4 right-4 z-50" style={{ width: '384px', height: '600px' }}>
+      <Card className="flex flex-col h-full w-full shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b bg-primary text-primary-foreground">
           <div className="flex items-center gap-2">
@@ -146,7 +170,16 @@ export function AIChatWidget({ deviceUuid, isOpen, onClose }: AIChatWidgetProps)
                     : 'bg-muted'
                 }`}
               >
-                <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                {message.role === 'assistant' ? (
+                  <ReactMarkdown 
+                    remarkPlugins={[remarkGfm]} 
+                    className="text-sm prose prose-sm max-w-none dark:prose-invert prose-headings:mt-2 prose-headings:mb-1 prose-p:my-1 prose-ul:my-1 prose-ol:my-1"
+                  >
+                    {message.content}
+                  </ReactMarkdown>
+                ) : (
+                  <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                )}
                 <span className="text-xs opacity-70 mt-1 block">
                   {message.timestamp.toLocaleTimeString([], {
                     hour: '2-digit',
@@ -200,22 +233,23 @@ export function AIChatWidget({ deviceUuid, isOpen, onClose }: AIChatWidgetProps)
           </div>
 
           {/* Suggestions */}
-          <div className="mt-2 flex flex-wrap gap-1">
-            {[
-              'Show device status',
-              'Check CPU usage',
-              'View recent logs',
-              'List containers',
-            ].map((suggestion) => (
+          <div 
+            className="mt-2 flex flex-wrap gap-1 max-h-[80px] overflow-y-auto pr-2"
+            style={{
+              scrollbarWidth: 'thin',
+              scrollbarColor: '#9ca3af #f3f4f6'
+            }}
+          >
+            {promptPresets.map(({ label, prompt }) => (
               <Button
-                key={suggestion}
+                key={label}
                 variant="outline"
                 size="sm"
-                className="text-xs"
-                onClick={() => setInput(suggestion)}
+                className="text-xs flex-shrink-0"
+                onClick={() => setInput(prompt)}
                 disabled={isLoading}
               >
-                {suggestion}
+                {label}
               </Button>
             ))}
           </div>

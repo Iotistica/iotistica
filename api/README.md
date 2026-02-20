@@ -60,6 +60,12 @@ docker run -d \
 | `LICENSE_PUBLIC_KEY` | - | RSA public key for license validation |
 | `BILLING_API_URL` | - | Global billing API URL (for usage reporting) |
 | `BILLING_UPGRADE_URL` | `https://iotistic.ca/upgrade` | Upgrade page URL (shown in feature-blocked errors) |
+| `AI_PROVIDER` | `ollama` | AI backend selection (`ollama` or `openai`) |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama base URL when using local models |
+| `OLLAMA_MODEL` | `llama3.1` | Ollama model name to load |
+| `OPENAI_API_KEY` | - | Required when `AI_PROVIDER=openai`; OpenAI API key |
+| `OPENAI_BASE_URL` | - | Optional custom base URL (useful for Azure OpenAI) |
+| `OPENAI_MODEL` | `gpt-4o-mini` | OpenAI model ID when OpenAI provider is enabled |
 
 ## API Endpoints
 

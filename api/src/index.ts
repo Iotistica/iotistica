@@ -41,6 +41,7 @@ import prometheusRoutes from './routes/prometheus';
 import endpointsDataRoutes from './routes/endpoints-data';
 import anomalyRoutes from './routes/anomaly';
 import profileRoutes, { publicRouter as profilePublicRoutes } from './routes/profiles';
+import aiChatRoutes from './routes/ai-chat';
 import { 
   globalApiRateLimit, 
   authRateLimit, 
@@ -374,6 +375,7 @@ app.use(`${API_BASE}/dashboard-layouts`, dashboardLayoutsRoutes);
 app.use(API_BASE, anomalyRoutes);
 app.use(API_BASE, noderedStorageRoutes);
 app.use(`${API_BASE}/metrics`, metricsCatalogRoutes);
+app.use(API_BASE, aiChatRoutes); // AI assistant chat endpoint
 
 // ============================================================================
 // API Gateway Proxies - Route requests to microservices

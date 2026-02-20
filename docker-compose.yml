@@ -105,6 +105,17 @@ services:
             - MQTT_MONITOR_ENABLED=${MQTT_MONITOR_ENABLED:-true}
             - USE_KEY_COMPACTION_POC=${USE_KEY_COMPACTION_POC:-true}
             - LOG_COMPRESSION=${LOG_COMPRESSION:-true}
+            # AI Assistant configuration
+            # Providers: ollama (local, free) | openai (cloud, paid)
+            # Azure OpenAI: Set AI_PROVIDER=openai, OPENAI_BASE_URL=https://<resource>.openai.azure.com/openai/deployments/<deployment>
+            - AI_PROVIDER=${AI_PROVIDER:-ollama}
+            # Ollama settings (local LLM - memory intensive)
+            - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+            - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1}
+            # OpenAI/Azure OpenAI settings
+            - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+            - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}  # For Azure: https://<resource>.openai.azure.com/openai/deployments/<deployment>
+            - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}  # For Azure: use deployment name
             - LICENSE_PUBLIC_KEY=${LICENSE_PUBLIC_KEY}
             - IOTISTIC_LICENSE_KEY=${IOTISTIC_LICENSE_KEY}
             - REDIS_HOST=${REDIS_HOST:-redis}
@@ -153,8 +164,35 @@ services:
         depends_on:
             redis:
                 condition: service_healthy
+            ollama:
+                condition: service_started
         networks:
             - iotistic-net
+
+    ollama:
+        image: ollama/ollama:latest
+        container_name: iotistic-ollama
+        restart: unless-stopped
+        ports:
+            - "${OLLAMA_PORT_EXT:-11434}:11434"
+        volumes:
+            - ollama-data:/root/.ollama
+        environment:
+            - OLLAMA_HOST=0.0.0.0
+        healthcheck:
+            test: ["CMD", "ollama", "list"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 60s
+        networks:
+            - iotistic-net
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "10m"
+                max-file: "3"
+
     mosquitto:
         image: iegomez/mosquitto-go-auth
         restart: unless-stopped
@@ -534,6 +572,8 @@ volumes:
   iotistic-redis-data:
     driver: local
   iotistic-api-spool:
+    driver: local
+  ollama-data:
     driver: local
   vpn-config:
     driver: local

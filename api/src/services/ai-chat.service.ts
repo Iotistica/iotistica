@@ -1,19 +1,45 @@
 /**
  * AI Chat Service
  * 
- * Handles natural language queries about IoT devices using Ollama (FREE local LLM)
- * 
- * Setup:
+ * Handles natural language queries about IoT devices using either Ollama (local) or
+ * OpenAI GPT models, depending on environment configuration.
+ *
+ * Ollama setup:
  *   1. Install Ollama: winget install Ollama.Ollama
  *   2. Pull a model: ollama pull llama3.1
  *   3. It runs on http://localhost:11434
+ *
+ * OpenAI setup:
+ *   1. Set AI_PROVIDER=openai
+ *   2. Provide OPENAI_API_KEY (and optional OPENAI_BASE_URL, OPENAI_MODEL)
  */
 
-import { DeviceModel, DeviceMetricsModel, DeviceLogsModel } from '../db/models';
+import OpenAI from 'openai';
+import { aiTools, executeTool } from './ai-tools';
 
 // Ollama configuration (FREE local LLM)
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.1';
+
+// OpenAI configuration
+const AI_PROVIDER = (process.env.AI_PROVIDER || 'ollama').toLowerCase();
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const AZURE_API_VERSION = process.env.AZURE_OPENAI_API_VERSION || '2024-08-01-preview';
+
+// Configure OpenAI client (works for both OpenAI and Azure OpenAI)
+const isAzure = process.env.OPENAI_BASE_URL?.includes('azure.com');
+const openaiClient = AI_PROVIDER === 'openai' && process.env.OPENAI_API_KEY
+  ? new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      // For Azure: https://resource.openai.azure.com/openai/deployments/model-name
+      // For OpenAI: https://api.openai.com/v1
+      baseURL: isAzure 
+        ? `${process.env.OPENAI_BASE_URL}/openai/deployments/${OPENAI_MODEL}` 
+        : process.env.OPENAI_BASE_URL,
+      defaultQuery: isAzure ? { 'api-version': AZURE_API_VERSION } : undefined,
+      defaultHeaders: isAzure ? { 'api-key': process.env.OPENAI_API_KEY } : undefined,
+    })
+  : null;
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -26,194 +52,192 @@ interface ChatRequest {
   conversationHistory?: ChatMessage[];
 }
 
-/**
- * Available tools that the AI can use
- */
-const tools = [
-  {
-    type: 'function',
+interface ProviderMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string | null;
+  tool_calls?: Array<{
+    id: string;
     function: {
-      name: 'get_device_info',
-      description: 'Get basic information about a device (name, status, online status)',
-      parameters: {
-        type: 'object',
-        properties: {
-          deviceUuid: {
-            type: 'string',
-            description: 'Device UUID',
-          },
-        },
-        required: ['deviceUuid'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_device_metrics',
-      description: 'Get device metrics like CPU, memory, storage usage',
-      parameters: {
-        type: 'object',
-        properties: {
-          deviceUuid: {
-            type: 'string',
-            description: 'Device UUID',
-          },
-          hours: {
-            type: 'number',
-            description: 'Number of hours to retrieve metrics for (default: 24)',
-          },
-        },
-        required: ['deviceUuid'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_device_logs',
-      description: 'Get recent logs from device containers',
-      parameters: {
-        type: 'object',
-        properties: {
-          deviceUuid: {
-            type: 'string',
-            description: 'Device UUID',
-          },
-          serviceName: {
-            type: 'string',
-            description: 'Optional: Filter by service/container name',
-          },
-          limit: {
-            type: 'number',
-            description: 'Number of log entries to retrieve (default: 50)',
-          },
-        },
-        required: ['deviceUuid'],
-      },
-    },
-  },
-];
+      name: string;
+      arguments: string;
+    };
+  }>;
+}
 
-/**
- * Execute a tool call
- */
-async function executeTool(toolName: string, args: any): Promise<string> {
-  try {
-    switch (toolName) {
-      case 'get_device_info': {
-        const device = await DeviceModel.getByUuid(args.deviceUuid);
-        if (!device) return 'Device not found';
-        return JSON.stringify({
-          name: device.device_name,
-          uuid: device.uuid,
-          status: device.status,
-          isOnline: device.is_online,
-          lastSeen: device.last_connectivity_event,
-        });
-      }
+async function createChatCompletion(
+  messages: any[],
+  options: { includeTools?: boolean } = {},
+): Promise<ProviderMessage> {
+  const includeTools = options.includeTools ?? true;
 
-      case 'get_device_metrics': {
-        const hours = args.hours || 24;
-        const metrics = await DeviceMetricsModel.getRecent(args.deviceUuid, hours);
-        if (!metrics || metrics.length === 0) {
-          return 'No metrics available for this time period';
-        }
-
-        // Calculate averages
-        const avgCpu = metrics.reduce((sum, m) => sum + (m.cpu_usage || 0), 0) / metrics.length;
-        const avgMem = metrics.reduce((sum, m) => sum + (m.memory_usage || 0), 0) / metrics.length;
-        const latest = metrics[0];
-
-        return JSON.stringify({
-          timeRange: `Last ${hours} hours`,
-          averageCpu: avgCpu.toFixed(1),
-          averageMemory: avgMem.toFixed(1),
-          currentCpu: latest.cpu_usage,
-          currentMemory: latest.memory_usage,
-          memoryTotal: latest.memory_total,
-        });
-      }
-
-      case 'get_device_logs': {
-        const limit = args.limit || 50;
-        const logs = await DeviceLogsModel.get(args.deviceUuid, {
-          serviceName: args.serviceName,
-          limit,
-        });
-
-        if (!logs || logs.length === 0) {
-          return 'No logs available';
-        }
-
-        // Format logs for AI
-        const formattedLogs = logs
-          .slice(0, 20) // Only show first 20 to avoid token limits
-          .map((log) => `[${log.service_name}] ${log.message}`)
-          .join('\n');
-
-        return `Recent logs (showing ${Math.min(20, logs.length)} of ${logs.length}):\n${formattedLogs}`;
-      }
-
-      default:
-        return `Unknown tool: ${toolName}`;
+  if (AI_PROVIDER === 'openai') {
+    if (!openaiClient || !process.env.OPENAI_API_KEY) {
+      throw new Error('OpenAI provider selected but OPENAI_API_KEY is not set');
     }
+
+    const params: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
+      model: OPENAI_MODEL,
+      messages,
+    };
+
+    if (includeTools) {
+      params.tools = aiTools as any;
+      params.tool_choice = 'auto';
+    }
+
+    const completion = await openaiClient.chat.completions.create(params);
+    return completion.choices[0].message as ProviderMessage;
+  }
+
+  // Ollama doesn't support tools parameter in the same way as OpenAI
+  // So we'll use simple message-based interaction for now
+  const body: Record<string, any> = {
+    model: OLLAMA_MODEL,
+    messages,
+    stream: false, // Disable streaming for now
+  };
+
+  console.log('[AI Service] Ollama request:', {
+    url: `${OLLAMA_URL}/v1/chat/completions`,
+    model: OLLAMA_MODEL,
+    messageCount: messages.length,
+    bodySize: JSON.stringify(body).length,
+  });
+
+  // Add timeout controller (2 minutes for first inference)
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 second timeout
+
+  try {
+    const response = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+    console.log('[AI Service] Ollama response status:', response.status, response.statusText);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[AI Service] Ollama error response:', {
+        status: response.status,
+        statusText: response.statusText,
+        body: errorText,
+        headers: Object.fromEntries(response.headers.entries()),
+      });
+      throw new Error(`Ollama error: ${response.statusText} - ${errorText}`);
+    }
+
+    const data = (await response.json()) as {
+      choices: Array<{ message: ProviderMessage }>;
+    };
+
+    console.log('[AI Service] Ollama response:', {
+      hasChoices: !!data.choices,
+      choiceCount: data.choices?.length,
+      hasMessage: !!data.choices?.[0]?.message,
+      messageContentLength: data.choices?.[0]?.message?.content?.length,
+    });
+
+    return data.choices[0].message;
   } catch (error: any) {
-    return `Error executing tool: ${error.message}`;
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      console.error('[AI Service] Ollama request timeout after 120s');
+      throw new Error('AI request timed out. The model may be loading or busy. Please try again in a moment.');
+    }
+    throw error;
   }
 }
 
 /**
- * Process a chat message with Ollama (FREE local LLM)
+ * Process a chat message with the configured AI provider
  */
 export async function processAIChat(request: ChatRequest): Promise<string> {
   const { deviceUuid, message, conversationHistory = [] } = request;
 
+  console.log('[AI Service] Processing chat request:', {
+    provider: AI_PROVIDER,
+    model: AI_PROVIDER === 'openai' ? OPENAI_MODEL : OLLAMA_MODEL,
+    hasOpenAiClient: !!openaiClient,
+    deviceUuid,
+  });
+
   try {
+    // For Ollama, fetch device data upfront and include in context
+    // For OpenAI, use tool calling
+    let systemPrompt = `You are an IoT device assistant. You help users monitor and manage their IoT devices.
+Current device UUID: ${deviceUuid}
+
+Be concise and helpful. When showing metrics, use clear formatting.
+If asked to perform actions like restarting containers, explain that you can provide information but the user needs to use the dashboard controls for actions.`;
+
+    if (AI_PROVIDER === 'ollama') {
+      // Fetch device data and include in system prompt
+      console.log('[AI Service] Fetching device data for Ollama context');
+      try {
+        const deviceInfo = await executeTool('get_device_info', { deviceUuid });
+        const deviceMetrics = await executeTool('get_device_metrics', {
+          deviceUuid,
+          limit: 10,
+        });
+
+        console.log('[AI Service] Device data fetched:', {
+          deviceInfoLength: deviceInfo.length,
+          deviceMetricsLength: deviceMetrics.length,
+        });
+
+        systemPrompt += `\n\nCurrent Device Information:\n${deviceInfo}\n\nRecent Metrics (last 10 readings):\n${deviceMetrics}\n\nUse this data to answer the user's questions.`;
+      } catch (err: any) {
+        console.warn('[AI Service] Failed to fetch device data for context:', {
+          error: err.message,
+          stack: err.stack,
+        });
+      }
+    }
+
     // Build messages array
     const messages: any[] = [
       {
         role: 'system',
-        content: `You are an IoT device assistant. You help users monitor and manage their IoT devices.
-Current device UUID: ${deviceUuid}
-
-Be concise and helpful. When showing metrics, use clear formatting.
-If asked to perform actions like restarting containers, explain that you can provide information but the user needs to use the dashboard controls for actions.`,
+        content: systemPrompt,
       },
-      ...conversationHistory.map((msg) => ({
-        role: msg.role,
-        content: msg.content,
-      })),
+      ...conversationHistory
+        .filter((msg) => msg.content && msg.content.trim().length > 0) // Filter out empty messages
+        .map((msg) => ({
+          role: msg.role,
+          content: msg.content,
+        })),
       {
         role: 'user',
         content: message,
       },
     ];
 
-    // Call Ollama with function calling (FREE!)
-    const response = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        messages,
-        tools: tools,
-        tool_choice: 'auto',
-      }),
+    console.log('[AI Service] Prepared messages:', {
+      messageCount: messages.length,
+      systemPromptLength: systemPrompt.length,
+      userMessageLength: message.length,
+      historyLength: conversationHistory.length,
+      filteredHistoryLength: conversationHistory.filter((msg) => msg.content && msg.content.trim().length > 0).length,
     });
 
-    if (!response.ok) {
-      throw new Error(`Ollama error: ${response.statusText}`);
-    }
+    const responseMessage = await createChatCompletion(messages, {
+      includeTools: AI_PROVIDER === 'openai', // Only use tools with OpenAI
+    });
 
-    const data = await response.json() as {
-      choices: Array<{ message: any }>;
-    };
-    const responseMessage = data.choices[0].message;
+    console.log('[AI Service] Received response from AI:', {
+      hasContent: !!responseMessage.content,
+      contentLength: responseMessage.content?.length,
+      hasToolCalls: !!responseMessage.tool_calls,
+      toolCallCount: responseMessage.tool_calls?.length,
+    });
 
-    // Check if AI wants to use tools
+    // Check if AI wants to use tools (OpenAI only)
     if (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
       // Execute tool calls
       messages.push(responseMessage);
@@ -230,31 +254,35 @@ If asked to perform actions like restarting containers, explain that you can pro
         });
       }
 
-      // Get final response from Ollama
-      const secondResponse = await fetch(`${OLLAMA_URL}/v1/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: OLLAMA_MODEL,
-          messages,
-        }),
-      });
-
-      const secondData = await secondResponse.json() as {
-        choices: Array<{ message: { content: string } }>;
-      };
-      return secondData.choices[0].message.content || 'No response';
+      const finalMessage = await createChatCompletion(messages, { includeTools: false });
+      return finalMessage.content || 'No response';
     }
 
     return responseMessage.content || 'No response';
   } catch (error: any) {
-    console.error('AI chat error:', error);
+    console.error('[AI Service] Error in processAIChat:', {
+      provider: AI_PROVIDER,
+      errorMessage: error.message,
+      errorStack: error.stack,
+      errorName: error.name,
+      errorCode: error.code,
+      openAiError: error.error,
+      hasOpenAiClient: !!openaiClient,
+    });
     
-    // Friendly error message if Ollama is not running
-    if (error.message.includes('fetch failed') || error.message.includes('ECONNREFUSED')) {
+    if (AI_PROVIDER === 'ollama' && (error.message.includes('fetch failed') || error.message.includes('ECONNREFUSED'))) {
       throw new Error('Ollama is not running. Please start it with: ollama serve');
+    }
+    
+    if (AI_PROVIDER === 'openai') {
+      // Log detailed OpenAI error
+      console.error('[AI Service] OpenAI Error Details:', {
+        status: error.status,
+        type: error.type,
+        code: error.code,
+        param: error.param,
+        error: error.error,
+      });
     }
     
     throw new Error(`AI chat failed: ${error.message}`);

@@ -57,6 +57,14 @@
       host: '0.0.0.0',
       port: 8080, // Using higher port to avoid Windows restrictions
       open: 'http://localhost:8080',
+      proxy: {
+        // Proxy API requests to the API server
+        '/api': {
+          target: process.env.VITE_API_URL || 'http://localhost:4002',
+          changeOrigin: true,
+          secure: false,
+        },
+      },
     },
     // Environment variables configuration
     // See: https://vitejs.dev/guide/env-and-mode.html
