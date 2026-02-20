@@ -120,7 +120,7 @@ const DEFAULT_SETTINGS = {
 };
 
 export default function AgentSettingsPage({ deviceUuid }: Props) {
-  const { getPendingConfig, updatePendingConfig, getTargetConfig,  saveTargetState, hasPendingChanges } = useDeviceState();
+  const { getPendingConfig, updatePendingConfig, getTargetConfig,  saveTargetState, hasPendingChanges, fetchDeviceState } = useDeviceState();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [restarting, setRestarting] = useState(false);
@@ -131,24 +131,15 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
   const pendingConfig = getPendingConfig(deviceUuid);
   const targetConfig = getTargetConfig(deviceUuid);
   
-  // Merge with defaults
-  const settings = {
-    ...DEFAULT_SETTINGS,
-    ...pendingConfig,
-    logging: { ...DEFAULT_SETTINGS.logging, ...pendingConfig.logging },
-    runtime: {
-      memory: { ...DEFAULT_SETTINGS.runtime.memory, ...pendingConfig.runtime?.memory },
-      scheduledRestart: { ...DEFAULT_SETTINGS.runtime.scheduledRestart, ...pendingConfig.runtime?.scheduledRestart }
-    },
-    features: { ...DEFAULT_SETTINGS.features, ...pendingConfig.features },
-    intervals: {
-      device: { ...DEFAULT_SETTINGS.intervals.device, ...pendingConfig.intervals?.device },
-      discovery: { ...DEFAULT_SETTINGS.intervals.discovery, ...pendingConfig.intervals?.discovery }
-    },
-    anomalyDetection: { ...DEFAULT_SETTINGS.anomalyDetection, ...pendingConfig.anomalyDetection }
-  };
+  // Use actual config from target state - no DEFAULT_SETTINGS fallback
+  // Cast to any since TypeScript types are too restrictive for dynamic config
+  const settings = pendingConfig as any;
 
   const hasUnsavedChanges = hasPendingChanges(deviceUuid);
+  
+  // Check if settings is empty (no configuration loaded)
+  const isSettingsEmpty = !settings || Object.keys(settings).length === 0 || 
+    (!settings.logging && !settings.features && !settings.intervals && !settings.anomalyDetection);
 
   useEffect(() => {
     // Fetch device info to check if it's a virtual agent
@@ -265,6 +256,23 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
           </div>
         </div>
 
+        {/* No Configuration Banner */}
+        {isSettingsEmpty && (
+          <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <Settings className="h-5 w-5 text-amber-600 dark:text-amber-500 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-amber-900 dark:text-amber-100 mb-1">
+                  No Configuration Loaded
+                </h3>
+                <p className="text-sm text-amber-800 dark:text-amber-200">
+                  This device does not have any target state configuration. The agent may be using its default internal settings.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Agent Version */}
         <Card>
           <CardHeader>
@@ -327,7 +335,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
               <div>
                 <label className="text-sm font-medium text-foreground mb-2 block">Log Level</label>
                 <select
-                  value={settings.logging.level}
+                  value={settings.logging?.level || 'debug'}
                   onChange={(e) => updateSetting('logging.level', e.target.value)}
                   className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                 >
@@ -341,7 +349,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                 <label className="text-sm font-medium text-foreground mb-2 block">Max Logs</label>
                 <input
                   type="number"
-                  value={settings.logging.maxLogs}
+                  value={settings.logging?.maxLogs || 10000}
                   onChange={(e) => updateSetting('logging.maxLogs', parseInt(e.target.value))}
                   className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                   min={100}
@@ -352,7 +360,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                 <label className="text-sm font-medium text-foreground mb-2 block">Log Max Age (ms)</label>
                 <input
                   type="number"
-                  value={settings.logging.logMaxAge}
+                  value={settings.logging?.logMaxAge || 86400000}
                   onChange={(e) => updateSetting('logging.logMaxAge', parseInt(e.target.value))}
                   className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                 />
@@ -361,7 +369,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                 <label className="text-sm font-medium text-foreground mb-2 block">Max Log File Size (bytes)</label>
                 <input
                   type="number"
-                  value={settings.logging.maxLogFileSize}
+                  value={settings.logging?.maxLogFileSize || 52428800}
                   onChange={(e) => updateSetting('logging.maxLogFileSize', parseInt(e.target.value))}
                   className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                 />
@@ -372,20 +380,20 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
               <FeatureToggle
                 label="Enable Compression"
                 description="Compress log files to save disk space"
-                enabled={settings.logging.enableCompression}
-                onToggle={() => updateSetting('logging.enableCompression', !settings.logging.enableCompression)}
+                enabled={settings.logging?.enableCompression || false}
+                onToggle={() => updateSetting('logging.enableCompression', !(settings.logging?.enableCompression || false))}
               />
               <FeatureToggle
                 label="Enable Remote Logging"
                 description="Send logs to cloud API for centralized monitoring"
-                enabled={settings.logging.enableRemoteLogging}
-                onToggle={() => updateSetting('logging.enableRemoteLogging', !settings.logging.enableRemoteLogging)}
+                enabled={settings.logging?.enableRemoteLogging || false}
+                onToggle={() => updateSetting('logging.enableRemoteLogging', !(settings.logging?.enableRemoteLogging || false))}
               />
               <FeatureToggle
                 label="Enable File Persistence"
                 description="Persist logs to disk for local debugging"
-                enabled={settings.logging.enableFilePersistence}
-                onToggle={() => updateSetting('logging.enableFilePersistence', !settings.logging.enableFilePersistence)}
+                enabled={settings.logging?.enableFilePersistence || false}
+                onToggle={() => updateSetting('logging.enableFilePersistence', !(settings.logging?.enableFilePersistence || false))}
               />
             </div>
           </CardContent>
@@ -408,7 +416,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                   <label className="text-sm font-medium text-foreground mb-2 block">Threshold (MB)</label>
                   <input
                     type="number"
-                    value={settings.runtime.memory.thresholdMb}
+                    value={settings.runtime?.memory?.thresholdMb || 30}
                     onChange={(e) => updateSetting('runtime.memory.thresholdMb', parseInt(e.target.value))}
                     className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                   />
@@ -417,7 +425,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                   <label className="text-sm font-medium text-foreground mb-2 block">Check Interval (ms)</label>
                   <input
                     type="number"
-                    value={settings.runtime.memory.checkIntervalMs}
+                    value={settings.runtime?.memory?.checkIntervalMs || 30000}
                     onChange={(e) => updateSetting('runtime.memory.checkIntervalMs', parseInt(e.target.value))}
                     className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                   />
@@ -430,16 +438,16 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
               <FeatureToggle
                 label="Enable Scheduled Restart"
                 description="Automatically restart agent to prevent memory fragmentation"
-                enabled={settings.runtime.scheduledRestart.enabled}
-                onToggle={() => updateSetting('runtime.scheduledRestart.enabled', !settings.runtime.scheduledRestart.enabled)}
+                enabled={settings.runtime?.scheduledRestart?.enabled || false}
+                onToggle={() => updateSetting('runtime.scheduledRestart.enabled', !(settings.runtime?.scheduledRestart?.enabled || false))}
               />
-              {settings.runtime.scheduledRestart.enabled && (
+              {settings.runtime?.scheduledRestart?.enabled && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 ml-4">
                   <div>
                     <label className="text-sm font-medium text-foreground mb-2 block">Interval (days)</label>
                     <input
                       type="number"
-                      value={settings.runtime.scheduledRestart.intervalDays}
+                      value={settings.runtime?.scheduledRestart?.intervalDays || 7}
                       onChange={(e) => updateSetting('runtime.scheduledRestart.intervalDays', parseInt(e.target.value))}
                       className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                       min={1}
@@ -450,7 +458,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                     <label className="text-sm font-medium text-foreground mb-2 block">Reason</label>
                     <input
                       type="text"
-                      value={settings.runtime.scheduledRestart.reason}
+                      value={settings.runtime?.scheduledRestart?.reason || ''}
                       onChange={(e) => updateSetting('runtime.scheduledRestart.reason', e.target.value)}
                       className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                     />
@@ -474,26 +482,26 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
             <FeatureToggle
               label="Device Jobs"
               description="Enable job execution engine on the agent"
-              enabled={settings.features.enableDeviceJobs}
-              onToggle={() => updateSetting('features.enableDeviceJobs', !settings.features.enableDeviceJobs)}
+              enabled={settings.features?.enableDeviceJobs || false}
+              onToggle={() => updateSetting('features.enableDeviceJobs', !(settings.features?.enableDeviceJobs || false))}
             />
             <FeatureToggle
               label="Anomaly Detection"
               description="Enable AI-powered anomaly detection for metrics"
-              enabled={settings.features.enableAnomalyDetection}
-              onToggle={() => updateSetting('features.enableAnomalyDetection', !settings.features.enableAnomalyDetection)}
+              enabled={settings.features?.enableAnomalyDetection || false}
+              onToggle={() => updateSetting('features.enableAnomalyDetection', !(settings.features?.enableAnomalyDetection || false))}
             />
             <FeatureToggle
               label="Remote Access"
               description="Allow remote SSH/terminal access to device"
-              enabled={settings.features.enableDeviceRemoteAccess}
-              onToggle={() => updateSetting('features.enableDeviceRemoteAccess', !settings.features.enableDeviceRemoteAccess)}
+              enabled={settings.features?.enableDeviceRemoteAccess || false}
+              onToggle={() => updateSetting('features.enableDeviceRemoteAccess', !(settings.features?.enableDeviceRemoteAccess || false))}
             />
             <FeatureToggle
               label="Sensor Publishing"
               description="Automatically publish sensor data to MQTT broker"
-              enabled={settings.features.enableDeviceSensorPublish}
-              onToggle={() => updateSetting('features.enableDeviceSensorPublish', !settings.features.enableDeviceSensorPublish)}
+              enabled={settings.features?.enableDeviceSensorPublish || false}
+              onToggle={() => updateSetting('features.enableDeviceSensorPublish', !(settings.features?.enableDeviceSensorPublish || false))}
             />
           </CardContent>
         </Card>
@@ -515,7 +523,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                   <label className="text-sm font-medium text-foreground mb-2 block">Report Interval (ms)</label>
                   <input
                     type="number"
-                    value={settings.intervals.device.reportIntervalMs}
+                    value={settings.intervals?.device?.reportIntervalMs || 60000}
                     onChange={(e) => updateSetting('intervals.device.reportIntervalMs', parseInt(e.target.value))}
                     className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                   />
@@ -524,7 +532,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                   <label className="text-sm font-medium text-foreground mb-2 block">Metrics Interval (ms)</label>
                   <input
                     type="number"
-                    value={settings.intervals.device.metricsIntervalMs}
+                    value={settings.intervals?.device?.metricsIntervalMs || 60000}
                     onChange={(e) => updateSetting('intervals.device.metricsIntervalMs', parseInt(e.target.value))}
                     className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                   />
@@ -533,7 +541,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                   <label className="text-sm font-medium text-foreground mb-2 block">Reconciliation Interval (ms)</label>
                   <input
                     type="number"
-                    value={settings.intervals.device.reconciliationIntervalMs}
+                    value={settings.intervals?.device?.reconciliationIntervalMs || 30000}
                     onChange={(e) => updateSetting('intervals.device.reconciliationIntervalMs', parseInt(e.target.value))}
                     className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                   />
@@ -542,7 +550,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                   <label className="text-sm font-medium text-foreground mb-2 block">Target State Poll Interval (ms)</label>
                   <input
                     type="number"
-                    value={settings.intervals.device.targetStatePollIntervalMs}
+                    value={settings.intervals?.device?.targetStatePollIntervalMs || 60000}
                     onChange={(e) => updateSetting('intervals.device.targetStatePollIntervalMs', parseInt(e.target.value))}
                     className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                   />
@@ -557,7 +565,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                   <label className="text-sm font-medium text-foreground mb-2 block">Full Scan Interval (ms)</label>
                   <input
                     type="number"
-                    value={settings.intervals.discovery.fullIntervalMs}
+                    value={settings.intervals?.discovery?.fullIntervalMs || 86400000}
                     onChange={(e) => updateSetting('intervals.discovery.fullIntervalMs', parseInt(e.target.value))}
                     className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                   />
@@ -566,7 +574,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                   <label className="text-sm font-medium text-foreground mb-2 block">Light Scan Interval (ms)</label>
                   <input
                     type="number"
-                    value={settings.intervals.discovery.lightIntervalMs}
+                    value={settings.intervals?.discovery?.lightIntervalMs || 14400000}
                     onChange={(e) => updateSetting('intervals.discovery.lightIntervalMs', parseInt(e.target.value))}
                     className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                   />
@@ -577,7 +585,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
         </Card>
 
         {/* Anomaly Detection (only if feature enabled) */}
-        {settings.features.enableAnomalyDetection && (
+        {settings.features?.enableAnomalyDetection && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -592,7 +600,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                   <label className="text-sm font-medium text-foreground mb-2 block">Sensitivity (1-10)</label>
                   <input
                     type="number"
-                    value={settings.anomalyDetection.sensitivity}
+                    value={settings.anomalyDetection?.sensitivity || 5}
                     onChange={(e) => updateSetting('anomalyDetection.sensitivity', parseInt(e.target.value))}
                     className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                     min={1}
@@ -603,7 +611,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                   <label className="text-sm font-medium text-foreground mb-2 block">Warmup Period (ms)</label>
                   <input
                     type="number"
-                    value={settings.anomalyDetection.warmupPeriodMs}
+                    value={settings.anomalyDetection?.warmupPeriodMs || 900000}
                     onChange={(e) => updateSetting('anomalyDetection.warmupPeriodMs', parseInt(e.target.value))}
                     className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                   />
@@ -617,7 +625,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                     <label className="text-sm font-medium text-foreground mb-2 block">Cooldown (ms)</label>
                     <input
                       type="number"
-                      value={settings.anomalyDetection.alerts.cooldownMs}
+                      value={settings.anomalyDetection?.alerts?.cooldownMs || 300000}
                       onChange={(e) => updateSetting('anomalyDetection.alerts.cooldownMs', parseInt(e.target.value))}
                       className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                     />
@@ -626,7 +634,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                     <label className="text-sm font-medium text-foreground mb-2 block">Max Queue Size</label>
                     <input
                       type="number"
-                      value={settings.anomalyDetection.alerts.maxQueueSize}
+                      value={settings.anomalyDetection?.alerts?.maxQueueSize || 1000}
                       onChange={(e) => updateSetting('anomalyDetection.alerts.maxQueueSize', parseInt(e.target.value))}
                       className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                     />
@@ -641,7 +649,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                     <label className="text-sm font-medium text-foreground mb-2 block">Retention (days)</label>
                     <input
                       type="number"
-                      value={settings.anomalyDetection.storage.retention}
+                      value={settings.anomalyDetection?.storage?.retention || 30}
                       onChange={(e) => updateSetting('anomalyDetection.storage.retention', parseInt(e.target.value))}
                       className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                     />
@@ -650,7 +658,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                     <label className="text-sm font-medium text-foreground mb-2 block">Min Samples</label>
                     <input
                       type="number"
-                      value={settings.anomalyDetection.storage.minSamples}
+                      value={settings.anomalyDetection?.storage?.minSamples || 5}
                       onChange={(e) => updateSetting('anomalyDetection.storage.minSamples', parseInt(e.target.value))}
                       className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                     />
