@@ -914,6 +914,13 @@ export default function App() {
   const deviceState = selectedDevice?.deviceUuid ? getDeviceState(selectedDevice.deviceUuid) : null;
   const hasUnsavedChanges = deviceState?.isDirty || false;
 
+  // Auto-clear deploying state when context confirms no pending changes
+  useEffect(() => {
+    if (isDeploying && !needsDeployment) {
+      setIsDeploying(false);
+    }
+  }, [isDeploying, needsDeployment]);
+
   // Calculate devices with pending changes for "Deploy All"
   const devicesWithPendingChanges = useMemo(() => {
     return devices.filter(d => d.deviceUuid && hasPendingChanges(d.deviceUuid));
@@ -960,8 +967,11 @@ export default function App() {
       } else {
         toast.warning(`Deployment complete: ${successCount} succeeded, ${failCount} failed`);
       }
-    } finally {
-      setIsDeploying(false);
+      
+      // isDeploying will auto-clear via useEffect when no devices have pending changes
+    } catch (error: any) {
+      setIsDeploying(false); // Clear immediately on unexpected error
+      throw error;
     }
   };
 
@@ -981,6 +991,7 @@ export default function App() {
         } catch (saveError: any) {
           console.error("Save error:", saveError);
           toast.error(`Failed to save changes: ${saveError.message || 'Unknown error'}`);
+          setIsDeploying(false); // Clear on error so user can retry
           throw saveError;
         }
       }
@@ -990,15 +1001,15 @@ export default function App() {
         await syncTargetState(selectedDevice.deviceUuid, 'dashboard');
         window.dispatchEvent(new CustomEvent('deployment-started', { detail: { deviceUuid: selectedDevice.deviceUuid } }));
         toast.success("Changes deployed - waiting for agent confirmation", { id: toastId });
+        // isDeploying will auto-clear via useEffect when needsDeployment becomes false
       } catch (deployError: any) {
         console.error("Deployment error:", deployError);
         toast.error(`Deployment failed: ${deployError.message || 'Unknown error'}`, { id: toastId });
+        setIsDeploying(false); // Clear on error so user can retry
         throw deployError;
       }
     } catch (error: any) {
       // Already handled above
-    } finally {
-      setIsDeploying(false);
     }
   };
 
@@ -1440,7 +1451,7 @@ export default function App() {
                     size="sm"
                     disabled={!needsDeployment || isDeploying}
                     variant="ghost"
-                    style={needsDeployment && !isDeploying ? {
+                    style={!isDeploying && needsDeployment ? {
                       backgroundColor: '#d97706',
                       color: 'white',
                       fontWeight: 500,
