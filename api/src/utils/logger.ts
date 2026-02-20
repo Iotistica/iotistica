@@ -67,7 +67,6 @@ logger.add(new winston.transports.Console({
       })
     )
   }));
-}
 
 // Helper functions for structured logging with visual grouping
 export const logOperation = {
