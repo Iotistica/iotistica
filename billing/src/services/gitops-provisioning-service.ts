@@ -64,7 +64,7 @@ export class GitOpsProvisioningService {
       enabled: process.env.GITOPS_ENABLED === 'true',
       repoUrl: process.env.GITOPS_REPO_URL || 'https://github.com/Iotistica/iot-k8s.git',
       repoDir: process.env.GITOPS_REPO_DIR || '/tmp/iot-k8s-main',
-      mainBranch: process.env.GITOPS_MAIN_BRANCH || 'main',
+      mainBranch: process.env.GITOPS_MAIN_BRANCH || process.env.GITOPS_BRANCH || 'main',
       pat: process.env.GITOPS_PAT || '',
       authorName: process.env.GITOPS_COMMIT_AUTHOR_NAME || 'IoTistic Billing Bot',
       authorEmail: process.env.GITOPS_COMMIT_AUTHOR_EMAIL || 'billing@iotistic.com',
@@ -164,6 +164,8 @@ export class GitOpsProvisioningService {
         );
 
         await simpleGit().clone(urlWithAuth, this.config.repoDir);
+        await this.git.fetch('origin', this.config.mainBranch);
+        await this.git.checkout(['-B', this.config.mainBranch, `origin/${this.config.mainBranch}`]);
         logger.info('Repository cloned successfully');
       } else {
         // Pull latest changes from existing repository
@@ -171,6 +173,7 @@ export class GitOpsProvisioningService {
         // Ensure a clean working tree before pull to avoid untracked file conflicts
         await this.git.fetch('origin', this.config.mainBranch);
         await this.git.clean('f', ['-d', '-x']);
+        await this.git.checkout(['-B', this.config.mainBranch, `origin/${this.config.mainBranch}`]);
         await this.git.reset(['--hard', `origin/${this.config.mainBranch}`]);
         await this.git.pull('origin', this.config.mainBranch);
         logger.info('Repository updated successfully');
@@ -506,7 +509,11 @@ export class GitOpsProvisioningService {
         plan: data.plan,
       });
 
-      // Ensure we have latest changes
+      // Ensure we have latest changes and are on the correct branch
+      await this.git.fetch('origin', this.config.mainBranch);
+      await this.git.clean('f', ['-d', '-x']);
+      await this.git.checkout(['-B', this.config.mainBranch, `origin/${this.config.mainBranch}`]);
+      await this.git.reset(['--hard', `origin/${this.config.mainBranch}`]);
       await this.git.pull('origin', this.config.mainBranch);
 
       // 1. Generate Application manifest
