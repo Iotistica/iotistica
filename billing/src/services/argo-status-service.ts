@@ -1,0 +1,351 @@
+/**
+ * Argo CD Status Service
+ * Queries Argo CD API to confirm Application deployment status
+ * 
+ * Used by deployment workers to determine when a client is fully deployed
+ * and mark customer as 'ready' in billing database.
+ */
+
+import axios, { AxiosInstance } from 'axios';
+import { logger } from '../utils/logger';
+
+interface ArgoApplication {
+  metadata: {
+    name: string;
+    namespace: string;
+  };
+  spec: {
+    destination: {
+      namespace: string;
+      server: string;
+    };
+  };
+  status: {
+    sync: {
+      status: 'Synced' | 'OutOfSync' | 'Unknown';
+      revision?: string;
+    };
+    health: {
+      status: 'Healthy' | 'Progressing' | 'Degraded' | 'Suspended' | 'Missing' | 'Unknown';
+      message?: string;
+    };
+    operationState?: {
+      phase: 'Running' | 'Succeeded' | 'Failed' | 'Error' | 'Terminating';
+      message?: string;
+      finishedAt?: string;
+    };
+  };
+}
+
+interface ArgoConfig {
+  baseUrl: string;
+  token: string;
+  maxRetries: number;
+  retryDelayMs: number;
+}
+
+export class ArgoStatusService {
+  private client: AxiosInstance;
+  private config: ArgoConfig;
+
+  constructor() {
+    this.config = {
+      baseUrl: process.env.ARGOCD_BASE_URL || 'https://argocd.iotistica.com',
+      token: process.env.ARGOCD_TOKEN || '',
+      maxRetries: parseInt(process.env.ARGOCD_STATUS_MAX_RETRIES || '10'),
+      retryDelayMs: parseInt(process.env.ARGOCD_STATUS_RETRY_DELAY_MS || '5000'),
+    };
+
+    // Remove trailing slash from base URL
+    this.config.baseUrl = this.config.baseUrl.replace(/\/$/, '');
+
+    this.client = axios.create({
+      baseURL: this.config.baseUrl,
+      headers: {
+        'Authorization': `Bearer ${this.config.token}`,
+        'Content-Type': 'application/json',
+      },
+      // Allow self-signed certificates for dev/test environments
+      httpsAgent: process.env.NODE_ENV === 'production' 
+        ? undefined 
+        : { rejectUnauthorized: false },
+    });
+
+    if (!this.config.token) {
+      logger.warn('ARGOCD_TOKEN not set - status checks will fail');
+    }
+  }
+
+  /**
+   * Get Application status from Argo CD
+   */
+  async getApplicationStatus(clientId: string): Promise<ArgoApplication | null> {
+    try {
+      const appName = `client-${clientId}`;
+      const response = await this.client.get<ArgoApplication>(
+        `/api/v1/applications/${appName}`
+      );
+
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        logger.warn('Application not found in Argo CD', { clientId });
+        return null;
+      }
+
+      logger.error('Failed to get Application status', {
+        clientId,
+        error: error.message,
+        status: error.response?.status,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Check if Application is healthy and synced
+   */
+  async isApplicationReady(clientId: string): Promise<boolean> {
+    const app = await this.getApplicationStatus(clientId);
+    
+    if (!app) {
+      return false;
+    }
+
+    const isSynced = app.status.sync.status === 'Synced';
+    const isHealthy = app.status.health.status === 'Healthy';
+
+    logger.info('Application status check', {
+      clientId,
+      syncStatus: app.status.sync.status,
+      healthStatus: app.status.health.status,
+      isReady: isSynced && isHealthy,
+    });
+
+    return isSynced && isHealthy;
+  }
+
+  /**
+   * Wait for Application to become ready with retries
+   * 
+   * Polls Argo CD API until:
+   * - Application is Synced and Healthy (success)
+   * - Max retries reached (failure)
+   * - Application sync/health fails (failure)
+   * 
+   * @param clientId Client ID (without 'client-' prefix)
+   * @returns true if ready, false if failed/timeout
+   */
+  async waitForApplicationReady(clientId: string): Promise<boolean> {
+    logger.info('Waiting for Application to be ready', {
+      clientId,
+      maxRetries: this.config.maxRetries,
+      retryDelayMs: this.config.retryDelayMs,
+    });
+
+    for (let attempt = 1; attempt <= this.config.maxRetries; attempt++) {
+      try {
+        const app = await this.getApplicationStatus(clientId);
+
+        if (!app) {
+          logger.warn('Application not found, retrying...', {
+            clientId,
+            attempt,
+            maxRetries: this.config.maxRetries,
+          });
+          
+          // Wait before retry
+          await this.sleep(this.config.retryDelayMs);
+          continue;
+        }
+
+        const syncStatus = app.status.sync.status;
+        const healthStatus = app.status.health.status;
+        const operationPhase = app.status.operationState?.phase;
+
+        logger.info('Application status', {
+          clientId,
+          attempt,
+          syncStatus,
+          healthStatus,
+          operationPhase,
+        });
+
+        // Check for failed states
+        if (healthStatus === 'Degraded' || healthStatus === 'Missing') {
+          logger.error('Application health check failed', {
+            clientId,
+            healthStatus,
+            healthMessage: app.status.health.message,
+          });
+          return false;
+        }
+
+        if (operationPhase === 'Failed' || operationPhase === 'Error') {
+          logger.error('Application sync operation failed', {
+            clientId,
+            operationPhase,
+            operationMessage: app.status.operationState?.message,
+          });
+          return false;
+        }
+
+        // Check if ready
+        if (syncStatus === 'Synced' && healthStatus === 'Healthy') {
+          logger.info('Application is ready', {
+            clientId,
+            attempt,
+            revision: app.status.sync.revision,
+          });
+          return true;
+        }
+
+        // Still progressing
+        logger.info('Application still progressing, retrying...', {
+          clientId,
+          attempt,
+          syncStatus,
+          healthStatus,
+          nextRetryIn: `${this.config.retryDelayMs}ms`,
+        });
+
+        // Wait before next retry
+        if (attempt < this.config.maxRetries) {
+          await this.sleep(this.config.retryDelayMs);
+        }
+
+      } catch (error: any) {
+        logger.error('Error checking Application status', {
+          clientId,
+          attempt,
+          error: error.message,
+        });
+
+        // Don't retry on auth errors
+        if (error.response?.status === 401 || error.response?.status === 403) {
+          logger.error('Authentication failed - check ARGOCD_TOKEN');
+          return false;
+        }
+
+        // Wait before retry
+        if (attempt < this.config.maxRetries) {
+          await this.sleep(this.config.retryDelayMs);
+        }
+      }
+    }
+
+    logger.error('Application readiness check timed out', {
+      clientId,
+      maxRetries: this.config.maxRetries,
+      totalWaitTime: `${(this.config.maxRetries * this.config.retryDelayMs) / 1000}s`,
+    });
+
+    return false;
+  }
+
+  /**
+   * Get detailed Application information
+   */
+  async getApplicationDetails(clientId: string): Promise<{
+    syncStatus: string;
+    healthStatus: string;
+    revision?: string;
+    message?: string;
+  } | null> {
+    const app = await this.getApplicationStatus(clientId);
+    
+    if (!app) {
+      return null;
+    }
+
+    return {
+      syncStatus: app.status.sync.status,
+      healthStatus: app.status.health.status,
+      revision: app.status.sync.revision,
+      message: app.status.health.message || app.status.operationState?.message,
+    };
+  }
+
+  /**
+   * List all Applications managed by Iotistic
+   */
+  async listApplications(): Promise<string[]> {
+    try {
+      const response = await this.client.get('/api/v1/applications', {
+        params: {
+          selector: 'managed-by=iotistic',
+        },
+      });
+
+      const apps = response.data.items || [];
+      return apps.map((app: ArgoApplication) => app.metadata.name);
+    } catch (error: any) {
+      logger.error('Failed to list Applications', {
+        error: error.message,
+      });
+      return [];
+    }
+  }
+
+  /**
+   * Trigger manual sync for Application
+   */
+  async syncApplication(clientId: string): Promise<boolean> {
+    try {
+      const appName = `client-${clientId}`;
+      await this.client.post(`/api/v1/applications/${appName}/sync`);
+      
+      logger.info('Application sync triggered', { clientId });
+      return true;
+    } catch (error: any) {
+      logger.error('Failed to trigger Application sync', {
+        clientId,
+        error: error.message,
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Delete Application from Argo CD
+   * Note: This is usually not needed since deleting the manifest from Git
+   * will cause Argo CD to prune the Application automatically
+   */
+  async deleteApplication(clientId: string): Promise<boolean> {
+    try {
+      const appName = `client-${clientId}`;
+      await this.client.delete(`/api/v1/applications/${appName}`);
+      
+      logger.info('Application deleted from Argo CD', { clientId });
+      return true;
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        logger.info('Application already deleted', { clientId });
+        return true;
+      }
+
+      logger.error('Failed to delete Application', {
+        clientId,
+        error: error.message,
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Sleep utility
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Check if service is enabled (has required configuration)
+   */
+  isEnabled(): boolean {
+    return !!(this.config.baseUrl && this.config.token);
+  }
+}
+
+// Singleton instance
+export const argoStatusService = new ArgoStatusService();

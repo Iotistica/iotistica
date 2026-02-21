@@ -22,8 +22,7 @@ import queueRouter from './routes/queue';
 import upgradesRouter from './routes/upgrades';
 import adminRouter from './routes/admin';
 
-// Workers
-import { deploymentWorker } from './workers/deployment-worker';
+// Services
 import { deploymentQueue } from './services/deployment-queue';
 
 // Load environment variables
@@ -96,18 +95,14 @@ async function start() {
     console.log('✅ License generator initialized');
 
     // Start server
-    app.listen(PORT, async () => {
-      console.log(`✅ Billing listening on port ${PORT}`);
+    app.listen(PORT, () => {
+      console.log(`✅ Billing API listening on port ${PORT}`);
       console.log(`   Health: http://localhost:${PORT}/health`);
       console.log(`   API: http://localhost:${PORT}/api`);
-      
-      // Start deployment worker
-      try {
-        await deploymentWorker.start();
-        console.log(`✅ Deployment worker started`);
-      } catch (error) {
-        console.error('⚠️  Failed to start deployment worker:', error);
-      }
+      console.log(`   Queue Dashboard: http://localhost:${PORT}/admin/queues`);
+      console.log('');
+      console.log('ℹ️  Note: Deployment worker runs in separate container');
+      console.log('   Start with: npm run worker (or docker-compose up worker)');
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);
@@ -116,15 +111,13 @@ async function start() {
 }
 
 // Graceful shutdown
-process.on('SIGTERM', async () => {
+process.on('SIGTERM', () => {
   console.log('📴 SIGTERM received, shutting down gracefully...');
-  await deploymentWorker.stop();
   process.exit(0);
 });
 
-process.on('SIGINT', async () => {
+process.on('SIGINT', () => {
   console.log('📴 SIGINT received, shutting down gracefully...');
-  await deploymentWorker.stop();
   process.exit(0);
 });
 

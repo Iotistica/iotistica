@@ -1,4 +1,5 @@
-# Billing - Docker Compose for Local Development
+# Billing Service - Docker Compose for Local Development
+# Supports both GitOps (Argo CD) and legacy Helm deployment modes
 
 version: '3.8'
 
@@ -24,7 +25,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "6380:6379"  # External port 6380 to avoid conflict
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
@@ -36,14 +37,15 @@ services:
 
   billing:
     build: .
+    container_name: billing-api
     ports:
       - "3100:3100"
     environment:
       NODE_ENV: development
       PORT: 3100
-      DATABASE_URL: postgres://billing:billing123@postgres:5432/billing
       
-      # Database connection for migrations
+      # Database
+      DATABASE_URL: postgres://billing:billing123@postgres:5432/billing
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: billing
@@ -54,9 +56,6 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_DB: 0
-      QUEUE_CONCURRENCY: 3
-      QUEUE_MAX_RETRIES: 3
-      QUEUE_RETRY_DELAY: 60000
       
       # Stripe (use your test keys)
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
@@ -70,34 +69,111 @@ services:
       STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE}
       
       # License keys
-      LICENSE_PRIVATE_KEY_PATH: ${LICENSE_PRIVATE_KEY_PATH}
-      LICENSE_PUBLIC_KEY_PATH: ${LICENSE_PUBLIC_KEY_PATH}
+      LICENSE_PRIVATE_KEY_PATH: /app/keys/private-key.pem
+      LICENSE_PUBLIC_KEY_PATH: /app/keys/public-key.pem
       LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY}  # For K8s deployment injection
 
       # Trial configuration
       DEFAULT_TRIAL_DAYS: 14
       
-      # Kubernetes deployment
-      BASE_DOMAIN: localhost  # Use localhost for Docker Desktop K8s
-      HELM_CHART_PATH: /app/charts/customer-instance
-      # Set to 'false' to use real K8s (Docker Desktop or AKS)
+      # Base configuration
+      BASE_DOMAIN: ${BASE_DOMAIN:-iotistic.com}
+      
+      # GitOps Configuration (NEW)
+      GITOPS_ENABLED: ${GITOPS_ENABLED:-true}
+      GITOPS_REPO_URL: ${GITOPS_REPO_URL:-https://github.com/Iotistica/iot-k8s.git}
+      GITOPS_REPO_DIR: /tmp/iot-k8s-main
+      GITOPS_BRANCH: ${GITOPS_BRANCH:-main}
+      GITOPS_PAT: ${GITOPS_PAT}  # GitHub Personal Access Token (repo scope)
+      GITOPS_AUTHOR_NAME: "IoTistic Billing Bot"
+      GITOPS_AUTHOR_EMAIL: "billing@iotistic.com"
+      
+      # Argo CD Configuration (NEW)
+      ARGOCD_BASE_URL: ${ARGOCD_BASE_URL:-https://argocd.iotistic.com}
+      ARGOCD_TOKEN: ${ARGOCD_TOKEN}  # Argo CD API token
+      ARGOCD_NAMESPACE: ${ARGOCD_NAMESPACE:-argocd}
+      ARGOCD_MAX_RETRIES: ${ARGOCD_MAX_RETRIES:-10}
+      ARGOCD_RETRY_DELAY: ${ARGOCD_RETRY_DELAY:-5000}
+      SKIP_ARGOCD_STATUS_CHECK: ${SKIP_ARGOCD_STATUS_CHECK:-false}
+      
+      # Legacy Helm deployment (for gradual migration)
       SIMULATE_K8S_DEPLOYMENT: ${SIMULATE_K8S_DEPLOYMENT:-true}
-      # Kubeconfig path (mounted from host)
-      KUBECONFIG: /root/.kube/config
-      # Use docker-desktop context
-      KUBE_CONTEXT: docker-desktop
     volumes:
       - ./keys:/app/keys
       - ./dist:/app/dist
-      - ../charts:/app/charts
-      # Mount kubeconfig for K8s access (Windows: %USERPROFILE%/.kube)
-      # This includes both docker-desktop and any cloud clusters
-      - ${USERPROFILE}/.kube/config:/root/.kube/config:ro
+      - ./src:/app/src  # For development hot-reload
+      # Git repository cache (GitOps operations)
+      - gitops_repo_cache:/tmp/iot-k8s-main
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  # Worker - Processes deployment queue jobs
+  worker:
+    build: .
+    container_name: billing-worker
+    command: node dist/worker.js
+    environment:
+      NODE_ENV: development
+      
+      # Database
+      DATABASE_URL: postgres://billing:billing123@postgres:5432/billing
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: billing
+      DB_PASSWORD: billing123
+      DB_NAME: billing
+      
+      # Redis (for deployment queue)
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      QUEUE_CONCURRENCY: ${QUEUE_CONCURRENCY:-3}
+      QUEUE_MAX_RETRIES: ${QUEUE_MAX_RETRIES:-3}
+      QUEUE_RETRY_DELAY: ${QUEUE_RETRY_DELAY:-60000}
+      
+      # License keys
+      LICENSE_PRIVATE_KEY_PATH: /app/keys/private-key.pem
+      LICENSE_PUBLIC_KEY_PATH: /app/keys/public-key.pem
+      LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY}
+      
+      # Base configuration
+      BASE_DOMAIN: ${BASE_DOMAIN:-iotistic.com}
+      
+      # GitOps Configuration
+      GITOPS_ENABLED: ${GITOPS_ENABLED:-true}
+      GITOPS_REPO_URL: ${GITOPS_REPO_URL:-https://github.com/Iotistica/iot-k8s.git}
+      GITOPS_REPO_DIR: /tmp/iot-k8s-main
+      GITOPS_BRANCH: ${GITOPS_BRANCH:-main}
+      GITOPS_PAT: ${GITOPS_PAT}
+      GITOPS_AUTHOR_NAME: "IoTistic Billing Bot"
+      GITOPS_AUTHOR_EMAIL: "billing@iotistic.com"
+      
+      # Argo CD Configuration
+      ARGOCD_BASE_URL: ${ARGOCD_BASE_URL:-https://argocd.iotistic.com}
+      ARGOCD_TOKEN: ${ARGOCD_TOKEN}
+      ARGOCD_NAMESPACE: ${ARGOCD_NAMESPACE:-argocd}
+      ARGOCD_MAX_RETRIES: ${ARGOCD_MAX_RETRIES:-10}
+      ARGOCD_RETRY_DELAY: ${ARGOCD_RETRY_DELAY:-5000}
+      SKIP_ARGOCD_STATUS_CHECK: ${SKIP_ARGOCD_STATUS_CHECK:-false}
+      
+      # Legacy Helm deployment
+      SIMULATE_K8S_DEPLOYMENT: ${SIMULATE_K8S_DEPLOYMENT:-true}
+    volumes:
+      - ./keys:/app/keys
+      - ./dist:/app/dist
+      - ./src:/app/src  # For development hot-reload
+      # Git repository cache (shared with API)
+      - gitops_repo_cache:/tmp/iot-k8s-main
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      billing:
+        condition: service_started
 
   # Stripe CLI for webhook testing
   stripe-cli:
@@ -117,3 +193,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  gitops_repo_cache:  # Shared Git repository cache for GitOps operations

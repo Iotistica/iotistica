@@ -8,6 +8,8 @@
     "watch": "tsc --watch",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
+    "worker": "node dist/worker.js",
+    "dev:worker": "ts-node src/worker.ts",
     "clean": "rimraf dist",
     "migrate": "psql $DATABASE_URL -f migrations/001_initial_schema.sql",
     "generate-keys": "tsx scripts/generate-keys.ts",
@@ -37,6 +39,7 @@
     "js-yaml": "^4.1.0",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.11.3",
+    "simple-git": "^3.25.0",
     "stripe": "^14.9.0",
     "uuid": "^9.0.1",
     "winston": "^3.18.3"

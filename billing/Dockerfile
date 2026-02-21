@@ -1,33 +1,61 @@
-# Billing - Production Deployment
+# Billing Service - GitOps Provisioning
+# Multi-stage build for optimized production image
 
-FROM node:18-alpine
+# =============================================================================
+# Stage 1: Builder - Compile TypeScript
+# =============================================================================
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install system dependencies
+# Install build dependencies
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++
+
+# Copy package files
+COPY package*.json ./
+
+# Install ALL dependencies (including devDependencies for TypeScript compilation)
+RUN npm ci
+
+# Copy source code and TypeScript config
+COPY tsconfig.json ./
+COPY src ./src
+
+# Build TypeScript
+RUN npm run build
+
+# =============================================================================
+# Stage 2: Production - Minimal runtime image
+# =============================================================================
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install runtime dependencies only
+# - postgresql-client: For database migrations
+# - git: Required for simple-git library (GitOps operations)
+# - bash: For entrypoint script
+# - ca-certificates: For HTTPS connections (Stripe, Argo CD API)
+# - curl: For health checks
 RUN apk add --no-cache \
     postgresql-client \
-    curl \
+    git \
     bash \
-    ca-certificates
+    ca-certificates \
+    curl \
+    && rm -rf /var/cache/apk/*
 
-# Install kubectl
-RUN curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl" \
-    && chmod +x kubectl \
-    && mv kubectl /usr/local/bin/kubectl
-
-# Install Helm
-RUN curl -fsSL https://get.helm.sh/helm-v3.13.0-linux-amd64.tar.gz -o helm.tar.gz \
-    && tar -zxvf helm.tar.gz \
-    && mv linux-amd64/helm /usr/local/bin/helm \
-    && rm -rf helm.tar.gz linux-amd64
-
-# Install dependencies
+# Copy package files
 COPY package*.json ./
-RUN npm ci --only=production
 
-# Copy built TypeScript
-COPY dist ./dist
+# Install production dependencies only (no devDependencies)
+RUN npm ci --only=production && npm cache clean --force
+
+# Copy compiled JavaScript from builder stage
+COPY --from=builder /app/dist ./dist
 
 # Copy migrations
 COPY migrations ./migrations
@@ -39,9 +67,25 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # Create keys directory (volume will be mounted here)
 RUN mkdir -p /app/keys
 
+# Create Git repository cache directory (for GitOps operations)
+RUN mkdir -p /tmp/iot-k8s-main && chmod 777 /tmp/iot-k8s-main
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S billing && \
+    adduser -u 1001 -S billing -G billing && \
+    chown -R billing:billing /app /tmp/iot-k8s-main
+
+# Switch to non-root user
+USER billing
+
 # Environment
 ENV NODE_ENV=production
 ENV PORT=3100
+ENV GITOPS_REPO_DIR=/tmp/iot-k8s-main
+
+# Health check (using curl with silent mode)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD curl -f http://localhost:3100/health || exit 1
 
 EXPOSE 3100
 

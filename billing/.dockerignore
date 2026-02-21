@@ -3,27 +3,26 @@ node_modules
 npm-debug.log
 .npm
 
-# TypeScript
-src
-tsconfig.json
-tsconfig.build.json
-*.ts
-!dist/**/*.js
+# Build artifacts (will be generated inside Docker)
+dist
 
 # Tests
 test
 tests
 *.test.js
 *.spec.js
+coverage
+.nyc_output
 
 # Documentation
 *.md
 !README.md
 docs
 
-# Git
+# Git (excluding .git saves significant space)
 .git
 .gitignore
+.github
 
 # IDE
 .vscode
@@ -31,20 +30,32 @@ docs
 *.swp
 *.swo
 
-# Environment
+# Environment (secrets should never be in images)
 .env
-.env.*
+.env.local
+.env.*.local
 !.env.example
 
-# Build artifacts
+# Logs
 *.log
-coverage
-.nyc_output
 
-# Scripts (keep migrations and entrypoint)
+# Scripts (keep only docker-specific files)
 scripts
 !docker-entrypoint.sh
 
-# Misc
+# Docker files (no need to copy into image)
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Temporary files
+temp
+tmp
+*.tmp
+
+# OS files
 .DS_Store
 Thumbs.db
+
+# Keys directory (will be mounted as volume)
+keys/*.pem

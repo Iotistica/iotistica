@@ -257,13 +257,23 @@ export class StripeService {
           customer,
           customerSubscription
         );
+
+        // Sanitize client ID (for GitOps)
+        const clientId = customer.customer_id.replace(/^cust_/, '').substring(0, 8);
+        const namespace = process.env.GITOPS_ENABLED === 'true' 
+          ? `client-${clientId}` 
+          : `customer-${customer.customer_id.substring(5, 13)}`;
         
         await deploymentQueue.add('deploy-customer-stack', {
           customerId: customer.customer_id,
           email: customer.email,
           companyName: customer.company_name || customer.full_name || 'Customer',
           licenseKey,
-          namespace: `customer-${customer.customer_id.substring(5, 13)}`,
+          namespace,
+          // GitOps-specific fields
+          plan,
+          licensePublicKey: process.env.LICENSE_PUBLIC_KEY || '',
+          domain: process.env.BASE_DOMAIN || 'iotistic.com',
         }, {
           attempts: 3,
           backoff: {
@@ -272,7 +282,7 @@ export class StripeService {
           },
         });
 
-        console.log(`✅ Deployment job queued for ${customer.customer_id}`);
+        console.log(`✅ Deployment job queued for ${customer.customer_id} (namespace: ${namespace})`);
       } catch (error) {
         console.error(`❌ Failed to queue deployment:`, error);
         // Don't throw - subscription was created successfully, deployment can be retried
@@ -372,16 +382,22 @@ export class StripeService {
     // Use dynamic import to avoid circular dependency
     const { deploymentQueue } = await import('./deployment-queue');
     
+    // Determine namespace based on GitOps mode
+    const clientId = customerId.replace(/^cust_/, '').substring(0, 8);
+    const namespace = process.env.GITOPS_ENABLED === 'true' 
+      ? `client-${clientId}` 
+      : `customer-${customerId.substring(5, 13)}`;
+    
     await deploymentQueue.add('delete-customer-stack', {
       customerId,
-      namespace: `customer-${customerId.substring(5, 13)}`, // Extract sanitized ID
+      namespace,
       reason: 'subscription_deleted',
     }, {
       attempts: 3,
       backoff: { type: 'exponential', delay: 5000 },
     });
 
-    console.log(`🗑️  K8s cleanup job queued for customer ${customerId}`);
+    console.log(`🗑️  K8s cleanup job queued for customer ${customerId} (namespace: ${namespace})`);
 
     // Update customer status (use direct query as these fields aren't in the update method)
     const customer = await CustomerModel.getById(customerId);
