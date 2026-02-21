@@ -501,19 +501,32 @@ export class VirtualDeviceManager {
         value: String(value)
       }));
 
+      const rawImage = vd.metadata.image;
+      const image = rawImage?.startsWith('iotistic/')
+        ? `docker.io/${rawImage}`
+        : rawImage;
+
       logger.info('[VirtualDeviceManager] Built sidecar container spec', {
         virtualDeviceUuid: vd.uuid,
         containerName,
-        image: vd.metadata.image,
+        image,
         port,
         envVars: envArray
       });
 
       return {
         name: containerName,
-        image: vd.metadata.image,
+        image,
         env: envArray,
         ports: [{ containerPort: port }],
+        securityContext: {
+          privileged: false,
+          allowPrivilegeEscalation: false,
+          runAsNonRoot: true,
+          capabilities: {
+            drop: ['ALL']
+          }
+        },
         resources: {
           limits: {
             cpu: '500m',
