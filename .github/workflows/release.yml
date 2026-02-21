@@ -331,9 +331,9 @@ jobs:
 
   create-release:
     name: Create GitHub Release (changelog)
-    needs: [validate-release, retag-and-push]
+    needs: [validate-release]
     runs-on: [iotistic-lab-sc]
-    if: always() && needs.validate-release.result == 'success' && (needs.retag-and-push.result == 'success' || needs.retag-and-push.result == 'skipped')
+    if: needs.validate-release.result == 'success'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
