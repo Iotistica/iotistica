@@ -73,28 +73,6 @@ metadata:
     iotistica.com/rbac-role: virtual-agent-manager
 
 ---
-# ClusterRole: Minimal cluster-scoped permissions (read-only + namespace creation)
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: {{ include "iotistic.fullname" . }}-virtual-agent-manager
-  labels:
-    {{- include "iotistic.labels" . | nindent 4 }}
-    app.kubernetes.io/component: api
-    iotistica.com/rbac-role: virtual-agent-manager
-rules:
-  # Namespace management (create only, no delete or list)
-  # Deletion is soft-delete via labels + external operator
-  - apiGroups: [""]
-    resources: ["namespaces"]
-    verbs: ["create", "get"]
-
-  # HTTPRoute reading (auto-discover Cloud API URL from ingress)
-  - apiGroups: ["gateway.networking.k8s.io"]
-    resources: ["httproutes"]
-    verbs: ["get", "list"]
-
----
 # Predefined ClusterRole with safe permissions for fleet namespaces
 # The API will bind this role (NOT create arbitrary roles)
 apiVersion: rbac.authorization.k8s.io/v1
@@ -169,6 +147,12 @@ rules:
     verbs: ["create", "get", "update"]  # Can create and manage RoleBindings
     # NOTE: RBAC cannot restrict which role is referenced in a RoleBinding!
     # Kyverno policies below enforce that only fleet-namespace-manager can be bound
+
+  # ResourceQuota management (create quota immediately after namespace creation)
+  # Must be here because API creates quota before RoleBinding takes effect
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    verbs: ["create", "get", "update"]
 
 ---
 # ClusterRoleBinding to grant API service account cluster-scoped permissions
