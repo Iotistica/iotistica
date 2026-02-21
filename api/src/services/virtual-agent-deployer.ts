@@ -137,7 +137,7 @@ export class VirtualAgentDeployer {
     // Load configuration from environment
     this.defaultNamespace = process.env.VIRTUAL_AGENT_NAMESPACE || 'virtual-agents';
     this.apiServiceAccountNamespace = process.env.NAMESPACE || process.env.API_NAMESPACE || 'demo'; // Where iotistic-api SA is deployed
-    this.agentImage = process.env.AGENT_IMAGE || 'iotistic/agent:latest';
+    this.agentImage = process.env.AGENT_IMAGE || 'docker.io/iotistic/agent:latest';
     
     // Cloud API URL: Try to auto-discover from K8s HTTPRoute, fall back to env var or default
     this.discoverCloudApiUrl().then((url) => {
@@ -1052,7 +1052,7 @@ export class VirtualAgentDeployer {
       
       sidecars.push({
         name: containerName,
-        image: process.env.OPCUA_SIMULATOR_IMAGE || 'iotistic/opcua-simulator:latest',
+        image: process.env.OPCUA_SIMULATOR_IMAGE || 'docker.io/iotistic/opcua-simulator:latest',
         imagePullPolicy: process.env.OPCUA_SIMULATOR_PULL_POLICY as any || 'Always',
         env: [
           { name: 'PORT', value: port.toString() }, // CRITICAL: Pass unique port
