@@ -289,6 +289,28 @@ jobs:
           echo "| MQTT Monitor | \`${{ steps.pkg_versions.outputs.mqtt_pkg }}\` | \`${{ steps.verify.outputs.mqtt_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Housekeeper | \`${{ steps.pkg_versions.outputs.housekeeper_pkg }}\` | \`${{ steps.verify.outputs.housekeeper_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Postoffice | \`${{ steps.pkg_versions.outputs.postoffice_pkg }}\` | \`${{ steps.verify.outputs.postoffice_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Determine if retag-and-push will run
+          API="${{ steps.verify.outputs.api_src_tag }}"
+          DASH="${{ steps.verify.outputs.dashboard_src_tag }}"
+          MQTT="${{ steps.verify.outputs.mqtt_src_tag }}"
+          HOUSE="${{ steps.verify.outputs.housekeeper_src_tag }}"
+          POST="${{ steps.verify.outputs.postoffice_src_tag }}"
+          
+          echo "### Next Steps Decision" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "$API" != "skip" || "$DASH" != "skip" || "$MQTT" != "skip" || "$HOUSE" != "skip" || "$POST" != "skip" ]]; then
+            echo "✅ **retag-and-push job will RUN** - at least one image found" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⏭️ **retag-and-push job will be SKIPPED** - all image tags are 'skip'" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Reason:** No Docker images found matching package.json versions" >> $GITHUB_STEP_SUMMARY
+            echo "- This could be due to Docker Hub rate limiting" >> $GITHUB_STEP_SUMMARY
+            echo "- Or CI builds haven't pushed images for these versions" >> $GITHUB_STEP_SUMMARY
+            echo "- The release will still be created (git tag + GitHub Release)" >> $GITHUB_STEP_SUMMARY
+          fi
 
   retag-and-push:
     name: Retag & push release images
