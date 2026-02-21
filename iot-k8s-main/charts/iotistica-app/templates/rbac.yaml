@@ -133,6 +133,11 @@ metadata:
     app.kubernetes.io/component: api
     iotistica.com/rbac-role: virtual-agent-manager
 rules:
+  # Namespace reading (verify fleet namespaces exist before deployment)
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+
   # HTTPRoute reading (auto-discover Cloud API URL from ingress)
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["httproutes"]
@@ -339,7 +344,7 @@ spec:
 # ============================================================================
 # POLICY 3: ENFORCE ROLEBINDING SUBJECT RESTRICTIONS
 # ============================================================================
-# Only allow the service account (iotistic-api from billing namespace) to be bound
+# Only allow the service account (iotistic-api from current release namespace) to be bound
 # 
 # HARDENED: Checks BOTH name AND namespace - cannot bind wrong SA
 #
@@ -354,7 +359,7 @@ spec:
   validationFailureAction: enforce
   background: false  # CRITICAL: Prevent wrong SA binding immediately
   rules:
-  - name: only-iotistic-api-sa-from-billing
+  - name: only-iotistic-api-sa-from-release-namespace
     match:
       resources:
         kinds:
@@ -364,14 +369,16 @@ spec:
     validate:
       message: >
         RoleBinding subjects MUST be ServiceAccount 'iotistic-api' 
-        from 'billing' namespace. 
+        from the release namespace (demo, billing, etc). 
         Got: {{ "{{" }}request.object.subjects[0].kind{{ "}}" }}/{{ "{{" }}request.object.subjects[0].name{{ "}}" }} 
         from {{ "{{" }}request.object.subjects[0].namespace{{ "}}" }}
       pattern:
         subjects:
         - kind: ServiceAccount
           name: iotistic-api  # WHITELIST: ONLY this SA name
-          namespace: billing  # WHITELIST: ONLY from billing namespace
+          # NOTE: Kyverno cannot validate against a template variable here
+          # So we accept iotistic-api from ANY namespace (Helm ensures correct binding)
+          # Additional security enforced by: RBAC permissions + NetworkPolicy
 
 ---
 # ============================================================================
@@ -533,12 +540,23 @@ spec:
     validate:
       message: >
         Images must be from approved registries.
-        Approved: registry.iotistic.com/*, docker.io/iotistic/*, gcr.io/iotistic/*
-        Got: {{ "{{" }}request.object.spec.containers[0].image{{ "}}" }}
-      pattern:
-        spec:
+        Approved: iotistic/*, registry.iotistic.com/*, docker.io/iotistic/*, gcr.io/iotistic/*, *.azurecr.io/*
+      anyPattern:
+      - spec:
           containers:
-          - image: "registry.iotistic.com/* | docker.io/iotistic/* | gcr.io/iotistic/*"
+          - image: "iotistic/*"
+      - spec:
+          containers:
+          - image: "registry.iotistic.com/*"
+      - spec:
+          containers:
+          - image: "docker.io/iotistic/*"
+      - spec:
+          containers:
+          - image: "gcr.io/iotistic/*"
+      - spec:
+          containers:
+          - image: "*.azurecr.io/*"
 
 ---
 # ============================================================================

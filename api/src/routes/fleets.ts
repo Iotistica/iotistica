@@ -236,52 +236,19 @@ router.post('/fleets', jwtAuth, async (req, res) => {
       created_at: new Date().toISOString()
     } : {};
 
-    // Create K8s namespace for virtual fleets
+    // Assign pre-provisioned fleet namespace for virtual fleets
     let k8s_namespace = null;
     let namespaceWarning: string | undefined;
     
     if (fleet_type === 'virtual') {
-      try {
-        // Use VirtualAgentDeployer service which has properly configured K8s client
-        const { virtualAgentDeployer } = await import('../services/virtual-agent-deployer.js');
-        
-        k8s_namespace = await virtualAgentDeployer.createFleetNamespace({
-          fleet_uuid: fleet_uuid,
-          fleet_name,
-          customer_id,
-          agent_count,
-          devices_per_agent
-        });
-        
-        logger.info(`[FLEETS] Created K8s namespace for virtual fleet`, {
-          fleet_uuid,
-          namespace: k8s_namespace,
-          agent_count,
-          total_devices: agent_count * devices_per_agent
-        });
-        
-      } catch (k8sError: any) {
-        const k8sBody = k8sError?.body || k8sError?.response?.body;
-        const k8sReason = k8sBody?.reason;
-        const k8sMessage = k8sBody?.message;
-        const statusCode = k8sError?.statusCode;
-        const errorMessage = k8sMessage
-          || (k8sError instanceof Error ? k8sError.message : String(k8sError));
-        
-        logger.error('[FLEETS] Failed to create K8s namespace', {
-          fleet_uuid,
-          error: errorMessage,
-          statusCode,
-          k8sReason,
-          k8sMessage,
-          k8sBody
-        });
-        
-        // K8s not available - continue without namespace
-        logger.warn('[FLEETS] K8s not available - fleet created without namespace');
-        k8s_namespace = null;
-        namespaceWarning = errorMessage;
-      }
+      // For MVP: Virtual fleets should be selected from pre-created list
+      // Pre-created fleets already have k8s_namespace set in database
+      // Custom fleet creation will have no namespace (can be added later)
+      logger.info('[FLEETS] Virtual fleet created without pre-assigned namespace', {
+        fleet_uuid,
+        note: 'Use pre-created fleet instances from dashboard'
+      });
+      namespaceWarning = 'Virtual fleet created without namespace. Use pre-created fleet instances for agent deployment.';
     }
 
     const result = await query(
@@ -606,29 +573,13 @@ router.delete('/fleets/:id', jwtAuth, async (req, res) => {
       });
     }
 
-    // If this is a virtual fleet with K8s namespace, delete it
+    // If this is a virtual fleet with K8s namespace, handle cleanup
     if (fleet.k8s_namespace) {
-      try {
-        // Safety check: Verify namespace matches fleet
-        if (!fleet.k8s_namespace.startsWith('fleet-') && !fleet.k8s_namespace.startsWith('customer-')) {
-          logger.warn(`[FLEETS] Skipping deletion of non-fleet namespace (safety check)`, {
-            fleet_uuid: fleet.fleet_uuid,
-            namespace: fleet.k8s_namespace
-          });
-        } else {
-          logger.info(`[FLEETS] Deleting K8s namespace for fleet: ${fleet.fleet_uuid}`, { namespace: fleet.k8s_namespace });
-          const { virtualAgentDeployer } = await import('../services/virtual-agent-deployer.js');
-          await virtualAgentDeployer.deleteFleetNamespace(fleet.k8s_namespace);
-          logger.info(`[FLEETS] K8s namespace deleted successfully`, { namespace: fleet.k8s_namespace, fleet_uuid: fleet.fleet_uuid });
-        }
-      } catch (error: any) {
-        // Log error but continue with soft delete - namespace may already be gone or K8s unavailable
-        logger.warn(`[FLEETS] Failed to delete K8s namespace (continuing with soft delete)`, {
-          fleet_uuid: fleet.fleet_uuid,
-          namespace: fleet.k8s_namespace,
-          error: error.message
-        });
-      }
+      logger.info(`[FLEETS] Fleet deleted with assigned namespace`, { 
+        fleet_uuid: fleet.fleet_uuid,
+        namespace: fleet.k8s_namespace,
+        note: 'Pre-provisioned namespace remains for reuse'
+      });
     }
 
     // Perform soft delete in database

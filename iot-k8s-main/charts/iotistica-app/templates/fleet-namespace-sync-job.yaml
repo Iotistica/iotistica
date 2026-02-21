@@ -1,0 +1,177 @@
+{{- if .Values.fleetNamespaces.enabled }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "iotistic.fullname" . }}-fleet-namespace-sync
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fleet-namespace-sync
+  annotations:
+    # Run after fleet namespaces are created
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  ttlSecondsAfterFinished: 100
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "iotistic.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: fleet-namespace-sync
+    spec:
+      serviceAccountName: default
+      restartPolicy: OnFailure
+      containers:
+      - name: sync-fleet-namespaces
+        image: postgres:15-alpine
+        command:
+        - sh
+        - -c
+        - |
+          set -e
+          echo "Starting fleet namespace sync..."
+          
+          # Connect to PostgreSQL and populate fleet_namespaces table
+          psql "${DATABASE_URL}" <<'EOF'
+          -- Ensure fleet_namespaces table exists (migration should have created it)
+          CREATE TABLE IF NOT EXISTS fleet_namespaces (
+            name VARCHAR(63) PRIMARY KEY,
+            max_agents INTEGER NOT NULL,
+            max_devices INTEGER NOT NULL,
+            current_agents INTEGER DEFAULT 0,
+            current_devices INTEGER DEFAULT 0,
+            cpu_quota_request VARCHAR(20),
+            memory_quota_request VARCHAR(20),
+            cpu_quota_used VARCHAR(20) DEFAULT '0',
+            memory_quota_used VARCHAR(20) DEFAULT '0',
+            available BOOLEAN DEFAULT true,
+            utilization_percent NUMERIC(5,2) DEFAULT 0,
+            last_synced TIMESTAMP DEFAULT NOW(),
+            created_at TIMESTAMP DEFAULT NOW()
+          );
+          
+          -- Insert or update fleet namespaces from Helm values
+          {{- range .Values.fleetNamespaces.namespaces }}
+          INSERT INTO fleet_namespaces (
+            name, 
+            max_agents, 
+            max_devices, 
+            cpu_quota_request, 
+            memory_quota_request,
+            current_agents,
+            available,
+            utilization_percent,
+            last_synced
+          ) VALUES (
+            'fleet-{{ .name }}',
+            {{ .maxAgents }},
+            {{ .maxDevices }},
+            '{{ .cpuRequest }}',
+            '{{ .memoryRequest }}',
+            0,
+            true,
+            0,
+            NOW()
+          )
+          ON CONFLICT (name) DO UPDATE SET
+            max_agents = EXCLUDED.max_agents,
+            max_devices = EXCLUDED.max_devices,
+            cpu_quota_request = EXCLUDED.cpu_quota_request,
+            memory_quota_request = EXCLUDED.memory_quota_request,
+            last_synced = NOW();
+          {{- end }}
+          
+          -- Query and display synced namespaces
+          SELECT name, max_agents, max_devices, available, utilization_percent 
+          FROM fleet_namespaces 
+          ORDER BY name;
+          
+          -- Create sample fleet instances from pre-provisioned namespaces
+          -- Each namespace gets a corresponding fleet instance
+          {{- range .Values.fleetNamespaces.namespaces }}
+          DELETE FROM fleets WHERE k8s_namespace = 'fleet-{{ .name }}';
+          
+          INSERT INTO fleets (
+            fleet_uuid,
+            fleet_id,
+            fleet_name,
+            customer_id,
+            fleet_type,
+            description,
+            agent_count,
+            devices_per_agent,
+            k8s_namespace,
+            status,
+            environment,
+            created_at,
+            updated_at,
+            deployment_config
+          ) VALUES (
+            gen_random_uuid(),
+            'fleet-' || SUBSTR((gen_random_uuid())::text, 1, 8),
+            'Fleet {{ .name | title }}',
+            '00000000-0000-0000-0000-000000000001',
+            'virtual',
+            'Pre-provisioned fleet in {{ .name }} namespace',
+            {{ .maxAgents }},
+            {{ div .maxDevices .maxAgents }},
+            'fleet-{{ .name }}',
+            'active',
+            'demo',
+            NOW(),
+            NOW(),
+            jsonb_build_object(
+              'agent_count', {{ .maxAgents }},
+              'devices_per_agent', {{ div .maxDevices .maxAgents }},
+              'total_devices', {{ .maxDevices }},
+              'created_at', NOW()::text
+            )
+          );
+          {{- end }}
+          
+          -- Query and display created fleets
+          SELECT fleet_name, agent_count, devices_per_agent, k8s_namespace, status
+          FROM fleets
+          WHERE k8s_namespace LIKE 'fleet-%'
+          ORDER BY k8s_namespace;
+          
+          EOF
+          
+          echo "Fleet namespace sync and fleet instance creation completed successfully!"
+        env:
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.api.sql.SecretName }}
+              key: server
+        - name: DB_PORT
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.api.sql.SecretName }}
+              key: port
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.api.sql.SecretName }}
+              key: dbname
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.api.sql.SecretName }}
+              key: username
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.api.sql.SecretName }}
+              key: password
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.api.sql.SecretName }}
+              key: password
+        - name: DATABASE_URL
+          value: "postgresql://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)"
+{{- end }}

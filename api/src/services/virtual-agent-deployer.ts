@@ -523,6 +523,7 @@ export class VirtualAgentDeployer {
           },
           spec: {
             // Security: Run as non-root user (virtual agents don't need Docker socket or VPN)
+            hostNetwork: false, // Required by Kyverno policy: no host network in fleet namespaces
             securityContext: {
               runAsNonRoot: true,
               runAsUser: 1000, // agentuser from Dockerfile
@@ -538,6 +539,7 @@ export class VirtualAgentDeployer {
                 image: this.agentImage,
                 imagePullPolicy: process.env.AGENT_IMAGE_PULL_POLICY as any || 'Always',
                 securityContext: {
+                  privileged: false, // Required by Kyverno policy
                   allowPrivilegeEscalation: false,
                   readOnlyRootFilesystem: false, // Agent needs to write to /app/data
                   runAsNonRoot: true,
@@ -1107,6 +1109,7 @@ export class VirtualAgentDeployer {
           failureThreshold: 3
         },
         securityContext: {
+          privileged: false, // Required by Kyverno policy
           allowPrivilegeEscalation: false,
           runAsNonRoot: true,
           capabilities: {
