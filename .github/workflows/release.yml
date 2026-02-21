@@ -237,49 +237,49 @@ jobs:
               return 1
             fi
             
-            echo "Checking ${DOCKER_ORG}/${svc}:${prefer_tag}..."
+            echo "Checking ${DOCKER_ORG}/${svc}:${prefer_tag}..." >&2
             
             # Try the package.json tag first (exact match)
             if docker manifest inspect "${DOCKER_ORG}/${svc}:${prefer_tag}" >/dev/null 2>&1; then
-              echo "  ✅ Found: ${DOCKER_ORG}/${svc}:${prefer_tag}"
+              echo "  ✅ Found: ${DOCKER_ORG}/${svc}:${prefer_tag}" >&2
               echo "$prefer_tag"
               return 0
             else
               CHECK_OUTPUT=$(docker manifest inspect "${DOCKER_ORG}/${svc}:${prefer_tag}" 2>&1 || true)
               if echo "$CHECK_OUTPUT" | grep -qi "no such manifest\|manifest unknown\|not found"; then
-                echo "  ❌ Image not found: ${DOCKER_ORG}/${svc}:${prefer_tag}"
+                echo "  ❌ Image not found: ${DOCKER_ORG}/${svc}:${prefer_tag}" >&2
               elif echo "$CHECK_OUTPUT" | grep -qi "rate limit\|429"; then
-                echo "  ⚠️ Rate limited when checking ${DOCKER_ORG}/${svc}:${prefer_tag}"
+                echo "  ⚠️ Rate limited when checking ${DOCKER_ORG}/${svc}:${prefer_tag}" >&2
               elif echo "$CHECK_OUTPUT" | grep -qi "unauthorized\|401\|403"; then
-                echo "  ⚠️ Authentication failed for ${DOCKER_ORG}/${svc}:${prefer_tag}"
+                echo "  ⚠️ Authentication failed for ${DOCKER_ORG}/${svc}:${prefer_tag}" >&2
               else
-                echo "  ⚠️ Error: $CHECK_OUTPUT"
+                echo "  ⚠️ Error: $CHECK_OUTPUT" >&2
               fi
             fi
             
             # If prefer_tag doesn't start with v, also try with v prefix
             if [[ "$prefer_tag" != v* ]]; then
-              echo "Checking ${DOCKER_ORG}/${svc}:v${prefer_tag}..."
+              echo "Checking ${DOCKER_ORG}/${svc}:v${prefer_tag}..." >&2
               if docker manifest inspect "${DOCKER_ORG}/${svc}:v${prefer_tag}" >/dev/null 2>&1; then
-                echo "  ✅ Found: ${DOCKER_ORG}/${svc}:v${prefer_tag}"
+                echo "  ✅ Found: ${DOCKER_ORG}/${svc}:v${prefer_tag}" >&2
                 echo "v${prefer_tag}"
                 return 0
               else
                 CHECK_OUTPUT=$(docker manifest inspect "${DOCKER_ORG}/${svc}:v${prefer_tag}" 2>&1 || true)
                 if echo "$CHECK_OUTPUT" | grep -qi "no such manifest\|manifest unknown\|not found"; then
-                  echo "  ❌ Image not found: ${DOCKER_ORG}/${svc}:v${prefer_tag}"
+                  echo "  ❌ Image not found: ${DOCKER_ORG}/${svc}:v${prefer_tag}" >&2
                 elif echo "$CHECK_OUTPUT" | grep -qi "rate limit\|429"; then
-                  echo "  ⚠️ Rate limited when checking ${DOCKER_ORG}/${svc}:v${prefer_tag}"
+                  echo "  ⚠️ Rate limited when checking ${DOCKER_ORG}/${svc}:v${prefer_tag}" >&2
                 elif echo "$CHECK_OUTPUT" | grep -qi "unauthorized\|401\|403"; then
-                  echo "  ⚠️ Authentication failed for ${DOCKER_ORG}/${svc}:v${prefer_tag}"
+                  echo "  ⚠️ Authentication failed for ${DOCKER_ORG}/${svc}:v${prefer_tag}" >&2
                 else
-                  echo "  ⚠️ Error: $CHECK_OUTPUT"
+                  echo "  ⚠️ Error: $CHECK_OUTPUT" >&2
                 fi
               fi
             fi
             
             # No versioned image found
-            echo "  ⏭️ Result: skip"
+            echo "  ⏭️ Result: skip" >&2
             echo "skip"
           }
           
