@@ -318,6 +318,18 @@ jobs:
     needs: validate-release
     if: always() && (needs.validate-release.outputs.api_src_tag != 'skip' || needs.validate-release.outputs.dashboard_src_tag != 'skip' || needs.validate-release.outputs.mqtt_src_tag != 'skip' || needs.validate-release.outputs.housekeeper_src_tag != 'skip' || needs.validate-release.outputs.postoffice_src_tag != 'skip')
     steps:
+      - name: Log execution decision
+        run: |
+          echo "✅ retag-and-push job is RUNNING"
+          echo "At least one Docker image was found in Docker Hub"
+          echo ""
+          echo "Images found:"
+          echo "  API: ${{ needs.validate-release.outputs.api_src_tag }}"
+          echo "  Dashboard: ${{ needs.validate-release.outputs.dashboard_src_tag }}"
+          echo "  MQTT Monitor: ${{ needs.validate-release.outputs.mqtt_src_tag }}"
+          echo "  Housekeeper: ${{ needs.validate-release.outputs.housekeeper_src_tag }}"
+          echo "  Postoffice: ${{ needs.validate-release.outputs.postoffice_src_tag }}"
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
