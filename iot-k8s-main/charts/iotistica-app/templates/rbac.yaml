@@ -414,13 +414,21 @@ spec:
         - "fleet-*"
     validate:
       message: "Privileged containers are not allowed in fleet namespaces"
-      pattern:
-        spec:
+      anyPattern:
+      - spec:
           containers:
           - securityContext:
               privileged: false
               runAsNonRoot: true
               allowPrivilegeEscalation: false
+      - spec:
+          template:
+            spec:
+              containers:
+              - securityContext:
+                  privileged: false
+                  runAsNonRoot: true
+                  allowPrivilegeEscalation: false
 
   - name: deny-hostpath-volumes
     match:
@@ -437,10 +445,15 @@ spec:
         - "fleet-*"
     validate:
       message: "hostPath volumes are not allowed in fleet namespaces"
-      pattern:
-        spec:
+      anyPattern:
+      - spec:
           =(volumes):
           - X(hostPath): null
+      - spec:
+          template:
+            spec:
+              =(volumes):
+              - X(hostPath): null
 
   - name: deny-host-network
     match:
@@ -457,9 +470,13 @@ spec:
         - "fleet-*"
     validate:
       message: "hostNetwork is not allowed in fleet namespaces"
-      pattern:
-        spec:
-          hostNetwork: false
+      anyPattern:
+      - spec:
+          =(hostNetwork): false
+      - spec:
+          template:
+            spec:
+              =(hostNetwork): false
 
 ---
 # ============================================================================
@@ -496,8 +513,8 @@ spec:
         Pods must define CPU and memory requests AND limits.
         Example: resources: { limits: { cpu: 500m, memory: 512Mi }, 
                                requests: { cpu: 250m, memory: 256Mi } }
-      pattern:
-        spec:
+      anyPattern:
+      - spec:
           containers:
           - resources:
               limits:
@@ -506,6 +523,17 @@ spec:
               requests:
                 memory: "?*"
                 cpu: "?*"
+      - spec:
+          template:
+            spec:
+              containers:
+              - resources:
+                  limits:
+                    memory: "?*"
+                    cpu: "?*"
+                  requests:
+                    memory: "?*"
+                    cpu: "?*"
 
 ---
 # ============================================================================
@@ -557,6 +585,31 @@ spec:
       - spec:
           containers:
           - image: "*.azurecr.io/*"
+      - spec:
+          template:
+            spec:
+              containers:
+              - image: "iotistic/*"
+      - spec:
+          template:
+            spec:
+              containers:
+              - image: "registry.iotistic.com/*"
+      - spec:
+          template:
+            spec:
+              containers:
+              - image: "docker.io/iotistic/*"
+      - spec:
+          template:
+            spec:
+              containers:
+              - image: "gcr.io/iotistic/*"
+      - spec:
+          template:
+            spec:
+              containers:
+              - image: "*.azurecr.io/*"
 
 ---
 # ============================================================================

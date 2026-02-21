@@ -105,6 +105,24 @@ spec:
               value: {{ .Values.api.cloudApiUrl | quote }}
             {{- end }}
 
+            # Virtual agent resource requests/limits (optional overrides)
+            {{- if .Values.api.env.VIRTUAL_AGENT_CPU_REQUEST }}
+            - name: VIRTUAL_AGENT_CPU_REQUEST
+              value: {{ .Values.api.env.VIRTUAL_AGENT_CPU_REQUEST | quote }}
+            {{- end }}
+            {{- if .Values.api.env.VIRTUAL_AGENT_MEMORY_REQUEST }}
+            - name: VIRTUAL_AGENT_MEMORY_REQUEST
+              value: {{ .Values.api.env.VIRTUAL_AGENT_MEMORY_REQUEST | quote }}
+            {{- end }}
+            {{- if .Values.api.env.VIRTUAL_AGENT_CPU_LIMIT }}
+            - name: VIRTUAL_AGENT_CPU_LIMIT
+              value: {{ .Values.api.env.VIRTUAL_AGENT_CPU_LIMIT | quote }}
+            {{- end }}
+            {{- if .Values.api.env.VIRTUAL_AGENT_MEMORY_LIMIT }}
+            - name: VIRTUAL_AGENT_MEMORY_LIMIT
+              value: {{ .Values.api.env.VIRTUAL_AGENT_MEMORY_LIMIT | quote }}
+            {{- end }}
+
             # --- AI / Azure OpenAI ---
             - name: AI_PROVIDER
               value: {{ .Values.api.env.AI_PROVIDER | quote }}

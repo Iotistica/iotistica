@@ -123,6 +123,7 @@ api:
     LOG_COMPRESSION: "true"
     VPN_ENABLED: "false"
     FORCE_COLOR: "1"
+    VIRTUAL_AGENT_CPU_REQUEST: "100m"
   # MQTT credentials
   # SECURITY: For production, use Kubernetes Secrets instead of hardcoding here
   # Option 1 (Recommended): Create secret manually:

@@ -81,7 +81,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: iotistic-api
-    namespace: {{ $.Release.Namespace }}  # API namespace (demo, billing, etc)
+    namespace: {{ $.Release.Namespace }}  # Use the release namespace (e.g., demo, billing, customer-specific)
 
 ---
 # LimitRange: Enforce default resource requests/limits (prevents pods without resources)

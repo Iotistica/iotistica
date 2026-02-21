@@ -26,10 +26,10 @@ agent:
   # Configured for 40 modbus devices + 1 OPC-UA
   resources:
     requests:
-      cpu: 500m
+      cpu: 150m
       memory: 1Gi
     limits:
-      cpu: 2000m
+      cpu: 500m
       memory: 3Gi
   
   # Agent environment variables
