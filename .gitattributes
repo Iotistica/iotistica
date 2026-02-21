@@ -1,0 +1,21 @@
+# Enforce Unix line endings (LF) for shell scripts
+# This prevents "cannot execute binary file" errors when piping to sh
+*.sh text eol=lf
+bin/*.sh text eol=lf
+scripts/*.sh text eol=lf
+
+# Enforce LF for other text files that need it
+*.bash text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf
+docker-compose.*.yml text eol=lf
+
+# Binary files
+*.jar binary
+*.zip binary
+*.tar binary
+*.tar.gz binary
