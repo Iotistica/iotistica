@@ -276,6 +276,9 @@ export class VirtualAgentDeployer {
       // Ensure namespace exists
       await this.ensureNamespace(namespace);
 
+      // Pre-flight check: Validate namespace has sufficient quota
+      await this.validateNamespaceQuota(namespace, config);
+
       // 1. Create Secret with provisioning key
       await this.createProvisioningKeySecret(namespace, secretName, config.provisioningKey);
       logger.info('Provisioning key Secret created', { namespace, secretName });
@@ -351,6 +354,102 @@ export class VirtualAgentDeployer {
       } else {
         throw error;
       }
+    }
+  }
+
+  /**
+   * Validate namespace has sufficient quota for the pod
+   * Pre-flight check to catch quota issues before attempting deployment
+   */
+  private async validateNamespaceQuota(namespace: string, config: VirtualAgentConfig): Promise<void> {
+    try {
+      // Try to get ResourceQuota for namespace
+      const quotas = await this.coreApi.listNamespacedResourceQuota(namespace);
+      if (!quotas.body.items || quotas.body.items.length === 0) {
+        logger.debug('No ResourceQuota found for namespace, allowing deployment', { namespace });
+        return; // No quota, nothing to validate
+      }
+
+      const quota = quotas.body.items[0]; // Use first quota
+      const hardLimits = quota.spec?.hard || {};
+      const used = quota.status?.used || {};
+
+      // Pod resource requirements (agent container)
+      const cpuLimit = config.resourceLimits?.cpu || '500m';
+      const memoryLimit = config.resourceLimits?.memory || '512Mi';
+
+      // Parse quota values (could be in '500m' or '512Mi' format)
+      const parseMemory = (val: string) => {
+        if (val.includes('Mi')) return parseInt(val);
+        if (val.includes('Gi')) return parseInt(val) * 1024;
+        return parseInt(val);
+      };
+
+      const parseCpu = (val: string) => {
+        if (val.includes('m')) return parseInt(val);
+        return parseInt(val) * 1000; // Convert cores to millicores
+      };
+
+      const quotaHardCpu = hardLimits['limits.cpu'] ? parseCpu(String(hardLimits['limits.cpu'])) : null;
+      const quotaUsedCpu = used['limits.cpu'] ? parseCpu(String(used['limits.cpu'])) : 0;
+      const quotaHardMem = hardLimits['limits.memory'] ? parseMemory(String(hardLimits['limits.memory'])) : null;
+      const quotaUsedMem = used['limits.memory'] ? parseMemory(String(used['limits.memory'])) : 0;
+
+      const podCpuLimit = parseCpu(cpuLimit);
+      const podMemoryLimit = parseMemory(memoryLimit);
+
+      // Check if pod would exceed quota
+      if (quotaHardCpu !== null && quotaUsedCpu + podCpuLimit > quotaHardCpu) {
+        const error = new Error(
+          `Insufficient CPU quota in namespace '${namespace}'. ` +
+          `Pod requires ${cpuLimit} CPU limit, but only ${quotaHardCpu - quotaUsedCpu}m available. ` +
+          `(Current usage: ${quotaUsedCpu}m / ${quotaHardCpu}m limit)`
+        );
+        (error as any).quotaError = true;
+        logger.error('Quota validation failed - CPU', {
+          namespace,
+          podRequest: cpuLimit,
+          quotaUsed: quotaUsedCpu,
+          quotaHard: quotaHardCpu,
+          available: quotaHardCpu - quotaUsedCpu
+        });
+        throw error;
+      }
+
+      if (quotaHardMem !== null && quotaUsedMem + podMemoryLimit > quotaHardMem) {
+        const error = new Error(
+          `Insufficient memory quota in namespace '${namespace}'. ` +
+          `Pod requires ${memoryLimit} memory limit, but only ${quotaHardMem - quotaUsedMem}Mi available. ` +
+          `(Current usage: ${quotaUsedMem}Mi / ${quotaHardMem}Mi limit)`
+        );
+        (error as any).quotaError = true;
+        logger.error('Quota validation failed - Memory', {
+          namespace,
+          podRequest: memoryLimit,
+          quotaUsed: quotaUsedMem,
+          quotaHard: quotaHardMem,
+          available: quotaHardMem - quotaUsedMem
+        });
+        throw error;
+      }
+
+      logger.info('Quota validation passed', {
+        namespace,
+        cpuUsed: `${quotaUsedCpu}m/${quotaHardCpu}m`,
+        memUsed: `${quotaUsedMem}Mi/${quotaHardMem}Mi`,
+        podRequires: `${cpuLimit}/${memoryLimit}`
+      });
+
+    } catch (error: any) {
+      // Re-throw quota errors with context
+      if (error.quotaError || error.message?.includes('quota')) {
+        throw error;
+      }
+      // Other errors (e.g., permission denied) - log but don't block
+      logger.warn('Could not validate quota (non-critical)', {
+        namespace,
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 

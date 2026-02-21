@@ -48,12 +48,12 @@ spec:
     # - Total: 300m CPU, 480Mi memory per pod
     # Formula: If not explicitly set, defaults to 300m * maxAgents
     requests.cpu: {{ .cpuRequest | default (printf "%dm" (mul 300 .maxAgents | int)) | quote }}
-    limits.cpu: {{ .cpuLimit | default (printf "%dm" (mul 500 .maxAgents | int)) | quote }}
+    limits.cpu: {{ .cpuLimit | default "2000m" | quote }}
     
     # Memory limits
-    # Formula: If not explicitly set, defaults to 480Mi * maxAgents
+    # Formula: Allocate 4Gi for 2 agents with multiple sidecars each
     requests.memory: {{ .memoryRequest | default (printf "%dMi" (mul 480 .maxAgents | int)) | quote }}
-    limits.memory: {{ .memoryLimit | default (printf "%dMi" (mul 768 .maxAgents | int)) | quote }}
+    limits.memory: {{ .memoryLimit | default "4096Mi" | quote }}
     
     # Secret limits (provisioning keys, TLS certs, API tokens, etc.)
     # Formula: 5 secrets per agent (provisioning key, TLS cert, auth token, etc.)

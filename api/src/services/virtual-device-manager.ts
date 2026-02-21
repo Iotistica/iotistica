@@ -349,6 +349,9 @@ export class VirtualDeviceManager {
         namespace: agent.k8s_namespace
       });
 
+      // Pre-flight check: Validate namespace has sufficient quota for sidecar
+      await this.validateNamespaceQuotaForSidecar(agent.k8s_namespace);
+
       // Update ResourceQuota before patching deployment
       // Skip quota update - Helm pre-configures ResourceQuota with adequate limits
       // await this.updateFleetQuota(agent.k8s_namespace, config.deviceUuid);
@@ -431,6 +434,104 @@ export class VirtualDeviceManager {
       // await this.updateFleetQuota(agent.k8s_namespace, deviceUuid);
 
       await this.patchVirtualAgentDeployment(deviceUuid, agent?.helm_release_name, agent?.k8s_namespace);
+    }
+  }
+
+  /**
+   * Validate namespace has sufficient quota for adding a sidecar
+   * Throws error if quota would be exceeded
+   */
+  private async validateNamespaceQuotaForSidecar(namespace: string): Promise<void> {
+    if (!this.coreApi) {
+      logger.warn('[VirtualDeviceManager] K8s coreApi not available, skipping quota validation');
+      return;
+    }
+
+    try {
+      const quotas = await this.coreApi.listNamespacedResourceQuota(namespace);
+      if (!quotas.body.items || quotas.body.items.length === 0) {
+        logger.debug('[VirtualDeviceManager] No ResourceQuota found for namespace', { namespace });
+        return; // No quota, nothing to validate
+      }
+
+      const quota = quotas.body.items[0];
+      const hardLimits = quota.spec?.hard || {};
+      const used = quota.status?.used || {};
+
+      // Sidecar resources (OPC-UA, Modbus, etc.)
+      const sidecarCpuLimit = 150; // in millicores
+      const sidecarMemoryLimit = 512; // in Mi
+
+      // Parse quota values
+      const parseCpu = (val: any) => {
+        const str = String(val);
+        if (str.includes('m')) return parseInt(str);
+        return parseInt(str) * 1000; // Convert cores to millicores
+      };
+
+      const parseMemory = (val: any) => {
+        const str = String(val);
+        if (str.includes('Mi')) return parseInt(str);
+        if (str.includes('Gi')) return parseInt(str) * 1024;
+        return parseInt(str);
+      };
+
+      const quotaHardCpu = hardLimits['limits.cpu'] ? parseCpu(hardLimits['limits.cpu']) : null;
+      const quotaUsedCpu = used['limits.cpu'] ? parseCpu(used['limits.cpu']) : 0;
+      const quotaHardMem = hardLimits['limits.memory'] ? parseMemory(hardLimits['limits.memory']) : null;
+      const quotaUsedMem = used['limits.memory'] ? parseMemory(used['limits.memory']) : 0;
+
+      // Check if adding sidecar would exceed quota
+      if (quotaHardCpu !== null && quotaUsedCpu + sidecarCpuLimit > quotaHardCpu) {
+        const error = new Error(
+          `Insufficient CPU quota to add sidecar in namespace '${namespace}'. ` +
+          `Sidecar requires 150m CPU limit, but only ${quotaHardCpu - quotaUsedCpu}m available. ` +
+          `(Current usage: ${quotaUsedCpu}m / ${quotaHardCpu}m limit)`
+        );
+        (error as any).quotaError = true;
+        logger.error('[VirtualDeviceManager] Quota validation failed - CPU', {
+          namespace,
+          sidecarRequest: '150m',
+          quotaUsed: quotaUsedCpu,
+          quotaHard: quotaHardCpu,
+          available: quotaHardCpu - quotaUsedCpu
+        });
+        throw error;
+      }
+
+      if (quotaHardMem !== null && quotaUsedMem + sidecarMemoryLimit > quotaHardMem) {
+        const error = new Error(
+          `Insufficient memory quota to add sidecar in namespace '${namespace}'. ` +
+          `Sidecar requires 512Mi memory limit, but only ${quotaHardMem - quotaUsedMem}Mi available. ` +
+          `(Current usage: ${quotaUsedMem}Mi / ${quotaHardMem}Mi limit)`
+        );
+        (error as any).quotaError = true;
+        logger.error('[VirtualDeviceManager] Quota validation failed - Memory', {
+          namespace,
+          sidecarRequest: '512Mi',
+          quotaUsed: quotaUsedMem,
+          quotaHard: quotaHardMem,
+          available: quotaHardMem - quotaUsedMem
+        });
+        throw error;
+      }
+
+      logger.info('[VirtualDeviceManager] Quota validation passed for sidecar', {
+        namespace,
+        cpuAvailable: `${quotaUsedCpu}m + ${sidecarCpuLimit}m = ${quotaUsedCpu + sidecarCpuLimit}m / ${quotaHardCpu}m`,
+        memAvailable: `${quotaUsedMem}Mi + ${sidecarMemoryLimit}Mi = ${quotaUsedMem + sidecarMemoryLimit}Mi / ${quotaHardMem}Mi`
+      });
+
+    } catch (error: any) {
+      // Re-throw quota errors
+      if (error.quotaError || error.message?.includes('quota')) {
+        throw error;
+      }
+      // Other errors - log but don't block
+      logger.warn('[VirtualDeviceManager] Could not validate quota (non-critical)', {
+        namespace,
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 

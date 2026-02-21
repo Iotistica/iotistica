@@ -369,11 +369,11 @@ fleetNamespaces:
       maxDevices: 32             # 2 agents * 16 devices each (4 protocols * 4 devices)
       fleetType: virtual
       quotaPolicy: strict
-      # Calculated: 600m CPU request (300m * 2), 960Mi memory (480Mi * 2)
+      # Calculated: 2 agents @ 500m + 4 sidecars @ 150m = 1600m CPU (+ 400m buffer = 2000m)
       cpuRequest: "600m"
-      cpuLimit: "1000m"          # Allow burst: 500m * 2
+      cpuLimit: "2000m"          # Covers 2 agents @ 500m + 4 sidecars @ 150m = 1600m actual
       memoryRequest: "960Mi"
-      memoryLimit: "1536Mi"      # Allow burst: 768Mi * 2
+      memoryLimit: "4096Mi"      # Covers all containers + overhead
       networkPolicy:
         enabled: true            # Restrict traffic for security
     
@@ -383,10 +383,11 @@ fleetNamespaces:
       maxDevices: 32             # 2 agents * 16 devices each
       fleetType: virtual
       quotaPolicy: strict
+      # Calculated: 2 agents @ 500m + 4 sidecars @ 150m = 1600m CPU (+ 400m buffer = 2000m)
       cpuRequest: "600m"
-      cpuLimit: "1000m"
+      cpuLimit: "2000m"          # Covers 2 agents @ 500m + 4 sidecars @ 150m = 1600m actual
       memoryRequest: "960Mi"
-      memoryLimit: "1536Mi"
+      memoryLimit: "4096Mi"      # Covers all containers + overhead
       networkPolicy:
         enabled: true
     
