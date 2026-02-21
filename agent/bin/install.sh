@@ -4,7 +4,7 @@ set -e
 # Iotistic Agent - Unified Installation Script
 # Version: AGENT_VERSION_PLACEHOLDER
 # This script installs the Iotistic agent using either Docker or Systemd
-# Usage: curl -sfL https://get.iotistica.com/agent | bash
+# Usage: curl -sfL https://get.iotistica.com/agent | sh
 #
 # Environment Variables (CI/Non-interactive mode):
 #   IOTISTIC_AGENT_VERSION        - Agent version to install (default: latest for Docker, dev for Systemd)
@@ -12,10 +12,8 @@ set -e
 #   IOTISTIC_CLOUD_API_ENDPOINT   - Cloud API endpoint (e.g., https://api.iotistica.com)
 #   IOTISTIC_PROVISIONING_KEY     - Provisioning API key (leave empty for local mode)
 
-# Re-exec with bash if running under sh
-if [ -z "$BASH_VERSION" ]; then
-    exec bash "$0" "$@"
-fi
+# Note: This script is POSIX-compliant and works with both sh and bash
+# No re-exec needed - works when piped to sh
 
 SCRIPT_VERSION="AGENT_VERSION_PLACEHOLDER"
 
@@ -65,9 +63,9 @@ echo "Detected OS: $OS $OS_VERSION ($ARCH_NAME)"
 
 # Helper function to install Docker if needed
 install_docker_if_needed() {
-    local REQUIRE_INSTALL="${1:-no}"  # 'yes' = install without asking, 'no' = ask in interactive mode
+    REQUIRE_INSTALL="${1:-no}"  # 'yes' = install without asking, 'no' = ask in interactive mode
     
-    if command -v docker &> /dev/null; then
+    if command -v docker >/dev/null 2>&1; then
         echo "✓ Docker is already installed ($(docker --version))"
         return 0
     fi
@@ -76,13 +74,14 @@ install_docker_if_needed() {
     echo ""
     
     # Determine if we should install
-    local SHOULD_INSTALL="$REQUIRE_INSTALL"
+    SHOULD_INSTALL="$REQUIRE_INSTALL"
     if [ "$SHOULD_INSTALL" != "yes" ]; then
         if [ -n "$CI" ] || [ ! -t 0 ]; then
             echo "Running in non-interactive mode - Docker will be installed automatically."
             SHOULD_INSTALL="yes"
         else
-            read -p "Would you like to install Docker now? (yes/no): " SHOULD_INSTALL
+            echo -n "Would you like to install Docker now? (yes/no): "
+            read SHOULD_INSTALL
         fi
     fi
     
@@ -267,9 +266,12 @@ echo ""
         echo "Running in interactive mode"
         
         # Prompt for configuration (read directly from /dev/tty to work when piped)
-        read -p "Enter cloud API endpoint (leave empty for local mode): " CLOUD_API_ENDPOINT < /dev/tty
-        read -p "Enter provisioning API key (leave empty for local mode): " PROVISIONING_KEY < /dev/tty
-        read -p "Enter device API port [48484]: " DEVICE_API_PORT < /dev/tty
+        echo -n "Enter cloud API endpoint (leave empty for local mode): " >/dev/tty
+        read CLOUD_API_ENDPOINT < /dev/tty
+        echo -n "Enter provisioning API key (leave empty for local mode): " >/dev/tty
+        read PROVISIONING_KEY < /dev/tty
+        echo -n "Enter device API port [48484]: " >/dev/tty
+        read DEVICE_API_PORT < /dev/tty
         DEVICE_API_PORT=${DEVICE_API_PORT:-48484}
         AGENT_VERSION="dev"
     else
