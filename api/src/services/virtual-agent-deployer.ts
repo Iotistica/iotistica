@@ -1086,7 +1086,7 @@ export class VirtualAgentDeployer {
             memory: '128Mi'
           },
           limits: {
-            cpu: '500m',
+            cpu: '150m',
             memory: '512Mi'
           }
         }
@@ -1207,7 +1207,7 @@ export class VirtualAgentDeployer {
    * 
    * Per-agent resource model:
    *   - Agent container: 250m CPU, 256Mi memory (request), 500m CPU, 512Mi memory (limit)
-   *   - Per simulator/endpoint (1 per device): 100m CPU, 128Mi memory (request), 500m CPU, 512Mi memory (limit)
+   *   - Per simulator/endpoint (1 per device): 100m CPU, 128Mi memory (request), 300m CPU, 512Mi memory (limit)
    * 
    * Resource calculation uses devices_per_agent to estimate simulator count
    * (assumes 1 simulator per device = 1 protocol endpoint per device)
@@ -1252,22 +1252,19 @@ export class VirtualAgentDeployer {
       
       logger.info('Fleet namespace created', { namespace, fleet_uuid: params.fleet_uuid });
       
-      // Calculate resource quotas based on:
-      // 1. Agent count (specified by user)
-      // 2. Devices per agent (specified by user) = estimate of simulator count
-      // This accounts for OPC UA, Modbus, BACnet, and other protocol simulators
+      // Calculate resource quotas accounting for agent + sidecar containers
+      // Agent: 250m request, 500m limit
+      // Sidecar (OPC-UA, etc): 100m request, 150m limit (respects 800m pod max)
+      // Total per agent: 350m request, 650m limit
       
-      // Base agent container resources
       const agentCpuRequest = 0.25;        // 250m
       const agentMemoryRequest = 256;      // 256Mi
       const agentCpuLimit = 0.5;           // 500m
       const agentMemoryLimit = 512;        // 512Mi
       
-      // Per-simulator resources (applies to OPC UA, Modbus, BACnet, etc)
-      // Assumes 1 simulator per device (most common: 1 protocol endpoint per device)
       const simulatorCpuRequest = 0.1;     // 100m per simulator
       const simulatorMemoryRequest = 128;  // 128Mi per simulator
-      const simulatorCpuLimit = 0.5;       // 500m per simulator
+      const simulatorCpuLimit = 0.15;      // 150m per simulator (reduced to fit 800m pod limit)
       const simulatorMemoryLimit = 512;    // 512Mi per simulator
       
       // Total per agent = agent + (simulator * devices_per_agent)

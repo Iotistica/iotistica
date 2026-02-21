@@ -529,7 +529,7 @@ export class VirtualDeviceManager {
         },
         resources: {
           limits: {
-            cpu: '500m',
+            cpu: '150m',
             memory: '512Mi'
           },
           requests: {
