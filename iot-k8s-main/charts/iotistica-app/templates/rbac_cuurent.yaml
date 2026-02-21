@@ -73,6 +73,28 @@ metadata:
     iotistica.com/rbac-role: virtual-agent-manager
 
 ---
+# ClusterRole: Minimal cluster-scoped permissions (read-only + namespace creation)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "iotistic.fullname" . }}-virtual-agent-manager
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+    iotistica.com/rbac-role: virtual-agent-manager
+rules:
+  # Namespace management (create only, no delete or list)
+  # Deletion is soft-delete via labels + external operator
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create", "get"]
+
+  # HTTPRoute reading (auto-discover Cloud API URL from ingress)
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
+    verbs: ["get", "list"]
+
+---
 # Predefined ClusterRole with safe permissions for fleet namespaces
 # The API will bind this role (NOT create arbitrary roles)
 # CRITICAL: Name must be 'iotistic-fleet-namespace-manager' (matches Kyverno policy)
@@ -118,12 +140,7 @@ rules:
     verbs: ["create", "get"]  # NO update, NO delete
 
 ---
-# ClusterRole: Minimal cluster-scoped permissions (read-only discovery + RoleBinding)
-# 
-# SECURITY HARDENING: Namespace/ResourceQuota creation removed
-# - Namespaces are PRE-PROVISIONED by Helm chart during customer deployment
-# - API can only manage resources within existing namespaces
-# - Follows least-privilege principle
+# ClusterRole: Minimal cluster-scoped permissions (namespace creation + RoleBinding only)
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -133,14 +150,26 @@ metadata:
     app.kubernetes.io/component: api
     iotistica.com/rbac-role: virtual-agent-manager
 rules:
+  # Namespace management (create only, no delete or list)
+  # Deletion is soft-delete via labels + external operator
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create", "get"]
+
   # HTTPRoute reading (auto-discover Cloud API URL from ingress)
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["httproutes"]
     verbs: ["get", "list"]
 
-  # RoleBinding management (REMOVED: only used during namespace bootstrap)
-  # RoleBindings are now created by Helm chart during fleet namespace provisioning
-  # API no longer needs to create RoleBindings dynamically
+  # RoleBinding management (only for fleet namespaces)
+  # API can ONLY create RoleBindings that bind the predefined fleet-namespace-manager role
+  # It CANNOT create arbitrary Roles (removed - see logic below)
+  # ⚠️ CRITICAL: Kyverno policies MUST enforce roleRef restrictions (see below)
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["create", "get", "update"]  # Can create and manage RoleBindings
+    # NOTE: RBAC cannot restrict which role is referenced in a RoleBinding!
+    # Kyverno policies below enforce that only fleet-namespace-manager can be bound
 
 ---
 # ClusterRoleBinding to grant API service account cluster-scoped permissions
@@ -178,83 +207,51 @@ roleRef:
 #    - API cannot define arbitrary permissions
 #    - All rules are explicitly approved by cluster admins
 #
-# ============================================================================
-# PRE-PROVISIONED NAMESPACE PATTERN (RBAC HARDENING)
-# ============================================================================
-#
-# SECURITY PATTERN:
-#
-# 1. Helm Chart Pre-Provisions Fleet Namespaces (admin-controlled):
-#    - Created during customer instance deployment
-#    - Includes Namespace, ResourceQuota, RoleBinding, LimitRange, NetworkPolicy
-#    - Capacity limits set by cluster admins (based on node resources)
-#    - API has NO permission to create namespaces or resource quotas
-#
-# 2. Predefined ClusterRole (admin-defined, safe):
-#    - fleet-namespace-manager contains all safe permissions
-#    - API uses this role ONLY within pre-provisioned namespaces
-#    - All rules explicitly approved by cluster admins
-#
-# 3. Per-namespace RoleBinding (created by Helm, NOT API):
-#    - Binds iotistic-api SA to fleet-namespace-manager role
-#    - Namespace-scoped (limited blast radius)
-#    - If API is compromised, attacker limited to existing namespace permissions
+# 3. Per-namespace RoleBinding (created by API):
+#    - API creates RoleBinding that binds fleet-namespace-manager to this namespace
+#    - RoleBinding is namespace-scoped (limited blast radius)
+#    - If API is compromised, attacker can only use predefined safe permissions
 #
 # WHY THIS IS SAFER:
 #
-# ✅ No namespace creation permission (prevents namespace sprawl, quota bypass)
-# ✅ No resourcequota permission (prevents resource exhaustion attacks)
-# ✅ No rolebinding creation (all bindings pre-created by Helm)
-# ✅ API cannot escalate privileges or access other namespaces
-# ✅ Capacity planning enforced at deployment time
-# ✅ Clear audit trail (Helm releases track all changes)
+# ✅ No arbitrary role creation (no privilege escalation)
+# ✅ No cluster-wide RBAC modification allowed
+# ✅ All dangerous verbs are in predefined role (admin-controlled)
+# ✅ Compromise is limited to predefined safe permission set
+# ✅ API cannot grant itself new permissions
 #
-# DEPLOYMENT WORKFLOW:
+# WHAT THE API CODE DOES:
 #
-# 1. Cluster admin deploys customer instance:
-#    helm install demo-release ./charts/iotistica-app -f values/demo/values.yaml
+# When creating a fleet namespace:
 #
-# 2. Helm creates pre-provisioned fleet namespaces (from values.yaml):
-#    - fleet-test: 2 agents, 10 devices, 700m CPU, 768Mi RAM
-#    - fleet-pool-01: 2 agents, 10 devices, 700m CPU, 768Mi RAM
+#   1. Create namespace fleet-{uuid}
+#   2. Create RoleBinding in that namespace:
+#      - Bind iotistic-api SA to fleet-namespace-manager role
+#   3. Create ResourceQuota
+#   4. Done - no Role creation
 #
-# 3. Each namespace gets:
-#    - ResourceQuota (hard limits)
-#    - LimitRange (default container resources)
-#    - RoleBinding (API → fleet-namespace-manager)
-#    - NetworkPolicy (optional traffic restrictions)
+# CODE EXAMPLE (virtual-agent-deployer.ts):
 #
-# 4. API assigns fleets to existing namespaces:
-#    - No creation, only reads available namespaces
-#    - Deploys agents within quota constraints
-#    - Fails gracefully if namespace doesn't exist
-#
-# CONFIGURATION (values/demo/values.yaml):
-#
-# fleetNamespaces:
-#   enabled: true
-#   namespaces:
-#     - name: test
-#       maxAgents: 2
-#       maxDevices: 10
-#       cpuRequest: 700m
-#       memoryRequest: 768Mi
+#   const roleBinding = {
+#     apiVersion: 'rbac.authorization.k8s.io/v1',
+#     kind: 'RoleBinding',
+#     metadata: { name: 'fleet-manager-binding', namespace },
+#     roleRef: {
+#       apiGroup: 'rbac.authorization.k8s.io',
+#       kind: 'ClusterRole',  # NOT Role, but ClusterRole
+#       name: 'iotistic-fleet-namespace-manager'  # Predefined
+#     },
+#     subjects: [{
+#       kind: 'ServiceAccount',
+#       name: 'iotistic-api',
+#       namespace: this.apiServiceAccountNamespace
+#     }]
+#   };
+#   await rbacApi.createNamespacedRoleBinding(namespace, roleBinding);
 #
 # ============================================================================
 
 ---
----
-# ============================================================================
-# KYVERNO POLICIES (DEFENSE IN DEPTH)
-# ============================================================================
-# These policies enforce restrictions that RBAC alone cannot
-#
-# IMPORTANT: With pre-provisioned namespaces, RoleBinding policy is NO LONGER NEEDED
-# RoleBindings are created by Helm during deployment, not by API at runtime
-#
-# Kept for backwards compatibility if dynamic provisioning is re-enabled
-# ============================================================================
-
 ---
 # ============================================================================
 # POLICY 1: RESTRICT ROLEBINDING ROLE REFERENCES (WHITELIST PATTERN)
@@ -328,7 +325,7 @@ spec:
         - ingress-nginx
     validate:
       message: >
-        Namespaces MUST follow pattern 'fleet-*' or 'customer-*' or 'billing' or 'demo' or 'iotistic-utils'.
+        Namespaces MUST follow pattern 'fleet-*' or 'customer-*' or 'billing'.
         System/cluster namespaces are managed by admins only.
         Invalid name: {{ "{{" }}request.object.metadata.name{{ "}}" }}
       pattern:

@@ -336,28 +336,9 @@ networkPolicy:
 resourceQuota:
   enabled: false  # Disabled for local development
 
-# ============================================================================
-# Pre-Provisioned Fleet Namespaces
-# ============================================================================
-# Create fleet namespaces during customer deployment (not dynamically by API)
-# This follows least-privilege principle for RBAC hardening
-#
-# CLUSTER CAPACITY ANALYSIS (2-node AKS):
-# - Total allocatable: 3800m CPU, 6470Mi memory
-# - Current usage: ~650m CPU (17%), ~4848Mi memory (76%)
-# - Available: ~3150m CPU, ~1622Mi memory
-#
-# VIRTUAL AGENT RESOURCES (per pod with 4 protocol sidecars):
-# - Agent container: 250m CPU, 256Mi memory
-# - OPC-UA sidecar: 50m CPU, 128Mi memory
-# - Modbus TCP sidecar: 50m CPU, 32Mi memory
-# - Modbus RTU sidecar: 50m CPU, 32Mi memory
-# - SNMP sidecar: 50m CPU, 32Mi memory
-# - Total per pod: 450m CPU, 480Mi memory
-#
-# CAPACITY WITH 4 SIDECARS: 3 agents max (1622Mi / 480Mi = 3.37)
-# CONFIGURED: 2 agents per namespace (conservative, leaves headroom)
-#
+# Fleet Namespaces (Pre-provisioned agent pools)
+# These namespaces are created by Helm and contain virtual agent pods
+# Each namespace has ResourceQuota to limit resource usage
 fleetNamespaces:
   enabled: true
   namespaces:
@@ -395,5 +376,5 @@ fleetNamespaces:
     #   maxDevices: 32
     #   fleetType: virtual
     #   quotaPolicy: strict
-    #   cpuRequest: "900m"
+    #   cpuRequest: "600m"
     #   memoryRequest: "960Mi"
