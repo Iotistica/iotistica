@@ -19,9 +19,15 @@ import { logger } from '../utils/logger';
 
 const router: Router = express.Router();
 
+// Detect Kubernetes environment
+const isKubernetes = !!process.env.KUBERNETES_SERVICE_HOST;
+
+// Use /tmp in Kubernetes (always writable), local uploads/ otherwise
+const uploadDir = isKubernetes ? '/tmp/ifc' : 'uploads/ifc';
+
 // Configure multer for IFC file uploads
 const upload = multer({
-  dest: 'uploads/ifc/',
+  dest: uploadDir,
   limits: {
     fileSize: 100 * 1024 * 1024, // 100MB max
   },
@@ -33,12 +39,6 @@ const upload = multer({
     }
   },
 });
-
-// Ensure upload directory exists
-const uploadDir = 'uploads/ifc';
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
 
 /**
  * POST /api/digital-twin/graph/upload-ifc

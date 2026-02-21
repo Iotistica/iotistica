@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 
 // Azure Storage configuration
-const AZURE_STORAGE_ACCOUNT = process.env.AZURE_STORAGE_ACCOUNT || 'your-storage-account';
+const AZURE_STORAGE_ACCOUNT = process.env.AZURE_STORAGE_ACCOUNT || 'iotistic';
 const AZURE_STORAGE_CONTAINER = process.env.AZURE_STORAGE_CONTAINER || 'scripts';
 const BLOB_INSTALL_PATH = 'agent/install';
 const BLOB_INSTALL_SHA256_PATH = 'agent/install.sha256';
