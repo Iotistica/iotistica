@@ -202,17 +202,29 @@ jobs:
       - name: Verify CI-built images exist (and determine source tags)
         id: verify
         shell: bash
-        continue-on-error: true
         run: |
           set -euo pipefail
 
           # Test for rate limiting first
           echo "Testing Docker Hub connectivity..."
-          if ! docker manifest inspect iotistic/api:latest >/dev/null 2>&1; then
-            echo "⚠️ WARNING: Cannot access Docker Hub - possibly rate limited or authentication issue"
+          TEST_OUTPUT=$(docker manifest inspect iotistic/api:latest 2>&1 || true)
+          if [[ $? -ne 0 ]]; then
+            echo "⚠️ WARNING: Cannot access Docker Hub"
+            echo "Error output: $TEST_OUTPUT"
+            if echo "$TEST_OUTPUT" | grep -qi "rate limit\|429"; then
+              echo "❌ RATE LIMITED by Docker Hub"
+            elif echo "$TEST_OUTPUT" | grep -qi "unauthorized\|401\|403"; then
+              echo "❌ AUTHENTICATION FAILED - check DOCKERHUB_USERNAME and DOCKERHUB_PASSWORD secrets"
+            else
+              echo "❌ UNKNOWN ERROR accessing Docker Hub"
+            fi
+            echo ""
             echo "⚠️ All image checks will return 'skip'"
             echo "⚠️ Release will be created without Docker images"
+          else
+            echo "✅ Docker Hub connectivity OK"
           fi
+          echo ""
 
           # Helper: check image existence (returns tag to use or "skip")
           check_image() {
@@ -225,21 +237,49 @@ jobs:
               return 1
             fi
             
+            echo "Checking ${DOCKER_ORG}/${svc}:${prefer_tag}..."
+            
             # Try the package.json tag first (exact match)
             if docker manifest inspect "${DOCKER_ORG}/${svc}:${prefer_tag}" >/dev/null 2>&1; then
+              echo "  ✅ Found: ${DOCKER_ORG}/${svc}:${prefer_tag}"
               echo "$prefer_tag"
               return 0
+            else
+              CHECK_OUTPUT=$(docker manifest inspect "${DOCKER_ORG}/${svc}:${prefer_tag}" 2>&1 || true)
+              if echo "$CHECK_OUTPUT" | grep -qi "no such manifest\|manifest unknown\|not found"; then
+                echo "  ❌ Image not found: ${DOCKER_ORG}/${svc}:${prefer_tag}"
+              elif echo "$CHECK_OUTPUT" | grep -qi "rate limit\|429"; then
+                echo "  ⚠️ Rate limited when checking ${DOCKER_ORG}/${svc}:${prefer_tag}"
+              elif echo "$CHECK_OUTPUT" | grep -qi "unauthorized\|401\|403"; then
+                echo "  ⚠️ Authentication failed for ${DOCKER_ORG}/${svc}:${prefer_tag}"
+              else
+                echo "  ⚠️ Error: $CHECK_OUTPUT"
+              fi
             fi
             
             # If prefer_tag doesn't start with v, also try with v prefix
             if [[ "$prefer_tag" != v* ]]; then
+              echo "Checking ${DOCKER_ORG}/${svc}:v${prefer_tag}..."
               if docker manifest inspect "${DOCKER_ORG}/${svc}:v${prefer_tag}" >/dev/null 2>&1; then
+                echo "  ✅ Found: ${DOCKER_ORG}/${svc}:v${prefer_tag}"
                 echo "v${prefer_tag}"
                 return 0
+              else
+                CHECK_OUTPUT=$(docker manifest inspect "${DOCKER_ORG}/${svc}:v${prefer_tag}" 2>&1 || true)
+                if echo "$CHECK_OUTPUT" | grep -qi "no such manifest\|manifest unknown\|not found"; then
+                  echo "  ❌ Image not found: ${DOCKER_ORG}/${svc}:v${prefer_tag}"
+                elif echo "$CHECK_OUTPUT" | grep -qi "rate limit\|429"; then
+                  echo "  ⚠️ Rate limited when checking ${DOCKER_ORG}/${svc}:v${prefer_tag}"
+                elif echo "$CHECK_OUTPUT" | grep -qi "unauthorized\|401\|403"; then
+                  echo "  ⚠️ Authentication failed for ${DOCKER_ORG}/${svc}:v${prefer_tag}"
+                else
+                  echo "  ⚠️ Error: $CHECK_OUTPUT"
+                fi
               fi
             fi
             
             # No versioned image found
+            echo "  ⏭️ Result: skip"
             echo "skip"
           }
           
