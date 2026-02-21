@@ -1,5 +1,7 @@
 const express = require('express');
 const helmet = require('helmet');
+const https = require('https');
+const { URL } = require('url');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,27 +20,43 @@ const INSTALL_URL = `https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZ
 const INSTALL_SHA256_URL = `https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_STORAGE_CONTAINER}/${BLOB_INSTALL_SHA256_PATH}`;
 
 // Helper function to proxy content from Azure Storage
-async function proxyFromStorage(url, res, contentType = 'text/plain') {
-  try {
-    const response = await fetch(url);
-    
-    if (!response.ok) {
-      throw new Error(`Azure Storage returned ${response.status}: ${response.statusText}`);
+function proxyFromStorage(url, res, contentType = 'text/plain') {
+  const parsedUrl = new URL(url);
+  
+  const options = {
+    hostname: parsedUrl.hostname,
+    path: parsedUrl.pathname,
+    method: 'GET',
+    headers: {
+      'User-Agent': 'Iotistica-Install-Redirect/1.0'
+    }
+  };
+
+  https.get(options, (response) => {
+    if (response.statusCode !== 200) {
+      console.error(`[ERROR] Azure Storage returned ${response.statusCode}: ${response.statusMessage}`);
+      res.status(502).json({
+        error: 'Bad Gateway',
+        message: 'Failed to fetch installation script'
+      });
+      return;
     }
 
     // Set appropriate headers
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'public, max-age=300'); // Cache for 5 minutes
     
-    // Stream the content directly to client
-    response.body.pipe(res);
-  } catch (error) {
+    // Pipe Azure Storage response directly to client
+    response.pipe(res);
+  }).on('error', (error) => {
     console.error(`[ERROR] Failed to fetch from Azure Storage: ${error.message}`);
-    res.status(502).json({
-      error: 'Bad Gateway',
-      message: 'Failed to fetch installation script'
-    });
-  }
+    if (!res.headersSent) {
+      res.status(502).json({
+        error: 'Bad Gateway',
+        message: 'Failed to fetch installation script'
+      });
+    }
+  });
 }
 
 // Health check endpoint
@@ -47,15 +65,15 @@ app.get('/health', (req, res) => {
 });
 
 // Main proxy endpoint: curl -sfL https://get.iotistica.com/agent | sh
-app.get('/agent', async (req, res) => {
+app.get('/agent', (req, res) => {
   console.log(`[${new Date().toISOString()}] Install request from ${req.ip}`);
-  await proxyFromStorage(INSTALL_URL, res, 'text/x-shellscript');
+  proxyFromStorage(INSTALL_URL, res, 'text/x-shellscript');
 });
 
 // SHA256 checksum endpoint
-app.get('/agent.sha256', async (req, res) => {
+app.get('/agent.sha256', (req, res) => {
   console.log(`[${new Date().toISOString()}] Checksum request from ${req.ip}`);
-  await proxyFromStorage(INSTALL_SHA256_URL, res, 'text/plain');
+  proxyFromStorage(INSTALL_SHA256_URL, res, 'text/plain');
 });
 
 // Info endpoint - shows what would be executed

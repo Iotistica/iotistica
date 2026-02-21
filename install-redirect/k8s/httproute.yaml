@@ -9,13 +9,12 @@ spec:
       namespace: envoy-gateway-system
       sectionName: https  # Attach to HTTPS listener
   hostnames:
-    - iotistica.com
-    - www.iotistica.com
+    - get.iotistica.com
   rules:
     - matches:
         - path:
             type: PathPrefix
-            value: /agent/
+            value: /
       backendRefs:
         - name: install-redirect
           port: 80
