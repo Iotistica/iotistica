@@ -372,6 +372,22 @@ jobs:
       needs.validate-release.result == 'success' &&
       (needs.retag-and-push.result == 'success' || needs.retag-and-push.result == 'skipped')
     steps:
+      - name: Log execution decision
+        run: |
+          echo "✅ create-release job is RUNNING"
+          echo ""
+          echo "Job results:"
+          echo "  validate-release: ${{ needs.validate-release.result }}"
+          echo "  retag-and-push: ${{ needs.retag-and-push.result }}"
+          echo ""
+          if [[ "${{ needs.retag-and-push.result }}" == "skipped" ]]; then
+            echo "⏭️ retag-and-push was SKIPPED (no Docker images found)"
+            echo "📝 Creating release anyway (git tag + GitHub Release)"
+          else
+            echo "✅ retag-and-push completed successfully"
+            echo "📝 Creating release with Docker images"
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
