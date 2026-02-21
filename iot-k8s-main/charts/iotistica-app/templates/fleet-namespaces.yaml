@@ -55,8 +55,9 @@ spec:
     requests.memory: {{ .memoryRequest | default (printf "%dMi" (mul 480 .maxAgents | int)) | quote }}
     limits.memory: {{ .memoryLimit | default (printf "%dMi" (mul 768 .maxAgents | int)) | quote }}
     
-    # Secret limits (provisioning keys, TLS certs)
-    secrets: {{ mul .maxAgents 2 | quote }}
+    # Secret limits (provisioning keys, TLS certs, API tokens, etc.)
+    # Formula: 5 secrets per agent (provisioning key, TLS cert, auth token, etc.)
+    secrets: {{ mul .maxAgents 5 | quote }}
     
     # Service limits (optional per-agent services)
     services: {{ .maxAgents | quote }}

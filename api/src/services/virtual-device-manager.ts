@@ -230,7 +230,7 @@ export class VirtualDeviceManager {
     });
 
     // 5. Build container config
-    const image = config.image || `iotistic/${config.protocol}-simulator:latest`;
+    const image = config.image || `docker.io/iotistic/${config.protocol}-simulator:latest`;
     const containerEnv = await this.buildContainerEnv(config.protocol, config.profile, nextPort, config.slaveCount);
 
     // 6. Build connection object (protocol-specific format)
@@ -350,7 +350,8 @@ export class VirtualDeviceManager {
       });
 
       // Update ResourceQuota before patching deployment
-      await this.updateFleetQuota(agent.k8s_namespace, config.deviceUuid);
+      // Skip quota update - Helm pre-configures ResourceQuota with adequate limits
+      // await this.updateFleetQuota(agent.k8s_namespace, config.deviceUuid);
 
       await this.patchVirtualAgentDeployment(config.deviceUuid, agent.helm_release_name, agent.k8s_namespace);
       logger.info('[VirtualDeviceManager] K8s deployment patch completed successfully', {
@@ -426,89 +427,10 @@ export class VirtualDeviceManager {
     // (virtual devices don't need agent reconciliation since they're sidecars)
     if (agent?.helm_release_name && agent?.k8s_namespace) {
       // Update ResourceQuota before patching deployment
-      await this.updateFleetQuota(agent.k8s_namespace, deviceUuid);
+      // Skip quota update - Helm pre-configures ResourceQuota with adequate limits
+      // await this.updateFleetQuota(agent.k8s_namespace, deviceUuid);
 
       await this.patchVirtualAgentDeployment(deviceUuid, agent?.helm_release_name, agent?.k8s_namespace);
-    }
-  }
-
-  /**
-   * Update fleet ResourceQuota to account for virtual devices (sidecars)
-   * 
-   * Resource allocation:
-   * - Agent: 250m CPU request, 256Mi memory request, 500m CPU limit, 512Mi memory limit
-   * - Each sidecar: 100m CPU request, 128Mi memory request, 500m CPU limit, 512Mi memory limit
-   */
-  async updateFleetQuota(namespace: string, deviceUuid: string): Promise<void> {
-    if (!this.coreApi) {
-      logger.warn('[VirtualDeviceManager] K8s CoreAPI not available, skipping quota update', { namespace });
-      return;
-    }
-
-    try {
-      // Get virtual device count for this agent
-      const virtualDevices = await this.getVirtualDevices(deviceUuid);
-      const sidecarCount = virtualDevices.length;
-
-      // Calculate total resources: 1 agent + N sidecars
-      const totalCpuRequest = 250 + (sidecarCount * 100); // millis
-      const totalMemoryRequest = 256 + (sidecarCount * 128); // MiB
-      const totalCpuLimit = 500 + (sidecarCount * 500); // millis
-      const totalMemoryLimit = 512 + (sidecarCount * 512); // MiB
-
-      logger.info('[VirtualDeviceManager] Updating fleet quota for sidecars', {
-        namespace,
-        deviceUuid,
-        sidecarCount,
-        quotas: {
-          cpuRequest: `${totalCpuRequest}m`,
-          memoryRequest: `${totalMemoryRequest}Mi`,
-          cpuLimit: `${totalCpuLimit}m`,
-          memoryLimit: `${totalMemoryLimit}Mi`
-        }
-      });
-
-      // Update ResourceQuota
-      const quotaPatch = {
-        spec: {
-          hard: {
-            'requests.cpu': `${totalCpuRequest}m`,
-            'requests.memory': `${totalMemoryRequest}Mi`,
-            'limits.cpu': `${totalCpuLimit}m`,
-            'limits.memory': `${totalMemoryLimit}Mi`,
-            'pods': '1' // Still 1 pod (agent + sidecars)
-          }
-        }
-      };
-
-      await this.coreApi.patchNamespacedResourceQuota(
-        'fleet-quota',
-        namespace,
-        quotaPatch,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        {
-          headers: {
-            'Content-Type': 'application/strategic-merge-patch+json'
-          }
-        }
-      );
-
-      logger.info('[VirtualDeviceManager] Fleet quota updated successfully', {
-        namespace,
-        sidecarCount
-      });
-    } catch (error) {
-      logger.error('[VirtualDeviceManager] Failed to update fleet quota', {
-        namespace,
-        deviceUuid,
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      });
-      // Don't throw - let the deployment attempt anyway in case quota isn't the issue
     }
   }
 
