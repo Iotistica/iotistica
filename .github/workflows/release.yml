@@ -202,8 +202,17 @@ jobs:
       - name: Verify CI-built images exist (and determine source tags)
         id: verify
         shell: bash
+        continue-on-error: true
         run: |
           set -euo pipefail
+
+          # Test for rate limiting first
+          echo "Testing Docker Hub connectivity..."
+          if ! docker manifest inspect iotistic/api:latest >/dev/null 2>&1; then
+            echo "⚠️ WARNING: Cannot access Docker Hub - possibly rate limited or authentication issue"
+            echo "⚠️ All image checks will return 'skip'"
+            echo "⚠️ Release will be created without Docker images"
+          fi
 
           # Helper: check image existence (returns tag to use or "skip")
           check_image() {
@@ -324,7 +333,7 @@ jobs:
     name: Create GitHub Release (changelog)
     needs: [validate-release, retag-and-push]
     runs-on: [iotistic-lab-sc]
-    if: always() && needs.validate-release.result == 'success'
+    if: always() && needs.validate-release.result == 'success' && (needs.retag-and-push.result == 'success' || needs.retag-and-push.result == 'skipped')
     steps:
       - name: Checkout
         uses: actions/checkout@v4
