@@ -1,9 +1,21 @@
 {{- if and .Values.api .Values.api.enabled }}
+# KYVERNO POLICIES (DEFENSE IN DEPTH)
+# ============================================================================
+# These policies enforce restrictions that RBAC alone cannot
+#
+# IMPORTANT: With pre-provisioned namespaces, RoleBinding policy is NO LONGER NEEDED
+# RoleBindings are created by Helm during deployment, not by API at runtime
+#
+# Kept for backwards compatibility if dynamic provisioning is re-enabled
+# ============================================================================
+
+{{- if .Values.kyverno.createClusterPolicies }}
+
+---
 ---
 # ============================================================================
-# RBAC HARDENING GUIDE - READ THIS FIRST
+# KYVERNO POLICIES (DEFENSE IN DEPTH)
 # ============================================================================
-#
 # THREAT MODEL:
 #
 # 1. If API service is compromised, what can attacker do?
@@ -656,5 +668,7 @@ spec:
 # 4. Success metrics:
 #    - kubectl get policyreport -A | grep -c "PASS"  (should have passes)
 #    - kubectl get policyreport -A | grep "FAIL" (should have no fails in enforce mode)
+
+{{- end }}
 
 {{- end }}
