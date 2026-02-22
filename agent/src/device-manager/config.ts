@@ -266,22 +266,6 @@ export class ConfigManager extends EventEmitter {
 	public getDiscoveryTargets(protocol: string): any[] {
 		const endpoints = this.targetConfig.endpoints || [];
 		
-		// DETAILED DEBUG: Log ALL endpoints in targetConfig
-		this.logger?.infoSync('=== DISCOVERY DEBUG: ALL ENDPOINTS IN MEMORY ===', {
-			component: LogComponents.configManager,
-			operation: 'getDiscoveryTargets',
-			protocol,
-			totalEndpoints: endpoints.length,
-			endpoints: endpoints.map((e: any) => ({
-				uuid: e.uuid,
-				name: e.name,
-				protocol: e.protocol,
-				connection: e.connection,
-				connectionString: e.connectionString,
-				dataPointsCount: e.dataPoints?.length || 0
-			}))
-		});
-		
 		const filtered = endpoints.filter((endpoint: any) => {
 			if (endpoint.protocol !== protocol) return false;
 
@@ -295,17 +279,6 @@ export class ConfigManager extends EventEmitter {
 				}
 			}
 
-			// Log each endpoint evaluation
-			this.logger?.infoSync(`Evaluating endpoint for ${protocol} discovery`, {
-				component: LogComponents.configManager,
-				operation: 'getDiscoveryTargets',
-				endpointUuid: endpoint.uuid,
-				endpointName: endpoint.name,
-				endpointProtocol: endpoint.protocol,
-				connection: connection,
-				dataPoints: endpoint.dataPoints
-			});
-
 			switch (protocol) {
 				case 'modbus':
 					// Accept endpoints with slaveRange (scan multiple slaves) OR slaveId (single slave)
@@ -313,21 +286,7 @@ export class ConfigManager extends EventEmitter {
 				case 'opcua':
 					const hasEndpointUrl = !!connection?.endpointUrl;
 					const hasNoDataPoints = !endpoint.dataPoints || endpoint.dataPoints.length === 0;
-					const shouldDiscover = hasEndpointUrl && hasNoDataPoints;
-					
-					this.logger?.infoSync('OPC UA endpoint discovery check', {
-						component: LogComponents.configManager,
-						operation: 'getDiscoveryTargets',
-						endpointUuid: endpoint.uuid,
-						endpointName: endpoint.name,
-						hasEndpointUrl,
-						hasNoDataPoints,
-						shouldDiscover,
-						endpointUrl: connection?.endpointUrl,
-						dataPointsLength: endpoint.dataPoints?.length || 0
-					});
-					
-					return shouldDiscover;
+					return hasEndpointUrl && hasNoDataPoints;
 				case 'snmp':
 					return connection?.community && 
 						(!endpoint.dataPoints || endpoint.dataPoints.length === 0);
@@ -337,14 +296,6 @@ export class ConfigManager extends EventEmitter {
 				default:
 					return false;
 			}
-		});
-		
-		// Log what was filtered
-		this.logger?.debugSync('Discovery targets filtered', {
-			component: LogComponents.configManager,
-			protocol,
-			totalFiltered: filtered.length,
-			filteredNames: filtered.map((e: any) => e.name),
 		});
 		
 		return filtered;
@@ -802,14 +753,44 @@ export class ConfigManager extends EventEmitter {
 
 			// Sync each device to SQLite
 			for (const device of devices) {
-				this.logger?.debugSync('=== PROCESSING DEVICE FOR DB SYNC ===', {
-					component: LogComponents.configManager,
-					operation: 'syncEndpointsToDatabase',
-					deviceUuid: device.uuid,
-					deviceName: device.name,
-					protocol: device.protocol,
-					targetDataPointsCount: device.dataPoints?.length || 0
-				});
+				// CRITICAL: Skip discovery targets (devices with slaveRange)
+				// Discovery targets are configuration-only - they exist in targetConfig
+				// to trigger discovery, but should NOT be created in endpoints table.
+				// Only the discovered slave devices (with slaveId) should be in endpoints.
+				
+				const deviceAny = device as any;
+				
+				// Parse connection from either object or string format (same logic as getDiscoveryTargets)
+				let connection: any = deviceAny.connection;
+				if (!connection && deviceAny.connectionString) {
+					try {
+						connection = JSON.parse(deviceAny.connectionString);
+					} catch (err) {
+						this.logger?.warnSync('Failed to parse connectionString', {
+							component: LogComponents.configManager,
+							deviceName: device.name,
+							connectionString: deviceAny.connectionString,
+							error: err instanceof Error ? err.message : String(err)
+						});
+						connection = null;
+					}
+				}
+				
+				// Check if this is a Modbus discovery target (has slaveRange)
+				const hasSlaveRange = connection?.slaveRange !== undefined;
+				
+				if (device.protocol === 'modbus' && hasSlaveRange) {
+					this.logger?.debugSync('Skipping discovery target device (has slaveRange)', {
+						component: LogComponents.configManager,
+						operation: 'syncEndpointsToDatabase',
+						deviceUuid: device.uuid,
+						deviceName: device.name,
+						connection: connection,
+						slaveRange: connection.slaveRange,
+						reason: 'Discovery target - only discovered slaves should be in endpoints table'
+					});
+					continue; // Skip to next device
+				}
 				
 				// Normalize property names from cloud API (camelCase) to SQLite (snake_case)
 				const normalizedDevice = this.normalizeDevice(device as ProtocolAdapterDevice);
@@ -988,8 +969,45 @@ export class ConfigManager extends EventEmitter {
 	private calculateSteps(): ConfigStep[] {
 		const steps: ConfigStep[] =[];
 		
-		const targetDevices = this.targetConfig.endpoints || [];
+		const allTargetDevices = this.targetConfig.endpoints || [];
 		const currentDevices = this.currentConfig.endpoints || [];
+		
+		// CRITICAL: Filter out discovery targets (devices with slaveRange)
+		// Discovery targets should never be in reconciliation steps - they're config-only
+		const targetDevices = allTargetDevices.filter((device: any) => {
+			// Parse connection (same logic as syncEndpointsToDatabase and getDiscoveryTargets)
+			let connection: any = device.connection;
+			if (!connection && device.connectionString) {
+				try {
+					connection = JSON.parse(device.connectionString);
+				} catch {
+					connection = null;
+				}
+			}
+			
+			// Skip Modbus discovery targets (have slaveRange)
+			if (device.protocol === 'modbus' && connection?.slaveRange) {
+				this.logger?.infoSync('Filtered out discovery target from reconciliation steps', {
+					component: LogComponents.configManager,
+					operation: 'calculateSteps',
+					deviceName: device.name,
+					slaveRange: connection.slaveRange,
+					reason: 'Discovery targets are config-only, not reconciled'
+				});
+				return false; // Exclude from targetDevices
+			}
+			
+			return true; // Include in targetDevices
+		});
+		
+		this.logger?.debugSync('Calculating reconciliation steps', {
+			component: LogComponents.configManager,
+			operation: 'calculateSteps',
+			allTargetCount: allTargetDevices.length,
+			filteredTargetCount: targetDevices.length,
+			currentCount: currentDevices.length,
+			filteredOut: allTargetDevices.length - targetDevices.length
+		});
 		
 		// Build maps for easier comparison
 		const targetMap = new Map(targetDevices.map(d => [d.id, d]));
@@ -1666,23 +1684,27 @@ if (existing) {
 		});
 	}
 
-	// Filter endpoints that support discovery (only for affected protocols)
-	// Discovery validates connectivity for:
-	// - Modbus: slaveRange (scan multiple slaves) or slaveId (single slave)
-	// - OPC-UA: discovery URLs
-	// - SNMP: IP ranges or specific hosts
-	// - MQTT: topic discovery
-	// - BACnet: device discovery
-	const discoverableEndpoints = allEndpointsNeedingDiscovery.filter((e: any) => {
-			if (e.connection?.slaveId) return true; // Modbus single slave discovery
-			if (e.protocol === 'opcua' && e.connection?.endpointUrl) return true; // OPC UA discovery via endpoint
-			if (e.protocol === 'snmp' && e.connection?.host) return true;
-			if (e.protocol === 'mqtt' && e.connection?.discoveryRoots) return true;
-			if (e.protocol === 'bacnet') return true; // BACnet uses broadcast discovery
-			return false;
-		});
+		// Filter endpoints that support discovery (only for affected protocols)
+		// Discovery validates connectivity for:
+		// - Modbus: slaveRange (scan multiple slaves) or slaveId (single slave)
+		// - OPC-UA: discovery URLs
+		// - SNMP: IP ranges or specific hosts
+		// - MQTT: topic discovery
+		// - BACnet: device discovery
+		const discoverableEndpoints = allEndpointsNeedingDiscovery.filter((e: any) => {
+				if (e.protocol === 'modbus' && (e.connection?.slaveId !== undefined || e.connection?.slaveRange)) return true;
+				if (e.protocol === 'opcua' && e.connection?.endpointUrl) return true; // OPC UA discovery via endpoint
+				if (e.protocol === 'snmp' && e.connection?.host) return true;
+				if (e.protocol === 'mqtt' && e.connection?.discoveryRoots) return true;
+				if (e.protocol === 'bacnet') return true; // BACnet uses broadcast discovery
+				return false;
+			});
 	
 		if (discoverableEndpoints.length > 0 && this.discoveryService) {
+			const shouldAllowDiscoveryWrites = discoverableEndpoints.some(
+				(e: any) => e.protocol === 'modbus' && e.connection?.slaveRange
+			);
+
 			// Get unique list of protocols that need discovery (from discoverable endpoints only)
 			const discoveryProtocols = [...new Set(discoverableEndpoints.map((e: any) => e.protocol))];
 
@@ -1700,7 +1722,7 @@ if (existing) {
 				validate: true, // Full validation to ensure endpoints are reachable
 				forceRun: true, // Bypass rate limiting (config-driven change)
 				protocols: discoveryProtocols, // Only scan changed protocols
-				skipDbWrites: true, // CRITICAL: Don't overwrite DB, reconcile already synced
+				skipDbWrites: !shouldAllowDiscoveryWrites, // Allow discovery to persist new slaves for modbus slaveRange targets
 				traceId: `config-change-${Date.now()}` // Set traceId to enable batch mode
 			}).catch((err: Error) => {
 				this.logger?.errorSync('Discovery validation failed after endpoint change', err, {

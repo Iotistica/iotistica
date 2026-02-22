@@ -183,7 +183,7 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
     if (type === 'tcp') {
       setValue('connection', {
         type: 'tcp',
-        host: (currentConnection as any).host || '192.168.1.100',
+        host: (currentConnection as any).host || '10.0.0.60',
         port: (currentConnection as any).port || 502,
         slaveId: (currentConnection as any).slaveId || 1,
         timeout: currentConnection.timeout || 5000,
@@ -225,7 +225,7 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
 
       {/* Profile Selector */}
       <div className="space-y-1.5">
-        <Label htmlFor="profile" className="text-sm">Quick Start: Load Configuration Profile</Label>
+        <Label htmlFor="profile" className="text-sm">Load Configuration Profile</Label>
         <Select value={selectedProfile} onValueChange={handleProfileSelect} disabled={loadingProfiles}>
           <SelectTrigger id="profile" className="h-9">
             <SelectValue placeholder={loadingProfiles ? "Loading profiles..." : "Select a profile to auto-configure..."} />
@@ -250,9 +250,7 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
         {selectedProfile && selectedProfile !== '__none__' && (
           <p className="text-xs text-green-600">✓ Profile applied: {selectedProfile}</p>
         )}
-        <p className="text-xs text-muted-foreground">
-          Load a pre-configured profile to quickly set up common devices
-        </p>
+       
       </div>
 
       {/* Connection Type */}
@@ -303,7 +301,7 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
               <Input
                 id="host"
                 {...register('connection.host')}
-                placeholder="192.168.1.100"
+                placeholder="10.0.0.60"
                 className="h-9"
               />
             </div>

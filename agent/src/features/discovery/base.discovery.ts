@@ -44,6 +44,7 @@ export interface DiscoveredDevice {
   protocol: 'modbus' | 'opcua' | 'can' | 'snmp' | 'mqtt' | 'bacnet'; // Strongly typed protocol
   name: string; // Human-readable name
   fingerprint: string; // Cryptographic hash (survives moves/reconfigs)
+  uuid?: string; // Unique identifier (set after saving to database)
   
   // Connection (REQUIRED)
   connection: Record<string, any>; // Protocol-specific connection config

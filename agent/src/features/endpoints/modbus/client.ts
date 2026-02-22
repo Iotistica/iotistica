@@ -73,7 +73,7 @@ export class ModbusClient {
    * Bound in constructor to allow proper removeListener() cleanup
    */
   private handleError(error: unknown): void {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = this.extractErrorMessage(error);
     this.logger.error(
       `[RECOVERY] Socket error for device ${this.device.name}: ${errorMessage}`
     );
@@ -188,7 +188,7 @@ export class ModbusClient {
         );
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = this.extractErrorMessage(error);
       this.logger.debug(`Error during client cleanup: ${errorMessage}`);
     }
   }
@@ -304,10 +304,17 @@ export class ModbusClient {
       this.logger.debug(
         `[RECOVERY] Connected to ${this.device.name} (slave ${this.device.slaveId}, timeout ${timeout}ms, client.isOpen=${this.client.isOpen})`
       );
+
+      // Log successful connection with register info
+      this.logger.info(
+        `[MODBUS] ✓ Connected to device: ${this.device.name} | Registers: ${this.device.registers.length} | ` +
+        `Function codes: ${Array.from(this.precomputedBatches.keys()).join(',')} | ` +
+        `Batches: ${Array.from(this.precomputedBatches.values()).flat().length}`
+      );
       
     } catch (error) {
       this.connected = false;
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = this.extractErrorMessage(error);
       this.logger.error(`Failed to connect to Modbus device ${this.device.name}: ${errorMessage}`);
       throw error;
     }
@@ -332,7 +339,7 @@ export class ModbusClient {
       this.connected = false;
       this.logger.debug(`Disconnected from Modbus device: ${this.device.name}`);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = this.extractErrorMessage(error);
       this.logger.error(`Error disconnecting from Modbus device ${this.device.name}: ${errorMessage}`);
     }
   }
@@ -382,6 +389,11 @@ export class ModbusClient {
             }
             this.consecutiveFailures = 0; // Reset failure counter on success
             
+            // Log successful individual read
+            this.logger.debug(
+              `[MODBUS] Device ${this.device.name} read ${register.name}: ${value} ${register.unit || ''}`
+            );
+            
             dataPoints.push({
               deviceName: this.device.name,
               metric: register.name,
@@ -403,6 +415,14 @@ export class ModbusClient {
             // Track successful batch read
             this.lastSuccessfulRead = Date.now();
             this.consecutiveFailures = 0; // Reset failure counter on success
+            
+            // Log batch read summary
+            const batchSummary = batchResults
+              .map(r => `${r.register.name}=${r.value}${r.register.unit ? ' ' + r.register.unit : ''}`)
+              .join(', ');
+            this.logger.debug(
+              `[MODBUS BATCH] Device ${this.device.name}: ${batchResults.length} registers read | ${batchSummary}`
+            );
             
             for (const result of batchResults) {
               dataPoints.push({
@@ -437,6 +457,19 @@ export class ModbusClient {
     }
     
     const pollTime = Date.now() - pollStart;
+    
+    // Count GOOD vs BAD data points
+    const goodCount = dataPoints.filter(dp => dp.quality === 'GOOD').length;
+    const badCount = dataPoints.filter(dp => dp.quality === 'BAD').length;
+    
+    // Log poll summary
+    if (goodCount > 0 || badCount > 0) {
+      const statusEmoji = badCount === 0 ? '✓' : badCount === dataPoints.length ? '✗' : '⚠';
+      this.logger.debug(
+        `[MODBUS POLL] Device ${this.device.name}: ${statusEmoji} ${goodCount} good, ${badCount} bad (${pollTime}ms)`
+      );
+    }
+    
     this.logger.debug(
       `[PERF] ${this.device.name} poll completed in ${pollTime}ms (${dataPoints.length} data points, ${this.precomputedBatches.size} function codes)`
     );
@@ -569,7 +602,7 @@ export class ModbusClient {
     try {
       return await this.readRegisterBatch(registers);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = this.extractErrorMessage(error);
       const qualityCode = this.extractQualityCode(errorMessage);
 
       // Auto-retry on DEVICE_BUSY or ACKNOWLEDGE (device processing previous request)
@@ -726,24 +759,88 @@ export class ModbusClient {
   }
   
   /**
+   * Extract readable error message from error object
+   * Handles cases where error is malformed, has undefined message, or is not an Error instance
+   * @param error Unknown error object
+   * @returns Readable error message string
+   */
+  private extractErrorMessage(error: unknown): string {
+    // If it's an Error object with a message
+    if (error instanceof Error) {
+      if (error.message && error.message !== 'undefined') {
+        return error.message;
+      }
+      // Fall back to stack trace first line if message is empty
+      if (error.stack) {
+        return error.stack.split('\n')[0];
+      }
+      // Fall back to error name
+      if (error.name) {
+        return error.name;
+      }
+    }
+
+    // If it's an object with a message property
+    if (error && typeof error === 'object' && 'message' in error) {
+      const msg = (error as any).message;
+      if (msg && typeof msg === 'string' && msg !== 'undefined') {
+        return msg;
+      }
+    }
+
+    // Try to stringify (won't be [object Object] if there are actual properties)
+    const stringified = String(error);
+    if (stringified !== '[object Object]') {
+      return stringified;
+    }
+
+    // Last resort: try JSON.stringify to extract properties
+    try {
+      const jsonStr = JSON.stringify(error);
+      if (jsonStr && jsonStr !== '{}') {
+        return jsonStr;
+      }
+    } catch {
+      // JSON.stringify failed, continue to fallback
+    }
+
+    // Final fallback
+    return 'Unknown error (no message available)';
+  }
+
+  /**
    * Perform raw batch read (not wrapped in retry logic)
    */
   private async readBatchRaw(functionCode: number, address: number, count: number): Promise<any> {
     try {
+      let result: any;
+      
       switch (functionCode) {
         case ModbusFunctionCode.READ_COILS:
-          return await this.client.readCoils(address, count);
+          result = await this.client.readCoils(address, count);
+          break;
         case ModbusFunctionCode.READ_DISCRETE_INPUTS:
-          return await this.client.readDiscreteInputs(address, count);
+          result = await this.client.readDiscreteInputs(address, count);
+          break;
         case ModbusFunctionCode.READ_HOLDING_REGISTERS:
-          return await this.client.readHoldingRegisters(address, count);
+          result = await this.client.readHoldingRegisters(address, count);
+          break;
         case ModbusFunctionCode.READ_INPUT_REGISTERS:
-          return await this.client.readInputRegisters(address, count);
+          result = await this.client.readInputRegisters(address, count);
+          break;
         default:
           throw new Error(`Unsupported function code for batch read: ${functionCode}`);
       }
+      
+      // Log successful read
+      const fcName = {1: 'READ_COILS', 2: 'READ_DISCRETE_INPUTS', 3: 'READ_HOLDING', 4: 'READ_INPUT'}[functionCode] || `FC${functionCode}`;
+      this.logger.debug(
+        `[MODBUS RAW] Device ${this.device.name} slave=${this.device.slaveId} ${fcName} addr=${address} count=${count}: ✓ Retrieved ${result.data?.length || 0} values`
+      );
+      
+      return result;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = this.extractErrorMessage(error);
       this.logger.error(`[MODBUS READ EXCEPTION] Device ${this.device.name} slave=${this.device.slaveId} FC${functionCode} addr=${address}: ${errorMessage}`);
       throw error;
     }
@@ -753,7 +850,7 @@ export class ModbusClient {
    * Create BAD quality data point from error
    */
   private createBadDataPoint(register: any, timestamp: string, error: unknown): SensorDataPoint {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = this.extractErrorMessage(error);
     this.logger.warn(`Failed to read register ${register.name} from device ${this.device.name}: ${errorMessage}`);
     
     const qualityCode = this.extractQualityCode(errorMessage);
@@ -785,7 +882,7 @@ export class ModbusClient {
         `read register ${register.name}`
       );
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = this.extractErrorMessage(error);
       const qualityCode = this.extractQualityCode(errorMessage);
       
       // Check for fatal serial port errors - trigger immediate reconnect
@@ -972,7 +1069,7 @@ export class ModbusClient {
             throw new Error(`Unsupported function code: ${register.functionCode}`);
         }
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage = this.extractErrorMessage(error);
         this.logger.error(`Device ${this.device.name} slave=${this.device.slaveId} ${register.name}: ${errorMessage}`);
         throw error;
       }
@@ -1218,7 +1315,7 @@ export class ModbusClient {
             `[RECOVERY] Reconnection completed for ${this.device.name}. Next poll will verify slave response.`
           );
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorMessage = this.extractErrorMessage(error);
           this.logger.debug(
             `[RECOVERY] ❌ Reconnection failed for ${this.device.name}: ${errorMessage}`
           );

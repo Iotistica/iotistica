@@ -215,7 +215,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 
     // Default options
     const slaveIdRange = options?.slaveIdRange || [1, 10];
-    const timeout = options?.timeout || 100;
+    const timeout = options?.timeout || 2000;  // 2-second timeout per slave ID (100ms was too short)
 
     // Detect connection type
     const isSerial = !!options?.serialPort;

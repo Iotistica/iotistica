@@ -186,6 +186,8 @@ export class DeviceSensorSyncService {
 
       // 1. Insert or update sensors from config
       for (const endpoint of configDevices) {
+        const enrichedEndpointMetadata = endpoint.metadata || {};
+        
         if (endpoint.uuid && existingUuids.has(endpoint.uuid)) {
           const existing = existingByUuid.get(endpoint.uuid);
           
@@ -199,7 +201,21 @@ export class DeviceSensorSyncService {
           // CRITICAL: Preserve deployment metadata fields during reconciliation
           // Virtual devices have metadata like {sidecar: true, profile: "...", image: "..."} 
           // that must not be overwritten by agent reconciliation (agents don't know about these fields)
-          let mergedMetadata = endpoint.metadata || {};
+          let mergedMetadata = enrichedEndpointMetadata;
+          
+          if (isReconciliation && existing?.metadata) {
+            const existingMeta = typeof existing.metadata === 'string' 
+              ? JSON.parse(existing.metadata) 
+              : existing.metadata;
+            
+            // During reconciliation, preserve deployment metadata fields
+            const preservedFields = ['sidecar', 'profile', 'image', 'containerConfig', 'createdAt', 'createdBy'];
+            preservedFields.forEach(field => {
+              if (existingMeta[field] !== undefined) {
+                mergedMetadata[field] = existingMeta[field];
+              }
+            });
+          }
           
           if (isReconciliation && existing?.metadata) {
             const existingMeta = typeof existing.metadata === 'string' 
@@ -267,7 +283,7 @@ export class DeviceSensorSyncService {
           
           // CRITICAL: Preserve deployment metadata fields during reconciliation
           // If device exists by name, merge metadata to preserve sidecar/profile/image fields
-          let mergedMetadata = endpoint.metadata || {};
+          let mergedMetadata = enrichedEndpointMetadata;
           
           if (isReconciliation && existingByNameMatch?.metadata) {
             const existingMeta = typeof existingByNameMatch.metadata === 'string'
@@ -683,10 +699,219 @@ export class DeviceSensorSyncService {
         }
       }
 
+      // MODBUS DISCOVERY: Update target state config when slaves are discovered
+      // When agent discovers Modbus slaves, remove parent from config and add slaves
+      await this.updateTargetStateWithDiscoveredSlaves(deviceUuid, runningEndpoints);
+
       logger.info(`Reconciliation complete: agent reality → table (version ${currentVersion})`);
     } catch (error) {
       logger.error('Error reconciling current state to table:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Update target state config with discovered Modbus slaves
+   * 
+   * Flow:
+   * 1. Identify discovered slaves (have metadata.slaveId and metadata.connectionName)
+   * 2. Match them to their parent discovery target by connectionName
+   * 3. Remove parent from target state config
+   * 4. Add all discovered slaves to target state config
+   * 
+   * This ensures the target state reflects actual discovered devices, not just discovery targets
+   */
+  private async updateTargetStateWithDiscoveredSlaves(
+    deviceUuid: string,
+    runningEndpoints: EndpointDeviceConfig[]
+  ): Promise<void> {
+    try {
+      // Identify discovered Modbus slaves (have slaveId in metadata)
+      const discoveredSlaves = runningEndpoints.filter(e => 
+        e.protocol === 'modbus' && 
+        e.metadata?.slaveId !== undefined &&
+        e.metadata?.connectionName !== undefined
+      );
+
+      if (discoveredSlaves.length === 0) {
+        // No discovered slaves - skip update
+        return;
+      }
+
+      logger.info(`Found ${discoveredSlaves.length} discovered Modbus slave(s) - updating target state config...`);
+
+      // Get current target state
+      const targetStateResult = await query(
+        'SELECT config, version FROM device_target_state WHERE device_uuid = $1',
+        [deviceUuid]
+      );
+
+      if (targetStateResult.rows.length === 0) {
+        logger.warn(`No target state found for device ${deviceUuid.substring(0, 8)} - skipping config update`);
+        return;
+      }
+
+      const targetState = targetStateResult.rows[0];
+      const targetConfig = typeof targetState.config === 'string' 
+        ? JSON.parse(targetState.config) 
+        : targetState.config;
+
+      if (!targetConfig.endpoints || !Array.isArray(targetConfig.endpoints)) {
+        logger.warn(`No endpoints array in target state config - skipping update`);
+        return;
+      }
+
+      // Group discovered slaves by connectionName
+      const slavesByConnection = new Map<string, typeof discoveredSlaves>();
+      for (const slave of discoveredSlaves) {
+        const connName = slave.metadata?.connectionName;
+        if (!slavesByConnection.has(connName)) {
+          slavesByConnection.set(connName, []);
+        }
+        slavesByConnection.get(connName)!.push(slave);
+      }
+
+      // Find parent discovery targets (those with slaveRange matching connectionName)
+      const parentsToRemove: string[] = [];
+      const parentNamesToDelete: string[] = []; // Track names for table deletion
+      const slavesToAdd: EndpointDeviceConfig[] = [];
+
+      for (const [connectionName, slaves] of slavesByConnection.entries()) {
+        // Find parent by connectionName (endpoint name should match)
+        const parentIndex = targetConfig.endpoints.findIndex((ep: any) => 
+          ep.protocol === 'modbus' && 
+          (ep.name === connectionName || ep.metadata?.connectionName === connectionName || 
+           ep.id || ep.uuid) && 
+          ep.connection?.slaveRange // Parent has slaveRange
+        );
+
+        if (parentIndex !== -1) {
+          const parent = targetConfig.endpoints[parentIndex];
+          parentsToRemove.push(parent.id || parent.uuid || parent.name);
+          parentNamesToDelete.push(parent.name); // Store for table deletion
+          
+          logger.info(`Found parent "${parent.name}" for ${slaves.length} discovered slave(s) via connectionName: ${connectionName}`);
+
+          // Add discovered slaves to config
+          for (const slave of slaves) {
+            slavesToAdd.push({
+              id: slave.id || slave.uuid,
+              uuid: slave.uuid,
+              name: slave.name,
+              protocol: slave.protocol,
+              enabled: slave.enabled,
+              pollInterval: slave.pollInterval,
+              connection: slave.connection,
+              dataPoints: slave.dataPoints,
+              metadata: slave.metadata
+            });
+
+            logger.info(`Adding discovered slave "${slave.name}" (ID: ${slave.metadata?.slaveId}) to target state config`);
+          }
+        }
+      }
+
+      // If no parents found by connectionName, try fallback: match by name pattern
+      if (parentsToRemove.length === 0 && discoveredSlaves.length > 0) {
+        logger.info(`No parents matched by connectionName - trying name pattern fallback...`);
+
+        // Try to match by endpoint name pattern: if slave name is "parent_slave_X", find parent
+        for (const slave of discoveredSlaves) {
+          const slaveIdMatch = slave.name.match(/_slave_(\d+)$/);
+          if (slaveIdMatch) {
+            // Extract parent name from slave: "myconn_slave_1" → "myconn"
+            const parentName = slave.name.substring(0, slave.name.lastIndexOf('_slave_'));
+            const parentIndex = targetConfig.endpoints.findIndex((ep: any) => 
+              ep.protocol === 'modbus' && 
+              ep.name === parentName && 
+              ep.connection?.slaveRange
+            );
+
+            if (parentIndex !== -1) {
+              const parent = targetConfig.endpoints[parentIndex];
+              const parentId = parent.id || parent.uuid;
+              
+              if (!parentsToRemove.includes(parentId)) {
+                parentsToRemove.push(parentId);
+                parentNamesToDelete.push(parent.name);
+                logger.info(`Found parent "${parentName}" by name pattern for slave "${slave.name}"`);
+              }
+
+              // Add this slave to the list
+              const existingSlave = slavesToAdd.find(s => s.name === slave.name);
+              if (!existingSlave) {
+                slavesToAdd.push({
+                  id: slave.id || slave.uuid,
+                  uuid: slave.uuid,
+                  name: slave.name,
+                  protocol: slave.protocol,
+                  enabled: slave.enabled,
+                  pollInterval: slave.pollInterval,
+                  connection: slave.connection,
+                  dataPoints: slave.dataPoints,
+                  metadata: slave.metadata
+                });
+
+                logger.info(`Adding discovered slave "${slave.name}" (ID: ${slave.metadata?.slaveId}) to target state config`);
+              }
+            }
+          }
+        }
+      }
+
+      // Update config: remove parents, add slaves
+      if (parentsToRemove.length > 0 || slavesToAdd.length > 0) {
+        const updatedEndpoints = targetConfig.endpoints.filter((ep: any) => {
+          const epId = ep.id || ep.uuid;
+          const isParent = parentsToRemove.includes(epId);
+          if (isParent) {
+            logger.info(`Removing discovery parent "${ep.name}" from target state config`);
+          }
+          return !isParent;
+        });
+
+        // Add discovered slaves
+        updatedEndpoints.push(...slavesToAdd);
+
+        // Update target state with new endpoints
+        targetConfig.endpoints = updatedEndpoints;
+
+        // CRITICAL: Delete parents from device_sensors table by name
+        // Parents are identified by having connection.slaveRange and matching parent names we identified
+        logger.info(`Deleting ${parentNamesToDelete.length} parent(s) from device_sensors table: ${parentNamesToDelete.join(', ')}`);
+        
+        for (const parentName of parentNamesToDelete) {
+          try {
+            const deleteResult = await query(
+              `DELETE FROM device_sensors 
+               WHERE device_uuid = $1 AND name = $2 AND protocol = 'modbus'`,
+              [deviceUuid, parentName]
+            );
+            
+            if (deleteResult.rowCount && deleteResult.rowCount > 0) {
+              logger.info(`Deleted discovery parent "${parentName}" from device_sensors (${deleteResult.rowCount} row(s))`);
+            } else {
+              logger.warn(`Discovery parent "${parentName}" not found in device_sensors for deletion`);
+            }
+          } catch (deleteError) {
+            logger.error(`Failed to delete parent device "${parentName}": ${deleteError}`);
+          }
+        }
+
+        await query(
+          `UPDATE device_target_state SET
+            config = $1,
+            version = version + 1,
+            updated_at = CURRENT_TIMESTAMP
+           WHERE device_uuid = $2`,
+          [JSON.stringify(targetConfig), deviceUuid]
+        );
+
+        logger.info(`Target state config updated: removed ${parentsToRemove.length} parent(s), added ${slavesToAdd.length} discovered slave(s)`);
+      }
+    } catch (error) {
+      logger.error('Error updating target state with discovered slaves:', error);
+      // Don't throw - reconciliation should continue even if config update fails
     }
   }
 

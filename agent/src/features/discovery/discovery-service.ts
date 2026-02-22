@@ -411,6 +411,21 @@ export class DiscoveryService extends EventEmitter {
      
         allDiscovered.push(...discovered);
 
+        // Log discovered devices and data info
+        if (discovered.length > 0) {
+          this.logger?.infoSync(`${protocol.toUpperCase()} found ${discovered.length} device(s)`, {
+            component: LogComponents.discovery,
+            protocol,
+            devices: discovered.map(d => ({
+              name: d.name,
+              dataPoints: d.dataPoints?.length || 0,
+              confidence: d.confidence
+            }))
+          });
+        }
+
+        
+
         // Log warning if enabled protocol found zero devices (helps catch simulator/server issues)
         if (discovered.length === 0) {
           this.logger?.warnSync(`${protocol.toUpperCase()} discovery found 0 devices`, {
@@ -566,9 +581,7 @@ export class DiscoveryService extends EventEmitter {
     // Clear observer data after use to prevent memory accumulation
     this.mqttObserverData = undefined;
 
-    // Clear discovered devices array to help GC (caller already has reference if needed)
-    allDiscovered.length = 0;
-
+    // Return discovered devices to caller
     return allDiscovered;
   }
 
@@ -978,6 +991,11 @@ export class DiscoveryService extends EventEmitter {
     // Fetch existing sensors ONCE before loop (avoid O(N²) performance)
     const existingSensors = await DeviceEndpointModel.getAll();
 
+    const targetEndpoints = this.configManager?.getTargetConfig().endpoints || [];
+    const targetEndpointByName = new Map(
+      targetEndpoints.map((endpoint: any) => [endpoint.name, endpoint])
+    );
+
     this.logger?.infoSync('Checking for existing endpoints in database', {
       component: LogComponents.discovery,
       existingCount: existingSensors.length,
@@ -1202,7 +1220,13 @@ export class DiscoveryService extends EventEmitter {
         // Convert to DeviceEndpoint format and save
         // Get enabled state from parent connection (if available)
         let endpointEnabled = false;
-        if (sensor.metadata?.connectionName && this.configManager) {
+        const targetEndpoint = sensor.metadata?.connectionName
+          ? targetEndpointByName.get(sensor.metadata.connectionName)
+          : targetEndpointByName.get(sensor.name);
+
+        if (targetEndpoint?.enabled !== undefined) {
+          endpointEnabled = Boolean(targetEndpoint.enabled);
+        } else if (sensor.metadata?.connectionName && this.configManager) {
           const modbusConfig = this.configManager.getModbusConfig();
           const parentConn = modbusConfig.connections?.find(c => c.name === sensor.metadata?.connectionName);
           endpointEnabled = parentConn?.enabled ?? false;
@@ -1222,6 +1246,9 @@ export class DiscoveryService extends EventEmitter {
             confidence: sensor.confidence,
             validated: sensor.validated,
             discoveredAt: sensor.discoveredAt,
+            // Track parent discovery target for automatic cleanup
+            // API will delete the parent when this discovered device arrives
+            ...(targetEndpoint?.id && { discoveryParentId: targetEndpoint.id }),
             // Include validation data (manufacturer, model, firmware, capabilities)
             ...(sensor.validationData && {
               manufacturer: sensor.validationData.manufacturer,
@@ -1234,6 +1261,31 @@ export class DiscoveryService extends EventEmitter {
             })
           }
         };
+
+        // Log parent ID tracking for debugging
+        if (targetEndpoint?.id) {
+          this.logger?.infoSync(`Discovered device linked to parent`, {
+            component: LogComponents.discovery,
+            traceId,
+            deviceName: sensor.name,
+            parentId: targetEndpoint.id,
+            parentName: targetEndpoint.name,
+            connectionName: sensor.metadata?.connectionName
+          });
+        } else {
+          this.logger?.warnSync(`Discovered device has no parent tracking - parent endpoint not found`, {
+            component: LogComponents.discovery,
+            traceId,
+            deviceName: sensor.name,
+            protocol: sensor.protocol,
+            connectionName: sensor.metadata?.connectionName,
+            availableTargetEndpoints: Array.from(targetEndpointByName.entries()).map(([name, ep]: [string, any]) => ({
+              name,
+              id: ep?.id,
+              protocol: ep?.protocol
+            }))
+          });
+        }
 
         await DeviceEndpointModel.create(deviceSensor);
         saved++;

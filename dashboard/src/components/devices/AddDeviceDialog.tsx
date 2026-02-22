@@ -124,22 +124,22 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
-        <DialogHeader>
+      <DialogContent className="!grid !grid-rows-[auto,1fr,auto] !gap-0 !h-[85vh] !max-h-[85vh] w-[720px] max-w-[95vw] sm:max-w-[95vw] !p-0 overflow-hidden">
+        <DialogHeader className="px-6 py-4">
           <DialogTitle>Add Device</DialogTitle>
           <DialogDescription>
-            Configure a protocol device to collect sensor data
+            Configure a protocol device to collect device data
           </DialogDescription>
         </DialogHeader>
 
-        {error && (
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
+        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-6">
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
-        <div className="space-y-4">
           <div className="space-y-2 text-left">
             <label className="text-sm font-medium text-foreground" htmlFor="protocol-select">
               Protocol
@@ -159,7 +159,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
           </div>
 
           {selectedProtocol === 'modbus' && (
-            <div className="flex-1 overflow-y-auto space-y-6">
+            <div className="space-y-6">
               <ModbusConfigForm
                 onChange={setModbusConfig}
                 onValidationChange={setModbusFormValid}
@@ -174,7 +174,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
           )}
 
           {selectedProtocol === 'opcua' && (
-            <div className="flex-1 overflow-y-auto space-y-6">
+            <div className="space-y-6">
               <OPCUAConfigForm
                 onChange={setOpcuaConfig}
                 onValidationChange={setOpcuaFormValid}
@@ -188,7 +188,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="px-6 py-4">
           <Button variant="outline" onClick={handleClose} disabled={loading}>
             Cancel
           </Button>

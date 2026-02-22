@@ -360,15 +360,15 @@ DISCOVERY:
                                       iotctl discover modbus             # Modbus only
 
 
-ENDPOINTS (SENSORS):
+DEVICES (SENSORS):
 
-  endpoints list [protocol]         List all configured endpoints/sensors
+  devices list [protocol]           List all configured devices/sensors
                                     Optional protocol filter: modbus, opcua, mqtt, can, snmp, bacnet
                                     Examples:
-                                      iotctl endpoints list              # All endpoints
-                                      iotctl endpoints list modbus       # Modbus endpoints only
+                                      iotctl devices list                # All devices
+                                      iotctl devices list modbus         # Modbus devices only
 
-  endpoints show <name>             Show detailed endpoint information including
+  devices show <name>               Show detailed device information including
                                     connection details, data points, and metadata
                                       iotctl discover --validate         # All with validation
                                       iotctl discover --protocol=snmp    # SNMP only
@@ -1090,9 +1090,14 @@ async function discover(protocolArg?: string): Promise<void> {
 			logger.info(`Running discovery for all protocols${validate ? ' with validation' : ''}...`);
 		}
 
+		if (protocol === 'modbus' || !protocol) {
+			logger.info('(Modbus scanning slave IDs - this may take 30-60 seconds...)');
+		}
+
 		const result = await apiRequest(`${DEVICE_API_V1}/discover`, {
 			method: 'POST',
-			body: JSON.stringify(body)
+			body: JSON.stringify(body),
+			signal: AbortSignal.timeout(120000)  // 2-minute timeout for discovery (scanning slave IDs is slow)
 		});
 
 		const devices = result.devices || [];
@@ -1110,11 +1115,13 @@ async function discover(protocolArg?: string): Promise<void> {
 			const connectionStr = formatConnection(device.protocol, device.connection);
 			const confidenceIcon = device.confidence === 'high' ? '●' : device.confidence === 'medium' ? '◐' : '○';
 			const validatedIcon = device.validated ? ' [V]' : '';
+			const statusEnabled = device.enabled === true ? 'enabled' : 'disabled';
 			
 			logger.info(device.name, {
 				protocol: device.protocol,
 				connection: connectionStr,
 				confidence: `${confidenceIcon} ${device.confidence}${validatedIcon}`,
+				status: statusEnabled,
 				discoveredAt: new Date(device.discoveredAt).toLocaleString()
 			});
 		}
@@ -1181,25 +1188,61 @@ async function endpointsList(protocolFilter?: string): Promise<void> {
  * Show detailed information for a specific endpoint
  */
 async function endpointsShow(endpointName?: string): Promise<void> {
-	if (!endpointName) {
-		logger.error('Endpoint name required');
-		logger.info('Usage: iotctl endpoints show <name>');
-		process.exit(1);
-	}
-
 	clearApiCache();
 	try {
 		const result = await apiRequest(`${DEVICE_API_V1}/endpoints`);
 		const endpoints = result.endpoints || [];
+
+		// If no name provided, show all devices
+		if (!endpointName) {
+			if (endpoints.length === 0) {
+				logger.info('No devices configured');
+				return;
+			}
+
+			logger.info(`Found ${endpoints.length} device${endpoints.length === 1 ? '' : 's'}`);
+			console.log('');
+
+			// Group by protocol
+			const byProtocol = endpoints.reduce((acc: Record<string, any[]>, endpoint: any) => {
+				const proto = endpoint.protocol || 'unknown';
+				if (!acc[proto]) acc[proto] = [];
+				acc[proto].push(endpoint);
+				return acc;
+			}, {} as Record<string, any[]>);
+
+			// Display by protocol groups
+			for (const [protocol, protoEndpoints] of Object.entries(byProtocol)) {
+				console.log(`\n${protocol.toUpperCase()} Devices:`);
+				console.log('━'.repeat(80));
+
+				for (const endpoint of protoEndpoints as any[]) {
+					const enabledIcon = endpoint.enabled ? '✓' : '✗';
+					const connectionStr = formatConnection(endpoint.protocol, endpoint.connection);
+					
+					logger.info(`${enabledIcon} ${endpoint.name}`, {
+						enabled: !!endpoint.enabled,
+						connection: connectionStr,
+						pollInterval: `${endpoint.poll_interval}ms`,
+						dataPoints: endpoint.data_points?.length || 0
+					});
+				}
+			}
+
+			console.log('');
+			return;
+		}
+
+		// If name provided, show detailed view
 		const endpoint = endpoints.find((e: any) => e.name === endpointName);
 
 		if (!endpoint) {
-			logger.error(`Endpoint not found: ${endpointName}`);
+			logger.error(`Device not found: ${endpointName}`);
 			process.exit(1);
 		}
 
 		console.log('\n╔═══════════════════════════════════════════════════════════════════╗');
-		console.log('║                    ENDPOINT DETAILS                               ║');
+		console.log('║                    DEVICE DETAILS                                 ║');
 		console.log('╚═══════════════════════════════════════════════════════════════════╝\n');
 
 		logger.info('Name', { value: endpoint.name });
@@ -1237,7 +1280,7 @@ async function endpointsShow(endpointName?: string): Promise<void> {
 
 		console.log('');
 	} catch (error) {
-		logger.error('Failed to show endpoint details', error as Error);
+		logger.error('Failed to show device details', error as Error);
 		process.exit(1);
 	}
 }
@@ -1712,7 +1755,13 @@ async function main(): Promise<void> {
 		discover: {
 			_default: discover
 		},
+		devices: {
+			list: endpointsList,
+			show: endpointsShow,
+			_default: endpointsList
+		},
 		endpoints: {
+			// Backward compatibility alias for devices
 			list: endpointsList,
 			show: endpointsShow,
 			_default: endpointsList

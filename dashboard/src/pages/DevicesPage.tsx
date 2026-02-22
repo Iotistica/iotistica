@@ -224,7 +224,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   };
 
   const fetchSensors = useCallback(async () => {
-    console.log('[fetchSensors] 🔄 START - Fetching sensors from API');
     try {
       const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors`));
       if (!response.ok) {
@@ -240,14 +239,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       }
       const data = await response.json();
       
-      console.log('[fetchSensors] Raw API response:', {
-        devicesCount: data.devices?.length,
-        pipelinesCount: data.pipelines?.length,
-        firstDevice: data.devices?.[0],
-        deviceNames: data.devices?.map((d: any) => d.name),
-        pipelineNames: data.pipelines?.map((p: any) => p.name),
-        deploymentStatuses: data.devices?.map((d: any) => ({ name: d.name, status: d.deploymentStatus || d.deployment_status, metadata: d.metadata }))
-      });
       
       // Merge pipelines and protocol adapter devices
       const pipelines = (data.pipelines || []).map((p: any) => ({
@@ -260,15 +251,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         // Use health data if available, otherwise fall back to connection status
         const health = d.health;
         const isConnected = health ? health.connected : d.connected;
-        
-        console.log(`[fetchSensors] device "${d.name}":`, {
-          enabled: d.enabled,
-          healthConnected: health?.connected,
-          deploymentStatus: d.deploymentStatus,
-          state: d.state,
-          rawDeploymentStatus: d.deployment_status, // Check if API returns snake_case
-          rawData: d
-        });
         
         return {
           uuid: d.uuid || d.configId, // Use uuid from table, fallback to configId
@@ -309,27 +291,17 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       });
       
       // Get pending devices from config (devices not yet deployed)
-      console.log('[fetchSensors] 📋 Getting pending config...');
       const pendingConfig = getPendingConfig(deviceUuid);
+      const rawEndpoints = pendingConfig.endpoints || [];
       
-      console.log('[fetchdevices] Pending config:', {
-        hasEndpoints: !!pendingConfig.endpoints,
-        endpointsCount: pendingConfig.endpoints?.length || 0,
-        hasSensors: !!pendingConfig.sensors,
-        sensorsCount: pendingConfig.sensors?.length || 0
-      });
-      
-      // Check both endpoints (new validation mode) and sensors (legacy)
-      const pendingEndpoints = pendingConfig.endpoints || pendingConfig.sensors || [];
-      
+      // NOTE: Discovery parents are automatically removed from target state config by API
+      // when their slaves are discovered. So we just display what's in the config.
+      const pendingEndpoints = rawEndpoints;
+
       const pendingSensors = pendingEndpoints
         .filter((s: any) => {
           // Only include sensors that are NOT in the database yet
-          const notInDb = !devices.find((d: any) => d.name === s.name);
-          if (notInDb) {
-            console.log(`[fetchSensors] Pending sensor "${s.name}" not in DB - adding to grid`);
-          }
-          return notInDb;
+          return !devices.find((d: any) => d.name === s.name);
         })
         .map((s: any) => {
           return {
@@ -354,32 +326,20 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             deploymentAttempts: 0,
           };
         });
-      
-      console.log(`[fetchSensors] Found ${pendingSensors.length} pending devices to display`);
-      console.log('[fetchSensors] 📊 Final pendingSensors status:', pendingSensors.map((s: any) => ({ name: s.name, status: s.deploymentStatus })));
-      
-      // Sort devices to show pending at top (recently deployed), then deployed, then others
+
+      // All deployed devices are shown (no filtering needed since API handles removal of discovery parents)
       const sortedDevices = [...devices].sort((a, b) => {
         const statusOrder = { 'pending': 0, 'deployed': 1, 'failed': 2 };
         const aOrder = statusOrder[a.deploymentStatus as keyof typeof statusOrder] ?? 3;
         const bOrder = statusOrder[b.deploymentStatus as keyof typeof statusOrder] ?? 3;
         return aOrder - bOrder;
       });
-
+      
       // Virtual devices now come through regular devices endpoint (no separate fetch needed)
       // They have metadata.sidecar === true
-      console.log(`[fetchSensors] Merging arrays:`, {
-        pendingSensorsCount: pendingSensors.length,
-        pipelinesCount: pipelines.length,
-        sortedDevicesCount: sortedDevices.length,
-        pendingSensorsNames: pendingSensors.map((s: { name: string }) => s.name),
-        pipelinesNames: pipelines.map((s: { name: string }) => s.name),
-        sortedDevicesNames: sortedDevices.map(s => s.name)
-      });
 
       // Show newly added devices (DRAFT) at the top, then sorted devices (includes virtual devices now)
       setSensors([...pendingSensors, ...pipelines, ...sortedDevices]);
-      console.log('[fetchSensors] ✅ COMPLETE - Updated sensors state');
       setError(null);
     } catch (err: any) {
       setError(err.message);
@@ -397,13 +357,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     // Listen for deployment events from Header (Sync button)
     const handleDeploymentStarted = (event: CustomEvent) => {
       if (event.detail.deviceUuid === deviceUuid) {
-        console.log('[deployment-started] 🚀 Event received for device:', deviceUuid);
-        
-        // Refresh immediately to get the database version with pending status
+        // Fetch immediately to catch discovery target before agent completes discovery
+        // Discovery can complete in < 1 second, so we need to be fast
         setTimeout(() => {
-          console.log('[deployment-started] 🔄 Fetching sensors to confirm database update');
           fetchSensors();
-        }, 500);
+        }, 100);
       }
     };
     
@@ -417,7 +375,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
   const handleAddProtocolDevice = async (device: any) => {
     try {
-      console.log('📝 Validating new device (not persisting yet):', device);
       
       // Call POST /api/v1/devices/:uuid/sensors?validateOnly=true
       // This validates the sensor config without persisting to DB
@@ -435,7 +392,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       }
 
       const result = await response.json();
-      console.log('✅ Device validated:', result);
 
       // Check if API returned validated sensor (validateOnly mode)
       if (!result.sensor) {
@@ -452,7 +408,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         duration: 4000
       });
     } catch (error: any) {
-      console.error('❌ Failed to add device:', error);
       toast.error(`Failed to add device: ${error.message}`);
       throw error;
     }
@@ -460,7 +415,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
   const handleUpdateProtocolDevice = async (deviceName: string, updates: any) => {
     try {
-      console.log('📝 Validating device updates (not persisting yet):', deviceName, updates);
       
       // Call PUT /api/v1/devices/:uuid/sensors/:name?validateOnly=true
       // This validates updates without persisting to DB
@@ -478,7 +432,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       }
 
       const result = await response.json();
-      console.log('✅ Device updates validated:', result);
 
       // Check if API returned validated updates (validateOnly mode)
       if (!result.updates) {
@@ -495,7 +448,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         duration: 4000
       });
     } catch (error: any) {
-      console.error('❌ Failed to update device:', error);
       toast.error(`Failed to update device: ${error.message}`);
       throw error;
     }
@@ -514,7 +466,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
     // Physical devices use soft delete
     try {
-      console.log('🗑️ Marking sensor for deletion via API:', deviceName);
       
       // Call DELETE /api/v1/devices/:uuid/sensors/:name API endpoint
       // This performs a SOFT DELETE - marks for deletion, waits for agent confirmation
@@ -530,15 +481,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         throw new Error(errorData.error || `Failed to delete sensor: ${response.status}`);
       }
 
-      const result = await response.json();
-      console.log('✅ Sensor marked for deletion:', result);
-
       // Refresh sensor list to show pending_deletion status
       await fetchSensors();
 
       toast.success(`Sensor "${deviceName}" marked for deletion - Click Sync to confirm on agent`);
     } catch (error: any) {
-      console.error('❌ Failed to delete sensor:', error);
       toast.error(`Failed to delete sensor: ${error.message}`);
       throw error;
     }
@@ -547,8 +494,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const handleToggleSensorEnabled = async (sensor: Sensor, currentEnabled: boolean) => {
     try {
       const newEnabled = !currentEnabled;
-      
-      console.log(`[Toggle] Toggling sensor "${sensor.name}" (UUID: ${sensor.uuid}) from ${currentEnabled} to ${newEnabled}`);
       
       // Build the update payload
       const updates = {
@@ -560,8 +505,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       // Update pending changes (React state only - not saved to DB yet)
       await updatePendingSensor(deviceUuid, sensor.name, updates);
       
-      console.log('[Toggle] Updated pending state - Click "Save Draft" to persist or "Deploy" to deploy');
-      
       // Refresh sensor list to show updated state from pending changes
       await fetchSensors();
 
@@ -569,7 +512,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         duration: 4000
       });
     } catch (error: any) {
-      console.error('Toggle device error:', error);
       toast.error(`Failed to toggle device: ${error.message}`);
     }
   };
@@ -587,7 +529,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         setVirtualFormData(prev => ({ ...prev, profile: data[0].profile_name }));
       }
     } catch (err) {
-      console.error('Failed to fetch profiles:', err);
       toast.error('Failed to fetch profiles');
     }
   };
@@ -631,7 +572,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       // Close dialog
       setAddVirtualDeviceDialogOpen(false);
     } catch (err) {
-      console.error('Failed to create virtual device:', err);
       toast.error(err instanceof Error ? err.message : 'Failed to create virtual device');
     } finally {
       setVirtualDeviceLoading(false);
@@ -656,7 +596,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       // Refresh sensor list
       await fetchSensors();
     } catch (err) {
-      console.error('Failed to delete virtual device:', err);
       toast.error('Failed to delete virtual device');
     }
   };
@@ -778,7 +717,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       // Close dialog
       setAddProfileDialogOpen(false);
     } catch (err) {
-      console.error('Failed to save profile:', err);
       toast.error(err instanceof Error ? err.message : 'Failed to save profile');
     } finally {
       setProfileLoading(false);
@@ -802,7 +740,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
     // When user toggles, deploymentStatus becomes 'pending' to prevent overwrite
     if (deploymentStatus === 'pending') {
-      console.log(`[Badge] "${sensor.name}" - Showing "Pending" (deploymentStatus=${deploymentStatus})`);
       return (
         <span 
           className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold border"

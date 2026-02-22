@@ -200,9 +200,9 @@ export class FeatureInitializer {
       );
 
       if (enabledEndpoints.size === 0) {
-        logger.warnSync('No enabled protocol adapters found', {
+        logger.warnSync('No enabled devices found', {
           component: LogComponents.agent,
-          note: 'Enable endpoints in database before starting Sensor Publish'
+          note: 'Enable devices in database before starting Device Publish'
         });
         return;
       }
