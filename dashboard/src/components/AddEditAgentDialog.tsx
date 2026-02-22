@@ -114,9 +114,13 @@ export function AddEditDeviceDialog({
     setIsLoadingKey(true);
     try {
       const provisioningFleetUuid = selectedFleetId === UNASSIGNED_FLEET_ID ? null : selectedFleetId;
+      const token = localStorage.getItem('accessToken');
       const response = await fetch(buildApiUrl('/api/v1/provisioning-keys/generate'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           fleetUuid: provisioningFleetUuid,
           newKey: isRegenerate,

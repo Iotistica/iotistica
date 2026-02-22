@@ -46,6 +46,7 @@ import { getVpnConfigForDevice, formatVpnConfigForDevice } from '../utils/vpn-co
 import { SystemConfigModel } from '../db/system-config-model';
 import { generateDefaultTargetState } from '../services/default-target-state-generator.js';
 import { provisioningService } from '../services/provisioning.service';
+import { jwtAuth } from '../middleware/jwt-auth';
 import logger from '../utils/logger';
 export const router = express.Router();
 
@@ -115,7 +116,7 @@ const keyExchangeLimiter = rateLimit({
  * 
  * Auth: Requires admin authentication (basic implementation for now)
  */
-router.post('/provisioning-keys', async (req, res) => {
+router.post('/provisioning-keys', jwtAuth, async (req, res) => {
   try {
     const { fleetId, maxDevices = 100, expiresInDays = 365, description } = req.body;
 
@@ -233,7 +234,7 @@ router.post('/provisioning-keys', async (req, res) => {
  * 
  * Returns key metadata (NOT the actual keys)
  */
-router.get('/provisioning-keys', async (req, res) => {
+router.get('/provisioning-keys', jwtAuth, async (req, res) => {
   try {
     const { fleetId } = req.query;
 
@@ -297,7 +298,7 @@ router.get('/provisioning-keys', async (req, res) => {
  * Body:
  * - reason: Reason for revocation (optional)
  */
-router.delete('/provisioning-keys/:keyId', async (req, res) => {
+router.delete('/provisioning-keys/:keyId', jwtAuth, async (req, res) => {
   try {
     const { keyId } = req.params;
     const { reason } = req.body;
@@ -355,7 +356,7 @@ router.delete('/provisioning-keys/:keyId', async (req, res) => {
  * - deploymentType: Echo back deployment type (if provided)
  * - simulatorConfig: Echo back simulator config (if provided)
  */
-router.post('/provisioning-keys/generate', async (req, res) => {
+router.post('/provisioning-keys/generate', jwtAuth, async (req, res) => {
   try {
     const { 
       fleetUuid, 

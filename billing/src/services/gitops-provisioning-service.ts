@@ -51,6 +51,8 @@ interface GitOpsConfig {
   pat: string;
   authorName: string;
   authorEmail: string;
+  argocdProject: string;
+  argocdNamespace: string;
 }
 
 export class GitOpsProvisioningService {
@@ -68,6 +70,8 @@ export class GitOpsProvisioningService {
       pat: process.env.GITOPS_PAT || '',
       authorName: process.env.GITOPS_COMMIT_AUTHOR_NAME || 'IoTistic Billing Bot',
       authorEmail: process.env.GITOPS_COMMIT_AUTHOR_EMAIL || 'billing@iotistic.com',
+      argocdProject: process.env.ARGOCD_PROJECT || 'default',
+      argocdNamespace: process.env.ARGOCD_NAMESPACE || 'argocd',
     };
 
     this.git = simpleGit({
@@ -217,7 +221,7 @@ export class GitOpsProvisioningService {
       kind: 'Application',
       metadata: {
         name: `client-${data.clientId}`,
-        namespace: 'argocd',
+        namespace: this.config.argocdNamespace,
         labels: {
           'managed-by': 'iotistic',
           'client-id': data.clientId,
@@ -228,7 +232,7 @@ export class GitOpsProvisioningService {
         },
       },
       spec: {
-        project: 'default',
+        project: this.config.argocdProject,
         source: {
           repoURL: this.config.repoUrl,
           targetRevision: this.config.mainBranch,
@@ -378,6 +382,11 @@ export class GitOpsProvisioningService {
             cpu: '500m',
             memory: '512Mi',
           },
+        },
+        monitoring: {
+          enabled: true,
+          interval: '30s',
+          scrapeTimeout: '10s',
         },
       },
       dashboard: {
