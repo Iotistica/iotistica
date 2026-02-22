@@ -480,14 +480,22 @@ jobs:
     runs-on: [iotistic-lab-sc]
     if: github.event.inputs.deploy == 'true' && needs.validate-release.result == 'success'
     steps:
-      - name: Checkout repository
+      - name: Checkout iotistic repository
         uses: actions/checkout@v4
+
+      - name: Checkout iot-k8s repository
+        uses: actions/checkout@v4
+        with:
+          repository: Iotistica/iot-k8s
+          ref: main
+          path: iot-k8s
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update ArgoCD values.yaml
         run: |
           RELEASE="${{ needs.validate-release.outputs.release_version }}"
           CLIENT="${{ github.event.inputs.client_name || 'demo' }}"
-          VALUES_FILE="charts/iotistica-app/values/${CLIENT}/values.yaml"
+          VALUES_FILE="iot-k8s/charts/iotistica-app/values/${CLIENT}/values.yaml"
           
           echo "Updating image tags in ArgoCD values file..."
           echo "  Release: ${RELEASE}"
@@ -497,7 +505,10 @@ jobs:
           # Check if the values file exists
           if [ ! -f "$VALUES_FILE" ]; then
             echo "❌ Error: Values file not found at $VALUES_FILE"
-            echo "Expected path: charts/iotistica-app/values/{client}/values.yaml"
+            echo "Expected path: iot-k8s/charts/iotistica-app/values/{client}/values.yaml"
+            echo ""
+            echo "Available clients:"
+            ls -la "iot-k8s/charts/iotistica-app/values/" 2>/dev/null || echo "  Directory not found"
             exit 1
           fi
           
@@ -515,22 +526,32 @@ jobs:
         run: |
           RELEASE="${{ needs.validate-release.outputs.release_version }}"
           CLIENT="${{ github.event.inputs.client_name || 'demo' }}"
+          VALUES_FILE="iot-k8s/charts/iotistica-app/values/${CLIENT}/values.yaml"
           
           # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Change to iot-k8s directory
+          cd iot-k8s
+          
+          # Configure git for this repo
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
           # Check if there are changes
           if git diff --quiet; then
             echo "ℹ️  No changes to commit"
+            cd ..
             exit 0
           fi
           
           # Stage, commit, and push changes
           git add "charts/iotistica-app/values/${CLIENT}/values.yaml"
           git commit -m "chore: bump ${CLIENT} version to ${RELEASE}"
-          git push origin HEAD:master
+          git push origin main
           
+          cd ..
           echo "✅ Pushed version update to ${RELEASE}"
           echo ""
           echo "ArgoCD will now automatically sync the changes to the cluster"
@@ -545,11 +566,16 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Release:** \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Client:** \`${CLIENT}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Repository:** Iotistica/iot-k8s" >> $GITHUB_STEP_SUMMARY
           echo "**Values File:** \`charts/iotistica-app/values/${CLIENT}/values.yaml\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Successfully updated ArgoCD values and pushed to repository**" >> $GITHUB_STEP_SUMMARY
+          echo "**Updated Fields:**" >> $GITHUB_STEP_SUMMARY
+          echo "- \`api.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`dashboard.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Successfully updated ArgoCD values and pushed to iot-k8s repository**" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "ArgoCD will now:" >> $GITHUB_STEP_SUMMARY
-          echo "1. Detect the change in the repository" >> $GITHUB_STEP_SUMMARY
+          echo "1. Detect the change in the iot-k8s repository" >> $GITHUB_STEP_SUMMARY
           echo "2. Sync the new version to the cluster" >> $GITHUB_STEP_SUMMARY
           echo "3. Roll out the updated application" >> $GITHUB_STEP_SUMMARY
