@@ -400,6 +400,7 @@ spec:
   background: false  # CRITICAL: Block privileged containers immediately
   rules:
   - name: deny-privileged-containers
+    skipBackgroundRequests: true
     match:
       resources:
         kinds:
@@ -413,6 +414,7 @@ spec:
         namespaces:
         - "fleet-*"
     validate:
+      allowExistingViolations: true
       message: "Privileged containers are not allowed in fleet namespaces"
       anyPattern:
       - spec:
@@ -431,6 +433,7 @@ spec:
                   allowPrivilegeEscalation: false
 
   - name: deny-hostpath-volumes
+    skipBackgroundRequests: true
     match:
       resources:
         kinds:
@@ -444,6 +447,7 @@ spec:
         namespaces:
         - "fleet-*"
     validate:
+      allowExistingViolations: true
       message: "hostPath volumes are not allowed in fleet namespaces"
       anyPattern:
       - spec:
@@ -456,6 +460,7 @@ spec:
               - X(hostPath): null
 
   - name: deny-host-network
+    skipBackgroundRequests: true
     match:
       resources:
         kinds:
@@ -469,6 +474,7 @@ spec:
         namespaces:
         - "fleet-*"
     validate:
+      allowExistingViolations: true
       message: "hostNetwork is not allowed in fleet namespaces"
       anyPattern:
       - spec:
