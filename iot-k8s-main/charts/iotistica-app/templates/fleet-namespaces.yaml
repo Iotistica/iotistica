@@ -6,7 +6,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: fleet-{{ .name }}
+  name: fleet-{{ $.Release.Namespace }}-{{ .name }}
   labels:
     app.kubernetes.io/managed-by: iotistica
     app.kubernetes.io/part-of: {{ include "iotistic.fullname" $ }}
@@ -25,8 +25,8 @@ metadata:
 apiVersion: v1
 kind: ResourceQuota
 metadata:
-  name: fleet-{{ .name }}-quota
-  namespace: fleet-{{ .name }}
+  name: fleet-{{ $.Release.Namespace }}-{{ .name }}-quota
+  namespace: fleet-{{ $.Release.Namespace }}-{{ .name }}
   labels:
     app.kubernetes.io/managed-by: iotistica
     iotistica.com/fleet-namespace: "true"
@@ -70,8 +70,8 @@ spec:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: iotistica-api-fleet-manager
-  namespace: fleet-{{ .name }}
+  name: iotistica-api-fleet-manager-{{ .name }}
+  namespace: fleet-{{ $.Release.Namespace }}-{{ .name }}
   labels:
     app.kubernetes.io/managed-by: iotistica
     iotistica.com/fleet-namespace: "true"
@@ -89,8 +89,8 @@ subjects:
 apiVersion: v1
 kind: LimitRange
 metadata:
-  name: fleet-{{ .name }}-limits
-  namespace: fleet-{{ .name }}
+  name: fleet-{{ $.Release.Namespace }}-{{ .name }}-limits
+  namespace: fleet-{{ $.Release.Namespace }}-{{ .name }}
   labels:
     app.kubernetes.io/managed-by: iotistica
     iotistica.com/fleet-namespace: "true"
@@ -125,8 +125,8 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: fleet-{{ .name }}-network-policy
-  namespace: fleet-{{ .name }}
+  name: fleet-{{ $.Release.Namespace }}-{{ .name }}-network-policy
+  namespace: fleet-{{ $.Release.Namespace }}-{{ .name }}
   labels:
     app.kubernetes.io/managed-by: iotistica
     iotistica.com/fleet-namespace: "true"
