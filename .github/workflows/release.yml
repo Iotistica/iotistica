@@ -475,53 +475,81 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   deploy-to-k8s:
-    name: Deploy to Kubernetes
+    name: Deploy to Kubernetes (ArgoCD)
     needs: [validate-release, create-release]
     runs-on: [iotistic-lab-sc]
     if: github.event.inputs.deploy == 'true' && needs.validate-release.result == 'success'
     steps:
-      - name: Trigger K8s deployment workflow
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.K8S_DEPLOY_PAT || secrets.GITHUB_TOKEN }}
-          script: |
-            const releaseVersion = '${{ needs.validate-release.outputs.release_version }}';
-            const isRC = '${{ github.event.inputs.release_mode }}' === 'rc';
-            const hasPAT = '${{ secrets.K8S_DEPLOY_PAT }}' !== '';
-            
-            console.log(`Triggering K8s deployment for ${releaseVersion} (RC: ${isRC})`);
-            
-            // Check if PAT exists
-            if (!hasPAT) {
-              core.warning('⚠️ K8S_DEPLOY_PAT secret not configured - skipping K8s deployment');
-              core.warning('To enable K8s deployments:');
-              core.warning('1. Go to GitHub Settings → Developer settings → Personal access tokens');
-              core.warning('2. Create a token (classic) with "workflow" scope');
-              core.warning('3. Add it to repository secrets as K8S_DEPLOY_PAT');
-              console.log('Deployment skipped - secret not configured');
-              return;
-            }
-            
-            try {
-              // Use the github object (already authenticated with K8S_DEPLOY_PAT)
-              await github.rest.actions.createWorkflowDispatch({
-                owner: 'Iotistica',
-                repo: 'iot-k8s',
-                workflow_id: 'k8s-release-iotistic.yml',
-                ref: 'main',
-                inputs: {
-                  release_version: releaseVersion,
-                  client_name: '${{ github.event.inputs.client_name || 'demo' }}',
-                  cluster_name: 'dev-iotistica-aks-cluster',
-                  clean_before_deploy: 'false'
-                }
-              });
-              
-              console.log('✅ K8s deployment workflow triggered successfully');
-              console.log(`   Repository: Iotistica/iot-k8s`);
-              console.log(`   Version: ${releaseVersion}`);
-              console.log(`   Client: ${{ github.event.inputs.client_name || 'demo' }}`);
-            } catch (error) {
-              console.error('❌ Failed to trigger K8s deployment:', error.message);
-              throw error;
-            }
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Update ArgoCD values.yaml
+        run: |
+          RELEASE="${{ needs.validate-release.outputs.release_version }}"
+          CLIENT="${{ github.event.inputs.client_name || 'demo' }}"
+          VALUES_FILE="charts/iotistica-app/values/${CLIENT}/values.yaml"
+          
+          echo "Updating image tags in ArgoCD values file..."
+          echo "  Release: ${RELEASE}"
+          echo "  Client: ${CLIENT}"
+          echo "  File: ${VALUES_FILE}"
+          
+          # Check if the values file exists
+          if [ ! -f "$VALUES_FILE" ]; then
+            echo "❌ Error: Values file not found at $VALUES_FILE"
+            echo "Expected path: charts/iotistica-app/values/{client}/values.yaml"
+            exit 1
+          fi
+          
+          # Update image tags using yq (strict, no fallback)
+          yq eval ".api.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
+          yq eval ".dashboard.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
+          
+          echo "✅ Updated image tags to ${RELEASE}"
+          echo ""
+          echo "Updated fields:"
+          yq eval ".api.image.tag" "$VALUES_FILE" | sed 's/^/  api.image.tag: /'
+          yq eval ".dashboard.image.tag" "$VALUES_FILE" | sed 's/^/  dashboard.image.tag: /'
+
+      - name: Commit and push changes
+        run: |
+          RELEASE="${{ needs.validate-release.outputs.release_version }}"
+          CLIENT="${{ github.event.inputs.client_name || 'demo' }}"
+          
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Check if there are changes
+          if git diff --quiet; then
+            echo "ℹ️  No changes to commit"
+            exit 0
+          fi
+          
+          # Stage, commit, and push changes
+          git add "charts/iotistica-app/values/${CLIENT}/values.yaml"
+          git commit -m "chore: bump ${CLIENT} version to ${RELEASE}"
+          git push origin HEAD:master
+          
+          echo "✅ Pushed version update to ${RELEASE}"
+          echo ""
+          echo "ArgoCD will now automatically sync the changes to the cluster"
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          RELEASE="${{ needs.validate-release.outputs.release_version }}"
+          CLIENT="${{ github.event.inputs.client_name || 'demo' }}"
+          
+          echo "## ArgoCD Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Client:** \`${CLIENT}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Values File:** \`charts/iotistica-app/values/${CLIENT}/values.yaml\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Successfully updated ArgoCD values and pushed to repository**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "ArgoCD will now:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Detect the change in the repository" >> $GITHUB_STEP_SUMMARY
+          echo "2. Sync the new version to the cluster" >> $GITHUB_STEP_SUMMARY
+          echo "3. Roll out the updated application" >> $GITHUB_STEP_SUMMARY

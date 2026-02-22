@@ -76,7 +76,7 @@ export function Header({
               <span style={{ color: '#1e40af' }}>Iot</span>
               <span style={{ color: '#16a34a' }}>istica</span>
             </h1>
-            <p style={{ fontSize: '1rem' }} className="font-semibold text-muted-foreground mt-1">Your Edge Management Platform</p>
+            <p style={{ fontSize: '1rem' }} className="font-semibold text-muted-foreground mt-1">Your Edge Management Platform <span className="text-xs text-gray-500">v2.0.141</span></p>
           </div>
         </div>
 
