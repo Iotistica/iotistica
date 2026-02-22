@@ -115,8 +115,6 @@ export default function App() {
     return stored && viewOptions.includes(stored as View) ? (stored as View) : 'metrics';
   });
   const [fleetNameById, setFleetNameById] = useState<Record<string, string>>({});
-  const [fleetUuidById, setFleetUuidById] = useState<Record<string, string>>({});
-  const [fleetIdByUuid, setFleetIdByUuid] = useState<Record<string, string>>({});
   const isGlobalView = currentView === 'dashboard' || currentView === 'mqtt' || currentView === 'audit' || currentView === 'security' || currentView === 'fleets';
   const [debugMode, setDebugMode] = useState(false);
   const [isKioskMode, setIsKioskMode] = useState<boolean>(() => {
@@ -161,9 +159,6 @@ export default function App() {
       const routeView = currentPath.view as View | undefined;
       const targetView = routeView && agentViews.includes(routeView) ? routeView : 'metrics';
       if (device) {
-        const mappedFleetId = currentPath.fleetId
-          ? fleetIdByUuid[currentPath.fleetId] || device.fleet_uuid || ''
-          : device.fleet_uuid || '';
         setSelectedDeviceId(device.id);
         
         // Save as last viewed agent for restoration when returning from global views
@@ -177,8 +172,7 @@ export default function App() {
         if (lastUrlFleetIdRef.current !== currentPath.fleetId) {
           console.log('[URL SYNC] URL fleet ID changed:', { 
             from: lastUrlFleetIdRef.current, 
-            to: currentPath.fleetId,
-            mappedTo: mappedFleetId 
+            to: currentPath.fleetId
           });
           lastUrlFleetIdRef.current = currentPath.fleetId;
           // Use fleet UUID directly from URL (don't convert to ID) - sidebar expects UUID
@@ -219,7 +213,7 @@ export default function App() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentViews, currentPath, devices, fleetIdByUuid, setSelectedFleetId]);
+  }, [agentViews, currentPath, devices, setSelectedFleetId]);
 
   useEffect(() => {
     const fleetId = currentPath.type === 'agent'
@@ -246,25 +240,16 @@ export default function App() {
         }
 
         const data = await response.json();
-        const resolvedFleetId = data?.fleet_id || fleetId;
         const resolvedFleetUuid = data?.fleet_uuid as string | undefined;
-        const fleetName = data?.fleet_name || fleetId;
+        const fleetName = data?.fleet_name || resolvedFleetUuid || fleetId;
 
         setFleetNameById((prev) => {
-          if (prev[fleetId] && (!resolvedFleetUuid || prev[resolvedFleetUuid])) {
+          const fleetKey = resolvedFleetUuid || fleetId;
+          if (prev[fleetKey]) {
             return prev;
           }
-          const next = { ...prev, [fleetId]: fleetName, [resolvedFleetId]: fleetName };
-          if (resolvedFleetUuid) {
-            next[resolvedFleetUuid] = fleetName;
-          }
-          return next;
+          return { ...prev, [fleetKey]: fleetName };
         });
-
-        if (resolvedFleetUuid && resolvedFleetId) {
-          setFleetUuidById((prev) => (prev[resolvedFleetId] ? prev : { ...prev, [resolvedFleetId]: resolvedFleetUuid }));
-          setFleetIdByUuid((prev) => (prev[resolvedFleetUuid] ? prev : { ...prev, [resolvedFleetUuid]: resolvedFleetId }));
-        }
       } catch (error) {
         setFleetNameById((prev) => (prev[fleetId] ? prev : { ...prev, [fleetId]: fleetId }));
       }
@@ -287,7 +272,7 @@ export default function App() {
     if (selectedFleetId) {
       // Check if there are any devices in the selected fleet
       const devicesInFleet = devices.filter(d => {
-        const deviceFleetId = (d as any).fleet_uuid || (d as any).fleet_id;
+        const deviceFleetId = (d as any).fleet_uuid;
         return deviceFleetId === selectedFleetId;
       });
       
@@ -296,7 +281,7 @@ export default function App() {
         console.log('[FLEET FILTER] Fleet has no agents, clearing device selection');
         setSelectedDeviceId('');
       } else if (selectedDeviceId && selectedDevice) {
-        const selectedDeviceFleetId = (selectedDevice as any).fleet_uuid || (selectedDevice as any).fleet_id;
+        const selectedDeviceFleetId = (selectedDevice as any).fleet_uuid;
         if (selectedDeviceFleetId !== selectedFleetId) {
           console.log('[FLEET FILTER] Selected device not in this fleet, clearing selection');
           setSelectedDeviceId('');
@@ -354,7 +339,7 @@ export default function App() {
       if (devices.length > 0) {
         // If fleet is selected, use first device from that fleet; otherwise use first device overall
         const deviceToSelect = devices.find(d => 
-          !selectedFleetId || (d as any).fleet_uuid === selectedFleetId || (d as any).fleet_id === selectedFleetId
+          !selectedFleetId || (d as any).fleet_uuid === selectedFleetId
         ) || devices[0];
         console.log('[handleGlobalViewChange] Selecting device:', deviceToSelect.name);
         setSelectedDeviceId(deviceToSelect.id);
@@ -377,56 +362,7 @@ export default function App() {
         : undefined;
       navigateToAgent(selectedDevice.deviceUuid, fleetUuid, view);
     }
-  }, [fleetUuidById, navigateToAgent, selectedDevice]);
-
-  const resolveFleetUuid = useCallback(async (fleetId?: string) => {
-    if (!fleetId) {
-      return undefined;
-    }
-
-    const cached = fleetUuidById[fleetId];
-    if (cached) {
-      return cached;
-    }
-
-    try {
-      const token = localStorage.getItem('accessToken');
-      const response = await fetch(buildApiUrl(`/api/v1/fleets/${fleetId}`), {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to load fleet');
-      }
-
-      const data = await response.json();
-      const resolvedFleetId = data?.fleet_id || fleetId;
-      const resolvedFleetUuid = data?.fleet_uuid as string | undefined;
-      const fleetName = data?.fleet_name || fleetId;
-
-      setFleetNameById((prev) => {
-        if (prev[fleetId] && (!resolvedFleetUuid || prev[resolvedFleetUuid])) {
-          return prev;
-        }
-        const next = { ...prev, [fleetId]: fleetName, [resolvedFleetId]: fleetName };
-        if (resolvedFleetUuid) {
-          next[resolvedFleetUuid] = fleetName;
-        }
-        return next;
-      });
-
-      if (resolvedFleetUuid && resolvedFleetId) {
-        setFleetUuidById((prev) => (prev[resolvedFleetId] ? prev : { ...prev, [resolvedFleetId]: resolvedFleetUuid }));
-        setFleetIdByUuid((prev) => (prev[resolvedFleetUuid] ? prev : { ...prev, [resolvedFleetUuid]: resolvedFleetId }));
-      }
-
-      return resolvedFleetUuid;
-    } catch (error) {
-      return undefined;
-    }
-  }, [fleetUuidById]);
+  }, [navigateToAgent, selectedDevice]);
 
   const formatViewLabel = useCallback((view: string) => {
     // Special mappings for views with different display names
@@ -939,7 +875,7 @@ export default function App() {
     setSidebarOpen(false); // Close sidebar on mobile after selection
 
     if (device) {
-      const fleetUuid = device.fleet_uuid || await resolveFleetUuid(device.fleet_uuid);
+      const fleetUuid = device.fleet_uuid || undefined;
       
       // Check if switching to a device in a different fleet - if so, reset view
       // This prevents showing tabs/views from agents in the previous fleet
@@ -1304,9 +1240,7 @@ export default function App() {
                     devices={devices} 
                     onDeviceSelect={(device) => {
                       setSelectedDeviceId(device.id);
-                      void resolveFleetUuid(device.fleet_uuid).then((fleetUuid) => {
-                        navigateToAgent(device.deviceUuid, fleetUuid || device.fleet_uuid, 'metrics');
-                      });
+                      navigateToAgent(device.deviceUuid, device.fleet_uuid, 'metrics');
                     }} 
                   />
                 </div>

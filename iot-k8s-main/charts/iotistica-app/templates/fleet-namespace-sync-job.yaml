@@ -1,4 +1,4 @@
-{{- if .Values.fleetNamespaces.enabled }}
+{{- if and .Values.fleetNamespaces .Values.fleetNamespaces.enabled }}
 ---
 apiVersion: batch/v1
 kind: Job

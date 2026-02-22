@@ -221,57 +221,28 @@ export class GitOpsProvisioningService {
       kind: 'Application',
       metadata: {
         name: `client-${data.clientId}`,
-        namespace: this.config.argocdNamespace,
-        labels: {
-          'managed-by': 'iotistic',
-          'client-id': data.clientId,
-          'plan': data.plan,
-        },
-        annotations: {
-          'argocd.argoproj.io/sync-wave': '1',
-        },
       },
       spec: {
-        project: this.config.argocdProject,
+        destination: {
+          namespace: data.namespace,
+          server: 'https://kubernetes.default.svc',
+        },
         source: {
+          path: 'charts/iotistica-app',
           repoURL: this.config.repoUrl,
           targetRevision: this.config.mainBranch,
-          path: 'charts/iotistica-app',
           helm: {
             valueFiles: [`values/client-${data.clientId}/values.yaml`],
           },
         },
-        destination: {
-          server: 'https://kubernetes.default.svc',
-          namespace: data.namespace,
-        },
+        sources: [],
+        project: this.config.argocdProject,
         syncPolicy: {
           automated: {
             prune: true,
             selfHeal: true,
-            allowEmpty: false,
-          },
-          syncOptions: [
-            'CreateNamespace=true',
-            'Validate=true',
-            'ServerSideApply=true',
-          ],
-          retry: {
-            limit: 5,
-            backoff: {
-              duration: '5s',
-              factor: 2,
-              maxDuration: '3m',
-            },
           },
         },
-        ignoreDifferences: [
-          {
-            group: 'apps',
-            kind: 'Deployment',
-            jsonPointers: ['/spec/replicas'],
-          },
-        ],
       },
     };
   }

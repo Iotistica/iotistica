@@ -8,8 +8,8 @@
 
 import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle } from 'lucide-react';
 import { ModbusConfigForm } from './ModbusConfigForm';
@@ -139,37 +139,54 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
           </Alert>
         )}
 
-        <Tabs value={selectedProtocol} onValueChange={(v) => setSelectedProtocol(v as 'modbus' | 'opcua')} className="flex-1 flex flex-col overflow-hidden">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="modbus">Modbus TCP/RTU</TabsTrigger>
-            <TabsTrigger value="opcua">OPC-UA</TabsTrigger>
-          </TabsList>
+        <div className="space-y-4">
+          <div className="space-y-2 text-left">
+            <label className="text-sm font-medium text-foreground" htmlFor="protocol-select">
+              Protocol
+            </label>
+            <Select
+              value={selectedProtocol}
+              onValueChange={(value) => setSelectedProtocol(value as 'modbus' | 'opcua')}
+            >
+              <SelectTrigger id="protocol-select" className="h-11 text-left">
+                <SelectValue placeholder="Select protocol" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="modbus">Modbus TCP/RTU</SelectItem>
+                <SelectItem value="opcua">OPC-UA</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-          <TabsContent value="modbus" className="flex-1 overflow-y-auto space-y-6 mt-4">
-            <ModbusConfigForm 
-              onChange={setModbusConfig}
-              onValidationChange={setModbusFormValid}
-              onDataPointsChange={setModbusDataPoints}
-            />
+          {selectedProtocol === 'modbus' && (
+            <div className="flex-1 overflow-y-auto space-y-6">
+              <ModbusConfigForm
+                onChange={setModbusConfig}
+                onValidationChange={setModbusFormValid}
+                onDataPointsChange={setModbusDataPoints}
+              />
 
-            <DataPointsTable
-              value={modbusDataPoints}
-              onChange={setModbusDataPoints}
-            />
-          </TabsContent>
+              <DataPointsTable
+                value={modbusDataPoints}
+                onChange={setModbusDataPoints}
+              />
+            </div>
+          )}
 
-          <TabsContent value="opcua" className="flex-1 overflow-y-auto space-y-6 mt-4">
-            <OPCUAConfigForm 
-              onChange={setOpcuaConfig}
-              onValidationChange={setOpcuaFormValid}
-            />
+          {selectedProtocol === 'opcua' && (
+            <div className="flex-1 overflow-y-auto space-y-6">
+              <OPCUAConfigForm
+                onChange={setOpcuaConfig}
+                onValidationChange={setOpcuaFormValid}
+              />
 
-            <OPCUADataPointsTable
-              dataPoints={opcuaDataPoints}
-              onChange={setOpcuaDataPoints}
-            />
-          </TabsContent>
-        </Tabs>
+              <OPCUADataPointsTable
+                dataPoints={opcuaDataPoints}
+                onChange={setOpcuaDataPoints}
+              />
+            </div>
+          )}
+        </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={handleClose} disabled={loading}>

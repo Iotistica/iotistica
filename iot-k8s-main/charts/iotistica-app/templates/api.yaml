@@ -1,4 +1,4 @@
-{{- if .Values.api.enabled }}
+{{- if and .Values.api .Values.api.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -85,6 +85,7 @@ spec:
             - name: api
               containerPort: {{ .Values.api.port }}
               protocol: TCP
+          {{- $apiEnv := .Values.api.env | default dict }}
           lifecycle:
             preStop:
               exec:
@@ -93,7 +94,7 @@ spec:
             - name: PORT
               value: {{ .Values.api.port | quote }}
             - name: NODE_ENV
-              value: {{ .Values.api.env.NODE_ENV | quote }}
+              value: {{ index $apiEnv "NODE_ENV" | default "production" | quote }}
             
             # Namespace for discovering HTTPRoute (used to auto-discover CLOUD_API_URL)
             - name: NAMESPACE

@@ -1,4 +1,4 @@
-{{- if .Values.api.enabled }}
+{{- if and .Values.api .Values.api.enabled }}
 ---
 # ============================================================================
 # RBAC HARDENING GUIDE - READ THIS FIRST

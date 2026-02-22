@@ -485,7 +485,7 @@ export function AddEditDeviceDialog({
           )}
           {!isEditMode && (
             <div className="space-y-2 text-left">
-              <Label htmlFor="device-type" className="text-left">Agent Type *</Label>
+              <Label htmlFor="device-type" className="text-left">Type *</Label>
               <Select
                 value={formData.type}
                 onValueChange={(value: Device['type']) => setFormData(prev => ({ ...prev, type: value }))}
@@ -495,16 +495,10 @@ export function AddEditDeviceDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="standalone">
-                    <div className="flex flex-col items-start">
-                      <span>Standalone Agent</span>
-                      <span className="text-xs text-muted-foreground">Physical device or VM with manual installation</span>
-                    </div>
+                    <span>Standalone</span>
                   </SelectItem>
                   <SelectItem value="virtual">
-                    <div className="flex flex-col items-start">
-                      <span>Virtual Agent</span>
-                      <span className="text-xs text-muted-foreground">Cloud-hosted agent with automatic deployment</span>
-                    </div>
+                    <span>Virtual</span>
                   </SelectItem>
                 </SelectContent>
               </Select>
@@ -532,14 +526,13 @@ export function AddEditDeviceDialog({
                     <SelectItem key={fleet.fleet_uuid} value={fleet.fleet_uuid}>
                       <div className="flex flex-col items-start">
                         <span>{fleet.fleet_name}</span>
-                        <span className="text-xs text-muted-foreground">{fleet.fleet_uuid}</span>
                       </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Defaults to the current fleet filter in the sidebar.
+                Defaults to the current fleet filter.
               </p>
             </div>
           )}

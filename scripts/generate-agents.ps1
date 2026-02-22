@@ -39,6 +39,14 @@ param(
     #[string]$ApiUrl = "https://localhost:3443",
     [string]$ApiUrl = "https://localhost:3443",
     [string]$FleetUuid = "71156440-0730-4c63-b211-3fbd8200d652",
+    [bool]$UseDirectDb = $true,
+    [string]$DbHost = "localhost",
+    [int]$DbPort = 5432,
+    [string]$DbName = "iotistic",
+    [string]$DbUser = "postgres",
+    [string]$DbPassword = "postgres",
+    [string]$DbSslMode = "",
+    [string]$DatabaseUrl = "",
     
     # Cleanup Mode
     [switch]$Cleanup,
@@ -235,22 +243,103 @@ function Remove-AgentResources {
 
 # Generate provisioning key via API
 function New-ProvisioningKey {
-    param([string]$ApiUrl, [string]$FleetUuid)
+    param(
+        [string]$ApiUrl,
+        [string]$FleetUuid,
+        [bool]$UseDirectDb,
+        [string]$DbHost,
+        [int]$DbPort,
+        [string]$DbName,
+        [string]$DbUser,
+        [string]$DbPassword,
+        [string]$DbSslMode,
+        [string]$DatabaseUrl
+    )
     
     try {
-        $body = @{
-            fleetUuid = $FleetUuid
-            newKey = $false
-        } | ConvertTo-Json
+        if (-not $UseDirectDb) {
+            Write-Error "UseDirectDb is disabled. Enable -UseDirectDb to generate keys directly in the database."
+            exit 1
+        }
 
-        $response = Invoke-RestMethod -Uri "$ApiUrl/api/v1/provisioning-keys/generate" `
-            -Method Post `
-            -ContentType "application/json" `
-            -Body $body `
-            -SkipCertificateCheck `
-            -ErrorAction Stop
+        if (-not (Get-Command psql -ErrorAction SilentlyContinue)) {
+            Write-Error "psql is required for direct provisioning. Install PostgreSQL client tools or add psql to PATH."
+            exit 1
+        }
 
-        return $response.key
+        $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        $bytes = New-Object byte[] 32
+        $rng.GetBytes($bytes)
+        $key = ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
+
+        $env:PGPASSWORD = $DbPassword
+        $connectionString = $DatabaseUrl
+        if ([string]::IsNullOrWhiteSpace($connectionString)) {
+            $sslPart = if ([string]::IsNullOrWhiteSpace($DbSslMode)) { "" } else { " sslmode=$DbSslMode" }
+            $connectionString = "host=$DbHost port=$DbPort dbname=$DbName user=$DbUser$sslPart"
+        }
+
+        $schemaSql = @"
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+ALTER TABLE provisioning_keys ADD COLUMN IF NOT EXISTS key_hash_fast VARCHAR(64);
+ALTER TABLE provisioning_keys ADD COLUMN IF NOT EXISTS fleet_uuid UUID;
+"@
+
+        $schemaResult = psql -d "$connectionString" -v ON_ERROR_STOP=1 -q -c $schemaSql 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to prepare provisioning_keys schema: $schemaResult"
+            exit 1
+        }
+
+        $hasKeyHashFast = psql -d "$connectionString" -t -A -q -c "SELECT 1 FROM information_schema.columns WHERE table_name='provisioning_keys' AND column_name='key_hash_fast'" 2>&1
+        $hasFleetUuid = psql -d "$connectionString" -t -A -q -c "SELECT 1 FROM information_schema.columns WHERE table_name='provisioning_keys' AND column_name='fleet_uuid'" 2>&1
+        $hasFleetId = psql -d "$connectionString" -t -A -q -c "SELECT 1 FROM information_schema.columns WHERE table_name='provisioning_keys' AND column_name='fleet_id'" 2>&1
+
+        $escapedKey = $key -replace "'", "''"
+        $escapedDescription = "Script-generated provisioning key" -replace "'", "''"
+        $escapedCreatedBy = "script" -replace "'", "''"
+        $escapedFleetUuid = $FleetUuid -replace "'", "''"
+
+        $columns = @('key_hash', 'description', 'max_devices', 'expires_at', 'created_by')
+        $values = @(
+            "crypt('$escapedKey', gen_salt('bf', 10))",
+            "'$escapedDescription'",
+            "1",
+            "NOW() + (30 || ' days')::interval",
+            "'$escapedCreatedBy'"
+        )
+
+        if ($hasKeyHashFast -match '1') {
+            $columns += 'key_hash_fast'
+            $values += "encode(digest('$escapedKey','sha256'),'hex')"
+        }
+        if ($hasFleetUuid -match '1') {
+            $columns += 'fleet_uuid'
+            if ([string]::IsNullOrWhiteSpace($escapedFleetUuid)) {
+                $values += "NULL"
+            } else {
+                $values += "'$escapedFleetUuid'::uuid"
+            }
+        }
+        if ($hasFleetId -match '1') {
+            $columns += 'fleet_id'
+            if ([string]::IsNullOrWhiteSpace($escapedFleetUuid)) {
+                $values += "NULL"
+            } else {
+                $values += "'$escapedFleetUuid'"
+            }
+        }
+
+        $insertSql = "INSERT INTO provisioning_keys ($($columns -join ', ')) VALUES ($($values -join ', ')) RETURNING id;"
+
+        $insertResult = psql -d "$connectionString" -v ON_ERROR_STOP=1 -t -A -q -c $insertSql 2>&1
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to insert provisioning key: $insertResult"
+            exit 1
+        }
+
+        return $key
     }
     catch {
         Write-Error "Failed to generate provisioning key via API: $($_.Exception.Message)"
@@ -333,7 +422,7 @@ if ($EnableSimulation) {
 } else {
     Write-Host "Simulation: DISABLED (all agents in normal operation mode)" -ForegroundColor Gray
 }
-Write-Host "🔑 Generating provisioning keys via API at $ApiUrl..." -ForegroundColor Cyan
+Write-Host "🔑 Generating provisioning keys via direct DB access..." -ForegroundColor Cyan
 
 $services = @()
 $volumes = @()
@@ -345,7 +434,9 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
     
     # Generate provisioning key via API
     Write-Host "  Generating key for $agentName..." -ForegroundColor Gray
-    $apiKey = New-ProvisioningKey -ApiUrl $ApiUrl -FleetUuid $FleetUuid
+    $apiKey = New-ProvisioningKey -ApiUrl $ApiUrl -FleetUuid $FleetUuid -UseDirectDb $UseDirectDb `
+        -DbHost $DbHost -DbPort $DbPort -DbName $DbName -DbUser $DbUser -DbPassword $DbPassword `
+        -DbSslMode $DbSslMode -DatabaseUrl $DatabaseUrl
     $provisioningKeys += "${agentName}: $apiKey"
     
     $volumeName = "$agentName-data"
