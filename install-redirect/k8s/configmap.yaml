@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: install-redirect-config
-  namespace: iotistic-utils
+  namespace: iotistica-utils
 data:
   AZURE_STORAGE_CONTAINER: "scripts"
   NODE_ENV: "production"

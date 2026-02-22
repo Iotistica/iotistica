@@ -2,15 +2,15 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: install-redirect
-  namespace: iotistic-utils
+  namespace: iotistica-utils
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
     name: install-redirect
   
-  minReplicas: 3    # Always have at least 3 for HA
-  maxReplicas: 10   # Scale up to 10 during traffic spikes
+  minReplicas: 2    # Always have at least 2 for HA
+  maxReplicas: 3   # Scale up to 3 during traffic spikes
   
   metrics:
     # Scale based on CPU usage
