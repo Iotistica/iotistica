@@ -489,7 +489,8 @@ jobs:
           repository: Iotistica/iot-k8s
           ref: main
           path: iot-k8s
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.K8S_DEPLOY_PAT || secrets.GITHUB_TOKEN }}
+        continue-on-error: true
 
       - name: Update ArgoCD values.yaml
         run: |
