@@ -2,13 +2,13 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: install-redirect
-  namespace: iotistic-utils
+  namespace: iotistica-utils
   labels:
     app: install-redirect
     component: redirector
     managed-by: iotistic
 spec:
-  replicas: 3  # High availability - 3 replicas across nodes
+  replicas: 1  # High availability - 3 replicas across nodes
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -46,7 +46,7 @@ spec:
       
       containers:
         - name: redirector
-          image: myregistry.azurecr.io/iotistic-install-redirect:latest
+          image: iotistic/iotistic-redirect:latest
           imagePullPolicy: Always
           
           ports:

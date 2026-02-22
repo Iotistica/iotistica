@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: iotistic-utils
+  name: iotistica-utils
   labels:
     managed-by: iotistic
     component: utilities

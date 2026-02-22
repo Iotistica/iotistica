@@ -2,9 +2,9 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: install-redirect
-  namespace: iotistic-utils
+  namespace: iotistica-utils
 spec:
-  minAvailable: 2  # Always keep at least 2 pods running
+  minAvailable: 1  # Always keep at least 1 pod running
   selector:
     matchLabels:
       app: install-redirect
