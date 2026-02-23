@@ -61,7 +61,7 @@ spec:
       volumes:
         - name: dashboard-config
           configMap:
-            name: {{ include "iotistica-app.fullname" . }}-dashboard-config
+            name: {{ include "iotistic.fullname" . }}-dashboard-config
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

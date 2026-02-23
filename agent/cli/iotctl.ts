@@ -1036,10 +1036,11 @@ async function restart(): Promise<void> {
 function formatConnection(protocol: string, connection: Record<string, any>): string {
 	switch (protocol) {
 		case 'modbus':
+			const slaveInfo = connection.slaveId || connection.slaveRange;
 			if (connection.type === 'tcp') {
-				return `${connection.host}:${connection.port} (TCP/${connection.slaveId || connection.slaveRange})`;
+				return `${connection.host}:${connection.port} (TCP, Slave: ${slaveInfo})`;
 			} else {
-				return `${connection.path} (Serial/${connection.slaveId || connection.slaveRange})`;
+				return `${connection.path} (Serial, Slave: ${slaveInfo})`;
 			}
 		case 'opcua':
 			return connection.endpointUrl || 'opc.tcp://...';
