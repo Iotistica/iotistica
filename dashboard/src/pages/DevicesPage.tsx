@@ -165,6 +165,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [dataPointsError, setDataPointsError] = useState('');
   const [activeTab, setActiveTab] = useState('devices');
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
+  const [profileProtocolFilter, setProfileProtocolFilter] = useState<string>('all');
 
   // Protocol-specific data point templates
   const PROTOCOL_TEMPLATES: Record<string, any[]> = {
@@ -858,9 +859,19 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
         {/* Tabs for Devices and Profiles */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList>
-            <TabsTrigger value="devices">Configured Devices</TabsTrigger>
-            <TabsTrigger value="profiles">Profiles</TabsTrigger>
+          <TabsList className="bg-transparent w-fit h-auto p-0 rounded-none justify-start gap-12 border-0">
+            <TabsTrigger 
+              value="devices"
+              className="!flex-none !border-0 !border-b-2 !border-b-transparent px-4 pb-3 text-base font-medium data-[state=active]:!border-b-foreground bg-transparent data-[state=active]:bg-transparent rounded-none hover:bg-transparent"
+            >
+              Configured Devices
+            </TabsTrigger>
+            <TabsTrigger 
+              value="profiles"
+              className="!flex-none !border-0 !border-b-2 !border-b-transparent px-4 pb-3 text-base font-medium data-[state=active]:!border-b-foreground bg-transparent data-[state=active]:bg-transparent rounded-none hover:bg-transparent"
+            >
+              Profiles
+            </TabsTrigger>
           </TabsList>
 
           {/* Devices Tab */}
@@ -1219,66 +1230,127 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
           {/* Profiles Tab */}
           <TabsContent value="profiles" className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-2xl font-bold tracking-tight">Device Profiles</h2>
-                <p className="text-sm text-muted-foreground">
-                  Manage protocol configuration profiles
-                </p>
+            {/* Protocol Filter with Add Profile Button */}
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-foreground">Protocol:</label>
+                <Select
+                  value={profileProtocolFilter}
+                  onValueChange={setProfileProtocolFilter}
+                >
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All ({allProfiles.length})</SelectItem>
+                    <SelectItem value="modbus">Modbus ({allProfiles.filter(p => p.protocol === 'modbus').length})</SelectItem>
+                    <SelectItem value="opcua">OPC-UA ({allProfiles.filter(p => p.protocol === 'opcua').length})</SelectItem>
+                    <SelectItem value="mqtt">MQTT ({allProfiles.filter(p => p.protocol === 'mqtt').length})</SelectItem>
+                    <SelectItem value="can">CAN Bus ({allProfiles.filter(p => p.protocol === 'can').length})</SelectItem>
+                    <SelectItem value="snmp">SNMP ({allProfiles.filter(p => p.protocol === 'snmp').length})</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
+
               <Button onClick={handleOpenProfileDialog}>
                 <Plus className="w-4 h-4 mr-2" />
                 Add Profile
               </Button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {allProfiles.length === 0 ? (
-                <Card className="col-span-full">
-                  <CardContent className="flex flex-col items-center justify-center py-12">
-                    <FileText className="h-12 w-12 mb-4 text-muted-foreground" />
-                    <p className="text-lg font-medium mb-2">No profiles yet</p>
-                    <p className="text-sm text-muted-foreground mb-4">Create your first protocol profile</p>
-                    <Button onClick={handleOpenProfileDialog}>
-                      <Plus className="w-4 h-4 mr-2" />
-                      Add Profile
-                    </Button>
-                  </CardContent>
-                </Card>
-              ) : (
-                allProfiles.map((profile) => (
-                  <Card key={profile.profile_name} className="hover:border-muted-foreground/40 transition-colors">
-                    <CardHeader>
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <CardTitle className="text-lg">{profile.profile_name}</CardTitle>
-                          <CardDescription className="mt-1">
-                            {profile.metadata?.description || 'No description'}
-                          </CardDescription>
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-xs">
-                            {profile.protocol.toUpperCase()}
-                          </Badge>
-                          <Badge variant="secondary" className="text-xs">
-                            {profile.data_points?.length || 0} data points
-                          </Badge>
-                        </div>
-                        {profile.created_at && (
-                          <p className="text-xs text-muted-foreground">
-                            Created {new Date(profile.created_at).toLocaleDateString()}
-                          </p>
+            {/* Profiles List */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Device Profiles</CardTitle>
+                <CardDescription>
+                  {(() => {
+                    const filteredProfiles = profileProtocolFilter === 'all' 
+                      ? allProfiles 
+                      : allProfiles.filter(p => p.protocol === profileProtocolFilter);
+                    
+                    if (allProfiles.length === 0) {
+                      return 'No profiles configured yet.';
+                    }
+                    
+                    const hasFilter = profileProtocolFilter !== 'all';
+                    return hasFilter 
+                      ? `${filteredProfiles.length} of ${allProfiles.length} profile(s) matching filter`
+                      : `${allProfiles.length} profile(s) configured`;
+                  })()}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {(() => {
+                  const filteredProfiles = profileProtocolFilter === 'all' 
+                    ? allProfiles 
+                    : allProfiles.filter(p => p.protocol === profileProtocolFilter);
+                  
+                  if (filteredProfiles.length === 0) {
+                    return (
+                      <div className="text-center py-12 text-muted-foreground">
+                        <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                        <p className="text-lg font-medium mb-2">
+                          {allProfiles.length === 0 ? 'No profiles yet' : 'No profiles found'}
+                        </p>
+                        {allProfiles.length === 0 && (
+                          <p className="text-sm mb-4">Create your first protocol profile</p>
                         )}
                       </div>
-                    </CardContent>
-                  </Card>
-                ))
-              )}
-            </div>
+                    );
+                  }
+                  
+                  return (
+                    <div className="space-y-3">
+                      {filteredProfiles.map((profile) => (
+                        <div key={profile.profile_name}>
+                          <div
+                            className="flex items-center justify-between p-4 border border-border rounded-lg hover:border-muted-foreground/20 transition-colors"
+                          >
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-2">
+                                <h3 className="text-lg font-semibold text-foreground">{profile.profile_name}</h3>
+                                <Badge variant="outline" className="text-xs">
+                                  {profile.protocol.toUpperCase()}
+                                </Badge>
+                                <Badge variant="secondary" className="text-xs">
+                                  {profile.data_points?.length || 0} data points
+                                </Badge>
+                              </div>
+                              
+                              <div className="flex flex-wrap gap-6 text-sm text-muted-foreground">
+                                {profile.metadata?.description && (
+                                  <div>
+                                    <span className="font-medium">Description:</span>{' '}
+                                    {profile.metadata.description}
+                                  </div>
+                                )}
+                                {profile.created_at && (
+                                  <div>
+                                    <span className="font-medium">Created:</span>{' '}
+                                    {new Date(profile.created_at).toLocaleDateString()}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            
+                            {/* Action Buttons */}
+                            <div className="flex items-center gap-3 ml-4">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                              >
+                                <Pencil className="h-4 w-4 mr-2" />
+                                Edit
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
 
