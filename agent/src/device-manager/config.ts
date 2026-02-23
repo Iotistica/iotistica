@@ -624,7 +624,7 @@ export class ConfigManager extends EventEmitter {
 			const steps = this.calculateSteps();
 
 			if (steps.length === 0) {
-				this.logger?.infoSync('No sensor config changes needed', {
+				this.logger?.infoSync('No device config changes needed', {
 					component: LogComponents.configManager,
 					operation: 'reconcile',
 				});

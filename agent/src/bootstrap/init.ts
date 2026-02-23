@@ -74,7 +74,7 @@ export class FeatureInitializer {
     await this.initProtocolAdapters();
     
     // Initialize sensor publish (connects to sockets created by protocol adapters)
-    await this.initSensorPublish();
+    await this.initDevicePublish();
     
     // Store discoveryService reference if available
     if (this.context.discoveryService) {
@@ -171,10 +171,10 @@ export class FeatureInitializer {
    * Initialize sensor publish feature (lightweight reload)
    * Reads endpoint configuration from database and starts Sensor Publish
    */
-  async initSensorPublish(): Promise<void> {
+  async initDevicePublish(): Promise<void> {
     const { logger, deviceInfo, anomalyService } = this.context;
 
-    logger.infoSync('Initializing Sensor Publish Feature', {
+    logger.infoSync('Initializing Device Publish Feature', {
       component: LogComponents.agent
     });
 
@@ -186,7 +186,7 @@ export class FeatureInitializer {
       const endpointOutputs = await EndpointOutputModel.getAll();
 
       if (endpointOutputs.length === 0) {
-        logger.warnSync('No sensor outputs configured in database', {
+        logger.warnSync('No device outputs configured in database', {
           component: LogComponents.agent,
           note: 'Run migrations to create default endpoint_outputs entries'
         });
@@ -259,7 +259,7 @@ export class FeatureInitializer {
         const { configureAnomalyFeed } = await import('../features/publish/manager.js');
         configureAnomalyFeed(anomalyService);
 
-        logger.debugSync('Configured edge AI anomaly detection for sensor data', {
+        logger.debugSync('Configured edge AI anomaly detection for device data', {
           component: LogComponents.agent,
           sensorCount: endpoints.length
         });
@@ -425,7 +425,7 @@ export class FeatureInitializer {
         }
 
         // Reinitialize with new endpoints (DB already synced before event emission)
-        await this.initSensorPublish();
+        await this.initDevicePublish();
 
         logger.infoSync('Sensor Publish reloaded successfully', {
           component: LogComponents.agent,
@@ -478,7 +478,7 @@ export class FeatureInitializer {
           await this.initProtocolAdapters();
 
           // Reinitialize Sensor Publish (will read endpoints from database)
-          await this.initSensorPublish();
+          await this.initDevicePublish();
 
           // CRITICAL: Update CloudSync's endpoints reference to new SensorsFeature instance
           // Without this, CloudSync tries to collect health from the old (stopped) instance
@@ -539,7 +539,7 @@ export class FeatureInitializer {
           await this.initProtocolAdapters();
 
           // Reinitialize Sensor Publish (will read endpoints from database)
-          await this.initSensorPublish();
+          await this.initDevicePublish();
 
           // Update CloudSync's endpoints reference
           if (this.cloudSync && this.features.sensors) {

@@ -69,19 +69,32 @@ export class DeviceEndpointModel {
    * Get device by UUID (recommended method for cloud/edge sync)
    */
   static async getByUuid(uuid: string): Promise<DeviceEndpoint | null> {
-    const device = await models(this.table)
-      .where('uuid', uuid)
-      .first();
-    
-    if (!device) return null;
-    
-    // Parse JSON fields (SQLite stores as TEXT)
-    return {
-      ...device,
-      connection: typeof device.connection === 'string' ? JSON.parse(device.connection) : device.connection,
-      data_points: device.data_points ? (typeof device.data_points === 'string' ? JSON.parse(device.data_points) : device.data_points) : null,
-      metadata: device.metadata ? (typeof device.metadata === 'string' ? JSON.parse(device.metadata) : device.metadata) : null,
-    };
+    try {
+      // Debug: Log the query being attempted
+      console.log('[DEBUG] Attempting getByUuid query', { uuid, table: this.table });
+      
+      const device = await models(this.table)
+        .where('uuid', uuid)
+        .first();
+      
+      if (!device) return null;
+      
+      // Parse JSON fields (SQLite stores as TEXT)
+      return {
+        ...device,
+        connection: typeof device.connection === 'string' ? JSON.parse(device.connection) : device.connection,
+        data_points: device.data_points ? (typeof device.data_points === 'string' ? JSON.parse(device.data_points) : device.data_points) : null,
+        metadata: device.metadata ? (typeof device.metadata === 'string' ? JSON.parse(device.metadata) : device.metadata) : null,
+      };
+    } catch (error: any) {
+      console.error('[ERROR] getByUuid failed', {
+        uuid,
+        errorMessage: error.message,
+        errorCode: error.code,
+        fullError: error
+      });
+      throw error;
+    }
   }
 
   /**
