@@ -23,7 +23,7 @@ const router = Router();
  * - limit: Max results (default 100)
  * - offset: Pagination offset (default 0)
  */
-router.get('/alerts', async (req, res) => {
+router.get('/anomaly-alerts', async (req, res) => {
   try {
     const { severity, startTime, endTime, limit = 100, offset = 0 } = req.query;
 
@@ -121,7 +121,7 @@ router.get('/alerts', async (req, res) => {
  *
  * Get single alert with incident context
  */
-router.get('/alerts/:alertId', async (req, res) => {
+router.get('/anomaly-alerts/:alertId', async (req, res) => {
   try {
     const { alertId } = req.params;
 

@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { MetricCard } from '@/components/ui/metric-card';
 import { AlertTriangle, AlertOctagon, Activity, CheckCircle, Eye, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { SeverityBadge, StatusBadge, ScoreBadge, IncidentTimelineChart } from '@/components/alerts';
 
@@ -247,6 +248,38 @@ export function AlertsPage() {
     return new Date(ms).toLocaleString();
   };
 
+  // Create metrics array
+  const metrics = [
+    {
+      icon: AlertTriangle,
+      label: "Open Incidents",
+      value: stats?.byStatus.open.toString() || "0",
+      subtitle: stats ? `${stats.total} total` : "Loading...",
+      iconColor: "orange" as const,
+    },
+    {
+      icon: AlertOctagon,
+      label: "Critical Alerts",
+      value: stats?.bySeverity.critical.toString() || "0",
+      subtitle: stats ? `${stats.bySeverity.warning} warnings` : "Loading...",
+      iconColor: "red" as const,
+    },
+    {
+      icon: Activity,
+      label: "Affected Devices",
+      value: stats?.affectedDevices.toString() || "0",
+      subtitle: stats ? `${stats.topDevices.length} unique` : "Loading...",
+      iconColor: "blue" as const,
+    },
+    {
+      icon: CheckCircle,
+      label: "Resolved Today",
+      value: stats?.byStatus.resolved.toString() || "0",
+      subtitle: stats ? `${((stats.byStatus.resolved / stats.total) * 100).toFixed(0)}% of total` : "Loading...",
+      iconColor: "green" as const,
+    },
+  ];
+
   return (
     <div className="w-full space-y-6 p-6">
       {/* Header */}
@@ -256,57 +289,18 @@ export function AlertsPage() {
       </div>
 
       {/* Stats Cards */}
-      {stats && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Open Incidents</p>
-                  <p className="text-3xl font-bold">{stats.byStatus.open}</p>
-                </div>
-                <AlertTriangle className="w-8 h-8 text-yellow-500" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Critical Alerts</p>
-                  <p className="text-3xl font-bold">{stats.bySeverity.critical}</p>
-                </div>
-                <AlertOctagon className="w-8 h-8 text-red-500" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Affected Devices</p>
-                  <p className="text-3xl font-bold">{stats.affectedDevices}</p>
-                </div>
-                <Activity className="w-8 h-8 text-blue-500" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Resolved Today</p>
-                  <p className="text-3xl font-bold">{stats.byStatus.resolved}</p>
-                </div>
-                <CheckCircle className="w-8 h-8 text-green-500" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {metrics.map((metric, index) => (
+          <MetricCard
+            key={index}
+            icon={metric.icon}
+            label={metric.label}
+            value={metric.value}
+            subtitle={metric.subtitle}
+            iconColor={metric.iconColor}
+          />
+        ))}
+      </div>
 
       {/* Filters Bar */}
       <div className="flex flex-wrap items-center gap-4">

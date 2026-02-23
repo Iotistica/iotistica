@@ -39,7 +39,7 @@ interface IncidentFilters {
  * - limit: Max results (default 50)
  * - offset: Pagination offset (default 0)
  */
-router.get('/incidents', async (req, res) => {
+router.get('/anomaly-incidents', async (req, res) => {
   try {
     const { status, severity, deviceName, deviceType, metric, startTime, endTime, limit = 50, offset = 0 } = req.query;
 
@@ -182,7 +182,7 @@ router.get('/incidents', async (req, res) => {
  * Query params:
  * - hours: Time window in hours (default 24)
  */
-router.get('/incidents/stats', async (req, res) => {
+router.get('/anomaly-incidents/stats', async (req, res) => {
   try {
     const hours = parseInt(req.query.hours as string) || 24;
     const timeWindowMs = hours * 60 * 60 * 1000;
@@ -274,7 +274,7 @@ router.get('/incidents/stats', async (req, res) => {
  *
  * Get single incident with full details including related events and alerts
  */
-router.get('/incidents/:incidentId', async (req, res) => {
+router.get('/anomaly-incidents/:incidentId', async (req, res) => {
   try {
     const { incidentId } = req.params;
 
@@ -429,7 +429,7 @@ router.get('/incidents/:incidentId', async (req, res) => {
  *   notes: string (optional)
  * }
  */
-router.patch('/incidents/:incidentId/resolve', async (req, res) => {
+router.patch('/anomaly-incidents/:incidentId/resolve', async (req, res) => {
   try {
     const { incidentId } = req.params;
     const { resolvedBy, notes } = req.body;
