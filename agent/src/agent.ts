@@ -949,7 +949,9 @@ export default class Agent {
         dbInstance,
         this.agentLogger,
         MqttManager.getInstance(),
-        this.deviceInfo.uuid
+        this.deviceInfo.uuid,
+        this.deviceInfo.deviceName, // Monitored device name (e.g., 'COMAP-Main-Controller')
+        (this.deviceInfo.deviceType as any) // Device source type
       );
       
       this.agentLogger?.infoSync('Anomaly detection initialized with inheritance support', {

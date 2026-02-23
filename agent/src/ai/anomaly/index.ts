@@ -35,6 +35,8 @@ export class AnomalyDetectionService {
 	private logger?: AgentLogger;
 	private mqttManager?: MqttManager;
 	private deviceUuid?: string;
+	private deviceName?: string;     // Monitored device name (e.g., 'COMAP-Main-Controller')
+	private deviceType?: 'modbus' | 'opcua' | 'bacnet' | 'mqtt-sensor' | 'agent-system'; // Device type
 	private enabled: boolean = false;
 	private predictor: LinearPredictor;
 	private predictionCadence: ForecastCadenceConfig;
@@ -56,11 +58,13 @@ export class AnomalyDetectionService {
 	private startupTimestamp: number = Date.now();
 	private warmupPeriodMs: number;
 	
-	constructor(config: AnomalyConfig, db?: Knex, logger?: AgentLogger, mqttManager?: MqttManager, deviceUuid?: string) {
+	constructor(config: AnomalyConfig, db?: Knex, logger?: AgentLogger, mqttManager?: MqttManager, deviceUuid?: string, deviceName?: string, deviceType?: 'modbus' | 'opcua' | 'bacnet' | 'mqtt-sensor' | 'agent-system') {
 		this.config = config;
 		this.logger = logger;
 		this.mqttManager = mqttManager;
 		this.deviceUuid = deviceUuid;
+		this.deviceName = deviceName || 'Agent System'; // Default to 'Agent System' for system metrics
+		this.deviceType = deviceType || 'agent-system';  // Default device type
 		this.enabled = true; // Controlled by features.enableAnomalyDetection
 		
 		// Set warm-up period from config (default: 15 minutes if not specified)
@@ -374,7 +378,9 @@ export class AnomalyDetectionService {
 		const confidence = this.calculateConfidence(anomalyScore, baseline);
 		
 		const event: import('./types').AnomalyEvent = {
-			deviceId: this.deviceUuid || 'unknown',
+			agentUuid: this.deviceUuid || 'unknown', // Infrastructure tracking (edge gateway)
+			deviceName: this.deviceName || 'Agent System', // Monitored device name (what users care about)
+			deviceType: this.deviceType || 'agent-system', // Device source type
 			metric: dataPoint.metric,
 			timestampMs: dataPoint.timestamp,
 			windowStartMs,
@@ -399,6 +405,8 @@ export class AnomalyDetectionService {
 		// Log canonical event
 		this.logger?.warnSync('Anomaly event', {
 			component: LogComponents.metrics,
+			deviceName: event.deviceName,
+			deviceType: event.deviceType,
 			metric: event.metric,
 			anomalyScore: event.anomalyScore.toFixed(3),
 			severity: event.severity,

@@ -14,7 +14,7 @@ import { Toaster } from "./components/ui/sonner";
 import { Sheet, SheetContent } from "./components/ui/sheet";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
-import { Menu, Activity, BarChart3, Radio, CalendarClock, Package, Shield, FileText, Terminal, Layers, Plus, Home, Bell, HelpCircle } from "lucide-react";
+import { Menu, Activity, BarChart3, Radio, CalendarClock, Package, Shield, FileText, Terminal, Layers, Plus, Home, Bell, HelpCircle, AlertOctagon } from "lucide-react";
 import { buildApiUrl } from "./config/api";
 import { SensorHealthDashboard } from "./pages/DeviceHealthDashboard";
 import { SensorsPage } from "./pages/DevicesPage";
@@ -32,6 +32,7 @@ import { DigitalTwinPage } from "./pages/DigitalTwinPage";
 import { EventDebuggerPage } from "./pages/EventDebuggerPage";
 import { AuditPage } from "./pages/audit";
 import { FleetsPage } from "./pages/FleetsPage";
+import { AlertsPage } from "./pages/AlertsPage";
 
 import { toast } from "sonner";
 import { Header } from "./components/Header";
@@ -87,7 +88,8 @@ export default function App() {
     'profile',
     'dashboard',
     'digital-twin',
-    'event-debugger'
+    'event-debugger',
+    'alerts'
   ] as const;
   type View = typeof viewOptions[number];
   const agentViews: View[] = [
@@ -115,7 +117,7 @@ export default function App() {
     return stored && viewOptions.includes(stored as View) ? (stored as View) : 'metrics';
   });
   const [fleetNameById, setFleetNameById] = useState<Record<string, string>>({});
-  const isGlobalView = currentView === 'dashboard' || currentView === 'mqtt' || currentView === 'audit' || currentView === 'security' || currentView === 'fleets';
+  const isGlobalView = currentView === 'dashboard' || currentView === 'mqtt' || currentView === 'audit' || currentView === 'security' || currentView === 'fleets' || currentView === 'alerts';
   const [debugMode, setDebugMode] = useState(false);
   const [isKioskMode, setIsKioskMode] = useState<boolean>(() => {
     return localStorage.getItem('dashboard-kiosk-mode') === 'true';
@@ -1159,6 +1161,15 @@ export default function App() {
                 <Shield className="w-5 h-5 mr-2" />
                 Security
               </Button>
+              <Button
+                variant={currentView === 'alerts' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => handleGlobalViewChange('alerts')}
+                style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
+              >
+                <AlertOctagon className="w-5 h-5 mr-2" />
+                Alerts
+              </Button>
             </div>
           </div>
           
@@ -1255,6 +1266,9 @@ export default function App() {
                 <div className="flex-1 bg-background overflow-auto p-6">
                   <SecurityPage />
                 </div>
+              )}
+              {currentView === 'alerts' && (
+                <AlertsPage />
               )}
             </>
           ) : isLoadingDevices ? (

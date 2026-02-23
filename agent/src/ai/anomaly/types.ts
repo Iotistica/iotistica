@@ -74,9 +74,13 @@ export interface BaselineInfo {
 
 /**
  * Canonical anomaly event (single event per metric, published to MQTT)
+ * CRITICAL: Tracks MONITORED DEVICES (e.g., 'COMAP-Main-Controller', 'Temp-Sensor-01'),
+ * not agent/gateway info. The agent UUID is kept for infrastructure tracking.
  */
 export interface AnomalyEvent {
-	deviceId: string;                // Device UUID (self-contained, don't rely on topic parsing)
+	agentUuid: string;               // Edge gateway/agent UUID (infrastructure tracking)
+	deviceName: string;              // Monitored device name (e.g., 'COMAP-Main-Controller', 'Agent System')
+	deviceType: 'modbus' | 'opcua' | 'bacnet' | 'mqtt-sensor' | 'agent-system'; // Source type
 	metric: string;
 	timestampMs: number;             // When the anomalous measurement occurred (explicit units)
 	windowStartMs: number;           // Start of statistical window used for detection
@@ -91,7 +95,7 @@ export interface AnomalyEvent {
 	suppressed: boolean;             // Within cooldown period
 	expectedRange: [number, number]; // From highest-confidence detector
 	deviation: number;               // From highest-confidence detector
-	fingerprint: string;             // For deduplication
+	fingerprint: string;             // For deduplication (hash of device+metric+method+severity)
 	// Suppression metadata
 	cooldownSec: number;
 	firstSeen: number;

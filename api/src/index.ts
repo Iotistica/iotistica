@@ -40,6 +40,8 @@ import { startTrafficFlushService, stopTrafficFlushService } from './services/tr
 import prometheusRoutes from './routes/prometheus';
 import endpointsDataRoutes from './routes/endpoints-data';
 import anomalyRoutes from './routes/anomaly';
+import anomalyIncidentsRoutes from './routes/anomaly-incidents';
+import anomalyAlertsRoutes from './routes/anomaly-alerts';
 import profileRoutes, { publicRouter as profilePublicRoutes } from './routes/profiles';
 import aiChatRoutes from './routes/ai-chat';
 import { 
@@ -373,6 +375,8 @@ app.use(API_BASE, trafficRoutes);
 app.use(API_BASE, deviceTagsRoutes);
 app.use(`${API_BASE}/dashboard-layouts`, dashboardLayoutsRoutes);
 app.use(API_BASE, anomalyRoutes);
+app.use(API_BASE, anomalyIncidentsRoutes);
+app.use(API_BASE, anomalyAlertsRoutes);
 app.use(API_BASE, noderedStorageRoutes);
 app.use(`${API_BASE}/metrics`, metricsCatalogRoutes);
 app.use(API_BASE, aiChatRoutes); // AI assistant chat endpoint
