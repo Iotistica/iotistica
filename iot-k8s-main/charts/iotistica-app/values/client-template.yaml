@@ -121,6 +121,9 @@ dashboard:
   replicas: 1
   port: 3000
   serviceType: ClusterIP
+  tlsCommonName: "client-XXXXXXXX.iotistica.com"  # Replace with actual domain
+  # API URL for browser access - client-specific
+  apiUrl: "https://api-XXXXXXXX.iotistica.com"  # Replace with actual API URL
   resources:
     requests:
       cpu: 50m
@@ -128,6 +131,8 @@ dashboard:
     limits:
       cpu: 200m
       memory: 128Mi
+  env:
+    NODE_ENV: production
 
 # PostgreSQL database
 postgres:
