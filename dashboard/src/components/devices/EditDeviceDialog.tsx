@@ -144,15 +144,16 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
         return;
       }
 
-      if (modbusDataPoints.length === 0) {
-        setError('Please add at least one data point');
-        return;
-      }
+      // Data points validation removed - users work with profiles only
+      // if (modbusDataPoints.length === 0) {
+      //   setError('Please add at least one data point');
+      //   return;
+      // }
 
-      // Combine config with data points
+      // Combine config with data points (now optional - profile-based)
       const finalConfig: ModbusDeviceConfig = {
         ...modbusConfig,
-        dataPoints: modbusDataPoints,
+        ...(modbusDataPoints.length > 0 && { dataPoints: modbusDataPoints }),
       };
 
       try {
@@ -310,10 +311,12 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
                 onValidationChange={setModbusFormValid}
               />
 
+              {/* Data Points Table - Commented out to reduce confusion, users should work with profiles only
               <DataPointsTable
                 value={modbusDataPoints}
                 onChange={setModbusDataPoints}
               />
+              */}
             </div>
           )}
 
@@ -325,10 +328,12 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
                 onValidationChange={setOpcuaFormValid}
               />
 
+              {/* OPC-UA Data Points Table - Commented out to reduce confusion, users should work with profiles only
               <OPCUADataPointsTable
                 dataPoints={opcuaDataPoints}
                 onChange={setOpcuaDataPoints}
               />
+              */}
             </div>
           )}
 

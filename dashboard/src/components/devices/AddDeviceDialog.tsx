@@ -54,15 +54,16 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
         return;
       }
 
-      if (modbusDataPoints.length === 0) {
-        setError('Please add at least one data point');
-        return;
-      }
+      // Data points validation removed - users work with profiles only
+      // if (modbusDataPoints.length === 0) {
+      //   setError('Please add at least one data point');
+      //   return;
+      // }
 
-      // Combine config with data points
+      // Combine config with data points (now optional - profile-based)
       const finalConfig: ModbusDeviceConfig = {
         ...modbusConfig,
-        dataPoints: modbusDataPoints,
+        ...(modbusDataPoints.length > 0 && { dataPoints: modbusDataPoints }),
       };
 
       try {
@@ -113,8 +114,8 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
 
   const canSave = () => {
     if (selectedProtocol === 'modbus') {
-      // Modbus requires at least one register mapping
-      return modbusFormValid && modbusDataPoints.length > 0;
+      // Modbus validation - data points not required (profile-based)
+      return modbusFormValid;
     } else if (selectedProtocol === 'opcua') {
       // OPC UA uses auto-discovery, nodes are optional
       return opcuaFormValid;
@@ -166,10 +167,12 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
                 onDataPointsChange={setModbusDataPoints}
               />
 
+              {/* Data Points Table - Commented out to reduce confusion, users should work with profiles only
               <DataPointsTable
                 value={modbusDataPoints}
                 onChange={setModbusDataPoints}
               />
+              */}
             </div>
           )}
 
@@ -180,10 +183,12 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
                 onValidationChange={setOpcuaFormValid}
               />
 
+              {/* OPC-UA Data Points Table - Commented out to reduce confusion, users should work with profiles only
               <OPCUADataPointsTable
                 dataPoints={opcuaDataPoints}
                 onChange={setOpcuaDataPoints}
               />
+              */}
             </div>
           )}
         </div>

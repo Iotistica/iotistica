@@ -71,9 +71,6 @@ router.post('/devices/:uuid/sensors', async (req, res) => {
     const sensorConfig = req.body;
     const validateOnly = req.query.validateOnly === 'true';
 
-    // Debug logging
-    logger.info('Received sensor config:', JSON.stringify(sensorConfig, null, 2));
-    logger.info('Validation-only mode:', validateOnly);
 
     // Basic validation
     if (!sensorConfig.name) {

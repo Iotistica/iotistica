@@ -120,12 +120,16 @@ const DEFAULT_SETTINGS = {
 };
 
 export default function AgentSettingsPage({ deviceUuid }: Props) {
-  const { getPendingConfig, updatePendingConfig, getTargetConfig,  saveTargetState, hasPendingChanges, fetchDeviceState } = useDeviceState();
+  const { getPendingConfig, updatePendingConfig, getTargetConfig,  saveTargetState, hasPendingChanges, fetchDeviceState, getDeviceStates } = useDeviceState();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [deviceInfo, setDeviceInfo] = useState<any>(null);
   const [showRestartDialog, setShowRestartDialog] = useState(false);
+  
+  // Get agent version from device state
+  const deviceStates = getDeviceStates();
+  const agentVersion = deviceStates[deviceUuid]?.agentVersion;
 
   // Get current settings from pending state (or target state as fallback)
   const pendingConfig = getPendingConfig(deviceUuid);
@@ -286,7 +290,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 <Badge variant="outline" className="text-sm">
-                  v{settings.agent?.version || DEFAULT_SETTINGS.agent.version}
+                  {agentVersion ? `v${agentVersion}` : 'Version unavailable'}
                 </Badge>
                 {deviceInfo?.device_type === 'virtual' && (
                   <Badge variant="secondary" className="text-sm">

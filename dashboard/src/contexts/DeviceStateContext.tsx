@@ -77,6 +77,9 @@ interface DeviceConfig {
 interface DeviceState {
   deviceUuid: string;
   
+  // Device metadata (from devices table)
+  agentVersion?: string; // Agent version from devices.agent_version
+  
   // Server states (source of truth)
   currentState: {
     apps: Record<string, AppState>;
@@ -109,6 +112,7 @@ interface DeviceState {
 interface DeviceStateContextValue {
   // State getters
   getDeviceState: (deviceUuid: string) => DeviceState | undefined;
+  getDeviceStates: () => Record<string, DeviceState>; // Get all device states
   getCurrentApps: (deviceUuid: string) => Record<string, AppState>;
   getTargetApps: (deviceUuid: string) => Record<string, AppState>;
   getPendingApps: (deviceUuid: string) => Record<string, AppState>;
@@ -177,6 +181,7 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
           ...prev,
           [deviceUuid]: {
             deviceUuid,
+            agentVersion: data.device?.agent_version, // Store agent version from devices table
             currentState: data.current_state ? {
               apps: data.current_state.apps || {},
               config: data.current_state.config || {},
@@ -715,6 +720,8 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
   // Utility functions
   const getDeviceState = useCallback((deviceUuid: string) => deviceStates[deviceUuid], [deviceStates]);
   
+  const getDeviceStates = useCallback(() => deviceStates, [deviceStates]);
+  
   const getCurrentApps = useCallback((deviceUuid: string) => 
     deviceStates[deviceUuid]?.currentState?.apps || {}, [deviceStates]);
   
@@ -785,6 +792,7 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
   
   const value: DeviceStateContextValue = {
     getDeviceState,
+    getDeviceStates,
     getCurrentApps,
     getTargetApps,
     getPendingApps,

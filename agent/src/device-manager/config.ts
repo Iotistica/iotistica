@@ -511,26 +511,21 @@ export class ConfigManager extends EventEmitter {
 	/**
 	 * Normalize device property names (camelCase → snake_case)
 	 * Handles both API and SQLite conventions
-	 * CRITICAL: Generates stable UUID if missing (required for database sync)
+	 * CRITICAL: Cloud API sends 'id' field, we map it to 'uuid' for database
 	 */
 	public normalizeDevice(device: ProtocolAdapterDevice): any {
-		const crypto = require('crypto');
+		const deviceAny = device as any;
 		
-		// If no uuid provided, generate a stable one based on protocol + name
-		// This ensures the same device always gets the same uuid
-		let uuid = device.uuid;
+		// Cloud API uses 'id', database uses 'uuid' - map between them
+		const uuid = device.uuid || deviceAny.id;
+		
 		if (!uuid) {
-			const hashInput = `${device.protocol}-${device.name}`;
-			const hash = crypto.createHash('sha256').update(hashInput).digest('hex');
-			uuid = `${hash.substring(0, 8)}-${hash.substring(8, 12)}-${hash.substring(12, 16)}-${hash.substring(16, 20)}-${hash.substring(20, 32)}`;
-			
-			this.logger?.debugSync('Generated UUID for device without uuid', {
+			this.logger?.warnSync('Device missing both uuid and id fields', {
 				component: LogComponents.configManager,
 				operation: 'normalizeDevice',
 				deviceName: device.name,
 				deviceProtocol: device.protocol,
-				generatedUuid: uuid,
-				reason: 'Cloud config missing uuid - generated stable identifier'
+				reason: 'This should not happen - check cloud API response'
 			});
 		}
 		
@@ -539,10 +534,10 @@ export class ConfigManager extends EventEmitter {
 			name: device.name,
 			protocol: device.protocol,
 			enabled: device.enabled !== undefined ? device.enabled : true,
-			poll_interval: (device as any).pollInterval || (device as any).poll_interval || 5000,
-			connection: (device as any).connection,
-			data_points: (device as any).dataPoints || (device as any).data_points || (device as any).registers,
-			metadata: (device as any).metadata
+			poll_interval: deviceAny.pollInterval || deviceAny.poll_interval || 5000,
+			connection: deviceAny.connection,
+			data_points: deviceAny.dataPoints || deviceAny.data_points || deviceAny.registers,
+			metadata: deviceAny.metadata
 		};
 	}
 

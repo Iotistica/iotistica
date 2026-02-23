@@ -4,13 +4,14 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Activity, Pencil, Plus, AlertCircle } from 'lucide-react';
+import { Activity, Pencil, Plus, AlertCircle, FileText } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -162,6 +163,8 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   });
   const [profileLoading, setProfileLoading] = useState(false);
   const [dataPointsError, setDataPointsError] = useState('');
+  const [activeTab, setActiveTab] = useState('devices');
+  const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
 
   // Protocol-specific data point templates
   const PROTOCOL_TEMPLATES: Record<string, any[]> = {
@@ -350,6 +353,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
   useEffect(() => {
     fetchSensors();
+    fetchAllProfiles(); // Fetch all profiles for the Profiles tab
     
     // Auto-refresh every 10 seconds to pick up agent status updates
     const interval = setInterval(fetchSensors, 10000);
@@ -528,6 +532,26 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       if (data && data.length > 0 && !virtualFormData.profile) {
         setVirtualFormData(prev => ({ ...prev, profile: data[0].profile_name }));
       }
+    } catch (err) {
+      toast.error('Failed to fetch profiles');
+    }
+  };
+
+  const fetchAllProfiles = async () => {
+    try {
+      // Fetch profiles for all protocols
+      const protocols = ['modbus', 'opcua', 'mqtt', 'can', 'snmp'];
+      const allProfilesData: Profile[] = [];
+      
+      for (const protocol of protocols) {
+        const response = await fetch(buildApiUrl(`/api/v1/profiles?protocol=${protocol}`));
+        if (response.ok) {
+          const data = await response.json();
+          allProfilesData.push(...(data || []));
+        }
+      }
+      
+      setAllProfiles(allProfilesData);
     } catch (err) {
       toast.error('Failed to fetch profiles');
     }
@@ -714,6 +738,9 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         await fetchProfiles(profileFormData.protocol);
       }
       
+      // Refresh all profiles for the Profiles tab
+      await fetchAllProfiles();
+      
       // Close dialog
       setAddProfileDialogOpen(false);
     } catch (err) {
@@ -829,6 +856,15 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           />
         )}
 
+        {/* Tabs for Devices and Profiles */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList>
+            <TabsTrigger value="devices">Configured Devices</TabsTrigger>
+            <TabsTrigger value="profiles">Profiles</TabsTrigger>
+          </TabsList>
+
+          {/* Devices Tab */}
+          <TabsContent value="devices" className="space-y-6">
         {/* Protocol Filter with Add Device Button */}
         <div className="flex items-center justify-between gap-4">
           {sensors.length > 0 ? (
@@ -1018,10 +1054,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                 Add Device
               </Button>
             )}
-            <Button onClick={handleOpenProfileDialog}>
-              <Plus className="w-4 h-4 mr-2" />
-              Add Profile
-            </Button>
           </div>
         </div>
 
@@ -1183,6 +1215,72 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             )}
           </CardContent>
         </Card>
+          </TabsContent>
+
+          {/* Profiles Tab */}
+          <TabsContent value="profiles" className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-bold tracking-tight">Device Profiles</h2>
+                <p className="text-sm text-muted-foreground">
+                  Manage protocol configuration profiles
+                </p>
+              </div>
+              <Button onClick={handleOpenProfileDialog}>
+                <Plus className="w-4 h-4 mr-2" />
+                Add Profile
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {allProfiles.length === 0 ? (
+                <Card className="col-span-full">
+                  <CardContent className="flex flex-col items-center justify-center py-12">
+                    <FileText className="h-12 w-12 mb-4 text-muted-foreground" />
+                    <p className="text-lg font-medium mb-2">No profiles yet</p>
+                    <p className="text-sm text-muted-foreground mb-4">Create your first protocol profile</p>
+                    <Button onClick={handleOpenProfileDialog}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add Profile
+                    </Button>
+                  </CardContent>
+                </Card>
+              ) : (
+                allProfiles.map((profile) => (
+                  <Card key={profile.profile_name} className="hover:border-muted-foreground/40 transition-colors">
+                    <CardHeader>
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <CardTitle className="text-lg">{profile.profile_name}</CardTitle>
+                          <CardDescription className="mt-1">
+                            {profile.metadata?.description || 'No description'}
+                          </CardDescription>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-xs">
+                            {profile.protocol.toUpperCase()}
+                          </Badge>
+                          <Badge variant="secondary" className="text-xs">
+                            {profile.data_points?.length || 0} data points
+                          </Badge>
+                        </div>
+                        {profile.created_at && (
+                          <p className="text-xs text-muted-foreground">
+                            Created {new Date(profile.created_at).toLocaleDateString()}
+                          </p>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </div>
+          </TabsContent>
+        </Tabs>
 
         {/* Add Sensor Dialog */}
         <AddSensorDialog
@@ -1261,6 +1359,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                 </Select>
               </div>
 
+              {/* Data Points Preview - Commented out to reduce confusion, users should work with profiles only
               <div className="space-y-2">
                 <Label>Data Points Preview</Label>
                 <Textarea
@@ -1273,6 +1372,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                   }
                 />
               </div>
+              */}
 
               {virtualFormData.protocol === 'modbus' && (
                 <div className="space-y-2">

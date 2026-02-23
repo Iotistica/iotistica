@@ -123,6 +123,7 @@ export default function App() {
     return localStorage.getItem('dashboard-kiosk-mode') === 'true';
   });
   const [isDeploying, setIsDeploying] = useState(false);
+  const [criticalAlertsCount, setCriticalAlertsCount] = useState(0);
   
   // Track last URL fleet ID to prevent overriding manual selections
   const lastUrlFleetIdRef = useRef<string | undefined>(undefined);
@@ -143,6 +144,39 @@ export default function App() {
       localStorage.setItem('lastViewedAgent', JSON.stringify(lastViewedAgent));
     }
   }, [lastViewedAgent]);
+  
+  // Fetch critical alerts count periodically
+  useEffect(() => {
+    const fetchCriticalAlertsCount = async () => {
+      try {
+        const token = localStorage.getItem('accessToken');
+        const response = await fetch(
+          buildApiUrl('/api/v1/anomaly-incidents/stats?hours=720'), // Last 30 days
+          {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+          }
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          // Count critical severity incidents
+          const criticalCount = data.bySeverity?.critical || 0;
+          const highCount = data.bySeverity?.high || 0;
+          setCriticalAlertsCount(criticalCount + highCount);
+        }
+      } catch (error) {
+        console.error('Failed to fetch critical alerts count:', error);
+      }
+    };
+    
+    // Fetch immediately
+    fetchCriticalAlertsCount();
+    
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchCriticalAlertsCount, 30000);
+    
+    return () => clearInterval(interval);
+  }, []);
   
   // Memoize selected device to prevent unnecessary re-renders
   const selectedDevice = useMemo(() => {
@@ -1166,9 +1200,18 @@ export default function App() {
                 size="sm"
                 onClick={() => handleGlobalViewChange('alerts')}
                 style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
+                className="relative"
               >
                 <AlertOctagon className="w-5 h-5 mr-2" />
                 Alerts
+                {criticalAlertsCount > 0 && (
+                  <Badge 
+                    variant="destructive" 
+                    className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-[10px] font-semibold rounded-full"
+                  >
+                    {criticalAlertsCount > 99 ? '99+' : criticalAlertsCount}
+                  </Badge>
+                )}
               </Button>
             </div>
           </div>
