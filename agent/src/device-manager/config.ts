@@ -763,100 +763,93 @@ export class ConfigManager extends EventEmitter {
 				}))
 			});
 			
-			const targetDeviceUuids = new Set(
-				devices.map((d: any) => d.uuid).filter(Boolean)
-			);
+		// CRITICAL: Cloud API sends 'id' field, not 'uuid'
+		// Use d.id || d.uuid to match what normalizeDevice() does
+		const targetDeviceUuids = new Set(
+			devices.map((d: any) => d.id || d.uuid).filter(Boolean)
+	);
+		
+		// For each device in target state
+		for (const device of devices) {
+			const deviceAny = device as any;
+		let connection: any = deviceAny.connection;
+		if (!connection && deviceAny.connectionString) {
+			try {
+				connection = JSON.parse(deviceAny.connectionString);
+			} catch (err) {
+				this.logger?.warnSync('Failed to parse connectionString', {
+					component: LogComponents.configManager,
+					deviceName: device.name,
+					connectionString: deviceAny.connectionString,
+					error: err instanceof Error ? err.message : String(err)
+				});
+				connection = null;
+			}
+		}
+		
+		// Check if this is a Modbus discovery target (has slaveRange)
+		const hasSlaveRange = connection?.slaveRange !== undefined;
+	
+	if (device.protocol === 'modbus' && hasSlaveRange) {
+		this.logger?.debugSync('Skipping discovery target device (has slaveRange)', {
+			component: LogComponents.configManager,
+			operation: 'syncEndpointsToDatabase',
+			deviceUuid: device.uuid,
+			deviceName: device.name,
+			connection: connection,
+			slaveRange: connection.slaveRange,
+			reason: 'Discovery target - only discovered slaves should be in endpoints table'
+		});
+		continue; // Skip to next device
+	}
+	
+	// Normalize property names from cloud API (camelCase) to SQLite (snake_case)
+	const normalizedDevice = this.normalizeDevice(device as ProtocolAdapterDevice);
 
-			// Sync each device to SQLite
-			for (const device of devices) {
-				// CRITICAL: Skip discovery targets (devices with slaveRange)
-				// Discovery targets are configuration-only - they exist in targetConfig
-				// to trigger discovery, but should NOT be created in endpoints table.
-				// Only the discovered slave devices (with slaveId) should be in endpoints.
-				
-				const deviceAny = device as any;
-				
-				// Parse connection from either object or string format (same logic as getDiscoveryTargets)
-				let connection: any = deviceAny.connection;
-				if (!connection && deviceAny.connectionString) {
-					try {
-						connection = JSON.parse(deviceAny.connectionString);
-					} catch (err) {
-						this.logger?.warnSync('Failed to parse connectionString', {
-							component: LogComponents.configManager,
-							deviceName: device.name,
-							connectionString: deviceAny.connectionString,
-							error: err instanceof Error ? err.message : String(err)
-						});
-						connection = null;
-					}
-				}
-				
-				// Check if this is a Modbus discovery target (has slaveRange)
-				const hasSlaveRange = connection?.slaveRange !== undefined;
-				
-				if (device.protocol === 'modbus' && hasSlaveRange) {
-					this.logger?.debugSync('Skipping discovery target device (has slaveRange)', {
-						component: LogComponents.configManager,
-						operation: 'syncEndpointsToDatabase',
-						deviceUuid: device.uuid,
-						deviceName: device.name,
-						connection: connection,
-						slaveRange: connection.slaveRange,
-						reason: 'Discovery target - only discovered slaves should be in endpoints table'
-					});
-					continue; // Skip to next device
-				}
-				
-				// Normalize property names from cloud API (camelCase) to SQLite (snake_case)
-				const normalizedDevice = this.normalizeDevice(device as ProtocolAdapterDevice);
+	// Use UUID for lookup if available, fallback to name for legacy devices
+	let existing: any = null;
+	try {
+		existing = normalizedDevice.uuid 
+			? await DeviceEndpointModel.getByUuid(normalizedDevice.uuid)
+			: await DeviceEndpointModel.getByName(normalizedDevice.name);
+	} catch (lookupError) {
+		this.logger?.warnSync('Failed to lookup existing device, treating as new', {
+			component: LogComponents.configManager,
+			operation: 'syncEndpointsToDatabase',
+			deviceUuid: normalizedDevice.uuid,
+			deviceName: normalizedDevice.name,
+			error: lookupError instanceof Error ? lookupError.message : String(lookupError)
+		});
+		// Continue as if device doesn't exist - will trigger CREATE path
+	}
 
-				// Use UUID for lookup if available, fallback to name for legacy devices
-				let existing: any = null;
-				try {
-					existing = normalizedDevice.uuid 
-						? await DeviceEndpointModel.getByUuid(normalizedDevice.uuid)
-						: await DeviceEndpointModel.getByName(normalizedDevice.name);
-				} catch (lookupError) {
-					this.logger?.warnSync('Failed to lookup existing device, treating as new', {
-						component: LogComponents.configManager,
-						operation: 'syncEndpointsToDatabase',
-						deviceUuid: normalizedDevice.uuid,
-						deviceName: normalizedDevice.name,
-						error: lookupError instanceof Error ? lookupError.message : String(lookupError)
-					});
-					// Continue as if device doesn't exist - will trigger CREATE path
-				}
-
-				if (existing) {
-					this.logger?.infoSync('Found existing device in DB', {
-						component: LogComponents.configManager,
-						operation: 'syncEndpointsToDatabase',
-						deviceUuid: existing.uuid,
-						deviceName: existing.name,
-						existingDataPointsCount: existing.data_points?.length || 0
-					});
-					
-					// CRITICAL: Preserve discovered data_points if target state has empty array
-					// This prevents reconciliation from overwriting discovery results
-					// Flow: Discovery finds nodes → saves to DB → cloud syncs → reconcile runs
-					// Without this check, reconcile would overwrite with cloud's empty array
-					const shouldPreserveDataPoints = 
-						existing.data_points && 
-						existing.data_points.length > 0 && 
-						(!normalizedDevice.data_points || normalizedDevice.data_points.length === 0);
-					
-					if (shouldPreserveDataPoints) {
-						this.logger?.debugSync('✅ PRESERVING discovered data_points (UPDATE path)', {
-							component: LogComponents.configManager,
-							deviceUuid: normalizedDevice.uuid || existing.uuid,
-							deviceName: normalizedDevice.name,
-							existingDataPointsCount: existing.data_points?.length || 0,
-							targetDataPointsCount: normalizedDevice.data_points?.length || 0,
-							reason: 'DB has nodes, target state empty - keeping DB nodes'
-						});
-						
-						// Keep existing data_points from discovery
+	if (existing) {
+		this.logger?.infoSync('Found existing device in DB', {
+			component: LogComponents.configManager,
+			operation: 'syncEndpointsToDatabase',
+			deviceUuid: existing.uuid,
+			deviceName: existing.name,
+			existingDataPointsCount: existing.data_points?.length || 0
+		});
+		
+		// CRITICAL: Preserve discovered data_points if target state has empty array
+		// This prevents reconciliation from overwriting discovery results
+		// Flow: Discovery finds nodes → saves to DB → cloud syncs → reconcile runs
+		// Without this check, reconcile would overwrite with cloud's empty array
+		const shouldPreserveDataPoints = 
+			existing.data_points && 
+			existing.data_points.length > 0 && 
+			(!normalizedDevice.data_points || normalizedDevice.data_points.length === 0);
+		
+		if (shouldPreserveDataPoints) {
+			this.logger?.debugSync('✅ PRESERVING discovered data_points (UPDATE path)', {
+				component: LogComponents.configManager,
+				deviceUuid: normalizedDevice.uuid || existing.uuid,
+				deviceName: normalizedDevice.name,
+				existingDataPointsCount: existing.data_points?.length || 0,
+				targetDataPointsCount: normalizedDevice.data_points?.length || 0,
+				reason: 'DB has nodes, target state empty - keeping DB nodes'
+			});
 						normalizedDevice.data_points = existing.data_points;
 					} else {
 						this.logger?.infoSync('Will use target state data_points (UPDATE path)', {

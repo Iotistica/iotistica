@@ -6,12 +6,28 @@
  * Uses React Hook Form with validation.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, ChevronsUpDown, Check } from 'lucide-react';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { cn } from '@/components/ui/utils';
+import { buildApiUrl } from '@/config/api';
 import { ModbusConfigForm } from './ModbusConfigForm';
 import { DataPointsTable } from './DataPointsTable';
 import { OPCUAConfigForm } from './OPCUAConfigForm';
@@ -33,6 +49,9 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedProtocol, setSelectedProtocol] = useState<'modbus' | 'opcua'>('modbus');
+  const [location, setLocation] = useState<string>('');
+  const [locations, setLocations] = useState<string[]>([]);
+  const [locationOpen, setLocationOpen] = useState(false);
   
   // Modbus form state
   const [modbusConfig, setModbusConfig] = useState<ModbusDeviceConfig | null>(null);
@@ -43,6 +62,28 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
   const [opcuaConfig, setOpcuaConfig] = useState<OPCUADeviceConfig | null>(null);
   const [opcuaFormValid, setOpcuaFormValid] = useState(false);
   const [opcuaDataPoints, setOpcuaDataPoints] = useState<OPCUADataPoint[]>([]);
+
+  const loadLocations = async () => {
+    try {
+      const token = localStorage.getItem('accessToken');
+      const response = await fetch(buildApiUrl('/api/v1/devices/locations'), {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setLocations(data.locations || []);
+      }
+    } catch (error) {
+      console.error('Error loading locations:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (open) {
+      // Load location autocomplete options
+      loadLocations();
+    }
+  }, [open]);
 
   const handleSave = async () => {
     setError(null);
@@ -68,7 +109,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
 
       try {
         setLoading(true);
-        await onSaveDevice(finalConfig);
+        await onSaveDevice({ ...finalConfig, location });
         handleClose();
       } catch (err: any) {
         setError(err.message || 'Failed to save device');
@@ -92,7 +133,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
 
       try {
         setLoading(true);
-        await onSaveDevice(finalConfig);
+        await onSaveDevice({ ...finalConfig, location });
         handleClose();
       } catch (err: any) {
         setError(err.message || 'Failed to save device');
@@ -109,6 +150,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
     setOpcuaConfig(null);
     setOpcuaDataPoints([]);
     setSelectedProtocol('modbus');
+    setLocation('');
     onOpenChange(false);
   };
 
@@ -140,6 +182,56 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
+
+          {/* Location field - common for all protocols */}
+          <div className="space-y-2 px-1">
+            <Label>Location (optional)</Label>
+            <Popover open={locationOpen} onOpenChange={setLocationOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={locationOpen}
+                  className="w-full justify-between font-normal"
+                >
+                  {location || "Select or enter location..."}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-full p-0" align="start">
+                <Command>
+                  <CommandInput 
+                    placeholder="Search or type new location..." 
+                    value={location}
+                    onValueChange={setLocation}
+                  />
+                  <CommandList>
+                    <CommandEmpty>Type to add a new location</CommandEmpty>
+                    <CommandGroup>
+                      {locations.map((loc) => (
+                        <CommandItem
+                          key={loc}
+                          value={loc}
+                          onSelect={(currentValue) => {
+                            setLocation(currentValue);
+                            setLocationOpen(false);
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              location === loc ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          {loc}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
 
           <div className="space-y-2 text-left">
             <label className="text-sm font-medium text-foreground" htmlFor="protocol-select">

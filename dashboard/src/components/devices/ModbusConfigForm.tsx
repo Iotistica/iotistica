@@ -337,7 +337,7 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
           </div>
 
           {/* Slave Range for Discovery - Compact */}
-          <div className="space-y-2 pt-2 border-t">
+          <div className="space-y-2 pt-2">
             <div className="flex items-center gap-1.5">
               <input
                 type="checkbox"
