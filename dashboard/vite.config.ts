@@ -73,7 +73,7 @@
       // Make environment variables available at build time
       // This allows K8s to inject VITE_API_URL via Dockerfile ARG
       'import.meta.env.VITE_API_URL': JSON.stringify(process.env.VITE_API_URL),
-      // Inject version from package.json at build time
-      '__APP_VERSION__': JSON.stringify(pkg.version),
+      // Inject displayVersion from package.json at build time (user-facing release version)
+      '__APP_VERSION__': JSON.stringify(pkg.displayVersion || pkg.version),
     },
   });
