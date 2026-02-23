@@ -309,95 +309,90 @@ export function AlertsPage() {
       )}
 
       {/* Filters Bar */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-              <div>
-                <Label className="text-sm mb-2 block">Status</Label>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="open">Open</SelectItem>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="resolved">Resolved</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+      <div className="flex flex-wrap items-center gap-4">
+        <div>
+          <Label className="text-sm font-medium">Status</Label>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-48 mt-1">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="open">Open</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="resolved">Resolved</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
 
-              <div>
-                <Label className="text-sm mb-2 block">Severity</Label>
-                <Select value={severityFilter} onValueChange={setSeverityFilter}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Severity</SelectItem>
-                    <SelectItem value="critical">Critical</SelectItem>
-                    <SelectItem value="warning">Warning</SelectItem>
-                    <SelectItem value="info">Info</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+        <div>
+          <Label className="text-sm font-medium">Severity</Label>
+          <Select value={severityFilter} onValueChange={setSeverityFilter}>
+            <SelectTrigger className="w-48 mt-1">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Severity</SelectItem>
+              <SelectItem value="critical">Critical</SelectItem>
+              <SelectItem value="warning">Warning</SelectItem>
+              <SelectItem value="info">Info</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
 
-              <div>
-                <Label className="text-sm mb-2 block">Device</Label>
-                <Select value={deviceFilter} onValueChange={setDeviceFilter}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Devices</SelectItem>
-                    {devices.map((d) => (
-                      <SelectItem key={d.name} value={d.name}>
-                        {d.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+        <div>
+          <Label className="text-sm font-medium">Device</Label>
+          <Select value={deviceFilter} onValueChange={setDeviceFilter}>
+            <SelectTrigger className="w-48 mt-1">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Devices</SelectItem>
+              {devices.map((d) => (
+                <SelectItem key={d.name} value={d.name}>
+                  {d.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-              <div>
-                <Label className="text-sm mb-2 block">Device Type</Label>
-                <Select value={deviceTypeFilter} onValueChange={setDeviceTypeFilter}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Types</SelectItem>
-                    <SelectItem value="modbus">Modbus</SelectItem>
-                    <SelectItem value="opcua">OPC-UA</SelectItem>
-                    <SelectItem value="bacnet">BACnet</SelectItem>
-                    <SelectItem value="mqtt-sensor">MQTT Sensor</SelectItem>
-                    <SelectItem value="agent-system">Agent System</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+        <div>
+          <Label className="text-sm font-medium">Device Type</Label>
+          <Select value={deviceTypeFilter} onValueChange={setDeviceTypeFilter}>
+            <SelectTrigger className="w-48 mt-1">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Types</SelectItem>
+              <SelectItem value="modbus">Modbus</SelectItem>
+              <SelectItem value="opcua">OPC-UA</SelectItem>
+              <SelectItem value="bacnet">BACnet</SelectItem>
+              <SelectItem value="mqtt-sensor">MQTT Sensor</SelectItem>
+              <SelectItem value="agent-system">Agent System</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
 
-              <div>
-                <Label className="text-sm mb-2 block">Metric</Label>
-                <Input
-                  placeholder="Filter metric..."
-                  value={metricFilter}
-                  onChange={(e) => setMetricFilter(e.target.value)}
-                />
-              </div>
-            </div>
+        <div>
+          <Label className="text-sm font-medium">Metric</Label>
+          <Input
+            placeholder="Filter metric..."
+            value={metricFilter}
+            onChange={(e) => setMetricFilter(e.target.value)}
+            className="w-48 mt-1"
+          />
+        </div>
 
-            <div className="flex gap-2">
-              <Button onClick={applyFilters} variant="default" size="sm">
-                Apply Filters
-              </Button>
-              <Button onClick={clearFilters} variant="outline" size="sm">
-                Clear
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+        <div className="flex gap-2 pt-6">
+          <Button onClick={applyFilters} variant="default" size="sm">
+            Apply Filters
+          </Button>
+          <Button onClick={clearFilters} variant="outline" size="sm">
+            Clear
+          </Button>
+        </div>
+      </div>
 
       {/* Incidents Table */}
       <Card>
