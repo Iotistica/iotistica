@@ -69,6 +69,12 @@ export class DeviceEndpointModel {
    * Get device by UUID (recommended method for cloud/edge sync)
    */
   static async getByUuid(uuid: string): Promise<DeviceEndpoint | null> {
+    // Guard: UUID must be defined
+    if (!uuid) {
+      console.warn('[WARN] getByUuid called with undefined/empty uuid');
+      return null;
+    }
+    
     try {
       // Debug: Log the query being attempted
       console.log('[DEBUG] Attempting getByUuid query', { uuid, table: this.table });
@@ -209,6 +215,11 @@ export class DeviceEndpointModel {
    * Update endpoint by UUID (recommended method)
    */
   static async updateByUuid(uuid: string, updates: Partial<DeviceEndpoint>): Promise<DeviceEndpoint | null> {
+    // Guard: UUID must be defined
+    if (!uuid) {
+      console.warn('[WARN] updateByUuid called with undefined/empty uuid');
+      return null;
+    }
     const updateData: any = {
       ...updates,
       updated_at: new Date(),
@@ -278,6 +289,11 @@ export class DeviceEndpointModel {
    * Delete endpoint by UUID (recommended method)
    */
   static async deleteByUuid(uuid: string): Promise<boolean> {
+    // Guard: UUID must be defined
+    if (!uuid) {
+      console.warn('[WARN] deleteByUuid called with undefined/empty uuid');
+      return false;
+    }
     const deleted = await models(this.table)
       .where('uuid', uuid)
       .delete();

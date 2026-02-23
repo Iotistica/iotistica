@@ -511,10 +511,31 @@ export class ConfigManager extends EventEmitter {
 	/**
 	 * Normalize device property names (camelCase → snake_case)
 	 * Handles both API and SQLite conventions
+	 * CRITICAL: Generates stable UUID if missing (required for database sync)
 	 */
 	public normalizeDevice(device: ProtocolAdapterDevice): any {
+		const crypto = require('crypto');
+		
+		// If no uuid provided, generate a stable one based on protocol + name
+		// This ensures the same device always gets the same uuid
+		let uuid = device.uuid;
+		if (!uuid) {
+			const hashInput = `${device.protocol}-${device.name}`;
+			const hash = crypto.createHash('sha256').update(hashInput).digest('hex');
+			uuid = `${hash.substring(0, 8)}-${hash.substring(8, 12)}-${hash.substring(12, 16)}-${hash.substring(16, 20)}-${hash.substring(20, 32)}`;
+			
+			this.logger?.debugSync('Generated UUID for device without uuid', {
+				component: LogComponents.configManager,
+				operation: 'normalizeDevice',
+				deviceName: device.name,
+				deviceProtocol: device.protocol,
+				generatedUuid: uuid,
+				reason: 'Cloud config missing uuid - generated stable identifier'
+			});
+		}
+		
 		return {
-			uuid: device.uuid,
+			uuid,
 			name: device.name,
 			protocol: device.protocol,
 			enabled: device.enabled !== undefined ? device.enabled : true,
@@ -796,9 +817,21 @@ export class ConfigManager extends EventEmitter {
 				const normalizedDevice = this.normalizeDevice(device as ProtocolAdapterDevice);
 
 				// Use UUID for lookup if available, fallback to name for legacy devices
-				const existing = normalizedDevice.uuid 
-					? await DeviceEndpointModel.getByUuid(normalizedDevice.uuid)
-					: await DeviceEndpointModel.getByName(normalizedDevice.name);
+				let existing: any = null;
+				try {
+					existing = normalizedDevice.uuid 
+						? await DeviceEndpointModel.getByUuid(normalizedDevice.uuid)
+						: await DeviceEndpointModel.getByName(normalizedDevice.name);
+				} catch (lookupError) {
+					this.logger?.warnSync('Failed to lookup existing device, treating as new', {
+						component: LogComponents.configManager,
+						operation: 'syncEndpointsToDatabase',
+						deviceUuid: normalizedDevice.uuid,
+						deviceName: normalizedDevice.name,
+						error: lookupError instanceof Error ? lookupError.message : String(lookupError)
+					});
+					// Continue as if device doesn't exist - will trigger CREATE path
+				}
 
 				if (existing) {
 					this.logger?.infoSync('Found existing device in DB', {
@@ -924,7 +957,22 @@ export class ConfigManager extends EventEmitter {
 					await DeviceEndpointModel.create(normalizedDevice);
 					
 					// CRITICAL: Verify what was actually saved to DB
-					const verifyInsert = await DeviceEndpointModel.getByUuid(normalizedDevice.uuid!);
+					// Use uuid if available, fallback to name for devices without uuid
+					let verifyInsert: any = null;
+					try {
+						if (normalizedDevice.uuid) {
+							verifyInsert = await DeviceEndpointModel.getByUuid(normalizedDevice.uuid);
+						} else {
+							verifyInsert = await DeviceEndpointModel.getByName(normalizedDevice.name);
+						}
+					} catch (verifyError) {
+						this.logger?.warnSync('Failed to verify inserted endpoint', {
+							component: LogComponents.configManager,
+							deviceName: normalizedDevice.name,
+							deviceUuid: normalizedDevice.uuid,
+							error: verifyError instanceof Error ? verifyError.message : String(verifyError)
+						});
+					}
 					
 					this.logger?.infoSync('Added endpoint to database', {
 						component: LogComponents.configManager,
@@ -933,7 +981,8 @@ export class ConfigManager extends EventEmitter {
 						protocol: normalizedDevice.protocol,
 						dataPointsCount: normalizedDevice.data_points?.length || 0,
 						dbDataPointsCount: verifyInsert?.data_points?.length || 0,
-						dbFirstDataPoint: verifyInsert?.data_points?.[0] || null
+						dbFirstDataPoint: verifyInsert?.data_points?.[0] || null,
+						verificationMethod: normalizedDevice.uuid ? 'by-uuid' : 'by-name'
 					});
 				}
 			}
