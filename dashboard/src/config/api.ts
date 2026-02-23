@@ -7,13 +7,23 @@
  *   - Uses localhost:3002 (configurable via VITE_API_URL)
  * 
  * Kubernetes Deployment:
- *   - Uses relative path "/api" (same ingress as dashboard)
- *   - Environment variables are injected at build time via Vite
+ *   - Uses runtime config from window.env (ConfigMap)
+ *   - Falls back to build-time import.meta.env if not available
  * 
  * Usage:
  *   import { getApiUrl } from '@/config/api';
  *   const response = await fetch(`${getApiUrl()}/api/v1/mqtt-monitor/stats`);
  */
+
+// TypeScript declarations for runtime configuration
+declare global {
+  interface Window {
+    env?: {
+      VITE_API_URL?: string;
+      NODE_ENV?: string;
+    };
+  }
+}
 
 /**
  * Get the base API URL based on environment
@@ -25,10 +35,15 @@
  * 3. Fall back to localhost:3002 for local development
  */
 export function getApiUrl(): string {
-  const envApiUrl = import.meta.env.VITE_API_URL;
+  // Priority 1: Runtime configuration from ConfigMap (K8s)
+  const runtimeApiUrl = window.env?.VITE_API_URL;
+  // Priority 2: Build-time environment variable
+  const buildApiUrl = import.meta.env.VITE_API_URL;
   
-  // Check for explicit environment variable (set at build time for K8s)
-  if (envApiUrl) {
+  const envApiUrl = runtimeApiUrl || buildApiUrl;
+  
+  // Check for explicit environment variable (runtime or build time)
+  if (envApiUrl && envApiUrl !== '__VITE_API_URL__') {
     // Empty string means auto-detect (K8s NodePort mode)
     if (envApiUrl === '' && import.meta.env.PROD) {
       // Extract hostname from current URL and use API NodePort (30002)
@@ -104,8 +119,10 @@ export const apiConfig = {
   housekeeperUrl: getHousekeeperUrl(),
   isDevelopment: import.meta.env.DEV,
   isProduction: import.meta.env.PROD,
-  envApiUrl: import.meta.env.VITE_API_URL,
+  runtimeApiUrl: window.env?.VITE_API_URL,
+  buildApiUrl: import.meta.env.VITE_API_URL,
   envHousekeeperUrl: import.meta.env.VITE_HOUSEKEEPER_URL,
+  configSource: window.env?.VITE_API_URL ? 'runtime (ConfigMap)' : 'build-time',
 };
 
 // Log configuration in development mode

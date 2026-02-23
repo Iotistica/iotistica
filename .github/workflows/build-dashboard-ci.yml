@@ -234,7 +234,6 @@ jobs:
           build-args: |
             BUILDKIT_INLINE_CACHE=1
             NODE_ENV=production
-            VITE_API_URL=https://api.iotistica.com
 
       # Move cache to prevent unlimited growth
       - name: Move cache

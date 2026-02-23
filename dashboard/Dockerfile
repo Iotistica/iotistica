@@ -15,13 +15,11 @@ COPY . .
 
 # Build arguments
 ARG NODE_ENV=production
-ARG VITE_API_URL
 
 # Set environment variables for Vite build
 ENV NODE_ENV=$NODE_ENV
-ENV VITE_API_URL=$VITE_API_URL
 
-# Build the application
+# Build the application (API URL will be configured at runtime via ConfigMap)
 RUN npm run build
 
 # Production stage

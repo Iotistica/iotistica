@@ -164,34 +164,71 @@ services:
         depends_on:
             redis:
                 condition: service_healthy
-            ollama:
-                condition: service_started
+      
         networks:
             - iotistic-net
 
-    ollama:
-        image: ollama/ollama:latest
-        container_name: iotistic-ollama
+    housekeeper:
+        build:
+            context: ./housekeeper
+            dockerfile: Dockerfile
+        container_name: iotistic-housekeeper
         restart: unless-stopped
-        ports:
-            - "${OLLAMA_PORT_EXT:-11434}:11434"
-        volumes:
-            - ollama-data:/root/.ollama
-        environment:
-            - OLLAMA_HOST=0.0.0.0
-        healthcheck:
-            test: ["CMD", "ollama", "list"]
-            interval: 30s
-            timeout: 10s
-            retries: 3
-            start_period: 60s
-        networks:
-            - iotistic-net
         logging:
             driver: "json-file"
             options:
                 max-size: "10m"
                 max-file: "3"
+        environment:
+            - PORT=${HOUSEKEEPER_PORT:-3400}
+            - NODE_ENV=${NODE_ENV:-development}
+            - LOG_LEVEL=${LOG_LEVEL:-info}
+            # TigerData Cloud TimescaleDB Configuration
+            - DB_HOST=${DB_HOST:-bg4k3yxway.pcwz234dvp.tsdb.cloud.timescale.com}
+            - DB_PORT=${DB_PORT:-30692}
+            - DB_NAME=${DB_NAME:-tsdb}
+            - DB_USER=${DB_USER:-tsdbadmin}
+            - DB_PASSWORD=${DB_PASSWORD:-w2qm8tm693xd3b9v}
+            - DB_POOL_MAX=${DB_POOL_MAX:-10}
+            - DB_IDLE_TIMEOUT=${DB_IDLE_TIMEOUT:-30000}
+            - DB_CONNECT_TIMEOUT=${DB_CONNECT_TIMEOUT:-10000}
+            # Task configuration
+            - EVENTS_RETENTION_DAYS=${EVENTS_RETENTION_DAYS:-90}
+            - DEVICE_LOGS_RETENTION_DAYS=${DEVICE_LOGS_RETENTION_DAYS:-30}
+        ports:
+            - "${HOUSEKEEPER_PORT_EXT:-3400}:3400"
+        healthcheck:
+            test: ["CMD", "node", "-e", "require('http').get('http://localhost:3400/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 40s
+        networks:
+            - iotistic-net
+
+    # ollama:
+    #     image: ollama/ollama:latest
+    #     container_name: iotistic-ollama
+    #     restart: unless-stopped
+    #     ports:
+    #         - "${OLLAMA_PORT_EXT:-11434}:11434"
+    #     volumes:
+    #         - ollama-data:/root/.ollama
+    #     environment:
+    #         - OLLAMA_HOST=0.0.0.0
+    #     healthcheck:
+    #         test: ["CMD", "ollama", "list"]
+    #         interval: 30s
+    #         timeout: 10s
+    #         retries: 3
+    #         start_period: 60s
+    #     networks:
+    #         - iotistic-net
+    #     logging:
+    #         driver: "json-file"
+    #         options:
+    #             max-size: "10m"
+    #             max-file: "3"
 
     mosquitto:
         image: iegomez/mosquitto-go-auth

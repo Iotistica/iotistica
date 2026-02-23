@@ -335,9 +335,10 @@ export function createHousekeeper(config: HousekeeperConfig = {}) {
       await import('./tasks/cleanup-old-logs'),
       await import('./tasks/database-vacuum'),
       await import('./tasks/device-logs-retention'),
-      await import('./tasks/device-logs-partition-maintenance'),
-      await import('./tasks/device-metrics-partition-maintenance'),
-      await import('./tasks/events-partition-maintenance'),
+      // Disabled: Tables not partitioned in current database schema
+      // await import('./tasks/device-logs-partition-maintenance'),
+      // await import('./tasks/device-metrics-partition-maintenance'),
+      // await import('./tasks/events-partition-maintenance'),
       await import('./tasks/security-scan-images'),
       // Add more tasks here
     ];

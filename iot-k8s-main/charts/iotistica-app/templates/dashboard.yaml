@@ -49,12 +49,19 @@ spec:
               protocol: TCP
           {{- $dashboardEnv := .Values.dashboard.env | default dict }}
           env:
-            - name: VITE_API_URL
-              value: {{ .Values.dashboard.apiUrl | quote }}
             - name: NODE_ENV
               value: {{ index $dashboardEnv "NODE_ENV" | default "production" | quote }}
+          volumeMounts:
+            - name: dashboard-config
+              mountPath: /usr/share/nginx/html/config.js
+              subPath: config.js
+              readOnly: true
           resources:
             {{- toYaml .Values.dashboard.resources | nindent 12 }}
+      volumes:
+        - name: dashboard-config
+          configMap:
+            name: {{ include "iotistica-app.fullname" . }}-dashboard-config
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
