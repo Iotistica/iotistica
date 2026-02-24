@@ -8,7 +8,7 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import rateLimit from 'express-rate-limit';
 import { query } from '../db/connection';
-import { hasPermission, isAdminOrOwner, isOwner, checkUserPermissions } from '../middleware/permissions';
+import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import { PERMISSIONS, ROLES, UserWithPermissions } from '../types/permissions';
 import { logger } from '../utils/logger';
 
@@ -35,10 +35,11 @@ const createUserRateLimit = rateLimit({
 
 /**
  * GET /api/v1/users
- * List all users (requires user:read permission)
+ * List all users (requires admin role)
  */
 router.get('/', 
-  hasPermission(PERMISSIONS.USER_READ),
+  jwtAuth,
+  requireRole('admin'),
   async (req: Request, res: Response) => {
     try {
       const result = await query<UserWithPermissions>(`
@@ -67,10 +68,11 @@ router.get('/',
 
 /**
  * GET /api/v1/users/:id
- * Get single user details
+ * Get single user details (requires admin role)
  */
 router.get('/:id',
-  hasPermission(PERMISSIONS.USER_READ),
+  jwtAuth,
+  requireRole('admin'),
   async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
@@ -105,12 +107,13 @@ router.get('/:id',
 
 /**
  * POST /api/v1/users
- * Create new user (requires user:write permission)
+ * Create new user (requires admin role)
  * SECURITY: Rate limited to prevent abuse
  */
 router.post('/',
+  jwtAuth,
+  requireRole('admin'),
   createUserRateLimit,
-  hasPermission(PERMISSIONS.USER_WRITE),
   async (req: Request, res: Response) => {
     try {
       const { username, email, password, role = ROLES.VIEWER } = req.body;
@@ -171,10 +174,11 @@ router.post('/',
 
 /**
  * PUT /api/v1/users/:id
- * Update user (requires user:write permission)
+ * Update user (requires admin role)
  */
 router.put('/:id',
-  hasPermission(PERMISSIONS.USER_WRITE),
+  jwtAuth,
+  requireRole('admin'),
   async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
@@ -265,10 +269,11 @@ router.put('/:id',
 
 /**
  * DELETE /api/v1/users/:id
- * Delete user (requires user:delete permission)
+ * Delete user (requires admin role)
  */
 router.delete('/:id',
-  hasPermission(PERMISSIONS.USER_DELETE),
+  jwtAuth,
+  requireRole('admin'),
   async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
@@ -316,6 +321,7 @@ router.delete('/:id',
  * Get current user's permissions
  */
 router.get('/me/permissions',
+  jwtAuth,
   async (req: Request, res: Response) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Unauthorized' });

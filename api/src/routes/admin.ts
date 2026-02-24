@@ -4,9 +4,14 @@
  */
 
 import express from 'express';
+import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import logger from '../utils/logger';
 
 export const router = express.Router();
+
+// Apply admin-only protection to all admin routes
+router.use(jwtAuth);
+router.use(requireRole('admin'));
 
 // ============================================================================
 // Admin / Monitoring Endpoints

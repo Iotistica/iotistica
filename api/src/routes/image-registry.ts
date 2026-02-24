@@ -7,7 +7,7 @@
 
 import express, { Request, Response } from 'express';
 import poolWrapper from '../db/connection';
-import { jwtAuth } from '../middleware/jwt-auth';
+import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import { logger } from '../utils/logger';
 import { EventPublisher } from '../services/event-sourcing';
 

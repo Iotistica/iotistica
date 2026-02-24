@@ -27,6 +27,7 @@ import {
 } from '../db/models';
 import { logger } from '../utils/logger';
 import deviceAuth, { deviceAuthFromBody } from '../middleware/device-auth';
+import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import { redisLogQueue } from '../services/redis-log-queue';
 import { redisSensorQueue } from '../services/redis-device-queue';
 
@@ -356,7 +357,7 @@ router.get('/devices/:uuid/logs/services', async (req, res) => {
  * Get Redis Stream queue statistics
  * GET /api/v1/admin/log-queue/stats
  */
-router.get('/admin/log-queue/stats', async (req, res) => {
+router.get('/admin/log-queue/stats', jwtAuth, requireRole('admin'), async (req, res) => {
   try {
     const stats = await redisLogQueue.getStats();
     res.json(stats);
@@ -373,7 +374,7 @@ router.get('/admin/log-queue/stats', async (req, res) => {
  * Get Redis Stream sensor queue statistics
  * GET /api/v1/admin/sensor-queue/stats
  */
-router.get('/admin/sensor-queue/stats', async (req, res) => {
+router.get('/admin/sensor-queue/stats', jwtAuth, requireRole('admin'), async (req, res) => {
   try {
     const stats = await redisSensorQueue.getStats();
     res.json(stats);
