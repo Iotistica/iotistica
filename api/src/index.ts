@@ -72,22 +72,36 @@ const API_BASE = `/api/${API_VERSION}`;
 const app = express();
 const PORT = process.env.PORT || 3002;
 
-// SECURITY: Trust proxy for deployments behind reverse proxy (nginx, load balancers, K8s ingress)
+// Quick check: are we in Kubernetes?
+const RUNNING_IN_K8S = process.env.KUBERNETES_SERVICE_HOST !== undefined;
+
+// SECURITY: Trust proxy for deployments behind reverse proxy (Envoy, NGINX, ALB, etc.)
 // This ensures req.ip, req.protocol, req.hostname reflect the original client request
-// Set to false for direct deployments, true/1 for single proxy, or number of hops for multiple proxies
-const TRUST_PROXY = process.env.TRUST_PROXY || 'false';
+// CRITICAL: Must be enabled when behind reverse proxy, otherwise:
+// - req.ip shows proxy IP, not client IP
+// - Rate limiting fails (all traffic appears from single proxy)
+// - Security checks based on IP are broken
+const EXPLICIT_TRUST_PROXY = process.env.TRUST_PROXY;
+const AUTO_TRUST_PROXY = RUNNING_IN_K8S ? 1 : false; // Auto-enable in K8s (behind ingress)
+const TRUST_PROXY = EXPLICIT_TRUST_PROXY !== undefined ? EXPLICIT_TRUST_PROXY : (AUTO_TRUST_PROXY ? 'true' : 'false');
+
 if (TRUST_PROXY !== 'false') {
-  app.set('trust proxy', TRUST_PROXY === 'true' ? 1 : parseInt(TRUST_PROXY, 10));
-  logger.info(`Trust proxy enabled: ${TRUST_PROXY}`);
+  const trustProxyValue = TRUST_PROXY === 'true' ? 1 : parseInt(TRUST_PROXY, 10);
+  app.set('trust proxy', trustProxyValue);
+  logger.info(`[OK] Trust proxy enabled: ${trustProxyValue} hop(s) (automatically enabled in K8s, behind Envoy Gateway)`);
+} else {
+  logger.info('Trust proxy disabled (direct deployment, not behind reverse proxy)');
 }
 
 // SECURITY: Helmet middleware - sets secure HTTP headers
-// Protects against common browser-based attacks (XSS, clickjacking, MIME sniffing, etc.)
+// Protects against common browser-based attacks:
+// - XSS via Content-Security-Policy
+// - Clickjacking via X-Frame-Options (frameGuard)
+// - MIME sniffing via X-Content-Type-Options (noSniff)
+// - Referrer leaks via Referrer-Policy
+// - Transport security via HSTS
 app.use(helmet({
-  // Disable COEP for WebSocket compatibility (ws:// connections)
-  crossOriginEmbedderPolicy: false,
-  
-  // Content Security Policy - restrict resource loading
+  // SECURITY: Content Security Policy - restrict resource loading (XSS protection)
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
@@ -95,16 +109,51 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'"], // Allow inline styles for Swagger UI
       imgSrc: ["'self'", "data:", "https:"],
       connectSrc: ["'self'", "ws:", "wss:"], // Allow WebSocket connections
-      frameSrc: ["'none'"], // Prevent embedding in iframes
+      frameSrc: ["'none'"], // Prevent embedding in iframes (clickjacking protection)
+      objectSrc: ["'none'"], // Prevent Flash, Java, etc.
+      mediaSrc: ["'self'"], // Restrict media loading
+      fontSrc: ["'self'", "data:"], // Allow self and data: fonts
+      formAction: ["'self'"], // Restrict form submissions
+      upgradeInsecureRequests: [], // Upgrade HTTP to HTTPS (handled by ingress in K8s)
+      blockAllMixedContent: [], // Block mixed content
     },
   },
   
-  // Additional security headers
-  hsts: {
-    maxAge: 31536000, // 1 year
-    includeSubDomains: true,
-    preload: true
+  // SECURITY: Prevent clickjacking attacks (X-Frame-Options: DENY)
+  frameguard: {
+    action: 'deny',
   },
+  
+  // SECURITY: Prevent MIME sniffing (X-Content-Type-Options: nosniff)
+  // Forces browser to respect Content-Type header
+  noSniff: true,
+  
+  // SECURITY: Referrer Policy - prevent sensitive referrer information leaks
+  // 'no-referrer': never send referrer header (strongest privacy)
+  referrerPolicy: {
+    policy: 'no-referrer',
+  },
+  
+  // SECURITY: HSTS - enforce HTTPS on all subsequent connections
+  hsts: {
+    maxAge: 31536000, // 1 year in seconds
+    includeSubDomains: true,
+    preload: true, // Allow inclusion in HSTS preload lists
+  },
+  
+  // Disable COEP for WebSocket compatibility (ws:// connections)
+  crossOriginEmbedderPolicy: false,
+  
+  // SECURITY: DNS Prefetch Control - prevent DNS prefetching of subdomains
+  dnsPrefetchControl: {
+    allow: false,
+  },
+  
+  // SECURITY: X-Powered-By removal - don't advertise technology stack
+  hidePoweredBy: true,
+  
+  // SECURITY: X-XSS-Protection header (legacy but helpful for older browsers)
+  xssFilter: true,
 }));
 
 // ============================================================================
@@ -197,12 +246,6 @@ app.use(cors({
 
 app.options('*', cors());
 
-// Security headers
-app.use(helmet({
-  contentSecurityPolicy: false,
-  crossOriginEmbedderPolicy: false
-}));
-
 // Brotli decompression middleware
 app.use(brotliDecompressionMiddleware);
 
@@ -210,12 +253,14 @@ app.use(brotliDecompressionMiddleware);
 app.use(requestIdMiddleware);
 
 // Support compressed (gzip/deflate) request bodies
+// SECURITY: Limited to 16MB to prevent DoS via large payloads
+// (Supports logs: 16MB compressed = ~60MB+ decompressed)
 app.use(express.json({ 
-  limit: '100mb',  // Large limit for decompressed logs (10MB compressed → 40-60MB decompressed)
+  limit: '16mb',
   inflate: true  // Automatically decompress gzip/deflate
 }));
 app.use(express.urlencoded({ 
-  limit: '100mb',  // Large limit for decompressed logs
+  limit: '16mb',
   extended: true,
   inflate: true  // Automatically decompress gzip/deflate
 }));
@@ -547,7 +592,7 @@ async function startServer() {
   try {
     const { redisClient } = await import('./redis/client');
     await redisClient.connect();
-    logger.info('✓ Redis client connected successfully');
+    logger.info('[OK] Redis client connected successfully');
   } catch (error) {
     logger.warn('Redis connection failed - continuing without real-time features', {
       error: error instanceof Error ? error.message : String(error),
@@ -608,7 +653,7 @@ async function startServer() {
       }
       // MQTT manager will log its own initialization status
     } catch (error) {
-      logger.warn('⚠️  MQTT service initialization failed - will retry in background', {
+      logger.warn('[WARNING] MQTT service initialization failed - will retry in background', {
         error: error instanceof Error ? error.message : String(error),
         note: 'This is non-critical - API will continue without MQTT'
       });
@@ -620,29 +665,132 @@ async function startServer() {
 
   const server = app.listen(PORT, () => {
     logger.info('='.repeat(80));
-    logger.info('☁️  Iotistic Unified API Server');
+    logger.info('[CLOUD] Iotistica API Server');
     logger.info('='.repeat(80));
     logger.info(`Server running on http://localhost:${PORT}`);
     logger.info('='.repeat(80));
   });
 
-  // HTTPS server (optional - for device-to-API TLS)
+  // Intelligent AKS/Kubernetes Ingress Detection (Environment-based)
+  function detectIngressArchitecture(): { isK8s: boolean; ingressType: string; behindIngress: boolean; tlsTermination: string; gatewayAddress?: string } {
+    const EXPLICIT_BEHIND_INGRESS = process.env.HTTPS_BEHIND_INGRESS === 'true';
+    const EXPLICIT_DIRECT_HTTPS = process.env.HTTPS_ENABLED === 'true';
+    
+    let ingressType = 'unknown';
+    let behindIngress = false;
+    let gatewayAddress: string | undefined;
+    
+    if (RUNNING_IN_K8S) {
+      // Detect ingress controller type from environment variable or defaults
+      const ingressClass = process.env.INGRESS_CLASS_NAME || 'envoy';
+      const gatewayAddr = process.env.GATEWAY_ADDRESS;
+      
+      if (ingressClass.toLowerCase().includes('envoy')) {
+        ingressType = 'Envoy Gateway';
+        gatewayAddress = gatewayAddr; // e.g., from GATEWAY_ADDRESS=20.220.137.172
+      } else if (ingressClass.toLowerCase().includes('nginx')) {
+        ingressType = 'NGINX Ingress Controller';
+        gatewayAddress = gatewayAddr;
+      } else if (ingressClass.toLowerCase().includes('alb')) {
+        ingressType = 'AWS Application Load Balancer (ALB)';
+        gatewayAddress = gatewayAddr;
+      } else if (ingressClass.toLowerCase().includes('azure')) {
+        ingressType = 'Azure Application Gateway';
+        gatewayAddress = gatewayAddr;
+      } else {
+        ingressType = `Custom: ${ingressClass}`;
+        gatewayAddress = gatewayAddr;
+      }
+      
+      // Determine TLS termination location
+      if (EXPLICIT_BEHIND_INGRESS) {
+        behindIngress = true;
+      } else if (EXPLICIT_DIRECT_HTTPS && !EXPLICIT_BEHIND_INGRESS) {
+        behindIngress = false;
+      } else {
+        // Default: if in K8s and HTTPS_ENABLED not explicitly true, assume behind ingress
+        behindIngress = !EXPLICIT_DIRECT_HTTPS;
+      }
+    }
+    
+    const tlsTermination = behindIngress 
+      ? `${ingressType}`
+      : 'Direct HTTPS (Node.js app layer)';
+    
+    return {
+      isK8s: RUNNING_IN_K8S,
+      ingressType,
+      behindIngress,
+      tlsTermination,
+      gatewayAddress
+    };
+  }
+
+  // Initialize HTTPS server and detect ingress architecture
   let httpsServer: https.Server | null = null;
   const HTTPS_ENABLED = process.env.HTTPS_ENABLED === 'true';
   const HTTPS_PORT = parseInt(process.env.HTTPS_PORT || '3443', 10);
+  const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
-  if (HTTPS_ENABLED) {
+  // Detect ingress and configure HTTPS server
+  const ingressArchitecture = detectIngressArchitecture();
+
+  // Log deployment architecture
+  logger.info('='.repeat(80));
+  logger.info('DEPLOYMENT ARCHITECTURE:');
+  if (ingressArchitecture.isK8s) {
+    logger.info(`  Environment: Kubernetes/AKS`);
+    logger.info(`  Gateway Controller: ${ingressArchitecture.ingressType}`);
+    if (ingressArchitecture.gatewayAddress) {
+      logger.info(`  Gateway Address: ${ingressArchitecture.gatewayAddress}`);
+    }
+    logger.info(`  TLS Termination: ${ingressArchitecture.tlsTermination}`);
+  } else {
+    logger.info(`  Environment: Local/Direct Deployment`);
+    logger.info(`  TLS Configuration: ${HTTPS_ENABLED ? 'Direct HTTPS via Node.js' : 'No TLS (HTTP only)'}`);
+  }
+  logger.info('='.repeat(80));
+
+  const BEHIND_INGRESS = ingressArchitecture.behindIngress;
+
+  // [WARNING] IMPORTANT ARCHITECTURE DECISION:
+  // - In Kubernetes/Cloud: TLS should be terminated at Ingress (Envoy/NGINX/ALB), NOT app layer
+  // - For Edge Devices: Use direct HTTPS if devices connect directly to pod
+  // - For Local Dev: Use direct HTTPS to test TLS locally
+  //
+  // If behind Kubernetes Gateway → disable this (traffic is already decrypted)
+  // If edge devices connect directly to pod → enable this
+  if (HTTPS_ENABLED && !BEHIND_INGRESS) {
     try {
+      // [OK] SECURITY: Environment-aware TLS defaults
+      // - Prod: Enforce certificate validation (Let's Encrypt)
+      // - Dev: Allow self-signed certs (better DX, still validates by default)
+      const rejectUnauthorized = process.env.HTTPS_REJECT_UNAUTHORIZED 
+        ? process.env.HTTPS_REJECT_UNAUTHORIZED === 'true'
+        : undefined; // Let https-server.ts decide based on environment
+      
       httpsServer = createHttpsServer(app, {
         enabled: true,
         port: HTTPS_PORT,
         certPath: process.env.HTTPS_CERT_PATH || './certs/tls.crt',
         keyPath: process.env.HTTPS_KEY_PATH || './certs/tls.key',
         caCertPath: process.env.HTTPS_CA_CERT_PATH || './certs/ca.crt',
+        environment: IS_PRODUCTION ? 'prod' : 'dev',
+        // Optional: Enable mTLS (client certificate validation)
+        requestCert: process.env.HTTPS_MTLS_ENABLED === 'true',
+        rejectUnauthorized, // Safely defaults based on environment
       });
     } catch (error) {
       logger.warn('Failed to start HTTPS server', { error });
     }
+  } else if (BEHIND_INGRESS) {
+    logger.info(`[OK] TLS termination at ${ingressArchitecture.ingressType}`);
+    logger.info(`   App layer receives HTTP only (no redundant TLS)`);
+    if (ingressArchitecture.gatewayAddress) {
+      logger.info(`   Gateway reachable at: ${ingressArchitecture.gatewayAddress}`);
+    }
+  } else if (!HTTPS_ENABLED) {
+    logger.info('HTTPS disabled - running HTTP only');
   }
 
   // Initialize WebSocket server

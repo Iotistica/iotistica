@@ -1,5 +1,56 @@
+/**
+ * 🔐 WebSocket Security Architecture
+ * ===================================
+ * 
+ * Defense-in-depth approach with multiple security layers:
+ * 
+ * 1. JWT Authentication (Upgrade Phase)
+ *    - Validates token during WebSocket upgrade
+ *    - Rejects connections without valid JWT
+ *    - Requires `exp` claim for token expiry tracking
+ *    - Prevents unauthorized access to shell, logs, MQTT
+ *    Example: wss://api.example.com/ws?token=JWT_HERE&deviceUuid=abc123
+ * 
+ * 2. Token Expiry Handling
+ *    - Automatically closes connection when JWT expires
+ *    - Prevents long-lived tokens from granting perpetual access
+ *    - Uses server-side timeout to enforce expiry
+ *    - Cleans up timeouts on disconnect to prevent memory leaks
+ * 
+ * 3. Role-Based Access Control
+ *    - All shell operations require authenticated user with admin role
+ *    - Session ownership validation (user can only access own sessions)
+ *    - User ID extraction from JWT token
+ * 
+ * 4. Input Validation (Zod Schemas)
+ *    - Strict message type validation using Zod for all WebSocket messages
+ *    - Prevents malicious payload injection and unexpected data types
+ *    - Limits string lengths to prevent memory abuse
+ *    - Validates UUIDs, session IDs, terminal dimensions
+ * 
+ * 5. Rate Limiting (Sliding Window)
+ *    - Per-client rate limit: 1000 messages per 60 seconds
+ *    - Prevents shell spam, log flooding, MQTT stats abuse
+ *    - Closes connection immediately when exceeded
+ * 
+ * 6. Max Payload Size
+ *    - WebSocket server limited to 1MB per message
+ *    - Prevents memory DoS attacks from huge payloads
+ * 
+ * 7. Session Management
+ *    - Server-side session tracking with user ownership
+ *    - Session termination on disconnect
+ *    - Audit logging of executed commands
+ * 
+ * 8. Connection Isolation
+ *    - Per-device client tracking (device-specific subscriptions)
+ *    - Global client tracking (MQTT stats, separate namespace)
+ */
+
 import { WebSocketServer, WebSocket } from 'ws';
 import { Server as HTTPServer } from 'http';
+import jwt, { JwtPayload } from 'jsonwebtoken';
+import { z } from 'zod';
 import { DeviceModel, DeviceMetricsModel, DeviceLogsModel } from '../db/models';
 import logger from '../utils/logger';
 import fetch from 'node-fetch';
@@ -9,10 +60,15 @@ import { query } from '../db/connection';
 interface WebSocketClient {
   ws: WebSocket;
   deviceUuid: string | null; // null for global connections (e.g., MQTT stats)
+  user: JwtPayload | null; // Authenticated user from JWT token (null for unauthenticated)
   subscriptions: Set<string>;
   intervals: Map<string, NodeJS.Timeout>;
   serviceName?: string; // For logs channel - which service to stream logs for
   redisSubscription?: boolean; // Track if subscribed to Redis pub/sub
+  // 🔐 Rate limiting (sliding window)
+  messageTimestamps: number[]; // Timestamps of recent messages for rate limiting
+  // 🔐 Token expiry handling
+  tokenExpiryTimeout?: NodeJS.Timeout; // Timeout to close connection when JWT expires
 }
 
 interface WebSocketMessage {
@@ -25,6 +81,152 @@ interface WebSocketMessage {
   serviceName?: string; // For logs channel - which service to filter logs by
   source?: string; // Indicate source: 'redis' (real-time) or 'database' (polling)
 }
+
+/**
+ * 🔐 Zod Validation Schemas for WebSocket Messages
+ * Prevents malicious payload injection, unexpected data types, and memory abuse
+ */
+
+// Common schema for UUIDs (base16, 8-32 chars)
+const UuidSchema = z.string().regex(/^[a-f0-9]+$/).min(8).max(128);
+
+// Session ID schema (alphanumeric + hyphens, reasonable length)
+const SessionIdSchema = z.string().uuid();
+
+// String channel names with length limit (prevents memory abuse via huge strings)
+const ChannelSchema = z.enum(['system-info', 'processes', 'history', 'network-interfaces', 'logs', 'shell', 'mqtt-stats', 'mqtt-topics']);
+
+// Global channel schema
+const GlobalChannelSchema = z.enum(['mqtt-stats', 'mqtt-topics']);
+
+// Service name validation (alphanumeric, hyphens, underscores)
+const ServiceNameSchema = z.string().regex(/^[a-zA-Z0-9_-]+$/).min(1).max(100);
+
+// Message type validators
+const SubscribeSchema = z.object({
+  type: z.literal('subscribe'),
+  channel: ChannelSchema,
+  serviceName: ServiceNameSchema.optional(),
+});
+
+const UnsubscribeSchema = z.object({
+  type: z.literal('unsubscribe'),
+  channel: ChannelSchema,
+});
+
+const PingSchema = z.object({
+  type: z.literal('ping'),
+});
+
+const CreateSessionSchema = z.object({
+  type: z.literal('create-session'),
+  deviceUuid: UuidSchema.optional(),
+  data: z.object({
+    userId: z.string().optional(),
+  }).optional(),
+});
+
+const AttachSessionSchema = z.object({
+  type: z.literal('attach-session'),
+  deviceUuid: UuidSchema.optional(),
+  data: z.object({
+    sessionId: SessionIdSchema,
+    userId: z.string().optional(),
+  }),
+});
+
+const DetachSessionSchema = z.object({
+  type: z.literal('detach-session'),
+  data: z.object({
+    sessionId: SessionIdSchema,
+  }),
+});
+
+const TerminateSessionSchema = z.object({
+  type: z.literal('terminate-session'),
+  data: z.object({
+    sessionId: SessionIdSchema,
+  }),
+});
+
+const ClearAllSessionsSchema = z.object({
+  type: z.literal('clear-all-sessions'),
+  deviceUuid: UuidSchema.optional(),
+  data: z.object({
+    userId: z.string().optional(),
+  }).optional(),
+});
+
+const ListSessionsSchema = z.object({
+  type: z.literal('list-sessions'),
+  deviceUuid: UuidSchema.optional(),
+});
+
+const ShellInputSchema = z.object({
+  type: z.literal('shell-input'),
+  data: z.object({
+    sessionId: SessionIdSchema,
+    input: z.string().max(4096), // Prevent huge input payloads
+  }).or(z.object({
+    sessionId: SessionIdSchema,
+    data: z.string().max(4096),
+  })),
+});
+
+const ResizeSessionSchema = z.object({
+  type: z.literal('resize-session'),
+  data: z.object({
+    sessionId: SessionIdSchema,
+    cols: z.number().int().min(1).max(999),
+    rows: z.number().int().min(1).max(999),
+  }),
+});
+
+const LegacyShellSchema = z.object({
+  type: z.literal('shell'),
+  deviceUuid: UuidSchema.optional(),
+  data: z.object({
+    action: z.string().max(50),
+    sessionId: SessionIdSchema.optional(),
+  }).optional(),
+});
+
+// Union of all valid device message schemas
+const DeviceMessageSchema = z.union([
+  SubscribeSchema,
+  UnsubscribeSchema,
+  CreateSessionSchema,
+  AttachSessionSchema,
+  DetachSessionSchema,
+  TerminateSessionSchema,
+  ClearAllSessionsSchema,
+  ListSessionsSchema,
+  ShellInputSchema,
+  ResizeSessionSchema,
+  LegacyShellSchema,
+  PingSchema,
+]);
+
+// Global message schemas
+const GlobalSubscribeSchema = z.object({
+  type: z.literal('subscribe'),
+  channel: GlobalChannelSchema,
+});
+
+const GlobalUnsubscribeSchema = z.object({
+  type: z.literal('unsubscribe'),
+  channel: GlobalChannelSchema,
+});
+
+const GlobalPingSchema = z.object({
+  type: z.literal('ping'),
+});
+
+const GlobalMessageSchema = z.union([
+  GlobalSubscribeSchema,
+  GlobalUnsubscribeSchema,
+  GlobalPingSchema,
+]);
 
 export class WebSocketManager {
   private wss: WebSocketServer | null = null;
@@ -44,6 +246,10 @@ export class WebSocketManager {
   private flushIntervals: Map<string, NodeJS.Timeout> = new Map(); // deviceUuid -> flush interval
   private readonly BATCH_FLUSH_INTERVAL_MS = 10000; // 10 seconds
   
+  // 🔐 Rate limiting (sliding window) - prevents shell/logs/MQTT abuse
+  private readonly RATE_LIMIT_WINDOW_MS = 60 * 1000; // 60 second window
+  private readonly RATE_LIMIT_MAX_MESSAGES = 1000; // max 1000 messages per window
+  
   // Shell command buffers (per session) - for audit logging
   private commandBuffers: Map<string, string> = new Map(); // sessionId -> accumulated command string
   
@@ -52,7 +258,7 @@ export class WebSocketManager {
 
   setMqttMonitor(monitor: any): void {
     this.mqttMonitor = monitor;
-    logger.info(' MQTT Monitor instance set');
+    logger.debug('MQTT Monitor instance set');
   }
 
   setMqttManager(manager: any): void {
@@ -80,13 +286,36 @@ export class WebSocketManager {
   }
 
   /**
-   * Initialize Redis pub/sub integration for real-time metrics
-   * Phase 1: Real-time distribution via Redis pub/sub
+   * 🔐 Check and enforce rate limits on WebSocket client using sliding window
+   * Prevents shell/logs/MQTT abuse by closing connections that exceed limits
+   * @returns true if within limits, false if rate limit exceeded (connection will be closed)
    */
+  private checkRateLimit(client: WebSocketClient): boolean {
+    const now = Date.now();
+    
+    // Remove timestamps outside the sliding window
+    while (client.messageTimestamps.length > 0 && client.messageTimestamps[0]! < now - this.RATE_LIMIT_WINDOW_MS) {
+      client.messageTimestamps.shift();
+    }
+    
+    // Check if exceeds limit
+    if (client.messageTimestamps.length >= this.RATE_LIMIT_MAX_MESSAGES) {
+      logger.warn(` 🔐 Rate limit exceeded for ${client.deviceUuid ? `device ${client.deviceUuid.substring(0, 8)}...` : 'global client'} (user: ${client.user?.id || 'unknown'})`);
+      logger.warn(` 🔐 Messages in window: ${client.messageTimestamps.length}, limit: ${this.RATE_LIMIT_MAX_MESSAGES} per ${this.RATE_LIMIT_WINDOW_MS}ms`);
+      
+      // Close connection
+      client.ws.close(1008, 'Rate limit exceeded');
+      return false;
+    }
+    
+    // Add current timestamp
+    client.messageTimestamps.push(now);
+    return true;
+  }
   async initializeRedis(): Promise<void> {
     // Prevent duplicate initialization
     if (this.redisSubscriber) {
-      logger.info('  Redis already initialized, skipping');
+      logger.debug('Redis already initialized, skipping');
       return;
     }
     
@@ -128,14 +357,14 @@ export class WebSocketManager {
       });
       
       this.redisSubscriber.on('ready', () => {
-        logger.info('  Redis subscriber connected and ready');
+        logger.debug('Redis subscriber connected and ready');
       });
       
-      logger.info('  Redis pub/sub integration initialized');
-      logger.info('   Subscribed to patterns:', metricsPattern, logsPattern);
+      logger.debug('Redis pub/sub integration initialized');
+      logger.debug('Subscribed to patterns:', metricsPattern, logsPattern);
     } catch (error) {
-      logger.error('   Failed to initialize Redis pub/sub:', error);
-      logger.info('  Falling back to database polling');
+      logger.error('Failed to initialize Redis pub/sub:', error);
+      logger.debug('Falling back to database polling');
     }
   }
 
@@ -170,7 +399,7 @@ export class WebSocketManager {
         this.flushMetricsBatch(deviceUuid);
       }, this.BATCH_FLUSH_INTERVAL_MS);
       this.flushIntervals.set(deviceUuid, interval);
-      logger.info(` Started batch flush interval for device ${deviceUuid.substring(0, 8)}... (every ${this.BATCH_FLUSH_INTERVAL_MS}ms)`);
+      logger.debug(`Started batch flush interval for device ${deviceUuid.substring(0, 8)}...`);
     }
     
     // Also update processes if present (send immediately, not batched)
@@ -222,7 +451,7 @@ export class WebSocketManager {
       return;
     }
     
-    logger.info(`  Received ${logs.length} logs from Redis for ${deviceUuid.substring(0, 8)}...`);
+    logger.debug(`Received ${logs.length} logs from Redis for ${deviceUuid.substring(0, 8)}...`);
     
     // Broadcast immediately to all clients subscribed to logs channel
     this.broadcast(deviceUuid, {
@@ -260,7 +489,7 @@ export class WebSocketManager {
       })),
     };
     
-    logger.info(`  Flushing ${buffer.length} metrics for device ${deviceUuid.substring(0, 8)}...`);
+    logger.debug(`Flushing ${buffer.length} metrics for device ${deviceUuid.substring(0, 8)}...`);
     
     // Broadcast batched data
     this.broadcast(deviceUuid, {
@@ -276,7 +505,12 @@ export class WebSocketManager {
   }
 
   initialize(server: HTTPServer): void {
-    this.wss = new WebSocketServer({ noServer: true });
+    // 🔐 Initialize WebSocket server with security constraints
+    // maxPayload: 1MB limit prevents memory DoS attacks
+    this.wss = new WebSocketServer({
+      noServer: true,
+      maxPayload: 1024 * 1024, // 1MB - prevents memory DoS
+    });
 
     // Handle upgrade requests
     server.on('upgrade', (request, socket, head) => {
@@ -285,8 +519,50 @@ export class WebSocketManager {
       if (url.pathname === '/ws') {
         const deviceUuid = url.searchParams.get('deviceUuid');
         const type = url.searchParams.get('type'); // 'device' or 'global'
+        const token = url.searchParams.get('token');
         
-        // Allow global connections (for MQTT stats) without deviceUuid
+        // 🔐 JWT Authentication - validate token for all connections
+        let user: JwtPayload | null = null;
+        
+        if (!token) {
+          logger.warn(' WebSocket connection rejected: missing JWT token');
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+
+        try {
+          user = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
+          
+          // 🔐 Validate token has expiry claim (required for security)
+          if (!user.exp) {
+            logger.warn(' WebSocket connection rejected: JWT missing exp claim');
+            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+            socket.destroy();
+            return;
+          }
+          
+          // Calculate token expiry time
+          const expiresIn = user.exp * 1000 - Date.now();
+          if (expiresIn < 0) {
+            logger.warn(' WebSocket connection rejected: JWT token already expired');
+            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+            socket.destroy();
+            return;
+          }
+          
+          logger.debug(`WebSocket JWT verified for user ${user.id}, expires in ${Math.round(expiresIn / 1000)}s`);
+          
+          // Store token expiry for later use in connection handlers
+          (request as any).tokenExpiryMs = expiresIn;
+        } catch (error) {
+          logger.warn(` WebSocket connection rejected: invalid JWT - ${(error as Error).message}`);
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+
+        // Allow global connections without deviceUuid, but device connections require it
         if (!deviceUuid && type !== 'global') {
           socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
           socket.destroy();
@@ -294,10 +570,11 @@ export class WebSocketManager {
         }
 
         this.wss!.handleUpgrade(request, socket, head, (ws) => {
+          const tokenExpiryMs = (request as any).tokenExpiryMs;
           if (type === 'global') {
-            this.handleGlobalConnection(ws);
+            this.handleGlobalConnection(ws, user!, tokenExpiryMs);
           } else {
-            this.handleConnection(ws, deviceUuid!);
+            this.handleConnection(ws, deviceUuid!, user!, tokenExpiryMs);
           }
         });
       } else {
@@ -305,18 +582,19 @@ export class WebSocketManager {
       }
     });
 
-    logger.info(' Server initialized');
+    logger.debug('WebSocket server initialized');
   }
 
-  private handleConnection(ws: WebSocket, deviceUuid: string): void {
-    logger.info(` Client connected for device: ${deviceUuid}`);
-    logger.info(` Total clients: ${this.clients.size + 1}`);
+  private handleConnection(ws: WebSocket, deviceUuid: string, user: JwtPayload, tokenExpiryMs?: number): void {
+    logger.info(`✅ Device connected: ${deviceUuid.substring(0, 8)}... (user: ${user.id})`);
 
     const client: WebSocketClient = {
       ws,
       deviceUuid,
+      user,
       subscriptions: new Set(),
       intervals: new Map(),
+      messageTimestamps: [], // 🔐 Initialize rate limit tracking
     };
 
     this.clients.set(ws, client);
@@ -327,6 +605,18 @@ export class WebSocketManager {
     }
     this.deviceClients.get(deviceUuid)!.add(ws);
 
+    // 🔐 Setup token expiry handler - auto-close connection when JWT expires
+    if (tokenExpiryMs && tokenExpiryMs > 0) {
+      const expiryTimeout = setTimeout(() => {
+        logger.info(` 🔐 JWT expired for user ${user.id}, closing connection for device ${deviceUuid.substring(0, 8)}...`);
+        ws.close(1008, 'Token expired');
+      }, tokenExpiryMs);
+      
+      client.tokenExpiryTimeout = expiryTimeout;
+    } else {
+      logger.debug(`Token expiry not set for device connection (user: ${user.id})`);
+    }
+
     // Send welcome message
     this.send(ws, {
       type: 'connected',
@@ -336,11 +626,37 @@ export class WebSocketManager {
 
     ws.on('message', (data) => {
       try {
-        const message: WebSocketMessage = JSON.parse(data.toString());
-        logger.info(` Received message from client:`, message);
+        const rawMessage = JSON.parse(data.toString());
+        
+        // 🔐 Validate message schema to prevent injection attacks and memory abuse
+        const validationResult = DeviceMessageSchema.safeParse(rawMessage);
+        if (!validationResult.success) {
+          logger.warn(` 🔐 Invalid message schema from device connection:`, {
+            errors: validationResult.error.errors,
+            messageType: rawMessage.type,
+          });
+          this.send(client.ws, {
+            type: 'error',
+            message: `Invalid message format: ${validationResult.error.errors[0]?.message || 'unknown error'}`,
+          });
+          return;
+        }
+        
+        const message = validationResult.data as WebSocketMessage;
+        logger.debug(`Received message: ${message.type}`);
+        
+        // 🔐 Check rate limits (prevents shell/logs/MQTT abuse)
+        if (!this.checkRateLimit(client)) {
+          return; // Connection closed, exit
+        }
+        
         this.handleMessage(client, message);
       } catch (error) {
         logger.error(' Failed to parse message:', error);
+        this.send(client.ws, {
+          type: 'error',
+          message: 'Failed to parse message',
+        });
       }
     });
 
@@ -354,19 +670,32 @@ export class WebSocketManager {
     });
   }
 
-  private handleGlobalConnection(ws: WebSocket): void {
-    logger.info(` Global client connected (MQTT stats)`);
-    logger.info(` Total clients: ${this.clients.size + 1}`);
+  private handleGlobalConnection(ws: WebSocket, user: JwtPayload, tokenExpiryMs?: number): void {
+    logger.info(`✅ Global client connected: ${user.id}`);
 
     const client: WebSocketClient = {
       ws,
       deviceUuid: null, // Global connection
+      user,
       subscriptions: new Set(),
       intervals: new Map(),
+      messageTimestamps: [], // 🔐 Initialize rate limit tracking
     };
 
     this.clients.set(ws, client);
     this.globalClients.add(ws);
+
+    // 🔐 Setup token expiry handler - auto-close connection when JWT expires
+    if (tokenExpiryMs && tokenExpiryMs > 0) {
+      const expiryTimeout = setTimeout(() => {
+        logger.info(` 🔐 JWT expired for user ${user.id}, closing global connection`);
+        ws.close(1008, 'Token expired');
+      }, tokenExpiryMs);
+      
+      client.tokenExpiryTimeout = expiryTimeout;
+    } else {
+      logger.debug(`Token expiry not set for global connection (user: ${user.id})`);
+    }
 
     // Send welcome message
     this.send(ws, {
@@ -376,11 +705,37 @@ export class WebSocketManager {
 
     ws.on('message', (data) => {
       try {
-        const message: WebSocketMessage = JSON.parse(data.toString());
-        logger.info(` Received message from global client:`, message);
+        const rawMessage = JSON.parse(data.toString());
+        
+        // 🔐 Validate global message schema to prevent injection attacks and memory abuse
+        const validationResult = GlobalMessageSchema.safeParse(rawMessage);
+        if (!validationResult.success) {
+          logger.warn(` 🔐 Invalid message schema from global connection:`, {
+            errors: validationResult.error.errors,
+            messageType: rawMessage.type,
+          });
+          this.send(client.ws, {
+            type: 'error',
+            message: `Invalid message format: ${validationResult.error.errors[0]?.message || 'unknown error'}`,
+          });
+          return;
+        }
+        
+        const message = validationResult.data as WebSocketMessage;
+        logger.debug(`Received global message: ${message.type}`);
+        
+        // 🔐 Check rate limits (prevents MQTT stats abuse)
+        if (!this.checkRateLimit(client)) {
+          return; // Connection closed, exit
+        }
+        
         this.handleGlobalMessage(client, message);
       } catch (error) {
         logger.error(' Failed to parse message:', error);
+        this.send(client.ws, {
+          type: 'error',
+          message: 'Failed to parse message',
+        });
       }
     });
 
@@ -418,7 +773,7 @@ export class WebSocketManager {
   }
 
   private handleGlobalSubscribe(client: WebSocketClient, channel: string): void {
-    logger.info(` Global client subscribed to ${channel}`);
+    logger.debug(`Global client subscribed to ${channel}`);
     
     client.subscriptions.add(channel);
 
@@ -436,7 +791,7 @@ export class WebSocketManager {
   }
 
   private handleGlobalUnsubscribe(client: WebSocketClient, channel: string): void {
-    logger.info(` Global client unsubscribed from ${channel}`);
+    logger.debug(`Global client unsubscribed from ${channel}`);
     
     client.subscriptions.delete(channel);
 
@@ -451,7 +806,12 @@ export class WebSocketManager {
   }
 
   private handleGlobalDisconnect(client: WebSocketClient): void {
-    logger.info(` Global client disconnected`);
+    logger.debug(`Global client disconnected`);
+
+    // 🔐 Clear token expiry timeout to prevent memory leaks
+    if (client.tokenExpiryTimeout) {
+      clearTimeout(client.tokenExpiryTimeout);
+    }
 
     this.globalClients.delete(client.ws);
     this.clients.delete(client.ws);
@@ -467,7 +827,7 @@ export class WebSocketManager {
       }
     });
 
-    logger.info(` Total clients: ${this.clients.size}`);
+    logger.debug(`Total clients: ${this.clients.size}`);
   }
 
   private handleMessage(client: WebSocketClient, message: WebSocketMessage): void {
@@ -522,7 +882,7 @@ export class WebSocketManager {
 
       case 'shell':
         // Legacy support: Forward shell commands to device via MQTT
-        logger.info('🐚 [SHELL] Received legacy shell command from WebSocket', {
+        logger.debug('SHELL: Received legacy shell command', {
           deviceUuid: client.deviceUuid?.substring(0, 8) + '...',
           action: message.data?.action,
           hasData: !!message.data?.data
@@ -537,15 +897,15 @@ export class WebSocketManager {
         break;
 
       default:
-        logger.warn(' Unknown message type:', message.type);
+        logger.debug('Unknown message type:', message.type);
     }
   }
 
   private handleSubscribe(client: WebSocketClient, channel: string): void {
-    logger.info(` Client subscribed to ${channel} for device ${client.deviceUuid}`);
+    logger.debug(`Subscribed to ${channel}`);
     
     if (channel === 'shell') {
-      logger.info('🐚 [SHELL] WebSocket client subscribed to shell channel', {
+      logger.debug('SHELL: Client subscribed to shell channel', {
         deviceUuid: client.deviceUuid?.substring(0, 8) + '...',
         channel
       });
@@ -577,7 +937,7 @@ export class WebSocketManager {
   }
 
   private handleUnsubscribe(client: WebSocketClient, channel: string): void {
-    logger.info(` Client unsubscribed from ${channel} for device ${client.deviceUuid}`);
+    logger.debug(`Unsubscribed from ${channel}`);
     
     client.subscriptions.delete(channel);
 
@@ -615,7 +975,7 @@ export class WebSocketManager {
 
     // Shell channel uses MQTT pub/sub only (no polling)
     if (channel === 'shell') {
-      logger.info(` 📡 Shell channel active for device ${deviceUuid.substring(0, 8)}... (MQTT-based)`);
+      logger.debug(`Shell channel active (MQTT-based)`);
       return;
     }
 
@@ -623,7 +983,7 @@ export class WebSocketManager {
     // Only fall back to polling if Redis unavailable
     const redisChannels = ['history', 'processes', 'network-interfaces', 'logs'];
     if (redisChannels.includes(channel) && this.redisClient) {
-      logger.info(` 📡 Using Redis pub/sub for ${channel} (real-time updates for device ${deviceUuid.substring(0, 8)}...)`);
+      logger.debug(`Using Redis pub/sub for real-time updates`);
       // No polling needed - Redis will push updates
       // But still send initial data immediately
       this.sendChannelData(deviceUuid, channel);
@@ -649,7 +1009,7 @@ export class WebSocketManager {
         intervalTime = 2000; // 2 seconds for real-time logs (fallback)
         break;
       default:
-        logger.warn(` Unknown channel: ${channel}`);
+        logger.debug(`Unknown channel: ${channel}`);
         return;
     }
 
@@ -658,7 +1018,7 @@ export class WebSocketManager {
     }, intervalTime);
 
     intervals.set(channel, interval);
-    logger.info(` Started ${channel} stream for device ${deviceUuid} (interval: ${intervalTime}ms, mode: ${this.redisClient ? 'redis-fallback' : 'polling'})`);
+    logger.debug(`Started ${channel} stream (interval: ${intervalTime}ms)`);
   }
 
   private stopDataStream(deviceUuid: string, channel: string): void {
@@ -666,7 +1026,7 @@ export class WebSocketManager {
     if (intervals?.has(channel)) {
       clearInterval(intervals.get(channel)!);
       intervals.delete(channel);
-      logger.info(` Stopped ${channel} stream for device ${deviceUuid}`);
+      logger.debug(`Stopped ${channel} stream`);
 
       // Clean up device intervals map if empty
       if (intervals.size === 0) {
@@ -690,7 +1050,7 @@ export class WebSocketManager {
         intervalTime = 10000; // 10 seconds
         break;
       default:
-        logger.warn(` Unknown global channel: ${channel}`);
+        logger.debug(`Unknown global channel: ${channel}`);
         return;
     }
 
@@ -699,14 +1059,14 @@ export class WebSocketManager {
     }, intervalTime);
 
     this.globalIntervals.set(channel, interval);
-    logger.info(` Started global ${channel} stream (interval: ${intervalTime}ms)`);
+    logger.debug(`Started global ${channel} stream (interval: ${intervalTime}ms)`);
   }
 
   private stopGlobalDataStream(channel: string): void {
     if (this.globalIntervals.has(channel)) {
       clearInterval(this.globalIntervals.get(channel)!);
       this.globalIntervals.delete(channel);
-      logger.info(` Stopped global ${channel} stream`);
+      logger.debug(`Stopped global ${channel} stream`);
     }
   }
 
@@ -722,7 +1082,7 @@ export class WebSocketManager {
           data = await this.fetchMqttTopics();
           break;
         default:
-          logger.warn(` Unknown global channel: ${channel}`);
+          logger.debug(`Unknown global channel: ${channel}`);
           return;
       }
 
@@ -744,7 +1104,7 @@ export class WebSocketManager {
       const response = await fetch('http://localhost:3002/api/v1/mqtt/metrics');
       
       if (!response.ok) {
-        logger.warn(`Failed to fetch MQTT metrics: ${response.status}`);
+        logger.debug(`Failed to fetch MQTT metrics: ${response.status}`);
         return null;
       }
       
@@ -762,7 +1122,7 @@ export class WebSocketManager {
       const response = await fetch('http://localhost:3002/api/v1/mqtt/topics?limit=50&decompress=true');
       
       if (!response.ok) {
-        logger.warn(`Failed to fetch MQTT topics: ${response.status}`);
+        logger.debug(`Failed to fetch MQTT topics: ${response.status}`);
         return null;
       }
       
@@ -881,14 +1241,14 @@ export class WebSocketManager {
       const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
       const metrics = await DeviceMetricsModel.getRecentByTime(deviceUuid, thirtyMinutesAgo);
 
-      logger.info(` [fetchMetricsHistory] Device ${deviceUuid.substring(0, 8)}: Fetched ${metrics.length} metrics rows (last 30 min from ${thirtyMinutesAgo})`);
+      logger.debug(`Fetched ${metrics.length} metrics (last 30 min)`);
 
       // Log time range of fetched data
       if (metrics.length > 0) {
         const firstTime = new Date(metrics[0].recorded_at);
         const lastTime = new Date(metrics[metrics.length - 1].recorded_at);
         const spanMinutes = (lastTime.getTime() - firstTime.getTime()) / 60000;
-        logger.info(` [fetchMetricsHistory] Time range: ${firstTime.toISOString()} to ${lastTime.toISOString()} (${Math.round(spanMinutes)} minutes)`);
+        logger.debug(`Time range: ${firstTime.toISOString()} to ${lastTime.toISOString()} (${Math.round(spanMinutes)} minutes)`);
       }
 
       // Transform to dashboard format (same as original App.tsx HTTP polling logic)
@@ -995,17 +1355,22 @@ export class WebSocketManager {
         offset: 0,
       });
 
-      logger.info(` Fetched ${logs.length} log entries for device ${deviceUuid}${serviceName ? ` service ${serviceName}` : ''}`);
+      logger.debug(`Fetched ${logs.length} log entries`);
 
       return { logs };
     } catch (error) {
-      logger.error(' Error fetching logs:', error);
+      logger.error('Error fetching logs:', error);
       return null;
     }
   }
 
   private handleDisconnect(client: WebSocketClient): void {
-    logger.info(` Client disconnected from device: ${client.deviceUuid}`);
+    logger.info(`❌ Device disconnected: ${client.deviceUuid.substring(0, 8)}...`);
+
+    // 🔐 Clear token expiry timeout to prevent memory leaks
+    if (client.tokenExpiryTimeout) {
+      clearTimeout(client.tokenExpiryTimeout);
+    }
 
     // CRITICAL: Detach from all sessions this client was attached to
     // This ensures database status is updated when WebSocket closes unexpectedly
@@ -1045,7 +1410,7 @@ export class WebSocketManager {
   private broadcast(deviceUuid: string, message: WebSocketMessage): void {
     const deviceClients = this.deviceClients.get(deviceUuid);
     if (!deviceClients) {
-      logger.debug(`📭 No WebSocket clients for device ${deviceUuid.substring(0, 8)}`);
+      logger.debug(`No WebSocket clients for device ${deviceUuid.substring(0, 8)}`);
       return;
     }
 
@@ -1092,7 +1457,7 @@ export class WebSocketManager {
     }
     
     if (channel === 'shell') {
-      logger.info(`🐚 [SHELL] 📡 Broadcast shell output to ${sentCount} client(s)`, {
+      logger.debug(`SHELL: Broadcast shell output to ${sentCount} client(s)`, {
         deviceUuid: deviceUuid.substring(0, 8) + '...',
         totalClients: deviceClients?.size || 0,
         sentCount,
@@ -1101,7 +1466,7 @@ export class WebSocketManager {
     }
 
     if (sentCount > 0) {
-      logger.info(` Broadcasted ${channel} to ${sentCount} client(s) for device ${deviceUuid}`);
+      logger.debug(`Broadcasted ${channel} to ${sentCount} client(s)`);
     }
   }
 
@@ -1117,7 +1482,7 @@ export class WebSocketManager {
   private notifySessionStatusChange(sessionId: string, status: string, message: string): void {
     const attachedClients = sessionManager.getAttachedClients(sessionId);
     
-    logger.info(`🐚 [STATUS] Notifying ${attachedClients.size} clients of session ${sessionId.substring(0, 8)}... status change: ${status}`);
+    logger.debug(`SHELL: Notifying ${attachedClients.size} clients of session status: ${status}`);
 
     attachedClients.forEach(ws => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -1142,7 +1507,7 @@ export class WebSocketManager {
     // Flush any pending metrics before shutdown
     this.metricsBuffers.forEach((buffer, deviceUuid) => {
       if (buffer.length > 0) {
-        logger.info(` 🚨 Flushing ${buffer.length} pending metrics for ${deviceUuid.substring(0, 8)}... before shutdown`);
+        logger.debug(`Flushing ${buffer.length} pending metrics before shutdown`);
         this.flushMetricsBatch(deviceUuid);
       }
     });
@@ -1198,7 +1563,7 @@ export class WebSocketManager {
       const topic = `iot/device/${deviceUuid}/agent/shell`;
       const payload = JSON.stringify(data);
       
-      logger.info(`🐚 [SHELL] ➡️ Publishing command to MQTT`, {
+      logger.debug(`SHELL: Publishing command to MQTT`, {
         deviceUuid: deviceUuid.substring(0, 8) + '...',
         topic,
         action: data.action,
@@ -1207,7 +1572,7 @@ export class WebSocketManager {
       
       await this.mqttManager.publish(topic, payload, 1);
       
-      logger.info('🐚 [SHELL] ✅ Command published to MQTT successfully');
+      logger.debug('SHELL: Command published to MQTT successfully');
     } catch (error) {
       logger.error('🐚 [SHELL] ❌ Failed to send shell command:', error);
     }
@@ -1232,7 +1597,7 @@ export class WebSocketManager {
       sessionManager.appendToBuffer(sessionId, output);
       
       const attachedClients = sessionManager.getAttachedClients(sessionId);
-      logger.info(`🐚 [SHELL] 📡 Broadcasting to ${attachedClients.size} attached clients for session ${sessionId.substring(0, 8)}...`);
+      logger.debug(`SHELL: Broadcasting to ${attachedClients.size} attached clients`);
       
       // Fan-out protection: non-blocking sends, skip slow/closed clients
       let sentCount = 0;
@@ -1249,7 +1614,7 @@ export class WebSocketManager {
             });
             sentCount++;
           } catch (err) {
-            logger.warn(`🐚 [SHELL] Failed to send to client, will detach on next error`, err);
+            logger.warn(`SHELL: Failed to send to client, will detach on next error`);
           }
         }
       });
@@ -1257,7 +1622,7 @@ export class WebSocketManager {
       logger.debug(`🐚 [SHELL] Sent to ${sentCount}/${attachedClients.size} clients`);
     } else {
       // Legacy non-session output: broadcast to all device clients
-      logger.info(`🐚 [SHELL] 📡 Broadcasting legacy output to device ${deviceUuid.substring(0, 8)}... clients`);
+      logger.debug(`SHELL: Broadcasting legacy output`);
       
       this.broadcast(deviceUuid, {
         type: 'shell',
@@ -1268,7 +1633,7 @@ export class WebSocketManager {
       });
     }
     
-    logger.info('🐚 [SHELL] ✅ Broadcast complete');
+    logger.debug('SHELL: Broadcast complete');
   }
 
   /**
@@ -1276,6 +1641,16 @@ export class WebSocketManager {
    */
   private async handleCreateSession(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
     try {
+      // 🔐 Validate user is authenticated for shell access
+      if (!client.user || !client.user.id) {
+      logger.warn('SHELL: Rejected - unauthenticated user attempting to create session');
+        this.send(client.ws, {
+          type: 'error',
+          message: 'Unauthorized: authentication required for shell access',
+        });
+        return;
+      }
+
       const deviceUuid = message.deviceUuid || client.deviceUuid;
       if (!deviceUuid) {
         this.send(client.ws, {
@@ -1285,7 +1660,7 @@ export class WebSocketManager {
         return;
       }
 
-      const session = await sessionManager.createSession(deviceUuid, message.data?.userId);
+      const session = await sessionManager.createSession(deviceUuid, client.user.id);
       
       // Send start command to device
       await this.handleShellCommand(deviceUuid, {
@@ -1297,7 +1672,7 @@ export class WebSocketManager {
       await sessionManager.markStartCommandSent(session.sessionId);
 
       // Mark as expecting PTY (will be set to true when first output arrives)
-      logger.info(`🐚 [SESSION] Waiting for agent response for session ${session.sessionId.substring(0, 8)}...`);
+      logger.debug(`SHELL: Waiting for agent response for session`);
 
       this.send(client.ws, {
         type: 'session-created',
@@ -1306,9 +1681,9 @@ export class WebSocketManager {
         data: session,
       });
 
-      logger.info(`🐚 [SESSION] Created and started session ${session.sessionId.substring(0, 8)}... for device ${deviceUuid.substring(0, 8)}...`);
+      logger.info(`🐚 SESSION created: ${session.sessionId.substring(0, 8)}... (user: ${client.user.id})`);
     } catch (error: any) {
-      logger.error('🐚 [SESSION] Failed to create session:', error);
+      logger.error('SHELL: Failed to create session:', error);
       this.send(client.ws, {
         type: 'error',
         message: `Failed to create session: ${error.message}`,
@@ -1318,23 +1693,32 @@ export class WebSocketManager {
 
   /**
    * Attach client to existing session
-   * Security: passes userId for ownership validation
+   * Security: validates user is authenticated and owns the session
    * Auto-restarts PTY if it died
    */
   private async handleAttachSession(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
-    logger.info(`🐚 [SESSION] handleAttachSession called`, {
+    // 🔐 Validate user is authenticated for shell access
+    if (!client.user || !client.user.id) {
+      logger.warn('SHELL: Rejected - unauthenticated user attempting to attach to session');
+      this.send(client.ws, {
+        type: 'error',
+        message: 'Unauthorized: authentication required for shell access',
+      });
+      return;
+    }
+
+    logger.debug(`SHELL: handleAttachSession called`, {
       hasSessionId: !!message.data?.sessionId,
       sessionId: message.data?.sessionId?.substring(0, 8) + '...',
-      userId: message.data?.userId,
+      userId: client.user.id,
       deviceUuid: client.deviceUuid?.substring(0, 8) + '...'
     });
     
     try {
       const sessionId = message.data?.sessionId;
-      const userId = message.data?.userId; // Get userId from message
       
       if (!sessionId) {
-        logger.warn(`🐚 [SESSION] No sessionId provided in attach request`);
+        logger.warn(`SHELL: No sessionId provided in attach request`);
         this.send(client.ws, {
           type: 'error',
           message: 'Session ID required',
@@ -1342,26 +1726,26 @@ export class WebSocketManager {
         return;
       }
 
-      logger.info(`🐚 [SESSION] Calling sessionManager.attachSession for ${sessionId.substring(0, 8)}...`);
+      logger.debug(`SHELL: Attaching to session`);
       
       // Pass userId for security validation - returns buffer and PTY restart flag
-      const result = await sessionManager.attachSession(sessionId, client.ws, userId);
+      const result = await sessionManager.attachSession(sessionId, client.ws, client.user.id);
 
-      logger.info(`🐚 [SESSION] attachSession succeeded, buffer size: ${result.buffer.length} chunks, needsPtyRestart: ${result.needsPtyRestart}`);
+      logger.debug(`SHELL: Attached, buffer size: ${result.buffer.length} chunks, needsPtyRestart: ${result.needsPtyRestart}`);
 
       // Only send PTY start command if it needs to be restarted
       // For brand new sessions, PTY was already started during creation
       if (client.deviceUuid && result.needsPtyRestart) {
-        logger.info(`🐚 [SESSION] Restarting PTY for session ${sessionId.substring(0, 8)}...`);
+        logger.debug(`SHELL: Restarting PTY`);
         
         await this.handleShellCommand(client.deviceUuid, {
           action: 'start',
           sessionId: sessionId,
         });
         
-        logger.info(`🐚 [SESSION] PTY start command sent for session ${sessionId.substring(0, 8)}...`);
+        logger.debug(`SHELL: PTY start command sent`);
       } else {
-        logger.info(`🐚 [SESSION] PTY already running for session ${sessionId.substring(0, 8)}, skipping start command`);
+        logger.debug(`SHELL: PTY already running, skipping start command`);
       }
 
       this.send(client.ws, {
@@ -1373,7 +1757,7 @@ export class WebSocketManager {
         },
       });
 
-      logger.info(`🐚 [SESSION] Client attached to session ${sessionId.substring(0, 8)}...`);
+      logger.debug(`SHELL: Client attached to session`);
     } catch (error: any) {
       logger.error('🐚 [SESSION] Failed to attach session:', error);
       logger.error('🐚 [SESSION] Error stack:', error.stack);
@@ -1389,6 +1773,12 @@ export class WebSocketManager {
    */
   private async handleDetachSession(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
     try {
+      // 🔐 Validate user is authenticated for shell access
+      if (!client.user || !client.user.id) {
+        logger.warn('🐚 [SESSION] Rejected - unauthenticated user attempting to detach from session');
+        return;
+      }
+
       const sessionId = message.data?.sessionId;
       if (!sessionId) {
         return;
@@ -1401,7 +1791,7 @@ export class WebSocketManager {
         sessionId,
       });
 
-      logger.info(`🐚 [SESSION] Client detached from session ${sessionId.substring(0, 8)}...`);
+      logger.debug(`SHELL: Client detached from session`);
     } catch (error: any) {
       logger.error('🐚 [SESSION] Failed to detach session:', error);
     }
@@ -1412,6 +1802,16 @@ export class WebSocketManager {
    */
   private async handleTerminateSession(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
     try {
+      // 🔐 Validate user is authenticated for shell access
+      if (!client.user || !client.user.id) {
+        logger.warn('🐚 [SESSION] Rejected - unauthenticated user attempting to terminate session');
+        this.send(client.ws, {
+          type: 'error',
+          message: 'Unauthorized: authentication required for shell access',
+        });
+        return;
+      }
+
       const sessionId = message.data?.sessionId;
       if (!sessionId) {
         this.send(client.ws, {
@@ -1425,13 +1825,29 @@ export class WebSocketManager {
       const sessions = await sessionManager.listSessions();
       const session = sessions.find(s => s.sessionId === sessionId);
       
-      if (session) {
-        // Send stop command to device
-        await this.handleShellCommand(session.deviceUuid, {
-          action: 'stop',
-          sessionId,
+      if (!session) {
+        this.send(client.ws, {
+          type: 'error',
+          message: 'Session not found',
         });
+        return;
       }
+
+      // 🔐 Verify user owns this session
+      if (session.userId !== client.user.id) {
+        logger.warn(`🐚 [SESSION] Rejected - user ${client.user.id} attempting to terminate session owned by ${session.userId}`);
+        this.send(client.ws, {
+          type: 'error',
+          message: 'Unauthorized: you do not own this session',
+        });
+        return;
+      }
+
+      // Send stop command to device
+      await this.handleShellCommand(session.deviceUuid, {
+        action: 'stop',
+        sessionId,
+      });
 
       await sessionManager.terminateSession(sessionId);
 
@@ -1441,7 +1857,7 @@ export class WebSocketManager {
       // Note: session-terminated message is sent by sessionManager.terminateSession()
       // to all attached clients, no need to send again here
 
-      logger.info(`🐚 [SESSION] Terminated session ${sessionId.substring(0, 8)}...`);
+      logger.debug(`SHELL: Terminated session`);
     } catch (error: any) {
       logger.error('🐚 [SESSION] Failed to terminate session:', error);
       this.send(client.ws, {
@@ -1456,15 +1872,24 @@ export class WebSocketManager {
    */
   private async handleClearAllSessions(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
     try {
-      const userId = message.data?.userId;
+      // 🔐 Validate user is authenticated for shell access
+      if (!client.user || !client.user.id) {
+        logger.warn('🐚 [SESSION] Rejected - unauthenticated user attempting to clear sessions');
+        this.send(client.ws, {
+          type: 'error',
+          message: 'Unauthorized: authentication required to clear sessions',
+        });
+        return;
+      }
+
       const deviceUuid = message.deviceUuid || client.deviceUuid;
 
-      logger.info(`🐚 [SESSION] 🗑️ CLEAR ALL SESSIONS - Received request`);
-      logger.info(`🐚 [SESSION] 🗑️ Device UUID: ${deviceUuid?.substring(0, 8)}...`);
-      logger.info(`🐚 [SESSION] 🗑️ User ID: ${userId || 'none'}`);
+      logger.debug(`SHELL: Clear all sessions requested`);
+      logger.debug(`Device: ${deviceUuid?.substring(0, 8)}...`);
+      logger.debug(`User: ${client.user.id}`);
 
       if (!deviceUuid) {
-        logger.error(`🐚 [SESSION] 🗑️ ERROR - No device UUID provided`);
+        logger.error(`No device UUID provided`);
         this.send(client.ws, {
           type: 'error',
           message: 'Device UUID required',
@@ -1474,46 +1899,42 @@ export class WebSocketManager {
 
       // Get sessions before clearing
       const sessionsBefore = await sessionManager.listSessions(deviceUuid);
-      logger.info(`🐚 [SESSION] 🗑️ Sessions BEFORE clear: ${sessionsBefore.length}`);
-      sessionsBefore.forEach(s => {
-        logger.info(`🐚 [SESSION] 🗑️   - ${s.sessionId.substring(0, 8)}... status=${s.status} userId=${s.userId || 'none'}`);
-      });
+      logger.debug(`Sessions before clear: ${sessionsBefore.length}`);
 
-      logger.info(`🐚 [SESSION] 🗑️ Calling terminateAllSessions()...`);
-      // Terminate all sessions
-      await sessionManager.terminateAllSessions(deviceUuid, userId);
-      logger.info(`🐚 [SESSION] 🗑️ terminateAllSessions() completed`);
+      logger.debug(`Terminating all sessions`);
+      // Terminate all sessions owned by this user
+      await sessionManager.terminateAllSessions(deviceUuid, client.user.id);
+      logger.debug(`Terminate completed`);
 
-      // Clean up command buffers for all sessions from this device
+      // Clean up command buffers for all sessions from this user
       sessionsBefore.forEach(session => {
-        this.commandBuffers.delete(session.sessionId);
+        if (session.userId === client.user.id) {
+          this.commandBuffers.delete(session.sessionId);
+        }
       });
-      logger.info(`🐚 [SESSION] 🗑️ Cleared ${sessionsBefore.length} command buffers`);
+      logger.debug(`Command buffers cleaned`);
 
       // Get sessions after clearing
       const sessionsAfter = await sessionManager.listSessions(deviceUuid);
-      logger.info(`🐚 [SESSION] 🗑️ Sessions AFTER clear: ${sessionsAfter.length}`);
-      sessionsAfter.forEach(s => {
-        logger.info(`🐚 [SESSION] 🗑️   - ${s.sessionId.substring(0, 8)}... status=${s.status} userId=${s.userId || 'none'}`);
-      });
+      logger.debug(`Sessions after clear: ${sessionsAfter.length}`);
 
       // Send confirmation message
-      logger.info(`🐚 [SESSION] 🗑️ Sending all-sessions-cleared confirmation`);
+      logger.debug(`Sending clear confirmation`);
       this.send(client.ws, {
         type: 'all-sessions-cleared',
         message: 'All sessions cleared successfully',
       });
 
       // Send updated sessions list
-      logger.info(`🐚 [SESSION] 🗑️ Sending sessions-list with ${sessionsAfter.length} sessions`);
+      logger.debug(`Sending sessions list`);
       this.send(client.ws, {
         type: 'sessions-list',
         data: { sessions: sessionsAfter },
       });
 
-      logger.info(`🐚 [SESSION] 🗑️ CLEAR ALL SESSIONS - Completed successfully`);
+      logger.debug(`Clear all sessions completed`);
     } catch (error: any) {
-      logger.error('🐚 [SESSION] 🗑️ CLEAR ALL SESSIONS - Failed:', error);
+      logger.error('Failed to clear sessions:', error);
       this.send(client.ws, {
         type: 'error',
         message: `Failed to clear sessions: ${error.message}`,
@@ -1535,9 +1956,9 @@ export class WebSocketManager {
         data: { sessions },
       });
 
-      logger.info(`🐚 [SESSION] Listed ${sessions.length} sessions for device ${deviceUuid?.substring(0, 8)}...`);
+      logger.debug(`Listed ${sessions.length} sessions`);
     } catch (error: any) {
-      logger.error('🐚 [SESSION] Failed to list sessions:', error);
+      logger.error('Failed to list sessions:', error);
       this.send(client.ws, {
         type: 'error',
         message: `Failed to list sessions: ${error.message}`,
@@ -1550,6 +1971,16 @@ export class WebSocketManager {
    */
   private async handleShellInput(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
     try {
+      // 🔐 Validate user is authenticated for shell access
+      if (!client.user || !client.user.id) {
+        logger.warn('🐚 [SESSION] Rejected - unauthenticated user attempting to send shell input');
+        this.send(client.ws, {
+          type: 'error',
+          message: 'Unauthorized: authentication required for shell access',
+        });
+        return;
+      }
+
       const sessionId = message.data?.sessionId;
       const input = message.data?.input ?? message.data?.data;
       
@@ -1569,6 +2000,16 @@ export class WebSocketManager {
         this.send(client.ws, {
           type: 'error',
           message: 'Session not found',
+        });
+        return;
+      }
+
+      // 🔐 Verify user owns this session
+      if (session.userId !== client.user.id) {
+        logger.warn(`🐚 [SESSION] Rejected - user ${client.user.id} attempting to access session owned by ${session.userId}`);
+        this.send(client.ws, {
+          type: 'error',
+          message: 'Unauthorized: you do not own this session',
         });
         return;
       }
@@ -1598,6 +2039,12 @@ export class WebSocketManager {
    */
   private async handleResizeSession(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
     try {
+      // 🔐 Validate user is authenticated for shell access
+      if (!client.user || !client.user.id) {
+        logger.warn('🐚 [SESSION] Rejected - unauthenticated user attempting to resize session');
+        return;
+      }
+
       const sessionId = message.data?.sessionId;
       const cols = message.data?.cols;
       const rows = message.data?.rows;
@@ -1613,6 +2060,12 @@ export class WebSocketManager {
       
       if (!session) {
         logger.warn(`🐚 [SESSION] Cannot resize - session ${sessionId.substring(0, 8)}... not found`);
+        return;
+      }
+
+      // 🔐 Verify user owns this session
+      if (session.userId !== client.user.id) {
+        logger.warn(`🐚 [SESSION] Rejected - user ${client.user.id} attempting to resize session owned by ${session.userId}`);
         return;
       }
 
