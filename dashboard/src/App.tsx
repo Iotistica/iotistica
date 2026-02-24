@@ -239,8 +239,12 @@ export default function App() {
     } else if (currentPath.type === 'global') {
       // Global view from URL
       const view = currentPath.view as View;
+      console.log('[URL SYNC] Global view from URL:', { view, isValid: viewOptions.includes(view) });
       if (viewOptions.includes(view)) {
+        console.log('[URL SYNC] Setting currentView to:', view);
         setCurrentView(view);
+      } else {
+        console.log('[URL SYNC] View not in viewOptions:', view);
       }
       
       // Don't clear fleet selection when going to global view - preserve for restoration
@@ -1174,7 +1178,10 @@ export default function App() {
               <Button
                 variant={currentView === 'mqtt' ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => handleGlobalViewChange('mqtt')}
+                onClick={() => {
+                  console.log('[BUTTON CLICK] MQTT button clicked');
+                  handleGlobalViewChange('mqtt');
+                }}
                 style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
               >
                 <Radio className="w-5 h-5 mr-2" />
@@ -1192,7 +1199,10 @@ export default function App() {
               <Button
                 variant={currentView === 'security' ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => handleGlobalViewChange('security')}
+                onClick={() => {
+                  console.log('[BUTTON CLICK] Security button clicked');
+                  handleGlobalViewChange('security');
+                }}
                 style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
               >
                 <Shield className="w-5 h-5 mr-2" />
