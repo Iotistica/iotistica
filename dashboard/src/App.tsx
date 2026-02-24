@@ -497,10 +497,9 @@ export default function App() {
         
         // Get auth token from localStorage
         const accessToken = localStorage.getItem('accessToken');
-        const apiUrl = buildApiUrl('/api/v1/devices?limit=100');
+        const apiUrl = buildApiUrl('/api/v1/devices?limit=100&includeTags=true');
         console.log('[DEBUG] API URL:', apiUrl);
-        console.log('[DEBUG] Fetching devices with token:', accessToken ? `${accessToken.substring(0, 20)}...` : 'NULL');
-        console.log('[DEBUG] Full auth header:', `Bearer ${accessToken}`);
+
         
         const response = await fetch(apiUrl, {
           headers: {
@@ -520,8 +519,7 @@ export default function App() {
 
         const data = await response.json();
         
-        console.log('Devices API response:', data);
-        console.log('[FLEET DEBUG] Raw devices with fleet_uuid:', data.devices.map((d: any) => ({ uuid: d.uuid, name: d.device_name, fleet_uuid: d.fleet_uuid })));
+      
         
         // Transform API response to match Device interface
         // CRITICAL: Use stable UUID as ID instead of index to prevent React remounts
@@ -545,6 +543,7 @@ export default function App() {
             ? Math.round((parseFloat(apiDevice.storage_usage) / parseFloat(apiDevice.storage_total) * 100)) 
             : 0,
           fleet_uuid: apiDevice.fleet_uuid || undefined, // API returns fleet_uuid
+          tags: Object.prototype.hasOwnProperty.call(apiDevice, 'tags') ? apiDevice.tags : undefined,
         }));
 
         // Only update state if devices actually changed (use callback for React optimization)

@@ -126,10 +126,19 @@ class WebSocketService {
     this.isIntentionallyClosed = false;
     this.connectionPending = true;
 
-    const wsUrl = buildApiUrl(`/ws?deviceUuid=${deviceUuid}`).replace('http', 'ws');
-    console.log('[WebSocket] Connecting to:', wsUrl);
+    const token = localStorage.getItem('accessToken');
+    if (!token) {
+      console.warn('[WebSocket] Missing access token, cannot connect');
+      this.connectionPending = false;
+      return;
+    }
 
-    this.createWebSocket(wsUrl, ['system-info', 'processes', 'history', 'network-interfaces']);
+    const wsUrl = new URL(buildApiUrl(`/ws?deviceUuid=${deviceUuid}`));
+    wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+    wsUrl.searchParams.set('token', token);
+    console.log('[WebSocket] Connecting to:', wsUrl.toString());
+
+    this.createWebSocket(wsUrl.toString(), ['system-info', 'processes', 'history', 'network-interfaces']);
   }
 
   connectGlobal() {
@@ -161,10 +170,19 @@ class WebSocketService {
     this.isIntentionallyClosed = false;
     this.connectionPending = true;
 
-    const wsUrl = buildApiUrl(`/ws?type=global`).replace('http', 'ws');
-    console.log('[WebSocket] Connecting to global:', wsUrl);
+    const token = localStorage.getItem('accessToken');
+    if (!token) {
+      console.warn('[WebSocket] Missing access token, cannot connect');
+      this.connectionPending = false;
+      return;
+    }
 
-    this.createWebSocket(wsUrl, ['mqtt-stats', 'mqtt-topics']);
+    const wsUrl = new URL(buildApiUrl('/ws?type=global'));
+    wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+    wsUrl.searchParams.set('token', token);
+    console.log('[WebSocket] Connecting to global:', wsUrl.toString());
+
+    this.createWebSocket(wsUrl.toString(), ['mqtt-stats', 'mqtt-topics']);
   }
 
   private createWebSocket(wsUrl: string, channels: string[]): void {

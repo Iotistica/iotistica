@@ -586,7 +586,7 @@ export class WebSocketManager {
   }
 
   private handleConnection(ws: WebSocket, deviceUuid: string, user: JwtPayload, tokenExpiryMs?: number): void {
-    logger.info(`✅ Device connected: ${deviceUuid.substring(0, 8)}... (user: ${user.id})`);
+    logger.info(`Device connected: ${deviceUuid.substring(0, 8)}... (user: ${user.id})`);
 
     const client: WebSocketClient = {
       ws,
