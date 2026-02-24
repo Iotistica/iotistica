@@ -3,7 +3,7 @@ import poolWrapper from '../db/connection';
 import bcrypt from 'bcrypt';
 import { X509Certificate } from 'crypto';
 import { logger } from '../utils/logger';
-import { jwtAuth } from '../middleware/jwt-auth';
+import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 
 const pool = poolWrapper.pool;
 
@@ -186,7 +186,7 @@ router.get('/brokers/:id', jwtAuth, async (req: Request, res: Response) => {
  * REQUIRES AUTHENTICATION - Protected endpoint
  * VALIDATES CERTIFICATES - All certificates must be valid X.509 certificates
  */
-router.post('/brokers', jwtAuth, async (req: Request, res: Response) => {
+router.post('/brokers', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const {
       name,
@@ -326,7 +326,7 @@ router.post('/brokers', jwtAuth, async (req: Request, res: Response) => {
  * REQUIRES AUTHENTICATION - Protected endpoint
  * VALIDATES CERTIFICATES - All certificates must be valid X.509 certificates
  */
-router.put('/brokers/:id', jwtAuth, async (req: Request, res: Response) => {
+router.put('/brokers/:id', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const {
@@ -501,7 +501,7 @@ router.put('/brokers/:id', jwtAuth, async (req: Request, res: Response) => {
  * 
  * REQUIRES AUTHENTICATION - Protected endpoint
  */
-router.delete('/brokers/:id', jwtAuth, async (req: Request, res: Response) => {
+router.delete('/brokers/:id', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -551,7 +551,7 @@ router.delete('/brokers/:id', jwtAuth, async (req: Request, res: Response) => {
  * 
  * REQUIRES AUTHENTICATION - Protected endpoint
  */
-router.post('/brokers/:id/test', jwtAuth, async (req: Request, res: Response) => {
+router.post('/brokers/:id/test', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 

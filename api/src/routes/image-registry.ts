@@ -160,7 +160,7 @@ router.get('/images/:id', async (req: Request, res: Response) => {
  * REQUIRES AUTHENTICATION - Protected endpoint
  * Only authenticated users with admin role can add images
  */
-router.post('/images', async (req: Request, res: Response) => {
+router.post('/images', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const {
       image_name,
@@ -228,7 +228,7 @@ router.post('/images', async (req: Request, res: Response) => {
  * 
  * REQUIRES AUTHENTICATION - Protected endpoint
  */
-router.put('/images/:id', async (req: Request, res: Response) => {
+router.put('/images/:id', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { description, category, approval_status } = req.body;
@@ -361,7 +361,7 @@ router.delete('/images/:id', async (req: Request, res: Response) => {
  * POST /api/v1/images/:id/tags
  * Add new tag to image
  */
-router.post('/images/:id/tags', async (req: Request, res: Response) => {
+router.post('/images/:id/tags', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const {
@@ -425,7 +425,7 @@ router.post('/images/:id/tags', async (req: Request, res: Response) => {
  * PUT /api/v1/images/:imageId/tags/:tagId
  * Update tag details
  */
-router.put('/images/:imageId/tags/:tagId', async (req: Request, res: Response) => {
+router.put('/images/:imageId/tags/:tagId', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { imageId, tagId } = req.params;
     const { is_recommended, is_deprecated, security_scan_status, vulnerabilities_count } = req.body;
@@ -503,7 +503,7 @@ router.put('/images/:imageId/tags/:tagId', async (req: Request, res: Response) =
  * DELETE /api/v1/images/:imageId/tags/:tagId
  * Remove tag from image
  */
-router.delete('/images/:imageId/tags/:tagId', async (req: Request, res: Response) => {
+router.delete('/images/:imageId/tags/:tagId', requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { imageId, tagId } = req.params;
 
