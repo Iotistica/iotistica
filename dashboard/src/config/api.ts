@@ -21,6 +21,7 @@ declare global {
     env?: {
       VITE_API_URL?: string;
       NODE_ENV?: string;
+      APP_VERSION?: string;
     };
   }
 }

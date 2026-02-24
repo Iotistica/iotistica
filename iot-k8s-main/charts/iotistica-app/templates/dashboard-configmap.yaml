@@ -30,6 +30,7 @@ data:
     // Runtime configuration injected by Kubernetes ConfigMap
     window.env = {
       VITE_API_URL: '{{ .Values.dashboard.apiUrl }}',
-      NODE_ENV: '{{ .Values.dashboard.env.NODE_ENV }}'
+      NODE_ENV: '{{ .Values.dashboard.env.NODE_ENV }}',
+      APP_VERSION: '{{ .Values.dashboard.env.APP_VERSION | default .Values.dashboard.image.tag }}'
     };
 {{- end }}
