@@ -1,6 +1,6 @@
 {
   "name": "Iotistica Dashboard",
-  "version": "2.0.158",
+  "version": "2.0.159",
   "displayVersion": "v0.0.1-rc.127",
   "private": true,
   "dependencies": {
