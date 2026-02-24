@@ -10,10 +10,21 @@
  */
 
 import express from 'express';
+import { z } from 'zod';
 import { query } from '../db/connection';
+import { jwtAuth } from '../middleware/jwt-auth';
 import logger from '../utils/logger';
 
 export const router = express.Router();
+
+// Validation schemas
+const protocolSchema = z.string().min(1).max(50).regex(/^[a-zA-Z0-9_\-]+$/, 'Invalid protocol format').optional();
+const uuidSchema = z.string().uuid('Invalid UUID format').optional();
+const deviceNameSchema = z.string().min(1).max(255).regex(/^[a-zA-Z0-9_\-\.\s]+$/, 'Invalid device name format');
+const metricNameSchema = z.string().min(1).max(100).regex(/^[a-zA-Z0-9_\-\.]+$/, 'Invalid metric name format');
+const timeRangeSchema = z.enum(['1m', '1h', '6h', '12h', '24h', '7d', '30d']).default('1h');
+const aggregationSchema = z.enum(['auto', '1min', '1hour', '1day']).default('auto');
+const viewSchema = z.enum(['catalog', 'devices', 'latest', 'all']);
 
 /**
  * Get list of endpoint devices (from extra.deviceName)
@@ -25,9 +36,14 @@ export const router = express.Router();
  * 
  * Returns devices discovered from readings with their available metrics
  */
-router.get('/devices', async (req, res) => {
+router.get('/devices', jwtAuth, async (req, res) => {
   try {
     const { protocol, agentUuid } = req.query;
+    const requestId = (req as any).id || 'unknown';
+    
+    // Validate inputs
+    const validatedProtocol = protocolSchema.parse(protocol);
+    const validatedAgentUuid = uuidSchema.parse(agentUuid);
     
     // Group by device_name to get unique devices across all agents
     let sql = `
@@ -45,15 +61,18 @@ router.get('/devices', async (req, res) => {
     `;
     
     const params: any[] = [];
+    let paramIndex = 0;
     
-    if (protocol) {
-      params.push(protocol);
-      sql += ` AND protocol = $${params.length}`;
+    if (validatedProtocol) {
+      params.push(validatedProtocol);
+      paramIndex++;
+      sql += ` AND protocol = $${paramIndex}`;
     }
     
-    if (agentUuid) {
-      params.push(agentUuid);
-      sql += ` AND agent_uuid = $${params.length}`;
+    if (validatedAgentUuid) {
+      params.push(validatedAgentUuid);
+      paramIndex++;
+      sql += ` AND agent_uuid = $${paramIndex}`;
     }
     
     sql += `
@@ -80,11 +99,13 @@ router.get('/devices', async (req, res) => {
       devices: result.rows
     });
   } catch (error: any) {
-    logger.error('Error getting endpoint devices:', error);
-    res.status(500).json({
-      error: 'Failed to get endpoint devices',
-      message: error.message
-    });
+    const requestId = (req as any).id || 'unknown';
+    if (error instanceof z.ZodError) {
+      logger.warn('Invalid devices parameters', { requestId, errors: error.errors });
+      return res.status(400).json({ error: 'Invalid parameters', requestId });
+    }
+    logger.error('Error getting endpoint devices', { requestId, userId: (req as any).user?.id, error: error.message });
+    res.status(500).json({ error: 'Internal server error', requestId });
   }
 });
 
@@ -100,9 +121,16 @@ router.get('/devices', async (req, res) => {
  * 
  * Returns available metrics with statistics
  */
-router.get('/catalog', async (req, res) => {
+router.get('/catalog', jwtAuth, async (req, res) => {
   try {
     const { deviceName, protocol, agentUuid, metricName } = req.query;
+    const requestId = (req as any).id || 'unknown';
+    
+    // Validate inputs
+    const validatedDeviceName = deviceName ? deviceNameSchema.parse(deviceName) : undefined;
+    const validatedProtocol = protocolSchema.parse(protocol);
+    const validatedAgentUuid = uuidSchema.parse(agentUuid);
+    const validatedMetricName = metricName ? metricNameSchema.parse(metricName) : undefined;
     
     let sql = `
       SELECT 
@@ -128,25 +156,30 @@ router.get('/catalog', async (req, res) => {
     `;
     
     const params: any[] = [];
+    let paramIndex = 0;
     
-    if (deviceName) {
-      params.push(deviceName);
-      sql += ` AND device_name = $${params.length}`;
+    if (validatedDeviceName) {
+      params.push(validatedDeviceName);
+      paramIndex++;
+      sql += ` AND device_name = $${paramIndex}`;
     }
     
-    if (protocol) {
-      params.push(protocol);
-      sql += ` AND protocol = $${params.length}`;
+    if (validatedProtocol) {
+      params.push(validatedProtocol);
+      paramIndex++;
+      sql += ` AND protocol = $${paramIndex}`;
     }
     
-    if (agentUuid) {
-      params.push(agentUuid);
-      sql += ` AND agent_uuid = $${params.length}`;
+    if (validatedAgentUuid) {
+      params.push(validatedAgentUuid);
+      paramIndex++;
+      sql += ` AND agent_uuid = $${paramIndex}`;
     }
     
-    if (metricName) {
-      params.push(metricName);
-      sql += ` AND metric_name = $${params.length}`;
+    if (validatedMetricName) {
+      params.push(validatedMetricName);
+      paramIndex++;
+      sql += ` AND metric_name = $${paramIndex}`;
     }
     
     sql += ` ORDER BY device_name, metric_name`;
@@ -158,11 +191,13 @@ router.get('/catalog', async (req, res) => {
       metrics: result.rows
     });
   } catch (error: any) {
-    logger.error('Error getting metric catalog:', error);
-    res.status(500).json({
-      error: 'Failed to get metric catalog',
-      message: error.message
-    });
+    const requestId = (req as any).id || 'unknown';
+    if (error instanceof z.ZodError) {
+      logger.warn('Invalid catalog parameters', { requestId, errors: error.errors });
+      return res.status(400).json({ error: 'Invalid parameters', requestId });
+    }
+    logger.error('Error getting metric catalog', { requestId, userId: (req as any).user?.id, error: error.message });
+    res.status(500).json({ error: 'Internal server error', requestId });
   }
 });
 
@@ -177,15 +212,15 @@ router.get('/catalog', async (req, res) => {
  * 
  * Returns current values from latest_readings view
  */
-router.get('/latest', async (req, res) => {
+router.get('/latest', jwtAuth, async (req, res) => {
   try {
     const { deviceName, metricName, agentUuid } = req.query;
+    const requestId = (req as any).id || 'unknown';
     
-    if (!deviceName) {
-      return res.status(400).json({
-        error: 'deviceName is required'
-      });
-    }
+    // Validate required params
+    const validatedDeviceName = deviceNameSchema.parse(deviceName);
+    const validatedMetricName = metricName ? metricNameSchema.parse(metricName) : undefined;
+    const validatedAgentUuid = uuidSchema.parse(agentUuid);
     
     let sql = `
       SELECT 
@@ -206,16 +241,19 @@ router.get('/latest', async (req, res) => {
       WHERE device_name = $1
     `;
     
-    const params: any[] = [deviceName];
+    const params: any[] = [validatedDeviceName];
+    let paramIndex = 1;
     
-    if (metricName) {
-      params.push(metricName);
-      sql += ` AND metric_name = $${params.length}`;
+    if (validatedMetricName) {
+      params.push(validatedMetricName);
+      paramIndex++;
+      sql += ` AND metric_name = $${paramIndex}`;
     }
     
-    if (agentUuid) {
-      params.push(agentUuid);
-      sql += ` AND agent_uuid = $${params.length}`;
+    if (validatedAgentUuid) {
+      params.push(validatedAgentUuid);
+      paramIndex++;
+      sql += ` AND agent_uuid = $${paramIndex}`;
     }
     
     sql += ` ORDER BY metric_name`;
@@ -227,11 +265,13 @@ router.get('/latest', async (req, res) => {
       readings: result.rows
     });
   } catch (error: any) {
-    logger.error('Error getting latest readings:', error);
-    res.status(500).json({
-      error: 'Failed to get latest readings',
-      message: error.message
-    });
+    const requestId = (req as any).id || 'unknown';
+    if (error instanceof z.ZodError) {
+      logger.warn('Invalid latest readings parameters', { requestId, errors: error.errors });
+      return res.status(400).json({ error: 'Invalid parameters', requestId });
+    }
+    logger.error('Error getting latest readings', { requestId, userId: (req as any).user?.id, error: error.message });
+    res.status(500).json({ error: 'Internal server error', requestId });
   }
 });
 
@@ -250,28 +290,25 @@ router.get('/latest', async (req, res) => {
  * 
  * Returns time-bucketed aggregates from appropriate view
  */
-router.get('/timeseries', async (req, res) => {
+router.get('/timeseries', jwtAuth, async (req, res) => {
   try {
     const { deviceName, metricName, timeRange, agentUuid, aggregation } = req.query;
+    const requestId = (req as any).id || 'unknown';
     
     // Validate required params
-    if (!deviceName || !metricName) {
-      return res.status(400).json({
-        error: 'deviceName and metricName are required'
-      });
-    }
-    
-    // Parse time range
-    const range = (timeRange as string) || '1h';
-    let intervalMinutes: number;
-    let viewName: string;
+    const validatedDeviceName = deviceNameSchema.parse(deviceName);
+    const validatedMetricName = metricNameSchema.parse(metricName);
+    const validatedTimeRange = timeRangeSchema.parse(timeRange);
+    const validatedAggregation = aggregationSchema.parse(aggregation);
+    const validatedAgentUuid = uuidSchema.parse(agentUuid);
     
     // Auto-select view based on time range and aggregation preference
-    const aggLevel = aggregation as string || 'auto';
+    let viewName: string;
+    let intervalMinutes: number = 0;
     
-    if (aggLevel !== 'auto') {
+    if (validatedAggregation !== 'auto') {
       // Manual aggregation selection
-      switch (aggLevel) {
+      switch (validatedAggregation) {
         case '1min':
           viewName = 'readings_1m';
           break;
@@ -284,14 +321,14 @@ router.get('/timeseries', async (req, res) => {
         default:
           return res.status(400).json({
             error: 'Invalid aggregation level',
-            message: 'Must be: auto, 1min, 1hour, or 1day'
+            requestId
           });
       }
     } else {
       // Auto-select based on time range
-      switch (range) {
+      switch (validatedTimeRange) {
         case '1m':
-          intervalMinutes = 5;  // Show last 5 minutes of 1-minute buckets
+          intervalMinutes = 5;
           viewName = 'readings_1m';
           break;
         case '1h':
@@ -321,12 +358,12 @@ router.get('/timeseries', async (req, res) => {
         default:
           return res.status(400).json({
             error: 'Invalid time range',
-            message: 'Must be: 1m, 1h, 6h, 12h, 24h, 7d, or 30d'
+            requestId
           });
       }
     }
     
-    // Build query for selected view
+    // Build query for selected view - SAFE: intervalMinutes is number, not interpolated into SQL
     let sql = `
       SELECT 
         bucket as time,
@@ -340,16 +377,18 @@ router.get('/timeseries', async (req, res) => {
         AND metric_name = $2
     `;
     
-    const params: any[] = [deviceName, metricName];
+    const params: any[] = [validatedDeviceName, validatedMetricName];
+    let paramIndex = 2;
     
-    // Add time range filter
-    if (intervalMinutes) {
-      sql += ` AND bucket > NOW() - INTERVAL '${intervalMinutes} minutes'`;
+    // Add time range filter - SAFE: Using parameterized make_interval() with validated number
+    if (intervalMinutes > 0) {
+      sql += ` AND bucket > NOW() - make_interval(mins => $${++paramIndex})`;
+      params.push(intervalMinutes);
     }
     
-    if (agentUuid) {
-      params.push(agentUuid);
-      sql += ` AND agent_uuid = $${params.length}`;
+    if (validatedAgentUuid) {
+      params.push(validatedAgentUuid);
+      sql += ` AND agent_uuid = $${++paramIndex}`;
     }
     
     sql += ` ORDER BY bucket ASC`;
@@ -360,17 +399,17 @@ router.get('/timeseries', async (req, res) => {
     const metadataResult = await query(
       `SELECT unit, protocol, quality_percentage 
        FROM metric_catalog 
-       WHERE device_name = $1 AND metric_name = $2 
+       WHERE device_name = $1 AND metric_name = $2
        LIMIT 1`,
-      [deviceName, metricName]
+      [validatedDeviceName, validatedMetricName]
     );
     
     const metadata = metadataResult.rows[0] || {};
     
     res.json({
       metric: {
-        deviceName,
-        metricName,
+        deviceName: validatedDeviceName,
+        metricName: validatedMetricName,
         unit: metadata.unit,
         protocol: metadata.protocol
       },
@@ -379,18 +418,20 @@ router.get('/timeseries', async (req, res) => {
         startTime: result.rows[0]?.time,
         endTime: result.rows[result.rows.length - 1]?.time,
         aggregationLevel: viewName.replace('readings_', ''),
-        timeRange: range,
+        timeRange: validatedTimeRange,
         qualityPercentage: metadata.quality_percentage
       },
       data: result.rows
     });
     
   } catch (error: any) {
-    logger.error('Error getting time-series data:', error);
-    res.status(500).json({
-      error: 'Failed to get time-series data',
-      message: error.message
-    });
+    const requestId = (req as any).id || 'unknown';
+    if (error instanceof z.ZodError) {
+      logger.warn('Invalid timeseries parameters', { requestId, errors: error.errors });
+      return res.status(400).json({ error: 'Invalid parameters', requestId });
+    }
+    logger.error('Error getting time-series data', { requestId, userId: (req as any).user?.id, error: error.message });
+    res.status(500).json({ error: 'Internal server error', requestId });
   }
 });
 
@@ -401,15 +442,27 @@ router.get('/timeseries', async (req, res) => {
  * Query params:
  * - view: which view to refresh (catalog, devices, latest, all)
  * 
- * Requires admin access (add auth middleware as needed)
+ * Requires admin access
  */
-router.post('/refresh', async (req, res) => {
+router.post('/refresh', jwtAuth, async (req, res) => {
   try {
     const { view } = req.query;
+    const requestId = (req as any).id || 'unknown';
+    const userId = (req as any).user?.id;
+    const userRole = (req as any).user?.role;
+    
+    // Verify admin role
+    if (userRole !== 'admin') {
+      logger.warn('Unauthorized view refresh attempt', { requestId, userId, userRole });
+      return res.status(403).json({ error: 'Admin authorization required', requestId });
+    }
+    
+    // Validate view parameter
+    const validatedView = viewSchema.parse(view);
     
     let sql: string;
     
-    switch (view) {
+    switch (validatedView) {
       case 'catalog':
         sql = 'SELECT refresh_metric_catalog()';
         break;
@@ -423,24 +476,24 @@ router.post('/refresh', async (req, res) => {
         sql = 'SELECT refresh_all_catalog_views()';
         break;
       default:
-        return res.status(400).json({
-          error: 'Invalid view parameter',
-          message: 'Must be: catalog, devices, latest, or all'
-        });
+        return res.status(400).json({ error: 'Invalid view parameter', requestId });
     }
     
+    logger.info('Refreshing metric views', { requestId, userId, view: validatedView });
     await query(sql);
     
     res.json({
-      success: true,
-      message: `Refreshed ${view} view(s)`
+      message: `Refreshed ${validatedView} view(s)`,
+      requestId
     });
     
   } catch (error: any) {
-    logger.error('Error refreshing views:', error);
-    res.status(500).json({
-      error: 'Failed to refresh views',
-      message: error.message
-    });
+    const requestId = (req as any).id || 'unknown';
+    if (error instanceof z.ZodError) {
+      logger.warn('Invalid refresh parameters', { requestId, errors: error.errors });
+      return res.status(400).json({ error: 'Invalid parameters', requestId });
+    }
+    logger.error('Error refreshing views', { requestId, userId: (req as any).user?.id, error: error.message });
+    res.status(500).json({ error: 'Internal server error', requestId });
   }
 });

@@ -82,6 +82,10 @@ services:
         environment:
             - PORT=${PORT:-3002}
             - NODE_ENV=${NODE_ENV:-development}
+            # JWT Authentication (REQUIRED for all authenticated endpoints)
+            - JWT_SECRET=${JWT_SECRET:-your-secret-change-this-in-production}
+            - JWT_ACCESS_TOKEN_EXPIRY=${JWT_ACCESS_TOKEN_EXPIRY:-15m}
+            - JWT_REFRESH_TOKEN_EXPIRY=${JWT_REFRESH_TOKEN_EXPIRY:-7d}
             - HTTPS_ENABLED=true
             - HTTPS_PORT=3443
             - HTTPS_CERT_PATH=/app/certs/tls.crt

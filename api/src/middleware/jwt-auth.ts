@@ -15,7 +15,18 @@ import jwt, { Secret } from 'jsonwebtoken';
 import { query } from '../db/connection';
 
 // JWT Configuration
-const JWT_SECRET: Secret = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+// CRITICAL: JWT_SECRET must be set in environment - no fallback to prevent security bypass
+const JWT_SECRET: Secret = (() => {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error(
+      'FATAL ERROR: JWT_SECRET environment variable is not set. '
+      + 'This is required for authentication security. '
+      + 'Set a strong random value: node -e "console.log(require(\"crypto\").randomBytes(32).toString(\"hex\"))"'
+    );
+  }
+  return secret;
+})();
 const JWT_ACCESS_TOKEN_EXPIRY = (process.env.JWT_ACCESS_TOKEN_EXPIRY || '15m') as string;
 const JWT_REFRESH_TOKEN_EXPIRY = (process.env.JWT_REFRESH_TOKEN_EXPIRY || '7d') as string;
 
@@ -29,7 +40,9 @@ declare global {
         email: string;
         role: string;
         isActive: boolean;
+        customerId?: string; // Multi-tenancy: customer ID for boundary enforcement
       };
+      id?: string; // Request ID for tracking and correlation
     }
   }
 }
@@ -116,19 +129,12 @@ export async function jwtAuth(
   next: NextFunction
 ): Promise<void> {
   const startTime = Date.now();
-  console.log('[JWT-AUTH] *** MIDDLEWARE CALLED ***', {
-    method: req.method,
-    path: req.path,
-    fullUrl: req.originalUrl,
-    hasAuthHeader: !!req.headers.authorization
-  });
   
   try {
     // Extract token from Authorization header
     const authHeader = req.headers.authorization;
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.log('[JWT-AUTH] No valid auth header, rejecting');
       res.status(401).json({
         error: 'Unauthorized',
         message: 'JWT token required. Send in Authorization: Bearer <token> header.'

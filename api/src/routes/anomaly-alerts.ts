@@ -8,8 +8,11 @@
 import { Router } from 'express';
 import { query } from '../db/connection';
 import logger from '../utils/logger';
+import { jwtAuth } from '../middleware/jwt-auth';
 
 const router = Router();
+
+router.use(jwtAuth);
 
 /**
  * GET /api/v1/anomaly-alerts

@@ -1,17 +1,57 @@
 import { Router, Request, Response } from 'express';
 import poolWrapper from '../db/connection';
 import bcrypt from 'bcrypt';
+import { X509Certificate } from 'crypto';
 import { logger } from '../utils/logger';
+import { jwtAuth } from '../middleware/jwt-auth';
 
 const pool = poolWrapper.pool;
 
 const router = Router();
 
 /**
+ * Validate X.509 certificate
+ * Checks for:
+ * - Valid PEM format
+ * - Not expired
+ * - Proper certificate structure
+ */
+function validateCertificate(certPEM: string): { valid: boolean; error?: string } {
+  try {
+    if (!certPEM || typeof certPEM !== 'string') {
+      return { valid: false, error: 'Certificate must be a non-empty string' };
+    }
+
+    if (!certPEM.includes('-----BEGIN CERTIFICATE-----') || !certPEM.includes('-----END CERTIFICATE-----')) {
+      return { valid: false, error: 'Invalid PEM format - must contain BEGIN/END CERTIFICATE markers' };
+    }
+
+    const cert = new X509Certificate(certPEM);
+
+    // Check expiration
+    const expiryDate = new Date(cert.validTo);
+    if (expiryDate < new Date()) {
+      return { valid: false, error: `Certificate expired on ${expiryDate.toISOString()}` };
+    }
+
+    // Check that certificate has valid subject
+    if (!cert.subject || cert.subject.length === 0) {
+      return { valid: false, error: 'Certificate has no subject' };
+    }
+
+    return { valid: true };
+  } catch (err: any) {
+    return { valid: false, error: `Invalid certificate: ${err.message}` };
+  }
+}
+
+/**
  * GET /api/mqtt/brokers
  * List all MQTT broker configurations
+ * 
+ * REQUIRES AUTHENTICATION - Protected endpoint
  */
-router.get('/brokers', async (req: Request, res: Response) => {
+router.get('/brokers', jwtAuth, async (req: Request, res: Response) => {
   try {
     const result = await pool.query(`
       SELECT 
@@ -56,8 +96,10 @@ router.get('/brokers', async (req: Request, res: Response) => {
 /**
  * GET /api/mqtt/brokers/summary
  * Get broker summary with device counts
+ * 
+ * REQUIRES AUTHENTICATION - Protected endpoint
  */
-router.get('/brokers/summary', async (req: Request, res: Response) => {
+router.get('/brokers/summary', jwtAuth, async (req: Request, res: Response) => {
   try {
     const result = await pool.query(`
       SELECT * FROM mqtt_broker_summary
@@ -81,8 +123,10 @@ router.get('/brokers/summary', async (req: Request, res: Response) => {
 /**
  * GET /api/mqtt/brokers/:id
  * Get a single broker configuration by ID
+ * 
+ * REQUIRES AUTHENTICATION - Protected endpoint
  */
-router.get('/brokers/:id', async (req: Request, res: Response) => {
+router.get('/brokers/:id', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -138,8 +182,11 @@ router.get('/brokers/:id', async (req: Request, res: Response) => {
 /**
  * POST /api/mqtt/brokers
  * Create a new broker configuration
+ * 
+ * REQUIRES AUTHENTICATION - Protected endpoint
+ * VALIDATES CERTIFICATES - All certificates must be valid X.509 certificates
  */
-router.post('/brokers', async (req: Request, res: Response) => {
+router.post('/brokers', jwtAuth, async (req: Request, res: Response) => {
   try {
     const {
       name,
@@ -171,6 +218,41 @@ router.post('/brokers', async (req: Request, res: Response) => {
         success: false,
         error: 'Missing required fields: name, host, port'
       });
+    }
+
+    // Validate certificates if TLS is enabled
+    if (use_tls) {
+      if (ca_cert) {
+        const caValidation = validateCertificate(ca_cert);
+        if (!caValidation.valid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid CA certificate',
+            details: caValidation.error
+          });
+        }
+      }
+
+      if (client_cert) {
+        const clientCertValidation = validateCertificate(client_cert);
+        if (!clientCertValidation.valid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid client certificate',
+            details: clientCertValidation.error
+          });
+        }
+      }
+
+      if (client_key) {
+        // Basic validation that client key exists and has correct format
+        if (!client_key.includes('-----BEGIN') || !client_key.includes('-----END')) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid client key format - must be in PEM format'
+          });
+        }
+      }
     }
 
     // Hash password if provided
@@ -207,6 +289,13 @@ router.post('/brokers', async (req: Request, res: Response) => {
       is_active, is_default, broker_type, JSON.stringify(extra_config)
     ]);
 
+    logger.info('MQTT broker configuration created', {
+      name,
+      host,
+      port,
+      userId: (req as any).user?.id
+    });
+
     res.status(201).json({
       success: true,
       message: 'Broker configuration created successfully',
@@ -224,7 +313,8 @@ router.post('/brokers', async (req: Request, res: Response) => {
 
     res.status(500).json({
       success: false,
-      error: 'Failed to create broker configuration'
+      error: 'Internal server error',
+      requestId: (req as any).id || 'unknown'
     });
   }
 });
@@ -232,8 +322,11 @@ router.post('/brokers', async (req: Request, res: Response) => {
 /**
  * PUT /api/mqtt/brokers/:id
  * Update an existing broker configuration
+ * 
+ * REQUIRES AUTHENTICATION - Protected endpoint
+ * VALIDATES CERTIFICATES - All certificates must be valid X.509 certificates
  */
-router.put('/brokers/:id', async (req: Request, res: Response) => {
+router.put('/brokers/:id', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const {
@@ -280,6 +373,41 @@ router.put('/brokers/:id', async (req: Request, res: Response) => {
         SET is_default = false 
         WHERE is_default = true AND id != $1
       `, [id]);
+    }
+
+    // Validate certificates if TLS is enabled or being updated
+    if (use_tls !== undefined && use_tls) {
+      if (ca_cert !== undefined && ca_cert) {
+        const caValidation = validateCertificate(ca_cert);
+        if (!caValidation.valid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid CA certificate',
+            details: caValidation.error
+          });
+        }
+      }
+
+      if (client_cert !== undefined && client_cert) {
+        const clientCertValidation = validateCertificate(client_cert);
+        if (!clientCertValidation.valid) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid client certificate',
+            details: clientCertValidation.error
+          });
+        }
+      }
+
+      if (client_key !== undefined && client_key) {
+        // Basic validation that client key exists and has correct format
+        if (!client_key.includes('-----BEGIN') || !client_key.includes('-----END')) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid client key format - must be in PEM format'
+          });
+        }
+      }
     }
 
     // Build dynamic UPDATE query
@@ -350,7 +478,7 @@ router.put('/brokers/:id', async (req: Request, res: Response) => {
       data: result.rows[0]
     });
   } catch (error: any) {
-    logger.error('Error updating broker configuration:', error);
+    logger.error('Error updating broker configuration:', { error: error.message, userId: (req as any).user?.id });
     
     if (error.code === '23505') {  // Unique violation
       return res.status(409).json({
@@ -361,7 +489,8 @@ router.put('/brokers/:id', async (req: Request, res: Response) => {
 
     res.status(500).json({
       success: false,
-      error: 'Failed to update broker configuration'
+      error: 'Internal server error',
+      requestId: (req as any).id || 'unknown'
     });
   }
 });
@@ -369,8 +498,10 @@ router.put('/brokers/:id', async (req: Request, res: Response) => {
 /**
  * DELETE /api/mqtt/brokers/:id
  * Delete a broker configuration
+ * 
+ * REQUIRES AUTHENTICATION - Protected endpoint
  */
-router.delete('/brokers/:id', async (req: Request, res: Response) => {
+router.delete('/brokers/:id', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -404,11 +535,12 @@ router.delete('/brokers/:id', async (req: Request, res: Response) => {
       success: true,
       message: `Broker configuration "${result.rows[0].name}" deleted successfully`
     });
-  } catch (error) {
-    logger.error('Error deleting broker configuration:', error);
+  } catch (error: any) {
+    logger.error('Error deleting broker configuration:', { error: error.message, userId: (req as any).user?.id });
     res.status(500).json({
       success: false,
-      error: 'Failed to delete broker configuration'
+      error: 'Internal server error',
+      requestId: (req as any).id || 'unknown'
     });
   }
 });
@@ -416,8 +548,10 @@ router.delete('/brokers/:id', async (req: Request, res: Response) => {
 /**
  * POST /api/mqtt/brokers/:id/test
  * Test connection to a broker
+ * 
+ * REQUIRES AUTHENTICATION - Protected endpoint
  */
-router.post('/brokers/:id/test', async (req: Request, res: Response) => {
+router.post('/brokers/:id/test', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 

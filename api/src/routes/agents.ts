@@ -13,6 +13,7 @@
 
 import express from 'express';
 import { query } from '../db/connection';
+import { z } from 'zod';
 import {
   DeviceModel,
   DeviceTargetStateModel,
@@ -35,7 +36,14 @@ console.log('[DEVICES-ROUTES] jwtAuth imported:', typeof jwtAuth, jwtAuth.name);
 
 export const router = express.Router();
 
-router.patch('/devices/:uuid', async (req, res) => {
+// SECURITY: Input validation schema for device updates
+const deviceNameSchema = z.string().min(1).max(255).regex(/^[a-zA-Z0-9\-_\s.]+$/, 'Device name contains invalid characters. Allowed: letters, numbers, spaces, hyphens, underscores, dots');
+const deviceTypeSchema = z.string().min(1).max(100).regex(/^[a-zA-Z0-9\-_]+$/, 'Device type contains invalid characters');
+const ipAddressSchema = z.string().ip({ version: 'v4' }).or(z.string().ip({ version: 'v6' })).or(z.string().refine((val) => /^[a-zA-Z0-9.-]+$/.test(val), 'Invalid IP address or hostname'));
+const macAddressSchema = z.string().regex(/^([0-9A-Fa-f]{2}:){5}([0-9A-Fa-f]{2})$/, 'Invalid MAC address format (use XX:XX:XX:XX:XX:XX)');
+const locationSchema = z.string().max(255).regex(/^[a-zA-Z0-9\-_\s.,()]+$/, 'Location contains invalid characters') .nullable();
+
+router.patch('/devices/:uuid', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     const { deviceName, deviceType, ipAddress, macAddress, location } = req.body;
@@ -43,9 +51,60 @@ router.patch('/devices/:uuid', async (req, res) => {
     // Validate at least one field is present
     if (!deviceName && !deviceType && !ipAddress && !macAddress && location === undefined) {
       return res.status(400).json({
-        error: 'No fields to update',
+        error: 'Invalid request',
         message: 'At least one of deviceName, deviceType, ipAddress, macAddress, or location must be provided.'
       });
+    }
+
+    // SECURITY: Validate all input fields with strict schemas
+    if (deviceName) {
+      const validName = deviceNameSchema.safeParse(deviceName);
+      if (!validName.success) {
+        return res.status(400).json({
+          error: 'Invalid deviceName',
+          message: validName.error.errors[0].message
+        });
+      }
+    }
+
+    if (deviceType) {
+      const validType = deviceTypeSchema.safeParse(deviceType);
+      if (!validType.success) {
+        return res.status(400).json({
+          error: 'Invalid deviceType',
+          message: validType.error.errors[0].message
+        });
+      }
+    }
+
+    if (ipAddress) {
+      const validIp = ipAddressSchema.safeParse(ipAddress);
+      if (!validIp.success) {
+        return res.status(400).json({
+          error: 'Invalid ipAddress',
+          message: 'IP address must be valid IPv4, IPv6, or hostname'
+        });
+      }
+    }
+
+    if (macAddress) {
+      const validMac = macAddressSchema.safeParse(macAddress);
+      if (!validMac.success) {
+        return res.status(400).json({
+          error: 'Invalid macAddress',
+          message: 'MAC address must be in format XX:XX:XX:XX:XX:XX'
+        });
+      }
+    }
+
+    if (location !== undefined) {
+      const validLocation = locationSchema.safeParse(location);
+      if (!validLocation.success) {
+        return res.status(400).json({
+          error: 'Invalid location',
+          message: validLocation.error.errors[0].message
+        });
+      }
     }
 
     const device = await DeviceModel.getByUuid(uuid);
@@ -96,14 +155,15 @@ router.patch('/devices/:uuid', async (req, res) => {
       }
     });
   } catch (error: any) {
-    logger.error('Error updating device (duplicate route)', {
+    logger.error('Error updating device', {
       error: error.message,
       stack: error.stack,
-      deviceId: req.params.uuid
+      deviceId: req.params.uuid,
+      userId: req.user?.id
     });
     res.status(500).json({
-      error: 'Failed to update device',
-      message: error.message
+      error: 'Internal server error',
+      requestId: req.id || 'unknown'
     });
   }
 });
@@ -112,73 +172,10 @@ router.patch('/devices/:uuid', async (req, res) => {
  * Update device details (name, type, IP, MAC)
  * PATCH /api/v1/devices/:uuid
  * Body: { deviceName, deviceType, ipAddress, macAddress }
+ * 
+ * NOTE: This is consolidated with the authenticated route defined above.
+ * The duplicate definition has been removed.
  */
-router.patch('/devices/:uuid', async (req, res) => {
-  try {
-    const { uuid } = req.params;
-    const { deviceName, deviceType, ipAddress, macAddress } = req.body;
-
-    // Validate at least one field is present
-    if (!deviceName && !deviceType && !ipAddress && !macAddress) {
-      return res.status(400).json({
-        error: 'No fields to update',
-        message: 'At least one of deviceName, deviceType, ipAddress, or macAddress must be provided.'
-      });
-    }
-
-    const device = await DeviceModel.getByUuid(uuid);
-    if (!device) {
-      return res.status(404).json({
-        error: 'Device not found',
-        message: `Device ${uuid} not found`
-      });
-    }
-
-    // Build update object
-    const updateFields = {};
-    if (deviceName) updateFields['device_name'] = deviceName;
-    if (deviceType) updateFields['device_type'] = deviceType;
-    if (ipAddress) updateFields['ip_address'] = ipAddress;
-    if (macAddress) updateFields['mac_address'] = macAddress;
-    updateFields['modified_at'] = new Date();
-
-    const updatedDevice = await DeviceModel.update(uuid, updateFields);
-
-    await logAuditEvent({
-      eventType: AuditEventType.DEVICE_CONFIG_UPDATE,
-      deviceUuid: uuid,
-      severity: AuditSeverity.INFO,
-      details: {
-        updatedFields: Object.keys(updateFields),
-        deviceName,
-        deviceType,
-        ipAddress,
-        macAddress
-      }
-    });
-
-    res.json({
-      success: true,
-      device: {
-        uuid: updatedDevice.uuid,
-        deviceName: updatedDevice.device_name,
-        deviceType: updatedDevice.device_type,
-        ipAddress: updatedDevice.ip_address,
-        macAddress: updatedDevice.mac_address,
-        isOnline: updatedDevice.is_online,
-        isActive: updatedDevice.is_active,
-        modifiedAt: updatedDevice.modified_at
-      }
-    });
-  } catch (error: any) {
-    console.error('Error updating device:', error);
-    res.status(500).json({
-      error: 'Failed to update device',
-      message: error.message
-    });
-  }
-});
-
 // Initialize event publisher for audit trail
 const eventPublisher = new EventPublisher();
 

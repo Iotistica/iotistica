@@ -7,9 +7,15 @@
 
 import express, { Request, Response } from 'express';
 import poolWrapper from '../db/connection';
+import { jwtAuth } from '../middleware/jwt-auth';
+import { logger } from '../utils/logger';
 import { EventPublisher } from '../services/event-sourcing';
 
-const router = express.Router();
+
+export const router = express.Router();
+
+// All routes require authentication
+router.use(jwtAuth);
 const pool = poolWrapper.pool;
 const eventPublisher = new EventPublisher('image-registry');
 
@@ -150,6 +156,9 @@ router.get('/images/:id', async (req: Request, res: Response) => {
 /**
  * POST /api/v1/images
  * Add new image to approved registry
+ * 
+ * REQUIRES AUTHENTICATION - Protected endpoint
+ * Only authenticated users with admin role can add images
  */
 router.post('/images', async (req: Request, res: Response) => {
   try {
@@ -176,6 +185,12 @@ router.post('/images', async (req: Request, res: Response) => {
 
     const image = result.rows[0];
 
+    logger.info('Image added to registry', { 
+      imageId: image.id, 
+      imageName: image_name, 
+      userId: (req as any).user?.id 
+    });
+
     // Publish event
     await eventPublisher.publish(
       'image.registry.added',
@@ -190,8 +205,8 @@ router.post('/images', async (req: Request, res: Response) => {
     );
 
     return res.status(201).json(image);
-  } catch (error) {
-    console.error('Error adding image:', error);
+  } catch (error: any) {
+    logger.error('Error adding image:', { error: error.message, userId: (req as any).user?.id });
     
     if (error instanceof Error && error.message.includes('duplicate key')) {
       return res.status(409).json({
@@ -201,8 +216,8 @@ router.post('/images', async (req: Request, res: Response) => {
     }
 
     return res.status(500).json({
-      error: 'Failed to add image',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      error: 'Internal server error',
+      requestId: (req as any).id || 'unknown'
     });
   }
 });
@@ -210,6 +225,8 @@ router.post('/images', async (req: Request, res: Response) => {
 /**
  * PUT /api/v1/images/:id
  * Update image details
+ * 
+ * REQUIRES AUTHENTICATION - Protected endpoint
  */
 router.put('/images/:id', async (req: Request, res: Response) => {
   try {
@@ -258,6 +275,12 @@ router.put('/images/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Image not found' });
     }
 
+    logger.info('Image updated', { 
+      imageId: id, 
+      userId: (req as any).user?.id,
+      updates: Object.keys(req.body)
+    });
+
     // Publish event
     await eventPublisher.publish(
       'image.registry.updated',
@@ -267,11 +290,11 @@ router.put('/images/:id', async (req: Request, res: Response) => {
     );
 
     return res.status(200).json(result.rows[0]);
-  } catch (error) {
-    console.error('Error updating image:', error);
+  } catch (error: any) {
+    logger.error('Error updating image:', { error: error.message, imageId: req.params.id, userId: (req as any).user?.id });
     return res.status(500).json({
-      error: 'Failed to update image',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      error: 'Internal server error',
+      requestId: (req as any).id || 'unknown'
     });
   }
 });
@@ -279,6 +302,8 @@ router.put('/images/:id', async (req: Request, res: Response) => {
 /**
  * DELETE /api/v1/images/:id
  * Remove image from registry
+ * 
+ * REQUIRES AUTHENTICATION - Protected endpoint
  */
 router.delete('/images/:id', async (req: Request, res: Response) => {
   try {
@@ -306,6 +331,11 @@ router.delete('/images/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Image not found' });
     }
 
+    logger.info('Image deleted from registry', { 
+      imageId: id, 
+      userId: (req as any).user?.id 
+    });
+
     // Publish event
     await eventPublisher.publish(
       'image.registry.deleted',
@@ -318,11 +348,11 @@ router.delete('/images/:id', async (req: Request, res: Response) => {
       message: 'Image deleted successfully',
       image: result.rows[0],
     });
-  } catch (error) {
-    console.error('Error deleting image:', error);
+  } catch (error: any) {
+    logger.error('Error deleting image:', { error: error.message, imageId: req.params.id, userId: (req as any).user?.id });
     return res.status(500).json({
-      error: 'Failed to delete image',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      error: 'Internal server error',
+      requestId: (req as any).id || 'unknown'
     });
   }
 });

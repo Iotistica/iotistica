@@ -13,8 +13,13 @@ import {
   type EventSearchCriteria
 } from '../services/event-sourcing';
 import { logger } from '../utils/logger';
+import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 
 export const router = express.Router();
+
+// All routes require authentication and admin role
+router.use(jwtAuth);
+router.use(requireRole('admin'));
 
 // ============================================================================
 // Event Query Endpoints

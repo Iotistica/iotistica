@@ -6,7 +6,7 @@
 
 import express, { Request, Response } from 'express';
 import * as authService from '../services/auth.service';
-import { jwtAuth } from '../middleware/jwt-auth';
+import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import rateLimit from 'express-rate-limit';
 
 const router = express.Router();
@@ -330,10 +330,11 @@ router.get('/me', jwtAuth, async (req: Request, res: Response) => {
  * GET /auth/mqtt-users
  * 
  * Get all MQTT users with their ACLs
+ * Requires admin role
  * 
  * Returns: { users: [{ id, username, is_superuser, is_active, acls: [] }] }
  */
-router.get('/mqtt-users', async (req: Request, res: Response) => {
+router.get('/mqtt-users', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { query } = await import('../db/connection');
     
@@ -379,6 +380,7 @@ router.get('/mqtt-users', async (req: Request, res: Response) => {
  * POST /auth/mqtt-users
  * 
  * Create a new MQTT user
+ * Requires admin role
  * 
  * Body:
  *   - username: string (required)
@@ -388,7 +390,7 @@ router.get('/mqtt-users', async (req: Request, res: Response) => {
  * 
  * Returns: { user }
  */
-router.post('/mqtt-users', async (req: Request, res: Response) => {
+router.post('/mqtt-users', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { username, password, is_superuser = false, is_active = true } = req.body;
     
@@ -440,6 +442,7 @@ router.post('/mqtt-users', async (req: Request, res: Response) => {
  * PUT /auth/mqtt-users/:id
  * 
  * Update an MQTT user
+ * Requires admin role
  * 
  * Body:
  *   - password: string (optional)
@@ -448,7 +451,7 @@ router.post('/mqtt-users', async (req: Request, res: Response) => {
  * 
  * Returns: { user }
  */
-router.put('/mqtt-users/:id', async (req: Request, res: Response) => {
+router.put('/mqtt-users/:id', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { password, is_superuser, is_active } = req.body;
@@ -521,10 +524,11 @@ router.put('/mqtt-users/:id', async (req: Request, res: Response) => {
  * DELETE /auth/mqtt-users/:id
  * 
  * Delete an MQTT user and their ACLs
+ * Requires admin role
  * 
  * Returns: { message }
  */
-router.delete('/mqtt-users/:id', async (req: Request, res: Response) => {
+router.delete('/mqtt-users/:id', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { query } = await import('../db/connection');
@@ -568,6 +572,7 @@ router.delete('/mqtt-users/:id', async (req: Request, res: Response) => {
  * POST /auth/mqtt-users/:id/acls
  * 
  * Add an ACL rule to an MQTT user
+ * Requires admin role
  * 
  * Body:
  *   - topic: string (required) - MQTT topic pattern (supports + and # wildcards)
@@ -576,7 +581,7 @@ router.delete('/mqtt-users/:id', async (req: Request, res: Response) => {
  * 
  * Returns: { acl }
  */
-router.post('/mqtt-users/:id/acls', async (req: Request, res: Response) => {
+router.post('/mqtt-users/:id/acls', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { topic, access, priority = 0 } = req.body;
@@ -640,6 +645,7 @@ router.post('/mqtt-users/:id/acls', async (req: Request, res: Response) => {
  * PUT /auth/mqtt-acls/:id
  * 
  * Update an ACL rule
+ * Requires admin role
  * 
  * Body:
  *   - topic: string (optional)
@@ -648,7 +654,7 @@ router.post('/mqtt-users/:id/acls', async (req: Request, res: Response) => {
  * 
  * Returns: { acl }
  */
-router.put('/mqtt-acls/:id', async (req: Request, res: Response) => {
+router.put('/mqtt-acls/:id', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { topic, access, priority } = req.body;
@@ -725,10 +731,11 @@ router.put('/mqtt-acls/:id', async (req: Request, res: Response) => {
  * DELETE /auth/mqtt-acls/:id
  * 
  * Delete an ACL rule
+ * Requires admin role
  * 
  * Returns: { success: true }
  */
-router.delete('/mqtt-acls/:id', async (req: Request, res: Response) => {
+router.delete('/mqtt-acls/:id', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { query } = await import('../db/connection');

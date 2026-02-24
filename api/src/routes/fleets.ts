@@ -61,11 +61,11 @@ router.post('/fleets/virtual/estimate', async (req, res) => {
 // ============================================================================
 
 // ============================================================================
-// GET /fleets - List all fleets for customer
+// GET /fleets - List all fleets
 // ============================================================================
 router.get('/fleets', jwtAuth, async (req, res) => {
   try {
-    const { customer_id, fleet_type, status, environment } = req.query;
+    const { fleet_type, status, environment } = req.query;
 
     let queryText = `
       SELECT 
@@ -81,11 +81,6 @@ router.get('/fleets', jwtAuth, async (req, res) => {
 
     const params: any[] = [];
     let paramCount = 1;
-
-    if (customer_id) {
-      queryText += ` AND f.customer_id = $${paramCount++}`;
-      params.push(customer_id);
-    }
 
     if (fleet_type) {
       queryText += ` AND f.fleet_type = $${paramCount++}`;
@@ -118,10 +113,10 @@ router.get('/fleets', jwtAuth, async (req, res) => {
     });
 
   } catch (error: any) {
-    logger.error('[FLEETS] Error listing fleets:', error);
+    logger.error('[FLEETS] Error listing fleets:', { error: error.message, userId: (req as any).user?.id });
     res.status(500).json({
-      error: 'Failed to list fleets',
-      message: error.message
+      error: 'Internal server error',
+      requestId: (req as any).id || 'unknown'
     });
   }
 });
@@ -133,7 +128,6 @@ router.get('/fleets/:id', jwtAuth, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Resolve fleet by UUID
     const fleetInfo = await query(
       'SELECT * FROM fleets WHERE fleet_uuid::text = $1',
       [id]
@@ -173,10 +167,10 @@ router.get('/fleets/:id', jwtAuth, async (req, res) => {
     });
 
   } catch (error: any) {
-    logger.error('[FLEETS] Error getting fleet details:', error);
+    logger.error('[FLEETS] Error getting fleet details:', { error: error.message, userId: (req as any).user?.id });
     res.status(500).json({
-      error: 'Failed to get fleet details',
-      message: error.message
+      error: 'Internal server error',
+      requestId: (req as any).id || 'unknown'
     });
   }
 });
@@ -188,7 +182,6 @@ router.post('/fleets', jwtAuth, async (req, res) => {
   try {
     const {
       fleet_name,
-      customer_id = '00000000-0000-0000-0000-000000000001', // Default customer for single-tenant deployments
       fleet_type = 'physical',
       description,
       environment,
@@ -200,6 +193,9 @@ router.post('/fleets', jwtAuth, async (req, res) => {
       agent_count,
       devices_per_agent
     } = req.body;
+    
+    // Use default customer_id from request body or fallback to default UUID
+    const customer_id = req.body.customer_id || '00000000-0000-0000-0000-000000000001';
 
     // Validation
     if (!fleet_name) {
@@ -339,6 +335,14 @@ router.patch('/fleets/:id', jwtAuth, async (req, res) => {
       status
     } = req.body;
 
+    const fleet = await resolveFleetByIdentifier(id);
+    if (!fleet) {
+      return res.status(404).json({
+        error: 'Fleet not found',
+        id
+      });
+    }
+
     const updates: string[] = [];
     const params: any[] = [];
     let paramCount = 1;
@@ -381,14 +385,6 @@ router.patch('/fleets/:id', jwtAuth, async (req, res) => {
     if (updates.length === 0) {
       return res.status(400).json({
         error: 'No fields to update'
-      });
-    }
-
-    const fleet = await resolveFleetByIdentifier(id);
-    if (!fleet) {
-      return res.status(404).json({
-        error: 'Fleet not found',
-        id
       });
     }
 

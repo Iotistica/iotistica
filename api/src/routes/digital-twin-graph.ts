@@ -16,8 +16,11 @@ import { IFCParserService } from '../services/ifc-parser.service';
 import { neo4jService } from '../services/neo4j.service';
 import { query } from '../db/connection';
 import { logger } from '../utils/logger';
+import { jwtAuth } from '../middleware/jwt-auth';
 
 const router: Router = express.Router();
+// All routes require authentication
+router.use(jwtAuth);
 
 // Detect Kubernetes environment
 const isKubernetes = !!process.env.KUBERNETES_SERVICE_HOST;

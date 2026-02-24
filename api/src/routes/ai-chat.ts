@@ -1,17 +1,43 @@
 /**
  * AI Chat API Routes
+ * SECURITY: Rate limited to prevent API abuse on expensive AI operations
  */
 
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { processAIChat } from '../services/ai-chat.service';
+import { logger } from '../utils/logger';
+import { jwtAuth } from '../middleware/jwt-auth';
 
 const router = Router();
+
+router.use(jwtAuth);
+
+// SECURITY: Rate limit for AI chat (expensive operation)
+const aiChatRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 50, // Max 50 chat requests per hour per IP
+  message: 'Too many AI chat requests',
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    logger.warn('[SECURITY] AI chat rate limit exceeded', {
+      ip: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+    res.status(429).json({
+      error: 'Too many requests',
+      message: 'Too many AI chat requests. Please try again later.'
+    });
+  }
+});
 
 /**
  * POST /api/v1/ai/chat
  * Send a message to the AI assistant
+ * SECURITY: Rate limited endpoint
  */
-router.post('/ai/chat', async (req, res) => {
+router.post('/ai/chat', aiChatRateLimit, async (req, res) => {
   try {
     const { deviceUuid, message, conversationHistory } = req.body;
 
@@ -51,9 +77,8 @@ router.post('/ai/chat', async (req, res) => {
       openAiModel: process.env.OPENAI_MODEL,
     });
     res.status(500).json({
-      error: 'AI chat failed',
-      message: error.message,
-      provider: process.env.AI_PROVIDER || 'ollama',
+      error: 'Internal server error',
+      requestId: req.id || 'unknown'
     });
   }
 });

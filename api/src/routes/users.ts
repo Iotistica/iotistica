@@ -6,12 +6,32 @@
 
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcrypt';
+import rateLimit from 'express-rate-limit';
 import { query } from '../db/connection';
 import { hasPermission, isAdminOrOwner, isOwner, checkUserPermissions } from '../middleware/permissions';
 import { PERMISSIONS, ROLES, UserWithPermissions } from '../types/permissions';
 import { logger } from '../utils/logger';
 
 const router = Router();
+
+// SECURITY: Rate limit for user creation (expensive operation, prevents spam)
+const createUserRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10, // Max 10 user creations per hour per IP
+  message: 'Too many user creation attempts, please try again later',
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    logger.warn('[SECURITY] User creation rate limit exceeded', {
+      ip: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+    res.status(429).json({
+      error: 'Too many requests',
+      message: 'Too many user creation attempts. Please try again later.'
+    });
+  }
+});
 
 /**
  * GET /api/v1/users
@@ -38,8 +58,8 @@ router.get('/',
     } catch (error) {
       logger.error('List users error:', error);
       res.status(500).json({ 
-        error: 'Failed to fetch users',
-        message: error instanceof Error ? error.message : 'Unknown error'
+        error: 'Internal server error',
+        requestId: req.id || 'unknown'
       });
     }
   }
@@ -76,8 +96,8 @@ router.get('/:id',
     } catch (error) {
       logger.error('Get user error:', error);
       res.status(500).json({ 
-        error: 'Failed to fetch user',
-        message: error instanceof Error ? error.message : 'Unknown error'
+        error: 'Internal server error',
+        requestId: req.id || 'unknown'
       });
     }
   }
@@ -86,8 +106,10 @@ router.get('/:id',
 /**
  * POST /api/v1/users
  * Create new user (requires user:write permission)
+ * SECURITY: Rate limited to prevent abuse
  */
 router.post('/',
+  createUserRateLimit,
   hasPermission(PERMISSIONS.USER_WRITE),
   async (req: Request, res: Response) => {
     try {
@@ -140,8 +162,8 @@ router.post('/',
       }
 
       res.status(500).json({ 
-        error: 'Failed to create user',
-        message: error.message
+        error: 'Internal server error',
+        requestId: req.id || 'unknown'
       });
     }
   }

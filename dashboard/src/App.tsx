@@ -147,6 +147,9 @@ export default function App() {
   
   // Fetch critical alerts count periodically
   useEffect(() => {
+    // Skip if not authenticated
+    if (!isAuthenticated) return;
+    
     const fetchCriticalAlertsCount = async () => {
       try {
         const token = localStorage.getItem('accessToken');
@@ -176,7 +179,7 @@ export default function App() {
     const interval = setInterval(fetchCriticalAlertsCount, 30000);
     
     return () => clearInterval(interval);
-  }, []);
+  }, [isAuthenticated]);
   
   // Memoize selected device to prevent unnecessary re-renders
   const selectedDevice = useMemo(() => {

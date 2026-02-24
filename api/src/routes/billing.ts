@@ -6,14 +6,18 @@
 import { Router, Request, Response } from 'express';
 import { BillingClient } from '../services/billing-client';
 import { LicenseValidator } from '../services/license-validator';
+import { jwtAuth } from '../middleware/jwt-auth';
 
 const router = Router();
+
+
 
 /**
  * GET /api/billing/subscription
  * Get current subscription details
+ * REQUIRES AUTHENTICATION
  */
-router.get('/subscription', async (req: Request, res: Response) => {
+router.get('/subscription', jwtAuth, async (req: Request, res: Response) => {
   try {
     const billingClient = BillingClient.getInstance();
     
@@ -43,8 +47,9 @@ router.get('/subscription', async (req: Request, res: Response) => {
 /**
  * POST /api/billing/upgrade
  * Create Stripe checkout session for plan upgrade
+ * REQUIRES AUTHENTICATION
  */
-router.post('/upgrade', async (req: Request, res: Response) => {
+router.post('/upgrade', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { plan } = req.body;
 
@@ -84,8 +89,23 @@ router.post('/upgrade', async (req: Request, res: Response) => {
 /**
  * GET /api/billing/success
  * Redirect after successful payment
+ * Validates session_id from checkout process
  */
 router.get('/success', async (req: Request, res: Response) => {
+  const { session_id } = req.query;
+  
+  if (!session_id || typeof session_id !== 'string') {
+    return res.status(400).send(`
+      <html>
+        <head><title>Error</title></head>
+        <body style="font-family: Arial; text-align: center; padding: 50px;">
+          <h1 style="color: red;">❌ Invalid Request</h1>
+          <p>Missing or invalid session ID.</p>
+          <a href="/" style="color: blue;">Return to Dashboard</a>
+        </body>
+      </html>
+    `);
+  }
   try {
     // Refresh license from billing API
     const billingClient = BillingClient.getInstance();
@@ -121,8 +141,23 @@ router.get('/success', async (req: Request, res: Response) => {
 /**
  * GET /api/billing/cancel
  * Redirect after cancelled payment
+ * Validates session_id from checkout process
  */
 router.get('/cancel', (req: Request, res: Response) => {
+  const { session_id } = req.query;
+  
+  if (!session_id || typeof session_id !== 'string') {
+    return res.status(400).send(`
+      <html>
+        <head><title>Error</title></head>
+        <body style="font-family: Arial; text-align: center; padding: 50px;">
+          <h1 style="color: red;">❌ Invalid Request</h1>
+          <p>Missing or invalid session ID.</p>
+          <a href="/" style="color: blue;">Return to Dashboard</a>
+        </body>
+      </html>
+    `);
+  }
   res.send(`
     <html>
       <head><title>Payment Cancelled</title></head>
@@ -140,8 +175,9 @@ router.get('/cancel', (req: Request, res: Response) => {
 /**
  * POST /api/billing/refresh-license
  * Manually refresh license from billing API
+ * REQUIRES AUTHENTICATION
  */
-router.post('/refresh-license', async (req: Request, res: Response) => {
+router.post('/refresh-license', jwtAuth, async (req: Request, res: Response) => {
   try {
     const billingClient = BillingClient.getInstance();
     

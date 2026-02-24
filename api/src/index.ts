@@ -9,28 +9,29 @@ import helmet from 'helmet';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { createBrotliDecompress } from 'zlib';
 import { brotliDecompressionMiddleware } from './middleware/brotli-decompression';
+import { requestIdMiddleware } from './middleware/request-id';
 import logger from './utils/logger';
 
 // Import route modules
 import authRoutes from './routes/auth';
 import usersRoutes from './routes/users';
-import deviceStateRoutes from './routes/device-state';
-import deviceLogsRoutes from './routes/device-logs';
-import deviceMetricsRoutes from './routes/device-metrics';
+import deviceStateRoutes from './routes/agent-state';
+import deviceLogsRoutes from './routes/agent-logs';
+import deviceMetricsRoutes from './routes/agent-metrics';
 import provisioningRoutes from './routes/provisioning';
-import devicesRoutes from './routes/devices';
+import devicesRoutes from './routes/agents';
 import adminRoutes from './routes/admin';
 import appsRoutes from './routes/apps';
 import imageRegistryRoutes from './routes/image-registry';
-import deviceJobsRoutes from './routes/device-jobs';
+import deviceJobsRoutes from './routes/agent-jobs';
 import rotationRoutes from './routes/rotation';
 import digitalTwinGraphRoutes from './routes/digital-twin-graph';
 import eventsRoutes from './routes/events';
 import mqttBrokerRoutes from './routes/mqtt-broker';
 import mqttMetricsRoutes from './routes/mqtt-metrics';
-import { router as deviceSensorsRoutes } from './routes/device-sensors';
+import { router as deviceSensorsRoutes } from './routes/agent-devices';
 import { router as trafficRoutes } from './routes/traffic';
-import { router as deviceTagsRoutes } from './routes/device-tags';
+import { router as deviceTagsRoutes } from './routes/agent-tags';
 import dashboardLayoutsRoutes from './routes/dashboard-layouts';
 import mosquittoAuthRoutes from './routes/mqtt-auth';
 import { router as noderedStorageRoutes } from './routes/nodered-storage';
@@ -42,7 +43,7 @@ import endpointsDataRoutes from './routes/endpoints-data';
 import anomalyRoutes from './routes/anomaly';
 import anomalyIncidentsRoutes from './routes/anomaly-incidents';
 import anomalyAlertsRoutes from './routes/anomaly-alerts';
-import profileRoutes, { publicRouter as profilePublicRoutes } from './routes/profiles';
+import profileRoutes from './routes/profiles';
 import aiChatRoutes from './routes/ai-chat';
 import { 
   globalApiRateLimit, 
@@ -205,6 +206,9 @@ app.use(helmet({
 // Brotli decompression middleware
 app.use(brotliDecompressionMiddleware);
 
+// Request ID middleware - adds unique ID for request tracking and correlation
+app.use(requestIdMiddleware);
+
 // Support compressed (gzip/deflate) request bodies
 app.use(express.json({ 
   limit: '100mb',  // Large limit for decompressed logs (10MB compressed → 40-60MB decompressed)
@@ -320,12 +324,6 @@ app.use(prometheusRoutes);
 app.use('/mosquitto-auth', mosquittoAuthRoutes);
 
 // ============================================================================
-// PUBLIC API Routes - NO AUTHENTICATION REQUIRED
-// Mount these BEFORE any auth middleware to ensure they're accessible
-// ============================================================================
-app.use(`${API_BASE}/profiles`, profilePublicRoutes); // Public profile endpoints (e.g., /datapoints for simulators)
-
-// ============================================================================
 // Rate Limiting - Token-based for IoT (prevents one device from blocking others)
 // Applied before route mounting for consistent enforcement
 // ============================================================================
@@ -336,6 +334,9 @@ app.use(API_BASE, globalApiRateLimit);
 // Route modules define their own paths internally (e.g., router.get('/devices'))
 // This keeps versioning logic centralized and prevents mount path inconsistencies
 // ============================================================================
+
+// Profile endpoints - require JWT authentication
+app.use(`${API_BASE}/profiles`, profileRoutes);
 
 // Authentication routes - strict rate limiting (brute-force protection)
 app.use(`${API_BASE}/auth`, authRateLimit, authRoutes);

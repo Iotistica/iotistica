@@ -81,29 +81,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setUser(userData.data.user);
               } else {
                 // Failed to get user, clear tokens
+                console.warn('Failed to fetch user after token refresh, clearing tokens');
                 localStorage.removeItem('accessToken');
                 localStorage.removeItem('refreshToken');
               }
             } else {
               // Refresh failed, clear tokens
+              console.warn('Token refresh failed during auth init, clearing tokens');
               localStorage.removeItem('accessToken');
               localStorage.removeItem('refreshToken');
             }
           } catch (refreshError) {
             console.error('Token refresh error:', refreshError);
             if (isMounted) {
+              console.warn('Exception during token refresh, clearing tokens');
               localStorage.removeItem('accessToken');
               localStorage.removeItem('refreshToken');
             }
           }
         } else {
           // Other error status, clear tokens
+          console.warn(`Auth verification failed with status ${response.status}, clearing tokens`);
           localStorage.removeItem('accessToken');
           localStorage.removeItem('refreshToken');
         }
       } catch (error) {
         console.error('Auth initialization error:', error);
         if (isMounted) {
+          console.warn('Exception during auth init, clearing tokens');
           localStorage.removeItem('accessToken');
           localStorage.removeItem('refreshToken');
         }

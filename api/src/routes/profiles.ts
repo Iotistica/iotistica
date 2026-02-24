@@ -54,13 +54,13 @@ class ProfileConfigModel {
 }
 
 const router = express.Router();
-const publicRouter = express.Router(); // Separate router for public endpoints (no auth)
+import { jwtAuth } from '../middleware/jwt-auth';
 
 /**
  * Get all profiles in dataPoints.json format (for simulators)
  * GET /api/v1/profiles/datapoints?protocol=modbus
  * 
- * PUBLIC ENDPOINT - No authentication required
+ * REQUIRES AUTHENTICATION - Protected endpoint
  * Used by internal services (Modbus simulator, other protocol simulators)
  * 
  * Returns format compatible with modbus-simulator:
@@ -69,7 +69,7 @@ const publicRouter = express.Router(); // Separate router for public endpoints (
  *   "COMAP": { "dataPoints": [...] }
  * }
  */
-publicRouter.get('/datapoints', async (req, res) => {
+router.get('/datapoints', jwtAuth, async (req, res) => {
   try {
     const protocol = (req.query.protocol as string) || 'modbus';
     const profiles = await ProfileConfigModel.listByProtocol(protocol);
@@ -95,22 +95,22 @@ publicRouter.get('/datapoints', async (req, res) => {
 
     res.json(dataPointsFormat);
   } catch (error: any) {
-    logger.error('Error getting datapoints', { error: error.message });
+    logger.error('Error getting datapoints', { error: error.message, stack: error.stack });
     res.status(500).json({
-      error: 'Failed to get datapoints',
-      message: error.message
+      error: 'Internal server error',
+      requestId: req.id || 'unknown'
     });
   }
 });
 
 /**
- * Create or update profile configuration (PUBLIC - for simulator use)
+ * Create or update profile configuration (PROTECTED)
  * POST /api/v1/profiles
  * 
- * PUBLIC ENDPOINT - No authentication required
- * Allows simulators to save modified profiles
+ * REQUIRES AUTHENTICATION - Protected endpoint
+ * Allows authorized users to save modified profiles
  */
-publicRouter.post('/', async (req, res) => {
+router.post('/', jwtAuth, async (req, res) => {
   try {
     const { profile_name, protocol, data_points, metadata } = req.body;
 
@@ -201,7 +201,7 @@ publicRouter.post('/', async (req, res) => {
       metadata
     );
 
-    logger.info('Profile config updated (public endpoint)', { profile: profile_name, protocol, dataPointsCount: data_points.length });
+    logger.info('Profile config updated', { profile: profile_name, protocol, dataPointsCount: data_points.length, userId: req.user?.id });
 
     res.json({
       status: 'ok',
@@ -209,10 +209,10 @@ publicRouter.post('/', async (req, res) => {
       profile
     });
   } catch (error: any) {
-    logger.error('Error saving profile config (public endpoint)', { error: error.message });
+    logger.error('Error saving profile config', { error: error.message, stack: error.stack });
     res.status(500).json({
-      error: 'Failed to save profile config',
-      message: error.message
+      error: 'Internal server error',
+      requestId: req.id || 'unknown'
     });
   }
 });
@@ -221,20 +221,20 @@ publicRouter.post('/', async (req, res) => {
  * List all profile configurations for a protocol
  * GET /api/v1/profiles?protocol=modbus
  * 
- * PUBLIC ENDPOINT - No authentication required
+ * REQUIRES AUTHENTICATION - Protected endpoint
  * Used by dashboard to show available profiles in device configuration
  */
-publicRouter.get('/', async (req, res) => {
+router.get('/', jwtAuth, async (req, res) => {
   try {
     const protocol = (req.query.protocol as string) || 'modbus';
     const profiles = await ProfileConfigModel.listByProtocol(protocol);
 
     res.json(profiles); // Return array directly for simplicity
   } catch (error: any) {
-    logger.error('Error listing profiles', { error: error.message });
+    logger.error('Error listing profiles', { error: error.message, stack: error.stack });
     res.status(500).json({
-      error: 'Failed to list profiles',
-      message: error.message
+      error: 'Internal server error',
+      requestId: req.id || 'unknown'
     });
   }
 });
@@ -242,8 +242,10 @@ publicRouter.get('/', async (req, res) => {
 /**
  * Get specific profile configuration
  * GET /api/v1/profiles/:name?protocol=modbus
+ * 
+ * REQUIRES AUTHENTICATION - Protected endpoint
  */
-router.get('/:name', async (req, res) => {
+router.get('/:name', jwtAuth, async (req, res) => {
   try {
     const { name } = req.params;
     const protocol = (req.query.protocol as string) || 'modbus';
@@ -261,133 +263,8 @@ router.get('/:name', async (req, res) => {
   } catch (error: any) {
     logger.error('Error getting profile', { error: error.message, profile: req.params.name });
     res.status(500).json({
-      error: 'Failed to get profile',
-      message: error.message
-    });
-  }
-});
-
-/**
- * Create or update profile configuration
- * POST /api/v1/profiles
- * 
- * Body:
- * {
- *   "profile_name": "COMAP",
- *   "protocol": "modbus",
- *   "data_points": [
- *     { "name": "engine_rpm", "address": 100, "type": "holding", "dataType": "uint16" },
- *     ...
- *   ],
- *   "metadata": {
- *     "description": "COMAP Generator Controller",
- *     "vendorUrl": "https://www.comap-control.com/"
- *   }
- * }
- */
-router.post('/', async (req, res) => {
-  try {
-    const { profile_name, protocol, data_points, metadata } = req.body;
-
-    // Validation
-    if (!profile_name || typeof profile_name !== 'string') {
-      return res.status(400).json({
-        error: 'Invalid request',
-        message: 'profile_name is required and must be a string'
-      });
-    }
-
-    if (!protocol || typeof protocol !== 'string') {
-      return res.status(400).json({
-        error: 'Invalid request',
-        message: 'protocol is required and must be a string (e.g., "modbus")'
-      });
-    }
-
-    if (!data_points || !Array.isArray(data_points)) {
-      return res.status(400).json({
-        error: 'Invalid request',
-        message: 'data_points is required and must be an array'
-      });
-    }
-
-    // Protocol-specific data point validation
-    if (protocol === 'modbus' && data_points.length > 0) {
-      // Modbus requires: name, address, type, dataType
-      for (const dp of data_points) {
-        if (!dp.name || dp.address === undefined || !dp.type || !dp.dataType) {
-          return res.status(400).json({
-            error: 'Invalid data point',
-            message: 'Each Modbus data point must have: name, address, type, dataType'
-          });
-        }
-      }
-    } else if (protocol === 'opcua' && data_points.length > 0) {
-      // OPC UA sensor groups: folder, prefix, model, count, unit, config
-      // OR manual nodes: name, nodeId
-      for (const dp of data_points) {
-        const isSensorGroup = dp.folder && dp.prefix && dp.model && dp.count;
-        const isNode = dp.name && dp.nodeId;
-        
-        if (!isSensorGroup && !isNode) {
-          return res.status(400).json({
-            error: 'Invalid data point',
-            message: 'Each OPC UA data point must be either a sensor group (folder, prefix, model, count, unit, config) or node (name, nodeId)'
-          });
-        }
-        
-        // Enforce OPC UA naming convention (IEC 62541 best practices)
-        if (isSensorGroup) {
-          // Prefix must use format: MetricType_ (e.g., "Temperature_", "Pressure_", "Flow_")
-          if (!dp.prefix.includes('_') || !dp.prefix.endsWith('_')) {
-            return res.status(400).json({
-              error: 'Invalid OPC UA prefix',
-              message: `Prefix "${dp.prefix}" must follow format "MetricType_" (e.g., "Temperature_", "Pressure_", "Flow_"). This ensures proper metric extraction following OPC UA standards.`
-            });
-          }
-          
-          // Model must be lowercase semantic name (matches prefix without underscore)
-          if (!/^[a-z_]+$/.test(dp.model)) {
-            return res.status(400).json({
-              error: 'Invalid OPC UA model',
-              message: `Model "${dp.model}" must be lowercase with underscores only (e.g., "temperature", "pressure", "flow_rate"). This is the semantic metric name used in data collection.`
-            });
-          }
-          
-          // Validate prefix and model consistency (warn if mismatch)
-          const expectedModel = dp.prefix.replace(/_$/, '').toLowerCase();
-          if (dp.model !== expectedModel) {
-            logger.warn('OPC UA sensor group prefix/model mismatch', {
-              prefix: dp.prefix,
-              model: dp.model,
-              expected: expectedModel,
-              message: 'Prefix should match model (e.g., "Temperature_" → "temperature")'
-            });
-          }
-        }
-      }
-    }
-    // Other protocols: no validation (auto-discovery or custom structure)
-
-    const profile = await ProfileConfigModel.upsert(
-      profile_name,
-      protocol,
-      data_points,
-      metadata
-    );
-
-    logger.info('Profile config updated', { profile: profile_name, protocol, dataPointsCount: data_points.length });
-
-    res.json({
-      status: 'ok',
-      message: `Profile '${profile_name}' configuration saved`,
-      profile
-    });
-  } catch (error: any) {
-    logger.error('Error saving profile config', { error: error.message });
-    res.status(500).json({
-      error: 'Failed to save profile config',
-      message: error.message
+      error: 'Internal server error',
+      requestId: req.id || 'unknown'
     });
   }
 });
@@ -395,14 +272,16 @@ router.post('/', async (req, res) => {
 /**
  * Delete profile configuration
  * DELETE /api/v1/profiles/:name
+ * 
+ * REQUIRES AUTHENTICATION - Protected endpoint
  */
-router.delete('/:name', async (req, res) => {
+router.delete('/:name', jwtAuth, async (req, res) => {
   try {
     const { name } = req.params;
 
     await ProfileConfigModel.delete(name);
 
-    logger.info('Profile config deleted', { profile: name });
+    logger.info('Profile config deleted', { profile: name, userId: req.user?.id });
 
     res.json({
       status: 'ok',
@@ -411,11 +290,10 @@ router.delete('/:name', async (req, res) => {
   } catch (error: any) {
     logger.error('Error deleting profile', { error: error.message, profile: req.params.name });
     res.status(500).json({
-      error: 'Failed to delete profile',
-      message: error.message
+      error: 'Internal server error',
+      requestId: req.id || 'unknown'
     });
   }
 });
 
 export default router;
-export { publicRouter }; // Export public router separately for no-auth mounting

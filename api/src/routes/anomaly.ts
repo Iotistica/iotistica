@@ -7,8 +7,11 @@
 import { Router } from 'express';
 import { readingsService } from '../services/readings.service';
 import logger from '../utils/logger';
+import { jwtAuth } from '../middleware/jwt-auth';
 
 const router = Router();
+
+router.use(jwtAuth);
 
 /**
  * GET /api/anomaly/summary

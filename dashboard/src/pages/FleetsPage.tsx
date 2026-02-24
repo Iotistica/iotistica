@@ -42,6 +42,12 @@ export function FleetsPage() {
   const fetchFleets = async () => {
     try {
       const token = localStorage.getItem('accessToken');
+      // Skip if no token (not authenticated yet)
+      if (!token) {
+        setIsLoading(false);
+        return;
+      }
+      
       const response = await fetch(buildApiUrl('/api/v1/fleets'), {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -151,7 +157,7 @@ export function FleetsPage() {
         <div className="flex items-center justify-between gap-4">
           {fleets.length > 0 ? (
             <div className="flex flex-wrap items-center gap-4">
-              <div className="flex items-center gap-2">
+              <div key="filter-type" className="flex items-center gap-2">
                 <label className="text-sm font-medium text-foreground">Type:</label>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -191,7 +197,7 @@ export function FleetsPage() {
                 </DropdownMenu>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div key="filter-status" className="flex items-center gap-2">
                 <label className="text-sm font-medium text-foreground">Status:</label>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -272,44 +278,44 @@ export function FleetsPage() {
                     className="flex items-center justify-between p-4 border border-border rounded-lg hover:border-muted-foreground/20 transition-colors cursor-pointer"
                     onClick={() => navigateToFleet(fleet.fleet_uuid || fleet.fleet_id)}
                   >
-                    <div className="flex-1">
+                    <div key="content" className="flex-1">
                       <div className="flex items-center gap-3 mb-2">
                         <h3 className="text-lg font-semibold text-foreground">{fleet.fleet_name}</h3>
-                        <Badge variant={fleet.fleet_type === 'virtual' ? 'default' : 'secondary'}>
+                        <Badge key="type" variant={fleet.fleet_type === 'virtual' ? 'default' : 'secondary'}>
                           {fleet.fleet_type}
                         </Badge>
-                        <Badge variant={fleet.status === 'active' ? 'default' : 'secondary'}>
+                        <Badge key="status" variant={fleet.status === 'active' ? 'default' : 'secondary'}>
                           {fleet.status}
                         </Badge>
-                        <Badge variant="outline" className="text-xs">
+                        <Badge key="environment" variant="outline" className="text-xs">
                           {fleet.environment}
                         </Badge>
                       </div>
 
                       <div className="flex flex-wrap gap-6 text-sm text-muted-foreground">
-                        <div>
+                        <div key="devices">
                           <span className="font-medium">Devices:</span>{' '}
                           {fleet.device_count} ({fleet.online_count} online)
                         </div>
                         {fleet.location && (
-                          <div>
+                          <div key="location">
                             <span className="font-medium">Location:</span>{' '}
                             {fleet.location}
                           </div>
                         )}
                         {fleet.billing_enabled && (
-                          <div>
+                          <div key="cost">
                             <span className="font-medium">Cost:</span>{' '}
                             ${fleet.current_cost}
                             {fleet.budget_limit && ` / $${fleet.budget_limit}`}
                           </div>
                         )}
-                        <div>
+                        <div key="created">
                           <span className="font-medium">Created:</span>{' '}
                           {new Date(fleet.created_at).toLocaleDateString()}
                         </div>
                         {fleet.fleet_uuid && (
-                          <div>
+                          <div key="uuid">
                             <span className="font-medium">UUID:</span>{' '}
                             <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono cursor-pointer hover:bg-muted/80" title="Click to copy" onClick={(e) => {
                               e.stopPropagation();
@@ -323,7 +329,7 @@ export function FleetsPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 ml-4">
+                    <div key="actions" className="flex items-center gap-2 ml-4">
                       <Button
                         size="sm"
                         variant="outline"

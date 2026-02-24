@@ -203,6 +203,9 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
     const loadFleets = async () => {
       try {
         const token = localStorage.getItem('accessToken');
+        // Skip if no token (not authenticated yet)
+        if (!token) return;
+        
         const response = await fetch(buildApiUrl('/api/v1/fleets'), {
           headers: { 'Authorization': `Bearer ${token}` }
         });

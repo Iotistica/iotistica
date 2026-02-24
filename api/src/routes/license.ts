@@ -7,14 +7,17 @@ import express from 'express';
 import { LicenseValidator } from '../services/license-validator';
 import { DeviceModel } from '../db/models';
 import { logger } from '../utils/logger';
+import { jwtAuth } from '../middleware/jwt-auth';
 
 const router = express.Router();
 
 /**
  * GET /api/license
  * Get current license information
+ * 
+ * REQUIRES AUTHENTICATION - Protected endpoint
  */
-router.get('/license', async (req, res) => {
+router.get('/license', jwtAuth, async (req, res) => {
   try {
     const license = LicenseValidator.getInstance();
     const licenseData = license.getLicense();
@@ -44,11 +47,14 @@ router.get('/license', async (req, res) => {
           percentUsed: Math.round((devices.length / licenseData.features.maxDevices) * 100),
         },
       },
-      upgradeUrl: process.env.BILLING_UPGRADE_URL || 'https://iotistic.ca/upgrade',
+      upgradeUrl: process.env.BILLING_UPGRADE_URL || 'https://iotistica.com/upgrade',
     });
   } catch (error: any) {
-    logger.error('Error fetching license info', { error: error.message });
-    res.status(500).json({ error: 'Internal server error' });
+    logger.error('Error fetching license info', { error: error.message, stack: error.stack, userId: req.user?.id });
+    res.status(500).json({ 
+      error: 'Internal server error',
+      requestId: req.id || 'unknown'
+    });
   }
 });
 

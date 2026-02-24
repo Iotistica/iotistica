@@ -9,8 +9,11 @@ import { logger } from '../utils/logger';
 import zlib from 'zlib';
 import msgpack from 'msgpack-lite';
 import crypto from 'crypto';
+import { jwtAuth } from '../middleware/jwt-auth';
 
 const router = Router();
+
+router.use (jwtAuth); // All routes require authentication
 
 /**
  * Deserialize MQTT payload - auto-detects base64, DEFLATE, msgpack, or JSON format

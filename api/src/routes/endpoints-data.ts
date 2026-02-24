@@ -8,8 +8,13 @@
 import express from 'express';
 import { query } from '../db/connection';
 import { logger } from '../utils/logger';
+import { z } from 'zod';
 
 export const router = express.Router();
+
+// Validation schema for time range
+const timeRangeSchema = z.enum(['1h', '6h', '24h', '7d', '30d']).default('24h');
+const aggregationSchema = z.enum(['avg', 'min', 'max', 'last']).default('avg');
 
 /**
  * GET /api/endpoints/timeseries
@@ -31,15 +36,33 @@ router.get('/timeseries', async (req, res) => {
       aggregation = 'avg'
     } = req.query;
 
-    // Parse time range
-    const timeRangeMap: Record<string, string> = {
-      '1h': '1 hour',
-      '6h': '6 hours',
-      '24h': '24 hours',
-      '7d': '7 days',
-      '30d': '30 days'
+    // Validate time range parameter
+    const validTimeRange = timeRangeSchema.safeParse(timeRange);
+    if (!validTimeRange.success) {
+      return res.status(400).json({
+        error: 'Invalid timeRange parameter',
+        message: 'timeRange must be one of: 1h, 6h, 24h, 7d, 30d'
+      });
+    }
+
+    // Validate aggregation parameter
+    const validAggregation = aggregationSchema.safeParse(aggregation);
+    if (!validAggregation.success) {
+      return res.status(400).json({
+        error: 'Invalid aggregation parameter',
+        message: 'aggregation must be one of: avg, min, max, last'
+      });
+    }
+
+    // Parse time range using lookup table (safe, no injection)
+    const timeRangeMap: Record<string, { unit: string; value: number }> = {
+      '1h': { unit: 'hours', value: 1 },
+      '6h': { unit: 'hours', value: 6 },
+      '24h': { unit: 'hours', value: 24 },
+      '7d': { unit: 'days', value: 7 },
+      '30d': { unit: 'days', value: 30 }
     };
-    const pgInterval = timeRangeMap[timeRange as string] || '24 hours';
+    const timeRangeConfig = timeRangeMap[validTimeRange.data] || timeRangeMap['24h'];
 
     // Auto-select interval based on time range
     let bucketInterval = interval as string;
@@ -69,14 +92,18 @@ router.get('/timeseries', async (req, res) => {
       params.push(metricList);
     }
 
-    conditions.push(`bucket >= NOW() - INTERVAL '${pgInterval}'`);
+    // SECURITY FIX: Use make_interval function with parameters to prevent SQL injection
+    // Instead of: bucket >= NOW() - INTERVAL '${pgInterval}'
+    // Use: bucket >= NOW() - make_interval(${unit} => ${value})
+    conditions.push(`bucket >= NOW() - make_interval(${timeRangeConfig.unit} => $${params.length + 1})`);
+    params.push(timeRangeConfig.value);
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    // Select aggregation column
-    const aggColumn = aggregation === 'avg' ? 'avg_value' :
-                      aggregation === 'min' ? 'min_value' :
-                      aggregation === 'max' ? 'max_value' :
+    // Select aggregation column (validated against enum)
+    const aggColumn = validAggregation.data === 'avg' ? 'avg_value' :
+                      validAggregation.data === 'min' ? 'min_value' :
+                      validAggregation.data === 'max' ? 'max_value' :
                       'last_value';
 
     // Query continuous aggregate
@@ -95,16 +122,16 @@ router.get('/timeseries', async (req, res) => {
     `, params);
 
     res.json({
-      timeRange,
+      timeRange: validTimeRange.data,
       interval: bucketInterval,
-      aggregation,
+      aggregation: validAggregation.data,
       dataPoints: result.rows.length,
       data: result.rows
     });
 
   } catch (error: any) {
-    logger.error('Error fetching timeseries data', { error: error.message });
-    res.status(500).json({ error: 'Failed to fetch timeseries data' });
+    logger.error('Error fetching timeseries data', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Internal server error', requestId: req.id || 'unknown' });
   }
 });
 
