@@ -21,6 +21,7 @@ import express from 'express';
 import { query } from '../db/connection';
 import { deviceSensorSync } from '../services/agent-devices';
 import { logger } from '../utils/logger';
+import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import { VirtualDeviceManager } from '../services/virtual-device-manager';
 
 export const router = express.Router();
@@ -34,7 +35,7 @@ const virtualDeviceManager = new VirtualDeviceManager();
  * 
  * Reads from device_sensors table (faster, allows filtering/sorting)
  */
-router.get('/devices/:uuid/sensors', async (req, res) => {
+router.get('/devices/:uuid/sensors', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     const { protocol } = req.query; // Optional filter by protocol
@@ -65,7 +66,7 @@ router.get('/devices/:uuid/sensors', async (req, res) => {
  * - validateOnly=true: Only validate config, don't persist (for draft mode)
  * - validateOnly=false (default): Validate and persist using dual-write
  */
-router.post('/devices/:uuid/sensors', async (req, res) => {
+router.post('/devices/:uuid/sensors', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     const sensorConfig = req.body;
@@ -182,7 +183,7 @@ router.post('/devices/:uuid/sensors', async (req, res) => {
  * - validateOnly=true: Only validate updates, don't persist (for draft mode)
  * - validateOnly=false (default): Validate and persist using dual-write
  */
-router.put('/devices/:uuid/sensors/:name', async (req, res) => {
+router.put('/devices/:uuid/sensors/:name', jwtAuth, async (req, res) => {
   try {
     const { uuid, name } = req.params;
     const updates = req.body;
@@ -262,7 +263,7 @@ router.put('/devices/:uuid/sensors/:name', async (req, res) => {
  * 
  * Dual-write: table + config (sync service handles both)
  */
-router.delete('/devices/:uuid/sensors/:name', async (req, res) => {
+router.delete('/devices/:uuid/sensors/:name', jwtAuth, async (req, res) => {
   try {
     const { uuid, name } = req.params;
 
@@ -304,7 +305,7 @@ router.delete('/devices/:uuid/sensors/:name', async (req, res) => {
  * Shows Configured Endpoints with protocol breakdown
  * GET /api/v1/devices/:uuid/device-health
  */
-router.get('/devices/:uuid/device-health', async (req, res) => {
+router.get('/devices/:uuid/device-health', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     const { protocolType } = req.query;
@@ -388,7 +389,7 @@ router.get('/devices/:uuid/device-health', async (req, res) => {
  * GET /api/v1/devices/:uuid/protocol-adapters/:protocol/:deviceName/history
  * Query params: ?hours=24 (default)
  */
-router.get('/devices/:uuid/protocol-adapters/:protocol/:deviceName/history', async (req, res) => {
+router.get('/devices/:uuid/protocol-adapters/:protocol/:deviceName/history', jwtAuth, async (req, res) => {
   try {
     const { uuid, protocol, deviceName } = req.params;
     const hours = parseInt(req.query.hours as string) || 24;
@@ -780,7 +781,7 @@ router.get('/devices/:uuid/protocol-adapters/:protocol/:deviceName/history', asy
  * 4. If parent is physical agent, agent will reconcile sidecar on next state sync
  * 5. Agent connects to virtual device at localhost:port like a normal physical device
  */
-router.post('/devices/:uuid/virtual-devices', async (req, res) => {
+router.post('/devices/:uuid/virtual-devices', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     const { name, protocol, profile, image, slaveCount } = req.body;
@@ -853,7 +854,7 @@ router.post('/devices/:uuid/virtual-devices', async (req, res) => {
  * 
  * Returns all virtual device sidecars configured for the agent
  */
-router.get('/devices/:uuid/virtual-devices', async (req, res) => {
+router.get('/devices/:uuid/virtual-devices', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
 
@@ -889,7 +890,7 @@ router.get('/devices/:uuid/virtual-devices', async (req, res) => {
  * 2. If parent is K8s virtual agent, patches Deployment to remove sidecar
  * 3. If parent is physical agent, agent will remove sidecar on next state sync
  */
-router.delete('/devices/:uuid/virtual-devices/:virtualDeviceUuid', async (req, res) => {
+router.delete('/devices/:uuid/virtual-devices/:virtualDeviceUuid',jwtAuth, async (req, res) => {
   try {
     const { uuid, virtualDeviceUuid } = req.params;
 

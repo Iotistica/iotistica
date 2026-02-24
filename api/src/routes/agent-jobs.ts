@@ -32,7 +32,7 @@ router.use('/jobs', jwtAuth, requireRole('admin'));
  * List all job templates
  * Requires: SETTINGS_READ permission (viewers and up)
  */
-router.get('/jobs/templates', async (req: Request, res: Response) => {
+router.get('/jobs/templates', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { category, active } = req.query;
 
@@ -74,7 +74,7 @@ router.get('/jobs/templates', async (req: Request, res: Response) => {
  * Get a specific job template
  * Requires: SETTINGS_READ permission
  */
-router.get('/jobs/templates/:id', async (req: Request, res: Response) => {
+router.get('/jobs/templates/:id', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -101,7 +101,7 @@ router.get('/jobs/templates/:id', async (req: Request, res: Response) => {
  * POST /api/v1/jobs/templates
  * Create a new job template
  */
-router.post('/jobs/templates', async (req: Request, res: Response) => {
+router.post('/jobs/templates', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { name, description, category, job_document, created_by } = req.body;
 
@@ -139,7 +139,7 @@ router.post('/jobs/templates', async (req: Request, res: Response) => {
  * PUT /api/v1/jobs/templates/:id
  * Update a job template
  */
-router.put('/jobs/templates/:id', async (req: Request, res: Response) => {
+router.put('/jobs/templates/:id', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { name, description, category, job_document, is_active } = req.body;
@@ -206,7 +206,7 @@ router.put('/jobs/templates/:id', async (req: Request, res: Response) => {
  * DELETE /api/v1/jobs/templates/:id
  * Delete a job template
  */
-router.delete('/jobs/templates/:id', async (req: Request, res: Response) => {
+router.delete('/jobs/templates/:id', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -240,7 +240,7 @@ router.delete('/jobs/templates/:id', async (req: Request, res: Response) => {
  * POST /api/v1/jobs/execute
  * Create and execute a job
  */
-router.post('/jobs/execute', async (req: Request, res: Response) => {
+router.post('/jobs/execute', jwtAuth, async (req: Request, res: Response) => {
   try {
     const {
       job_name,
@@ -408,7 +408,7 @@ router.post('/jobs/execute', async (req: Request, res: Response) => {
  * GET /api/v1/jobs/executions
  * List all job executions
  */
-router.get('/jobs/executions', async (req: Request, res: Response) => {
+router.get('/jobs/executions', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { status, limit = 50, offset = 0 } = req.query;
 
@@ -446,7 +446,7 @@ router.get('/jobs/executions', async (req: Request, res: Response) => {
  * GET /api/v1/jobs/executions/:jobId
  * Get details of a specific job execution
  */
-router.get('/jobs/executions/:jobId', async (req: Request, res: Response) => {
+router.get('/jobs/executions/:jobId', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { jobId } = req.params;
 
@@ -490,7 +490,7 @@ router.get('/jobs/executions/:jobId', async (req: Request, res: Response) => {
  * POST /api/v1/jobs/executions/:jobId/cancel
  * Cancel a job execution
  */
-router.post('/jobs/executions/:jobId/cancel', async (req: Request, res: Response) => {
+router.post('/jobs/executions/:jobId/cancel', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { jobId } = req.params;
 
@@ -763,7 +763,7 @@ router.get('/jobs/handlers', async (req: Request, res: Response) => {
  * POST /api/v1/jobs/handlers
  * Create a new job handler
  */
-router.post('/jobs/handlers', async (req: Request, res: Response) => {
+router.post('/jobs/handlers', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { name, description, script_type, script_content, default_args, created_by } = req.body;
 
@@ -812,7 +812,7 @@ router.post('/jobs/handlers', async (req: Request, res: Response) => {
  * DELETE /api/v1/jobs/:jobId
  * Delete a job and all its related data
  */
-router.delete('/jobs/:jobId', async (req: Request, res: Response) => {
+router.delete('/jobs/:jobId', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { jobId } = req.params;
 

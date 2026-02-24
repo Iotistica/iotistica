@@ -279,7 +279,7 @@ router.post('/device/:uuid/logs/dropped-summaries', deviceAuth, express.json(), 
  * Get device logs
  * GET /api/v1/devices/:uuid/logs
  */
-router.get('/devices/:uuid/logs', async (req, res) => {
+router.get('/devices/:uuid/logs', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     const serviceName = req.query.service as string | undefined;
@@ -330,7 +330,7 @@ router.get('/devices/:uuid/logs', async (req, res) => {
  * Get list of services with logs for a device
  * GET /api/v1/devices/:uuid/logs/services
  */
-router.get('/devices/:uuid/logs/services', async (req, res) => {
+router.get('/devices/:uuid/logs/services', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     
