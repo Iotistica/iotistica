@@ -200,7 +200,9 @@ class WebSocketService {
         this.connectionPending = false;
         
         const activeChannels = channels.length > 0 ? channels : this.getActiveChannels();
-        console.log('[WebSocket] Active channels:', activeChannels);
+        if (import.meta.env.DEV) {
+          console.log('[WebSocket] Active channels:', activeChannels);
+        }
 
         // Subscribe to all active channels individually
         activeChannels.forEach(channel => {
@@ -210,7 +212,9 @@ class WebSocketService {
           });
         });
 
-        console.log('[WebSocket] Subscribed to channels:', activeChannels);
+        if (import.meta.env.DEV) {
+          console.log('[WebSocket] Subscribed to channels:', activeChannels);
+        }
       };
 
       this.socket.onmessage = (event) => {

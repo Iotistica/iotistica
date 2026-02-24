@@ -390,6 +390,7 @@ export default function App() {
     } else {
       // Going to other global views - preserve fleet selection and lastViewedAgent
       console.log('[handleGlobalViewChange] Navigating to global view:', view);
+      setCurrentView(view);
       navigateToGlobal(view);
     }
   }, [navigateToGlobal, setSelectedFleetId, devices, setCurrentView, navigateToAgent, lastViewedAgent, setSelectedDeviceId, selectedFleetId]);
