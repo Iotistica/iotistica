@@ -10,9 +10,7 @@ import { randomUUID } from 'crypto';
 import poolWrapper from '../db/connection';
 import deviceAuth, { deviceAuthFromBody } from '../middleware/device-auth';
 import { getJobsHandler } from '../mqtt/jobs-handler';
-import { hasPermission, hasAnyPermission } from '../middleware/permissions';
-import { PERMISSIONS } from '../types/permissions';
-import { jwtAuth } from '../middleware/jwt-auth';
+import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import { EventPublisher } from '../services/event-sourcing';
 import { logger } from '../utils/logger';
 
@@ -21,11 +19,9 @@ const pool = poolWrapper.pool;
 const jobsHandler = getJobsHandler();
 const eventPublisher = new EventPublisher('device-jobs-api');
 
-// Apply JWT authentication to all dashboard/cloud routes
+// Apply admin-only access to all dashboard/cloud job routes
 // Device routes use deviceAuth middleware individually
-router.use('/jobs/templates', jwtAuth);
-router.use('/jobs/executions', jwtAuth);
-router.use('/jobs/handlers', jwtAuth);
+router.use('/jobs', jwtAuth, requireRole('admin'));
 
 // =============================================================================
 // Job Templates Management
@@ -36,9 +32,7 @@ router.use('/jobs/handlers', jwtAuth);
  * List all job templates
  * Requires: SETTINGS_READ permission (viewers and up)
  */
-router.get('/jobs/templates', 
-  hasPermission(PERMISSIONS.SETTINGS_READ),
-  async (req: Request, res: Response) => {
+router.get('/jobs/templates', async (req: Request, res: Response) => {
   try {
     const { category, active } = req.query;
 
@@ -80,9 +74,7 @@ router.get('/jobs/templates',
  * Get a specific job template
  * Requires: SETTINGS_READ permission
  */
-router.get('/jobs/templates/:id', 
-  hasPermission(PERMISSIONS.SETTINGS_READ),
-  async (req: Request, res: Response) => {
+router.get('/jobs/templates/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -542,7 +534,7 @@ router.post('/jobs/executions/:jobId/cancel', async (req: Request, res: Response
  * GET /api/v1/devices/:uuid/jobs
  * Get jobs for a specific device
  */
-router.get('/devices/:uuid/jobs', async (req: Request, res: Response) => {
+router.get('/devices/:uuid/jobs', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { uuid } = req.params;
     const { status, limit = 20, offset = 0 } = req.query;

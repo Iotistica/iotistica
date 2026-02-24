@@ -7,7 +7,7 @@ import express from 'express';
 import { LicenseValidator } from '../services/license-validator';
 import { DeviceModel } from '../db/models';
 import { logger } from '../utils/logger';
-import { jwtAuth } from '../middleware/jwt-auth';
+import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 
 const router = express.Router();
 
@@ -17,7 +17,7 @@ const router = express.Router();
  * 
  * REQUIRES AUTHENTICATION - Protected endpoint
  */
-router.get('/license', jwtAuth, async (req, res) => {
+router.get('/license', jwtAuth, requireRole('admin'), async (req, res) => {
   try {
     const license = LicenseValidator.getInstance();
     const licenseData = license.getLicense();
