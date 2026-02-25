@@ -228,6 +228,7 @@ router.get('/devices', jwtAuth, async (req, res) => {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const filter = (req.query.filter as string)?.toLowerCase() || 'all';
+    const includeTags = req.query.includeTags === 'true';
 
     const devices = await DeviceModel.list({ isOnline });
 
@@ -299,9 +300,31 @@ router.get('/devices', jwtAuth, async (req, res) => {
       })
     );
 
+    let devicesWithTags = enhancedDevices;
+    if (includeTags && enhancedDevices.length > 0) {
+      const deviceUuids = enhancedDevices.map(device => device.uuid);
+      const tagsResult = await query(
+        'SELECT device_uuid, key, value FROM device_tags WHERE device_uuid = ANY($1::uuid[])',
+        [deviceUuids]
+      );
+
+      const tagsByDevice: Record<string, Record<string, string>> = {};
+      tagsResult.rows.forEach(row => {
+        if (!tagsByDevice[row.device_uuid]) {
+          tagsByDevice[row.device_uuid] = {};
+        }
+        tagsByDevice[row.device_uuid][row.key] = row.value;
+      });
+
+      devicesWithTags = enhancedDevices.map(device => ({
+        ...device,
+        tags: tagsByDevice[device.uuid] || {}
+      }));
+    }
+
     res.json({
-      count: enhancedDevices.length,
-      devices: enhancedDevices,
+      count: devicesWithTags.length,
+      devices: devicesWithTags,
       pagination: {
         page,
         limit,

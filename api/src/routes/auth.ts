@@ -113,9 +113,8 @@ router.post('/login', authRateLimit, async (req: Request, res: Response) => {
       return;
     }
 
-    // Extract client info
-    const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0] || 
-                      req.socket.remoteAddress;
+    // Extract client info - req.ip automatically populated from X-Forwarded-For via trust proxy
+    const ipAddress = req.ip || req.socket.remoteAddress;
     const userAgent = req.headers['user-agent'];
 
     const result = await authService.loginUser(
@@ -171,8 +170,8 @@ router.post('/refresh', async (req: Request, res: Response) => {
       return;
     }
 
-    const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0] || 
-                      req.socket.remoteAddress;
+    // req.ip automatically populated from X-Forwarded-For via trust proxy
+    const ipAddress = req.ip || req.socket.remoteAddress;
 
     const result = await authService.refreshAccessToken(refreshToken, ipAddress);
 
