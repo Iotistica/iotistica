@@ -127,9 +127,15 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
 
     setIsLoading(true);
     
-    const wsUrl = buildApiUrl(`/ws?deviceUuid=${deviceUuid}`).replace(/^http/, 'ws');
+    const token = localStorage.getItem('accessToken');
+    const wsUrl = new URL(buildApiUrl('/ws'));
+    wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+    wsUrl.searchParams.set('deviceUuid', deviceUuid);
+    if (token) {
+      wsUrl.searchParams.set('token', token);
+    }
 
-    const ws = new WebSocket(wsUrl);
+    const ws = new WebSocket(wsUrl.toString());
     wsRef.current = ws;
 
     ws.onopen = () => {

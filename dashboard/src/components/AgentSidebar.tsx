@@ -364,15 +364,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
       // Fleet matching: check both fleet_uuid and fleet_id (legacy support)
       const deviceFleetId = (device as any).fleet_uuid || (device as any).fleet_id;
       const matchesFleet = !normalizedFleetId || deviceFleetId === normalizedFleetId;
-      
-      if (!matchesFleet && normalizedFleetId) {
-        console.log('[FILTER MISS]', {
-          device: device.name,
-          deviceFleetId,
-          selectedFleetId: normalizedFleetId,
-          match: deviceFleetId === normalizedFleetId
-        });
-      }
+  
       
       // Status and type filters are disabled - only apply search and fleet filters
       return matchesSearch && matchesFleet;
@@ -383,20 +375,10 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
       return 0;
     });
 
-    console.log('[FILTER RESULT]', {
-      filteredCount: filtered.length,
-      devices: filtered.map(d => ({ name: d.name, status: d.status, fleet_uuid: (d as any).fleet_uuid, fleet_id: (d as any).fleet_id }))
-    });
 
     return filtered;
   }, [devices, normalizedFleetId, searchQuery]);
 
-  const hasActiveFilters = searchQuery.length > 0 || selectedFleetId !== '';
-
-  const clearFilters = () => {
-    setSearchQuery("");
-    setSelectedFleetId('');
-  };
 
   return (
     <TooltipProvider>

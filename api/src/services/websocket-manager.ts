@@ -4,6 +4,7 @@ import { DeviceModel, DeviceMetricsModel, DeviceLogsModel } from '../db/models';
 import logger from '../utils/logger';
 import fetch from 'node-fetch';
 import { sessionManager } from './session-manager';
+import { verifyToken } from '../middleware/jwt-auth';
 import { query } from '../db/connection';
 
 interface WebSocketClient {
@@ -285,6 +286,24 @@ export class WebSocketManager {
       if (url.pathname === '/ws') {
         const deviceUuid = url.searchParams.get('deviceUuid');
         const type = url.searchParams.get('type'); // 'device' or 'global'
+        const token = url.searchParams.get('token');
+
+        if (!token) {
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+
+        try {
+          const payload = verifyToken(token);
+          if (payload.type !== 'access') {
+            throw new Error('Invalid token type');
+          }
+        } catch (error) {
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
         
         // Allow global connections (for MQTT stats) without deviceUuid
         if (!deviceUuid && type !== 'global') {

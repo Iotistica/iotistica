@@ -126,10 +126,16 @@ class WebSocketService {
     this.isIntentionallyClosed = false;
     this.connectionPending = true;
 
-    const wsUrl = buildApiUrl(`/ws?deviceUuid=${deviceUuid}`).replace('http', 'ws');
-    console.log('[WebSocket] Connecting to:', wsUrl);
+    const token = localStorage.getItem('accessToken');
+    const wsUrl = new URL(buildApiUrl('/ws'));
+    wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+    wsUrl.searchParams.set('deviceUuid', deviceUuid);
+    if (token) {
+      wsUrl.searchParams.set('token', token);
+    }
+    console.log('[WebSocket] Connecting to:', wsUrl.toString());
 
-    this.createWebSocket(wsUrl, ['system-info', 'processes', 'history', 'network-interfaces']);
+    this.createWebSocket(wsUrl.toString(), ['system-info', 'processes', 'history', 'network-interfaces']);
   }
 
   connectGlobal() {
@@ -161,10 +167,16 @@ class WebSocketService {
     this.isIntentionallyClosed = false;
     this.connectionPending = true;
 
-    const wsUrl = buildApiUrl(`/ws?type=global`).replace('http', 'ws');
-    console.log('[WebSocket] Connecting to global:', wsUrl);
+    const token = localStorage.getItem('accessToken');
+    const wsUrl = new URL(buildApiUrl('/ws'));
+    wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+    wsUrl.searchParams.set('type', 'global');
+    if (token) {
+      wsUrl.searchParams.set('token', token);
+    }
+    console.log('[WebSocket] Connecting to global:', wsUrl.toString());
 
-    this.createWebSocket(wsUrl, ['mqtt-stats', 'mqtt-topics']);
+    this.createWebSocket(wsUrl.toString(), ['mqtt-stats', 'mqtt-topics']);
   }
 
   private createWebSocket(wsUrl: string, channels: string[]): void {
