@@ -1,4 +1,4 @@
-# Billing Service - Docker Compose for Local Development
+# Provisioning Service - Docker Compose for Local Development
 # Supports both GitOps (Argo CD) and legacy Helm deployment modes
 
 version: '3.8'
@@ -35,9 +35,9 @@ services:
       timeout: 3s
       retries: 5
 
-  billing:
+  provisioning:
     build: .
-    container_name: billing-api
+    container_name: provisioning-api
     ports:
       - "3100:3100"
     environment:
@@ -60,7 +60,7 @@ services:
       # Stripe (use your test keys)
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY}
-      # Get this from: docker logs billing-stripe-cli (look for "Ready! Your webhook signing secret is whsec_...")
+      # Get this from: docker logs provisioning-stripe-cli (look for "Ready! Your webhook signing secret is whsec_...")
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
       
       # Stripe Price IDs (create these in Stripe dashboard)
@@ -85,7 +85,7 @@ services:
       GITOPS_REPO_DIR: /tmp/iot-k8s-main
       GITOPS_BRANCH: ${GITOPS_BRANCH:-main}
       GITOPS_PAT: ${GITOPS_PAT}  # GitHub Personal Access Token (repo scope)
-      GITOPS_AUTHOR_NAME: "IoTistic Billing Bot"
+      GITOPS_AUTHOR_NAME: "IoTistic provisioning Bot"
       GITOPS_AUTHOR_EMAIL: "billing@iotistic.com"
       
       # Argo CD Configuration (NEW)
@@ -113,7 +113,7 @@ services:
   # Worker - Processes deployment queue jobs
   worker:
     build: .
-    container_name: billing-worker
+    container_name: provisioning-worker
     command: node dist/worker.js
     environment:
       NODE_ENV: development
@@ -148,7 +148,7 @@ services:
       GITOPS_REPO_DIR: /tmp/iot-k8s-main
       GITOPS_BRANCH: ${GITOPS_BRANCH:-main}
       GITOPS_PAT: ${GITOPS_PAT}
-      GITOPS_AUTHOR_NAME: "IoTistic Billing Bot"
+      GITOPS_AUTHOR_NAME: "IoTistic provisioning Bot"
       GITOPS_AUTHOR_EMAIL: "billing@iotistic.com"
       
       # Argo CD Configuration
@@ -172,23 +172,23 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      billing:
+      provisioning:
         condition: service_started
 
   # Stripe CLI for webhook testing
   stripe-cli:
     image: stripe/stripe-cli:latest
-    container_name: billing-stripe-cli
-    command: listen --forward-to http://billing:3100/api/webhooks/stripe --skip-verify
+    container_name: provisioning-stripe-cli
+    command: listen --forward-to http://provisioning:3100/api/webhooks/stripe --skip-verify
     environment:
       # Set your Stripe API key
       STRIPE_API_KEY: ${STRIPE_SECRET_KEY}
     depends_on:
-      - billing
+      - provisioning
     # Note: On first run, you'll need to get the webhook signing secret
-    # Run: docker logs billing-stripe-cli
+    # Run: docker logs provisioning-stripe-cli
     # Look for: "Ready! Your webhook signing secret is whsec_..." 
-    # Update STRIPE_WEBHOOK_SECRET in billing service with this value
+    # Update STRIPE_WEBHOOK_SECRET in provisioning service with this value
 
 volumes:
   postgres_data:

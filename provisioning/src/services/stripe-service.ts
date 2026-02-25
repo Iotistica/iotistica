@@ -240,7 +240,7 @@ export class StripeService {
       console.log(`🚀 Triggering K8s deployment for customer ${customer.customer_id}...`);
       
       try {
-        const { deploymentQueue } = await import('../services/deployment-queue');
+        const { deploymentQueue } = await import('./deployment-queue');
         const { LicenseGenerator } = await import('./license-generator');
         const { SubscriptionModel } = await import('../db/subscription-model');
         

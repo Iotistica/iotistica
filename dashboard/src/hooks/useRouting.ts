@@ -26,32 +26,39 @@ export function useRouting() {
   const currentPath = useMemo(() => {
     const path = location.pathname;
     const segments = path.split('/').filter(Boolean);
+    console.log('[useRouting] Parsing path:', { path, segments });
 
     // Agent view: /fleets/:fleetId/agents/:agentId/:view?
     if (segments[0] === 'fleets' && segments[1] && segments[2] === 'agents' && segments[3]) {
       const urlView = segments[4];
-      return {
+      const result = {
         type: 'agent' as const,
         fleetId: segments[1],
         agentId: segments[3],
         view: urlView ? (urlToView[urlView] || urlView) : undefined
       };
+      console.log('[useRouting] Detected agent view:', result);
+      return result;
     }
 
     // Fleet view: /fleets/:fleetId
     if (segments[0] === 'fleets' && segments[1]) {
-      return {
+      const result = {
         type: 'fleet' as const,
         fleetId: segments[1]
       };
+      console.log('[useRouting] Detected fleet view:', result);
+      return result;
     }
 
     // Global view
     const view = segments[0] || 'home';
-    return {
+    const result = {
       type: 'global' as const,
       view
     };
+    console.log('[useRouting] Detected global view:', result);
+    return result;
   }, [location.pathname]);
 
   // Navigation functions
