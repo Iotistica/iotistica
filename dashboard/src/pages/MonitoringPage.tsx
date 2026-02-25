@@ -9,8 +9,9 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { MetricCard } from '@/components/ui/metric-card';
-import { AlertTriangle, AlertOctagon, Activity, CheckCircle, Eye, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { AlertTriangle, AlertOctagon, Activity, CheckCircle, Eye, ChevronLeft, ChevronRight, Loader2, Settings } from 'lucide-react';
 import { SeverityBadge, StatusBadge, ScoreBadge, IncidentTimelineChart } from '@/components/alerts';
+import { AnomalyMetricsTable } from '@/components/monitoring/AnomalyMetricsTable';
 
 interface AnomalyEvent {
   msg_id: string;
@@ -98,6 +99,7 @@ export function AlertsPage() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [resolutionNotes, setResolutionNotes] = useState('');
+  const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [resolving, setResolving] = useState(false);
 
   // Device list for filters
@@ -386,6 +388,18 @@ export function AlertsPage() {
             Clear
           </Button>
         </div>
+        
+        <div className="ml-auto pt-6">
+          <Button 
+            onClick={() => setConfigDialogOpen(true)} 
+            variant="outline" 
+            size="sm"
+            className="gap-2"
+          >
+            <Settings className="h-4 w-4" />
+            Configure Anomaly Detection
+          </Button>
+        </div>
       </div>
 
       {/* Incidents Table */}
@@ -665,6 +679,12 @@ export function AlertsPage() {
           ) : null}
         </DialogContent>
       </Dialog>
+
+      {/* Anomaly Configuration Dialog */}
+      <AnomalyMetricsTable
+        open={configDialogOpen}
+        onOpenChange={setConfigDialogOpen}
+      />
     </div>
   );
 }

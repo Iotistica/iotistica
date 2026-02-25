@@ -1583,10 +1583,10 @@ export default function App() {
             </Button>
             </div>
             <div className="flex items-center gap-3 shrink-0">
-              {/* Deploy Buttons - Only show for agent views */}
-              {!isGlobalView && (
+              {/* Deploy Buttons - Show for agent views OR when devices have pending changes in global views */}
+              {(!isGlobalView || devicesWithPendingChanges.length > 0) && (
                 <>
-                  {hasUnsavedChanges && (
+                  {!isGlobalView && hasUnsavedChanges && (
                     <Button
                       onClick={handleSaveDraft}
                       size="sm"
@@ -1597,29 +1597,31 @@ export default function App() {
                       Save Draft
                     </Button>
                   )}
-                  <Button
-                    onClick={handleDeploy}
-                    size="sm"
-                    disabled={!needsDeployment || isDeploying}
-                    variant="ghost"
-                    style={!isDeploying && needsDeployment ? {
-                      backgroundColor: '#d97706',
-                      color: 'white',
-                      fontWeight: 500,
-                      fontSize: '1.1rem',
-                      padding: '0.6rem 1.25rem'
-                    } : {
-                      backgroundColor: '#9ca3af',
-                      color: 'white',
-                      cursor: 'not-allowed',
-                      fontSize: '1.1rem',
-                      padding: '0.6rem 1.25rem'
-                    }}
-                    className="hover:opacity-90"
-                  >
-                    {isDeploying ? 'Deploying...' : 'Deploy'}
-                  </Button>
-                  {needsDeployment && (
+                  {!isGlobalView && (
+                    <Button
+                      onClick={handleDeploy}
+                      size="sm"
+                      disabled={!needsDeployment || isDeploying}
+                      variant="ghost"
+                      style={!isDeploying && needsDeployment ? {
+                        backgroundColor: '#d97706',
+                        color: 'white',
+                        fontWeight: 500,
+                        fontSize: '1.1rem',
+                        padding: '0.6rem 1.25rem'
+                      } : {
+                        backgroundColor: '#9ca3af',
+                        color: 'white',
+                        cursor: 'not-allowed',
+                        fontSize: '1.1rem',
+                        padding: '0.6rem 1.25rem'
+                      }}
+                      className="hover:opacity-90"
+                    >
+                      {isDeploying ? 'Deploying...' : 'Deploy'}
+                    </Button>
+                  )}
+                  {!isGlobalView && needsDeployment && (
                     <Button
                       onClick={handleCancelDeploy}
                       size="sm"
@@ -1630,7 +1632,7 @@ export default function App() {
                       {hasUnsavedChanges && !needsDeployment ? 'Discard' : 'Cancel'}
                     </Button>
                   )}
-                  {devicesWithPendingChanges.length > 1 && (
+                  {devicesWithPendingChanges.length > 0 && (isGlobalView || devicesWithPendingChanges.length > 1) && (
                     <Button
                       onClick={handleDeployAll}
                       size="sm"
@@ -1651,7 +1653,9 @@ export default function App() {
                       }}
                       className="hover:opacity-90"
                     >
-                      {isDeploying ? 'Deploying...' : `Deploy All (${devicesWithPendingChanges.length})`}
+                      {isDeploying ? 'Deploying...' : devicesWithPendingChanges.length === 1 
+                        ? `Deploy ${devicesWithPendingChanges[0].name || 'Agent'}`
+                        : `Deploy All (${devicesWithPendingChanges.length})`}
                     </Button>
                   )}
                   {/* Spacer between deploy buttons and Add agent */}
