@@ -32,7 +32,7 @@ import { DigitalTwinPage } from "./pages/DigitalTwinPage";
 import { EventDebuggerPage } from "./pages/EventDebuggerPage";
 import { AuditPage } from "./pages/audit";
 import { FleetsPage } from "./pages/FleetsPage";
-import { AlertsPage } from "./pages/AlertsPage";
+import { AlertsPage } from "./pages/MonitoringPage";
 
 import { toast } from "sonner";
 import { Header } from "./components/Header";
@@ -89,7 +89,7 @@ export default function App() {
     'dashboard',
     'digital-twin',
     'event-debugger',
-    'alerts'
+    'monitoring'
   ] as const;
   type View = typeof viewOptions[number];
   const agentViews: View[] = [
@@ -117,7 +117,7 @@ export default function App() {
     return stored && viewOptions.includes(stored as View) ? (stored as View) : 'metrics';
   });
   const [fleetNameById, setFleetNameById] = useState<Record<string, string>>({});
-  const isGlobalView = currentView === 'dashboard' || currentView === 'mqtt' || currentView === 'audit' || currentView === 'security' || currentView === 'fleets' || currentView === 'alerts';
+  const isGlobalView = currentView === 'dashboard' || currentView === 'mqtt' || currentView === 'audit' || currentView === 'security' || currentView === 'fleets' || currentView === 'monitoring';
   const [debugMode, setDebugMode] = useState(false);
   const [isKioskMode, setIsKioskMode] = useState<boolean>(() => {
     return localStorage.getItem('dashboard-kiosk-mode') === 'true';
@@ -1135,6 +1135,19 @@ export default function App() {
       {!isKioskMode && (
         <div className="bg-card border-b border-border px-6 py-2 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
+            {/* Agents Sidebar Toggle Button - Only show when not in global view */}
+            {!isGlobalView && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSidebarOpen(true)}
+                style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
+                className="mr-2"
+              >
+                <Menu className="w-5 h-5 mr-2" />
+                Agents
+              </Button>
+            )}
             <Button
               variant={currentView === 'home' ? 'default' : 'outline'}
               size="sm"
@@ -1199,14 +1212,14 @@ export default function App() {
                 Security
               </Button>
               <Button
-                variant={currentView === 'alerts' ? 'default' : 'outline'}
+                variant={currentView === 'monitoring' ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => handleGlobalViewChange('alerts')}
+                onClick={() => handleGlobalViewChange('monitoring')}
                 style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
                 className="relative"
               >
                 <AlertOctagon className="w-5 h-5 mr-2" />
-                Alerts
+                Monitoring
                 {criticalAlertsCount > 0 && (
                   <Badge 
                     variant="destructive" 
@@ -1271,19 +1284,6 @@ export default function App() {
       )}
 
       <div className="flex flex-1 overflow-hidden">
-                {/* Desktop Sidebar - Hidden on mobile and in kiosk mode */}
-        {!isKioskMode && !isGlobalView && (
-          <div className="hidden lg:block">
-            <DeviceSidebar
-              devices={devices}
-              selectedDeviceId={selectedDeviceId}
-              onSelectDevice={handleSelectDevice}
-              onAddDevice={handleAddDevice}
-              onEditDevice={handleEditDevice}
-              hasPendingChanges={hasPendingChanges}
-            />
-          </div>
-        )}
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col overflow-y-auto">
           {isGlobalView ? (
@@ -1313,7 +1313,7 @@ export default function App() {
                   <SecurityPage />
                 </div>
               )}
-              {currentView === 'alerts' && (
+              {currentView === 'monitoring' && (
                 <AlertsPage />
               )}
             </>
@@ -1778,19 +1778,21 @@ export default function App() {
 
 
 
-        {/* Mobile Drawer - Opens from right */}
-        <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-          <SheetContent side="right" className="p-0 w-80">
-            <DeviceSidebar
-              devices={devices}
-              selectedDeviceId={selectedDeviceId}
-              onSelectDevice={handleSelectDevice}
-              onAddDevice={handleAddDevice}
-              onEditDevice={handleEditDevice}
-              hasPendingChanges={hasPendingChanges}
-            />
-          </SheetContent>
-        </Sheet>
+        {/* Agents Sidebar Drawer - Opens from left */}
+        {!isKioskMode && !isGlobalView && (
+          <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+            <SheetContent side="left" className="p-0 w-80">
+              <DeviceSidebar
+                devices={devices}
+                selectedDeviceId={selectedDeviceId}
+                onSelectDevice={handleSelectDevice}
+                onAddDevice={handleAddDevice}
+                onEditDevice={handleEditDevice}
+                hasPendingChanges={hasPendingChanges}
+              />
+            </SheetContent>
+          </Sheet>
+        )}
       </div>
 
        {/* Add/Edit Device Dialog */}

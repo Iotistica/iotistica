@@ -102,9 +102,9 @@ const WIDGET_TYPES = {
     defaultW: 4,
     defaultH: 3
   },
-  ALERT_SUMMARY: {
-    id: 'alerts',
-    name: 'Alert Summary',
+  MONITORING_SUMMARY: {
+    id: 'monitoring',
+    name: 'Monitoring Summary',
     icon: AlertTriangle,
     minW: 3,
     minH: 2,
@@ -1279,7 +1279,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           </div>
         );
 
-      case 'ALERT_SUMMARY':
+      case 'MONITORING_SUMMARY':
       case 'RECENT_EVENTS':
         return (
           <div className="text-center text-muted-foreground h-full flex items-center justify-center">
@@ -1601,9 +1601,9 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                 <Activity className="w-4 h-4 mr-2" />
                 System Health
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => addWidget('ALERT_SUMMARY')}>
+              <DropdownMenuItem onClick={() => addWidget('MONITORING_SUMMARY')}>
                 <AlertTriangle className="w-4 h-4 mr-2" />
-                Alert Summary
+                Monitoring Summary
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => addWidget('RECENT_EVENTS')}>
                 <Clock className="w-4 h-4 mr-2" />

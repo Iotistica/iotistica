@@ -99,9 +99,9 @@ const WIDGET_TYPES = {
     defaultW: 6,
     defaultH: 3
   },
-  ALERTS: { 
-    id: 'alerts', 
-    name: 'Alerts', 
+  MONITORING: { 
+    id: 'monitoring', 
+    name: 'Monitoring', 
     icon: AlertTriangle,
     minW: 3, 
     minH: 2,
@@ -455,7 +455,7 @@ export function CustomDashboardPage({ device }: CustomDashboardPageProps) {
           </div>
         );
       
-      case 'ALERTS':
+      case 'MONITORING':
         return (
           <div className="text-center text-muted-foreground h-full flex items-center justify-center">
             No active alerts

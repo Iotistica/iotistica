@@ -284,7 +284,7 @@ export function AlertsPage() {
     <div className="w-full space-y-6 p-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold">Alerts</h1>
+        <h1 className="text-3xl font-bold">Monitoring</h1>
         <p className="text-gray-600 mt-1">Monitor and manage anomaly detection incidents</p>
       </div>
 
