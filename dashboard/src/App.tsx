@@ -239,12 +239,8 @@ export default function App() {
     } else if (currentPath.type === 'global') {
       // Global view from URL
       const view = currentPath.view as View;
-      console.log('[URL SYNC] Global view from URL:', { view, isValid: viewOptions.includes(view) });
       if (viewOptions.includes(view)) {
-        console.log('[URL SYNC] Setting currentView to:', view);
         setCurrentView(view);
-      } else {
-        console.log('[URL SYNC] View not in viewOptions:', view);
       }
       
       // Don't clear fleet selection when going to global view - preserve for restoration
@@ -394,7 +390,6 @@ export default function App() {
     } else {
       // Going to other global views - preserve fleet selection and lastViewedAgent
       console.log('[handleGlobalViewChange] Navigating to global view:', view);
-      setCurrentView(view);
       navigateToGlobal(view);
     }
   }, [navigateToGlobal, setSelectedFleetId, devices, setCurrentView, navigateToAgent, lastViewedAgent, setSelectedDeviceId, selectedFleetId]);
@@ -502,9 +497,10 @@ export default function App() {
         
         // Get auth token from localStorage
         const accessToken = localStorage.getItem('accessToken');
-        const apiUrl = buildApiUrl('/api/v1/devices?limit=100&includeTags=true');
+        const apiUrl = buildApiUrl('/api/v1/devices?limit=100');
         console.log('[DEBUG] API URL:', apiUrl);
-
+        console.log('[DEBUG] Fetching devices with token:', accessToken ? `${accessToken.substring(0, 20)}...` : 'NULL');
+        console.log('[DEBUG] Full auth header:', `Bearer ${accessToken}`);
         
         const response = await fetch(apiUrl, {
           headers: {
@@ -524,7 +520,8 @@ export default function App() {
 
         const data = await response.json();
         
-      
+        console.log('Devices API response:', data);
+        console.log('[FLEET DEBUG] Raw devices with fleet_uuid:', data.devices.map((d: any) => ({ uuid: d.uuid, name: d.device_name, fleet_uuid: d.fleet_uuid })));
         
         // Transform API response to match Device interface
         // CRITICAL: Use stable UUID as ID instead of index to prevent React remounts
@@ -548,7 +545,6 @@ export default function App() {
             ? Math.round((parseFloat(apiDevice.storage_usage) / parseFloat(apiDevice.storage_total) * 100)) 
             : 0,
           fleet_uuid: apiDevice.fleet_uuid || undefined, // API returns fleet_uuid
-          tags: Object.prototype.hasOwnProperty.call(apiDevice, 'tags') ? apiDevice.tags : undefined,
         }));
 
         // Only update state if devices actually changed (use callback for React optimization)
@@ -1178,10 +1174,7 @@ export default function App() {
               <Button
                 variant={currentView === 'mqtt' ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => {
-                  console.log('[BUTTON CLICK] MQTT button clicked');
-                  handleGlobalViewChange('mqtt');
-                }}
+                onClick={() => handleGlobalViewChange('mqtt')}
                 style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
               >
                 <Radio className="w-5 h-5 mr-2" />
@@ -1199,10 +1192,7 @@ export default function App() {
               <Button
                 variant={currentView === 'security' ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => {
-                  console.log('[BUTTON CLICK] Security button clicked');
-                  handleGlobalViewChange('security');
-                }}
+                onClick={() => handleGlobalViewChange('security')}
                 style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
               >
                 <Shield className="w-5 h-5 mr-2" />

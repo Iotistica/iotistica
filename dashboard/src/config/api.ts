@@ -63,7 +63,7 @@ export function getApiUrl(): string {
     return `${protocol}//${hostname}:30002`;
   }
 
-  // Local development default - API runs on 4002 (docker-compose maps 4002:3002)
+  // Local development default
   return 'http://localhost:4002';
 }
 

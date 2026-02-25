@@ -20,7 +20,7 @@ createRoot(document.getElementById("root")!).render(
           <MetricsHistoryProvider>
             <SystemMetricsProvider>
               <MqttProvider>
-                <BrowserRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
+                <BrowserRouter>
                   <Routes>
                     <Route path="/fleets/:fleetId/agents/:agentId/:view" element={<App />} />
                     <Route path="/fleets/:fleetId/agents/:agentId" element={<App />} />
