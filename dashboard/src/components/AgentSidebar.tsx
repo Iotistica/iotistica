@@ -39,6 +39,7 @@ export interface Device {
   memory: number;
   disk: number;
   fleet_uuid?: string; // Optional fleet assignment (UUID)
+  tags?: Record<string, string>;
 }
 
 interface DeviceSidebarProps {
@@ -80,8 +81,8 @@ const statusBadgeColors = {
 };
 
 // Device Tags Pills Component - shows 2-3 preview tags with "View all" link
-function DeviceTagsPills({ deviceUuid }: { deviceUuid: string }) {
-  const [tags, setTags] = useState<Record<string, string>>({});
+function DeviceTagsPills({ deviceUuid, tags: initialTags }: { deviceUuid: string; tags?: Record<string, string> }) {
+  const [tags, setTags] = useState<Record<string, string>>(initialTags || {});
   const [loading, setLoading] = useState(false);
 
   const fetchTags = async () => {
@@ -99,6 +100,11 @@ function DeviceTagsPills({ deviceUuid }: { deviceUuid: string }) {
   };
 
   useEffect(() => {
+    if (initialTags !== undefined) {
+      setTags(initialTags);
+      return;
+    }
+
     // Stagger requests with random delay to prevent overwhelming API
     const delay = Math.random() * 2000; // 0-2 second random delay
     const timer = setTimeout(() => {
@@ -106,7 +112,7 @@ function DeviceTagsPills({ deviceUuid }: { deviceUuid: string }) {
     }, delay);
     
     return () => clearTimeout(timer);
-  }, [deviceUuid]);
+  }, [deviceUuid, initialTags]);
 
   // Listen for tag updates from other components (e.g., AddEditDeviceDialog)
   useEffect(() => {
@@ -115,13 +121,15 @@ function DeviceTagsPills({ deviceUuid }: { deviceUuid: string }) {
       if (customEvent.detail.deviceUuid === deviceUuid) {
         console.log('[DeviceTagsPills] Tags updated externally, reloading...');
         invalidateDeviceTagsCache(deviceUuid);
-        fetchTags();
+        if (initialTags === undefined) {
+          fetchTags();
+        }
       }
     };
 
     window.addEventListener('device-tags-updated', handleTagsUpdated);
     return () => window.removeEventListener('device-tags-updated', handleTagsUpdated);
-  }, [deviceUuid]);
+  }, [deviceUuid, initialTags]);
 
   const tagEntries = Object.entries(tags);
   const visibleTags = tagEntries.slice(0, 2);
@@ -211,7 +219,6 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
         });
         if (response.ok) {
           const data = await response.json();
-          console.log('[FLEET DEBUG] Loaded fleets:', data.fleets);
           setFleets(data.fleets || []);
         }
       } catch (error) {
@@ -344,18 +351,6 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
     : selectedFleetId;
 
   const filteredDevices = useMemo(() => {
-    console.log('[FILTER INPUT]', {
-      totalDevices: devices.length,
-      selectedFleetId: normalizedFleetId,
-      searchQuery,
-      deviceFleetIds: devices.map(d => ({
-        name: d.name,
-        fleet_uuid: (d as any).fleet_uuid,
-        fleet_id: (d as any).fleet_id,
-        status: d.status,
-        type: d.type
-      }))
-    });
 
     const filtered = devices.filter(device => {
       const matchesSearch = device.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -392,8 +387,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
               value={selectedFleetId}
               onChange={(e) => {
                 const newFleetId = e.target.value;
-                console.log('[FLEET DEBUG] Fleet selected:', newFleetId);
-                console.log('[FLEET DEBUG] Current path:', currentPath);
+            
                 
                 // Update context
                 setSelectedFleetId(newFleetId);
@@ -402,7 +396,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
                 // IMPORTANT: Reset view to 'metrics' when switching fleets to avoid showing
                 // tabs/views from agents in the previous fleet
                 if (currentPath.type === 'agent' && currentPath.agentId && newFleetId) {
-                  console.log('[FLEET DEBUG] Navigating to agent with fleet:', newFleetId, 'resetting view to metrics');
+               
                   navigateToAgent(currentPath.agentId, newFleetId, 'metrics');
                 }
                 // If selecting "All Fleets" while on agent view, stay on current URL but context updated
@@ -591,7 +585,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
                     </div>
 
                     {/* Device Tags */}
-                    <DeviceTagsPills deviceUuid={device.deviceUuid} />
+                    <DeviceTagsPills deviceUuid={device.deviceUuid} tags={device.tags} />
                   </div>
                 </div>
 

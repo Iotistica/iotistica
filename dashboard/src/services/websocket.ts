@@ -97,6 +97,10 @@ class WebSocketService {
     this.unsubscribe = this.unsubscribe.bind(this);
   }
 
+  private getActiveChannels(): string[] {
+    return Array.from(this.handlers.keys());
+  }
+
   connect(deviceUuid: string) {
     // Don't reconnect if we're already connected to this device
     if (this.socket?.readyState === WebSocket.OPEN && this.deviceUuid === deviceUuid) {
@@ -189,13 +193,22 @@ class WebSocketService {
         this.reconnectAttempts = 0;
         this.connectionPending = false;
         
-        // Subscribe to all channels individually
-        channels.forEach(channel => {
+        const activeChannels = channels.length > 0 ? channels : this.getActiveChannels();
+        if (import.meta.env.DEV) {
+          console.log('[WebSocket] Active channels:', activeChannels);
+        }
+
+        // Subscribe to all active channels individually
+        activeChannels.forEach(channel => {
           this.send({
             type: 'subscribe',
             channel: channel
           });
         });
+
+        if (import.meta.env.DEV) {
+          console.log('[WebSocket] Subscribed to channels:', activeChannels);
+        }
       };
 
       this.socket.onmessage = (event) => {
@@ -308,7 +321,14 @@ class WebSocketService {
       this.handlers.set(type, new Set());
     }
     this.handlers.get(type)!.add(handler);
-    console.log(`[WebSocket] Subscribed to type: ${type}, total handlers: ${this.handlers.get(type)!.size}`);
+    
+
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.send({
+        type: 'subscribe',
+        channel: type
+      });
+    }
 
     // Return unsubscribe function
     return () => this.unsubscribe(type, handler);
@@ -320,6 +340,13 @@ class WebSocketService {
       handlers.delete(handler);
       if (handlers.size === 0) {
         this.handlers.delete(type);
+
+        if (this.socket?.readyState === WebSocket.OPEN) {
+          this.send({
+            type: 'unsubscribe',
+            channel: type
+          });
+        }
       }
     }
   }
