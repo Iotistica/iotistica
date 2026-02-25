@@ -55,7 +55,6 @@ import { DeviceModel, DeviceMetricsModel, DeviceLogsModel } from '../db/models';
 import logger from '../utils/logger';
 import fetch from 'node-fetch';
 import { sessionManager } from './session-manager';
-import { verifyToken } from '../middleware/jwt-auth';
 import { query } from '../db/connection';
 
 interface WebSocketClient {
@@ -235,7 +234,9 @@ export class WebSocketManager {
   private deviceClients: Map<string, Set<WebSocket>> = new Map();
   private deviceIntervals: Map<string, Map<string, NodeJS.Timeout>> = new Map();
   private globalClients: Set<WebSocket> = new Set(); // Global connections for MQTT stats
-  private globalIntervals: Map<string, NodeJS.Timeout> = new Map(); // Global intervals
+      const deviceUuid = url.searchParams.get('deviceUuid');
+      const type = url.searchParams.get('type'); // 'device' or 'global'
+      const token = url.searchParams.get('token');
   private mqttMonitor: any = null; // MQTTMonitorService instance
   private mqttManager: any = null; // MQTT Manager instance for publishing commands
   private redisClient: any = null; // Redis client for pub/sub
@@ -521,23 +522,6 @@ export class WebSocketManager {
         const deviceUuid = url.searchParams.get('deviceUuid');
         const type = url.searchParams.get('type'); // 'device' or 'global'
         const token = url.searchParams.get('token');
-
-        if (!token) {
-          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-          socket.destroy();
-          return;
-        }
-
-        try {
-          const payload = verifyToken(token);
-          if (payload.type !== 'access') {
-            throw new Error('Invalid token type');
-          }
-        } catch (error) {
-          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-          socket.destroy();
-          return;
-        }
         
         // 🔐 JWT Authentication - validate token for all connections
         let user: JwtPayload | null = null;
@@ -551,6 +535,13 @@ export class WebSocketManager {
 
         try {
           user = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
+
+          if (user.type !== 'access') {
+            logger.warn(' WebSocket connection rejected: invalid token type');
+            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+            socket.destroy();
+            return;
+          }
           
           // 🔐 Validate token has expiry claim (required for security)
           if (!user.exp) {

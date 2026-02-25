@@ -37,6 +37,7 @@ admin/.next/
 dashboard/build/
 billing/dist/
 billing-exporter/dist/
+billing/keys/
 
 # TypeScript
 *.tsbuildinfo
