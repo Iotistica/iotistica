@@ -4,10 +4,12 @@
  * 
  * Flow:
  * 1. Clone/pull iot-k8s-main repository
- * 2. Generate Argo CD Application manifest
- * 3. Generate client-specific values file
- * 4. Commit and push to main branch
- * 5. Argo CD auto-syncs changes to Kubernetes
+ * 2. Provision TigerData database
+ * 3. Create 1Password secrets
+ * 4. Generate Argo CD Application manifest
+ * 5. Generate client-specific values file
+ * 6. Commit and push to main branch
+ * 7. Argo CD auto-syncs changes to Kubernetes
  */
 
 import simpleGit, { SimpleGit } from 'simple-git';
@@ -15,6 +17,9 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
 import { logger } from '../utils/logger';
+import { TigerDataService, TigerDataDatabase } from './tigerdata-service';
+import { OnePasswordService } from './onepassword-service';
+import { CustomerModel } from '../db/customer-model';
 
 interface ClientDeploymentData {
   clientId: string;           // Sanitized: dc5fec42
@@ -59,6 +64,8 @@ export class GitOpsProvisioningService {
   private git: SimpleGit;
   private config: GitOpsConfig;
   private initialized = false;
+  private tigerDataService: TigerDataService;
+  private onePasswordService: OnePasswordService;
 
   constructor() {
     // Load configuration from environment
@@ -81,6 +88,10 @@ export class GitOpsProvisioningService {
         `user.email=${this.config.authorEmail}`,
       ],
     });
+
+    // Initialize provisioning services
+    this.tigerDataService = new TigerDataService();
+    this.onePasswordService = new OnePasswordService();
 
     if (!this.config.enabled) {
       logger.warn('GitOps mode disabled (GITOPS_ENABLED=false)');
@@ -251,6 +262,9 @@ export class GitOpsProvisioningService {
    * Generate client-specific values file
    */
   private generateValuesFile(data: ClientDeploymentData): any {
+    // Check if using TigerData (external database) or embedded PostgreSQL
+    const usingTigerData = data.postgres?.username && data.postgres.username !== 'postgres';
+    
     // Default postgres credentials if not provided
     const postgresUsername = data.postgres?.username || 'postgres';
     const postgresPassword = data.postgres?.password || this.generatePassword();
@@ -382,7 +396,10 @@ export class GitOpsProvisioningService {
         },
       },
       postgres: {
-        enabled: true,
+        // TigerData managed TimescaleDB (external database)
+        // Credentials synced from 1Password via OnePasswordItem CRD: sql-credentials-{namespace}
+        enabled: !usingTigerData,  // Disable embedded PostgreSQL if using TigerData
+        // Embedded PostgreSQL configuration (used only if TigerData not configured)
         image: {
           repository: 'postgres',
           tag: '16-alpine',
@@ -390,7 +407,7 @@ export class GitOpsProvisioningService {
         port: 5432,
         database: postgresDatabase,
         username: postgresUsername,
-        password: postgresPassword,
+        password: postgresPassword,  // Only used for embedded PostgreSQL
         persistence: {
           enabled: true,
           size: '10Gi',
@@ -495,6 +512,153 @@ export class GitOpsProvisioningService {
       await this.git.checkout(['-B', this.config.mainBranch, `origin/${this.config.mainBranch}`]);
       await this.git.reset(['--hard', `origin/${this.config.mainBranch}`]);
       await this.git.pull('origin', this.config.mainBranch);
+
+      // === STEP 1: Provision TigerData Database ===
+      console.log('\n' + '-'.repeat(80));
+      console.log('🏛️  STEP 1/4: PROVISION TIGERDATA DATABASE');
+      console.log('-'.repeat(80));
+      logger.info('Step 1: Provisioning TigerData database', { 
+        customerId: data.customerId, 
+        namespace: data.namespace 
+      });
+      
+      console.log(`🔄 Updating status: db_provisioning`);
+      await CustomerModel.updateDeploymentStatus(data.customerId, 'db_provisioning');
+      
+      let dbResult: TigerDataDatabase;
+      try {
+        console.log(`\n🚀 Creating TigerData service for namespace: ${data.namespace}`);
+        dbResult = await this.tigerDataService.provisionDatabase(data.namespace);
+        console.log(`✅ Database provisioned!`);
+        console.log(`   Service ID: ${dbResult.serviceId}`);
+        console.log(`   Host: ${dbResult.host}`);
+        console.log(`   Port: ${dbResult.port}`);
+        console.log(`   Database: ${dbResult.dbName}`);
+        console.log(`   Username: ${dbResult.username}`);
+        console.log(`   Status: ${dbResult.status}`);
+        logger.info('TigerData database provisioned', { 
+          serviceId: dbResult.serviceId,
+          host: dbResult.host 
+        });
+
+        console.log(`\n⏳ Waiting for database to become ready...`);
+        // Wait for database to become ready
+        await this.tigerDataService.waitUntilReady(dbResult.serviceId);
+        console.log(`✅ Database is ready!`);
+        logger.info('TigerData database is ready', { serviceId: dbResult.serviceId });
+
+        // Update customer record with DB details
+        console.log(`\n💾 Saving database details to customer record...`);
+        await CustomerModel.updateTigerDataDetails(data.customerId, {
+          db_service_id: dbResult.serviceId,
+          db_host: dbResult.host,
+          db_port: dbResult.port,
+          db_name: dbResult.dbName,
+          db_region: dbResult.region,
+          db_provisioned_at: new Date(),
+          db_api_response: dbResult.fullResponse,
+          db_initialized: false,
+          deployment_status: 'db_ready',
+        });
+        console.log(`✅ Database details saved!`);
+        console.log(`🔄 Status updated to: db_ready`);
+        console.log('-'.repeat(80));
+        
+        logger.info('TigerData details saved to database');
+      } catch (error: any) {
+        console.log(`\n❌ TigerData provisioning FAILED!`);
+        console.log(`   Error: ${error.message}`);
+        logger.error('TigerData provisioning failed', { 
+          error: error.message,
+          customerId: data.customerId 
+        });
+        
+        await CustomerModel.updateDeploymentStatus(data.customerId, 'failed', {
+          deploymentError: `TigerData provisioning failed: ${error.message}`,
+        });
+        
+        throw new Error(`TigerData provisioning failed: ${error.message}`);
+      }
+
+      // === STEP 2: Create 1Password Secrets ===
+      console.log('\n' + '-'.repeat(80));
+      console.log('🔐 STEP 2/4: CREATE 1PASSWORD SECRETS');
+      console.log('-'.repeat(80));
+      logger.info('Step 2: Creating 1Password secrets', { 
+        customerId: data.customerId,
+        namespace: data.namespace 
+      });
+      
+      console.log(`🔄 Updating status: secret_creating`);
+      await CustomerModel.updateDeploymentStatus(data.customerId, 'secret_creating');
+      
+      try {
+        console.log(`\n🔑 Creating 1Password item: sql-credentials-${data.namespace}`);
+        console.log(`   Host: ${dbResult.host}`);
+        console.log(`   Port: ${dbResult.port}`);
+        console.log(`   Username: ${dbResult.username}`);
+        console.log(`   Database: ${dbResult.dbName}`);
+        
+        const secretItemId = await this.onePasswordService.createSecretItem(data.namespace, {
+          host: dbResult.host,
+          port: dbResult.port,
+          username: dbResult.username,
+          password: dbResult.password,
+          database: dbResult.dbName,
+        });
+        
+        console.log(`✅ Secret created successfully!`);
+        console.log(`   Item ID: ${secretItemId}`);
+        logger.info('1Password secret created', { 
+          itemId: secretItemId,
+          namespace: data.namespace 
+        });
+
+        // Update customer record with secret details
+        console.log(`\n💾 Saving secret details to customer record...`);
+        await CustomerModel.updateSecretDetails(data.customerId, {
+          secret_item_id: secretItemId,
+          secret_created_at: new Date(),
+          deployment_status: 'secret_ready',
+        });
+        console.log(`✅ Secret details saved!`);
+        console.log(`🔄 Status updated to: secret_ready`);
+        console.log('-'.repeat(80));
+        
+        logger.info('1Password details saved to database');
+      } catch (error: any) {
+        console.log(`\n❌ 1Password secret creation FAILED!`);
+        console.log(`   Error: ${error.message}`);
+        logger.error('1Password secret creation failed', { 
+          error: error.message,
+          customerId: data.customerId 
+        });
+        
+        // Optionally cleanup TigerData database on secret creation failure
+        // await this.tigerDataService.deleteDatabase(dbResult.serviceId);
+        
+        await CustomerModel.updateDeploymentStatus(data.customerId, 'failed', {
+          deploymentError: `1Password secret creation failed: ${error.message}`,
+        });
+        
+        throw new Error(`1Password secret creation failed: ${error.message}`);
+      }
+
+      // Update data.postgres to use TigerData credentials
+      // Note: Password now comes from 1Password CRD, not values file
+      data.postgres = {
+        username: dbResult.username,
+        password: '', // Will be synced from 1Password via OnePasswordItem CRD
+        database: dbResult.dbName,
+      };
+
+      // === STEP 3: Generate Application Manifest ===
+      console.log('\n' + '-'.repeat(80));
+      console.log('📝 STEP 3/4: GENERATE GITOPS MANIFESTS');
+      console.log('-'.repeat(80));
+      logger.info('Step 3: Generating Argo CD Application manifest');
+      
+      await CustomerModel.updateDeploymentStatus(data.customerId, 'deploying');
 
       // 1. Generate Application manifest
       const applicationManifest = this.generateApplicationManifest(data);

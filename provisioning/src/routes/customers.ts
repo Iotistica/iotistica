@@ -467,6 +467,104 @@ router.get('/:id/deployment/status', async (req, res) => {
 });
 
 /**
+ * POST /api/customers/:id/retry-deployment
+ * Retry a failed deployment
+ * 
+ * This is specifically designed for handling deployment failures:
+ * - If TigerData DB already provisioned, skip DB provisioning step
+ * - Reset Argo CD retry counter
+ * - Re-enqueue deployment job with existing resources
+ * 
+ * Use cases:
+ * - Argo CD sync failed (after 3 retries)
+ * - 1Password secret creation failed
+ * - Transient network errors during deployment
+ */
+router.post('/:id/retry-deployment', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    console.log(`🔄 Deployment retry requested: ${id}`);
+
+    const customer = await CustomerModel.getById(id);
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    // Check if deployment actually failed
+    const failedStatuses = ['failed', 'deployment_failed'];
+    if (!failedStatuses.includes(customer.deployment_status || '')) {
+      return res.status(400).json({
+        error: 'Deployment not in failed state',
+        message: `Current status is '${customer.deployment_status}'. Retry is only available for failed deployments.`,
+        currentStatus: customer.deployment_status,
+      });
+    }
+
+    // Get subscription and regenerate license
+    const subscription = await SubscriptionModel.getByCustomerId(id);
+    if (!subscription) {
+      return res.status(400).json({
+        error: 'No active subscription',
+        message: 'Customer must have an active subscription to retry deployment',
+      });
+    }
+
+    // Generate fresh license
+    const license = await LicenseGenerator.generateLicense(customer, subscription);
+
+    console.log(`📝 Resetting deployment state for retry...`);
+
+    // Reset deployment error and Argo retry count
+    await CustomerModel.resetArgoRetry(id);
+    
+    // Determine starting status based on what's already provisioned
+    let startingStatus = 'db_provisioning';
+    if (customer.db_service_id) {
+      console.log(`✅ TigerData DB already provisioned (${customer.db_service_id}), skipping DB step`);
+      startingStatus = 'secret_ready'; // Start from Git commit step
+    }
+
+    // Update status to restart from appropriate step
+    await CustomerModel.updateDeploymentStatus(id, startingStatus as any, {
+      deploymentError: '', // Clear error message
+    });
+
+    // Re-enqueue deployment job
+    const job = await deploymentQueue.addDeploymentJob({
+      customerId: customer.customer_id,
+      email: customer.email,
+      companyName: customer.company_name || 'Unknown Company',
+      licenseKey: license,
+      namespace: customer.instance_namespace || undefined,
+      priority: 1, // High priority for retries
+      metadata: {
+        isRetry: true,
+        previousError: customer.deployment_error,
+        skipDatabase: !!customer.db_service_id, // Flag to skip DB if already exists
+      },
+    });
+
+    console.log(`✅ Deployment retry queued: ${job.id}`);
+
+    res.json({
+      message: 'Deployment retry queued successfully',
+      customerId: id,
+      jobId: job.id,
+      startingStatus,
+      skipDatabase: !!customer.db_service_id,
+      previousError: customer.deployment_error,
+      note: customer.db_service_id
+        ? 'Using existing TigerData database, will retry from secret creation onwards'
+        : 'Will provision new TigerData database',
+    });
+  } catch (error: any) {
+    console.error('Error retrying deployment:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * DELETE /api/customers/:id/deployment
  * Delete customer instance from Kubernetes
  */

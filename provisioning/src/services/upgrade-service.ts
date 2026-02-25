@@ -5,7 +5,6 @@ import * as fs from 'fs';
 import * as yaml from 'js-yaml';
 import { logger } from '../utils/logger';
 import { CustomerModel } from '../db/customer-model';
-import { k8sDeploymentService } from './k8s-deployment-service';
 
 const execAsync = promisify(exec);
 

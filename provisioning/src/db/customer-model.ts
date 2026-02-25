@@ -22,6 +22,21 @@ export interface Customer {
   instance_namespace?: string;
   deployed_at?: Date;
   deployment_error?: string;
+  // TigerData database provisioning fields
+  db_service_id?: string;
+  db_host?: string;
+  db_port?: number;
+  db_name?: string;
+  db_region?: string;
+  db_provisioned_at?: Date;
+  db_api_response?: any;
+  db_initialized?: boolean;
+  // 1Password secret management fields
+  secret_item_id?: string;
+  secret_created_at?: Date;
+  // Argo CD retry tracking fields
+  argo_retry_count?: number;
+  argo_last_retry_at?: Date;
   created_at: Date;
   updated_at: Date;
 }
@@ -213,7 +228,7 @@ export class CustomerModel {
    */
   static async updateDeploymentStatus(
     customerId: string,
-    status: 'pending' | 'provisioning' | 'ready' | 'failed',
+    status: 'pending' | 'db_provisioning' | 'db_ready' | 'secret_creating' | 'secret_ready' | 'provisioning' | 'deploying' | 'ready' | 'failed' | 'deployment_failed',
     data?: {
       instanceUrl?: string;
       instanceNamespace?: string;
@@ -251,6 +266,118 @@ export class CustomerModel {
     const result = await query<Customer>(
       `UPDATE customers SET ${fields.join(', ')} WHERE customer_id = $${paramIndex} RETURNING *`,
       values
+    );
+
+    return result.rows[0];
+  }
+
+  /**
+   * Update TigerData database provisioning details
+   */
+  static async updateTigerDataDetails(
+    customerId: string,
+    data: {
+      db_service_id: string;
+      db_host: string;
+      db_port: number;
+      db_name: string;
+      db_region: string;
+      db_provisioned_at: Date;
+      db_api_response: any;
+      db_initialized: boolean;
+      deployment_status: string;
+    }
+  ): Promise<Customer> {
+    const result = await query<Customer>(
+      `UPDATE customers 
+       SET db_service_id = $1, 
+           db_host = $2, 
+           db_port = $3, 
+           db_name = $4, 
+           db_region = $5, 
+           db_provisioned_at = $6, 
+           db_api_response = $7, 
+           db_initialized = $8, 
+           deployment_status = $9,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE customer_id = $10 
+       RETURNING *`,
+      [
+        data.db_service_id,
+        data.db_host,
+        data.db_port,
+        data.db_name,
+        data.db_region,
+        data.db_provisioned_at,
+        JSON.stringify(data.db_api_response),
+        data.db_initialized,
+        data.deployment_status,
+        customerId,
+      ]
+    );
+
+    return result.rows[0];
+  }
+
+  /**
+   * Update 1Password secret details
+   */
+  static async updateSecretDetails(
+    customerId: string,
+    data: {
+      secret_item_id: string;
+      secret_created_at: Date;
+      deployment_status: string;
+    }
+  ): Promise<Customer> {
+    const result = await query<Customer>(
+      `UPDATE customers 
+       SET secret_item_id = $1, 
+           secret_created_at = $2, 
+           deployment_status = $3,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE customer_id = $4 
+       RETURNING *`,
+      [
+        data.secret_item_id,
+        data.secret_created_at,
+        data.deployment_status,
+        customerId,
+      ]
+    );
+
+    return result.rows[0];
+  }
+
+  /**
+   * Increment Argo CD retry count
+   */
+  static async incrementArgoRetry(customerId: string): Promise<Customer> {
+    const result = await query<Customer>(
+      `UPDATE customers 
+       SET argo_retry_count = COALESCE(argo_retry_count, 0) + 1,
+           argo_last_retry_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE customer_id = $1 
+       RETURNING *`,
+      [customerId]
+    );
+
+    return result.rows[0];
+  }
+
+  /**
+   * Reset Argo CD retry count
+   */
+  static async resetArgoRetry(customerId: string): Promise<Customer> {
+    const result = await query<Customer>(
+      `UPDATE customers 
+       SET argo_retry_count = 0,
+           argo_last_retry_at = NULL,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE customer_id = $1 
+       RETURNING *`,
+      [customerId]
     );
 
     return result.rows[0];

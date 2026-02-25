@@ -1,11 +1,9 @@
 import { Job } from 'bull';
 import { deploymentQueue } from '../services/deployment-queue';
-import { k8sDeploymentService } from '../services/k8s-deployment-service';
 import { gitOpsProvisioningService } from '../services/gitops-provisioning-service';
 import { argoStatusService } from '../services/argo-status-service';
 import { CustomerModel } from '../db/customer-model';
 import { logger } from '../utils/logger';
-// import { upgradeService } from '../services/upgrade-service'; // Disabled - missing module
 
 interface DeploymentJobData {
   customerId: string;
@@ -82,22 +80,34 @@ export class DeploymentWorker {
   private async handleDeployment(job: Job<DeploymentJobData>) {
     const { customerId, email, companyName, licenseKey, namespace, plan, licensePublicKey, domain } = job.data;
 
-    logger.info('Processing deployment', { customerId, plan, gitOpsEnabled: gitOpsProvisioningService.isEnabled() });
+    console.log('\n' + '='.repeat(80));
+    console.log('🚀 STARTING DEPLOYMENT JOB');
+    console.log('='.repeat(80));
+    console.log(`📋 Job ID: ${job.id}`);
+    console.log(`👤 Customer ID: ${customerId}`);
+    console.log(`📧 Email: ${email}`);
+    console.log(`🏢 Company: ${companyName}`);
+    console.log(`📦 Plan: ${plan || 'starter'}`);
+    console.log(`🏷️  Namespace: ${namespace || 'auto-generated'}`);
+    console.log('='.repeat(80) + '\n');
+
+    logger.info('Processing deployment', { customerId, plan });
 
     try {
       // Update job progress: Starting
+      console.log('📊 Progress: 10% - Job started');
       await job.progress(10);
 
-      // Update customer status
-      await CustomerModel.updateDeploymentStatus(customerId, 'provisioning');
+      // Update customer status to db_provisioning (GitOps service will handle provisioning stages)
+      console.log('\n🔄 Updating customer status to: db_provisioning');
+      await CustomerModel.updateDeploymentStatus(customerId, 'db_provisioning');
 
-      // Update job progress: Namespace creation
+      // Update job progress: Database provisioning
+      console.log('📊 Progress: 20% - Starting database provisioning');
       await job.progress(20);
 
-      // Check if GitOps mode is enabled
-      if (gitOpsProvisioningService.isEnabled()) {
-        // GitOps flow: Write to Git, let Argo CD handle deployment
-        logger.info('Using GitOps provisioning', { customerId });
+      // GitOps flow: Provision DB, create secrets, write to Git, let Argo CD handle deployment
+      logger.info('Using GitOps provisioning with TigerData + 1Password', { customerId });
 
         // Sanitize client ID
         const clientId = this.sanitizeClientId(customerId);
@@ -106,9 +116,22 @@ export class DeploymentWorker {
         // Decode license to extract monitoring config and other settings
         const licenseData = this.decodeLicense(licenseKey);
 
-        await job.progress(40);
+        // GitOps service handles:
+        // - TigerData DB provisioning (status: db_provisioning -> db_ready)
+        // - 1Password secret creation (status: secret_creating -> secret_ready)
+        // - Git commit (status: deploying)
+        // Progress: 20% -> 40% (DB ready), 40% -> 50% (Secrets ready), 50% -> 60% (Git committed)
+        
+        console.log('📊 Progress: 30% - Preparing GitOps deployment');
+        await job.progress(30);
 
-        // Deploy via GitOps
+        console.log('\n🔧 Starting GitOps deployment flow...');
+        console.log('   ├─ TigerData DB provisioning');
+        console.log('   ├─ 1Password secret creation');
+        console.log('   ├─ Git manifest generation');
+        console.log('   └─ Argo CD synchronization\n');
+
+        // Deploy via GitOps (includes TigerData + 1Password provisioning)
         await gitOpsProvisioningService.deployClient({
           clientId,
           customerId,
@@ -122,37 +145,62 @@ export class DeploymentWorker {
           monitoring: licenseData.monitoring,
         });
 
-        logger.info('GitOps deployment committed and pushed', { customerId, clientId });
+        console.log('\n✅ GitOps deployment completed!');
+        console.log('   ✓ Database provisioned');
+        console.log('   ✓ Secrets created');
+        console.log('   ✓ Manifests committed to Git\n');
+        logger.info('GitOps deployment committed and pushed (DB + Secrets + Manifests)', { customerId, clientId });
 
+        console.log('📊 Progress: 60% - GitOps deployment complete');
         await job.progress(60);
 
         // Wait for Argo CD to sync and deploy (optional)
         const skipArgoCheck = process.env.SKIP_ARGOCD_STATUS_CHECK === 'true';
         
         if (skipArgoCheck) {
+          console.log('\n⏭️  Skipping Argo CD status check (SKIP_ARGOCD_STATUS_CHECK=true)');
           logger.info('Skipping Argo CD status check (SKIP_ARGOCD_STATUS_CHECK=true)', { clientId });
         } else {
+          console.log('\n⏳ Waiting for Argo CD to sync and deploy application...');
           logger.info('Waiting for Argo CD to deploy Application', { clientId });
           
-          const isReady = await argoStatusService.waitForApplicationReady(clientId);
+          console.log('📊 Progress: 80% - Monitoring Argo CD deployment');
+          await job.progress(80);
+          
+          // Pass customerId for retry tracking
+          const isReady = await argoStatusService.waitForApplicationReady(clientId, customerId);
 
           if (!isReady) {
             throw new Error('Argo CD deployment did not reach healthy state within timeout');
           }
         }
 
+        console.log('📊 Progress: 90% - Finalizing deployment');
         await job.progress(90);
 
         // Update customer deployment status to 'ready'
+        const instanceUrl = `https://${clientId}.${domain || process.env.BASE_DOMAIN || 'iotistic.com'}`;
+        console.log('\n🔄 Updating customer status to: ready');
+        console.log(`🌐 Instance URL: ${instanceUrl}`);
         await CustomerModel.updateDeploymentStatus(customerId, 'ready', {
           instanceNamespace: clientNamespace,
-          instanceUrl: `https://${clientId}.${domain || process.env.BASE_DOMAIN || 'iotistic.com'}`,
+          instanceUrl,
           deploymentError: '',
         });
 
+        console.log('📊 Progress: 100% - Deployment complete! 🎉');
         await job.progress(100);
 
-        logger.info('GitOps deployment completed', { customerId, clientId });
+        console.log('\n' + '='.repeat(80));
+        console.log('✅ DEPLOYMENT COMPLETED SUCCESSFULLY');
+        console.log('='.repeat(80));
+        console.log(`👤 Customer: ${email}`);
+        console.log(`🏷️  Namespace: ${clientNamespace}`);
+        console.log(`🌐 URL: ${instanceUrl}`);
+        console.log(`⏱️  Completed at: ${new Date().toISOString()}`);
+        console.log('='.repeat(80) + '\n');
+
+        logger.info('GitOps deployment completed successfully', { customerId, clientId });
 
         return {
           success: true,
@@ -162,39 +210,19 @@ export class DeploymentWorker {
           completedAt: new Date().toISOString(),
         };
 
-      } else {
-        // Legacy Helm-based deployment
-        logger.info('Using legacy Helm deployment', { customerId });
-
-        // Deploy to Kubernetes
-        const result = await k8sDeploymentService.deployCustomerInstance({
-          customerId,
-          email,
-          companyName,
-          licenseKey,
-          namespace,
-        });
-
-        if (!result.success) {
-          throw new Error(result.error || 'Deployment failed');
-        }
-
-        // Update job progress: Completed
-        await job.progress(100);
-
-        logger.info('Helm deployment completed', { customerId });
-
-        return {
-          success: true,
-          customerId,
-          instanceUrl: result.instanceUrl,
-          namespace: result.namespace,
-          completedAt: new Date().toISOString(),
-        };
-      }
-
     } catch (error: any) {
-      logger.error('Deployment failed', { customerId, error: error.message });
+      console.log('\n' + '='.repeat(80));
+      console.log('❌ DEPLOYMENT FAILED');
+      console.log('='.repeat(80));
+      console.log(`👤 Customer ID: ${customerId}`);
+      console.log(`❌ Error: ${error.message}`);
+      if (error.stack) {
+        console.log(`\n📋 Stack trace:`);
+        console.log(error.stack);
+      }
+      console.log('='.repeat(80) + '\n');
+
+      logger.error('Deployment failed', { customerId, error: error.message, stack: error.stack });
 
       // Update customer status to failed
       await CustomerModel.updateDeploymentStatus(
@@ -252,7 +280,7 @@ export class DeploymentWorker {
   private async handleUpdate(job: Job<UpdateJobData>) {
     const { customerId, licenseKey, namespace } = job.data;
 
-    logger.info('Processing update', { customerId, gitOpsEnabled: gitOpsProvisioningService.isEnabled() });
+    logger.info('Processing update', { customerId });
 
     try {
       await job.progress(10);
@@ -264,9 +292,8 @@ export class DeploymentWorker {
 
       await job.progress(20);
 
-      if (gitOpsProvisioningService.isEnabled()) {
-        // GitOps flow: Update client in Git
-        logger.info('Using GitOps update', { customerId });
+      // GitOps flow: Update client in Git
+      logger.info('Using GitOps update', { customerId });
 
         const clientId = this.sanitizeClientId(customerId);
         const licenseData = this.decodeLicense(licenseKey);
@@ -309,31 +336,6 @@ export class DeploymentWorker {
           completedAt: new Date().toISOString(),
         };
 
-      } else {
-        // Legacy Helm update
-        const result = await k8sDeploymentService.updateCustomerInstance({
-          customerId,
-          email: customer.email,
-          companyName: customer.company_name || 'Unknown',
-          licenseKey,
-          namespace,
-        });
-
-        if (!result.success) {
-          throw new Error(result.error || 'Update failed');
-        }
-
-        await job.progress(100);
-
-        logger.info('Helm update completed', { customerId });
-
-        return {
-          success: true,
-          customerId,
-          completedAt: new Date().toISOString(),
-        };
-      }
-
     } catch (error: any) {
       logger.error('Update failed', { customerId, error: error.message });
       throw error;
@@ -346,14 +348,13 @@ export class DeploymentWorker {
   private async handleDeletion(job: Job<DeleteJobData>) {
     const { customerId, namespace } = job.data;
 
-    logger.info('Processing deletion', { customerId, gitOpsEnabled: gitOpsProvisioningService.isEnabled() });
+    logger.info('Processing deletion', { customerId });
 
     try {
       await job.progress(10);
 
-      if (gitOpsProvisioningService.isEnabled()) {
-        // GitOps flow: Remove client from Git
-        logger.info('Using GitOps deletion', { customerId });
+      // GitOps flow: Remove client from Git
+      logger.info('Using GitOps deletion', { customerId });
 
         const clientId = this.sanitizeClientId(customerId);
 
@@ -374,25 +375,6 @@ export class DeploymentWorker {
           customerId,
           completedAt: new Date().toISOString(),
         };
-
-      } else {
-        // Legacy Helm deletion
-        const result = await k8sDeploymentService.deleteCustomerInstance(customerId);
-
-        if (!result.success) {
-          throw new Error(result.error || 'Deletion failed');
-        }
-
-        await job.progress(100);
-
-        logger.info('Helm deletion completed', { customerId });
-
-        return {
-          success: true,
-          customerId,
-          completedAt: new Date().toISOString(),
-        };
-      }
 
     } catch (error: any) {
       logger.error('Deletion failed', { customerId, error: error.message });

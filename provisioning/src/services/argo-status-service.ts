@@ -8,6 +8,7 @@
 
 import axios, { AxiosInstance } from 'axios';
 import { logger } from '../utils/logger';
+import { CustomerModel } from '../db/customer-model';
 
 interface ArgoApplication {
   metadata: {
@@ -133,12 +134,19 @@ export class ArgoStatusService {
    * - Max retries reached (failure)
    * - Application sync/health fails (failure)
    * 
+   * Implements smart retry logic:
+   * - Tracks retry count in database (argo_retry_count)
+   * - Auto-retry up to 3 times with exponential backoff
+   * - After 3 failures, marks as 'deployment_failed' for manual intervention
+   * 
    * @param clientId Client ID (without 'client-' prefix)
+   * @param customerId Customer ID for retry tracking
    * @returns true if ready, false if failed/timeout
    */
-  async waitForApplicationReady(clientId: string): Promise<boolean> {
+  async waitForApplicationReady(clientId: string, customerId?: string): Promise<boolean> {
     logger.info('Waiting for Application to be ready', {
       clientId,
+      customerId,
       maxRetries: this.config.maxRetries,
       retryDelayMs: this.config.retryDelayMs,
     });
@@ -178,6 +186,32 @@ export class ArgoStatusService {
             healthStatus,
             healthMessage: app.status.health.message,
           });
+          
+          // Increment retry count if customerId provided
+          if (customerId) {
+            const customer = await CustomerModel.incrementArgoRetry(customerId);
+            const retryCount = customer.argo_retry_count || 0;
+            
+            logger.info('Incremented Argo CD retry count', {
+              customerId,
+              retryCount,
+            });
+            
+            // Check if max retries reached (3 automatic retries)
+            if (retryCount >= 3) {
+              logger.error('Max Argo CD retries reached, marking as deployment_failed', {
+                customerId,
+                retryCount,
+              });
+              
+              await CustomerModel.updateDeploymentStatus(customerId, 'deployment_failed', {
+                deploymentError: `Argo CD sync failed after ${retryCount} attempts: ${app.status.health.message}`,
+              });
+              
+              return false;
+            }
+          }
+          
           return false;
         }
 
@@ -187,6 +221,32 @@ export class ArgoStatusService {
             operationPhase,
             operationMessage: app.status.operationState?.message,
           });
+          
+          // Increment retry count if customerId provided
+          if (customerId) {
+            const customer = await CustomerModel.incrementArgoRetry(customerId);
+            const retryCount = customer.argo_retry_count || 0;
+            
+            logger.info('Incremented Argo CD retry count', {
+              customerId,
+              retryCount,
+            });
+            
+            // Check if max retries reached
+            if (retryCount >= 3) {
+              logger.error('Max Argo CD retries reached, marking as deployment_failed', {
+                customerId,
+                retryCount,
+              });
+              
+              await CustomerModel.updateDeploymentStatus(customerId, 'deployment_failed', {
+                deploymentError: `Argo CD operation ${operationPhase} after ${retryCount} attempts: ${app.status.operationState?.message}`,
+              });
+              
+              return false;
+            }
+          }
+          
           return false;
         }
 
@@ -197,6 +257,15 @@ export class ArgoStatusService {
             attempt,
             revision: app.status.sync.revision,
           });
+          
+          // Reset retry count on success
+          if (customerId) {
+            await CustomerModel.resetArgoRetry(customerId);
+            logger.info('Reset Argo CD retry count after successful deployment', {
+              customerId,
+            });
+          }
+          
           return true;
         }
 
