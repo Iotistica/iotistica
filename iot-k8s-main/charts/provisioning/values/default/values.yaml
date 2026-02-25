@@ -3,7 +3,7 @@
 
 # Global configuration
 global:
-  namespace: provisioning
+  namespace: iotistica-provisioning
 
 # Service account configuration
 serviceAccount:
@@ -21,6 +21,10 @@ api:
   replicas: 1
   port: 3100
   serviceType: ClusterIP
+  
+  # External access configuration (Envoy Gateway)
+  tlsCommonName: "provisioning.iotistica.com"  # Domain for HTTPRoute (required for Stripe webhooks)
+  corsOrigins: "https://dashboard.iotistica.com,http://localhost:3000"
   
   # Secret references (stored in 1Password)
   postgres:

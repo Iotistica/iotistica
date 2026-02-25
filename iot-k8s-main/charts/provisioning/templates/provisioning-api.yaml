@@ -246,6 +246,10 @@ spec:
               value: "{{ .Values.deployment.helmChartPath }}"
             - name: HELM_VALUES_DIR
               value: "{{ .Values.deployment.helmValuesDir }}"
+            
+            # CORS configuration
+            - name: CORS_ORIGINS
+              value: {{ .Values.api.corsOrigins | quote }}
           
           livenessProbe:
             httpGet:
@@ -275,4 +279,26 @@ spec:
       volumes:
         - name: git-repos
           emptyDir: {}
+---
+# Envoy Gateway HTTPRoute for external access (Stripe webhooks, customer portal, etc.)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "provisioning.fullname" . }}-api-httproute
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "provisioning.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: iotistica-gateway
+      namespace: envoy-gateway-system
+  hostnames:
+    - {{ .Values.api.tlsCommonName }}
+  rules:
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: {{ include "provisioning.fullname" . }}-api
+          port: {{ .Values.api.port }}
+          weight: 1
 {{- end }}
