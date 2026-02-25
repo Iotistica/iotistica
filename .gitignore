@@ -38,6 +38,7 @@ dashboard/build/
 billing/dist/
 billing/keys/
 billing-exporter/dist/
+billing/keys/
 
 # TypeScript
 *.tsbuildinfo
