@@ -45,6 +45,11 @@ export interface LicenseData {
   };
   issuedAt: number;
   expiresAt: number; // License expiry (separate from subscription)
+  
+  // Standard JWT claims
+  exp?: number; // JWT expiration timestamp (seconds since epoch)
+  iat?: number; // JWT issued at timestamp
+  nbf?: number; // JWT not before timestamp
 }
 
 export class LicenseValidator {
@@ -140,7 +145,15 @@ export class LicenseValidator {
         algorithms: ['RS256'], // Asymmetric signing
       }) as LicenseData;
 
-      // Check license expiry
+      // SECURITY: Explicit expiry check (defense-in-depth)
+      // Check standard JWT 'exp' field first (do not rely solely on JWT library)
+      const now = Math.floor(Date.now() / 1000);
+      if (decoded.exp && now > decoded.exp) {
+        const daysExpired = Math.floor((now - decoded.exp) / 86400);
+        throw new Error(`License expired ${daysExpired} days ago (JWT exp: ${decoded.exp})`);
+      }
+
+      // Check custom expiresAt field (legacy/additional check)
       if (decoded.expiresAt && decoded.expiresAt < Date.now() / 1000) {
         throw new Error('License has expired');
       }

@@ -338,7 +338,8 @@ IOTISTIC_LICENSE_KEY=<JWT token>
 
 ### Multi-Tenant Settings
 ```yaml
-# Customer namespace: customer-{8-char-id}
+# Customer namespace: customer-{12-char-hash}
+# Example: customer-a3f5c8d9e2b1 (SHA256 hash of customer ID)
 # Helm chart: charts/customer-instance/
 # License JWT contains:
 {

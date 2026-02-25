@@ -4,6 +4,7 @@
  */
 
 import Stripe from 'stripe';
+import crypto from 'crypto';
 import { CustomerModel } from '../db/customer-model';
 import { SubscriptionModel } from '../db/subscription-model';
 import pool from '../db/connection';
@@ -258,11 +259,15 @@ export class StripeService {
           customerSubscription
         );
 
-        // Sanitize client ID (for GitOps)
-        const clientId = customer.customer_id.replace(/^cust_/, '').substring(0, 8);
-        const namespace = process.env.GITOPS_ENABLED === 'true' 
-          ? `client-${clientId}` 
-          : `customer-${customer.customer_id.substring(5, 13)}`;
+        // Hash customer_id to get 12-char client ID
+        // CRITICAL: Must match deployment-worker.ts sanitizeClientId() method
+        const clientId = crypto
+          .createHash('sha256')
+          .update(customer.customer_id)
+          .digest('hex')
+          .substring(0, 12);
+        
+        const namespace = `client-${clientId}`;
         
         await deploymentQueue.add('deploy-customer-stack', {
           customerId: customer.customer_id,
@@ -378,40 +383,92 @@ export class StripeService {
     await SubscriptionModel.cancel(customerId);
     console.log(`✅ Subscription canceled for customer ${customerId}`);
 
+    // Get customer to check deployment status
+    const customer = await CustomerModel.getById(customerId);
+    if (!customer) {
+      console.warn('Customer not found in database:', customerId);
+      return;
+    }
+
     // Queue K8s namespace cleanup job
     // Use dynamic import to avoid circular dependency
     const { deploymentQueue } = await import('./deployment-queue');
     
-    // Determine namespace based on GitOps mode
-    const clientId = customerId.replace(/^cust_/, '').substring(0, 8);
-    const namespace = process.env.GITOPS_ENABLED === 'true' 
-      ? `client-${clientId}` 
-      : `customer-${customerId.substring(5, 13)}`;
-    
-    await deploymentQueue.add('delete-customer-stack', {
-      customerId,
-      namespace,
-      reason: 'subscription_deleted',
-    }, {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 5000 },
-    });
+    // Hash customer_id to get 12-char client ID for namespace
+    const clientId = crypto
+      .createHash('sha256')
+      .update(customerId)
+      .digest('hex')
+      .substring(0, 12);
+    const namespace = `client-${clientId}`;
 
-    console.log(`🗑️  K8s cleanup job queued for customer ${customerId} (namespace: ${namespace})`);
+    // Check if provisioning is in progress
+    const provisioningStatuses = [
+      'provisioning', 'db_provisioning', 'db_ready',
+      'secret_creating', 'secret_ready',
+      'deploying', 'git_committed', 'argo_syncing'
+    ];
+    const isProvisioning = customer.deployment_status ? provisioningStatuses.includes(customer.deployment_status) : false;
 
-    // Update customer status (use direct query as these fields aren't in the update method)
-    const customer = await CustomerModel.getById(customerId);
-    if (customer) {
-      await pool.query(
-        `UPDATE customers 
-         SET is_active = false, 
-             deleted_at = NOW(),
-             updated_at = NOW()
-         WHERE customer_id = $1`,
-        [customerId]
-      );
-      console.log(`✅ Customer ${customerId} deactivated`);
+    if (isProvisioning) {
+      console.log(`⚠️  Provisioning in progress (status: ${customer.deployment_status})`);
+      
+      // Cancel any pending (waiting/delayed) deployment jobs
+      const cancelledCount = await deploymentQueue.cancelPendingDeploymentJobs(customerId);
+      if (cancelledCount > 0) {
+        console.log(`🚫 Cancelled ${cancelledCount} pending deployment job(s)`);
+      }
+
+      // Check if there are active jobs
+      const hasActiveJobs = await deploymentQueue.hasActiveDeploymentJobs(customerId);
+      if (hasActiveJobs) {
+        console.log(`⏳ Active deployment job detected - deletion will wait for completion`);
+      }
+
+      // Update customer status to 'cancelled' to signal deployment to abort
+      await CustomerModel.updateDeploymentStatus(customerId, 'cancelled');
+      console.log(`✅ Customer status updated to 'cancelled'`);
+
+      // Queue deletion with delay to allow active jobs to complete/abort
+      // Deletion is idempotent, so it will clean up whatever resources were created
+      const delayMs = hasActiveJobs ? 2 * 60 * 1000 : 10 * 1000; // 2 min if active, 10s otherwise
+      await deploymentQueue.add('delete-customer-stack', {
+        customerId,
+        namespace,
+        reason: 'subscription_cancelled_during_provisioning',
+      }, {
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 5000 },
+        delay: delayMs, // Delay to allow provisioning to complete/abort
+      });
+
+      console.log(`🗑️  Delayed deletion job queued (${delayMs/1000}s delay) - will clean up after provisioning completes`);
+    } else {
+      // Customer is ready, failed, or already deleted - proceed with immediate deletion
+      console.log(`✅ Customer status: ${customer.deployment_status} - proceeding with immediate deletion`);
+      
+      await deploymentQueue.add('delete-customer-stack', {
+        customerId,
+        namespace,
+        reason: 'subscription_deleted',
+      }, {
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 5000 },
+      });
+
+      console.log(`🗑️  K8s cleanup job queued for customer ${customerId} (namespace: ${namespace})`);
     }
+
+    // Update customer database record
+    await pool.query(
+      `UPDATE customers 
+       SET is_active = false, 
+           deleted_at = NOW(),
+           updated_at = NOW()
+       WHERE customer_id = $1`,
+      [customerId]
+    );
+    console.log(`✅ Customer ${customerId} deactivated`);
   }
 
   /**

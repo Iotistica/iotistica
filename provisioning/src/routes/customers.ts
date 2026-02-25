@@ -8,7 +8,6 @@ import { CustomerModel } from '../db/customer-model';
 import { SubscriptionModel } from '../db/subscription-model';
 import { LicenseGenerator } from '../services/license-generator';
 import { LicenseHistoryModel } from '../db/license-history-model';
-import { k8sDeploymentService } from '../services/k8s-deployment-service';
 import { deploymentQueue } from '../services/deployment-queue';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
@@ -200,7 +199,7 @@ router.post('/signup', async (req, res) => {
         job_id: job.id,
         message: 'Your instance deployment is queued and will begin shortly',
         estimated_time: '2-5 minutes',
-        instance_url: `https://${customer.customer_id}.${process.env.BASE_DOMAIN || 'iotistic.ca'}`,
+        instance_url: `https://${customer.customer_id}.${process.env.BASE_DOMAIN || 'iotistica.com'}`,
         check_status_url: `/api/queue/jobs/${job.id}`,
       },
       next_steps: [
@@ -430,15 +429,32 @@ router.post('/:id/deploy', async (req, res) => {
     // Generate fresh license
     const license = await LicenseGenerator.generateLicense(customer, subscription);
 
-    // Trigger deployment
-    const result = await k8sDeploymentService.deployCustomerInstance({
+    // Update deployment status
+    await CustomerModel.updateDeploymentStatus(customer.customer_id, 'pending');
+
+    // Queue deployment job
+    const job = await deploymentQueue.addDeploymentJob({
       customerId: customer.customer_id,
       email: customer.email,
       companyName: customer.company_name || 'Unknown Company',
       licenseKey: license,
+      priority: subscription.plan === 'enterprise' ? 1 : 
+               subscription.plan === 'professional' ? 2 : 3,
+      metadata: {
+        manualTrigger: true,
+        plan: subscription.plan,
+      },
     });
 
-    res.json(result);
+    console.log(`🚀 Deployment job queued: ${job.id} for customer ${customer.customer_id}`);
+
+    res.json({
+      message: 'Deployment job queued successfully',
+      customerId: customer.customer_id,
+      jobId: job.id,
+      status: 'pending',
+      check_status_url: `/api/queue/jobs/${job.id}`,
+    });
   } catch (error: any) {
     console.error('Error triggering deployment:', error);
     res.status(500).json({ error: error.message });
@@ -458,8 +474,24 @@ router.get('/:id/deployment/status', async (req, res) => {
       return res.status(404).json({ error: 'Customer not found' });
     }
 
-    const status = await k8sDeploymentService.getDeploymentStatus(id);
-    res.json(status);
+    res.json({
+      customerId: customer.customer_id,
+      deployment_status: customer.deployment_status,
+      instance_url: customer.instance_url,
+      instance_namespace: customer.instance_namespace,
+      deployed_at: customer.deployed_at,
+      deployment_error: customer.deployment_error,
+      last_provisioning_step: customer.last_provisioning_step,
+      provisioning_started_at: customer.provisioning_started_at,
+      provisioning_completed_at: customer.provisioning_completed_at,
+      database: {
+        service_id: customer.db_service_id,
+        host: customer.db_host,
+        port: customer.db_port,
+        name: customer.db_name,
+        provisioned_at: customer.db_provisioned_at,
+      },
+    });
   } catch (error: any) {
     console.error('Error getting deployment status:', error);
     res.status(500).json({ error: error.message });
@@ -577,8 +609,29 @@ router.delete('/:id/deployment', async (req, res) => {
       return res.status(404).json({ error: 'Customer not found' });
     }
 
-    const result = await k8sDeploymentService.deleteCustomerInstance(id);
-    res.json(result);
+    // Ensure customer has a namespace to delete
+    if (!customer.instance_namespace) {
+      return res.status(400).json({ 
+        error: 'No deployment found',
+        message: 'Customer has no Kubernetes namespace to delete'
+      });
+    }
+
+    // Queue deletion job
+    const job = await deploymentQueue.addDeleteJob({
+      customerId: id,
+      namespace: customer.instance_namespace
+    });
+
+    console.log(`🗑️  Deletion job queued: ${job.id} for namespace ${customer.instance_namespace}`);
+
+    res.json({
+      message: 'Deployment deletion queued successfully',
+      customerId: id,
+      namespace: customer.instance_namespace,
+      jobId: job.id,
+      check_status_url: `/api/queue/jobs/${job.id}`,
+    });
   } catch (error: any) {
     console.error('Error deleting deployment:', error);
     res.status(500).json({ error: error.message });

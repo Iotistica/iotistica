@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as yaml from 'js-yaml';
+import crypto from 'crypto';
 import { logger } from '../utils/logger';
 import { CustomerModel } from '../db/customer-model';
 
@@ -189,7 +190,12 @@ export class UpgradeService {
     options: UpgradeOptions
   ): string {
     const namespace = customer.instance_namespace;
-    const shortId = customer.customer_id.replace(/^cust_/, '').substring(0, 8);
+    // Hash customer_id to get 12-char client ID (same as deployment-worker.ts)
+    const shortId = crypto
+      .createHash('sha256')
+      .update(customer.customer_id)
+      .digest('hex')
+      .substring(0, 12);
     
     // Get LICENSE_PUBLIC_KEY from environment
     const licensePublicKey = process.env.LICENSE_PUBLIC_KEY || '';

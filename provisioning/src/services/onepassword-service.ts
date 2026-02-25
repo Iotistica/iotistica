@@ -19,6 +19,17 @@ export interface DatabaseCredentials {
   database: string;
 }
 
+export interface SecretItem {
+  title: string;
+  category: ItemCategory;
+  fields: Array<{
+    id: string;
+    title: string;
+    fieldType: ItemFieldType;
+    value: string;
+  }>;
+}
+
 export class OnePasswordError extends Error {
   constructor(
     message: string,
@@ -30,12 +41,17 @@ export class OnePasswordError extends Error {
 }
 
 export class OnePasswordService {
-  private clientPromise: Promise<Client>;
+  private clientPromise?: Promise<Client>;
   private vaultId: string;
   private simulateMode: boolean;
 
   constructor(config?: Partial<OnePasswordConfig>) {
+    console.log('[OnePasswordService] Constructor called');
+    console.log('[OnePasswordService] SIMULATE_ONEPASSWORD env var:', process.env.SIMULATE_ONEPASSWORD);
+    console.log('[OnePasswordService] All env keys:', Object.keys(process.env).filter(k => k.includes('SIMULATE') || k.includes('ONEPASSWORD')));
+    
     this.simulateMode = process.env.SIMULATE_ONEPASSWORD === 'true';
+    console.log('[OnePasswordService] simulateMode calculated as:', this.simulateMode);
     
     const serviceAccountToken = config?.serviceAccountToken || 
       process.env.ONEPASSWORD_CONNECT_TOKEN || 
@@ -44,6 +60,13 @@ export class OnePasswordService {
     
     this.vaultId = config?.vaultId || process.env.ONEPASSWORD_VAULT_ID || 'IOT-CLIENTS';
 
+    // Skip initialization and validation if in simulation mode
+    if (this.simulateMode) {
+      console.log('[OnePasswordService] ⚠️  SIMULATION MODE ENABLED - Skipping 1Password client initialization');
+      // Don't create clientPromise in simulation mode
+      return;
+    }
+
     if (!serviceAccountToken) {
       throw new OnePasswordError('1Password service account token is required');
     }
@@ -51,7 +74,7 @@ export class OnePasswordService {
     try {
       this.clientPromise = createClient({
         auth: serviceAccountToken,
-        integrationName: 'Iotistic Provisioning',
+        integrationName: 'Iotistica Provisioning',
         integrationVersion: '1.0.0',
       });
       console.log('[OnePasswordService] Client initialization started');
@@ -64,6 +87,9 @@ export class OnePasswordService {
   }
 
   private async getClient(): Promise<Client> {
+    if (!this.clientPromise) {
+      throw new OnePasswordError('1Password client not initialized (simulation mode enabled?)');
+    }
     return await this.clientPromise;
   }
 
@@ -104,7 +130,7 @@ export class OnePasswordService {
         vaultId: this.vaultId,
         title: itemTitle,
         category: ItemCategory.Database,
-        tags: ['iotistic', 'database', 'customer', namespace],
+        tags: [namespace],
         fields: [
           {
             id: 'host',
@@ -209,11 +235,134 @@ export class OnePasswordService {
   }
 
   /**
+   * Create a generic secret item (flexible for any secret type)
+   * @param clientId - Client identifier
+   * @param secretType - Type of secret (sql, redis, mqtt, openai, api-jwt)
+   * @param fields - Key-value pairs for the secret fields
+   * @returns Item ID
+   */
+  async createGenericSecretItem(
+    clientId: string,
+    secretType: string,
+    fields: Record<string, string>
+  ): Promise<string> {
+    const itemTitle = `${secretType}-credentials-${clientId}`;
+    console.log(`[OnePasswordService] Creating ${secretType} secret: ${itemTitle}`);
+
+    // Simulation mode - don't actually create
+    if (this.simulateMode) {
+      const mockItemId = `mock-1pass-${secretType}-${clientId}-${Date.now()}`;
+      console.log(`[OnePasswordService] ⚠️  SIMULATION MODE - Mock item: ${mockItemId}`);
+      return mockItemId;
+    }
+
+    try {
+      const client = await this.getClient();
+      
+      // Check if item already exists
+      const existingItem = await this.getItemByTitle(itemTitle);
+      if (existingItem) {
+        console.log(`[OnePasswordService] Item exists, updating: ${existingItem.id}`);
+        await this.updateGenericItem(existingItem.id, fields);
+        return existingItem.id;
+      }
+
+      // Determine category based on secret type
+      const category = secretType === 'sql' ? ItemCategory.Database : ItemCategory.Password;
+
+      // Convert fields to 1Password field format
+      const itemFields = Object.entries(fields).map(([key, value]) => ({
+        id: key,
+        title: key.charAt(0).toUpperCase() + key.slice(1), // Capitalize first letter
+        fieldType: key.includes('password') || key.includes('secret') || key.includes('key')
+          ? ItemFieldType.Concealed
+          : ItemFieldType.Text,
+        value: value || 'PLACEHOLDER', // Use placeholder if value is empty
+      }));
+
+      // Create new item
+      const item = await client.items.create({
+        vaultId: this.vaultId,
+        title: itemTitle,
+        category,
+        tags: [`client-${clientId}`, secretType],
+        fields: itemFields,
+      });
+
+      console.log(`[OnePasswordService] ✅ ${secretType} secret created: ${item.id}`);
+      return item.id;
+    } catch (error) {
+      console.error(`[OnePasswordService] Failed to create ${secretType} secret:`, error);
+      throw new OnePasswordError(`Failed to create ${secretType} secret: ${error}`, error);
+    }
+  }
+
+  /**
+   * Update a generic secret item
+   * @param itemId - 1Password item ID
+   * @param fields - New field values
+   */
+  async updateGenericItem(itemId: string, fields: Record<string, string>): Promise<void> {
+    console.log(`[OnePasswordService] Updating item: ${itemId}`);
+
+    // Simulation mode - don't actually update
+    if (this.simulateMode) {
+      console.log(`[OnePasswordService] ⚠️  SIMULATION MODE - Skipping update`);
+      return;
+    }
+
+    try {
+      const client = await this.getClient();
+      const currentItem = await client.items.get(this.vaultId, itemId);
+
+      // Update field values
+      const updatedFields = currentItem.fields.map((field) => {
+        if (fields[field.id]) {
+          return { ...field, value: fields[field.id] };
+        }
+        return field;
+      });
+
+      // Add new fields if they don't exist
+      Object.entries(fields).forEach(([key, value]) => {
+        const fieldExists = currentItem.fields.some((f) => f.id === key);
+        if (!fieldExists) {
+          updatedFields.push({
+            id: key,
+            title: key.charAt(0).toUpperCase() + key.slice(1),
+            fieldType: key.includes('password') || key.includes('secret') || key.includes('key')
+              ? ItemFieldType.Concealed
+              : ItemFieldType.Text,
+            value,
+          });
+        }
+      });
+
+      // Put updated item
+      await client.items.put({
+        ...currentItem,
+        fields: updatedFields,
+      });
+
+      console.log(`[OnePasswordService] ✅ Item updated: ${itemId}`);
+    } catch (error) {
+      console.error(`[OnePasswordService] Failed to update item:`, error);
+      throw new OnePasswordError(`Failed to update item: ${error}`, error);
+    }
+  }
+
+  /**
    * Delete a secret item
    * @param itemId - 1Password item ID
    */
   async deleteItem(itemId: string): Promise<void> {
     console.log(`[OnePasswordService] Deleting item: ${itemId}`);
+
+    // Simulation mode - don't actually delete
+    if (this.simulateMode) {
+      console.log(`[OnePasswordService] ⚠️  SIMULATION MODE - Not actually deleting 1Password item: ${itemId}`);
+      return;
+    }
 
     try {
       const client = await this.getClient();

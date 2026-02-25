@@ -7,6 +7,7 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
+import https from 'https';
 import { logger } from '../utils/logger';
 import { CustomerModel } from '../db/customer-model';
 
@@ -69,7 +70,7 @@ export class ArgoStatusService {
       // Allow self-signed certificates for dev/test environments
       httpsAgent: process.env.NODE_ENV === 'production' 
         ? undefined 
-        : { rejectUnauthorized: false },
+        : new https.Agent({ rejectUnauthorized: false }),
     });
 
     if (!this.config.token) {
@@ -199,12 +200,12 @@ export class ArgoStatusService {
             
             // Check if max retries reached (3 automatic retries)
             if (retryCount >= 3) {
-              logger.error('Max Argo CD retries reached, marking as deployment_failed', {
+              logger.error('Max Argo CD retries reached, marking as argo_failed', {
                 customerId,
                 retryCount,
               });
               
-              await CustomerModel.updateDeploymentStatus(customerId, 'deployment_failed', {
+              await CustomerModel.updateDeploymentStatus(customerId, 'argo_failed', {
                 deploymentError: `Argo CD sync failed after ${retryCount} attempts: ${app.status.health.message}`,
               });
               
@@ -234,12 +235,12 @@ export class ArgoStatusService {
             
             // Check if max retries reached
             if (retryCount >= 3) {
-              logger.error('Max Argo CD retries reached, marking as deployment_failed', {
+              logger.error('Max Argo CD retries reached, marking as argo_failed', {
                 customerId,
                 retryCount,
               });
               
-              await CustomerModel.updateDeploymentStatus(customerId, 'deployment_failed', {
+              await CustomerModel.updateDeploymentStatus(customerId, 'argo_failed', {
                 deploymentError: `Argo CD operation ${operationPhase} after ${retryCount} attempts: ${app.status.operationState?.message}`,
               });
               
@@ -284,16 +285,33 @@ export class ArgoStatusService {
         }
 
       } catch (error: any) {
-        logger.error('Error checking Application status', {
-          clientId,
-          attempt,
-          error: error.message,
-        });
-
-        // Don't retry on auth errors
-        if (error.response?.status === 401 || error.response?.status === 403) {
-          logger.error('Authentication failed - check ARGOCD_TOKEN');
+        const status = error.response?.status;
+        
+        // Only fail immediately on 401 (invalid token)
+        if (status === 401) {
+          logger.error('Authentication failed - invalid ARGOCD_TOKEN', {
+            clientId,
+            status,
+          });
           return false;
+        }
+        
+        // 403 can mean application doesn't exist yet (Argo CD security feature)
+        // Treat it like 404 and keep retrying
+        if (status === 403 || status === 404) {
+          logger.warn('Application not found or not accessible yet, retrying...', {
+            clientId,
+            attempt,
+            status,
+            maxRetries: this.config.maxRetries,
+          });
+        } else {
+          logger.error('Error checking Application status', {
+            clientId,
+            attempt,
+            error: error.message,
+            status,
+          });
         }
 
         // Wait before retry

@@ -68,6 +68,14 @@ export class TigerDataService {
       defaultPlan: config?.defaultPlan || process.env.TIGERDATA_DEFAULT_PLAN || 'dev',
     };
 
+    // Skip validation and client initialization if in simulation mode
+    if (this.simulateMode) {
+      console.log('[TigerDataService] ⚠️  SIMULATION MODE ENABLED - Skipping API validation');
+      // Create a dummy client that won't be used
+      this.client = {} as AxiosInstance;
+      return;
+    }
+
     if (!this.config.accessKey || !this.config.secretKey) {
       throw new TigerDataProvisioningError('TigerData access key and secret key are required');
     }

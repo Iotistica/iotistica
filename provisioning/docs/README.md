@@ -182,7 +182,7 @@ LICENSE_PUBLIC_KEY_PATH=./keys/public-key.pem
 DEFAULT_TRIAL_DAYS=14
 
 # Kubernetes deployment
-BASE_DOMAIN=iotistic.ca
+BASE_DOMAIN=iotistica.com
 HELM_CHART_PATH=/app/charts/customer-instance
 SIMULATE_K8S_DEPLOYMENT=true  # For local testing
 ```

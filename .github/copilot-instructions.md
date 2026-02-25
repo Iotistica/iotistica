@@ -40,8 +40,10 @@ This codebase supports **TWO DISTINCT ARCHITECTURES** - understand which you're 
 - `billing/src/services/license-generator.ts` - RS256 JWT signing
 - `api/src/middleware/license-validator.ts` - JWT verification
 
-**Namespace Convention**: `customer-{8-char-id}` (e.g., `customer-dc5fec42`)
-- Sanitized from `cust_dc5fec42901a...` to fit K8s 63-char limit
+**Namespace Convention**: `customer-{12-char-hash}` (e.g., `customer-a3f5c8d9e2b1`)
+- SHA256 hash of Stripe customer ID to prevent collisions
+- Deterministic: Same customer ID always produces same namespace
+- Security: 12 hex chars = 48 bits = ~281 trillion combinations
 - Each namespace gets: API, Dashboard, PostgreSQL (dedicated), Mosquitto, Redis, Billing Exporter
 - Prometheus: Shared (Starter/Pro) or Dedicated (Enterprise)
 

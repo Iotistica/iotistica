@@ -1,7 +1,7 @@
 import Bull, { Queue, Job, JobOptions } from 'bull';
 import { EventEmitter } from 'events';
 
-interface DeploymentJobData {
+export interface DeploymentJobData {
   customerId: string;
   email: string;
   companyName: string;
@@ -9,17 +9,28 @@ interface DeploymentJobData {
   namespace?: string;
   priority?: number;
   metadata?: Record<string, any>;
+  // GitOps-specific fields
+  plan?: 'starter' | 'professional' | 'enterprise';
+  licensePublicKey?: string;
+  domain?: string;
 }
 
-interface UpdateJobData {
+export interface UpdateJobData {
   customerId: string;
   licenseKey: string;
   namespace: string;
 }
 
-interface DeleteJobData {
+export interface DeleteJobData {
   customerId: string;
   namespace: string;
+}
+
+export interface MonitorArgoJobData {
+  customerId: string;
+  clientId: string;
+  namespace: string;
+  instanceUrl: string;
 }
 
 export class DeploymentQueue extends EventEmitter {
@@ -120,6 +131,34 @@ export class DeploymentQueue extends EventEmitter {
   }
 
   /**
+   * Add Argo CD monitoring job to queue
+   * This runs separately from deployment to avoid blocking workers
+   * Concurrency: 5 (independent of deployment workers)
+   */
+  async addMonitorArgoJob(
+    data: MonitorArgoJobData,
+    options?: JobOptions
+  ): Promise<Job<MonitorArgoJobData>> {
+    const job = await this.queue.add(
+      'monitor-argo',
+      data,
+      {
+        priority: 4, // Lower priority than deployments
+        jobId: `monitor-${data.customerId}-${Date.now()}`,
+        attempts: 3, // Retry monitoring up to 3 times
+        backoff: {
+          type: 'exponential',
+          delay: 120000, // 2 min between retries
+        },
+        ...options,
+      }
+    );
+
+    console.log(`👁️  Argo monitoring job queued: ${job.id} for customer ${data.customerId}`);
+    return job;
+  }
+
+  /**
    * Add a generic job to the queue (for upgrades, etc.)
    */
   async add(
@@ -174,6 +213,42 @@ export class DeploymentQueue extends EventEmitter {
       delayed,
       total: waiting + active + completed + failed + delayed,
     };
+  }
+
+  /**
+   * Cancel pending deployment/update jobs for a customer
+   * (Remove waiting/delayed jobs, but cannot stop actively processing jobs)
+   */
+  async cancelPendingDeploymentJobs(customerId: string): Promise<number> {
+    const [waiting, delayed] = await Promise.all([
+      this.queue.getWaiting(),
+      this.queue.getDelayed(),
+    ]);
+
+    const pendingJobs = [...waiting, ...delayed].filter(job => 
+      job.data.customerId === customerId &&
+      (job.name === 'deploy-customer-stack' || job.name === 'update-customer-stack')
+    );
+
+    let cancelledCount = 0;
+    for (const job of pendingJobs) {
+      await job.remove();
+      cancelledCount++;
+      console.log(`🚫 Cancelled pending job: ${job.name} (${job.id})`);
+    }
+
+    return cancelledCount;
+  }
+
+  /**
+   * Check if customer has active deployment jobs
+   */
+  async hasActiveDeploymentJobs(customerId: string): Promise<boolean> {
+    const activeJobs = await this.queue.getActive();
+    return activeJobs.some(job => 
+      job.data.customerId === customerId &&
+      (job.name === 'deploy-customer-stack' || job.name === 'update-customer-stack')
+    );
   }
 
   /**

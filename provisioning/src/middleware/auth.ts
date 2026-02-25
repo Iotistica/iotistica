@@ -28,7 +28,7 @@ export async function authenticateCustomer(
 
   try {
     // Extract customer ID from API key
-    // Format: cust_<id>_<secret>
+    // Format: <customer_id>_<secret>
     const customerId = extractCustomerIdFromApiKey(apiKey);
 
     if (!customerId || !(await verifyApiKey(apiKey))) {
@@ -79,12 +79,13 @@ export function authenticateAdmin(
  * Extract customer ID from API key
  */
 function extractCustomerIdFromApiKey(apiKey: string): string | null {
-  // Format: cust_abc123_secret456
-  const parts = apiKey.split('_');
-  if (parts.length >= 3 && parts[0] === 'cust') {
-    return `${parts[0]}_${parts[1]}`;
+  // Format: <customer_id>_<secret>
+  // Extract everything before the last underscore
+  const lastUnderscoreIndex = apiKey.lastIndexOf('_');
+  if (lastUnderscoreIndex === -1) {
+    return null;
   }
-  return null;
+  return apiKey.substring(0, lastUnderscoreIndex);
 }
 
 /**

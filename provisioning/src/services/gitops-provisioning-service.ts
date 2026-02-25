@@ -16,20 +16,22 @@ import simpleGit, { SimpleGit } from 'simple-git';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
+import crypto from 'crypto';
 import { logger } from '../utils/logger';
 import { TigerDataService, TigerDataDatabase } from './tigerdata-service';
 import { OnePasswordService } from './onepassword-service';
 import { CustomerModel } from '../db/customer-model';
+import { SecretBuilder } from './secret-builder';
 
 interface ClientDeploymentData {
-  clientId: string;           // Sanitized: dc5fec42
-  customerId: string;         // Original: cust_dc5fec42901a...
+  clientId: string;           // Sanitized: dc5fec42901a (SHA256 hash)
+  customerId: string;         // Internal ID: 47d48f27e0774d6a9f89a1c1dab9870a
   email: string;
   companyName: string;
   plan: 'starter' | 'professional' | 'enterprise';
   licenseKey: string;         // JWT token
   licensePublicKey: string;   // RSA public key
-  namespace: string;          // client-dc5fec42
+  namespace: string;          // client-dc5fec42901a
   domain?: string;            // iotistica.com
   
   // Monitoring configuration (from license JWT)
@@ -205,10 +207,26 @@ export class GitOpsProvisioningService {
 
   /**
    * Sanitize customer ID for use as client ID
-   * Example: cust_dc5fec42901a... -> dc5fec42
+   * Uses SHA256 hash to prevent namespace collisions (critical for multi-tenant SaaS)
+   * 
+   * @param customerId - Internal customer ID (e.g., 47d48f27e0774d6a9f89a1c1dab9870a)
+   * @returns 12-character hex hash (e.g., 3f558f4667c9)
+   * 
+   * Security: SHA256 ensures uniqueness across millions of customers
+   * 12 hex chars = 48 bits = ~281 trillion combinations
+   * 
+   * Backwards compatibility: Strips cust_ prefix if present for old customers
+   * 
+   * IMPORTANT: This MUST match deployment-worker.ts sanitizeClientId() method
    */
   private sanitizeClientId(customerId: string): string {
-    return customerId.replace(/^cust_/, '').substring(0, 8);
+    // Strip cust_ prefix if present (backwards compatibility)
+    const cleanId = customerId.replace(/^cust_/, '');
+    return crypto
+      .createHash('sha256')
+      .update(cleanId)
+      .digest('hex')
+      .substring(0, 12);
   }
 
   /**
@@ -573,18 +591,18 @@ export class GitOpsProvisioningService {
           customerId: data.customerId 
         });
         
-        await CustomerModel.updateDeploymentStatus(data.customerId, 'failed', {
+        await CustomerModel.updateDeploymentStatus(data.customerId, 'failed_db', {
           deploymentError: `TigerData provisioning failed: ${error.message}`,
         });
         
         throw new Error(`TigerData provisioning failed: ${error.message}`);
       }
 
-      // === STEP 2: Create 1Password Secrets ===
+      // === STEP 2: Build and Create Secret Bundle (Pre-DB) ===
       console.log('\n' + '-'.repeat(80));
-      console.log('🔐 STEP 2/4: CREATE 1PASSWORD SECRETS');
+      console.log('🔐 STEP 2/4: CREATE SECRET BUNDLE (SQL PLACEHOLDER)');
       console.log('-'.repeat(80));
-      logger.info('Step 2: Creating 1Password secrets', { 
+      logger.info('Step 2: Creating secret bundle', { 
         customerId: data.customerId,
         namespace: data.namespace 
       });
@@ -592,20 +610,83 @@ export class GitOpsProvisioningService {
       console.log(`🔄 Updating status: secret_creating`);
       await CustomerModel.updateDeploymentStatus(data.customerId, 'secret_creating');
       
+      let secretItemIds: Record<string, string> = {};
+      
       try {
-        console.log(`\n🔑 Creating 1Password item: sql-credentials-${data.namespace}`);
-        console.log(`   Host: ${dbResult.host}`);
-        console.log(`   Port: ${dbResult.port}`);
-        console.log(`   Username: ${dbResult.username}`);
-        console.log(`   Database: ${dbResult.dbName}`);
+        // Build all app secrets using templates
+        console.log(`\n🔧 Pre-generating app secrets for client: ${data.clientId}`);
+        const secretBuilder = new SecretBuilder(data.clientId).preGenerate([
+          'redis',
+          'mqtt',
+          'openai',
+          'api-jwt',
+          'sql'   // SQL with PENDING placeholders
+        ]);
         
-        const secretItemId = await this.onePasswordService.createSecretItem(data.namespace, {
+        let allSecrets = secretBuilder.build();
+        
+        console.log(`✅ Secrets pre-generated from templates:`);
+        console.log(`   ├─ redis (host, password, port_ext, port)`);
+        console.log(`   ├─ mqtt (username, password)`);
+        console.log(`   ├─ openai (key)`);
+        console.log(`   ├─ api-jwt (secret)`);
+        console.log(`   └─ sql (PENDING placeholders)`);
+        
+        // Create separate 1Password items for each component
+        console.log(`\n🔑 Creating 1Password secret bundle...`);
+        
+        const apps = ['sql', 'redis', 'mqtt', 'openai', 'api-jwt'];
+        for (let i = 0; i < apps.length; i++) {
+          const app = apps[i];
+          const appSecrets = allSecrets[app];
+          
+          if (!appSecrets) {
+            console.warn(`   ⚠️  No secrets generated for: ${app}`);
+            continue;
+          }
+          
+          const isLast = i === apps.length - 1;
+          const prefix = isLast ? '   └─' : '   ├─';
+          
+          console.log(`${prefix} ${app}-credentials-${data.clientId}`);
+          
+          secretItemIds[app] = await this.onePasswordService.createGenericSecretItem(
+            data.clientId,
+            app,
+            appSecrets
+          );
+        }
+        
+        console.log(`\n✅ Secret bundle created (${apps.length} items)!`);
+        logger.info('Secret bundle created', { 
+          clientId: data.clientId,
+          itemCount: Object.keys(secretItemIds).length,
+          apps,
+        });
+        
+        // Now update SQL credentials with actual DB info
+        console.log(`\n🔄 Updating SQL credentials with TigerData info...`);
+        secretBuilder.addDbCredentials({
+          user: dbResult.username,
+          password: dbResult.password,
           host: dbResult.host,
           port: dbResult.port,
-          username: dbResult.username,
-          password: dbResult.password,
-          database: dbResult.dbName,
+          name: dbResult.dbName,
         });
+        
+        allSecrets = secretBuilder.build();
+        
+        await this.onePasswordService.updateGenericItem(
+          secretItemIds.sql,
+          allSecrets.sql
+        );
+        
+        console.log(`✅ SQL credentials updated!`);
+        console.log(`   Host: ${dbResult.host}`);
+        console.log(`   Port: ${dbResult.port}`);
+        console.log(`   Database: ${dbResult.dbName}`);
+        
+        const secretItemId = secretItemIds.sql; // Keep for backward compatibility
         
         console.log(`✅ Secret created successfully!`);
         console.log(`   Item ID: ${secretItemId}`);
@@ -637,7 +718,7 @@ export class GitOpsProvisioningService {
         // Optionally cleanup TigerData database on secret creation failure
         // await this.tigerDataService.deleteDatabase(dbResult.serviceId);
         
-        await CustomerModel.updateDeploymentStatus(data.customerId, 'failed', {
+        await CustomerModel.updateDeploymentStatus(data.customerId, 'failed_secret', {
           deploymentError: `1Password secret creation failed: ${error.message}`,
         });
         
@@ -763,7 +844,16 @@ export class GitOpsProvisioningService {
   }
 
   /**
-   * Delete a client instance
+   * Delete a client instance (comprehensive cleanup)
+   * 
+   * COMPLETE DELETION FLOW:
+   * 1. Remove Git manifests (Application + values)
+   * 2. Commit + push (triggers Argo CD prune)
+   * 3. Delete 1Password secret item
+   * 4. Delete TigerData database
+   * 
+   * IDEMPOTENT: Checks if resources exist before attempting deletion
+   * RESILIENT: Tries all cleanups, collects errors, reports at end
    */
   async deleteClient(clientId: string, customerId: string): Promise<void> {
     if (!this.config.enabled) {
@@ -775,87 +865,198 @@ export class GitOpsProvisioningService {
       await this.initialize();
     }
 
+    const errors: string[] = [];
+    let gitDeleted = false;
+    let secretDeleted = false;
+    let dbDeleted = false;
+
     try {
-      logger.info('Starting GitOps client deletion', { clientId });
+      logger.info('Starting comprehensive client deletion', { clientId, customerId });
+      console.log('\n' + '='.repeat(80));
+      console.log('🗑️  COMPREHENSIVE CLIENT DELETION');
+      console.log('='.repeat(80));
+      console.log(`👤 Customer ID: ${customerId}`);
+      console.log(`🏷️  Client ID: ${clientId}`);
+      console.log('='.repeat(80) + '\n');
 
-      // Ensure we have latest changes
-      await this.git.pull('origin', this.config.mainBranch);
-
-      // Remove Application manifest
-      const applicationPath = path.join(
-        this.config.repoDir,
-        'argocd',
-        'clients',
-        `client-${clientId}.yaml`
-      );
-
-      // Remove values directory
-      const valuesDir = path.join(
-        this.config.repoDir,
-        'charts',
-        'iotistica-app',
-        'values',
-        `client-${clientId}`
-      );
-
-      // Check if files exist
-      const appExists = await fs.access(applicationPath).then(() => true).catch(() => false);
-      const valuesExist = await fs.access(valuesDir).then(() => true).catch(() => false);
-
-      if (!appExists && !valuesExist) {
-        logger.info('Client already deleted', { clientId });
-        return;
+      // Get customer record to find resource IDs
+      const customer = await CustomerModel.getById(customerId);
+      if (!customer) {
+        logger.warn('Customer not found during deletion', { customerId });
+        console.log('⚠️  Customer record not found - proceeding with Git cleanup only');
       }
 
-      // Remove files
-      if (appExists) {
-        await fs.unlink(applicationPath);
-        logger.info('Application manifest deleted', { path: applicationPath });
+      // === STEP 1: Remove Git manifests ===
+      console.log('📝 STEP 1/4: REMOVE GIT MANIFESTS');
+      console.log('-'.repeat(80));
+      
+      try {
+        // Ensure we have latest changes
+        await this.git.pull('origin', this.config.mainBranch);
+
+        // Remove Application manifest
+        const applicationPath = path.join(
+          this.config.repoDir,
+          'argocd',
+          'clients',
+          `client-${clientId}.yaml`
+        );
+
+        // Remove values directory
+        const valuesDir = path.join(
+          this.config.repoDir,
+          'charts',
+          'iotistica-app',
+          'values',
+          `client-${clientId}`
+        );
+
+        // Check if files exist (idempotent check)
+        const appExists = await fs.access(applicationPath).then(() => true).catch(() => false);
+        const valuesExist = await fs.access(valuesDir).then(() => true).catch(() => false);
+
+        if (!appExists && !valuesExist) {
+          logger.info('Git manifests already deleted', { clientId });
+          console.log('✅ Git manifests already deleted (idempotent)');
+          gitDeleted = true;
+        } else {
+          // Remove files
+          if (appExists) {
+            await fs.unlink(applicationPath);
+            console.log(`   ✅ Deleted: argocd/clients/client-${clientId}.yaml`);
+            logger.info('Application manifest deleted', { path: applicationPath });
+          }
+
+          if (valuesExist) {
+            await fs.rm(valuesDir, { recursive: true, force: true });
+            console.log(`   ✅ Deleted: charts/iotistica-app/values/client-${clientId}/`);
+            logger.info('Values directory deleted', { path: valuesDir });
+          }
+
+          // Commit changes
+          await this.git.add([
+            `argocd/clients/client-${clientId}.yaml`,
+            `charts/iotistica-app/values/client-${clientId}/`,
+          ]);
+
+          await this.git.commit(
+            `Delete client ${clientId}\n\n` +
+            `Customer: ${customerId}\n` +
+            `Reason: Subscription canceled`
+          );
+
+          console.log('   ✅ Changes committed');
+          logger.info('Deletion committed', { clientId });
+
+          // Push to remote
+          const urlWithAuth = this.config.repoUrl.replace(
+            'https://',
+            `https://${this.config.pat}@`
+          );
+
+          await this.git.addRemote('authenticated', urlWithAuth).catch(() => {
+            return this.git.remote(['set-url', 'authenticated', urlWithAuth]);
+          });
+
+          await this.git.push('authenticated', this.config.mainBranch);
+
+          console.log('   ✅ Changes pushed to remote (Argo CD will prune resources)');
+          logger.info('Deletion pushed to remote', { clientId, branch: this.config.mainBranch });
+          gitDeleted = true;
+        }
+      } catch (error: any) {
+        const errorMsg = `Git cleanup failed: ${error.message}`;
+        errors.push(errorMsg);
+        console.log(`   ❌ ${errorMsg}`);
+        logger.error('Git cleanup failed', { clientId, error: error.message });
       }
 
-      if (valuesExist) {
-        await fs.rm(valuesDir, { recursive: true, force: true });
-        logger.info('Values directory deleted', { path: valuesDir });
+      console.log('-'.repeat(80) + '\n');
+
+      // === STEP 2: Wait for Argo CD prune (optional, best effort) ===
+      console.log('⏳ STEP 2/4: ARGO CD PRUNE (OPTIONAL)');
+      console.log('-'.repeat(80));
+      console.log('   ℹ️  Argo CD will automatically prune resources when Application is deleted');
+      console.log('   ℹ️  Skipping explicit wait (resources will be cleaned up asynchronously)');
+      console.log('-'.repeat(80) + '\n');
+
+      // === STEP 3: Delete 1Password secret ===
+      console.log('🔐 STEP 3/4: DELETE 1PASSWORD SECRET');
+      console.log('-'.repeat(80));
+      
+      try {
+        if (customer?.secret_item_id) {
+          console.log(`   🔑 Secret Item ID: ${customer.secret_item_id}`);
+          await this.onePasswordService.deleteItem(customer.secret_item_id);
+          console.log('   ✅ 1Password secret deleted successfully');
+          logger.info('1Password secret deleted', { itemId: customer.secret_item_id });
+          secretDeleted = true;
+        } else {
+          console.log('   ⚠️  No secret_item_id found (already deleted or never created)');
+          logger.info('No 1Password secret to delete', { customerId });
+          secretDeleted = true; // Consider it "deleted" if it never existed
+        }
+      } catch (error: any) {
+        const errorMsg = `1Password cleanup failed: ${error.message}`;
+        errors.push(errorMsg);
+        console.log(`   ❌ ${errorMsg}`);
+        logger.error('1Password cleanup failed', { customerId, error: error.message });
       }
 
-      // Commit changes
-      await this.git.add([
-        `argocd/clients/client-${clientId}.yaml`,
-        `charts/iotistica-app/values/client-${clientId}/`,
-      ]);
+      console.log('-'.repeat(80) + '\n');
 
-      await this.git.commit(
-        `Delete client ${clientId}\n\n` +
-        `Customer: ${customerId}\n` +
-        `Reason: Subscription canceled`
-      );
+      // === STEP 4: Delete TigerData database ===
+      console.log('🗄️  STEP 4/4: DELETE TIGERDATA DATABASE');
+      console.log('-'.repeat(80));
+      
+      try {
+        if (customer?.db_service_id) {
+          console.log(`   🗄️  Database Service ID: ${customer.db_service_id}`);
+          await this.tigerDataService.deleteDatabase(customer.db_service_id);
+          console.log('   ✅ TigerData database deleted successfully');
+          logger.info('TigerData database deleted', { serviceId: customer.db_service_id });
+          dbDeleted = true;
+        } else {
+          console.log('   ⚠️  No db_service_id found (already deleted or never created)');
+          logger.info('No TigerData database to delete', { customerId });
+          dbDeleted = true; // Consider it "deleted" if it never existed
+        }
+      } catch (error: any) {
+        const errorMsg = `TigerData cleanup failed: ${error.message}`;
+        errors.push(errorMsg);
+        console.log(`   ❌ ${errorMsg}`);
+        logger.error('TigerData cleanup failed', { customerId, error: error.message });
+      }
 
-      logger.info('Deletion committed', { clientId });
+      console.log('-'.repeat(80) + '\n');
 
-      // Push to remote
-      const urlWithAuth = this.config.repoUrl.replace(
-        'https://',
-        `https://${this.config.pat}@`
-      );
+      // === SUMMARY ===
+      console.log('\n' + '='.repeat(80));
+      console.log('📊 DELETION SUMMARY');
+      console.log('='.repeat(80));
+      console.log(`   Git Manifests: ${gitDeleted ? '✅ Deleted' : '❌ Failed'}`);
+      console.log(`   1Password Secret: ${secretDeleted ? '✅ Deleted' : '❌ Failed'}`);
+      console.log(`   TigerData Database: ${dbDeleted ? '✅ Deleted' : '❌ Failed'}`);
+      console.log('='.repeat(80) + '\n');
 
-      await this.git.addRemote('authenticated', urlWithAuth).catch(() => {
-        return this.git.remote(['set-url', 'authenticated', urlWithAuth]);
-      });
+      // If any errors occurred, throw them
+      if (errors.length > 0) {
+        const errorSummary = `Deletion completed with ${errors.length} error(s):\n${errors.join('\n')}`;
+        logger.error('Deletion completed with errors', { clientId, customerId, errors });
+        throw new Error(errorSummary);
+      }
 
-      await this.git.push('authenticated', this.config.mainBranch);
-
-      logger.info('Deletion pushed to remote', {
-        clientId,
-        branch: this.config.mainBranch,
-      });
+      logger.info('Comprehensive deletion completed successfully', { clientId, customerId });
+      console.log('✅ COMPREHENSIVE DELETION COMPLETED SUCCESSFULLY\n');
 
     } catch (error: any) {
-      logger.error('GitOps client deletion failed', {
+      logger.error('Client deletion failed', {
         clientId,
+        customerId,
         error: error.message,
         stack: error.stack,
       });
-      throw new Error(`GitOps deletion failed: ${error.message}`);
+      throw new Error(`Client deletion failed: ${error.message}`);
     }
   }
 

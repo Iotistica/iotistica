@@ -8,6 +8,7 @@
  *   npx ts-node scripts/trigger-provisioning.ts cust_b345b02c911c4fbcb47a48727492af1b
  */
 
+import crypto from 'crypto';
 import { deploymentQueue } from '../src/queues/deployment-queue';
 import { db } from '../src/database/db';
 
@@ -65,8 +66,12 @@ async function triggerProvisioning(customerId: string) {
     
     console.log(`\n🔑 Generated license key (first 50 chars): ${licenseKey.substring(0, 50)}...`);
     
-    // Sanitize client ID (for GitOps)
-    const clientId = customer.customer_id.replace(/^cust_/, '').substring(0, 8);
+    // Sanitize client ID (for GitOps) - SHA256 hash to prevent collisions
+    const clientId = crypto
+      .createHash('sha256')
+      .update(customer.customer_id)
+      .digest('hex')
+      .substring(0, 12);
     const namespace = process.env.GITOPS_ENABLED === 'true' 
       ? `client-${clientId}` 
       : `customer-${customer.customer_id.substring(5, 13)}`;

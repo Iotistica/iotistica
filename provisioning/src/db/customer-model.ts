@@ -5,6 +5,7 @@
 import { query } from './connection';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcrypt';
+import type { DeploymentStatus } from '../types/deployment-status';
 
 export interface Customer {
   id: number;
@@ -17,7 +18,7 @@ export interface Customer {
   api_key_hash?: string;
   api_key_created_at?: Date;
   api_key_last_used?: Date;
-  deployment_status?: string;
+  deployment_status?: DeploymentStatus;
   instance_url?: string;
   instance_namespace?: string;
   deployed_at?: Date;
@@ -37,6 +38,15 @@ export interface Customer {
   // Argo CD retry tracking fields
   argo_retry_count?: number;
   argo_last_retry_at?: Date;
+  // Provisioning observability fields
+  last_provisioning_step?: string;
+  last_provisioning_error?: string;
+  provisioning_started_at?: Date;
+  provisioning_completed_at?: Date;
+  provisioning_retry_count?: number;
+  // Cancellation tracking
+  is_active?: boolean;
+  deleted_at?: Date;
   created_at: Date;
   updated_at: Date;
 }
@@ -51,7 +61,9 @@ export class CustomerModel {
     fullName?: string;
     passwordHash?: string;
   }): Promise<Customer> {
-    const customerId = `cust_${uuidv4().replace(/-/g, '')}`;
+    // Generate clean customer ID (32-char UUID without dashes)
+    // This gets hashed to 12-char client ID for namespaces, URLs, etc.
+    const customerId = uuidv4().replace(/-/g, '');
     
     const result = await query<Customer>(
       `INSERT INTO customers (customer_id, email, company_name, full_name, password_hash, created_at, updated_at)
@@ -155,13 +167,13 @@ export class CustomerModel {
    * Verify API key for customer
    */
   static async verifyApiKey(apiKey: string): Promise<Customer | null> {
-    // Extract customer ID from API key (format: cust_<id>_<secret>)
-    const parts = apiKey.split('_');
-    if (parts.length < 3 || parts[0] !== 'cust') {
+    // Extract customer ID from API key (format: <customer_id>_<secret>)
+    const lastUnderscoreIndex = apiKey.lastIndexOf('_');
+    if (lastUnderscoreIndex === -1) {
       return null;
     }
     
-    const customerId = `${parts[0]}_${parts[1]}`;
+    const customerId = apiKey.substring(0, lastUnderscoreIndex);
     const customer = await this.getById(customerId);
     
     if (!customer || !customer.api_key_hash) {
@@ -228,7 +240,7 @@ export class CustomerModel {
    */
   static async updateDeploymentStatus(
     customerId: string,
-    status: 'pending' | 'db_provisioning' | 'db_ready' | 'secret_creating' | 'secret_ready' | 'provisioning' | 'deploying' | 'ready' | 'failed' | 'deployment_failed',
+    status: DeploymentStatus,
     data?: {
       instanceUrl?: string;
       instanceNamespace?: string;
@@ -266,6 +278,76 @@ export class CustomerModel {
     const result = await query<Customer>(
       `UPDATE customers SET ${fields.join(', ')} WHERE customer_id = $${paramIndex} RETURNING *`,
       values
+    );
+
+    return result.rows[0];
+  }
+
+  /**
+   * Update provisioning step (for observability and idempotent retries)
+   */
+  static async updateProvisioningStep(
+    customerId: string,
+    step: string,
+    error?: string
+  ): Promise<Customer> {
+    const fields = [
+      'last_provisioning_step = $1',
+      'updated_at = CURRENT_TIMESTAMP'
+    ];
+    const values: any[] = [step];
+    let paramIndex = 2;
+
+    if (error) {
+      fields.push(`last_provisioning_error = $${paramIndex}`);
+      values.push(error);
+      paramIndex++;
+    } else {
+      // Clear error on successful step
+      fields.push('last_provisioning_error = NULL');
+    }
+
+    values.push(customerId);
+
+    const result = await query<Customer>(
+      `UPDATE customers SET ${fields.join(', ')} WHERE customer_id = $${paramIndex} RETURNING *`,
+      values
+    );
+
+    return result.rows[0];
+  }
+
+  /**
+   * Mark provisioning as started
+   */
+  static async markProvisioningStarted(customerId: string): Promise<Customer> {
+    const result = await query<Customer>(
+      `UPDATE customers 
+       SET provisioning_started_at = CURRENT_TIMESTAMP,
+           provisioning_retry_count = COALESCE(provisioning_retry_count, 0) + 1,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE customer_id = $1 
+       RETURNING *`,
+      [customerId]
+    );
+
+    return result.rows[0];
+  }
+
+  /**
+   * Mark provisioning as completed
+   */
+  static async markProvisioningCompleted(customerId: string): Promise<Customer> {
+    const result = await query<Customer>(
+      `UPDATE customers 
+       SET provisioning_completed_at = CURRENT_TIMESTAMP,
+           deployment_status = 'ready',
+           deployed_at = CURRENT_TIMESTAMP,
+           last_provisioning_error = NULL,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE customer_id = $1 
+       RETURNING *`,
+      [customerId]
     );
 
     return result.rows[0];

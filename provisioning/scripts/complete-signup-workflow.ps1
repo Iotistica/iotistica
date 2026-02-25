@@ -368,7 +368,7 @@ $deploymentPayload = @{
     plan = $Plan
     namespace = "customer-$($customerId.Substring(5, 8))"  # Use part of customer ID
     helm_chart = "customer-instance"
-    instance_url = "https://customer-$($customerId.Substring(5, 8)).iotistic.ca"
+    instance_url = "https://customer-$($customerId.Substring(5, 8)).iotistica.com"
 }
 
 try {

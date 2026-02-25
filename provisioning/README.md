@@ -126,7 +126,7 @@ ARGOCD_STATUS_RETRY_DELAY_MS=5000
 ```bash
 # Only needed if GITOPS_ENABLED=false
 HELM_CHART_PATH=../charts/customer-instance
-BASE_DOMAIN=iotistic.ca
+BASE_DOMAIN=iotistica.com
 SIMULATE_K8S_DEPLOYMENT=false
 ```
 
