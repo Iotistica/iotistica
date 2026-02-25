@@ -256,15 +256,11 @@ export class DeploymentWorker {
    * 
    * Security: SHA256 ensures uniqueness across millions of customers
    * 12 hex chars = 48 bits = ~281 trillion combinations
-   * 
-   * Backwards compatibility: Strips cust_ prefix if present for old customers
    */
   private sanitizeClientId(customerId: string): string {
-    // Strip cust_ prefix if present (backwards compatibility)
-    const cleanId = customerId.replace(/^cust_/, '');
     return crypto
       .createHash('sha256')
-      .update(cleanId)
+      .update(customerId)
       .digest('hex')
       .substring(0, 12);
   }

@@ -215,19 +215,8 @@ export class GitOpsProvisioningService {
    * Security: SHA256 ensures uniqueness across millions of customers
    * 12 hex chars = 48 bits = ~281 trillion combinations
    * 
-   * Backwards compatibility: Strips cust_ prefix if present for old customers
-   * 
    * IMPORTANT: This MUST match deployment-worker.ts sanitizeClientId() method
    */
-  private sanitizeClientId(customerId: string): string {
-    // Strip cust_ prefix if present (backwards compatibility)
-    const cleanId = customerId.replace(/^cust_/, '');
-    return crypto
-      .createHash('sha256')
-      .update(cleanId)
-      .digest('hex')
-      .substring(0, 12);
-  }
 
   /**
    * Generate random password for PostgreSQL

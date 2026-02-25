@@ -28,9 +28,9 @@ COPY src ./src
 RUN npm run build
 
 # =============================================================================
-# Stage 2: Production - Minimal runtime image
+# Stage 2: Provisioning API - REST API for customer management
 # =============================================================================
-FROM node:20-alpine
+FROM node:20-alpine AS provisioning
 
 WORKDIR /app
 
@@ -91,3 +91,55 @@ EXPOSE 3100
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "dist/index.js"]
+
+# =============================================================================
+# Stage 3: Provisioning Worker - Background job processor
+# =============================================================================
+FROM node:20-alpine AS worker
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    postgresql-client \
+    git \
+    bash \
+    ca-certificates \
+    curl \
+    && rm -rf /var/cache/apk/*
+
+# Copy package files
+COPY package*.json ./
+
+# Install production dependencies only
+RUN npm ci --only=production && npm cache clean --force
+
+# Copy compiled JavaScript from builder stage
+COPY --from=builder /app/dist ./dist
+
+# Copy migrations (worker may need to check DB state)
+COPY migrations ./migrations
+
+# Copy entrypoint script
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Create keys directory
+RUN mkdir -p /app/keys
+
+# Create Git repository cache directory
+RUN mkdir -p /tmp/iot-k8s-main && chmod 777 /tmp/iot-k8s-main
+
+# Create non-root user
+RUN addgroup -g 1001 -S billing && \
+    adduser -u 1001 -S billing -G billing && \
+    chown -R billing:billing /app /tmp/iot-k8s-main
+
+USER billing
+
+# Environment
+ENV NODE_ENV=production
+ENV GITOPS_REPO_DIR=/tmp/iot-k8s-main
+
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["node", "dist/worker.js"]
