@@ -1,0 +1,164 @@
+{{- if and .Values.worker .Values.worker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "provisioning.fullname" . }}-worker
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "provisioning.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      {{- include "provisioning.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "provisioning.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      serviceAccountName: {{ include "provisioning.serviceAccountName" . }}
+      terminationGracePeriodSeconds: 120  # Allow time for current jobs to finish
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          securityContext:
+            runAsUser: 1001
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            privileged: false
+          env:
+            - name: NODE_ENV
+              value: "production"
+            
+            # PostgreSQL connection
+            - name: DB_HOST
+              value: "{{ .Values.postgres.host }}"
+            - name: DB_PORT
+              value: "{{ .Values.postgres.port }}"
+            - name: DB_NAME
+              value: "{{ .Values.postgres.database }}"
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.worker.postgres.SecretName | quote }}
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.worker.postgres.SecretName | quote }}
+                  key: password
+            
+            # Redis connection
+            - name: REDIS_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.worker.redis.SecretName | quote }}
+                  key: host
+            - name: REDIS_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.worker.redis.SecretName | quote }}
+                  key: port
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.worker.redis.SecretName | quote }}
+                  key: password
+            - name: REDIS_PORT_EXT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.worker.redis.SecretName | quote }}
+                  key: port_ext
+            - name: REDIS_TLS
+              value: {{ .Values.redis.tls | quote }}
+            - name: REDIS_CLUSTER
+              value: {{ .Values.redis.cluster | quote }}
+            
+            # Git configuration (for GitOps)
+            - name: GIT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.worker.git.SecretName | quote }}
+                  key: username
+            - name: GIT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.worker.git.SecretName | quote }}
+                  key: token
+            - name: GITOPS_REPO_URL
+              value: "{{ .Values.gitops.repoUrl }}"
+            - name: GITOPS_REPO_BRANCH
+              value: "{{ .Values.gitops.branch }}"
+            - name: GITOPS_REPO_DIR
+              value: "/tmp/iot-k8s-main"
+            
+            # License keys (RSA keypair for JWT signing)
+            - name: LICENSE_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.worker.licenseKeys.SecretName | quote }}
+                  key: private_key
+            - name: LICENSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.worker.licenseKeys.SecretName | quote }}
+                  key: public_key
+            
+            # 1Password integration
+            - name: ONEPASSWORD_SERVICE_ACCOUNT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.worker.onepassword.SecretName | quote }}
+                  key: service_account_token
+            - name: ONEPASSWORD_VAULT_ID
+              value: "{{ .Values.onepassword.vaultId }}"
+            
+            # TigerData integration
+            - name: TIGERDATA_BASE_URL
+              value: "{{ .Values.tigerdata.baseUrl }}"
+            - name: TIGERDATA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.worker.tigerdata.SecretName | quote }}
+                  key: api_key
+            
+            # Argo CD integration
+            - name: ARGOCD_SERVER
+              value: "{{ .Values.argocd.server }}"
+            - name: ARGOCD_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.worker.argocd.SecretName | quote }}
+                  key: token
+            - name: ARGOCD_NAMESPACE
+              value: "{{ .Values.argocd.namespace }}"
+            
+            # K8s deployment settings
+            - name: SIMULATE_K8S_DEPLOYMENT
+              value: "{{ .Values.deployment.simulate }}"
+            - name: HELM_CHART_PATH
+              value: "{{ .Values.deployment.helmChartPath }}"
+            - name: HELM_VALUES_DIR
+              value: "{{ .Values.deployment.helmValuesDir }}"
+            
+            # Worker-specific settings
+            - name: WORKER_CONCURRENCY
+              value: "{{ .Values.worker.concurrency }}"
+            - name: WORKER_MAX_ATTEMPTS
+              value: "{{ .Values.worker.maxAttempts }}"
+          
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          
+          volumeMounts:
+            - name: git-repos
+              mountPath: /tmp/iot-k8s-main
+      
+      volumes:
+        - name: git-repos
+          emptyDir: {}
+{{- end }}

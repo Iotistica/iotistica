@@ -1,0 +1,128 @@
+# Default values for provisioning service
+# This is a YAML-formatted file for the Iotistic provisioning service
+
+# Global configuration
+global:
+  namespace: provisioning
+
+# Service account configuration
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Provisioning API service
+api:
+  enabled: true
+  image:
+    repository: iotistic/provisioning-api
+    tag: latest
+    pullPolicy: Always
+  replicas: 1
+  port: 3100
+  serviceType: ClusterIP
+  
+  # Secret references (stored in 1Password)
+  postgres:
+    SecretName: "provisioning-postgres"
+  redis:
+    SecretName: "redis-credentials-provisioning"
+  stripe:
+    SecretName: "provisioning-stripe"
+  git:
+    SecretName: "provisioning-git"
+  licenseKeys:
+    SecretName: "provisioning-license-keys"
+  onepassword:
+    SecretName: "provisioning-1password"
+  tigerdata:
+    SecretName: "provisioning-tigerdata"
+  argocd:
+    SecretName: "provisioning-argocd"
+  
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+
+# Provisioning Worker (background job processor)
+worker:
+  enabled: true
+  image:
+    repository: iotistic/provisioning-worker
+    tag: latest
+    pullPolicy: Always
+  replicas: 1
+  concurrency: "5"  # Number of concurrent jobs
+  maxAttempts: "3"  # Retry attempts for failed jobs
+  
+  # Secret references (stored in 1Password)
+  postgres:
+    SecretName: "provisioning-postgres"
+  redis:
+    SecretName: "redis-credentials-provisioning"
+  git:
+    SecretName: "provisioning-git"
+  licenseKeys:
+    SecretName: "provisioning-license-keys"
+  onepassword:
+    SecretName: "provisioning-1password"
+  tigerdata:
+    SecretName: "provisioning-tigerdata"
+  argocd:
+    SecretName: "provisioning-argocd"
+  
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+
+# PostgreSQL database (can be external managed database)
+postgres:
+  # For managed databases (AWS RDS, Cloud SQL, Azure Database):
+  # Set host, port, database to your managed instance
+  # Credentials stored in 1Password: provisioning-postgres
+  host: "your-rds-endpoint.region.rds.amazonaws.com"
+  port: "5432"
+  database: "iotistic_provisioning"
+  # If using in-cluster PostgreSQL, set:
+  # host: "provisioning-postgres"
+
+# Redis (External Managed Service - Azure Cache for Redis)
+redis:
+  cluster: true  # Set to true if using Redis Cluster
+  tls: true  # Set to true if Redis requires TLS
+
+# GitOps configuration
+gitops:
+  repoUrl: "https://github.com/Iotistica/iot-k8s-main.git"
+  branch: "main"
+
+# 1Password integration
+onepassword:
+  vaultId: "IOT-CLIENTS"
+
+# TigerData integration
+tigerdata:
+  baseUrl: "https://tigerdata-api.example.com"
+
+# Argo CD integration
+argocd:
+  server: "argocd-server.argocd.svc.cluster.local"
+  namespace: "argocd"
+
+# Kubernetes deployment settings
+deployment:
+  simulate: "false"  # Set to "true" for local testing
+  helmChartPath: "charts/iotistica-app"
+  helmValuesDir: "charts/iotistica-app/values"
+
+# Name overrides
+nameOverride: ""
+fullnameOverride: ""

@@ -1,0 +1,13 @@
+apiVersion: v2
+name: provisioning
+description: Iotistic Provisioning Service - Customer management and deployment automation
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - iot
+  - provisioning
+  - billing
+  - customer-management
+maintainers:
+  - name: Iotistic Team
