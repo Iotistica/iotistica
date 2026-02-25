@@ -36,7 +36,9 @@ services:
       retries: 5
 
   provisioning:
-    build: .
+    build:
+      context: .
+      target: provisioning
     container_name: provisioning-api
     ports:
       - "3100:3100"
@@ -125,9 +127,10 @@ services:
 
   # Worker - Processes deployment queue jobs
   worker:
-    build: .
+    build:
+      context: .
+      target: worker
     container_name: provisioning-worker
-    command: node dist/worker.js
     environment:
       NODE_ENV: development
       

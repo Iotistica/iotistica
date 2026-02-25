@@ -57,6 +57,9 @@ RUN npm ci --only=production && npm cache clean --force
 # Copy compiled JavaScript from builder stage
 COPY --from=builder /app/dist ./dist
 
+# Copy templates (needed at runtime)
+COPY src/templates ./dist/templates
+
 # Copy migrations
 COPY migrations ./migrations
 
@@ -116,6 +119,9 @@ RUN npm ci --only=production && npm cache clean --force
 
 # Copy compiled JavaScript from builder stage
 COPY --from=builder /app/dist ./dist
+
+# Copy templates (needed at runtime)
+COPY src/templates ./dist/templates
 
 # Copy migrations (worker may need to check DB state)
 COPY migrations ./migrations

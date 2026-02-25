@@ -28,21 +28,21 @@ api:
   
   # Secret references (stored in 1Password)
   postgres:
-    SecretName: "provisioning-postgres"
+    SecretName: "postgres-credentials-client-provisioning"
   redis:
-    SecretName: "redis-credentials-provisioning"
+    SecretName: "redis-credentials-client-provisioning"
   stripe:
-    SecretName: "provisioning-stripe"
+    SecretName: "stripe-credentials-client-provisioning"
   git:
-    SecretName: "provisioning-git"
+    SecretName: "git-credentials-client-provisioning"
   licenseKeys:
-    SecretName: "provisioning-license-keys"
+    SecretName: "license-keys-client-provisioning"
   onepassword:
-    SecretName: "provisioning-1password"
+    SecretName: "onepassword-credentials-client-provisioning"
   tigerdata:
-    SecretName: "provisioning-tigerdata"
+    SecretName: "tigerdata-credentials-client-provisioning"
   argocd:
-    SecretName: "provisioning-argocd"
+    SecretName: "argocd-credentials-client-provisioning"
   
   resources:
     requests:
@@ -65,19 +65,19 @@ worker:
   
   # Secret references (stored in 1Password)
   postgres:
-    SecretName: "provisioning-postgres"
+    SecretName: "postgres-credentials-client-provisioning"
   redis:
-    SecretName: "redis-credentials-provisioning"
+    SecretName: "redis-credentials-client-provisioning"
   git:
-    SecretName: "provisioning-git"
+    SecretName: "git-credentials-client-provisioning"
   licenseKeys:
-    SecretName: "provisioning-license-keys"
+    SecretName: "license-keys-client-provisioning"
   onepassword:
-    SecretName: "provisioning-1password"
+    SecretName: "onepassword-credentials-client-provisioning"
   tigerdata:
-    SecretName: "provisioning-tigerdata"
+    SecretName: "tigerdata-credentials-client-provisioning"
   argocd:
-    SecretName: "provisioning-argocd"
+    SecretName: "argocd-credentials-client-provisioning"
   
   resources:
     requests:

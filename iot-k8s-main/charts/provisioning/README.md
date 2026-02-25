@@ -17,11 +17,13 @@ Create these items in 1Password vault `IOT-CLIENTS`:
 
 ### 1. `provisioning-postgres`
 ```yaml
+### 1. `postgres-credentials-client-provisioning`
+```yaml
 username: iotistic
 password: <generated-password>
 ```
 
-### 2. `redis-credentials-provisioning`
+### 2. `redis-credentials-client-client-provisioning`
 ```yaml
 host: <redis-hostname>
 port: <redis-port>
@@ -35,19 +37,19 @@ port_ext: <redis-port>  # Same as port for Azure Redis
 - `password`: Primary Access Key from Azure Portal
 - `port_ext`: `6380`
 
-### 3. `provisioning-stripe`
+### 3. `stripe-credentials-client-provisioning`
 ```yaml
 secret_key: sk_live_...
 webhook_secret: whsec_...
 ```
 
-### 4. `provisioning-git`
+### 4. `git-credentials-client-provisioning`
 ```yaml
 username: <github-username>
 token: <github-pat>
 ```
 
-### 5. `provisioning-license-keys`
+### 5. `license-keys-client-provisioning`
 ```yaml
 private_key: |
   -----BEGIN PRIVATE KEY-----
@@ -59,12 +61,12 @@ public_key: |
   -----END PUBLIC KEY-----
 ```
 
-### 6. `provisioning-1password`
+### 6. `onepassword-credentials-client-provisioning`
 ```yaml
 service_account_token: <1password-service-account-token>
 ```
 
-### 7. `provisioning-tigerdata`
+### 7. `tigerdata-credentials-client-provisioning`
 ```yaml
 api_key: <tigerdata-api-key>
 ```
@@ -323,7 +325,7 @@ kubectl get pods -n onepassword-operator-system
 
 # Check OnePasswordItem status
 kubectl get onepassworditems -n iotistica-provisioning
-kubectl describe onepassworditem provisioning-postgres -n iotistica-provisioning
+kubectl describe onepassworditem postgres-credentials-client-provisioning -n iotistica-provisioning
 ```
 
 ### Worker jobs failing

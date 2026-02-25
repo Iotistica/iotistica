@@ -22,66 +22,66 @@ spec:
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata:
-  name: redis-credentials-{{ .Values.global.namespace }}
+  name: redis-credentials-client-{{ .Values.global.namespace }}
   namespace: {{ .Values.global.namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/redis-credentials-{{ .Values.global.namespace }}"
+  itemPath: "vaults/IOT-CLIENTS/items/redis-credentials-client-{{ .Values.global.namespace }}"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata:
-  name: provisioning-postgres
+  name: postgres-credentials-client-provisioning
   namespace: {{ .Values.global.namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/provisioning-postgres"
+  itemPath: "vaults/IOT-CLIENTS/items/postgres-credentials-client-provisioning"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata:
-  name: provisioning-stripe
+  name: stripe-credentials-client-provisioning
   namespace: {{ .Values.global.namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/provisioning-stripe"
+  itemPath: "vaults/IOT-CLIENTS/items/stripe-credentials-client-provisioning"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata:
-  name: provisioning-git
+  name: git-credentials-client-provisioning
   namespace: {{ .Values.global.namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/provisioning-git"
+  itemPath: "vaults/IOT-CLIENTS/items/git-credentials-client-provisioning"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata:
-  name: provisioning-license-keys
+  name: license-keys-client-provisioning
   namespace: {{ .Values.global.namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/provisioning-license-keys"
+  itemPath: "vaults/IOT-CLIENTS/items/license-keys-client-provisioning"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata:
-  name: provisioning-1password
+  name: onepassword-credentials-client-provisioning
   namespace: {{ .Values.global.namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/provisioning-1password"
+  itemPath: "vaults/IOT-CLIENTS/items/onepassword-credentials-client-provisioning"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata:
-  name: provisioning-tigerdata
+  name: tigerdata-credentials-client-provisioning
   namespace: {{ .Values.global.namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/provisioning-tigerdata"
+  itemPath: "vaults/IOT-CLIENTS/items/tigerdata-credentials-client-provisioning"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata:
-  name: provisioning-argocd
+  name: argocd-credentials-client-provisioning
   namespace: {{ .Values.global.namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/provisioning-argocd"
+  itemPath: "vaults/IOT-CLIENTS/items/argocd-credentials-client-provisioning"
 ---
 apiVersion: apps/v1
 kind: Deployment

@@ -43,14 +43,14 @@ export const secretTemplates: Record<string, SecretTemplate> = {
     port: { type: 'static', value: '6379' },
   },
   mqtt: {
-    username: { type: 'username', prefix: 'mqtt-' },
+    username: { type: 'username', prefix: 'mqtt' },
     password: { type: 'password', length: 32 },
   },
   openai: {
     key: { type: 'token', length: 48 },
   },
   'api-jwt': {
-    secret: { type: 'token', length: 64 },
+    token: { type: 'token', length: 64 },
   },
   sql: {
     password: { type: 'static', value: 'PENDING' },

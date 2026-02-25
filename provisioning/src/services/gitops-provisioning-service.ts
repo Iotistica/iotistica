@@ -22,6 +22,7 @@ import { TigerDataService, TigerDataDatabase } from './tigerdata-service';
 import { OnePasswordService } from './onepassword-service';
 import { CustomerModel } from '../db/customer-model';
 import { SecretBuilder } from './secret-builder';
+import { releaseService } from './release-service';
 
 interface ClientDeploymentData {
   clientId: string;           // Sanitized: dc5fec42901a (SHA256 hash)
@@ -260,237 +261,40 @@ export class GitOpsProvisioningService {
             prune: true,
             selfHeal: true,
           },
+          syncOptions: [
+            'CreateNamespace=true',
+          ],
         },
       },
     };
   }
 
   /**
-   * Generate client-specific values file
+   * Generate client-specific values file from template
    */
-  private generateValuesFile(data: ClientDeploymentData): any {
-    // Check if using TigerData (external database) or embedded PostgreSQL
-    const usingTigerData = data.postgres?.username && data.postgres.username !== 'postgres';
+  private async generateValuesFile(data: ClientDeploymentData): Promise<any> {
+    // Load the template file
+    const templatePath = path.join(__dirname, '..', 'templates', 'values.yaml');
+    const templateContent = await fs.readFile(templatePath, 'utf-8');
     
-    // Default postgres credentials if not provided
-    const postgresUsername = data.postgres?.username || 'postgres';
-    const postgresPassword = data.postgres?.password || this.generatePassword();
-    const postgresDatabase = data.postgres?.database || 'iotistic';
-
-    return {
-      global: {
-        namespace: data.namespace,
-      },
-      license: {
-        licenseKey: data.licenseKey,
-        publicKey: data.licensePublicKey,
-      },
-      customer: {
-        id: data.customerId,
-        email: data.email,
-        companyName: data.companyName,
-        plan: data.plan,
-      },
-      redis: {
-        enabled: true,
-        image: {
-          repository: 'redis',
-          tag: '7-alpine',
-        },
-        port: 6379,
-        maxMemory: '512mb',
-        maxMemoryPolicy: 'allkeys-lru',
-        persistence: {
-          enabled: true,
-        },
-        storage: {
-          size: '5Gi',
-        },
-        resources: {
-          requests: {
-            cpu: '100m',
-            memory: '256Mi',
-          },
-          limits: {
-            cpu: '500m',
-            memory: '1Gi',
-          },
-        },
-      },
-      mosquitto: {
-        enabled: true,
-        image: {
-          repository: 'iegomez/mosquitto-go-auth',
-          tag: '3.0.0-mosquitto_2.0.18',
-        },
-        serviceType: 'ClusterIP',
-        ports: {
-          mqtt: 1883,
-          mqtts: 8883,
-          websocket: 9001,
-        },
-        resources: {
-          requests: {
-            cpu: '100m',
-            memory: '64Mi',
-          },
-          limits: {
-            cpu: '200m',
-            memory: '128Mi',
-          },
-        },
-        auth: {
-          allowAnonymous: false,
-          hasher: 'bcrypt',
-          hasherCost: 10,
-        },
-        persistence: {
-          enabled: true,
-        },
-      },
-      mqttBroker: {
-        protocol: 'mqtt',
-        host: `client-${data.clientId}-release-iotistic-mosquitto.${data.namespace}.svc.cluster.local`,
-        port: 1883,
-        useTls: false,
-      },
-      api: {
-        enabled: true,
-        image: {
-          repository: 'iotistic/api',
-          tag: 'latest',
-          pullPolicy: 'Always',
-        },
-        replicas: 1,
-        port: 3002,
-        serviceType: 'ClusterIP',
-        corsOrigins: `https://${data.clientId}.${data.domain || 'iotistic.com'},http://localhost:3000`,
-        resources: {
-          requests: {
-            cpu: '100m',
-            memory: '256Mi',
-          },
-          limits: {
-            cpu: '500m',
-            memory: '512Mi',
-          },
-        },
-        monitoring: {
-          enabled: true,
-          interval: '30s',
-          scrapeTimeout: '10s',
-        },
-      },
-      dashboard: {
-        enabled: true,
-        image: {
-          repository: 'iotistic/dashboard',
-          tag: 'latest',
-          pullPolicy: 'Always',
-        },
-        replicas: 1,
-        port: 3000,
-        serviceType: 'ClusterIP',
-        resources: {
-          requests: {
-            cpu: '50m',
-            memory: '64Mi',
-          },
-          limits: {
-            cpu: '200m',
-            memory: '128Mi',
-          },
-        },
-      },
-      postgres: {
-        // TigerData managed TimescaleDB (external database)
-        // Credentials synced from 1Password via OnePasswordItem CRD: sql-credentials-{namespace}
-        enabled: !usingTigerData,  // Disable embedded PostgreSQL if using TigerData
-        // Embedded PostgreSQL configuration (used only if TigerData not configured)
-        image: {
-          repository: 'postgres',
-          tag: '16-alpine',
-        },
-        port: 5432,
-        database: postgresDatabase,
-        username: postgresUsername,
-        password: postgresPassword,  // Only used for embedded PostgreSQL
-        persistence: {
-          enabled: true,
-          size: '10Gi',
-        },
-        resources: {
-          requests: {
-            cpu: '100m',
-            memory: '256Mi',
-          },
-          limits: {
-            cpu: '500m',
-            memory: '1Gi',
-          },
-        },
-      },
-      ingress: {
-        enabled: true,
-        className: 'nginx',
-        annotations: {
-          'cert-manager.io/cluster-issuer': 'letsencrypt-production',
-        },
-        hosts: [
-          {
-            host: `${data.clientId}.${data.domain || 'iotistic.com'}`,
-            paths: [
-              {
-                path: '/',
-                pathType: 'Prefix',
-                service: 'dashboard',
-                port: 3000,
-              },
-              {
-                path: '/api',
-                pathType: 'Prefix',
-                service: 'api',
-                port: 3002,
-              },
-            ],
-          },
-        ],
-        tls: [
-          {
-            secretName: `client-${data.clientId}-tls`,
-            hosts: [`${data.clientId}.${data.domain || 'iotistic.com'}`],
-          },
-        ],
-      },
-      monitoring: data.monitoring || {
-        enabled: true,
-        dedicated: false,
-        serviceMonitor: {
-          enabled: true,
-          interval: '30s',
-          scrapeTimeout: '10s',
-        },
-      },
-      billingExporter: {
-        enabled: true,
-        image: {
-          repository: 'iotistic/billing-exporter',
-          tag: 'latest',
-        },
-        customerId: data.customerId,
-        pushgatewayUrl: 'http://prometheus-pushgateway.monitoring.svc.cluster.local:9091',
-        interval: 300,
-      },
-      resourceQuota: {
-        enabled: true,
-        limits: {
-          cpu: '2000m',
-          memory: '4Gi',
-          storage: '50Gi',
-          pods: '20',
-        },
-      },
-    };
+    // Fetch the current stable release version from GitHub
+    const releaseVersion = await releaseService.getCurrentStableRelease();
+    logger.info('Using release version for deployment', { 
+      releaseVersion, 
+      clientId: data.clientId 
+    });
+    
+    // Replace placeholders:
+    // - {{CLIENT_ID}} with actual client ID (prefixed with "client-")
+    // - {{RELEASE_VERSION}} with current stable release version
+    let processedContent = templateContent
+      .replace(/\{\{CLIENT_ID\}\}/g, `client-${data.clientId}`)
+      .replace(/\{\{RELEASE_VERSION\}\}/g, releaseVersion);
+    
+    // Parse YAML to object
+    const values = yaml.load(processedContent) as any;
+    
+    return values;
   }
 
   /**
@@ -605,9 +409,7 @@ export class GitOpsProvisioningService {
         // Build all app secrets using templates
         console.log(`\n🔧 Pre-generating app secrets for client: ${data.clientId}`);
         const secretBuilder = new SecretBuilder(data.clientId).preGenerate([
-          'redis',
           'mqtt',
-          'openai',
           'api-jwt',
           'sql'   // SQL with PENDING placeholders
         ]);
@@ -615,16 +417,14 @@ export class GitOpsProvisioningService {
         let allSecrets = secretBuilder.build();
         
         console.log(`✅ Secrets pre-generated from templates:`);
-        console.log(`   ├─ redis (host, password, port_ext, port)`);
         console.log(`   ├─ mqtt (username, password)`);
-        console.log(`   ├─ openai (key)`);
         console.log(`   ├─ api-jwt (secret)`);
         console.log(`   └─ sql (PENDING placeholders)`);
         
         // Create separate 1Password items for each component
         console.log(`\n🔑 Creating 1Password secret bundle...`);
         
-        const apps = ['sql', 'redis', 'mqtt', 'openai', 'api-jwt'];
+        const apps = ['sql', 'mqtt', 'api-jwt'];
         for (let i = 0; i < apps.length; i++) {
           const app = apps[i];
           const appSecrets = allSecrets[app];
@@ -751,7 +551,7 @@ export class GitOpsProvisioningService {
       logger.info('Application manifest created', { path: applicationPath });
 
       // 2. Generate values file
-      const valuesData = this.generateValuesFile(data);
+      const valuesData = await this.generateValuesFile(data);
       const valuesDir = path.join(
         this.config.repoDir,
         'charts',

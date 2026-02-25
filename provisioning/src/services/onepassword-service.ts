@@ -112,7 +112,7 @@ export class OnePasswordService {
       return mockItemId;
     }
 
-    const itemTitle = `sql-credentials-${namespace}`;
+    const itemTitle = `sql-credentials-client-${namespace}`;
 
     try {
       const client = await this.getClient();
@@ -246,7 +246,10 @@ export class OnePasswordService {
     secretType: string,
     fields: Record<string, string>
   ): Promise<string> {
-    const itemTitle = `${secretType}-credentials-${clientId}`;
+    // Special naming for api-jwt: no "credentials" in the name
+    const itemTitle = secretType === 'api-jwt' 
+      ? `api-jwt-client-${clientId}`
+      : `${secretType}-credentials-client-${clientId}`;
     console.log(`[OnePasswordService] Creating ${secretType} secret: ${itemTitle}`);
 
     // Simulation mode - don't actually create
