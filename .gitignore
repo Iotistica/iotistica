@@ -36,6 +36,7 @@ admin/dist/
 admin/.next/
 dashboard/build/
 billing/dist/
+billing/keys/
 billing-exporter/dist/
 
 # TypeScript
