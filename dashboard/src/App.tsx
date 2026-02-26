@@ -162,10 +162,10 @@ export default function App() {
         
         if (response.ok) {
           const data = await response.json();
-          // Count critical severity incidents
-          const criticalCount = data.bySeverity?.critical || 0;
-          const highCount = data.bySeverity?.high || 0;
-          setCriticalAlertsCount(criticalCount + highCount);
+          // Count critical and warning severity incidents
+          const criticalCount = data.stats?.bySeverity?.critical || 0;
+          const warningCount = data.stats?.bySeverity?.warning || 0;
+          setCriticalAlertsCount(criticalCount + warningCount);
         }
       } catch (error) {
         console.error('Failed to fetch critical alerts count:', error);
@@ -1174,7 +1174,7 @@ export default function App() {
               <Activity className="w-4 h-4 mr-2" />
               Agents
             </Button> */}
-            <div className="flex items-center gap-2 overflow-x-auto">
+            <div className="flex items-center gap-2">
               <Button
                 variant={currentView === 'dashboard' ? 'default' : 'outline'}
                 size="sm"
@@ -1215,7 +1215,7 @@ export default function App() {
                 variant={currentView === 'monitoring' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => handleGlobalViewChange('monitoring')}
-                style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
+                style={{ fontSize: '1.1rem', padding: '0.6rem 1.75rem', cursor: 'pointer' }}
                 className="relative"
               >
                 <AlertOctagon className="w-5 h-5 mr-2" />

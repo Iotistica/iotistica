@@ -362,12 +362,19 @@ router.get('/anomaly-incidents/:incidentId', async (req, res) => {
     const alertsResult = await query(alertsQuery, [incidentId]);
     const alerts = alertsResult.rows;
 
+    // Extract device_uuid from affected_agents (first one if available)
+    const affectedAgents = incident.affected_agents || [];
+    const deviceUuid = Array.isArray(affectedAgents) && affectedAgents.length > 0 
+      ? affectedAgents[0] 
+      : null;
+
     res.json({
       success: true,
       incident: {
         incident_id: incident.incident_id,
         fingerprint: incident.fingerprint,
         device_name: incident.device_name,
+        device_uuid: deviceUuid,
         device_type: incident.device_type,
         metric: incident.metric,
         severity: incident.severity,

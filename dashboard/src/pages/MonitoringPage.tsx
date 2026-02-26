@@ -12,6 +12,7 @@ import { MetricCard } from '@/components/ui/metric-card';
 import { AlertTriangle, AlertOctagon, Activity, CheckCircle, ChevronLeft, ChevronRight, Loader2, Settings } from 'lucide-react';
 import { SeverityBadge, StatusBadge, ScoreBadge } from '@/components/alerts';
 import { AnomalyMetricsTable } from '@/components/monitoring/AnomalyMetricsTable';
+import { IncidentDetailsModal } from '@/components/monitoring/IncidentDetailsModal';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface AnomalyEvent {
@@ -46,6 +47,7 @@ interface Incident {
   incident_id: string;
   fingerprint: string;
   device_name: string;
+  device_uuid?: string;
   device_type: string;
   metric: string;
   severity: 'info' | 'warning' | 'critical';
@@ -87,7 +89,7 @@ export function AlertsPage() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('unresolved');
   const [severityFilter, setSeverityFilter] = useState('all');
   const [deviceFilter, setDeviceFilter] = useState('all');
   const [deviceTypeFilter, setDeviceTypeFilter] = useState('all');
@@ -97,9 +99,13 @@ export function AlertsPage() {
   const [hasMore, setHasMore] = useState(false);
   const [total, setTotal] = useState(0);
 
-  // Resolve modal state
+  // Details modal state (for viewing incident details)
+  const [detailsIncident, setDetailsIncident] = useState<IncidentDetails | null>(null);
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+
+  // Resolve modal state (for resolving incidents)
   const [selectedIncident, setSelectedIncident] = useState<IncidentDetails | null>(null);
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [resolveDialogOpen, setResolveDialogOpen] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [resolutionNotes, setResolutionNotes] = useState('');
   const [resolving, setResolving] = useState(false);
@@ -143,7 +149,7 @@ export function AlertsPage() {
       params.append('limit', limit.toString());
       params.append('offset', off.toString());
 
-      if (statusFilter !== 'all') params.append('status', statusFilter);
+      if (statusFilter !== 'all' && statusFilter !== 'unresolved') params.append('status', statusFilter);
       if (severityFilter !== 'all') params.append('severity', severityFilter);
       if (deviceFilter !== 'all') params.append('deviceName', deviceFilter);
       if (deviceTypeFilter !== 'all') params.append('deviceType', deviceTypeFilter);
@@ -153,9 +159,14 @@ export function AlertsPage() {
       const data = await response.json();
 
       if (data.success) {
-        setIncidents(data.incidents);
-        setTotal(data.total);
-        setHasMore(data.hasMore);
+        let filteredIncidents = data.incidents;
+        // Filter unresolved incidents if that filter is selected
+        if (statusFilter === 'unresolved') {
+          filteredIncidents = data.incidents.filter((inc: any) => inc.status !== 'resolved');
+        }
+        setIncidents(filteredIncidents);
+        setTotal(filteredIncidents.length);
+        setHasMore(false);
         setOffset(off);
       }
     } catch (error) {
@@ -166,9 +177,29 @@ export function AlertsPage() {
   };
 
   /**
-   * Fetch incident details
+   * Fetch and show incident details
    */
-  const fetchIncidentDetails = async (incidentId: string) => {
+  const openDetailsModal = async (incidentId: string) => {
+    setDetailsLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/anomaly-incidents/${incidentId}`);
+      const data = await response.json();
+
+      if (data.success) {
+        setDetailsIncident(data.incident);
+        setDetailsModalOpen(true);
+      }
+    } catch (error) {
+      console.error('Failed to fetch incident details:', error);
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
+
+  /**
+   * Open resolve dialog
+   */
+  const openResolveDialog = async (incidentId: string) => {
     setDetailsLoading(true);
     try {
       const response = await fetch(`${API_BASE}/anomaly-incidents/${incidentId}`);
@@ -176,7 +207,7 @@ export function AlertsPage() {
 
       if (data.success) {
         setSelectedIncident(data.incident);
-        setDetailsOpen(true);
+        setResolveDialogOpen(true);
         setResolutionNotes(data.incident?.resolution_notes || '');
       }
     } catch (error) {
@@ -202,8 +233,10 @@ export function AlertsPage() {
 
       const data = await response.json();
       if (data.success) {
-        setDetailsOpen(false);
+        setResolveDialogOpen(false);
+        setDetailsModalOpen(false);
         setSelectedIncident(null);
+        setDetailsIncident(null);
         setResolutionNotes('');
         await fetchIncidents(offset, true);
         await fetchStats();
@@ -227,7 +260,7 @@ export function AlertsPage() {
    * Clear filters
    */
   const clearFilters = async () => {
-    setStatusFilter('all');
+    setStatusFilter('unresolved');
     setSeverityFilter('all');
     setDeviceFilter('all');
     setDeviceTypeFilter('all');
@@ -320,8 +353,7 @@ export function AlertsPage() {
             <SelectTrigger className="w-48 mt-1">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
+            <SelectContent>            <SelectItem value="unresolved">Unresolved</SelectItem>              <SelectItem value="all">All Status</SelectItem>
               <SelectItem value="open">Open</SelectItem>
               <SelectItem value="active">Active</SelectItem>
               <SelectItem value="resolved">Resolved</SelectItem>
@@ -433,46 +465,53 @@ export function AlertsPage() {
                       <TableHead className="w-32">Type</TableHead>
                       <TableHead>Metric</TableHead>
                       <TableHead className="w-24">Status</TableHead>
-                      <TableHead className="w-32">First Seen</TableHead>
                       <TableHead className="w-32">Last Seen</TableHead>
                       <TableHead className="w-24">Score</TableHead>
                       <TableHead className="w-16">Events</TableHead>
-                      <TableHead className="w-20">Actions</TableHead>
+                      <TableHead className="w-40">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {incidents.map((incident) => (
                       <TableRow key={incident.incident_id}>
-                        <TableCell>
+                        <TableCell className="py-4">
                           <SeverityBadge severity={incident.severity} />
                         </TableCell>
-                        <TableCell className="font-medium">{incident.device_name}</TableCell>
-                        <TableCell>
+                        <TableCell className="font-medium py-4">{incident.device_name}</TableCell>
+                        <TableCell className="py-4">
                           <Badge variant="outline" className="text-xs">
                             {incident.device_type}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-sm">{incident.metric}</TableCell>
-                        <TableCell>
+                        <TableCell className="text-sm py-4">{incident.metric}</TableCell>
+                        <TableCell className="py-4">
                           <StatusBadge status={incident.status} />
                         </TableCell>
-                        <TableCell className="text-xs">{formatTime(incident.first_seen)}</TableCell>
-                        <TableCell className="text-xs">{formatTime(incident.last_seen)}</TableCell>
-                        <TableCell>
+                        <TableCell className="text-xs py-4">{formatTime(incident.last_seen)}</TableCell>
+                        <TableCell className="py-4">
                           <ScoreBadge score={incident.max_anomaly_score} />
                         </TableCell>
-                        <TableCell className="text-center">{incident.event_count}</TableCell>
-                        <TableCell>
-                          {incident.status !== 'resolved' && (
+                        <TableCell className="text-center py-4">{incident.event_count}</TableCell>
+                        <TableCell className="py-4">
+                          <div className="flex gap-2">
                             <Button
                               size="sm"
-                              variant="default"
-                              onClick={() => fetchIncidentDetails(incident.incident_id)}
+                              variant="outline"
+                              onClick={() => openDetailsModal(incident.incident_id)}
                             >
-                              <CheckCircle className="w-4 h-4 mr-1" />
-                              Resolve
+                              Details
                             </Button>
-                          )}
+                            {incident.status !== 'resolved' && (
+                              <Button
+                                size="sm"
+                                variant="default"
+                                onClick={() => openResolveDialog(incident.incident_id)}
+                              >
+                                <CheckCircle className="w-4 h-4 mr-1" />
+                                Resolve
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -511,7 +550,18 @@ export function AlertsPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
+      {/* Details Modal */}
+      {detailsIncident && (
+        <IncidentDetailsModal
+          open={detailsModalOpen}
+          onOpenChange={setDetailsModalOpen}
+          incident={detailsIncident}
+          onResolve={() => openResolveDialog(detailsIncident.incident_id)}
+        />
+      )}
+
+      {/* Resolve Modal */}
+      <Dialog open={resolveDialogOpen} onOpenChange={setResolveDialogOpen}>
         <DialogContent className="max-w-md">
           {detailsLoading ? (
             <div className="flex justify-center items-center h-32">
