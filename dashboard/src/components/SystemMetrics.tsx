@@ -1005,6 +1005,11 @@ export function SystemMetrics({
                             <Badge
                               variant="destructive"
                               className="!bg-[#d4183d] !text-white !border-[#d4183d] hover:!bg-[#d4183d]"
+                              style={{
+                                backgroundColor: '#d4183d',
+                                borderColor: '#d4183d',
+                                color: '#ffffff',
+                              }}
                             >
                               {criticalCount} Critical
                             </Badge>

@@ -2,6 +2,9 @@
 -- Description: Creates a dedicated API key for protocol simulators (Modbus, OPC UA, BACnet)
 -- Required: Simulators now require API key authentication (no fallback)
 
+-- Ensure pgcrypto extension is available for gen_random_bytes()
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- Add unique constraint on name if not exists (MUST be before INSERT with ON CONFLICT)
 DO $$
 BEGIN
