@@ -199,7 +199,7 @@ router.post('/signup', async (req, res) => {
         job_id: job.id,
         message: 'Your instance deployment is queued and will begin shortly',
         estimated_time: '2-5 minutes',
-        instance_url: `https://${customer.customer_id}.${process.env.BASE_DOMAIN || 'iotistica.com'}`,
+        instance_url: `https://client-${customer.customer_id}.${process.env.BASE_DOMAIN || 'iotistica.com'}`,
         check_status_url: `/api/queue/jobs/${job.id}`,
       },
       next_steps: [

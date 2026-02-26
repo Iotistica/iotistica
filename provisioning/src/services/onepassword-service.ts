@@ -276,8 +276,8 @@ export class OnePasswordService {
       // Convert fields to 1Password field format
       const itemFields = Object.entries(fields).map(([key, value]) => ({
         id: key,
-        title: key.charAt(0).toUpperCase() + key.slice(1), // Capitalize first letter
-        fieldType: key.includes('password') || key.includes('secret') || key.includes('key')
+        title: (key === 'token' || key === 'username') ? key : key.charAt(0).toUpperCase() + key.slice(1), // Keep 'token' and 'username' lowercase
+        fieldType: key.includes('password') || key.includes('secret') || key.includes('key') || key === 'token'
           ? ItemFieldType.Concealed
           : ItemFieldType.Text,
         value: value || 'PLACEHOLDER', // Use placeholder if value is empty

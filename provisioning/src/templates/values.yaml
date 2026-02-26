@@ -105,16 +105,16 @@ api:
     JWT_REFRESH_TOKEN_EXPIRY: "7d"
   sql:
     # Reference existing Kubernetes secret (recommended for production)
-    SecretName: "sql-credentials-demo"
+    SecretName: "sql-credentials-master"
   mqtt:
     # Reference existing Kubernetes secret (recommended for production)
     SecretName: "mqtt-credentials-{{CLIENT_ID}}"
   redis:
-    SecretName: "redis-credentials-demo"
+    SecretName: "redis-credentials-master"
     cluster: true # Set to true if using Redis Cluster
     tls: false # Set to true if Redis requires TLS
   openai:
-    SecretName: "openai-credentials-demo"
+    SecretName: "openai-credentials-master"
   jwt:
     SecretName: "api-jwt-{{CLIENT_ID}}"
   # License configuration (optional)

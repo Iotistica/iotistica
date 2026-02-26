@@ -78,8 +78,8 @@ export class GitOpsProvisioningService {
       repoDir: process.env.GITOPS_REPO_DIR || '/tmp/iot-k8s-main',
       mainBranch: process.env.GITOPS_MAIN_BRANCH || process.env.GITOPS_BRANCH || 'main',
       pat: process.env.GITOPS_PAT || '',
-      authorName: process.env.GITOPS_COMMIT_AUTHOR_NAME || 'IoTistic Billing Bot',
-      authorEmail: process.env.GITOPS_COMMIT_AUTHOR_EMAIL || 'billing@iotistic.com',
+      authorName: process.env.GITOPS_COMMIT_AUTHOR_NAME || 'Iotistica Provisioning Bot',
+      authorEmail: process.env.GITOPS_COMMIT_AUTHOR_EMAIL || 'info@iotistica.com',
       argocdProject: process.env.ARGOCD_PROJECT || 'default',
       argocdNamespace: process.env.ARGOCD_NAMESPACE || 'argocd',
     };
@@ -418,7 +418,7 @@ export class GitOpsProvisioningService {
         
         console.log(`✅ Secrets pre-generated from templates:`);
         console.log(`   ├─ mqtt (username, password)`);
-        console.log(`   ├─ api-jwt (secret)`);
+        console.log(`   ├─ api-jwt (token)`);
         console.log(`   └─ sql (PENDING placeholders)`);
         
         // Create separate 1Password items for each component

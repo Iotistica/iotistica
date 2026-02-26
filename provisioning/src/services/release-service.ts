@@ -43,6 +43,9 @@ export class ReleaseService {
           headers: {
             Accept: 'application/vnd.github.v3+json',
             'User-Agent': 'Iotistic-Provisioning-Service',
+            ...(process.env.GITOPS_PAT && {
+              Authorization: `Bearer ${process.env.GITOPS_PAT}`,
+            }),
           },
           timeout: 10000, // 10 second timeout
         }
@@ -86,10 +89,11 @@ export class ReleaseService {
         return this.cachedVersion;
       }
 
-      // Ultimate fallback - return a default version
-      const fallbackVersion = 'v0.0.1-rc.129';
-      logger.warn('Using fallback version', { version: fallbackVersion });
-      return fallbackVersion;
+      // No cache available - fail with connection diagnostics
+      logger.error('GitHub connection failed and no cache available', {
+        hint: 'Run: provisioning/scripts/test-github-connection.ps1 to diagnose',
+      });
+      throw new Error('Failed to fetch release version from GitHub and no cached version available');
     }
   }
 
@@ -137,14 +141,16 @@ export class ReleaseService {
     } catch (error: any) {
       logger.error('Failed to fetch stable releases', { error: error.message });
 
-      // Fallback to cached version or default
+      // Fallback to cached version if available
       if (this.cachedVersion) {
+        logger.warn('Using cached version due to fetch error', {
+          version: this.cachedVersion,
+        });
         return this.cachedVersion;
       }
 
-      const fallbackVersion = 'v0.0.1-rc.129';
-      logger.warn('Using fallback version', { version: fallbackVersion });
-      return fallbackVersion;
+      // No cache available - throw error
+      throw new Error('Failed to fetch stable release from GitHub and no cached version available');
     }
   }
 
