@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Cpu, HardDrive, MemoryStick, Network, RefreshCw, AlertTriangle, AlertOctagon, Activity, Bell, Info, CheckCircle, XCircle } from "lucide-react";
 import { Card } from "./ui/card";
-import { ScrollArea } from "./ui/scroll-area";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useSystemMetrics } from "@/contexts/SystemMetricsContext";
 import type { SystemInfoData, ProcessData } from "@/services/websocket";
@@ -1013,10 +1012,7 @@ export function SystemMetrics({
                         }
                         if (warningCount > 0) {
                           return (
-                            <Badge
-                              variant="outline"
-                              className="!text-orange-500 !border-orange-500"
-                            >
+                            <Badge variant="secondary">
                               {warningCount} Warning
                             </Badge>
                           );
@@ -1062,7 +1058,7 @@ export function SystemMetrics({
               {incidentsLoading ? (
                 <div className="text-center py-8 text-muted-foreground">Loading alerts...</div>
               ) : (
-                <ScrollArea className="max-h-[400px]">
+                <div className="h-[320px] overflow-y-auto pr-2">
                   <div className="space-y-3">
                     {incidents.length === 0 ? (
                       <div className="text-center py-8 text-muted-foreground">
@@ -1079,13 +1075,23 @@ export function SystemMetrics({
                             bgColor: 'bg-red-50 dark:bg-red-950/30',
                             badgeVariant: 'destructive' as const,
                             badgeClass: '!bg-[#d4183d] !text-white !border-[#d4183d] hover:!bg-[#d4183d]',
+                            badgeStyle: {
+                              backgroundColor: '#d4183d',
+                              borderColor: '#d4183d',
+                              color: '#ffffff',
+                            },
                           },
                           warning: {
                             icon: AlertTriangle,
                             color: 'text-orange-600 dark:text-orange-400',
                             bgColor: 'bg-orange-50 dark:bg-orange-950/30',
-                            badgeVariant: 'outline' as const,
-                            badgeClass: '!text-orange-500 !border-orange-500',
+                            badgeVariant: 'secondary' as const,
+                            badgeClass: '!bg-[#f59e0b] !text-white !border-[#f59e0b] hover:!bg-[#f59e0b]',
+                            badgeStyle: {
+                              backgroundColor: '#f59e0b',
+                              borderColor: '#f59e0b',
+                              color: '#ffffff',
+                            },
                           },
                           info: {
                             icon: Info,
@@ -1148,6 +1154,7 @@ export function SystemMetrics({
                                   <Badge
                                     variant={config.badgeVariant}
                                     className={`shrink-0 ${(config as any).badgeClass ? (config as any).badgeClass : ''}`}
+                                    style={(config as any).badgeStyle}
                                   >
                                     {incident.severity}
                                   </Badge>
@@ -1171,7 +1178,7 @@ export function SystemMetrics({
                       })
                     )}
                   </div>
-                </ScrollArea>
+                </div>
               )}
             </div>
           </Card>
