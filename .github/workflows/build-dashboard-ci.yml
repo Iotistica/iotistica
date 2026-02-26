@@ -13,6 +13,8 @@ jobs:
   test:
     name: Run Tests
     runs-on: [iotistic-lab-sc]
+    # Skip CI on automatic merge commits
+    if: "!contains(github.event.head_commit.message, 'Merge branch')"
     defaults:
       run:
         working-directory: ./dashboard

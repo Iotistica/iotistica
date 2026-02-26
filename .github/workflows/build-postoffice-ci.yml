@@ -12,6 +12,8 @@ jobs:
   test:
     name: Run Tests & Coverage
     runs-on: ubuntu-24.04
+    # Skip CI on automatic merge commits
+    if: "!contains(github.event.head_commit.message, 'Merge branch')"
     
     steps:
       - name: Checkout repository
