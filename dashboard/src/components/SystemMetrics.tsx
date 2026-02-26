@@ -1003,14 +1003,20 @@ export function SystemMetrics({
                         
                         if (criticalCount > 0) {
                           return (
-                            <Badge variant="destructive">
+                            <Badge
+                              variant="destructive"
+                              className="!bg-[#d4183d] !text-white !border-[#d4183d] hover:!bg-[#d4183d]"
+                            >
                               {criticalCount} Critical
                             </Badge>
                           );
                         }
                         if (warningCount > 0) {
                           return (
-                            <Badge variant="outline" className="border-orange-600 text-orange-600 dark:border-orange-400 dark:text-orange-400">
+                            <Badge
+                              variant="outline"
+                              className="!text-orange-500 !border-orange-500"
+                            >
                               {warningCount} Warning
                             </Badge>
                           );
@@ -1072,13 +1078,14 @@ export function SystemMetrics({
                             color: 'text-red-600 dark:text-red-400',
                             bgColor: 'bg-red-50 dark:bg-red-950/30',
                             badgeVariant: 'destructive' as const,
+                            badgeClass: '!bg-[#d4183d] !text-white !border-[#d4183d] hover:!bg-[#d4183d]',
                           },
                           warning: {
                             icon: AlertTriangle,
                             color: 'text-orange-600 dark:text-orange-400',
                             bgColor: 'bg-orange-50 dark:bg-orange-950/30',
                             badgeVariant: 'outline' as const,
-                            badgeClass: 'border-orange-600 text-orange-600 dark:border-orange-400 dark:text-orange-400',
+                            badgeClass: '!text-orange-500 !border-orange-500',
                           },
                           info: {
                             icon: Info,
@@ -1130,7 +1137,7 @@ export function SystemMetrics({
                             className="rounded-lg border p-4"
                           >
                             <div className="flex gap-3">
-                              <div className={`${config.bgColor} rounded-full p-2 h-fit`}>
+                              <div className="h-fit">
                                 <Icon className={`h-5 w-5 ${config.color}`} />
                               </div>
                               <div className="flex-1 space-y-1">
@@ -1140,7 +1147,7 @@ export function SystemMetrics({
                                   </h4>
                                   <Badge
                                     variant={config.badgeVariant}
-                                    className={`shrink-0 ${config.badgeVariant === 'outline' && (config as any).badgeClass ? (config as any).badgeClass : ''}`}
+                                    className={`shrink-0 ${(config as any).badgeClass ? (config as any).badgeClass : ''}`}
                                   >
                                     {incident.severity}
                                   </Badge>
