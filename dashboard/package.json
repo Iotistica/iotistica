@@ -1,7 +1,7 @@
 {
   "name": "Iotistica Dashboard",
   "version": "2.0.171",
-  "displayVersion": "v0.0.1",
+  "displayVersion": "v0.0.1-rc.133",
   "private": true,
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.3",
