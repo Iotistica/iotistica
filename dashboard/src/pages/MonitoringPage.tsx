@@ -9,9 +9,10 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { MetricCard } from '@/components/ui/metric-card';
-import { AlertTriangle, AlertOctagon, Activity, CheckCircle, Eye, ChevronLeft, ChevronRight, Loader2, Settings } from 'lucide-react';
-import { SeverityBadge, StatusBadge, ScoreBadge, IncidentTimelineChart } from '@/components/alerts';
+import { AlertTriangle, AlertOctagon, Activity, CheckCircle, ChevronLeft, ChevronRight, Loader2, Settings } from 'lucide-react';
+import { SeverityBadge, StatusBadge, ScoreBadge } from '@/components/alerts';
 import { AnomalyMetricsTable } from '@/components/monitoring/AnomalyMetricsTable';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface AnomalyEvent {
   msg_id: string;
@@ -50,8 +51,8 @@ interface Incident {
   severity: 'info' | 'warning' | 'critical';
   affected_devices: string[];
   affected_agents: string[];
-  first_seen: number;
-  last_seen: number;
+  first_seen: number | null;
+  last_seen: number | null;
   max_anomaly_score: number;
   max_confidence: number;
   event_count: number;
@@ -80,6 +81,8 @@ interface IncidentDetails extends Incident {
 const API_BASE = '/api/v1';
 
 export function AlertsPage() {
+  const { user } = useAuth();
+  
   // State
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -94,13 +97,15 @@ export function AlertsPage() {
   const [hasMore, setHasMore] = useState(false);
   const [total, setTotal] = useState(0);
 
-  // Modal state
+  // Resolve modal state
   const [selectedIncident, setSelectedIncident] = useState<IncidentDetails | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [resolutionNotes, setResolutionNotes] = useState('');
-  const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [resolving, setResolving] = useState(false);
+
+  // Config dialog state
+  const [configDialogOpen, setConfigDialogOpen] = useState(false);
 
   // Device list for filters
   const [devices, setDevices] = useState<{ name: string; type: string }[]>([]);
@@ -129,8 +134,10 @@ export function AlertsPage() {
   /**
    * Fetch incidents with filters
    */
-  const fetchIncidents = async (off: number = 0) => {
-    setLoading(true);
+  const fetchIncidents = async (off: number = 0, silent: boolean = false) => {
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const params = new URLSearchParams();
       params.append('limit', limit.toString());
@@ -179,9 +186,6 @@ export function AlertsPage() {
     }
   };
 
-  /**
-   * Resolve incident
-   */
   const resolveIncident = async () => {
     if (!selectedIncident) return;
 
@@ -191,16 +195,17 @@ export function AlertsPage() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          resolvedBy: 'user', // TODO: Get from auth context
+          resolvedBy: user?.email || user?.username || 'anonymous',
           notes: resolutionNotes,
         }),
       });
 
       const data = await response.json();
       if (data.success) {
-        setSelectedIncident(data.incident);
-        // Refresh incidents list
-        await fetchIncidents(offset);
+        setDetailsOpen(false);
+        setSelectedIncident(null);
+        setResolutionNotes('');
+        await fetchIncidents(offset, true);
         await fetchStats();
       }
     } catch (error) {
@@ -236,17 +241,20 @@ export function AlertsPage() {
     fetchStats();
     fetchIncidents(0);
 
-    // Auto-refresh every 30 seconds
+    // Auto-refresh every 30 seconds (silent refresh to prevent flickering)
     const interval = setInterval(() => {
       fetchStats();
-      fetchIncidents(offset);
+      fetchIncidents(offset, true); // Silent refresh
     }, 30000);
 
     return () => clearInterval(interval);
   }, []);
 
   // Format timestamp
-  const formatTime = (ms: number) => {
+  const formatTime = (ms: number | null | undefined) => {
+    if (!ms || isNaN(ms)) {
+      return 'N/A';
+    }
     return new Date(ms).toLocaleString();
   };
 
@@ -416,7 +424,7 @@ export function AlertsPage() {
             <div className="text-center py-8 text-gray-500">No incidents found</div>
           ) : (
             <>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto transition-opacity duration-300">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -455,26 +463,16 @@ export function AlertsPage() {
                         </TableCell>
                         <TableCell className="text-center">{incident.event_count}</TableCell>
                         <TableCell>
-                          <div className="flex gap-1">
+                          {incident.status !== 'resolved' && (
                             <Button
                               size="sm"
-                              variant="outline"
+                              variant="default"
                               onClick={() => fetchIncidentDetails(incident.incident_id)}
                             >
-                              <Eye className="w-4 h-4" />
+                              <CheckCircle className="w-4 h-4 mr-1" />
+                              Resolve
                             </Button>
-                            {incident.status !== 'resolved' && (
-                              <Button
-                                size="sm"
-                                variant="default"
-                                onClick={() => {
-                                  fetchIncidentDetails(incident.incident_id);
-                                }}
-                              >
-                                <CheckCircle className="w-4 h-4" />
-                              </Button>
-                            )}
-                          </div>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -513,11 +511,10 @@ export function AlertsPage() {
         </CardContent>
       </Card>
 
-      {/* Incident Details Modal */}
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-md">
           {detailsLoading ? (
-            <div className="flex justify-center items-center h-64">
+            <div className="flex justify-center items-center h-32">
               <Loader2 className="w-8 h-8 animate-spin" />
             </div>
           ) : selectedIncident ? (
@@ -525,155 +522,42 @@ export function AlertsPage() {
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                   <SeverityBadge severity={selectedIncident.severity} />
-                  {selectedIncident.metric}
+                  Resolve Incident
                 </DialogTitle>
                 <DialogDescription>
-                  Incident ID: {selectedIncident.incident_id}
+                  {selectedIncident.device_name} - {selectedIncident.metric}
                 </DialogDescription>
               </DialogHeader>
 
-              <div className="space-y-6">
-                {/* Summary Grid */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label className="text-sm text-gray-600">Status</Label>
-                    <div className="mt-1">
-                      <StatusBadge status={selectedIncident.status} />
-                    </div>
-                  </div>
-                  <div>
-                    <Label className="text-sm text-gray-600">Anomaly Score</Label>
-                    <div className="mt-1">
-                      <ScoreBadge score={selectedIncident.max_anomaly_score} />
-                    </div>
-                  </div>
-                  <div>
-                    <Label className="text-sm text-gray-600">First Detected</Label>
-                    <p className="text-sm mt-1">{formatTime(selectedIncident.first_seen)}</p>
-                  </div>
-                  <div>
-                    <Label className="text-sm text-gray-600">Last Seen</Label>
-                    <p className="text-sm mt-1">{formatTime(selectedIncident.last_seen)}</p>
-                  </div>
+              <div className="space-y-4 mt-4">
+                <div>
+                  <Label htmlFor="notes">Resolution Notes</Label>
+                  <Textarea
+                    id="notes"
+                    placeholder="Describe how this incident was resolved..."
+                    value={resolutionNotes}
+                    onChange={(e) => setResolutionNotes(e.target.value)}
+                    rows={4}
+                    className="mt-1"
+                  />
                 </div>
-
-                {/* Affected Devices */}
-                {selectedIncident.affected_devices && selectedIncident.affected_devices.length > 0 && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-lg">Affected Devices</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedIncident.affected_devices.map((device) => (
-                          <Badge key={device} variant="secondary">
-                            {device}
-                          </Badge>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Timeline Chart */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg">Event Timeline</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <IncidentTimelineChart events={selectedIncident.events || []} />
-                  </CardContent>
-                </Card>
-
-                {/* Events Table */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg">
-                      Related Events ({selectedIncident.events?.length || 0})
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {selectedIncident.events && selectedIncident.events.length > 0 ? (
-                      <div className="overflow-x-auto">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Timestamp</TableHead>
-                              <TableHead>Device</TableHead>
-                              <TableHead>Observed</TableHead>
-                              <TableHead>Baseline</TableHead>
-                              <TableHead>Deviation</TableHead>
-                              <TableHead>Score</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {selectedIncident.events.map((event) => (
-                              <TableRow key={event.msg_id}>
-                                <TableCell className="text-xs">
-                                  {formatTime(event.timestamp_ms)}
-                                </TableCell>
-                                <TableCell className="text-sm">{event.device_name}</TableCell>
-                                <TableCell className="text-sm">
-                                  {event.observed_value.toFixed(2)}
-                                </TableCell>
-                                <TableCell className="text-sm">
-                                  {event.baseline.mean.toFixed(2)}
-                                </TableCell>
-                                <TableCell className="text-sm">
-                                  {event.deviation.toFixed(2)}
-                                </TableCell>
-                                <TableCell>
-                                  <ScoreBadge score={event.anomaly_score} />
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    ) : (
-                      <p className="text-gray-500">No events available</p>
-                    )}
-                  </CardContent>
-                </Card>
-
-                {/* Resolution Form */}
-                {selectedIncident.status !== 'resolved' && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-lg">Resolve Incident</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div>
-                        <Label htmlFor="notes">Resolution Notes</Label>
-                        <Textarea
-                          id="notes"
-                          placeholder="Describe how this incident was resolved..."
-                          value={resolutionNotes}
-                          onChange={(e) => setResolutionNotes(e.target.value)}
-                          rows={4}
-                          className="mt-1"
-                        />
-                      </div>
-                      <Button
-                        onClick={resolveIncident}
-                        disabled={resolving}
-                        className="w-full"
-                      >
-                        {resolving ? (
-                          <>
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            Resolving...
-                          </>
-                        ) : (
-                          <>
-                            <CheckCircle className="w-4 h-4 mr-2" />
-                            Mark as Resolved
-                          </>
-                        )}
-                      </Button>
-                    </CardContent>
-                  </Card>
-                )}
+                <Button
+                  onClick={resolveIncident}
+                  disabled={resolving}
+                  className="w-full"
+                >
+                  {resolving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Resolving...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Mark as Resolved
+                    </>
+                  )}
+                </Button>
               </div>
             </>
           ) : null}

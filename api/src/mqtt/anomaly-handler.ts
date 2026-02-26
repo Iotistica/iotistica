@@ -57,7 +57,10 @@ export interface Incident {
 	fingerprint: string;
 	metric: string;
 	severity: 'info' | 'warning' | 'critical';
-	affectedDevices: string[];
+	deviceName: string;         // Primary device name
+	deviceType: string;         // Protocol/source type
+	affectedDevices: string[];  // Array of device names
+	affectedAgents: string[];   // Array of agent UUIDs
 	firstSeen: number;
 	lastSeen: number;
 	maxAnomalyScore: number;
@@ -269,9 +272,37 @@ export class AnomalyEventHandler {
 		const redis = await this.getRedis();
 		const incidentKey = `incident:${event.fingerprint}`;
 		
-		// Try to get existing incident
-		const existingData = await redis.get(incidentKey);
+		// Check database for resolved incidents (defensive check)
+		// Prevents reopening incidents that were manually resolved
+		const dbCheck = await query(
+			`SELECT incident_id, status, fingerprint 
+			 FROM anomaly_incidents 
+			 WHERE fingerprint = $1 
+			 ORDER BY created_at DESC 
+			 LIMIT 1`,
+			[event.fingerprint]
+		);
 		
+		if (dbCheck.rows.length > 0 && dbCheck.rows[0].status === 'resolved') {
+			logger.info('Previous incident was resolved, creating new incident', {
+				fingerprint: event.fingerprint,
+				oldIncidentId: dbCheck.rows[0].incident_id,
+				oldStatus: 'resolved',
+			});
+			
+			// Clear stale Redis cache and create fresh incident
+			if (redis) {
+				await redis.del(incidentKey);
+			}
+			// Fall through to create new incident below
+		}
+		
+		// Try to get existing incident from Redis
+		const existingData = redis ? await redis.get(incidentKey) : null;
+		
+		// Create new incident if:
+		// 1. No Redis cache exists (first event with this fingerprint)
+		// 2. Previous incident was resolved (defensive check above cleared cache)
 		if (!existingData) {
 			// Create new incident
 			const incident: Incident = {
@@ -279,7 +310,10 @@ export class AnomalyEventHandler {
 				fingerprint: event.fingerprint,
 				metric: event.metric,
 				severity: event.severity,
-				affectedDevices: [event.agentUuid],
+				deviceName: event.deviceName,
+				deviceType: event.deviceType,
+				affectedDevices: [event.deviceName],
+				affectedAgents: [event.agentUuid],
 				firstSeen: event.timestampMs,
 				lastSeen: event.timestampMs,
 				maxAnomalyScore: event.anomalyScore,
@@ -300,9 +334,25 @@ export class AnomalyEventHandler {
 		// Update existing incident
 		const incident: Incident = JSON.parse(existingData);
 		
-		// Add device if not already affected
-		if (!incident.affectedDevices.includes(event.agentUuid)) {
-			incident.affectedDevices.push(event.agentUuid);
+		// Ensure new fields exist (backward compatibility)
+		if (!incident.deviceName) {
+			incident.deviceName = event.deviceName;
+		}
+		if (!incident.deviceType) {
+			incident.deviceType = event.deviceType;
+		}
+		if (!incident.affectedAgents) {
+			incident.affectedAgents = [event.agentUuid];
+		}
+		
+		// Add device name if not already affected
+		if (!incident.affectedDevices.includes(event.deviceName)) {
+			incident.affectedDevices.push(event.deviceName);
+		}
+		
+		// Add agent UUID if not already tracked
+		if (!incident.affectedAgents.includes(event.agentUuid)) {
+			incident.affectedAgents.push(event.agentUuid);
 		}
 		
 		// Update metrics
@@ -354,7 +404,10 @@ export class AnomalyEventHandler {
 				fingerprint,
 				metric,
 				severity,
+				device_name,
+				device_type,
 				affected_devices,
+				affected_agents,
 				first_seen,
 				last_seen,
 				max_anomaly_score,
@@ -363,13 +416,16 @@ export class AnomalyEventHandler {
 				status,
 				created_at,
 				updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())`,
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())`,
 			[
 				incident.incidentId,
 				incident.fingerprint,
 				incident.metric,
 				incident.severity,
+				incident.deviceName,
+				incident.deviceType,
 				JSON.stringify(incident.affectedDevices),
+				JSON.stringify(incident.affectedAgents),
 				incident.firstSeen,
 				incident.lastSeen,
 				incident.maxAnomalyScore,
@@ -387,18 +443,24 @@ export class AnomalyEventHandler {
 		await query(
 			`UPDATE anomaly_incidents SET
 				severity = $2,
-				affected_devices = $3,
-				last_seen = $4,
-				max_anomaly_score = $5,
-				max_confidence = $6,
-				event_count = $7,
-				status = $8,
+				device_name = $3,
+				device_type = $4,
+				affected_devices = $5,
+				affected_agents = $6,
+				last_seen = $7,
+				max_anomaly_score = $8,
+				max_confidence = $9,
+				event_count = $10,
+				status = $11,
 				updated_at = NOW()
 			WHERE incident_id = $1`,
 			[
 				incident.incidentId,
 				incident.severity,
+				incident.deviceName,
+				incident.deviceType,
 				JSON.stringify(incident.affectedDevices),
+				JSON.stringify(incident.affectedAgents),
 				incident.lastSeen,
 				incident.maxAnomalyScore,
 				incident.maxConfidence,

@@ -153,8 +153,8 @@ router.get('/anomaly-incidents', async (req, res) => {
         severity: inc.severity,
         affected_devices: inc.affected_devices || [],
         affected_agents: inc.affected_agents || [],
-        first_seen: inc.first_seen,
-        last_seen: inc.last_seen,
+        first_seen: parseInt(inc.first_seen),
+        last_seen: parseInt(inc.last_seen),
         max_anomaly_score: parseFloat(inc.max_anomaly_score),
         max_confidence: parseFloat(inc.max_confidence),
         event_count: parseInt(inc.event_count),
@@ -373,8 +373,8 @@ router.get('/anomaly-incidents/:incidentId', async (req, res) => {
         severity: incident.severity,
         affected_devices: incident.affected_devices || [],
         affected_agents: incident.affected_agents || [],
-        first_seen: incident.first_seen,
-        last_seen: incident.last_seen,
+        first_seen: parseInt(incident.first_seen),
+        last_seen: parseInt(incident.last_seen),
         max_anomaly_score: parseFloat(incident.max_anomaly_score),
         max_confidence: parseFloat(incident.max_confidence),
         event_count: parseInt(incident.event_count),
@@ -391,7 +391,7 @@ router.get('/anomaly-incidents/:incidentId', async (req, res) => {
         device_name: e.device_name,
         device_type: e.device_type,
         metric: e.metric,
-        timestamp_ms: e.timestamp_ms,
+        timestamp_ms: parseInt(e.timestamp_ms),
         observed_value: parseFloat(e.observed_value),
         baseline: e.baseline,
         anomaly_score: parseFloat(e.anomaly_score),
@@ -485,6 +485,27 @@ router.patch('/anomaly-incidents/:incidentId/resolve', async (req, res) => {
     }
 
     const incident = result.rows[0];
+
+    // Clear Redis cache to prevent reopening
+    try {
+      const { redisClient } = await import('../redis/client');
+      await redisClient.connect();
+      const redis = redisClient.getClient();
+      if (redis) {
+        const incidentKey = `incident:${incident.fingerprint}`;
+        await redis.del(incidentKey);
+        logger.info('Cleared Redis cache for resolved incident', {
+          incidentId,
+          fingerprint: incident.fingerprint,
+        });
+      }
+    } catch (redisError) {
+      logger.warn('Failed to clear Redis cache on resolution', {
+        incidentId,
+        error: redisError instanceof Error ? redisError.message : String(redisError),
+      });
+      // Don't fail resolution if Redis cleanup fails
+    }
 
     logger.info(`Incident ${incidentId} resolved by ${resolvedBy}`, {
       incidentId,
