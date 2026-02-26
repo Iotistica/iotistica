@@ -295,6 +295,7 @@ export function SystemMetrics({
   // Incidents state for alerts card
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [incidentsLoading, setIncidentsLoading] = useState(true);
+  const [isIncidentsRefreshing, setIsIncidentsRefreshing] = useState(false);
 
   // Format uptime from seconds to human readable
   const formatUptime = useCallback((seconds: number): string => {
@@ -562,6 +563,16 @@ export function SystemMetrics({
       setIncidentsLoading(false);
     }
   }, [device.deviceUuid]);
+
+  // Manual refresh function for incidents
+  const handleIncidentsRefresh = useCallback(async () => {
+    setIsIncidentsRefreshing(true);
+    try {
+      await fetchIncidents();
+    } finally {
+      setIsIncidentsRefreshing(false);
+    }
+  }, [fetchIncidents]);
 
   // Manual refresh function for telemetry
   const handleManualRefresh = useCallback(async () => {
@@ -994,6 +1005,20 @@ export function SystemMetrics({
                   <h3 className="text-lg font-semibold">Alerts</h3>
                 </div>
                 <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    className="h-8 w-8 p-0"
+                    onClick={handleIncidentsRefresh}
+                    disabled={isIncidentsRefreshing}
+                  >
+                    <RefreshCw 
+                      className={`w-4 h-4 ${isIncidentsRefreshing ? 'animate-spin' : ''}`}
+                      style={{ 
+                        transform: isIncidentsRefreshing ? undefined : 'rotate(0deg)',
+                        transition: isIncidentsRefreshing ? undefined : 'none'
+                      }}
+                    />
+                  </Button>
                   {!incidentsLoading && (
                     <>
                       {(() => {
