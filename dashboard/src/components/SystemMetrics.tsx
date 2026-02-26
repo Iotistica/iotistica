@@ -1154,8 +1154,6 @@ export function SystemMetrics({
                                 </p>
                                 <div className="flex items-center gap-3 text-xs text-muted-foreground pt-1">
                                   <span>{formatTimestamp(incident.last_seen)}</span>
-                                  <span>•</span>
-                                  <span>{incident.device_name}</span>
                                   {incident.status === 'resolved' && (
                                     <>
                                       <span>•</span>
