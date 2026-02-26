@@ -215,7 +215,7 @@ router.post('/acl', async (req: Request, res: Response) => {
   const action = req.body?.action || req.query?.action as string | undefined;
 
   // Log raw request for debugging
-  authLogger.info('ACL request received', {
+  authLogger.debug('ACL request received', {
     hasBody: !!req.body,
     bodyKeys: req.body ? Object.keys(req.body) : [],
     hasQuery: Object.keys(req.query).length > 0,
@@ -228,7 +228,7 @@ router.post('/acl', async (req: Request, res: Response) => {
   });
 
   if (!username || !topic || (acc === undefined && !action)) {
-    authLogger.info('Missing ACL parameters');
+    authLogger.debug('Missing ACL parameters');
     return res.status(403).json({ result: 'deny', error: 'Missing parameters' });
   }
 

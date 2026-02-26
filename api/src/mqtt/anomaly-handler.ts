@@ -18,7 +18,9 @@ import logger from '../utils/logger';
  */
 export interface AnomalyEvent {
 	msgId?: string;
-	deviceId: string;
+	agentUuid: string;          // Edge gateway UUID (infrastructure tracking)
+	deviceName: string;         // Monitored device name (e.g., 'COMAP-Main-Controller')
+	deviceType: 'modbus' | 'opcua' | 'bacnet' | 'mqtt' | 'system'; // Protocol/source type
 	metric: string;
 	timestampMs: number;
 	windowStartMs: number;
@@ -112,7 +114,8 @@ export class AnomalyEventHandler {
 			// 1. Skip suppressed events (already handled at edge)
 			if (event.suppressed) {
 				logger.info('⏭️ Suppressed event - storing anyway for testing', {
-					deviceId: event.deviceId,
+					agentUuid: event.agentUuid,
+					deviceName: event.deviceName,
 					metric: event.metric,
 					fingerprint: event.fingerprint,
 				});
@@ -122,7 +125,8 @@ export class AnomalyEventHandler {
 			// 2. Store raw event to database
 			await this.storeEvent(event);
 			logger.info('✅ Event stored, starting correlation', {
-				deviceId: event.deviceId,
+				agentUuid: event.agentUuid,
+				deviceName: event.deviceName,
 				metric: event.metric,
 				fingerprint: event.fingerprint
 			});
@@ -142,7 +146,9 @@ export class AnomalyEventHandler {
 			}
 			
 			logger.info('Processed anomaly event', {
-				deviceId: event.deviceId,
+				agentUuid: event.agentUuid,
+				deviceName: event.deviceName,
+				deviceType: event.deviceType,
 				metric: event.metric,
 				severity: event.severity,
 				incidentId: incident.incidentId,
@@ -153,7 +159,8 @@ export class AnomalyEventHandler {
 			logger.error('Failed to process anomaly event', {
 				error: error instanceof Error ? error.message : String(error),
 				stack: error instanceof Error ? error.stack : undefined,
-				deviceId: event.deviceId,
+				agentUuid: event.agentUuid,
+				deviceName: event.deviceName,
 				metric: event.metric,
 			});
 			throw error; // Re-throw to see in outer handler
@@ -167,7 +174,9 @@ export class AnomalyEventHandler {
 		// Log the actual values being inserted
 		logger.info('Storing anomaly event to database', {
 			msgId: event.msgId,
-			deviceId: event.deviceId,
+			agentUuid: event.agentUuid,
+			deviceName: event.deviceName,
+			deviceType: event.deviceType,
 			metric: event.metric,
 			timestampMs: event.timestampMs,
 			hasTimestampMs: event.timestampMs !== undefined,
@@ -191,7 +200,8 @@ export class AnomalyEventHandler {
 			}
 			
 			logger.warn('Deviation was missing, calculated from expected range', {
-				deviceId: event.deviceId,
+				agentUuid: event.agentUuid,
+				deviceName: event.deviceName,
 				metric: event.metric,
 				observedValue: value,
 				expectedRange: event.expectedRange,
@@ -202,7 +212,9 @@ export class AnomalyEventHandler {
 		await query(
 			`INSERT INTO anomaly_events (
 				msg_id,
-				device_id,
+				agent_uuid,
+				device_name,
+				device_type,
 				metric,
 				timestamp_ms,
 				window_start_ms,
@@ -222,10 +234,12 @@ export class AnomalyEventHandler {
 				cooldown_sec,
 				first_seen,
 				created_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW())`,
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW())`,
 			[
 				event.msgId || randomUUID(),
-				event.deviceId,
+				event.agentUuid,
+				event.deviceName,
+				event.deviceType,
 				event.metric,
 				event.timestampMs,
 				event.windowStartMs,
@@ -265,7 +279,7 @@ export class AnomalyEventHandler {
 				fingerprint: event.fingerprint,
 				metric: event.metric,
 				severity: event.severity,
-				affectedDevices: [event.deviceId],
+				affectedDevices: [event.agentUuid],
 				firstSeen: event.timestampMs,
 				lastSeen: event.timestampMs,
 				maxAnomalyScore: event.anomalyScore,
@@ -287,8 +301,8 @@ export class AnomalyEventHandler {
 		const incident: Incident = JSON.parse(existingData);
 		
 		// Add device if not already affected
-		if (!incident.affectedDevices.includes(event.deviceId)) {
-			incident.affectedDevices.push(event.deviceId);
+		if (!incident.affectedDevices.includes(event.agentUuid)) {
+			incident.affectedDevices.push(event.agentUuid);
 		}
 		
 		// Update metrics

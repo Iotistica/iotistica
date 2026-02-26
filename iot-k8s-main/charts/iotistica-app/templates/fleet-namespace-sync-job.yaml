@@ -91,9 +91,8 @@ spec:
           
           -- Create sample fleet instances from pre-provisioned namespaces
           -- Each namespace gets a corresponding fleet instance
+          -- Uses UPSERT to safely handle concurrent execution when multiple instances share same DB
           {{- range .Values.fleetNamespaces.namespaces }}
-          DELETE FROM fleets WHERE k8s_namespace = 'fleet-{{ .name }}';
-          
           INSERT INTO fleets (
             fleet_uuid,
             fleet_id,
@@ -129,7 +128,14 @@ spec:
               'total_devices', {{ .maxDevices }},
               'created_at', NOW()::text
             )
-          );
+          )
+          ON CONFLICT (k8s_namespace) DO UPDATE SET
+            fleet_name = EXCLUDED.fleet_name,
+            agent_count = EXCLUDED.agent_count,
+            devices_per_agent = EXCLUDED.devices_per_agent,
+            description = EXCLUDED.description,
+            updated_at = NOW(),
+            deployment_config = EXCLUDED.deployment_config;
           {{- end }}
           
           -- Query and display created fleets

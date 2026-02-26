@@ -329,7 +329,7 @@ resourceQuota:
 # CONFIGURED: 2 agents per namespace (conservative, leaves headroom)
 #
 fleetNamespaces:
-  enabled: true
+  enabled: false  # Disabled to prevent conflicts when sharing database with other instances
   namespaces:
     # Test fleet for development/testing
     - name: test

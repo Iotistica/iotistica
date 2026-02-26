@@ -35,7 +35,7 @@ interface IncidentFilters {
  * - status: 'open' | 'active' | 'resolved' (optional)
  * - severity: 'info' | 'warning' | 'critical' (optional)
  * - deviceName: Filter by monitored device name (optional)
- * - deviceType: Filter by device type (optional, modbus|opcua|bacnet|mqtt-sensor|agent-system)
+ * - deviceType: Filter by device type (optional, modbus|opcua|bacnet|mqtt|system)
  * - metric: Filter by metric name (optional)
  * - startTime: Start time in milliseconds (optional)
  * - endTime: End time in milliseconds (optional)

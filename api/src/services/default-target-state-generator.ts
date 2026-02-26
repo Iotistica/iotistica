@@ -339,8 +339,9 @@ export function generateDefaultTargetStateConfig(
         minSamples: 5,     // Minimum samples before detection starts
       },
       alerts: {
-        cooldownMs: 300000,  // 5 minutes (agent-side alert deduplication)
-        maxQueueSize: 1000,  // Max alerts in agent memory queue
+        cooldownMs: 300000,   // 5 minutes (agent-side alert deduplication)
+        maxQueueSize: 1000,   // Max alerts in agent memory queue
+        minConfidence: 0.7,   // Minimum confidence threshold to generate alerts (0-1)
       },
       systemMetrics: [
         {

@@ -65,6 +65,9 @@ Sensor/System Data → DataPoint → Buffer → Detector(s) → Fusion → Alert
 **Data Structures**:
 - `agent/src/ai/anomaly/buffer.ts` - Rolling statistical buffer
 - `agent/src/ai/anomaly/types.ts` (274 lines) - TypeScript type definitions
+  - `Protocol` type: 'modbus' | 'opcua' | 'bacnet' | 'mqtt' | 'system'
+  - `DataPoint` interface: Includes optional `protocol` field for per-metric tracking
+  - `AnomalyEvent` interface: Uses `deviceType: Protocol` for database storage
 
 **Endpoint Discovery**:
 - `agent/src/ai/anomaly/endpoint-sync.ts` (173 lines) - Endpoint → Metric config converter
@@ -431,15 +434,58 @@ CREATE TABLE anomaly_alerts (
 
 ### Warm-up Skip Logic
 ```typescript
-// Skip warm-up if database has sufficient baselines
-const baselines = await storage.loadBaselines();
-if (baselines.length > 0 && baselines[0].sampleCount >= 100) {
-  this.startupTimestamp = 0;  // Disable warm-up
-  this.logger.info('Skipping warm-up period (baselines loaded from database)');
+// Automatically checks on startup (index.ts:98-99, 989-1023)
+this.storage.initialize()
+  .then(() => this.checkAndSkipWarmupIfBaselinesExist())
+
+// Implementation:
+private async checkAndSkipWarmupIfBaselinesExist(): Promise<void> {
+  const { hasCoverage, coveragePercent } = await this.storage.checkBaselineCoverage(
+    enabledMetrics,
+    30,   // minSamples per metric
+    0.8   // 80% coverage required
+  );
+  
+  if (hasCoverage) {
+    // Skip warm-up by backdating startup timestamp
+    this.startupTimestamp = Date.now() - this.warmupPeriodMs;
+    this.logger.info('Skipping warm-up period - sufficient baselines exist');
+  }
 }
 ```
 
-**Purpose**: New agents don't need 15-minute warm-up if historical data exists
+**Purpose**: Prevents repeated 15-minute alert blackouts after agent restarts when historical baselines exist
+
+**Coverage Calculation** (storage.ts:275-315):
+```typescript
+// 1. Find metrics with ANY baselines (ever collected)
+const anyBaselines = await db('anomaly_baselines')
+  .whereIn('metric', enabledMetrics)
+  .groupBy('metric');
+
+const collectibleMetrics = anyBaselines.length;
+
+// 2. Find metrics with SUFFICIENT baselines (30+ samples)
+const sufficientBaselines = await db('anomaly_baselines')
+  .whereIn('metric', enabledMetrics)
+  .where('sample_count', '>=', 30)
+  .groupBy('metric');
+
+// 3. Coverage = sufficient / collectible (excludes never-collected metrics)
+const coveragePercent = sufficientBaselines.length / collectibleMetrics;
+```
+
+**Handles Uncollectable Metrics Automatically**:
+- Config has `["cpu_usage", "memory_percent", "cpu_temp"]` (3 metrics)
+- Windows can't collect `cpu_temp` → never saved to database → not in `anyBaselines`
+- Coverage = 2 sufficient / 2 collectible = 100% ✅ (not 2/3 = 67% ❌)
+- Result: Warm-up skipped even though cpu_temp is configured
+
+**When Warm-up Restarts**:
+- First-time setup (no database or empty)
+- Database cleared (anomaly_baselines table truncated)
+- Coverage drops below 80% (e.g., many new metrics added)
+- Storage initialization fails
 
 ## Configuration Patterns
 
@@ -634,6 +680,7 @@ interface AnomalyConfig {
   alerts: {
     cooldownMs: number;      // 300000 (5 minutes)
     maxQueueSize: number;    // 1000
+    minConfidence: number;   // 0.7 (minimum confidence threshold to generate alerts)
   };
   storage: {
     retention: number;       // 30 days
@@ -722,9 +769,35 @@ if (isWarmingUp) {
 }
 ```
 
-**Skip Warm-up If**:
-- Database has baselines with sample_count >= 100
-- Restarts don't lose historical context
+**Critical: Warm-Up Does NOT Restart on Agent Restarts**
+
+The warm-up period is **automatically skipped** if sufficient baselines exist in the database. This prevents "repeated 15-minute alert blackouts" after normal agent restarts.
+
+**On Agent Startup** (`index.ts` lines 98-99, 989-1023):
+1. **Checks database** for existing baselines
+2. **Evaluates coverage**: 
+   - Queries database for metrics with ANY baselines (ever collected)
+   - Calculates coverage as: (metrics with 30+ samples) / (metrics ever collected)
+   - Automatically excludes uncollectable metrics (e.g., `cpu_temp` on Windows where sensors aren't accessible)
+   - Requires **80% of collectible metrics** to have sufficient baselines
+   - Each baseline needs **30+ samples** (~2.5 minutes of data)
+3. **Two outcomes**:
+   - ✅ **Sufficient baselines found**: Warm-up skipped by backdating `startupTimestamp`
+     - Logs: `"Skipping warm-up period - sufficient baselines exist"`
+     - Detection starts immediately with normal alert generation
+   - ❌ **Insufficient baselines**: 15-minute warm-up runs (no alerts)
+     - Logs: `"Warm-up period active - insufficient baseline coverage"`
+
+**Baseline Persistence**:
+- Saved to SQLite **every 5 minutes** (automatic)
+- Survives agent restarts
+- Retention: **30 days** default
+
+**Warm-up Only Restarts When**:
+- First-time setup (no database or empty)
+- Database cleared (anomaly_baselines table truncated)
+- Coverage drops below 80% (e.g., many new metrics added)
+- Storage initialization fails
 
 ### Quality Gating
 ```typescript
@@ -842,6 +915,46 @@ expectedRange = [floor(23.0 × 0.68), ceil(23.0 × 1.32)]
 - Humidity (Modbus): base=550, scale=0.1 → 55.0%RH
 - Voltage (Modbus): base=2300, scale=0.1 → 230.0V
 - Any metric where raw register value ≠ actual metric value
+
+### Issue: Database constraint violation on device_type
+**Symptom**: API error "violates check constraint 'anomaly_events_device_type_check'" with device_type='standalone'
+
+**Root Cause**: Protocol types must match database constraint: `'modbus' | 'opcua' | 'bacnet' | 'mqtt' | 'system'`
+
+**Solution**: Updated database constraint (migration 160) to accept standardized protocol types:
+- `'mqtt'` for MQTT sensors (was `'mqtt-sensor'`)
+- `'system'` for agent metrics (was `'agent-system'`)  
+- `'modbus'`, `'opcua'`, `'bacnet'` remain unchanged
+
+**Implementation** (`agent/src/ai/anomaly/index.ts` lines 461-470):
+```typescript
+// Protocol passed via dataPoint.protocol (from publish manager or system metrics)
+const deviceType = dataPoint.protocol || this.deviceType || 'system';
+
+const event = {
+  agentUuid: this.deviceUuid,      // Infrastructure (edge gateway)
+  deviceName: this.deviceName,      // Monitored device (user-facing)
+  deviceType,                       // Protocol: modbus, opcua, bacnet, mqtt, system
+  // ...
+};
+```
+
+**Data Flow**:
+1. **System metrics**: Pass `protocol: 'system'` when calling `processDataPoint()`
+2. **Endpoint metrics**: Pass `protocol: this.protocol` (modbus, opcua, bacnet, mqtt) from PublishManager
+3. **Event creation**: Use `dataPoint.protocol` if present, otherwise fall back to constructor's `deviceType`
+
+**Database Constraint** (migration 160):
+```sql
+ALTER TABLE anomaly_events 
+  ADD CONSTRAINT anomaly_events_device_type_check 
+  CHECK (device_type IN ('modbus', 'opcua', 'bacnet', 'mqtt', 'system'));
+```
+
+**Fields**:
+- `agent_uuid` - Edge gateway UUID (infrastructure)
+- `device_name` - Monitored device name (user-facing)
+- `device_type` - Protocol/source type (modbus, opcua, bacnet, mqtt, system)
 
 ## Guidelines for Code Changes
 

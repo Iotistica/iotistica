@@ -44,6 +44,11 @@ def load_profile_data():
     import time
     
     API_URL = os.environ.get("API_URL", "http://api:3002")
+    API_KEY = os.environ.get("API_KEY")  # Required: from api_keys table
+    
+    if not API_KEY:
+        logger.error("API_KEY environment variable is required but not set")
+        return {}
     
     # Create SSL context that accepts self-signed certificates
     ssl_context = ssl.create_default_context()
@@ -54,8 +59,14 @@ def load_profile_data():
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            url = f"{API_URL}/api/v1/profiles/datapoints?protocol=opcua"
-            req = urllib.request.Request(url, headers={'User-Agent': 'opcua-gui/1.0'})
+            # Use simulator endpoint
+            url = f"{API_URL}/api/v1/profiles/sim/datapoints?protocol=opcua"
+            headers = {
+                'User-Agent': 'opcua-gui/1.0',
+                'Authorization': f'Bearer {API_KEY}'
+            }
+            
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=3, context=ssl_context) as response:
                 profile_data = json.loads(response.read().decode())
                 logger.info(f"Loaded {len(profile_data)} profiles from API")

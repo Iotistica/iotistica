@@ -282,14 +282,29 @@ export class AnomalyStorageService {
 		}
 
 		try {
-			const baselines = await this.db('anomaly_baselines')
+			// Find metrics with ANY baselines (have been collected at least once)
+			const anyBaselines = await this.db('anomaly_baselines')
+				.whereIn('metric', metrics)
+				.select('metric')
+				.groupBy('metric');
+			
+			const collectibleMetrics = anyBaselines.length;
+			
+			// If no metrics have ever been collected, can't skip warm-up
+			if (collectibleMetrics === 0) {
+				return { hasCoverage: false, coveragePercent: 0, metricsWithBaselines: 0 };
+			}
+			
+			// Find metrics with SUFFICIENT baselines (minSamples+)
+			const sufficientBaselines = await this.db('anomaly_baselines')
 				.whereIn('metric', metrics)
 				.where('sample_count', '>=', minSamples)
 				.select('metric')
 				.groupBy('metric');
 
-			const metricsWithBaselines = baselines.length;
-			const coveragePercent = metricsWithBaselines / metrics.length;
+			const metricsWithBaselines = sufficientBaselines.length;
+			// Coverage = sufficient / collectible (excludes never-collected metrics like cpu_temp on Windows)
+			const coveragePercent = metricsWithBaselines / collectibleMetrics;
 			const hasCoverage = coveragePercent >= minCoveragePercent;
 
 			return { hasCoverage, coveragePercent, metricsWithBaselines };

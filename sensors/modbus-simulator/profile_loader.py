@@ -14,8 +14,12 @@ logger = logging.getLogger(__name__)
 def load_profile_data():
     """Load profile data points from API (shared by simulator and GUI)"""
     API_URL = os.environ.get("API_URL", "http://api:3002")
-    API_TOKEN = os.environ.get("API_TOKEN", "")
+    API_KEY = os.environ.get("API_KEY")  # Required: from api_keys table
     VERIFY_SSL = os.environ.get("VERIFY_SSL", "false").lower() == "true"
+    
+    if not API_KEY:
+        logger.error("API_KEY environment variable is required but not set")
+        return {}
     
     # Create SSL context for HTTPS (disable verification for self-signed certs)
     ssl_context = ssl.create_default_context()
@@ -29,10 +33,12 @@ def load_profile_data():
     
     for attempt in range(max_retries):
         try:
-            url = f"{API_URL}/api/v1/profiles/datapoints?protocol=modbus"
-            headers = {'User-Agent': 'modbus-simulator/1.0'}
-            if API_TOKEN:
-                headers['Authorization'] = f'Bearer {API_TOKEN}'
+            # Use simulator endpoint
+            url = f"{API_URL}/api/v1/profiles/sim/datapoints?protocol=modbus"
+            headers = {
+                'User-Agent': 'modbus-simulator/1.0',
+                'Authorization': f'Bearer {API_KEY}'
+            }
             
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=5, context=ssl_context) as response:

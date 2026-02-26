@@ -333,7 +333,7 @@ services:
         environment:
           - PROFILE=${MODBUS_PROFILE:-Generic}
           - API_URL=http://api:3002
-          - API_TOKEN=${API_TOKEN:-}
+          - API_KEY=${SIMULATOR_API_KEY}  # Required: API key from api_keys table
           - GUI_PORT=5000
           - GUI_HOST=0.0.0.0
         ports:
@@ -350,7 +350,7 @@ services:
                 max-size: "5m"
                 max-file: "2"
  
-    opcua-simulator:
+    opcua-sim:
         build:
             context: ./sensors/opcua-simulator
             dockerfile: Dockerfile
@@ -360,6 +360,7 @@ services:
         environment:
             - PROFILE=${OPCUA_PROFILE:-testfactory}
             - API_URL=http://api:3002
+            - API_KEY=${SIMULATOR_API_KEY}  # Required: API key from api_keys table
             - WEB_PORT=5002
         ports:
             - "4840:4840"     # OPC UA server

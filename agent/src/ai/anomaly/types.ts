@@ -6,10 +6,16 @@
  */
 
 /**
+ * Protocol types for data sources
+ */
+export type Protocol = 'modbus' | 'opcua' | 'bacnet' | 'mqtt' | 'system';
+
+/**
  * Unified data point for all monitored values
  */
 export interface DataPoint {
 	source: 'sensor' | 'system' | 'container' | 'endpoint';
+	protocol?: Protocol;      // Protocol/source type (modbus, opcua, system, etc.)
 	metric: string;           // e.g., 'temperature', 'cpu_usage', 'memory_percent'
 	value: number;
 	unit: string;
@@ -80,7 +86,7 @@ export interface BaselineInfo {
 export interface AnomalyEvent {
 	agentUuid: string;               // Edge gateway/agent UUID (infrastructure tracking)
 	deviceName: string;              // Monitored device name (e.g., 'COMAP-Main-Controller', 'Agent System')
-	deviceType: 'modbus' | 'opcua' | 'bacnet' | 'mqtt-sensor' | 'agent-system'; // Source type
+	deviceType: Protocol;            // Protocol/source type (modbus, opcua, system, etc.)
 	metric: string;
 	timestampMs: number;             // When the anomalous measurement occurred (explicit units)
 	windowStartMs: number;           // Start of statistical window used for detection

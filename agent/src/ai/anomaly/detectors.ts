@@ -111,13 +111,14 @@ export class MADDetector implements AnomalyDetector {
 		if (config.expectedRange && config.expectedRange.length === 2) {
 			const [min, max] = config.expectedRange;
 			if (value >= min && value <= max) {
+				// LOG: expectedRange override - skip statistical checks (MAD detector)
 				return {
 					method: this.method,
 					isAnomaly: false,
 					confidence: 0,
 					deviation: 0,
 					expectedRange: [min, max],
-					message: `Value within expected range [${min.toFixed(2)}, ${max.toFixed(2)}]`,
+					message: `[OVERRIDE] Value within expected range [${min.toFixed(2)}, ${max.toFixed(2)}] - skipping MAD checks`,
 				};
 			}
 		}

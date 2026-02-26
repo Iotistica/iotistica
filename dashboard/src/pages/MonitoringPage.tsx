@@ -364,8 +364,8 @@ export function AlertsPage() {
               <SelectItem value="modbus">Modbus</SelectItem>
               <SelectItem value="opcua">OPC-UA</SelectItem>
               <SelectItem value="bacnet">BACnet</SelectItem>
-              <SelectItem value="mqtt-sensor">MQTT Sensor</SelectItem>
-              <SelectItem value="agent-system">Agent System</SelectItem>
+              <SelectItem value="mqtt">MQTT</SelectItem>
+              <SelectItem value="system">System</SelectItem>
             </SelectContent>
           </Select>
         </div>

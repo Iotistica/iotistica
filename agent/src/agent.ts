@@ -951,7 +951,7 @@ export default class Agent {
         MqttManager.getInstance(),
         this.deviceInfo.uuid,
         this.deviceInfo.deviceName, // Monitored device name (e.g., 'COMAP-Main-Controller')
-        (this.deviceInfo.deviceType as any) // Device source type
+        'system' // Default protocol (overridden by dataPoint.protocol per metric)
       );
       
       this.agentLogger?.infoSync('Anomaly detection initialized with inheritance support', {

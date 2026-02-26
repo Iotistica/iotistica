@@ -882,6 +882,7 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 				if (item.value !== null && item.value !== undefined) {
 					anomalyService.processDataPoint({
 						source: 'system',
+						protocol: 'system', // Agent system metrics
 						metric: item.metric,
 						value: item.value,
 						unit: item.unit,

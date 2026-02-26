@@ -55,13 +55,65 @@ class ProfileConfigModel {
 
 const router = express.Router();
 import { jwtAuth } from '../middleware/jwt-auth';
+import { validateApiKey } from '../middleware/api-key-auth';
 
 /**
- * Get all profiles in dataPoints.json format (for simulators)
+ * Simulator endpoint for protocol simulators (API KEY REQUIRED)
+ * GET /api/v1/profiles/sim/datapoints?protocol=modbus
+ * 
+ * REQUIRES API KEY - For internal Docker network services
+ * Used by protocol simulators (modbus-sim, opcua-simulator, bacnet-sim)
+ * 
+ * Authentication: Authorization: Bearer <api-key> header (from api_keys table)
+ * Security: Only accessible within Docker network, not exposed externally
+ * 
+ * Returns format compatible with modbus-simulator:
+ * {
+ *   "Generic": { "dataPoints": [...] },
+ *   "COMAP": { "dataPoints": [...] }
+ * }
+ */
+router.get('/sim/datapoints', validateApiKey, async (req, res) => {
+  try {
+    const protocol = (req.query.protocol as string) || 'modbus';
+    const profiles = await ProfileConfigModel.listByProtocol(protocol);
+
+    // Transform to dataPoints.json format
+    const dataPointsFormat: Record<string, any> = {};
+    for (const profile of profiles) {
+      // Parse data_points if it's a JSON string
+      const dataPoints = typeof profile.data_points === 'string' 
+        ? JSON.parse(profile.data_points) 
+        : profile.data_points;
+      
+      // Parse metadata if it's a JSON string
+      const metadata = profile.metadata 
+        ? (typeof profile.metadata === 'string' ? JSON.parse(profile.metadata) : profile.metadata)
+        : undefined;
+      
+      dataPointsFormat[profile.profile_name] = {
+        dataPoints: dataPoints,
+        ...(metadata && { metadata })
+      };
+    }
+
+    logger.debug('Internal profiles accessed', { protocol, count: profiles.length });
+    res.json(dataPointsFormat);
+  } catch (error: any) {
+    logger.error('Error getting internal datapoints', { error: error.message, stack: error.stack });
+    res.status(500).json({
+      error: 'Internal server error',
+      requestId: req.id || 'unknown'
+    });
+  }
+});
+
+/**
+ * Get all profiles in dataPoints.json format (PROTECTED - Dashboard Use)
  * GET /api/v1/profiles/datapoints?protocol=modbus
  * 
- * REQUIRES AUTHENTICATION - Protected endpoint
- * Used by internal services (Modbus simulator, other protocol simulators)
+ * REQUIRES AUTHENTICATION - Protected endpoint for dashboard
+ * Used by dashboard GUI to display available profiles
  * 
  * Returns format compatible with modbus-simulator:
  * {
@@ -71,7 +123,7 @@ import { jwtAuth } from '../middleware/jwt-auth';
  */
 router.get('/datapoints', jwtAuth, async (req, res) => {
   try {
-    const protocol = (req.query.protocol as string) || 'modbus';
+    const protocol = (req.query.protocol as string);
     const profiles = await ProfileConfigModel.listByProtocol(protocol);
 
     // Transform to dataPoints.json format

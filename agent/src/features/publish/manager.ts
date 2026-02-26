@@ -417,6 +417,7 @@ export class PublishManager extends EventEmitter {
       
       anomalyService.processDataPoint({
         source: 'endpoint',
+        protocol: this.protocol as any, // Protocol type (modbus, opcua, bacnet, mqtt)
         metric: fullMetricName,
         value: data,
         unit: this.inferUnit(metricName),
@@ -493,6 +494,7 @@ export class PublishManager extends EventEmitter {
               
               anomalyService.processDataPoint({
                 source: 'endpoint',
+                protocol: this.protocol as any, // Protocol type (modbus, opcua, bacnet, mqtt)
                 metric: `${this.deviceUuid}_${deviceName}_${fieldName}`,
                 value: value,
                 unit: this.inferUnit(fieldName),
@@ -526,6 +528,7 @@ export class PublishManager extends EventEmitter {
           
           anomalyService.processDataPoint({
             source: 'sensor',
+            protocol: this.protocol as any, // Protocol type (modbus, opcua, bacnet, mqtt)
             metric: `${this.deviceUuid}_${sensorName}_${metricName}`,
             value: value,
             unit: this.inferUnit(key),

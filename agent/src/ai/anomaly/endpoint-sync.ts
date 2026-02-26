@@ -97,6 +97,17 @@ export async function discoverEndpointMetrics(
 				const scale = dp.scale || 1;
 				const scaledBase = dp.base * scale;
 				
+				// LOG: Show scale factor application (critical for debugging false positives)
+				logger?.debugSync('[ANOMALY] Calculating expectedRange with scale factor', {
+					component: LogComponents.metrics,
+					metric: metricName,
+					base: dp.base,
+					scale,
+					scaledBase,
+					noise_pct: dp.noise_pct,
+					marginMultiplier,
+				});
+				
 				// Handle special case: base = 0 (e.g., unused registers)
 				if (dp.base === 0) {
 					// For constant zero values, set small range to allow zero
@@ -106,6 +117,13 @@ export async function discoverEndpointMetrics(
 					const lowerBound = Math.floor(scaledBase * (1 - dp.noise_pct * marginMultiplier));
 					const upperBound = Math.ceil(scaledBase * (1 + dp.noise_pct * marginMultiplier));
 					expectedRange = [lowerBound, upperBound];
+					
+					logger?.debugSync('[ANOMALY] Calculated expectedRange', {
+						component: LogComponents.metrics,
+						metric: metricName,
+						expectedRange,
+						calculation: `[${scaledBase} * (1 ± ${dp.noise_pct} * ${marginMultiplier})]`,
+					});
 				}
 				
 				logger?.debugSync(`Calculated expectedRange for ${metricName}`, {

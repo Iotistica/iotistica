@@ -19,6 +19,7 @@ import type {
 	StatisticalBuffer,
 	DetectionMethod,
 	AnomalySeverity,
+	Protocol,
 } from './types';
 import { createBuffer, addValue, getRecentValues, getTrend, getMedian } from './buffer';
 import { getDetector } from './detectors';
@@ -36,7 +37,7 @@ export class AnomalyDetectionService {
 	private mqttManager?: MqttManager;
 	private deviceUuid?: string;
 	private deviceName?: string;     // Monitored device name (e.g., 'COMAP-Main-Controller')
-	private deviceType?: 'modbus' | 'opcua' | 'bacnet' | 'mqtt-sensor' | 'agent-system'; // Device type
+	private deviceType?: Protocol; // Default protocol (overridden by dataPoint.protocol per metric)
 	private enabled: boolean = false;
 	private predictor: LinearPredictor;
 	private predictionCadence: ForecastCadenceConfig;
@@ -58,13 +59,13 @@ export class AnomalyDetectionService {
 	private startupTimestamp: number = Date.now();
 	private warmupPeriodMs: number;
 	
-	constructor(config: AnomalyConfig, db?: Knex, logger?: AgentLogger, mqttManager?: MqttManager, deviceUuid?: string, deviceName?: string, deviceType?: 'modbus' | 'opcua' | 'bacnet' | 'mqtt-sensor' | 'agent-system') {
+	constructor(config: AnomalyConfig, db?: Knex, logger?: AgentLogger, mqttManager?: MqttManager, deviceUuid?: string, deviceName?: string, deviceType?: import('./types').Protocol) {
 		this.config = config;
 		this.logger = logger;
 		this.mqttManager = mqttManager;
 		this.deviceUuid = deviceUuid;
 		this.deviceName = deviceName || 'Agent System'; // Default to 'Agent System' for system metrics
-		this.deviceType = deviceType || 'agent-system';  // Default device type
+		this.deviceType = deviceType || 'system';  // Default device type
 		this.enabled = true; // Controlled by features.enableAnomalyDetection
 		
 		// Set warm-up period from config (default: 15 minutes if not specified)
@@ -140,11 +141,26 @@ export class AnomalyDetectionService {
 			return; // Metric not configured for anomaly detection
 		}
 		
+		// LOG: Entry point - new data point received
+		this.logger?.debugSync('[ANOMALY] Processing data point', {
+			component: LogComponents.metrics,
+			metric: dataPoint.metric,
+			value: dataPoint.value,
+			quality: dataPoint.quality,
+			configuredMethods: metricConfig.methods.join(','),
+			expectedRange: metricConfig.expectedRange,
+		});
+		
 		// Get or create buffer
 		let buffer = this.buffers.get(dataPoint.metric);
 		if (!buffer) {
 			buffer = createBuffer(metricConfig.windowSize);
 			this.buffers.set(dataPoint.metric, buffer);
+			this.logger?.infoSync('[ANOMALY] Created new buffer', {
+				component: LogComponents.metrics,
+				metric: dataPoint.metric,
+				windowSize: metricConfig.windowSize,
+			});
 		}
 		
 		// Add value to buffer
@@ -152,13 +168,26 @@ export class AnomalyDetectionService {
 		
 		// Run detection if buffer has enough samples (async, updates cache)
 		if (buffer.size >= 10) {
+			this.logger?.debugSync('[ANOMALY] Buffer sufficient for detection', {
+				component: LogComponents.metrics,
+				metric: dataPoint.metric,
+				bufferSize: buffer.size,
+				mean: isNaN(buffer.mean) ? 'NaN' : buffer.mean.toFixed(3),
+				stdDev: isNaN(buffer.stdDev) ? 'NaN' : buffer.stdDev.toFixed(3),
+			});
 			this.runDetection(dataPoint, buffer, metricConfig);
 		} else {
 			// Buffer still building, cache zero score for this metric
+			this.logger?.debugSync('[ANOMALY] Buffer building', {
+				component: LogComponents.metrics,
+				metric: dataPoint.metric,
+				bufferSize: buffer.size,
+				required: 10,
+			});
 			this.anomalyScores.set(dataPoint.metric, 0.0);
 			// Cache metadata even while building buffer
 			this.anomalyMetadata.set(dataPoint.metric, {
-				threshold: metricConfig.minConfidence || this.config.alerts.minConfidence,
+				threshold: metricConfig.minConfidence || this.config.alerts.minConfidence || 0.7,
 				methods: metricConfig.methods,
 				samples: buffer.size
 			});
@@ -239,6 +268,17 @@ export class AnomalyDetectionService {
 					minimumSamples,
 					null // Profile filter disabled - baselines shared across scenarios
 				);
+				if (dbBaseline) {
+					this.logger?.debugSync('[ANOMALY] Loaded baseline from database', {
+						component: LogComponents.metrics,
+						metric: dataPoint.metric,
+						timeSlot,
+						seasonalityPattern,
+						mean: dbBaseline.mean?.toFixed(3),
+						stdDev: dbBaseline.std_dev?.toFixed(3),
+						sampleCount: dbBaseline.sample_count,
+					});
+				}
 			} catch (error) {
 				this.logger?.debugSync('Failed to load baseline from database, using buffer stats', {
 					component: LogComponents.metrics,
@@ -257,6 +297,15 @@ export class AnomalyDetectionService {
 			methodsToRun.unshift('expected_range'); // Add first for priority
 		}
 		
+		this.logger?.debugSync('[ANOMALY] Running detection methods', {
+			component: LogComponents.metrics,
+			metric: dataPoint.metric,
+			value: dataPoint.value,
+			methods: methodsToRun.join(','),
+			hasDbBaseline: !!dbBaseline,
+			bufferSize: buffer.size,
+		});
+		
 		// Run each configured detection method
 		for (const method of methodsToRun) {
 			const detector = getDetector(method);
@@ -269,25 +318,60 @@ export class AnomalyDetectionService {
 			
 			const result = detector.detect(dataPoint.value, buffer, metricConfig, dbBaseline);
 			
+			this.logger?.debugSync(`[ANOMALY] Detector result: ${method}`, {
+				component: LogComponents.metrics,
+				metric: dataPoint.metric,
+				method,
+				isAnomaly: result.isAnomaly,
+				confidence: result.confidence?.toFixed(3) ?? 'N/A',
+				deviation: result.deviation?.toFixed(3) ?? 'N/A',
+				expectedRange: `[${result.expectedRange?.[0]?.toFixed(2) ?? 'N/A'}, ${result.expectedRange?.[1]?.toFixed(2) ?? 'N/A'}]`,
+				baselineSource: result.baselineSource || 'N/A',
+				message: result.message,
+			});
+			
 			// Track maximum confidence across all methods (for anomaly score)
 			if (result.confidence > maxConfidence) {
 				maxConfidence = result.confidence;
 			}
 			
 			// Filter by confidence threshold for alerts
-			const minConfidence = metricConfig.minConfidence || this.config.alerts.minConfidence;
+			const minConfidence = metricConfig.minConfidence || this.config.alerts.minConfidence || 0.7; // Default: 0.7
 			if (result.isAnomaly && result.confidence >= minConfidence) {
+				this.logger?.infoSync('[ANOMALY] Creating alert (confidence threshold met)', {
+					component: LogComponents.metrics,
+					metric: dataPoint.metric,
+					method,
+					confidence: result.confidence?.toFixed(3) ?? 'N/A',
+					minConfidence: minConfidence?.toFixed(3) ?? 'N/A',
+				});
 				const alert = this.createAlert(dataPoint, buffer, metricConfig, result);
 				results.push(alert);
+			} else if (result.isAnomaly) {
+				this.logger?.debugSync('[ANOMALY] Anomaly detected but confidence below threshold', {
+					component: LogComponents.metrics,
+					metric: dataPoint.metric,
+					method,
+					confidence: result.confidence?.toFixed(3) ?? 'N/A',
+					minConfidence: minConfidence?.toFixed(3) ?? 'N/A',
+				});
 			}
 		}
 		
 		// Cache the anomaly score for this metric (0.0-1.0 range)
 		this.anomalyScores.set(dataPoint.metric, maxConfidence);
 		
+		this.logger?.debugSync('[ANOMALY] Detection complete', {
+			component: LogComponents.metrics,
+			metric: dataPoint.metric,
+			maxConfidence: maxConfidence?.toFixed(3) ?? '0.000',
+			alertsCreated: results.length,
+			methodsRun: methodsToRun.join(','),
+		});
+		
 		// Cache metadata for ML training and debugging
 		this.anomalyMetadata.set(dataPoint.metric, {
-			threshold: metricConfig.minConfidence || this.config.alerts.minConfidence,
+			threshold: metricConfig.minConfidence || this.config.alerts.minConfidence || 0.7,
 			methods: methodsToRun,
 			samples: buffer.size
 		});
@@ -377,10 +461,14 @@ export class AnomalyDetectionService {
 		// Calculate confidence (post-fusion certainty adjusted for baseline quality)
 		const confidence = this.calculateConfidence(anomalyScore, baseline);
 		
+		// Determine device type: Prefer protocol from data point, fall back to constructor value
+		// This allows per-metric protocol specification (modbus, opcua, system, etc.)
+		const deviceType = dataPoint.protocol || this.deviceType || 'system';
+		
 		const event: import('./types').AnomalyEvent = {
 			agentUuid: this.deviceUuid || 'unknown', // Infrastructure tracking (edge gateway)
 			deviceName: this.deviceName || 'Agent System', // Monitored device name (what users care about)
-			deviceType: this.deviceType || 'agent-system', // Device source type
+			deviceType, // Protocol/source type (modbus, opcua, bacnet, mqtt, system)
 			metric: dataPoint.metric,
 			timestampMs: dataPoint.timestamp,
 			windowStartMs,
@@ -408,7 +496,7 @@ export class AnomalyDetectionService {
 			deviceName: event.deviceName,
 			deviceType: event.deviceType,
 			metric: event.metric,
-			anomalyScore: event.anomalyScore.toFixed(3),
+			anomalyScore: event.anomalyScore?.toFixed(3) ?? '0.000',
 			severity: event.severity,
 			triggeredBy: event.triggeredBy.join('+'),
 			suppressed: event.suppressed,
@@ -742,10 +830,34 @@ export class AnomalyDetectionService {
 				continue;
 			}
 			
+			this.logger?.debugSync('[ANOMALY] Generating forecast', {
+				component: LogComponents.metrics,
+				metric: metricName,
+				bufferSize: buffer.size,
+				lookback: LINEAR_PREDICTOR_LOOKBACK,
+			});
+			
 			// Generate prediction using linear predictor (standardized lookback)
 			const prediction = this.predictor.predict(buffer, LINEAR_PREDICTOR_LOOKBACK);
 			recordForecastResult(cadenceState, null, now); // Track run even if no publish
-			if (!prediction) continue;
+			if (!prediction) {
+				this.logger?.debugSync('[ANOMALY] Forecast generation failed', {
+					component: LogComponents.metrics,
+					metric: metricName,
+					reason: 'Insufficient data or no trend',
+				});
+				continue;
+			}
+			
+			this.logger?.debugSync('[ANOMALY] Forecast generated', {
+				component: LogComponents.metrics,
+				metric: metricName,
+				current: prediction.current?.toFixed(3) ?? 'N/A',
+				predicted_next: prediction.predicted_next?.toFixed(3) ?? 'N/A',
+				trend: prediction.trend,
+				trend_strength: prediction.trend_strength?.toFixed(3) ?? 'N/A',
+				confidence: prediction.confidence?.toFixed(3) ?? 'N/A',
+			});
 			
 			// Add time-to-threshold only when prediction confidence is solid
 			if (
@@ -772,8 +884,24 @@ export class AnomalyDetectionService {
 			
 			const shouldPublish = shouldPublishForecast(prediction, cadenceState, this.predictionCadence);
 			if (!shouldPublish) {
+				this.logger?.debugSync('[ANOMALY] Forecast not published (cadence control)', {
+					component: LogComponents.metrics,
+					metric: metricName,
+					reason: 'No significant change from last forecast',
+				});
 				continue;
 			}
+
+			this.logger?.infoSync('[ANOMALY] Publishing forecast', {
+				component: LogComponents.metrics,
+				metric: metricName,
+				predicted_next: prediction.predicted_next?.toFixed(3) ?? 'N/A',
+				trend: prediction.trend,
+				confidence: prediction.confidence?.toFixed(3) ?? 'N/A',
+				time_to_threshold: prediction.time_to_threshold?.estimated_seconds
+					? `${(prediction.time_to_threshold.estimated_seconds / 3600).toFixed(1)}h`
+					: 'N/A',
+			});
 
 			recordForecastResult(cadenceState, prediction, now);
 			predictions[metricName] = prediction;
@@ -874,10 +1002,11 @@ export class AnomalyDetectionService {
 		if (enabledMetrics.length === 0) return;
 
 		// Check if baselines exist for most metrics (80% coverage with 30+ samples each)
+		// Coverage calculation automatically excludes never-collected metrics (e.g., cpu_temp on Windows)
 		const { hasCoverage, coveragePercent, metricsWithBaselines } = await this.storage.checkBaselineCoverage(
 			enabledMetrics,
 			30, // minSamples (30 samples = ~2.5 min at 5sec intervals)
-			0.8  // minCoveragePercent (80% of metrics must have baselines)
+			0.8  // minCoveragePercent (80% of collectible metrics must have baselines)
 		);
 
 		if (hasCoverage) {

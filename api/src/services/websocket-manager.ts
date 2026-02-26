@@ -234,9 +234,7 @@ export class WebSocketManager {
   private deviceClients: Map<string, Set<WebSocket>> = new Map();
   private deviceIntervals: Map<string, Map<string, NodeJS.Timeout>> = new Map();
   private globalClients: Set<WebSocket> = new Set(); // Global connections for MQTT stats
-      const deviceUuid = url.searchParams.get('deviceUuid');
-      const type = url.searchParams.get('type'); // 'device' or 'global'
-      const token = url.searchParams.get('token');
+  private globalIntervals: Map<string, NodeJS.Timeout> = new Map(); // Global subscription intervals (e.g., MQTT stats)
   private mqttMonitor: any = null; // MQTTMonitorService instance
   private mqttManager: any = null; // MQTT Manager instance for publishing commands
   private redisClient: any = null; // Redis client for pub/sub

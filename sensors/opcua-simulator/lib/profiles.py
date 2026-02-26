@@ -127,17 +127,29 @@ def load_profile_from_api(profile_name: str, api_url: str) -> SensorProfile:
     import urllib.request
     import ssl
     import time
+    import os
     
     # Create SSL context that accepts self-signed certificates
     ssl_context = ssl.create_default_context()
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
     
+    # Get API key from environment (required)
+    api_key = os.environ.get('API_KEY')
+    if not api_key:
+        raise ValueError("API_KEY environment variable is required but not set")
+    
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            url = f"{api_url}/api/v1/profiles/datapoints?protocol=opcua"
-            req = urllib.request.Request(url, headers={'User-Agent': 'opcua-simulator/2.0'})
+            # Use simulator endpoint
+            url = f"{api_url}/api/v1/profiles/sim/datapoints?protocol=opcua"
+            headers = {
+                'User-Agent': 'opcua-simulator/2.0',
+                'Authorization': f'Bearer {api_key}'
+            }
+            
+            req = urllib.request.Request(url, headers=headers)
             
             with urllib.request.urlopen(req, timeout=5, context=ssl_context) as response:
                 all_profiles = json.loads(response.read().decode())

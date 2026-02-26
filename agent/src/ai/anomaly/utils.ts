@@ -33,16 +33,20 @@ export function loadConfigFromTargetState(targetStateConfig?: any): AnomalyConfi
 		systemMetrics: rawConfig.systemMetrics || [],
 		sensitivity: rawConfig.sensitivity || 5,
 		metrics: unifiedMetrics,  // Unified array for processing
-		alerts: rawConfig.alerts || {
+		alerts: {
+			// Defaults first, then override with any provided values
 			mqtt: true,
 			cloud: true,
 			minConfidence: 0.7,
 			cooldownMs: 300000,
-			maxQueueSize: 1000
+			maxQueueSize: 1000,
+			...rawConfig.alerts // Override with cloud-provided config
 		},
-		storage: rawConfig.storage || {
+		storage: {
+			// Defaults first, then override
 			retention: 30,
-			minSamples: 5
+			minSamples: 5,
+			...rawConfig.storage
 		},
 		ml: rawConfig.ml,
 		predictions: rawConfig.predictions,

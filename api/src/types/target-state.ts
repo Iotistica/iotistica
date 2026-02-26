@@ -12,6 +12,7 @@
 export interface AnomalyAlerts {
   cooldownMs: number;      // Min time between duplicate alerts (agent-side deduplication)
   maxQueueSize: number;    // Max alerts in memory queue (agent-side)
+  minConfidence: number;   // Minimum confidence threshold to generate alerts (0-1, default 0.7)
 }
 
 export interface AnomalyMetric {

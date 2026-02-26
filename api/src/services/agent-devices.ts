@@ -511,7 +511,7 @@ export class DeviceSensorSyncService {
             windowSize: 120,
             minSamples: 5
           },
-          alerts: { cooldownMs: 300000, maxQueueSize: 1000 },
+          alerts: { cooldownMs: 300000, maxQueueSize: 1000, minConfidence: 0.7 },
           systemMetrics: [],  // System metrics (cpu, memory, temp) - managed separately
           storage: { retention: 30, minSamples: 5 },
           sensitivity: 5,
