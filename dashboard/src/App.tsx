@@ -1135,19 +1135,6 @@ export default function App() {
       {!isKioskMode && (
         <div className="bg-card border-b border-border px-6 py-2 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            {/* Agents Sidebar Toggle Button - Only show when not in global view */}
-            {!isGlobalView && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setSidebarOpen(true)}
-                style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
-                className="mr-2"
-              >
-                <Menu className="w-5 h-5 mr-2" />
-                Agents
-              </Button>
-            )}
             <Button
               variant={currentView === 'home' ? 'default' : 'outline'}
               size="sm"
@@ -1284,6 +1271,20 @@ export default function App() {
       )}
 
       <div className="flex flex-1 overflow-hidden">
+        {/* Desktop Sidebar - Hidden on mobile and in kiosk mode */}
+        {!isKioskMode && !isGlobalView && (
+          <div className="hidden lg:block">
+            <DeviceSidebar
+              devices={devices}
+              selectedDeviceId={selectedDeviceId}
+              onSelectDevice={handleSelectDevice}
+              onAddDevice={handleAddDevice}
+              onEditDevice={handleEditDevice}
+              hasPendingChanges={hasPendingChanges}
+            />
+          </div>
+        )}
+
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col overflow-y-auto">
           {isGlobalView ? (
@@ -1782,10 +1783,10 @@ export default function App() {
 
 
 
-        {/* Agents Sidebar Drawer - Opens from left */}
+        {/* Mobile Drawer - Opens from right */}
         {!isKioskMode && !isGlobalView && (
           <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-            <SheetContent side="left" className="p-0 w-80">
+            <SheetContent side="right" className="p-0 w-80">
               <DeviceSidebar
                 devices={devices}
                 selectedDeviceId={selectedDeviceId}

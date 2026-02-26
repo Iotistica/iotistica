@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2, Calendar, TrendingUp } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { SeverityBadge, StatusBadge, ScoreBadge } from '@/components/alerts';
@@ -95,6 +94,8 @@ export function IncidentDetailsModal({
   const [metricLoading, setMetricLoading] = useState(false);
   const [metricError, setMetricError] = useState<string | null>(null);
   const [unit, setUnit] = useState('');
+  const [activeTab, setActiveTab] = useState<'details' | 'history' | 'events'>('details');
+  const [events, setEvents] = useState<AnomalyEvent[]>([]);
 
   const formatTime = (ms: number | null | undefined) => {
     if (!ms || isNaN(ms)) return 'N/A';
@@ -174,9 +175,36 @@ export function IncidentDetailsModal({
     }
   };
 
+  const fetchEvents = async () => {
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('accessToken');
+      const response = await fetch(
+        buildApiUrl(`/api/v1/anomaly-incidents/${incident.incident_id}`),
+        {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch incident events');
+      }
+
+      const data = await response.json();
+      setEvents(data.events || []);
+    } catch (error) {
+      console.error('Error fetching events:', error);
+    }
+  };
+
   useEffect(() => {
     if (open && incident) {
+      setActiveTab('details');
       fetchMetricHistory();
+      if (!incident.events || incident.events.length === 0) {
+        fetchEvents();
+      } else {
+        setEvents(incident.events);
+      }
     }
   }, [open, incident]);
 
@@ -241,15 +269,34 @@ export function IncidentDetailsModal({
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="timeline" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="timeline">Timeline</TabsTrigger>
-            <TabsTrigger value="history">History</TabsTrigger>
-            <TabsTrigger value="events">Events ({incident.event_count})</TabsTrigger>
-          </TabsList>
+        {/* Simple Tab Buttons */}
+        <div className="flex gap-2 border-b">
+          <Button
+            variant={activeTab === 'details' ? 'default' : 'ghost'}
+            onClick={() => setActiveTab('details')}
+            className="rounded-none"
+          >
+            Details
+          </Button>
+          <Button
+            variant={activeTab === 'history' ? 'default' : 'ghost'}
+            onClick={() => setActiveTab('history')}
+            className="rounded-none"
+          >
+            History
+          </Button>
+          <Button
+            variant={activeTab === 'events' ? 'default' : 'ghost'}
+            onClick={() => setActiveTab('events')}
+            className="rounded-none"
+          >
+            Events ({incident.event_count})
+          </Button>
+        </div>
 
-          {/* Timeline Tab */}
-          <TabsContent value="timeline" className="space-y-4">
+        {/* Details Tab */}
+        {activeTab === 'details' && (
+          <div className="space-y-4">
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm flex items-center gap-2">
@@ -292,57 +339,61 @@ export function IncidentDetailsModal({
                 )}
               </CardContent>
             </Card>
-          </TabsContent>
+          </div>
+        )}
 
-              {/* Metric History Tab */}
-              <TabsContent value="history" className="space-y-4">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <TrendingUp className="w-4 h-4" />
-                      Trend
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {metricLoading ? (
-                      <div className="flex justify-center items-center h-80">
-                        <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
-                      </div>
-                    ) : metricError ? (
-                      <div className="flex justify-center items-center h-80">
-                        <p className="text-red-500 text-sm">{metricError}</p>
-                      </div>
-                    ) : (
-                      <div className="w-full h-80">
-                        {renderChart()}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
+        {/* History Tab */}
+        {activeTab === 'history' && (
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4" />
+                  Trend
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {metricLoading ? (
+                  <div className="flex justify-center items-center h-80">
+                    <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+                  </div>
+                ) : metricError ? (
+                  <div className="flex justify-center items-center h-80">
+                    <p className="text-red-500 text-sm">{metricError}</p>
+                  </div>
+                ) : (
+                  <div className="w-full h-80">
+                    {renderChart()}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
-              {/* Events Tab */}
-              <TabsContent value="events" className="space-y-4 mt-0">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm">Anomaly Events</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {incident.events && incident.events.length > 0 ? (
-                      <div className="overflow-x-auto">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Time</TableHead>
-                              <TableHead>Value</TableHead>
-                              <TableHead>Expected</TableHead>
-                              <TableHead>Deviation</TableHead>
-                              <TableHead>Score</TableHead>
-                              <TableHead>Confidence</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {incident.events.slice(0, 20).map((event) => (
+        {/* Events Tab */}
+        {activeTab === 'events' && (
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Anomaly Events</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {events && events.length > 0 ? (
+                  <div className="max-h-80 overflow-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Time</TableHead>
+                          <TableHead>Value</TableHead>
+                          <TableHead>Expected</TableHead>
+                          <TableHead>Deviation</TableHead>
+                          <TableHead>Score</TableHead>
+                          <TableHead>Confidence</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {events.slice(0, 20).map((event) => (
                               <TableRow key={event.msg_id}>
                                 <TableCell className="text-xs">
                                   {new Date(event.timestamp_ms).toLocaleTimeString()}
@@ -366,9 +417,9 @@ export function IncidentDetailsModal({
                             ))}
                           </TableBody>
                         </Table>
-                        {incident.events && incident.events.length > 20 && (
+                        {events && events.length > 20 && (
                           <p className="text-xs text-gray-500 mt-2">
-                            Showing 20 of {incident.events.length} events
+                            Showing 20 of {events.length} events
                           </p>
                         )}
                       </div>
@@ -377,8 +428,8 @@ export function IncidentDetailsModal({
                     )}
                   </CardContent>
                 </Card>
-              </TabsContent>
-        </Tabs>
+            </div>
+          )}
 
         <DialogFooter>
           {incident.status !== 'resolved' && (

@@ -65,11 +65,14 @@ interface Device {
   is_online: boolean;
 }
 
-interface MetricCatalogItem {
-  metric_name: string;
+interface MetricDevice {
+  agent_uuid: string;
+  agent_name: string;
   device_name: string;
   protocol: string;
-  unit?: string;
+  available_metrics: string[];
+  metric_count: number;
+  last_seen: string;
 }
 
 export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
@@ -80,11 +83,13 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
   const [selectedDeviceUuid, setSelectedDeviceUuid] = useState<string>(initialDeviceUuid || '');
   const [devices, setDevices] = useState<Device[]>([]);
   const [metrics, setMetrics] = useState<AnomalyMetric[]>([]);
-  const [availableMetrics, setAvailableMetrics] = useState<MetricCatalogItem[]>([]);
+  const [availableMetrics, setAvailableMetrics] = useState<string[]>([]);
+  const [metricDevices, setMetricDevices] = useState<MetricDevice[]>([]);
+  const [metricDevicesLoading, setMetricDevicesLoading] = useState(false);
+  const [selectedMetricDevice, setSelectedMetricDevice] = useState('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [isFormDialogOpen, setIsFormDialogOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [catalogLoading, setCatalogLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const { getPendingConfig, updatePendingConfig, fetchDeviceState } = useDeviceState();
@@ -118,9 +123,26 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
   useEffect(() => {
     if (selectedDeviceUuid && open) {
       loadMetricsForDevice(selectedDeviceUuid);
-      fetchMetricsCatalog(selectedDeviceUuid);
     }
   }, [selectedDeviceUuid, open]);
+
+  // Load available devices/metrics for the Add Metric dialog
+  useEffect(() => {
+    if (open && isFormDialogOpen) {
+      fetchMetricDevices();
+    }
+  }, [open, isFormDialogOpen]);
+
+  // Update available metrics when metric device changes
+  useEffect(() => {
+    if (!selectedMetricDevice) {
+      setAvailableMetrics([]);
+      return;
+    }
+
+    const device = metricDevices.find(d => d.device_name === selectedMetricDevice);
+    setAvailableMetrics(device?.available_metrics || []);
+  }, [selectedMetricDevice, metricDevices]);
 
   const fetchDevices = async () => {
     try {
@@ -142,23 +164,24 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
     }
   };
 
-  const fetchMetricsCatalog = async (deviceUuid: string) => {
-    const device = devices.find(d => d.uuid === deviceUuid);
-    if (!device) return;
-
-    setCatalogLoading(true);
+  const fetchMetricDevices = async () => {
+    setMetricDevicesLoading(true);
     try {
-      const response = await fetch(
-        buildApiUrl(`/api/v1/metrics/catalog?deviceName=${encodeURIComponent(device.device_name || device.name)}`)
-      );
+      const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
+      const response = await fetch(buildApiUrl('/api/v1/metrics/devices'), {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       const data = await response.json();
-      if (data.metrics) {
-        setAvailableMetrics(data.metrics);
-      }
+      const fetchedDevices = data.devices || [];
+      setMetricDevices(fetchedDevices);
+
+      const scopedDevices = fetchedDevices.filter((d: MetricDevice) => d.agent_uuid === selectedDeviceUuid);
+      const defaultDevice = scopedDevices[0] || fetchedDevices[0];
+      setSelectedMetricDevice(defaultDevice?.device_name || '');
     } catch (err: any) {
-      console.error('Failed to fetch metrics catalog:', err);
+      console.error('Failed to fetch metric devices:', err);
     } finally {
-      setCatalogLoading(false);
+      setMetricDevicesLoading(false);
     }
   };
 
@@ -190,6 +213,8 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
       windowSize: 120,
       expectedRange: undefined,
     });
+    setSelectedMetricDevice('');
+    setAvailableMetrics([]);
     setEditingIndex(null);
     setIsFormDialogOpen(true);
   };
@@ -276,7 +301,9 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
 
   const selectedDevice = devices.find(d => d.uuid === selectedDeviceUuid);
   const configuredMetricNames = new Set(metrics.map(m => m.name));
-  const unusedMetrics = availableMetrics.filter(m => !configuredMetricNames.has(m.metric_name));
+  const unusedMetrics = availableMetrics.filter(m => !configuredMetricNames.has(m));
+  const metricDeviceOptions = metricDevices.filter(d => d.agent_uuid === selectedDeviceUuid);
+  const metricDeviceList = metricDeviceOptions.length > 0 ? metricDeviceOptions : metricDevices;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -438,35 +465,71 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
 
               <div className="flex-1 overflow-y-auto pr-2">
                 <TabsContent value="basic" className="space-y-4 mt-4">
+                  {/* Device */}
+                  <div className="space-y-2">
+                    <Label htmlFor="metric-device">
+                      Device <span className="text-red-500">*</span>
+                    </Label>
+                    <Select
+                      value={selectedMetricDevice}
+                      onValueChange={setSelectedMetricDevice}
+                      disabled={editingIndex !== null}
+                    >
+                      <SelectTrigger id="metric-device">
+                        <SelectValue placeholder="Select a device..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {metricDevicesLoading ? (
+                          <SelectItem value="loading" disabled>
+                            Loading devices...
+                          </SelectItem>
+                        ) : metricDeviceList.length === 0 ? (
+                          <SelectItem value="none" disabled>
+                            No devices available
+                          </SelectItem>
+                        ) : (
+                          metricDeviceList.map((device) => (
+                            <SelectItem key={device.device_name} value={device.device_name}>
+                              {device.device_name} ({device.protocol}) - {device.metric_count} metrics
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      {editingIndex === null
+                        ? 'Select the device that provides the metric'
+                        : 'Device cannot be changed while editing'}
+                    </p>
+                  </div>
+
                   {/* Metric Name */}
                   <div className="space-y-2">
                     <Label htmlFor="metric-name">
                       Metric Name <span className="text-red-500">*</span>
                     </Label>
                     {editingIndex === null ? (
-                      catalogLoading ? (
-                        <div className="flex items-center gap-2 py-2">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          <span className="text-sm text-muted-foreground">Loading metrics...</span>
-                        </div>
-                      ) : (
-                        <Select
-                          value={watch('name')}
-                          onValueChange={(value) => reset({ ...watch(), name: value })}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a metric..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {unusedMetrics.map((metric) => (
-                              <SelectItem key={metric.metric_name} value={metric.metric_name}>
-                                {metric.metric_name}
-                                {metric.unit && ` (${metric.unit})`}
+                      <Select
+                        value={watch('name')}
+                        onValueChange={(value) => reset({ ...watch(), name: value })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a metric..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {unusedMetrics.length === 0 ? (
+                            <SelectItem value="none" disabled>
+                              {selectedMetricDevice ? 'No metrics available' : 'Select a device first'}
+                            </SelectItem>
+                          ) : (
+                            unusedMetrics.map((metricName) => (
+                              <SelectItem key={metricName} value={metricName}>
+                                {metricName}
                               </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      )
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
                     ) : (
                       <Input
                         id="metric-name"
