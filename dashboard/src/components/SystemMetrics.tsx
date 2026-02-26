@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Cpu, HardDrive, MemoryStick, Network, RefreshCw, AlertTriangle, AlertOctagon, Activity } from "lucide-react";
+import { Cpu, HardDrive, MemoryStick, Network, RefreshCw, AlertTriangle, AlertOctagon, Activity, Bell, Info, CheckCircle, XCircle } from "lucide-react";
 import { Card } from "./ui/card";
+import { ScrollArea } from "./ui/scroll-area";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useSystemMetrics } from "@/contexts/SystemMetricsContext";
 import type { SystemInfoData, ProcessData } from "@/services/websocket";
@@ -986,83 +987,192 @@ export function SystemMetrics({
           </Card>
 
           {/* Alerts Card - Condensed view for this agent */}
-          <Card className="p-4 md:p-6">
-            <div className="mb-4 flex items-start justify-between gap-2">
-              <div>
-                <h3 className="text-lg text-foreground font-medium mb-1">Alerts</h3>
-                <p className="text-sm text-muted-foreground">Recent incidents</p>
+          <Card>
+            <div className="p-4 md:p-6 pb-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Bell className="h-5 w-5" />
+                  <h3 className="text-lg font-semibold">Alerts</h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!incidentsLoading && (
+                    <>
+                      {(() => {
+                        const criticalCount = incidents.filter(i => i.severity === 'critical').length;
+                        const warningCount = incidents.filter(i => i.severity === 'warning').length;
+                        
+                        if (criticalCount > 0) {
+                          return (
+                            <Badge variant="destructive">
+                              {criticalCount} Critical
+                            </Badge>
+                          );
+                        }
+                        if (warningCount > 0) {
+                          return (
+                            <Badge variant="outline" className="border-orange-600 text-orange-600 dark:border-orange-400 dark:text-orange-400">
+                              {warningCount} Warning
+                            </Badge>
+                          );
+                        }
+                        if (incidents.length === 0) {
+                          return (
+                            <Badge variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-950/30 dark:text-green-400">
+                              All Clear
+                            </Badge>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </>
+                  )}
+                </div>
               </div>
-              <button 
-                onClick={() => {
-                  // Navigate to monitoring view
-                  const event = new CustomEvent('navigate-to-monitoring');
-                  window.dispatchEvent(event);
-                }}
-                className="text-xs text-blue-600 hover:underline cursor-pointer"
-              >
-                View All
-              </button>
+              <p className="text-sm text-muted-foreground mt-1">
+                {incidentsLoading ? (
+                  'Loading...'
+                ) : (
+                  <>
+                    {incidents.length} active alert{incidents.length !== 1 ? 's' : ''}
+                    {incidents.length > 0 && (
+                      <>
+                        {' • '}
+                        <button
+                          onClick={() => {
+                            const event = new CustomEvent('navigate-to-monitoring');
+                            window.dispatchEvent(event);
+                          }}
+                          className="text-blue-600 hover:underline cursor-pointer"
+                        >
+                          View all
+                        </button>
+                      </>
+                    )}
+                  </>
+                )}
+              </p>
             </div>
-            {incidentsLoading ? (
-              <div className="text-center py-8 text-muted-foreground">Loading...</div>
-            ) : incidents.length === 0 ? (
-              <div className="text-center py-12">
-                <Activity className="w-12 h-12 mx-auto mb-3 text-green-500 opacity-50" />
-                <p className="text-sm text-muted-foreground">No active alerts</p>
-                <p className="text-xs text-muted-foreground mt-1">All systems normal</p>
-              </div>
-            ) : (
-              <div className="border border-border rounded-lg overflow-hidden">
-                <div className="max-h-[320px] overflow-y-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
-                        <th className="text-left py-2 px-3">Severity</th>
-                        <th className="text-left py-2 px-3">Metric</th>
-                        <th className="text-right py-2 px-3">Events</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {incidents.map((incident) => {
-                        const severityColor = 
-                          incident.severity === 'critical' ? 'bg-red-100 text-red-700 border-red-200' :
-                          incident.severity === 'warning' ? 'bg-yellow-100 text-yellow-700 border-yellow-200' :
-                          'bg-blue-100 text-blue-700 border-blue-200';
-                        
-                        const severityIcon = 
-                          incident.severity === 'critical' ? <AlertOctagon className="w-4 h-4" /> :
-                          incident.severity === 'warning' ? <AlertTriangle className="w-4 h-4" /> :
-                          <Activity className="w-4 h-4" />;
-                        
+            <div className="px-4 md:px-6 pb-4 md:pb-6">
+              {incidentsLoading ? (
+                <div className="text-center py-8 text-muted-foreground">Loading alerts...</div>
+              ) : (
+                <ScrollArea className="max-h-[400px]">
+                  <div className="space-y-3">
+                    {incidents.length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <Info className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                        <p>No alerts to display</p>
+                      </div>
+                    ) : (
+                      incidents.map((incident) => {
+                        // Severity configuration
+                        const severityConfig = {
+                          critical: {
+                            icon: XCircle,
+                            color: 'text-red-600 dark:text-red-400',
+                            bgColor: 'bg-red-50 dark:bg-red-950/30',
+                            badgeVariant: 'destructive' as const,
+                          },
+                          warning: {
+                            icon: AlertTriangle,
+                            color: 'text-orange-600 dark:text-orange-400',
+                            bgColor: 'bg-orange-50 dark:bg-orange-950/30',
+                            badgeVariant: 'outline' as const,
+                            badgeClass: 'border-orange-600 text-orange-600 dark:border-orange-400 dark:text-orange-400',
+                          },
+                          info: {
+                            icon: Info,
+                            color: 'text-blue-600 dark:text-blue-400',
+                            bgColor: 'bg-blue-50 dark:bg-blue-950/30',
+                            badgeVariant: 'secondary' as const,
+                          },
+                        };
+
+                        const config = severityConfig[incident.severity] || severityConfig.info;
+                        const Icon = config.icon;
+
+                        // Format timestamp
+                        const formatTimestamp = (timestamp: number | null) => {
+                          if (!timestamp) return 'Just now';
+                          const date = new Date(timestamp);
+                          const now = new Date();
+                          const diffMs = now.getTime() - date.getTime();
+                          const diffMins = Math.floor(diffMs / 60000);
+                          const diffHours = Math.floor(diffMs / 3600000);
+                          const diffDays = Math.floor(diffMs / 86400000);
+
+                          if (diffMins < 1) return 'Just now';
+                          if (diffMins < 60) return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`;
+                          if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+                          return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+                        };
+
+                        // Create descriptive message
+                        const createMessage = () => {
+                          const parts = [];
+                          if (incident.event_count > 1) {
+                            parts.push(`${incident.event_count} anomaly events detected`);
+                          } else {
+                            parts.push('Anomaly detected');
+                          }
+                          if (incident.max_anomaly_score) {
+                            parts.push(`Maximum anomaly score: ${incident.max_anomaly_score.toFixed(2)}`);
+                          }
+                          if (incident.max_confidence) {
+                            parts.push(`Confidence: ${(incident.max_confidence * 100).toFixed(0)}%`);
+                          }
+                          return parts.join('. ') + '.';
+                        };
+
                         return (
-                          <tr
+                          <div
                             key={incident.incident_id}
-                            className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
+                            className="rounded-lg border p-4 transition-all hover:bg-accent/50 cursor-pointer"
                             onClick={() => {
                               const event = new CustomEvent('navigate-to-monitoring');
                               window.dispatchEvent(event);
                             }}
                           >
-                            <td className="py-2 px-3">
-                              <Badge variant="outline" className={`text-xs ${severityColor} flex items-center gap-1 w-fit`}>
-                                {severityIcon}
-                                {incident.severity}
-                              </Badge>
-                            </td>
-                            <td className="py-2 px-3 text-sm font-medium text-foreground truncate">
-                              {incident.metric}
-                            </td>
-                            <td className="py-2 px-3 text-xs text-muted-foreground text-right">
-                              {incident.event_count}
-                            </td>
-                          </tr>
+                            <div className="flex gap-3">
+                              <div className={`${config.bgColor} rounded-full p-2 h-fit`}>
+                                <Icon className={`h-5 w-5 ${config.color}`} />
+                              </div>
+                              <div className="flex-1 space-y-1">
+                                <div className="flex items-start justify-between gap-2">
+                                  <h4 className="font-medium leading-none">
+                                    {incident.metric}
+                                  </h4>
+                                  <Badge
+                                    variant={config.badgeVariant}
+                                    className={`shrink-0 ${config.badgeVariant === 'outline' && (config as any).badgeClass ? (config as any).badgeClass : ''}`}
+                                  >
+                                    {incident.severity}
+                                  </Badge>
+                                </div>
+                                <p className="text-sm text-muted-foreground">
+                                  {createMessage()}
+                                </p>
+                                <div className="flex items-center gap-3 text-xs text-muted-foreground pt-1">
+                                  <span>{formatTimestamp(incident.last_seen)}</span>
+                                  <span>•</span>
+                                  <span>{incident.device_name}</span>
+                                  {incident.status === 'resolved' && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="text-green-600 dark:text-green-400">Resolved</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
                         );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+                      })
+                    )}
+                  </div>
+                </ScrollArea>
+              )}
+            </div>
           </Card>
         </div>
 
