@@ -1127,11 +1127,7 @@ export function SystemMetrics({
                         return (
                           <div
                             key={incident.incident_id}
-                            className="rounded-lg border p-4 transition-all hover:bg-accent/50 cursor-pointer"
-                            onClick={() => {
-                              const event = new CustomEvent('navigate-to-monitoring');
-                              window.dispatchEvent(event);
-                            }}
+                            className="rounded-lg border p-4"
                           >
                             <div className="flex gap-3">
                               <div className={`${config.bgColor} rounded-full p-2 h-fit`}>
