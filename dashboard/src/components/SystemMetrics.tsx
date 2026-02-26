@@ -1022,13 +1022,6 @@ export function SystemMetrics({
                             </Badge>
                           );
                         }
-                        if (incidents.length === 0) {
-                          return (
-                            <Badge variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-950/30 dark:text-green-400">
-                              All Clear
-                            </Badge>
-                          );
-                        }
                         return null;
                       })()}
                     </>
@@ -1062,16 +1055,15 @@ export function SystemMetrics({
             <div className="px-4 md:px-6 pb-4 md:pb-6">
               {incidentsLoading ? (
                 <div className="text-center py-8 text-muted-foreground">Loading alerts...</div>
+              ) : incidents.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Info className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                  <p>No alerts to display</p>
+                </div>
               ) : (
                 <div className="h-[320px] overflow-y-auto pr-2">
                   <div className="space-y-3">
-                    {incidents.length === 0 ? (
-                      <div className="text-center py-8 text-muted-foreground">
-                        <Info className="h-12 w-12 mx-auto mb-2 opacity-20" />
-                        <p>No alerts to display</p>
-                      </div>
-                    ) : (
-                      incidents.map((incident) => {
+                    {incidents.map((incident) => {
                         // Severity configuration
                         const severityConfig = {
                           critical: {
@@ -1182,8 +1174,7 @@ export function SystemMetrics({
                             </div>
                           </div>
                         );
-                      })
-                    )}
+                      })}
                   </div>
                 </div>
               )}
