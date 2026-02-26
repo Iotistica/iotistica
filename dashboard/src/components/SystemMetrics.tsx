@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Cpu, HardDrive, MemoryStick, Network, RefreshCw } from "lucide-react";
+import { Cpu, HardDrive, MemoryStick, Network, RefreshCw, AlertTriangle, AlertOctagon, Activity } from "lucide-react";
 import { Card } from "./ui/card";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useSystemMetrics } from "@/contexts/SystemMetricsContext";
 import type { SystemInfoData, ProcessData } from "@/services/websocket";
 import { MetricCard } from "./ui/metric-card";
 import { Button } from "./ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import {
   Select,
   SelectContent,
@@ -27,6 +28,7 @@ import {
   ReferenceLine,
 } from "recharts";
 import { Device } from "./AgentSidebar";
+import { Badge } from "./ui/badge";
 import { NetworkingCard, NetworkInterface } from "./NetworkingCard";
 import { GeneralInfoCard } from "./GeneralInfoCard";
 import { buildApiUrl } from "@/config/api";
@@ -35,6 +37,29 @@ import { detectGaps, createGapDotRenderer } from "@/utils/chartGapDetection";
 interface SystemMetricsProps {
   device: Device;
   networkInterfaces?: NetworkInterface[];
+}
+
+interface Incident {
+  incident_id: string;
+  fingerprint: string;
+  device_name: string;
+  device_uuid?: string;
+  device_type: string;
+  metric: string;
+  severity: 'info' | 'warning' | 'critical';
+  affected_devices: string[];
+  affected_agents: string[];
+  first_seen: number | null;
+  last_seen: number | null;
+  max_anomaly_score: number;
+  max_confidence: number;
+  event_count: number;
+  status: 'open' | 'active' | 'resolved';
+  acknowledged_at?: string;
+  acknowledged_by?: string;
+  resolution_notes?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export function SystemMetrics({ 
@@ -266,6 +291,10 @@ export function SystemMetrics({
   }>>([]);
   const [processesLoading, setProcessesLoading] = useState(true);
   const [isProcessesRefreshing, setIsProcessesRefreshing] = useState(false);
+  
+  // Incidents state for alerts card
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [incidentsLoading, setIncidentsLoading] = useState(true);
 
   // Format uptime from seconds to human readable
   const formatUptime = useCallback((seconds: number): string => {
@@ -486,6 +515,54 @@ export function SystemMetrics({
     }
   }, [device.deviceUuid, device.status, addMetricsDataPoint]);
 
+  // Fetch incidents for this agent
+  const fetchIncidents = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token') || localStorage.getItem('accessToken');
+      const params = new URLSearchParams();
+      params.append('limit', '20'); // Fetch a few more and filter locally
+      params.append('offset', '0');
+      
+      // Filter by device name (same as MonitoringPage)
+      if (device.name) {
+        params.append('deviceName', device.name);
+      }
+      
+      const response = await fetch(
+        buildApiUrl(`/api/v1/anomaly-incidents?${params.toString()}`),
+        {
+          headers: token
+            ? {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            : {
+                'Content-Type': 'application/json'
+              }
+        }
+      );
+
+      if (!response.ok) {
+        console.warn('[SystemMetrics] Incidents fetch failed:', response.status, response.statusText);
+        setIncidents([]);
+        return;
+      }
+
+      const data = await response.json();
+      if (data.success && Array.isArray(data.incidents)) {
+        const unresolved = data.incidents.filter((inc: Incident) => inc.status !== 'resolved');
+        setIncidents(unresolved.slice(0, 5));
+      } else {
+        setIncidents([]);
+      }
+    } catch (error) {
+      console.error('[SystemMetrics] Failed to fetch incidents:', error);
+      setIncidents([]);
+    } finally {
+      setIncidentsLoading(false);
+    }
+  }, [device.deviceUuid]);
+
   // Manual refresh function for telemetry
   const handleManualRefresh = useCallback(async () => {
     setIsTelemetryRefreshing(true);
@@ -521,6 +598,13 @@ export function SystemMetrics({
       };
     }
   }, [timePeriod, refreshInterval, fetchHistoricalData]);
+  
+  // Fetch incidents on mount and every 30 seconds
+  useEffect(() => {
+    fetchIncidents();
+    const interval = setInterval(fetchIncidents, 30000); // Refresh every 30 seconds
+    return () => clearInterval(interval);
+  }, [fetchIncidents]);
 
   // Clear data when device changes (not on initial mount)
   useEffect(() => {
@@ -593,76 +677,85 @@ export function SystemMetrics({
           ))}
         </div>
 
-        {/* Cards in 2-Column Layout */}
+        {/* Main Cards Layout */}
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* Telemetry Chart - Combined CPU, Memory, and Network */}
+          {/* Telemetry / Top Processes Tabs Card */}
           <Card className="p-4 md:p-6">
-            <div className="mb-4 space-y-3">
-              <div>
-                <h3 className="text-lg text-foreground font-medium mb-1">Telemetry</h3>
-                <p className="text-sm text-muted-foreground">System performance metrics</p>
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-2">
-                  <Select value={timePeriod} onValueChange={(value: any) => setTimePeriod(value)}>
-                    <SelectTrigger className="w-[120px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="30min">30 minutes</SelectItem>
-                      <SelectItem value="6h">6 hours</SelectItem>
-                      <SelectItem value="12h">12 hours</SelectItem>
-                      <SelectItem value="24h">24 hours</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={selectedMetric} onValueChange={(value: any) => setSelectedMetric(value)}>
-                    <SelectTrigger className="w-[140px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="cpu">CPU Usage</SelectItem>
-                      <SelectItem value="memory">Memory Usage</SelectItem>
-                      <SelectItem value="network">Network Activity</SelectItem>
-                    </SelectContent>
-                  </Select>
+            <Tabs defaultValue="telemetry" className="w-full">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <div>
+                  <h3 className="text-lg text-foreground font-medium mb-1">System Insights</h3>
+                  <p className="text-sm text-muted-foreground">Telemetry and process activity</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Refresh:</span>
-                  <Select value={refreshInterval.toString()} onValueChange={(value) => setRefreshInterval(parseInt(value, 10))}>
-                    <SelectTrigger className="w-[100px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="5">5s</SelectItem>
-                      <SelectItem value="10">10s</SelectItem>
-                      <SelectItem value="30">30s</SelectItem>
-                      <SelectItem value="60">1m</SelectItem>
-                      <SelectItem value="300">5m</SelectItem>
-                      <SelectItem value="0">Off</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0"
-                    onClick={handleManualRefresh}
-                    disabled={isTelemetryRefreshing}
-                  >
-                    <RefreshCw 
-                      className={`w-4 h-4 ${isTelemetryRefreshing ? 'animate-spin' : ''}`}
-                      style={{ 
-                        transform: isTelemetryRefreshing ? undefined : 'rotate(0deg)',
-                        transition: isTelemetryRefreshing ? undefined : 'none'
-                      }}
-                    />
-                  </Button>
-                </div>
+                <TabsList>
+                  <TabsTrigger value="telemetry">Telemetry</TabsTrigger>
+                  <TabsTrigger value="processes">Top Processes</TabsTrigger>
+                </TabsList>
               </div>
-            </div>
 
-            {selectedMetric === 'cpu' && (
-              <>
-                <ResponsiveContainer width="100%" height={250} key="cpu-chart">
+              <TabsContent value="telemetry" className="mt-0">
+                <div className="mb-4 space-y-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Select value={timePeriod} onValueChange={(value: any) => setTimePeriod(value)}>
+                        <SelectTrigger className="w-[120px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="30min">30 minutes</SelectItem>
+                          <SelectItem value="6h">6 hours</SelectItem>
+                          <SelectItem value="12h">12 hours</SelectItem>
+                          <SelectItem value="24h">24 hours</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select value={selectedMetric} onValueChange={(value: any) => setSelectedMetric(value)}>
+                        <SelectTrigger className="w-[140px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="cpu">CPU Usage</SelectItem>
+                          <SelectItem value="memory">Memory Usage</SelectItem>
+                          <SelectItem value="network">Network Activity</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground">Refresh:</span>
+                      <Select value={refreshInterval.toString()} onValueChange={(value) => setRefreshInterval(parseInt(value, 10))}>
+                        <SelectTrigger className="w-[100px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="5">5s</SelectItem>
+                          <SelectItem value="10">10s</SelectItem>
+                          <SelectItem value="30">30s</SelectItem>
+                          <SelectItem value="60">1m</SelectItem>
+                          <SelectItem value="300">5m</SelectItem>
+                          <SelectItem value="0">Off</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        onClick={handleManualRefresh}
+                        disabled={isTelemetryRefreshing}
+                      >
+                        <RefreshCw 
+                          className={`w-4 h-4 ${isTelemetryRefreshing ? 'animate-spin' : ''}`}
+                          style={{ 
+                            transform: isTelemetryRefreshing ? undefined : 'rotate(0deg)',
+                            transition: isTelemetryRefreshing ? undefined : 'none'
+                          }}
+                        />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                {selectedMetric === 'cpu' && (
+                  <>
+                    <ResponsiveContainer width="100%" height={250} key="cpu-chart">
                       <AreaChart data={cpuChartData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
                         <defs>
                           <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
@@ -712,205 +805,274 @@ export function SystemMetrics({
                         ))}
                       </AreaChart>
                     </ResponsiveContainer>
-              </>
-            )}
+                  </>
+                )}
 
-            {selectedMetric === 'memory' && (
-              <>
-                  <ResponsiveContainer width="100%" height={250} key="memory-chart">
-                    <AreaChart data={memoryChartData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
-                  <defs>
-                    <linearGradient id="colorMemory" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis 
-                    dataKey="time" 
-                    stroke="#6b7280" 
-                    tick={{ fontSize: 10 }} 
-                    interval={0}
-                    angle={0}
-                    textAnchor="middle"
-                    height={40}
-                  />
-                  <YAxis 
-                    stroke="#6b7280" 
-                    width={60} 
-                    tick={{ fontSize: 10 }} 
-                    domain={[0, (dataMax: number) => Math.ceil(dataMax / 1000) * 1000]} 
-                    tickFormatter={(value) => `${value} MB`}
-                    tickCount={6}
-                  />
-                  <Tooltip />
-                  <Area
-                    type="linear"
-                    dataKey="used"
-                    name="Used Memory"
-                    stroke="#8b5cf6"
-                    strokeWidth={2}
-                    fillOpacity={1}
-                    fill="url(#colorMemory)"
-                    isAnimationActive={false}
-                    dot={createGapDotRenderer({ color: '#ef4444' })}
-                    activeDot={{ r: 5 }}
-                    connectNulls={true}
-                  />
-                  {memoryGapTimes.map((gapTime, idx) => (
-                    <ReferenceLine
-                      key={`memory-gap-${idx}`}
-                      x={gapTime}
-                      stroke="#ef4444"
-                      strokeDasharray="4 4"
-                      strokeWidth={1.5}
-                      opacity={0.8}
-                    />
-                  ))}
-                </AreaChart>
-              </ResponsiveContainer>
-              </>
-            )}
-
-            {selectedMetric === 'network' && (
-              <>
-                  <ResponsiveContainer width="100%" height={250} key="network-chart">
-                    <LineChart data={networkChartData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis 
-                        dataKey="time" 
-                        stroke="#6b7280" 
-                        tick={{ fontSize: 10 }} 
-                        interval={0}
-                        angle={0}
-                        textAnchor="middle"
-                        height={40}
-                      />
-                      <YAxis stroke="#6b7280" width={40} tick={{ fontSize: 10 }} domain={[0, 'auto']} />
-                      <Tooltip />
-                      <Legend />
-                      <Line
-                        type="linear"
-                        dataKey="download"
-                        stroke="#3b82f6"
-                        strokeWidth={2}
-                        dot={createGapDotRenderer({ color: '#ef4444' })}
-                        activeDot={{ r: 5 }}
-                        isAnimationActive={false}
-                        connectNulls={true}
-                      />
-                      <Line
-                        type="linear"
-                        dataKey="upload"
-                        stroke="#10b981"
-                        strokeWidth={2}
-                        dot={createGapDotRenderer({ color: '#ef4444' })}
-                        activeDot={{ r: 5 }}
-                        isAnimationActive={false}
-                        connectNulls={true}
-                      />
-                      {networkGapTimes.map((gapTime, idx) => (
-                        <ReferenceLine
-                          key={`network-gap-${idx}`}
-                          x={gapTime}
-                          stroke="#ef4444"
-                          strokeDasharray="4 4"
-                          strokeWidth={1.5}
-                          opacity={0.8}
+                {selectedMetric === 'memory' && (
+                  <>
+                    <ResponsiveContainer width="100%" height={250} key="memory-chart">
+                      <AreaChart data={memoryChartData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+                        <defs>
+                          <linearGradient id="colorMemory" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                        <XAxis 
+                          dataKey="time" 
+                          stroke="#6b7280" 
+                          tick={{ fontSize: 10 }} 
+                          interval={0}
+                          angle={0}
+                          textAnchor="middle"
+                          height={40}
                         />
-                      ))}
-                    </LineChart>
-                  </ResponsiveContainer>
-              </>
-            )}
+                        <YAxis 
+                          stroke="#6b7280" 
+                          width={60} 
+                          tick={{ fontSize: 10 }} 
+                          domain={[0, (dataMax: number) => Math.ceil(dataMax / 1000) * 1000]} 
+                          tickFormatter={(value) => `${value} MB`}
+                          tickCount={6}
+                        />
+                        <Tooltip />
+                        <Area
+                          type="linear"
+                          dataKey="used"
+                          name="Used Memory"
+                          stroke="#8b5cf6"
+                          strokeWidth={2}
+                          fillOpacity={1}
+                          fill="url(#colorMemory)"
+                          isAnimationActive={false}
+                          dot={createGapDotRenderer({ color: '#ef4444' })}
+                          activeDot={{ r: 5 }}
+                          connectNulls={true}
+                        />
+                        {memoryGapTimes.map((gapTime, idx) => (
+                          <ReferenceLine
+                            key={`memory-gap-${idx}`}
+                            x={gapTime}
+                            stroke="#ef4444"
+                            strokeDasharray="4 4"
+                            strokeWidth={1.5}
+                            opacity={0.8}
+                          />
+                        ))}
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </>
+                )}
+
+                {selectedMetric === 'network' && (
+                  <>
+                    <ResponsiveContainer width="100%" height={250} key="network-chart">
+                      <LineChart data={networkChartData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                        <XAxis 
+                          dataKey="time" 
+                          stroke="#6b7280" 
+                          tick={{ fontSize: 10 }} 
+                          interval={0}
+                          angle={0}
+                          textAnchor="middle"
+                          height={40}
+                        />
+                        <YAxis stroke="#6b7280" width={40} tick={{ fontSize: 10 }} domain={[0, 'auto']} />
+                        <Tooltip />
+                        <Legend />
+                        <Line
+                          type="linear"
+                          dataKey="download"
+                          stroke="#3b82f6"
+                          strokeWidth={2}
+                          dot={createGapDotRenderer({ color: '#ef4444' })}
+                          activeDot={{ r: 5 }}
+                          isAnimationActive={false}
+                          connectNulls={true}
+                        />
+                        <Line
+                          type="linear"
+                          dataKey="upload"
+                          stroke="#10b981"
+                          strokeWidth={2}
+                          dot={createGapDotRenderer({ color: '#ef4444' })}
+                          activeDot={{ r: 5 }}
+                          isAnimationActive={false}
+                          connectNulls={true}
+                        />
+                        {networkGapTimes.map((gapTime, idx) => (
+                          <ReferenceLine
+                            key={`network-gap-${idx}`}
+                            x={gapTime}
+                            stroke="#ef4444"
+                            strokeDasharray="4 4"
+                            strokeWidth={1.5}
+                            opacity={0.8}
+                          />
+                        ))}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </>
+                )}
+              </TabsContent>
+
+              <TabsContent value="processes" className="mt-0">
+                <div className="mb-4 flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg text-foreground font-medium mb-1">Top Processes</h3>
+                    <p className="text-sm text-muted-foreground">Most resource-intensive processes</p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    onClick={handleProcessesRefresh}
+                    disabled={isProcessesRefreshing || processesLoading}
+                  >
+                    <RefreshCw 
+                      className={`w-4 h-4 ${isProcessesRefreshing ? 'animate-spin' : ''}`}
+                      style={{ 
+                        transform: isProcessesRefreshing ? undefined : 'rotate(0deg)',
+                        transition: isProcessesRefreshing ? undefined : 'none'
+                      }}
+                    />
+                  </Button>
+                </div>
+                {processesLoading ? (
+                  <div className="text-center py-8 text-muted-foreground">Loading processes...</div>
+                ) : processes.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">No process data available</div>
+                ) : (
+                  <div className="overflow-x-auto h-[320px] overflow-y-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-border">
+                          <th className="text-left py-3 px-0 text-sm font-medium text-muted-foreground">Process</th>
+                          <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground hidden sm:table-cell">PID</th>
+                          <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground">CPU %</th>
+                          <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground hidden md:table-cell">Memory %</th>
+                          <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground hidden lg:table-cell">CPU Usage</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {processes.map((process, index) => (
+                          <tr key={index} className="border-b border-border last:border-0">
+                            <td className="py-3 px-0 text-foreground truncate max-w-[150px]">
+                              {process.name}
+                            </td>
+                            <td className="py-3 px-4 text-muted-foreground hidden sm:table-cell">{process.pid}</td>
+                            <td className="py-3 px-4 text-foreground">{process.cpu.toFixed(1)}%</td>
+                            <td className="py-3 px-4 text-foreground hidden md:table-cell">{process.mem.toFixed(1)}%</td>
+                            <td className="py-3 px-4 hidden lg:table-cell">
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1 bg-muted rounded-full h-2 max-w-[120px]">
+                                  <div
+                                    className="bg-blue-600 h-2 rounded-full transition-all"
+                                    style={{ width: `${Math.min(process.cpu * 5, 100)}%` }}
+                                  />
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           </Card>
 
+          {/* Alerts Card - Condensed view for this agent */}
+          <Card className="p-4 md:p-6">
+            <div className="mb-4 flex items-start justify-between gap-2">
+              <div>
+                <h3 className="text-lg text-foreground font-medium mb-1">Alerts</h3>
+                <p className="text-sm text-muted-foreground">Recent incidents</p>
+              </div>
+              <button 
+                onClick={() => {
+                  // Navigate to monitoring view
+                  const event = new CustomEvent('navigate-to-monitoring');
+                  window.dispatchEvent(event);
+                }}
+                className="text-xs text-blue-600 hover:underline cursor-pointer"
+              >
+                View All
+              </button>
+            </div>
+            {incidentsLoading ? (
+              <div className="text-center py-8 text-muted-foreground">Loading...</div>
+            ) : incidents.length === 0 ? (
+              <div className="text-center py-12">
+                <Activity className="w-12 h-12 mx-auto mb-3 text-green-500 opacity-50" />
+                <p className="text-sm text-muted-foreground">No active alerts</p>
+                <p className="text-xs text-muted-foreground mt-1">All systems normal</p>
+              </div>
+            ) : (
+              <div className="border border-border rounded-lg overflow-hidden">
+                <div className="max-h-[320px] overflow-y-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+                        <th className="text-left py-2 px-3">Severity</th>
+                        <th className="text-left py-2 px-3">Metric</th>
+                        <th className="text-right py-2 px-3">Events</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {incidents.map((incident) => {
+                        const severityColor = 
+                          incident.severity === 'critical' ? 'bg-red-100 text-red-700 border-red-200' :
+                          incident.severity === 'warning' ? 'bg-yellow-100 text-yellow-700 border-yellow-200' :
+                          'bg-blue-100 text-blue-700 border-blue-200';
+                        
+                        const severityIcon = 
+                          incident.severity === 'critical' ? <AlertOctagon className="w-4 h-4" /> :
+                          incident.severity === 'warning' ? <AlertTriangle className="w-4 h-4" /> :
+                          <Activity className="w-4 h-4" />;
+                        
+                        return (
+                          <tr
+                            key={incident.incident_id}
+                            className="border-b border-border last:border-0 hover:bg-accent/50 transition-colors cursor-pointer"
+                            onClick={() => {
+                              const event = new CustomEvent('navigate-to-monitoring');
+                              window.dispatchEvent(event);
+                            }}
+                          >
+                            <td className="py-2 px-3">
+                              <Badge variant="outline" className={`text-xs ${severityColor} flex items-center gap-1 w-fit`}>
+                                {severityIcon}
+                                {incident.severity}
+                              </Badge>
+                            </td>
+                            <td className="py-2 px-3 text-sm font-medium text-foreground truncate">
+                              {incident.metric}
+                            </td>
+                            <td className="py-2 px-3 text-xs text-muted-foreground text-right">
+                              {incident.event_count}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </Card>
+        </div>
+
+        {/* System Info and Networking Cards */}
+        <div className="grid gap-6 lg:grid-cols-2">
           {/* System Info */}
           <GeneralInfoCard systemInfo={systemInfo} />
 
           {/* Network Interfaces */}
           <NetworkingCard interfaces={networkInterfaces} />
-
-          {/* Analytics Card - Commented out (using fake data) */}
-          {/* <div id="analytics-section">
-            <AnalyticsCard 
-              deviceName={device.name} 
-              deviceId={device.deviceUuid} 
-              processes={processes.map(p => ({
-                name: p.name,
-                pid: p.pid,
-                cpu: p.cpu,
-                memory: p.mem,
-              }))} 
-              provisioned={device.status !== 'pending'}
-            />
-          </div> */}
-
-          {/* Top Processes */}
-          <Card className="p-4 md:p-6" id="processes-section">
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-lg text-foreground font-medium mb-1">Top Processes</h3>
-                <p className="text-sm text-muted-foreground">Most resource-intensive processes</p>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={handleProcessesRefresh}
-                disabled={isProcessesRefreshing || processesLoading}
-              >
-                <RefreshCw 
-                  className={`w-4 h-4 ${isProcessesRefreshing ? 'animate-spin' : ''}`}
-                  style={{ 
-                    transform: isProcessesRefreshing ? undefined : 'rotate(0deg)',
-                    transition: isProcessesRefreshing ? undefined : 'none'
-                  }}
-                />
-              </Button>
-            </div>
-            {processesLoading ? (
-              <div className="text-center py-8 text-muted-foreground">Loading processes...</div>
-            ) : processes.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">No process data available</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-border">
-                      <th className="text-left py-3 px-0 text-sm font-medium text-muted-foreground">Process</th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground hidden sm:table-cell">PID</th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground">CPU %</th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground hidden md:table-cell">Memory %</th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground hidden lg:table-cell">CPU Usage</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {processes.map((process, index) => (
-                      <tr key={index} className="border-b border-border last:border-0">
-                        <td className="py-3 px-0 text-foreground truncate max-w-[150px]">
-                          {process.name}
-                        </td>
-                        <td className="py-3 px-4 text-muted-foreground hidden sm:table-cell">{process.pid}</td>
-                        <td className="py-3 px-4 text-foreground">{process.cpu.toFixed(1)}%</td>
-                        <td className="py-3 px-4 text-foreground hidden md:table-cell">{process.mem.toFixed(1)}%</td>
-                        <td className="py-3 px-4 hidden lg:table-cell">
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 bg-muted rounded-full h-2 max-w-[120px]">
-                              <div
-                                className="bg-blue-600 h-2 rounded-full transition-all"
-                                style={{ width: `${Math.min(process.cpu * 5, 100)}%` }}
-                              />
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
         </div>
       </div>
     </div>

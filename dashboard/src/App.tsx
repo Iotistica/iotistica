@@ -646,7 +646,42 @@ export default function App() {
           virtual: iface.virtual,
         };
       });
-      setNetworkInterfaces(interfaces);
+      const normalizeIp = (ip?: string) => {
+        if (!ip) return '';
+        const trimmed = ip.trim();
+        if (trimmed === '' || trimmed === '0.0.0.0' || trimmed === '::') return '';
+        return trimmed;
+      };
+
+      const scoreInterface = (iface: typeof interfaces[number]) => {
+        let score = 0;
+        if (iface.status === 'connected') score += 5;
+        if (iface.default) score += 3;
+        if (normalizeIp(iface.ipAddress)) score += 3;
+        if (iface.mac) score += 2;
+        if (iface.speed) score += 1;
+        if (iface.signal !== undefined) score += 1;
+        return score;
+      };
+
+      const deduped = new Map<string, typeof interfaces[number]>();
+      interfaces.forEach((iface) => {
+        const ipKey = normalizeIp(iface.ipAddress);
+        const idKey = iface.mac || iface.name || iface.id || ipKey || `${iface.type}-${iface.virtual ? 'v' : 'p'}`;
+        const key = iface.virtual ? `virtual|${iface.type}` : `${idKey}|${iface.type}|p`;
+        const existing = deduped.get(key);
+        if (!existing) {
+          deduped.set(key, iface);
+          return;
+        }
+
+        // Prefer higher-quality interface data when duplicates exist
+        if (scoreInterface(iface) > scoreInterface(existing)) {
+          deduped.set(key, iface);
+        }
+      });
+
+      setNetworkInterfaces(Array.from(deduped.values()));
     }
   }, []);
 
@@ -706,6 +741,16 @@ export default function App() {
     window.addEventListener('kiosk-mode-changed', handleKioskModeChange);
     return () => window.removeEventListener('kiosk-mode-changed', handleKioskModeChange);
   }, []);
+  
+  // Listen for navigate-to-monitoring events (from SystemMetrics alerts card)
+  useEffect(() => {
+    const handleNavigateToMonitoring = () => {
+      handleGlobalViewChange('monitoring');
+    };
+
+    window.addEventListener('navigate-to-monitoring', handleNavigateToMonitoring);
+    return () => window.removeEventListener('navigate-to-monitoring', handleNavigateToMonitoring);
+  }, [handleGlobalViewChange]);
 
   // Helper function to format last seen time
   const formatLastSeen = (timestamp: string | null): string => {
