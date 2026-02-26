@@ -133,8 +133,8 @@ export class OnePasswordService {
         tags: [namespace],
         fields: [
           {
-            id: 'host',
-            title: 'Host',
+            id: 'server',
+            title: 'Server',
             fieldType: ItemFieldType.Text,
             value: credentials.host,
           },
@@ -157,7 +157,7 @@ export class OnePasswordService {
             value: credentials.password,
           },
           {
-            id: 'database',
+            id: 'dbname',
             title: 'Database',
             fieldType: ItemFieldType.Text,
             value: credentials.database,
@@ -206,7 +206,7 @@ export class OnePasswordService {
       // Update field values
       const updatedFields = currentItem.fields.map((field) => {
         switch (field.id) {
-          case 'host':
+          case 'server':
             return { ...field, value: credentials.host };
           case 'port':
             return { ...field, value: credentials.port.toString() };
@@ -214,7 +214,7 @@ export class OnePasswordService {
             return { ...field, value: credentials.username };
           case 'password':
             return { ...field, value: credentials.password };
-          case 'database':
+          case 'dbname':
             return { ...field, value: credentials.database };
           default:
             return field;
@@ -274,9 +274,10 @@ export class OnePasswordService {
       const category = secretType === 'sql' ? ItemCategory.Database : ItemCategory.Password;
 
       // Convert fields to 1Password field format
+      // Use exact field names from secretTemplates schema (no capitalization)
       const itemFields = Object.entries(fields).map(([key, value]) => ({
         id: key,
-        title: (key === 'token' || key === 'username') ? key : key.charAt(0).toUpperCase() + key.slice(1), // Keep 'token' and 'username' lowercase
+        title: key, // Use exact field name from schema
         fieldType: key.includes('password') || key.includes('secret') || key.includes('key') || key === 'token'
           ? ItemFieldType.Concealed
           : ItemFieldType.Text,
@@ -327,13 +328,14 @@ export class OnePasswordService {
       });
 
       // Add new fields if they don't exist
+      // Use exact field names from secretTemplates schema (no capitalization)
       Object.entries(fields).forEach(([key, value]) => {
         const fieldExists = currentItem.fields.some((f) => f.id === key);
         if (!fieldExists) {
           updatedFields.push({
             id: key,
-            title: key.charAt(0).toUpperCase() + key.slice(1),
-            fieldType: key.includes('password') || key.includes('secret') || key.includes('key')
+            title: key, // Use exact field name from schema
+            fieldType: key.includes('password') || key.includes('secret') || key.includes('key') || key === 'token'
               ? ItemFieldType.Concealed
               : ItemFieldType.Text,
             value,

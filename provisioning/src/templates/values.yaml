@@ -105,7 +105,7 @@ api:
     JWT_REFRESH_TOKEN_EXPIRY: "7d"
   sql:
     # Reference existing Kubernetes secret (recommended for production)
-    SecretName: "sql-credentials-master"
+    SecretName: "sql-credentials-{{CLIENT_ID}}"
   mqtt:
     # Reference existing Kubernetes secret (recommended for production)
     SecretName: "mqtt-credentials-{{CLIENT_ID}}"

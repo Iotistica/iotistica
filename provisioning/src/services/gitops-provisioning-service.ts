@@ -340,7 +340,11 @@ export class GitOpsProvisioningService {
       try {
         console.log(`\n🚀 Creating TigerData service for namespace: ${data.namespace}`);
         dbResult = await this.tigerDataService.provisionDatabase(data.namespace);
-        console.log(`✅ Database provisioned!`);
+        
+        console.log(`\n📥 TigerData Response Received:`);
+        console.log(JSON.stringify(dbResult, null, 2));
+        
+        console.log(`\n✅ Database provisioned!`);
         console.log(`   Service ID: ${dbResult.serviceId}`);
         console.log(`   Host: ${dbResult.host}`);
         console.log(`   Port: ${dbResult.port}`);
