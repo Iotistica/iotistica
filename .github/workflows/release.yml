@@ -286,33 +286,6 @@ jobs:
           echo "Release tag points to commit: $RELEASE_COMMIT"
           echo ""
           
-          # Function to find the last commit where a service's files changed
-          find_service_sha() {
-            local svc="$1"
-            local path_filter="$2"
-            
-            echo "Finding last built commit for $svc (path filter: $path_filter)..." >&2
-            
-            # Walk backwards from release commit to find last change to service files
-            local sha=$(git log -1 --format=%H "$RELEASE_COMMIT" -- $path_filter)
-            
-            if [ -z "$sha" ]; then
-              # No changes found in recent history, try broader search
-              echo "⚠️  No recent changes found for $svc in path $path_filter" >&2
-              echo "   Searching entire history from HEAD..." >&2
-              sha=$(git log -1 --format=%H HEAD -- $path_filter)
-            fi
-            
-            if [ -z "$sha" ]; then
-              echo "❌ ERROR: Could not find any commit with changes to $path_filter" >&2
-              exit 1
-            fi
-            
-            echo "   Last commit with $svc changes: $sha" >&2
-            echo "" >&2
-            echo "$sha"
-          }
-          
           promote_image() {
             local svc="$1"
             local path_filter="$2"
@@ -321,23 +294,38 @@ jobs:
             echo "Promoting $svc"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             
-            # Find the last commit where this service was built
-            SHA=$(find_service_sha "$svc" "$path_filter")
+            # Find all commits that changed this service, starting from release commit
+            echo "Finding commits with $svc changes (path filter: $path_filter)..."
+            local commits=$(git log --format=%H "$RELEASE_COMMIT" -- $path_filter | head -10)
             
-            # Pull the immutable SHA image using full 40-char SHA
-            echo "Pulling ${DOCKER_ORG}/${svc}:${SHA}..."
-            if ! docker pull "${DOCKER_ORG}/${svc}:${SHA}"; then
-              echo "❌ ERROR: Failed to pull ${DOCKER_ORG}/${svc}:${SHA}"
-              echo ""
-              echo "This means CI did not build commit $SHA for $svc"
-              echo "Possible reasons:"
-              echo "  - CI workflow failed for this commit"
-              echo "  - CI workflow was skipped (path filters)"
-              echo "  - Docker image was pruned/deleted"
-              echo ""
-              echo "You may need to manually trigger CI build for this service."
+            if [ -z "$commits" ]; then
+              echo "❌ ERROR: No commits found with changes to $path_filter"
               exit 1
             fi
+            
+            local SHA=""
+            # Try each commit until we find one with a built image
+            for commit_sha in $commits; do
+              echo "   Checking commit: $commit_sha"
+              if docker pull "${DOCKER_ORG}/${svc}:${commit_sha}" 2>&1 | grep -q "Digest:"; then
+                SHA="$commit_sha"
+                echo "   ✅ Found built image at commit: $SHA"
+                break
+              else
+                echo "   ⏭️  No image found, trying previous commit..."
+              fi
+            done
+            
+            if [ -z "$SHA" ]; then
+              echo "❌ ERROR: No built images found in last 10 commits for $svc"
+              echo "   Tried commits:"
+              echo "$commits" | while read c; do echo "     - $c"; done
+              echo ""
+              echo "   You need to trigger CI build for this service."
+              exit 1
+            fi
+            
+            echo ""
             
             # Tag as release version
             echo "Tagging as ${DOCKER_ORG}/${svc}:${RELEASE}..."
@@ -349,15 +337,19 @@ jobs:
             
             echo "✅ Promoted ${DOCKER_ORG}/${svc}:${SHA} → ${DOCKER_ORG}/${svc}:${RELEASE}"
             echo ""
+            
+            # Store SHA for latest tagging
+            echo "$SHA" > "/tmp/${svc}_sha.txt"
           }
           
           # Promote all services with their respective path filters
           # These match the CI workflow triggers (code + workflow changes)
-          API_SHA=$(find_service_sha "api" "api/** .github/workflows/build-api-ci.yml")
-          DASHBOARD_SHA=$(find_service_sha "dashboard" "dashboard/** .github/workflows/build-dashboard-ci.yml")
-          
           promote_image "api" "api/** .github/workflows/build-api-ci.yml"
           promote_image "dashboard" "dashboard/** .github/workflows/build-dashboard-ci.yml"
+          
+          # Read SHAs from temp files
+          API_SHA=$(cat /tmp/api_sha.txt)
+          DASHBOARD_SHA=$(cat /tmp/dashboard_sha.txt)
           
           # For final releases, also tag as 'latest'
           if [[ "$RELEASE" != *"-rc."* ]]; then
