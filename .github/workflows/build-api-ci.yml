@@ -92,7 +92,7 @@ jobs:
           for i in {1..5}; do
             echo "Push attempt $i of 5..."
             
-            # Fetch latest state from remote
+            # Fetch latest state from remote1
             git fetch origin master
             
             # Rebase our commit on top of latest origin/master
