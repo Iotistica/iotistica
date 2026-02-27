@@ -64,27 +64,28 @@ jobs:
       - name: Set release version (auto bump)
         id: set_version
         run: |
-          # Query remote directly to get latest tags (not relying on local cache)
-          echo "=== DEBUG: Querying remote for latest tags ==="
-          git ls-remote --tags origin | grep -E 'refs/tags/v[0-9]+\.[0-9]+\.[0-9]+[^-^{]' | cut -f2 | sed 's|refs/tags/||' | sort -V | tail -15
+          # Fetch all tags from remote
+          git fetch origin 'refs/tags/*:refs/tags/*' --force
+          
+          # Debug: Show top tags
+          echo "=== DEBUG: Top 10 tags ==="
+          git tag --list 'v*' --sort=-version:refname | head -10
           echo ""
           
           if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            # Tag push — use the pushed tag
             RELEASE="${GITHUB_REF#refs/tags/}"
-            echo "Triggered by tag push. Release: $RELEASE"
+            echo "Tag push detected: $RELEASE"
             echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # Manual dispatch → determine release version
+          # Manual dispatch
           MODE="${{ github.event.inputs.release_mode || 'final' }}"
           TYPE="${{ github.event.inputs.release_type }}"
           
-          # Find latest final release by querying remote (not local cache)
-          LATEST_FINAL=$(git ls-remote --tags origin | grep -E 'refs/tags/v[0-9]+\.[0-9]+\.[0-9]+[^-^{]' | cut -f2 | sed 's|refs/tags/||' | sort -V | tail -1)
-          
-          echo "Latest final release from remote: $LATEST_FINAL"
+          # Find latest final (excluding RC tags)
+          LATEST_FINAL=$(git tag --list 'v*' --sort=-version:refname | grep -v -E '\-rc' | head -1)
+          echo "Latest final release: $LATEST_FINAL"
           
           if [ -z "$LATEST_FINAL" ]; then
             echo "No previous final releases found, starting from v0.0.0"
@@ -186,9 +187,12 @@ jobs:
         run: |
           set -euo pipefail
           
-          # Query remote directly to get latest tags
-          echo "=== DEBUG: Available tags from remote ==="
-          git ls-remote --tags origin | grep -E 'refs/tags/v[0-9]+\.[0-9]+\.[0-9]+' | cut -f2 | sed 's|refs/tags/||' | sort -V | tail -15
+          # Fetch all tags from remote
+          git fetch origin 'refs/tags/*:refs/tags/*' --force
+          
+          # Debug: Show available tags
+          echo "=== DEBUG: Available tags ==="
+          git tag --list 'v*' --sort=-version:refname | head -10
           echo ""
           
           RELEASE="${{ steps.set_version.outputs.release_version }}"
