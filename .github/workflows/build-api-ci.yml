@@ -59,8 +59,10 @@ jobs:
         id: sha
         run: |
           SHA=$(git rev-parse HEAD)
+          SHORT_SHA=${SHA:0:12}
           echo "sha=$SHA" >> $GITHUB_OUTPUT
-          echo "Build for commit: $SHA"
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "Build for commit: $SHA ($SHORT_SHA)"
 
       - name: Display Build Info
         run: |
@@ -70,7 +72,8 @@ jobs:
           echo "**Platform:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker Tags:" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/api:${{ steps.sha.outputs.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/api:${{ steps.sha.outputs.sha }}\` (immutable)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/api:ci-${{ steps.sha.outputs.short_sha }}\` (CI indicator)" >> $GITHUB_STEP_SUMMARY
           echo "- \`iotistic/api:latest\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Set up Docker Buildx
@@ -112,6 +115,7 @@ jobs:
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
           tags: |
             iotistic/api:${{ steps.sha.outputs.sha }}
+            iotistic/api:ci-${{ steps.sha.outputs.short_sha }}
             iotistic/api:latest
           build-args: |
             BUILDKIT_INLINE_CACHE=1
