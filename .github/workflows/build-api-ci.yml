@@ -47,8 +47,8 @@ jobs:
     permissions:
       contents: read
     outputs:
-      short_sha: ${{ steps.sha.outputs.short_sha }}
-
+      sha: ${{ steps.sha.outputs.sha }}
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -58,26 +58,19 @@ jobs:
       - name: Calculate commit SHA
         id: sha
         run: |
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          echo "Build for commit: $SHORT_SHA"
+          SHA=$(git rev-parse HEAD)
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "Build for commit: $SHA"
 
       - name: Display Build Info
         run: |
           echo "## Building Docker Image" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Git SHA:** \`${{ steps.sha.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ steps.sha.outputs.sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Platform:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker Tags:" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/api:${{ steps.sha.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/api:latest\`" >> $GITHUB_STEP_SUMMARY
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+          echo "- \`iotistic/api:${{ steps.sha.outputs.sha }}\`" >> $GITHUB_STEP_SUMMARY
         with:
           driver-opts: |
             image=moby/buildkit:buildx-stable-1
@@ -114,7 +107,7 @@ jobs:
             type=registry,ref=iotistic/api:buildcache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
           tags: |
-            iotistic/api:${{ steps.sha.outputs.short_sha }}
+            iotistic/api:${{ steps.sha.outputs.sha }}
             iotistic/api:latest
           build-args: |
             BUILDKIT_INLINE_CACHE=1
@@ -165,17 +158,17 @@ jobs:
           echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
           
           # Pull the image
-          docker pull iotistic/api:${{ needs.buildx.outputs.short_sha }}
+          docker pull iotistic/api:${{ needs.buildx.outputs.sha }}
           
           # Get image size
-          SIZE_BYTES=$(docker image inspect iotistic/api:${{ needs.buildx.outputs.short_sha }} --format='{{.Size}}')
+          SIZE_BYTES=$(docker image inspect iotistic/api:${{ needs.buildx.outputs.sha }} --format='{{.Size}}')
           SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
           
           echo "size_mb=$SIZE_MB" >> $GITHUB_OUTPUT
           echo "size_bytes=$SIZE_BYTES" >> $GITHUB_OUTPUT
           
           # Get layer count
-          LAYERS=$(docker image inspect iotistic/api:${{ needs.buildx.outputs.short_sha }} --format='{{len .RootFS.Layers}}')
+          LAYERS=$(docker image inspect iotistic/api:${{ needs.buildx.outputs.sha }} --format='{{len .RootFS.Layers}}')
           echo "layers=$LAYERS" >> $GITHUB_OUTPUT
 
       - name: Generate Summary Report
