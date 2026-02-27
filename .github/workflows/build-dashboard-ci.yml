@@ -168,9 +168,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Pull Docker image
-        run: docker pull iotistic/dashboard:latest || true
-
       - name: Generate changelog
         id: changelog
         run: |
@@ -184,9 +181,8 @@ jobs:
       - name: Image size report
         run: |
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Docker Image Size" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          docker images iotistic/dashboard --format "{{.Repository}}:{{.Tag}} - {{.Size}}" | head -5 >> $GITHUB_STEP_SUMMARY || echo "Images not available" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Tags pushed:** \`ci-${{ needs.buildx.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker Image" >> $GITHUB_STEP_SUMMARY
+          SIZE_BYTES=$(docker image inspect "iotistic/dashboard:ci-${{ needs.buildx.outputs.short_sha }}" --format='{{.Size}}')
+          SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
+          echo "**Tag:** \`iotistic/dashboard:ci-${{ needs.buildx.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Size:** ${SIZE_MB} MB" >> $GITHUB_STEP_SUMMARY
