@@ -216,10 +216,10 @@ jobs:
           echo "5. ⏳ deploy-to-k8s: Update ArgoCD values" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Services to Promote" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/api\` (always)" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/dashboard\` (always, if CI built it)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/api\` (last built from commit matching api/**)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/dashboard\` (last built from commit matching dashboard/**)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Note:** Release is deterministic based on SHA extraction from git tag" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Each service uses its last built commit (path filter aware)" >> $GITHUB_STEP_SUMMARY
 
   create-tag:
     name: Create git tag (for workflow_dispatch)
@@ -279,29 +279,63 @@ jobs:
           # Tag might have been created by create-tag job seconds ago
           git fetch origin 'refs/tags/*:refs/tags/*' --force
           
-          # Get the full SHA of the commit that this release tag points to
-          # This will now always work because tag was either:
-          # - Already created (push trigger) or
-          # - Just created (workflow_dispatch)
-          SHA=$(git rev-list -n 1 "$RELEASE")
+          # Get the commit that this release tag points to
+          RELEASE_COMMIT=$(git rev-list -n 1 "$RELEASE")
           
           echo "Release: $RELEASE"
-          echo "Commit SHA: $SHA"
+          echo "Release tag points to commit: $RELEASE_COMMIT"
           echo ""
+          
+          # Function to find the last commit where a service's files changed
+          find_service_sha() {
+            local svc="$1"
+            local path_filter="$2"
+            
+            echo "Finding last built commit for $svc (path filter: $path_filter)..."
+            
+            # Walk backwards from release commit to find last change to service files
+            local sha=$(git log -1 --format=%H "$RELEASE_COMMIT" -- "$path_filter")
+            
+            if [ -z "$sha" ]; then
+              # No changes found in recent history, try broader search
+              echo "⚠️  No recent changes found for $svc in path $path_filter"
+              echo "   Searching entire history from HEAD..."
+              sha=$(git log -1 --format=%H HEAD -- "$path_filter")
+            fi
+            
+            if [ -z "$sha" ]; then
+              echo "❌ ERROR: Could not find any commit with changes to $path_filter"
+              exit 1
+            fi
+            
+            echo "   Last commit with $svc changes: $sha"
+            echo ""
+            echo "$sha"
+          }
           
           promote_image() {
             local svc="$1"
+            local path_filter="$2"
+            
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "Promoting $svc"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            
+            # Find the last commit where this service was built
+            SHA=$(find_service_sha "$svc" "$path_filter")
             
             # Pull the immutable SHA image using full 40-char SHA
             echo "Pulling ${DOCKER_ORG}/${svc}:${SHA}..."
             if ! docker pull "${DOCKER_ORG}/${svc}:${SHA}"; then
               echo "❌ ERROR: Failed to pull ${DOCKER_ORG}/${svc}:${SHA}"
               echo ""
-              echo "This means CI did not build this commit for $svc"
-              echo "The release process requires all services to be built."
+              echo "This means CI did not build commit $SHA for $svc"
+              echo "Possible reasons:"
+              echo "  - CI workflow failed for this commit"
+              echo "  - CI workflow was skipped (path filters)"
+              echo "  - Docker image was pruned/deleted"
+              echo ""
+              echo "You may need to manually trigger CI build for this service."
               exit 1
             fi
             
@@ -317,22 +351,32 @@ jobs:
             echo ""
           }
           
-          # Promote all services
-          promote_image "api"
-          promote_image "dashboard"
+          # Promote all services with their respective path filters
+          # These match the CI workflow path filters
+          API_SHA=$(find_service_sha "api" "api/**")
+          DASHBOARD_SHA=$(find_service_sha "dashboard" "dashboard/**")
+          
+          promote_image "api" "api/**"
+          promote_image "dashboard" "dashboard/**"
           
           # For final releases, also tag as 'latest'
           if [[ "$RELEASE" != *"-rc."* ]]; then
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "Release is FINAL - also tagging as 'latest'"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo ""
             
-            for svc in api dashboard; do
-              echo "Tagging ${DOCKER_ORG}/${svc} as latest..."
-              docker tag "${DOCKER_ORG}/${svc}:${SHA}" "${DOCKER_ORG}/${svc}:latest"
-              docker push "${DOCKER_ORG}/${svc}:latest"
-              echo "✅ Pushed ${DOCKER_ORG}/${svc}:latest"
-              echo ""
-            done
+            echo "Tagging ${DOCKER_ORG}/api as latest (from $API_SHA)..."
+            docker tag "${DOCKER_ORG}/api:${API_SHA}" "${DOCKER_ORG}/api:latest"
+            docker push "${DOCKER_ORG}/api:latest"
+            echo "✅ Pushed ${DOCKER_ORG}/api:latest"
+            echo ""
+            
+            echo "Tagging ${DOCKER_ORG}/dashboard as latest (from $DASHBOARD_SHA)..."
+            docker tag "${DOCKER_ORG}/dashboard:${DASHBOARD_SHA}" "${DOCKER_ORG}/dashboard:latest"
+            docker push "${DOCKER_ORG}/dashboard:latest"
+            echo "✅ Pushed ${DOCKER_ORG}/dashboard:latest"
+            echo ""
           fi
           
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
