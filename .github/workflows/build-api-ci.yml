@@ -161,18 +161,18 @@ jobs:
           # Login to Docker Hub to pull the image
           echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
           
-          # Pull the image
-          docker pull iotistic/api:${{ needs.buildx.outputs.sha }}
+          # Pull the image using ci- tag
+          docker pull iotistic/api:ci-${{ needs.buildx.outputs.short_sha }}
           
           # Get image size
-          SIZE_BYTES=$(docker image inspect iotistic/api:${{ needs.buildx.outputs.sha }} --format='{{.Size}}')
+          SIZE_BYTES=$(docker image inspect iotistic/api:ci-${{ needs.buildx.outputs.short_sha }} --format='{{.Size}}')
           SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
           
           echo "size_mb=$SIZE_MB" >> $GITHUB_OUTPUT
           echo "size_bytes=$SIZE_BYTES" >> $GITHUB_OUTPUT
           
           # Get layer count
-          LAYERS=$(docker image inspect iotistic/api:${{ needs.buildx.outputs.sha }} --format='{{len .RootFS.Layers}}')
+          LAYERS=$(docker image inspect iotistic/api:ci-${{ needs.buildx.outputs.short_sha }} --format='{{len .RootFS.Layers}}')
           echo "layers=$LAYERS" >> $GITHUB_OUTPUT
 
       - name: Generate Summary Report
@@ -181,8 +181,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           
           echo "## Version Information" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ needs.buildx.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Platform:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
@@ -190,10 +189,8 @@ jobs:
           echo "**Size:** ${{ steps.image_size.outputs.size_mb }} MB" >> $GITHUB_STEP_SUMMARY
           echo "**Layers:** ${{ steps.image_size.outputs.layers }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/api:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/api:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/api:${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:**" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/api:ci-${{ needs.buildx.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           echo "## Changelog" >> $GITHUB_STEP_SUMMARY

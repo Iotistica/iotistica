@@ -188,4 +188,4 @@ jobs:
           docker images iotistic/dashboard --format "{{.Repository}}:{{.Tag}} - {{.Size}}" | head -5 >> $GITHUB_STEP_SUMMARY || echo "Images not available" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Tags pushed:** \`${{ needs.buildx.outputs.sha }}\`, \`latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags pushed:** \`ci-${{ needs.buildx.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
