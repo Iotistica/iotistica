@@ -52,7 +52,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_version: ${{ steps.set_version.outputs.release_version }}
-      short_sha: ${{ steps.verify.outputs.short_sha }}
     steps:
       - name: Checkout repository (full)
         uses: actions/checkout@v4
@@ -66,9 +65,9 @@ jobs:
           # Fetch all tags from remote
           git fetch origin 'refs/tags/*:refs/tags/*' --force
           
-          # Debug: Show top tags (v0.0.2+ only)
-          echo "=== DEBUG: Top 10 v0.0.2+ tags ==="
-          git tag --list 'v0.0.*' --sort=-version:refname | grep -E 'v0\.0\.[2-9]|v0\.0\.[0-9]{2,}' | head -10
+          # Debug: Show top tags (all versions)
+          echo "=== DEBUG: Top 10 version tags ==="
+          git tag --list 'v*.*.*' --sort=-version:refname | head -10
           echo ""
           
           if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
@@ -82,8 +81,8 @@ jobs:
           MODE="${{ github.event.inputs.release_mode || 'final' }}"
           TYPE="${{ github.event.inputs.release_type }}"
           
-          # Find latest final (excluding RC tags and old v0.0.1-rc clutter) - start from v0.0.2
-          LATEST_FINAL=$(git tag --list 'v0.0.*' --sort=-version:refname | grep -E 'v0\.0\.[2-9]|v0\.0\.[0-9]{2,}' | grep -v -E '\-rc' | head -1)
+          # Find latest final (excluding RC tags)
+          LATEST_FINAL=$(git tag --list 'v*.*.*' --sort=-version:refname | grep -v -E '\-rc' | head -1)
           echo "Latest final release: $LATEST_FINAL"
           
           if [ -z "$LATEST_FINAL" ]; then
@@ -144,59 +143,50 @@ jobs:
           fi
           
           # === FINAL MODE ===
-          # Check if we're finalizing from an RC line
-          RC_CHECK=$(git tag -l "${LATEST_FINAL}-rc.*" | head -n1 || echo "")
-          
-          if [ -n "$RC_CHECK" ]; then
-            # Finalizing from existing RCs - use current final version
-            RELEASE="$LATEST_FINAL"
-            echo "Finalizing release ${RELEASE} from existing RC line"
-            echo "⚠️  This will promote the RC line to final release"
-          else
-            # Fresh final release - bump version
-            case "$TYPE" in
-              patch)
-                PATCH=$((PATCH + 1))
-                ;;
-              minor)
-                MINOR=$((MINOR + 1))
-                PATCH=0
-                ;;
-              major)
-                MAJOR=$((MAJOR + 1))
-                MINOR=0
-                PATCH=0
-                ;;
-            esac
-            RELEASE="v${MAJOR}.${MINOR}.${PATCH}"
-            echo "New final release: $RELEASE"
-          fi
-          
+          # Compute new version directly (don't auto-infer RCs)
+          case "$TYPE" in
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+          esac
+          RELEASE="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "New final release: $RELEASE"
           echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
 
-      - name: Verify git tag exists and extract SHA
+      - name: Check if tag already exists (for push trigger)
         id: verify
         shell: bash
         run: |
           RELEASE="${{ steps.set_version.outputs.release_version }}"
           
-          # Verify the release tag exists in git
-          if ! git rev-parse "$RELEASE" >/dev/null 2>&1; then
-            echo "❌ ERROR: Release tag $RELEASE not found in git"
-            exit 1
+          # For tag push events, tag should already exist
+          if git rev-parse "$RELEASE" >/dev/null 2>&1; then
+            echo "✅ Tag already exists: $RELEASE (from push trigger)"
+            echo "tag_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Tag does not exist yet: $RELEASE (will be created in create-tag job)"
+            echo "tag_exists=false" >> $GITHUB_OUTPUT
           fi
-          
-          # Extract the short SHA that this tag points to
-          SHORT_SHA=$(git rev-list -n 1 "$RELEASE" | cut -c1-12)
-          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          
-          echo "✅ Release tag verified: $RELEASE"
-          echo "   Points to commit: $SHORT_SHA"
 
       - name: Summary for step output
         run: |
           MODE="${{ github.event.inputs.release_mode || 'final' }}"
           RELEASE="${{ steps.set_version.outputs.release_version }}"
+          TAG_SOURCE="push trigger (tag already exists)"
+          
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG_SOURCE="workflow_dispatch (will be created by create-tag job)"
+          fi
+          
           MODE_BADGE="🎯 Final Release"
           
           if [ "$MODE" = "rc" ]; then
@@ -208,40 +198,65 @@ jobs:
           echo "## Release validation" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Release:** \`$RELEASE\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Mode:** $MODE_BADGE" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag Source:** $TAG_SOURCE" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Service | selected image tag |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| API | \`${{ steps.verify.outputs.api_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Dashboard | \`${{ steps.verify.outputs.dashboard_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| MQTT Monitor | \`${{ steps.verify.outputs.mqtt_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Housekeeper | \`${{ steps.verify.outputs.housekeeper_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Postoffice | \`${{ steps.verify.outputs.postoffice_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Workflow Sequence" >> $GITHUB_STEP_SUMMARY
+          echo "1. ✅ validate-release: Compute version (\`$RELEASE\`)" >> $GITHUB_STEP_SUMMARY
           
-          # Determine if retag-and-push will run
-          API="${{ steps.verify.outputs.api_src_tag }}"
-          DASH="${{ steps.verify.outputs.dashboard_src_tag }}"
-          
-          echo "### Next Steps Decision" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [[ "$API" != "skip" || "$DASH" != "skip" ]]; then
-            echo "✅ **retag-and-push job will RUN** - at least one image found" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "2. ⏳ create-tag: Create and push git tag" >> $GITHUB_STEP_SUMMARY
+            echo "3. ⏳ promote-images: Pull SHA image and promote to release version" >> $GITHUB_STEP_SUMMARY
           else
-            echo "⏭️ **retag-and-push job will be SKIPPED** - all image tags are 'skip'" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Reason:** No Docker images found matching package.json versions" >> $GITHUB_STEP_SUMMARY
-            echo "- This could be due to Docker Hub rate limiting" >> $GITHUB_STEP_SUMMARY
-            echo "- Or CI builds haven't pushed images for these versions" >> $GITHUB_STEP_SUMMARY
-            echo "- The release will still be created (git tag + GitHub Release)" >> $GITHUB_STEP_SUMMARY
+            echo "2. ⏭️ create-tag: SKIPPED (tag from push trigger)" >> $GITHUB_STEP_SUMMARY
+            echo "3. ⏳ promote-images: Pull SHA image and promote to release version" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "4. ⏳ create-release: Create GitHub Release" >> $GITHUB_STEP_SUMMARY
+          echo "5. ⏳ deploy-to-k8s: Update ArgoCD values" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Services to Promote" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/api\` (always)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/dashboard\` (always, if CI built it)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Release is deterministic based on SHA extraction from git tag" >> $GITHUB_STEP_SUMMARY
+
+  create-tag:
+    name: Create git tag (for workflow_dispatch)
+    runs-on: ubuntu-latest
+    needs: validate-release
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create and push git tag
+        run: |
+          RELEASE="${{ needs.validate-release.outputs.release_version }}"
+          
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Check if tag already exists
+          if git rev-parse "$RELEASE" >/dev/null 2>&1; then
+            echo "Tag $RELEASE already exists"
+          else
+            echo "Creating tag $RELEASE pointing to HEAD"
+            git tag -a "$RELEASE" -m "Release $RELEASE"
+            git push origin "$RELEASE"
+            echo "✅ Tag $RELEASE created and pushed"
           fi
 
   promote-images:
     name: Promote images to release version
     runs-on: ubuntu-latest
-    needs: validate-release
+    needs: [validate-release, create-tag]
+    # create-tag only runs on workflow_dispatch; on push it's skipped
+    # Skipped jobs count as satisfied dependencies, so promote-images will run
+    if: always() && needs.validate-release.result == 'success'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -260,13 +275,18 @@ jobs:
           set -euo pipefail
           RELEASE="${{ needs.validate-release.outputs.release_version }}"
           
-          # Get the SHA of the commit that this release tag points to
+          # Fetch all tags from remote (race condition fix)
+          # Tag might have been created by create-tag job seconds ago
+          git fetch origin 'refs/tags/*:refs/tags/*' --force
+          
+          # Get the full SHA of the commit that this release tag points to
+          # This will now always work because tag was either:
+          # - Already created (push trigger) or
+          # - Just created (workflow_dispatch)
           SHA=$(git rev-list -n 1 "$RELEASE")
-          SHORT_SHA="${SHA:0:12}"
           
           echo "Release: $RELEASE"
           echo "Commit SHA: $SHA"
-          echo "Short SHA: $SHORT_SHA"
           echo ""
           
           promote_image() {
@@ -275,10 +295,10 @@ jobs:
             echo "Promoting $svc"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             
-            # Pull the immutable SHA image
-            echo "Pulling ${DOCKER_ORG}/${svc}:${SHORT_SHA}..."
-            if ! docker pull "${DOCKER_ORG}/${svc}:${SHORT_SHA}"; then
-              echo "❌ ERROR: Failed to pull ${DOCKER_ORG}/${svc}:${SHORT_SHA}"
+            # Pull the immutable SHA image using full 40-char SHA
+            echo "Pulling ${DOCKER_ORG}/${svc}:${SHA}..."
+            if ! docker pull "${DOCKER_ORG}/${svc}:${SHA}"; then
+              echo "❌ ERROR: Failed to pull ${DOCKER_ORG}/${svc}:${SHA}"
               echo ""
               echo "This means CI did not build this commit for $svc"
               echo "The release process requires all services to be built."
@@ -287,13 +307,13 @@ jobs:
             
             # Tag as release version
             echo "Tagging as ${DOCKER_ORG}/${svc}:${RELEASE}..."
-            docker tag "${DOCKER_ORG}/${svc}:${SHORT_SHA}" "${DOCKER_ORG}/${svc}:${RELEASE}"
+            docker tag "${DOCKER_ORG}/${svc}:${SHA}" "${DOCKER_ORG}/${svc}:${RELEASE}"
             
             # Push release tag
             echo "Pushing ${DOCKER_ORG}/${svc}:${RELEASE}..."
             docker push "${DOCKER_ORG}/${svc}:${RELEASE}"
             
-            echo "✅ Promoted ${DOCKER_ORG}/${svc}:${SHORT_SHA} → ${DOCKER_ORG}/${svc}:${RELEASE}"
+            echo "✅ Promoted ${DOCKER_ORG}/${svc}:${SHA} → ${DOCKER_ORG}/${svc}:${RELEASE}"
             echo ""
           }
           
@@ -301,34 +321,43 @@ jobs:
           promote_image "api"
           promote_image "dashboard"
           
+          # For final releases, also tag as 'latest'
+          if [[ "$RELEASE" != *"-rc."* ]]; then
+            echo "Release is FINAL - also tagging as 'latest'"
+            echo ""
+            
+            for svc in api dashboard; do
+              echo "Tagging ${DOCKER_ORG}/${svc} as latest..."
+              docker tag "${DOCKER_ORG}/${svc}:${SHA}" "${DOCKER_ORG}/${svc}:latest"
+              docker push "${DOCKER_ORG}/${svc}:latest"
+              echo "✅ Pushed ${DOCKER_ORG}/${svc}:latest"
+              echo ""
+            done
+          fi
+          
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "✅ Image promotion complete"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
   create-release:
     name: Create GitHub Release (changelog)
-    needs: [validate-release, retag-and-push]
+    needs: [validate-release, promote-images]
     runs-on: ubuntu-latest
     if: |
       !cancelled() &&
       needs.validate-release.result == 'success' &&
-      (needs.retag-and-push.result == 'success' || needs.retag-and-push.result == 'skipped')
+      needs.promote-images.result == 'success'
     steps:
       - name: Log execution decision
         run: |
           echo "✅ create-release job is RUNNING"
           echo ""
-          echo "Job results:"
+          echo "Previous jobs:"
           echo "  validate-release: ${{ needs.validate-release.result }}"
-          echo "  retag-and-push: ${{ needs.retag-and-push.result }}"
+          echo "  promote-images: ${{ needs.promote-images.result }}"
           echo ""
-          if [[ "${{ needs.retag-and-push.result }}" == "skipped" ]]; then
-            echo "⏭️ retag-and-push was SKIPPED (no Docker images found)"
-            echo "📝 Creating release anyway (git tag + GitHub Release)"
-          else
-            echo "✅ retag-and-push completed successfully"
-            echo "📝 Creating release with Docker images"
-          fi
+          echo "✅ Images promoted and ready for release"
+          echo "📝 Now creating GitHub Release object"
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -347,22 +376,17 @@ jobs:
             git --no-pager log --pretty=format:"- %s (%h)" --no-merges ${PREV_TAG}..HEAD > changelog.txt
           fi
 
-      - name: Create and push git tag
+      - name: Verify git tag exists
         run: |
           RELEASE="${{ needs.validate-release.outputs.release_version }}"
           
-          # Configure git
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Check if tag already exists
+          # Tag should exist from either push trigger or create-tag job
           if git rev-parse "$RELEASE" >/dev/null 2>&1; then
-            echo "Tag $RELEASE already exists, skipping creation"
+            echo "✅ Tag $RELEASE verified to exist"
           else
-            echo "Creating tag $RELEASE"
-            git tag -a "$RELEASE" -m "Release $RELEASE"
-            git push origin "$RELEASE"
-            echo "✅ Tag $RELEASE created and pushed"
+            echo "❌ Tag $RELEASE does not exist"
+            echo "This should not happen - tag should have been created by create-tag job or push trigger"
+            exit 1
           fi
 
       - name: Create GitHub Release
@@ -372,7 +396,7 @@ jobs:
           name: Release ${{ needs.validate-release.outputs.release_version }}
           body_path: changelog.txt
           draft: false
-          prerelease: ${{ github.event.inputs.release_mode == 'rc' }}
+          prerelease: ${{ contains(needs.validate-release.outputs.release_version, '-rc.') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
