@@ -145,9 +145,7 @@ jobs:
             type=registry,ref=iotistic/dashboard:buildcache
           cache-to: type=local,dest=/tmp/.buildx-cache-new/${{ matrix.board }},mode=max
           tags: |
-            iotistic/dashboard:${{ steps.sha.outputs.sha }}
             iotistic/dashboard:ci-${{ steps.sha.outputs.short_sha }}
-            iotistic/dashboard:latest
           build-args: |
             BUILDKIT_INLINE_CACHE=1
             NODE_ENV=production
