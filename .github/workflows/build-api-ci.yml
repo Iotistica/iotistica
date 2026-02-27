@@ -40,93 +40,14 @@ jobs:
         working-directory: ./api
         run: npm run build
 
-  version:
-    name: Bump Version
+  buildx:
+    name: Build & Push to Docker
     needs: test
     runs-on: [iotistic-lab-sc]
     permissions:
-      contents: write
+      contents: read
     outputs:
-      package_version: ${{ steps.bump.outputs.package_version }}
-      sha_short: ${{ steps.bump.outputs.sha_short }}
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Bump version in package.json
-        id: bump
-        run: |
-          cd api
-          # Get current version
-          CURRENT_VERSION=$(jq -r '.version' package.json)
-          echo "Current version: $CURRENT_VERSION"
-          
-          # Bump patch version (e.g., 1.0.0 -> 1.0.1)
-          IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
-          MAJOR="${VERSION_PARTS[0]}"
-          MINOR="${VERSION_PARTS[1]}"
-          PATCH="${VERSION_PARTS[2]}"
-          NEW_PATCH=$((PATCH + 1))
-          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
-          
-          echo "New version: $NEW_VERSION"
-          
-          # Update package.json
-          jq --arg v "$NEW_VERSION" '.version = $v' package.json > tmp.json && mv tmp.json package.json
-          
-          # Set outputs
-          echo "package_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-
-      - name: Commit and push version bump
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add api/package.json
-          git commit -m "chore: bump api version to ${{ steps.bump.outputs.package_version }} [skip ci]"
-          
-          # Retry push with rebase up to 5 times (handles concurrent workflow runs)
-          for i in {1..5}; do
-            echo "Push attempt $i of 5..."
-            
-            # Fetch latest state from remote1
-            git fetch origin master
-            
-            # Rebase our commit on top of latest origin/master
-            git -c rebase.autoStash=true rebase origin/master
-            
-            # Try to push
-            if git push origin HEAD:master; then
-              echo "Successfully pushed version bump!"
-              exit 0
-            fi
-            
-            # If push failed, wait before retry
-            if [ $i -lt 5 ]; then
-              echo "Push failed, retrying in 2 seconds..."
-              sleep 2
-            fi
-          done
-          
-          echo "Failed to push after 5 attempts"
-          exit 1
-
-      - name: Display version info
-        run: |
-          echo "## Version Bumped" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**New Version:** \`${{ steps.bump.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Git SHA:** \`${{ steps.bump.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-
-  buildx:
-    name: Build & Push to Docker
-    needs: version
-    runs-on: [iotistic-lab-sc]
-    permissions:
-      contents: write
+      short_sha: ${{ steps.sha.outputs.short_sha }}
 
     steps:
       - name: Checkout repository
@@ -134,18 +55,23 @@ jobs:
         with:
           ref: master
 
-      - name: Display Version Update
+      - name: Calculate commit SHA
+        id: sha
         run: |
-          echo "## Building Version ${{ needs.version.outputs.package_version }}" >> $GITHUB_STEP_SUMMARY
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "Build for commit: $SHORT_SHA"
+
+      - name: Display Build Info
+        run: |
+          echo "## Building Docker Image" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ steps.sha.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Platform:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker Tags:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/api:${{ steps.sha.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`iotistic/api:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/api:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/api:${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -173,7 +99,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      # Build and push to registry
+      # Build and push to registry (immutable SHA tag + latest)
       - name: Build & Push final image
         id: docker_build
         if: success()
@@ -188,9 +114,8 @@ jobs:
             type=registry,ref=iotistic/api:buildcache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
           tags: |
+            iotistic/api:${{ steps.sha.outputs.short_sha }}
             iotistic/api:latest
-            iotistic/api:${{ needs.version.outputs.sha_short }}
-            iotistic/api:${{ needs.version.outputs.package_version }}
           build-args: |
             BUILDKIT_INLINE_CACHE=1
 
@@ -203,7 +128,7 @@ jobs:
 
   report:
     name: Generate Reports
-    needs: [version, buildx]
+    needs: buildx
     runs-on: [iotistic-lab-sc]
     if: always()
     
@@ -240,17 +165,17 @@ jobs:
           echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
           
           # Pull the image
-          docker pull iotistic/api:${{ needs.version.outputs.package_version }}
+          docker pull iotistic/api:${{ needs.buildx.outputs.short_sha }}
           
           # Get image size
-          SIZE_BYTES=$(docker image inspect iotistic/api:${{ needs.version.outputs.package_version }} --format='{{.Size}}')
+          SIZE_BYTES=$(docker image inspect iotistic/api:${{ needs.buildx.outputs.short_sha }} --format='{{.Size}}')
           SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
           
           echo "size_mb=$SIZE_MB" >> $GITHUB_OUTPUT
           echo "size_bytes=$SIZE_BYTES" >> $GITHUB_OUTPUT
           
           # Get layer count
-          LAYERS=$(docker image inspect iotistic/api:${{ needs.version.outputs.package_version }} --format='{{len .RootFS.Layers}}')
+          LAYERS=$(docker image inspect iotistic/api:${{ needs.buildx.outputs.short_sha }} --format='{{len .RootFS.Layers}}')
           echo "layers=$LAYERS" >> $GITHUB_OUTPUT
 
       - name: Generate Summary Report
