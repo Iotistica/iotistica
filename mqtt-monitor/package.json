@@ -1,6 +1,6 @@
 {
   "name": "@iotistic/mqtt-monitor",
-  "version": "0.1.0",
+  "version": "0.0.1-rc.134",
   "description": "MQTT topic monitoring service with schema generation and metrics",
   "main": "dist/index.js",
   "scripts": {
