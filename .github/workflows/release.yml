@@ -216,10 +216,10 @@ jobs:
           echo "5. ⏳ deploy-to-k8s: Update ArgoCD values" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Services to Promote" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/api\` (last built from commit matching api/**)" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/dashboard\` (last built from commit matching dashboard/**)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/api\` (last commit changing api/** or API CI workflow)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/dashboard\` (last commit changing dashboard/** or Dashboard CI workflow)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Note:** Each service uses its last built commit (path filter aware)" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Each service uses its last built commit (matches CI trigger paths)" >> $GITHUB_STEP_SUMMARY
 
   create-tag:
     name: Create git tag (for workflow_dispatch)
@@ -291,25 +291,25 @@ jobs:
             local svc="$1"
             local path_filter="$2"
             
-            echo "Finding last built commit for $svc (path filter: $path_filter)..."
+            echo "Finding last built commit for $svc (path filter: $path_filter)..." >&2
             
             # Walk backwards from release commit to find last change to service files
-            local sha=$(git log -1 --format=%H "$RELEASE_COMMIT" -- "$path_filter")
+            local sha=$(git log -1 --format=%H "$RELEASE_COMMIT" -- $path_filter)
             
             if [ -z "$sha" ]; then
               # No changes found in recent history, try broader search
-              echo "⚠️  No recent changes found for $svc in path $path_filter"
-              echo "   Searching entire history from HEAD..."
-              sha=$(git log -1 --format=%H HEAD -- "$path_filter")
+              echo "⚠️  No recent changes found for $svc in path $path_filter" >&2
+              echo "   Searching entire history from HEAD..." >&2
+              sha=$(git log -1 --format=%H HEAD -- $path_filter)
             fi
             
             if [ -z "$sha" ]; then
-              echo "❌ ERROR: Could not find any commit with changes to $path_filter"
+              echo "❌ ERROR: Could not find any commit with changes to $path_filter" >&2
               exit 1
             fi
             
-            echo "   Last commit with $svc changes: $sha"
-            echo ""
+            echo "   Last commit with $svc changes: $sha" >&2
+            echo "" >&2
             echo "$sha"
           }
           
@@ -352,12 +352,12 @@ jobs:
           }
           
           # Promote all services with their respective path filters
-          # These match the CI workflow path filters
-          API_SHA=$(find_service_sha "api" "api/**")
-          DASHBOARD_SHA=$(find_service_sha "dashboard" "dashboard/**")
+          # These match the CI workflow triggers (code + workflow changes)
+          API_SHA=$(find_service_sha "api" "api/** .github/workflows/build-api-ci.yml")
+          DASHBOARD_SHA=$(find_service_sha "dashboard" "dashboard/** .github/workflows/build-dashboard-ci.yml")
           
-          promote_image "api" "api/**"
-          promote_image "dashboard" "dashboard/**"
+          promote_image "api" "api/** .github/workflows/build-api-ci.yml"
+          promote_image "dashboard" "dashboard/** .github/workflows/build-dashboard-ci.yml"
           
           # For final releases, also tag as 'latest'
           if [[ "$RELEASE" != *"-rc."* ]]; then
