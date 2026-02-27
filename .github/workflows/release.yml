@@ -221,7 +221,7 @@ jobs:
             echo "- \`iotistic/${APP}\` (will find last built image from ${APP}/**)" >> $GITHUB_STEP_SUMMARY
           done
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Note:** Each app searches last 10 commits for built Docker images" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Searches for ci-tagged images (CI-built, last 50 commits)" >> $GITHUB_STEP_SUMMARY
 
   create-tag:
     name: Create git tag (for workflow_dispatch)
@@ -289,10 +289,10 @@ jobs:
             echo "Promoting $APP"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-            # Get last 10 commits affecting this app
-            for COMMIT in $(git log --format=%H -n 10 -- $PATH_FILTER); do
-              echo -n "   Trying $COMMIT... "
-              if docker pull "${DOCKER_ORG}/${APP}:${COMMIT}" >/dev/null 2>&1; then
+            # Get last 50 commits affecting this app
+            for COMMIT in $(git log --format=%H "$RELEASE_COMMIT" -n 50 -- $PATH_FILTER); do
+              echo -n "   Trying ci-${COMMIT:0:12}... "
+              if docker pull "${DOCKER_ORG}/${APP}:ci-${COMMIT}" >/dev/null 2>&1; then
                 SHA="$COMMIT"
                 echo "✅ Found"
                 break
@@ -303,15 +303,16 @@ jobs:
 
             if [ -z "$SHA" ]; then
               echo ""
-              echo "❌ No built images found for $APP in last 10 commits"
+              echo "❌ No CI-built images found for $APP (searched 50 commits)"
               echo "   Run: gh workflow run build-${APP}-ci.yml"
               exit 1
             fi
 
-            # Tag as release
-            docker tag "${DOCKER_ORG}/${APP}:${SHA}" "${DOCKER_ORG}/${APP}:${RELEASE}"
+            # Pull the ci- tagged image and retag as release version
+            docker pull "${DOCKER_ORG}/${APP}:ci-${SHA}"
+            docker tag "${DOCKER_ORG}/${APP}:ci-${SHA}" "${DOCKER_ORG}/${APP}:${RELEASE}"
             docker push "${DOCKER_ORG}/${APP}:${RELEASE}"
-            echo "✅ ${DOCKER_ORG}/${APP}:${SHA} → ${RELEASE}"
+            echo "✅ ${DOCKER_ORG}/${APP}:ci-${SHA:0:12} → ${RELEASE}"
             echo ""
 
             # Save SHA for latest tagging
@@ -330,7 +331,7 @@ jobs:
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             for APP in ${{ env.APPS }}; do
               SHA=$(cat /tmp/${APP}_sha.txt)
-              docker tag "${DOCKER_ORG}/${APP}:${SHA}" "${DOCKER_ORG}/${APP}:latest"
+              docker tag "${DOCKER_ORG}/${APP}:ci-${SHA}" "${DOCKER_ORG}/${APP}:latest"
               docker push "${DOCKER_ORG}/${APP}:latest"
               echo "✅ ${DOCKER_ORG}/${APP}:latest"
             done
@@ -348,7 +349,7 @@ jobs:
           echo "### Promoted Images" >> $GITHUB_STEP_SUMMARY
           for APP in ${{ env.APPS }}; do
             SHA=$(cat /tmp/${APP}_sha.txt)
-            echo "- **${APP}**: \`${DOCKER_ORG}/${APP}:${SHA:0:12}\` → \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **${APP}**: \`${DOCKER_ORG}/${APP}:ci-${SHA:0:12}\` → \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
           done
 
   create-release:
