@@ -527,7 +527,6 @@ jobs:
           body_path: changelog.txt
           draft: false
           prerelease: ${{ github.event.inputs.release_mode == 'rc' }}
-          make_latest: ${{ github.event_name == 'push' || github.event.inputs.release_mode != 'rc' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
