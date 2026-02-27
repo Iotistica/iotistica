@@ -2098,6 +2098,223 @@ kubectl delete namespace -l managed-by=iotistic
 - SSL offloading at gateway
 - Enterprise workloads
 
+## ArgoCD Operations and Troubleshooting
+
+### ArgoCD Cluster Configuration
+
+**ArgoCD Namespace**: `iotistica-argocd`
+
+**Key ArgoCD Resources**:
+```powershell
+# List all ArgoCD applications
+kubectl get applications -n iotistica-argocd -o wide
+
+# Get application status
+kubectl get applications -n iotistica-argocd -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.sync.status}{"\n"}{end}'
+
+# Describe specific application
+kubectl describe application <app-name> -n iotistica-argocd
+```
+
+### Managing ArgoCD Applications
+
+**List Applications**:
+```powershell
+# Quick list
+kubectl get applications -n iotistica-argocd
+
+# Detailed view with sync status
+kubectl get applications -n iotistica-argocd -o custom-columns=NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status
+```
+
+**Stop/Disable Auto-Sync**:
+```powershell
+# Disable auto-sync (switch to manual sync)
+kubectl patch application <app-name> -n iotistica-argocd -p '{"spec":{"syncPolicy":{"automated":null}}}' --type merge
+
+# Example - disable auto-sync for client app
+kubectl patch application client-2e16a296695f -n iotistica-argocd -p '{"spec":{"syncPolicy":{"automated":null}}}' --type merge
+```
+
+**Enable Auto-Sync**:
+```powershell
+# Resume auto-sync with prune and self-heal enabled
+kubectl patch application <app-name> -n iotistica-argocd -p '{"spec":{"syncPolicy":{"automated":{"prune":true,"selfHeal":true}}}}' --type merge
+```
+
+**Manually Sync Application**:
+```powershell
+# Trigger immediate sync (ignores sync policy)
+kubectl patch application <app-name> -n iotistica-argocd --type merge -p '{"status":{"operationState":{"initiatedBy":{"username":"admin"},"operation":{"sync":{"syncStrategy":{"hook":{}}}}}}}' 
+
+# Or use ArgoCD CLI
+argocd app sync <app-name>
+```
+
+### Deleting ArgoCD Applications
+
+**Complete Deletion (App + All Resources)**:
+```powershell
+# Delete ArgoCD application with cascade (deletes all managed resources)
+kubectl delete application <app-name> -n iotistica-argocd --cascade=foreground
+
+# Example - delete client-2e16a296695f app
+kubectl delete application client-2e16a296695f -n iotistica-argocd --cascade=foreground
+
+# Delete customer namespace and related fleet namespaces
+kubectl delete namespace <customer-namespace> fleet-<customer-id>-pool-01 fleet-<customer-id>-test
+
+# Example - cleanup after deleting client-2e16a296695f
+kubectl delete namespace client-2e16a296695f fleet-client-2e16a296695f-pool-01 fleet-client-2e16a296695f-test
+```
+
+**Verify Deletion**:
+```powershell
+# Check application is deleted
+kubectl get application <app-name> -n iotistica-argocd 2>&1
+# Should return: error: applications.argoproj.io "<app-name>" not found
+
+# Verify namespaces are deleted
+kubectl get ns | Select-String <customer-id>
+# Should return empty (no results)
+```
+
+**Cleanup Script for Multiple Client Deletions**:
+```powershell
+# Delete multiple client applications at once
+$apps = @("client-2e16a296695f", "client-c0ea5d582f12", "client-3397af99050b")
+
+foreach ($app in $apps) {
+  Write-Host "Deleting application: $app"
+  kubectl delete application $app -n iotistica-argocd --cascade=foreground
+  
+  # Extract customer ID from app name (remove "client-" prefix)
+  $customerId = $app -replace "^client-", ""
+  
+  Write-Host "Deleting namespaces for: $customerId"
+  kubectl delete namespace "client-$customerId" "fleet-client-$customerId-pool-01" "fleet-client-$customerId-test" 2>&1 | Select-String -Pattern "deleted|NotFound"
+  
+  Write-Host "Completed: $app`n"
+}
+```
+
+### ArgoCD Troubleshooting
+
+**Application Stuck in "Progressing" State**:
+```powershell
+# Check application conditions
+kubectl describe application <app-name> -n iotistica-argocd | Select-String -A 5 "Conditions:"
+
+# Check ArgoCD server logs
+kubectl logs -n iotistica-argocd deployment/argocd-server --tail=100 | Select-String ERROR
+
+# Force refresh synchronization source
+kubectl annotate application <app-name> -n iotistica-argocd argocd.argoproj.io/refresh=normal --overwrite
+
+# Delete application and recreate (last resort)
+kubectl delete application <app-name> -n iotistica-argocd --grace-period=0 --force
+```
+
+**Sync Operation Failed**:
+```powershell
+# Check sync error details
+kubectl get application <app-name> -n iotistica-argocd -o jsonpath='{.status.operationState.syncResult.errors[*].message}'
+
+# View full application status
+kubectl get application <app-name> -n iotistica-argocd -o yaml | Select-String -A 20 "status:"
+
+# Check ArgoCD controller logs
+kubectl logs -n iotistica-argocd deployment/argocd-application-controller --tail=100 | Select-String $app-name
+
+# Common causes:
+# 1. Git repository unreachable - Check network connectivity to git repo
+# 2. Invalid Kustomize/Helm values - Check syntax in git repo
+# 3. RBAC permissions - Verify ArgoCD has permission to managed resources
+# 4. Resource conflicts - Check for manual changes conflicting with git state
+```
+
+**Application Health Check**:
+```powershell
+# Get health status summary
+kubectl get application <app-name> -n iotistica-argocd -o jsonpath='{.status.health.status}'
+
+# View individual resource health
+kubectl get application <app-name> -n iotistica-argocd -o jsonpath='{.status.resources[*]}{"\n"}' | ConvertFrom-Json | Select-Object name, health, syncWave
+
+# Check all resources in application
+kubectl get all -n <customer-namespace>
+```
+
+**Force Delete Application (Stuck Deletion)**:
+```powershell
+# If application is stuck deleting, remove finalizers (blocking deletion)
+kubectl patch application <app-name> -n iotistica-argocd -p '{"metadata":{"finalizers":null}}' --type merge
+
+# Force delete immediately (grace period=0)
+kubectl delete application <app-name> -n iotistica-argocd --grace-period=0 --force
+
+# Verify deletion
+kubectl get application <app-name> -n iotistica-argocd 2>&1
+# Should return: Error from server (NotFound): applications.argoproj.io "<app-name>" not found
+
+# Refresh ArgoCD UI by restarting server pod
+kubectl delete pod -n iotistica-argocd -l app.kubernetes.io/name=argocd-server
+
+# Restart application controller
+kubectl delete pod -n iotistica-argocd iotistica-argocd-application-controller-0
+
+# Wait for pods to restart and UI to refresh (1-2 minutes)
+kubectl get pods -n iotistica-argocd --watch
+```
+
+**Real Example - Stuck Application**:
+```powershell
+# Problem: Application appears in admin page but cannot be deleted normally
+# Solution: Use force delete with finalizer removal
+
+# 1. Remove finalizers blocking deletion
+kubectl patch application client-2e16a296695f -n iotistica-argocd -p '{"metadata":{"finalizers":null}}' --type merge
+
+# 2. Force immediate deletion
+kubectl delete application client-2e16a296695f -n iotistica-argocd --grace-period=0 --force
+
+# 3. Verify it's gone
+kubectl get application client-2e16a296695f -n iotistica-argocd 2>&1
+# Error from server (NotFound): applications.argoproj.io "client-2e16a296695f" not found
+
+# 4. Refresh ArgoCD UI to clear cache
+kubectl delete pod -n iotistica-argocd -l app.kubernetes.io/name=argocd-server
+kubectl delete pod -n iotistica-argocd iotistica-argocd-application-controller-0
+```
+
+### Common ArgoCD Commands
+
+**Application Status**:
+```powershell
+# Quick status check
+kubectl get application <app-name> -n iotistica-argocd -o jsonpath='{.status.sync.status},{.status.health.status},{.status.operationState.phase}{"\n"}'
+
+# Watch for changes
+kubectl get application -n iotistica-argocd -w
+
+# Export application YAML
+kubectl get application <app-name> -n iotistica-argocd -o yaml > app-backup.yaml
+```
+
+**Rollback Application**:
+```powershell
+# Get revision history
+kubectl get application <app-name> -n iotistica-argocd -o jsonpath='{.status.operationState.syncResult.revision}'
+
+# Rollback to previous revision (via git)
+# First, revert commit in git repository, then ArgoCD will auto-sync
+git revert <commit-hash>
+git push
+
+# Or manually trigger sync to specific revision
+kubectl patch application <app-name> -n iotistica-argocd -p '{"spec":{"source":{"targetRevision":"main"}}}' --type merge
+```
+
 ## Emergency Procedures
 
 ### Cluster Unresponsive

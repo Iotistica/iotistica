@@ -170,20 +170,42 @@ jobs:
           
           echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
 
-      - name: Update dashboard displayVersion
+      - name: Update service versions
         run: |
           RELEASE="${{ steps.set_version.outputs.release_version }}"
-          echo "Updating dashboard/package.json displayVersion to ${RELEASE}"
+          VERSION="${RELEASE#v}"
+          echo "Updating service package.json versions to ${VERSION}"
+          echo "Updating dashboard displayVersion to ${RELEASE}"
           
-          # Update displayVersion field in package.json
+          # Update version fields for all services
+          jq --arg version "$VERSION" '.version = $version' api/package.json > api/package.json.tmp
+          mv api/package.json.tmp api/package.json
+          
+          jq --arg version "$VERSION" '.version = $version' dashboard/package.json > dashboard/package.json.tmp
+          mv dashboard/package.json.tmp dashboard/package.json
+          
+          jq --arg version "$VERSION" '.version = $version' mqtt-monitor/package.json > mqtt-monitor/package.json.tmp
+          mv mqtt-monitor/package.json.tmp mqtt-monitor/package.json
+          
+          jq --arg version "$VERSION" '.version = $version' housekeeper/package.json > housekeeper/package.json.tmp
+          mv housekeeper/package.json.tmp housekeeper/package.json
+          
+          jq --arg version "$VERSION" '.version = $version' postoffice/package.json > postoffice/package.json.tmp
+          mv postoffice/package.json.tmp postoffice/package.json
+          
+          # Update displayVersion field in dashboard
           jq --arg version "$RELEASE" '.displayVersion = $version' dashboard/package.json > dashboard/package.json.tmp
           mv dashboard/package.json.tmp dashboard/package.json
           
-          # Verify the change
-          DISPLAY_VERSION=$(jq -r '.displayVersion' dashboard/package.json)
-          echo "✅ Set displayVersion to: ${DISPLAY_VERSION}"
+          # Verify the changes
+          echo "✅ API version: $(jq -r '.version' api/package.json)"
+          echo "✅ Dashboard version: $(jq -r '.version' dashboard/package.json)"
+          echo "✅ MQTT Monitor version: $(jq -r '.version' mqtt-monitor/package.json)"
+          echo "✅ Housekeeper version: $(jq -r '.version' housekeeper/package.json)"
+          echo "✅ Postoffice version: $(jq -r '.version' postoffice/package.json)"
+          echo "✅ Dashboard displayVersion: $(jq -r '.displayVersion' dashboard/package.json)"
 
-      - name: Commit displayVersion change
+      - name: Commit version changes
         run: |
           RELEASE="${{ steps.set_version.outputs.release_version }}"
           
@@ -192,14 +214,14 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
           # Check if there are changes
-          if git diff --quiet dashboard/package.json; then
-            echo "ℹ️  No changes to displayVersion"
+          if git diff --quiet; then
+            echo "ℹ️  No version changes to commit"
             exit 0
           fi
           
           # Commit the change
-          git add dashboard/package.json
-          git commit -m "chore: update dashboard displayVersion to ${RELEASE}"
+          git add api/package.json dashboard/package.json mqtt-monitor/package.json housekeeper/package.json postoffice/package.json
+          git commit -m "chore: update service versions to ${RELEASE}"
           git push origin HEAD:${GITHUB_REF##*/}
           
           echo "✅ Committed and pushed displayVersion change"
