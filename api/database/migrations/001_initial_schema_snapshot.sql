@@ -11442,7 +11442,7 @@ ALTER SEQUENCE public.scheduled_jobs_id_seq OWNED BY public.scheduled_jobs.id;
 -- Name: schema_migrations; Type: TABLE; Schema: public; Owner: postgres
 --
 
-CREATE TABLE public.schema_migrations (
+CREATE TABLE IF NOT EXISTS public.schema_migrations (
     id integer NOT NULL,
     migration_number integer NOT NULL,
     name character varying(255) NOT NULL,
@@ -11458,7 +11458,7 @@ CREATE TABLE public.schema_migrations (
 -- Name: schema_migrations_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
-CREATE SEQUENCE public.schema_migrations_id_seq
+CREATE SEQUENCE IF NOT EXISTS public.schema_migrations_id_seq
     AS integer
     START WITH 1
     INCREMENT BY 1
@@ -16580,16 +16580,24 @@ ALTER TABLE ONLY public.scheduled_jobs
 -- Name: schema_migrations schema_migrations_migration_number_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
-ALTER TABLE ONLY public.schema_migrations
-    ADD CONSTRAINT schema_migrations_migration_number_key UNIQUE (migration_number);
+DO $$ BEGIN
+    ALTER TABLE ONLY public.schema_migrations
+        ADD CONSTRAINT schema_migrations_migration_number_key UNIQUE (migration_number);
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 
 --
 -- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
-ALTER TABLE ONLY public.schema_migrations
-    ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (id);
+DO $$ BEGIN
+    ALTER TABLE ONLY public.schema_migrations
+        ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (id);
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 
 --
@@ -24829,7 +24837,7 @@ CREATE INDEX idx_scheduled_jobs_schedule_id ON public.scheduled_jobs USING btree
 -- Name: idx_schema_migrations_number; Type: INDEX; Schema: public; Owner: postgres
 --
 
-CREATE INDEX idx_schema_migrations_number ON public.schema_migrations USING btree (migration_number);
+CREATE INDEX IF NOT EXISTS idx_schema_migrations_number ON public.schema_migrations USING btree (migration_number);
 
 
 --
