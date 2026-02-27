@@ -519,13 +519,12 @@ export class MqttManager extends EventEmitter {
         
         // Always schedule reconnect on error (including initial connection failures)
         // This makes the API resilient to cold-start scenarios where MQTT broker starts late
-        if (!this.reconnecting) {
-          logger.warn('MQTT connection error, scheduling reconnect', {
-            initialConnection: !initialConnectionSucceeded,
-            reconnectAttempts: this.reconnectAttempts
-          });
-          this.scheduleReconnect();
-        }
+        // scheduleReconnect() has proper guards to cancel existing timers and check max attempts
+        logger.warn('MQTT connection error, scheduling reconnect', {
+          initialConnection: !initialConnectionSucceeded,
+          reconnectAttempts: this.reconnectAttempts
+        });
+        this.scheduleReconnect();
       });
 
       this.client.on('offline', () => {
