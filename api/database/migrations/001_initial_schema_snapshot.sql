@@ -11438,42 +11438,6 @@ CREATE SEQUENCE public.scheduled_jobs_id_seq
 ALTER SEQUENCE public.scheduled_jobs_id_seq OWNED BY public.scheduled_jobs.id;
 
 
---
--- Name: schema_migrations; Type: TABLE; Schema: public; Owner: postgres
---
-
-CREATE TABLE IF NOT EXISTS public.schema_migrations (
-    id integer NOT NULL,
-    migration_number integer NOT NULL,
-    name character varying(255) NOT NULL,
-    filename character varying(255) NOT NULL,
-    applied_at timestamp without time zone DEFAULT now(),
-    checksum character varying(64),
-    execution_time_ms integer
-);
-
-
-
---
--- Name: schema_migrations_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
---
-
-CREATE SEQUENCE IF NOT EXISTS public.schema_migrations_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-
---
--- Name: schema_migrations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
---
-
-ALTER SEQUENCE public.schema_migrations_id_seq OWNED BY public.schema_migrations.id;
-
 
 --
 -- Name: sensor_health_history; Type: TABLE; Schema: public; Owner: postgres
@@ -14259,14 +14223,6 @@ ALTER TABLE ONLY public.rollout_events ALTER COLUMN id SET DEFAULT nextval('publ
 
 ALTER TABLE ONLY public.scheduled_jobs ALTER COLUMN id SET DEFAULT nextval('public.scheduled_jobs_id_seq'::regclass);
 
-
---
--- Name: schema_migrations id; Type: DEFAULT; Schema: public; Owner: postgres
---
-
-ALTER TABLE ONLY public.schema_migrations ALTER COLUMN id SET DEFAULT nextval('public.schema_migrations_id_seq'::regclass);
-
-
 --
 -- Name: sensor_health_history id; Type: DEFAULT; Schema: public; Owner: postgres
 --
@@ -16575,29 +16531,6 @@ ALTER TABLE ONLY public.scheduled_jobs
 ALTER TABLE ONLY public.scheduled_jobs
     ADD CONSTRAINT scheduled_jobs_schedule_id_key UNIQUE (schedule_id);
 
-
---
--- Name: schema_migrations schema_migrations_migration_number_key; Type: CONSTRAINT; Schema: public; Owner: postgres
---
-
-DO $$ BEGIN
-    ALTER TABLE ONLY public.schema_migrations
-        ADD CONSTRAINT schema_migrations_migration_number_key UNIQUE (migration_number);
-EXCEPTION
-    WHEN duplicate_object THEN NULL;
-END $$;
-
-
---
--- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
---
-
-DO $$ BEGIN
-    ALTER TABLE ONLY public.schema_migrations
-        ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (id);
-EXCEPTION
-    WHEN duplicate_object THEN NULL;
-END $$;
 
 
 --
@@ -24831,14 +24764,6 @@ CREATE INDEX idx_scheduled_jobs_is_active ON public.scheduled_jobs USING btree (
 --
 
 CREATE INDEX idx_scheduled_jobs_schedule_id ON public.scheduled_jobs USING btree (schedule_id);
-
-
---
--- Name: idx_schema_migrations_number; Type: INDEX; Schema: public; Owner: postgres
---
-
-CREATE INDEX IF NOT EXISTS idx_schema_migrations_number ON public.schema_migrations USING btree (migration_number);
-
 
 --
 -- Name: idx_sensor_health_dashboard; Type: INDEX; Schema: public; Owner: postgres
