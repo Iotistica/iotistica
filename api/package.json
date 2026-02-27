@@ -1,6 +1,6 @@
 {
   "name": "iotistic-api",
-  "version": "0.1.0-rc.3",
+  "version": "0.0.1",
   "description": "Unified Iotistic API - combines Grafana control, Docker management, and cloud multi-device management",
   "main": "dist/index.js",
   "scripts": {

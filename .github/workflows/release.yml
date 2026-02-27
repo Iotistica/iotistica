@@ -170,85 +170,6 @@ jobs:
           
           echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
 
-      - name: Update service versions
-        run: |
-          RELEASE="${{ steps.set_version.outputs.release_version }}"
-          VERSION="${RELEASE#v}"
-          echo "Updating service package.json versions to ${VERSION}"
-          echo "Updating dashboard displayVersion to ${RELEASE}"
-          
-          # Update version fields for all services
-          jq --arg version "$VERSION" '.version = $version' api/package.json > api/package.json.tmp
-          mv api/package.json.tmp api/package.json
-          
-          jq --arg version "$VERSION" '.version = $version' dashboard/package.json > dashboard/package.json.tmp
-          mv dashboard/package.json.tmp dashboard/package.json
-          
-          jq --arg version "$VERSION" '.version = $version' mqtt-monitor/package.json > mqtt-monitor/package.json.tmp
-          mv mqtt-monitor/package.json.tmp mqtt-monitor/package.json
-          
-          jq --arg version "$VERSION" '.version = $version' housekeeper/package.json > housekeeper/package.json.tmp
-          mv housekeeper/package.json.tmp housekeeper/package.json
-          
-          jq --arg version "$VERSION" '.version = $version' postoffice/package.json > postoffice/package.json.tmp
-          mv postoffice/package.json.tmp postoffice/package.json
-          
-          # Update displayVersion field in dashboard
-          jq --arg version "$RELEASE" '.displayVersion = $version' dashboard/package.json > dashboard/package.json.tmp
-          mv dashboard/package.json.tmp dashboard/package.json
-          
-          # Verify the changes
-          echo "✅ API version: $(jq -r '.version' api/package.json)"
-          echo "✅ Dashboard version: $(jq -r '.version' dashboard/package.json)"
-          echo "✅ MQTT Monitor version: $(jq -r '.version' mqtt-monitor/package.json)"
-          echo "✅ Housekeeper version: $(jq -r '.version' housekeeper/package.json)"
-          echo "✅ Postoffice version: $(jq -r '.version' postoffice/package.json)"
-          echo "✅ Dashboard displayVersion: $(jq -r '.displayVersion' dashboard/package.json)"
-
-      - name: Commit version changes
-        run: |
-          RELEASE="${{ steps.set_version.outputs.release_version }}"
-          
-          # Configure git
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Check if there are changes
-          if git diff --quiet; then
-            echo "ℹ️  No version changes to commit"
-            exit 0
-          fi
-          
-          # Commit the change
-          git add api/package.json dashboard/package.json mqtt-monitor/package.json housekeeper/package.json postoffice/package.json
-          git commit -m "chore: update service versions to ${RELEASE}"
-          git push origin HEAD:${GITHUB_REF##*/}
-          
-          echo "✅ Committed and pushed displayVersion change"
-
-      - name: Read service versions from package.json at this commit
-        id: pkg_versions
-        run: |
-          # Read versions from package.json in the repo at this commit
-          API_VERSION=$(jq -r '.version' api/package.json)
-          DASHBOARD_VERSION=$(jq -r '.version' dashboard/package.json)
-          MQTT_MONITOR_VERSION=$(jq -r '.version' mqtt-monitor/package.json)
-          HOUSEKEEPER_VERSION=$(jq -r '.version' housekeeper/package.json)
-          POSTOFFICE_VERSION=$(jq -r '.version' postoffice/package.json)
-
-          echo "api_pkg=$API_VERSION" >> $GITHUB_OUTPUT
-          echo "dashboard_pkg=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
-          echo "mqtt_pkg=$MQTT_MONITOR_VERSION" >> $GITHUB_OUTPUT
-          echo "housekeeper_pkg=$HOUSEKEEPER_VERSION" >> $GITHUB_OUTPUT
-          echo "postoffice_pkg=$POSTOFFICE_VERSION" >> $GITHUB_OUTPUT
-
-          echo "Package.json versions:"
-          echo "  API: $API_VERSION"
-          echo "  Dashboard: $DASHBOARD_VERSION"
-          echo "  MQTT Monitor: $MQTT_MONITOR_VERSION"
-          echo "  Housekeeper: $HOUSEKEEPER_VERSION"
-          echo "  Postoffice: $POSTOFFICE_VERSION"
-
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -260,6 +181,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          RELEASE="${{ steps.set_version.outputs.release_version }}"
+          VERSION="${RELEASE#v}"
 
           # Test for rate limiting first
           echo "Testing Docker Hub connectivity..."
@@ -340,11 +263,11 @@ jobs:
           }
           
           # Check each service
-          API_SRC=$(check_image "api" "${{ steps.pkg_versions.outputs.api_pkg }}" || true)
-          DASHBOARD_SRC=$(check_image "dashboard" "${{ steps.pkg_versions.outputs.dashboard_pkg }}" || true)
-          MQTT_SRC=$(check_image "mqtt-monitor" "${{ steps.pkg_versions.outputs.mqtt_pkg }}" || true)
-          HOUSEKEEPER_SRC=$(check_image "housekeeper" "${{ steps.pkg_versions.outputs.housekeeper_pkg }}" || true)
-          POSTOFFICE_SRC=$(check_image "postoffice" "${{ steps.pkg_versions.outputs.postoffice_pkg }}" || true)
+          API_SRC=$(check_image "api" "$VERSION" || true)
+          DASHBOARD_SRC=$(check_image "dashboard" "$VERSION" || true)
+          MQTT_SRC=$(check_image "mqtt-monitor" "$VERSION" || true)
+          HOUSEKEEPER_SRC=$(check_image "housekeeper" "$VERSION" || true)
+          POSTOFFICE_SRC=$(check_image "postoffice" "$VERSION" || true)
 
           echo "api_src_tag=$API_SRC" >> $GITHUB_OUTPUT
           echo "dashboard_src_tag=$DASHBOARD_SRC" >> $GITHUB_OUTPUT
@@ -378,13 +301,13 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Mode:** $MODE_BADGE" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Service | package.json | selected image tag |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---:|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| API | \`${{ steps.pkg_versions.outputs.api_pkg }}\` | \`${{ steps.verify.outputs.api_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Dashboard | \`${{ steps.pkg_versions.outputs.dashboard_pkg }}\` | \`${{ steps.verify.outputs.dashboard_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| MQTT Monitor | \`${{ steps.pkg_versions.outputs.mqtt_pkg }}\` | \`${{ steps.verify.outputs.mqtt_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Housekeeper | \`${{ steps.pkg_versions.outputs.housekeeper_pkg }}\` | \`${{ steps.verify.outputs.housekeeper_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Postoffice | \`${{ steps.pkg_versions.outputs.postoffice_pkg }}\` | \`${{ steps.verify.outputs.postoffice_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | selected image tag |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| API | \`${{ steps.verify.outputs.api_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dashboard | \`${{ steps.verify.outputs.dashboard_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| MQTT Monitor | \`${{ steps.verify.outputs.mqtt_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Housekeeper | \`${{ steps.verify.outputs.housekeeper_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Postoffice | \`${{ steps.verify.outputs.postoffice_src_tag }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           # Determine if retag-and-push will run
