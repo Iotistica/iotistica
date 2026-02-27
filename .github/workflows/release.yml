@@ -65,7 +65,7 @@ jobs:
         id: set_version
         run: |
           # Ensure we have the latest tags from remote
-          git fetch origin --tags --force
+          git fetch origin --tags --prune --prune-tags --force
           
           if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             # Tag push — use the pushed tag
@@ -78,6 +78,11 @@ jobs:
           # Manual dispatch → determine release version
           MODE="${{ github.event.inputs.release_mode || 'final' }}"
           TYPE="${{ github.event.inputs.release_type }}"
+          
+          # Debug: List all tags to verify fetch worked
+          echo "=== Available tags after fetch ==="
+          git tag -l 'v*.*.*' --sort=-version:refname | head -10
+          echo ""
           
           # Find latest final release (no -rc suffix)
           LATEST_FINAL=$(git tag -l 'v*.*.*' --sort=-version:refname | grep -v '-rc' | head -n1)
@@ -183,7 +188,12 @@ jobs:
           set -euo pipefail
           
           # Ensure we have the latest tags from remote
-          git fetch origin --tags --force
+          git fetch origin --tags --prune --prune-tags --force
+          
+          # Debug: List all tags to verify fetch worked
+          echo "=== Available tags for image verification ==="
+          git tag -l 'v*.*.*' --sort=-version:refname | head -10
+          echo ""
           
           RELEASE="${{ steps.set_version.outputs.release_version }}"
           VERSION="${RELEASE#v}"
