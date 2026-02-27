@@ -91,6 +91,7 @@ jobs:
       contents: read
     outputs:
       sha: ${{ steps.sha.outputs.sha }}
+      short_sha: ${{ steps.sha.outputs.short_sha }}
     strategy:
       matrix:
         include:
