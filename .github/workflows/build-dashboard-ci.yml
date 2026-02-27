@@ -92,7 +92,6 @@ jobs:
     outputs:
       sha: ${{ steps.sha.outputs.sha }}
       short_sha: ${{ steps.sha.outputs.short_sha }}
-      short_sha: ${{ steps.sha.outputs.short_sha }}
     strategy:
       matrix:
         include:
