@@ -54,9 +54,6 @@ jobs:
       release_version: ${{ steps.set_version.outputs.release_version }}
       api_src_tag: ${{ steps.verify.outputs.api_src_tag }}
       dashboard_src_tag: ${{ steps.verify.outputs.dashboard_src_tag }}
-      mqtt_src_tag: ${{ steps.verify.outputs.mqtt_src_tag }}
-      housekeeper_src_tag: ${{ steps.verify.outputs.housekeeper_src_tag }}
-      postoffice_src_tag: ${{ steps.verify.outputs.postoffice_src_tag }}
     steps:
       - name: Checkout repository (full)
         uses: actions/checkout@v4
@@ -271,26 +268,17 @@ jobs:
             echo "skip"
           }
           
-          # Check each service
+          # Check each service (Dashboard & API only)
           API_SRC=$(check_image "api" "$VERSION" || true)
           DASHBOARD_SRC=$(check_image "dashboard" "$VERSION" || true)
-          MQTT_SRC=$(check_image "mqtt-monitor" "$VERSION" || true)
-          HOUSEKEEPER_SRC=$(check_image "housekeeper" "$VERSION" || true)
-          POSTOFFICE_SRC=$(check_image "postoffice" "$VERSION" || true)
 
           echo "api_src_tag=$API_SRC" >> $GITHUB_OUTPUT
           echo "dashboard_src_tag=$DASHBOARD_SRC" >> $GITHUB_OUTPUT
-          echo "mqtt_src_tag=$MQTT_SRC" >> $GITHUB_OUTPUT
-          echo "housekeeper_src_tag=$HOUSEKEEPER_SRC" >> $GITHUB_OUTPUT
-          echo "postoffice_src_tag=$POSTOFFICE_SRC" >> $GITHUB_OUTPUT
 
           echo ""
           echo "Image verification complete:"
           echo "  API  -> $API_SRC"
           echo "  Dashboard -> $DASHBOARD_SRC"
-          echo "  MQTT Monitor -> $MQTT_SRC"
-          echo "  Housekeeper -> $HOUSEKEEPER_SRC"
-          echo "  Postoffice -> $POSTOFFICE_SRC"
 
       - name: Summary for step output
         run: |
@@ -322,14 +310,11 @@ jobs:
           # Determine if retag-and-push will run
           API="${{ steps.verify.outputs.api_src_tag }}"
           DASH="${{ steps.verify.outputs.dashboard_src_tag }}"
-          MQTT="${{ steps.verify.outputs.mqtt_src_tag }}"
-          HOUSE="${{ steps.verify.outputs.housekeeper_src_tag }}"
-          POST="${{ steps.verify.outputs.postoffice_src_tag }}"
           
           echo "### Next Steps Decision" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          if [[ "$API" != "skip" || "$DASH" != "skip" || "$MQTT" != "skip" || "$HOUSE" != "skip" || "$POST" != "skip" ]]; then
+          if [[ "$API" != "skip" || "$DASH" != "skip" ]]; then
             echo "✅ **retag-and-push job will RUN** - at least one image found" >> $GITHUB_STEP_SUMMARY
           else
             echo "⏭️ **retag-and-push job will be SKIPPED** - all image tags are 'skip'" >> $GITHUB_STEP_SUMMARY
@@ -344,7 +329,7 @@ jobs:
     name: Retag & push release images
     runs-on: [iotistic-lab-sc]
     needs: validate-release
-    if: always() && (needs.validate-release.outputs.api_src_tag != 'skip' || needs.validate-release.outputs.dashboard_src_tag != 'skip' || needs.validate-release.outputs.mqtt_src_tag != 'skip' || needs.validate-release.outputs.housekeeper_src_tag != 'skip' || needs.validate-release.outputs.postoffice_src_tag != 'skip')
+    if: always() && (needs.validate-release.outputs.api_src_tag != 'skip' || needs.validate-release.outputs.dashboard_src_tag != 'skip')
     steps:
       - name: Log execution decision
         run: |
@@ -354,9 +339,6 @@ jobs:
           echo "Images found:"
           echo "  API: ${{ needs.validate-release.outputs.api_src_tag }}"
           echo "  Dashboard: ${{ needs.validate-release.outputs.dashboard_src_tag }}"
-          echo "  MQTT Monitor: ${{ needs.validate-release.outputs.mqtt_src_tag }}"
-          echo "  Housekeeper: ${{ needs.validate-release.outputs.housekeeper_src_tag }}"
-          echo "  Postoffice: ${{ needs.validate-release.outputs.postoffice_src_tag }}"
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -387,9 +369,6 @@ jobs:
 
           retag_and_push "api" "${{ needs.validate-release.outputs.api_src_tag }}"
           retag_and_push "dashboard" "${{ needs.validate-release.outputs.dashboard_src_tag }}"
-          retag_and_push "mqtt-monitor" "${{ needs.validate-release.outputs.mqtt_src_tag }}"
-          retag_and_push "housekeeper" "${{ needs.validate-release.outputs.housekeeper_src_tag }}"
-          retag_and_push "postoffice" "${{ needs.validate-release.outputs.postoffice_src_tag }}"
 
   create-release:
     name: Create GitHub Release (changelog)
