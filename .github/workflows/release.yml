@@ -184,6 +184,15 @@ jobs:
           RELEASE="${{ steps.set_version.outputs.release_version }}"
           VERSION="${RELEASE#v}"
 
+          # For RC releases, strip the RC suffix to find CI images
+          # CI builds push images as X.Y.Z, but RC tags are X.Y.Z-rc.N
+          if [[ "$RELEASE" == *"-rc."* ]]; then
+            BASE_VERSION="${VERSION%%-rc.*}"
+            echo "RC release detected: ${RELEASE}"
+            echo "Looking for CI images with base version: ${BASE_VERSION}"
+            VERSION="$BASE_VERSION"
+          fi
+
           # Test for rate limiting first
           echo "Testing Docker Hub connectivity..."
           TEST_OUTPUT=$(docker manifest inspect iotistic/api:latest 2>&1 || true)
