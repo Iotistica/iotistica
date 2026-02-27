@@ -246,17 +246,6 @@ jobs:
               echo "  ✅ Found: ${DOCKER_ORG}/${svc}:${prefer_tag}" >&2
               echo "$prefer_tag"
               return 0
-            else
-              CHECK_OUTPUT=$(docker manifest inspect "${DOCKER_ORG}/${svc}:${prefer_tag}" 2>&1 || true)
-              if echo "$CHECK_OUTPUT" | grep -qi "no such manifest\|manifest unknown\|not found"; then
-                echo "  ❌ Image not found: ${DOCKER_ORG}/${svc}:${prefer_tag}" >&2
-              elif echo "$CHECK_OUTPUT" | grep -qi "rate limit\|429"; then
-                echo "  ⚠️ Rate limited when checking ${DOCKER_ORG}/${svc}:${prefer_tag}" >&2
-              elif echo "$CHECK_OUTPUT" | grep -qi "unauthorized\|401\|403"; then
-                echo "  ⚠️ Authentication failed for ${DOCKER_ORG}/${svc}:${prefer_tag}" >&2
-              else
-                echo "  ⚠️ Error: $CHECK_OUTPUT" >&2
-              fi
             fi
             
             # If prefer_tag doesn't start with v, also try with v prefix
@@ -266,22 +255,20 @@ jobs:
                 echo "  ✅ Found: ${DOCKER_ORG}/${svc}:v${prefer_tag}" >&2
                 echo "v${prefer_tag}"
                 return 0
-              else
-                CHECK_OUTPUT=$(docker manifest inspect "${DOCKER_ORG}/${svc}:v${prefer_tag}" 2>&1 || true)
-                if echo "$CHECK_OUTPUT" | grep -qi "no such manifest\|manifest unknown\|not found"; then
-                  echo "  ❌ Image not found: ${DOCKER_ORG}/${svc}:v${prefer_tag}" >&2
-                elif echo "$CHECK_OUTPUT" | grep -qi "rate limit\|429"; then
-                  echo "  ⚠️ Rate limited when checking ${DOCKER_ORG}/${svc}:v${prefer_tag}" >&2
-                elif echo "$CHECK_OUTPUT" | grep -qi "unauthorized\|401\|403"; then
-                  echo "  ⚠️ Authentication failed for ${DOCKER_ORG}/${svc}:v${prefer_tag}" >&2
-                else
-                  echo "  ⚠️ Error: $CHECK_OUTPUT" >&2
-                fi
               fi
             fi
             
-            # No versioned image found
-            echo "  ⏭️ Result: skip" >&2
+            # Fallback: Use latest image (for cases where CI didn't run for this service)
+            echo "  ⚠️ Version not found, attempting fallback to latest..." >&2
+            if docker manifest inspect "${DOCKER_ORG}/${svc}:latest" >/dev/null 2>&1; then
+              echo "  ✅ Found latest: ${DOCKER_ORG}/${svc}:latest" >&2
+              echo "  ℹ️ Will retag latest to ${prefer_tag} (CI did not run for ${svc})" >&2
+              echo "latest"
+              return 0
+            fi
+            
+            # No image found at all
+            echo "  ❌ Result: skip (no images found)" >&2
             echo "skip"
           }
           
@@ -372,9 +359,17 @@ jobs:
           retag_and_push() {
             local svc="$1"
             local src_tag="$2"
+            
+            # If no specific version found, fall back to latest
             if [ -z "$src_tag" ] || [ "$src_tag" = "skip" ]; then
-              echo "Skipping $svc (no source image)"
-              return 0
+              echo "No specific version found for $svc, attempting fallback to latest..."
+              if docker pull "${DOCKER_ORG}/${svc}:latest" 2>/dev/null; then
+                src_tag="latest"
+                echo "✅ Using latest tag for $svc"
+              else
+                echo "❌ Cannot find latest tag for $svc either, skipping"
+                return 0
+              fi
             fi
 
             echo "Processing $svc: ${DOCKER_ORG}/${svc}:${src_tag} -> ${DOCKER_ORG}/${svc}:${RELEASE}"
