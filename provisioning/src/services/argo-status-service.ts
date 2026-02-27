@@ -152,6 +152,8 @@ export class ArgoStatusService {
       retryDelayMs: this.config.retryDelayMs,
     });
 
+    let lastKnownStatus: { syncStatus: string; healthStatus: string; operationPhase?: string } | null = null;
+
     for (let attempt = 1; attempt <= this.config.maxRetries; attempt++) {
       try {
         const app = await this.getApplicationStatus(clientId);
@@ -171,6 +173,9 @@ export class ArgoStatusService {
         const syncStatus = app.status.sync.status;
         const healthStatus = app.status.health.status;
         const operationPhase = app.status.operationState?.phase;
+
+        // Track last known status for graceful timeout handling
+        lastKnownStatus = { syncStatus, healthStatus, operationPhase };
 
         logger.info('Application status', {
           clientId,
@@ -321,8 +326,29 @@ export class ArgoStatusService {
       }
     }
 
+    // Max retries reached - check if it's a graceful timeout (still progressing) or actual failure
+    if (lastKnownStatus && 
+        (lastKnownStatus.healthStatus === 'Progressing' || lastKnownStatus.operationPhase === 'Running')) {
+      
+      logger.warn('Argo CD monitoring timed out, but application is still progressing', {
+        clientId,
+        lastKnownStatus,
+        maxRetries: this.config.maxRetries,
+        totalWaitTime: `${(this.config.maxRetries * this.config.retryDelayMs) / 1000}s`,
+        note: 'Argo CD will continue syncing in the background. Check Argo CD UI for progress.',
+      });
+
+      // Keep customer status as 'deploying' - Argo CD continues in background
+      // No need to update status since it's already in deploying state
+
+      // Return true to not fail the deployment - Argo CD continues in background
+      return true;
+    }
+
+    // If we got here with no status or a bad status, it's a real failure
     logger.error('Application readiness check timed out', {
       clientId,
+      lastKnownStatus,
       maxRetries: this.config.maxRetries,
       totalWaitTime: `${(this.config.maxRetries * this.config.retryDelayMs) / 1000}s`,
     });

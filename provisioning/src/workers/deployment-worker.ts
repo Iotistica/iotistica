@@ -601,6 +601,37 @@ export class DeploymentWorker {
 
       await job.progress(90);
 
+      // Check if deployment is actually ready or still progressing
+      const customer = await CustomerModel.getById(customerId);
+      const finalStatus = customer?.deployment_status;
+      
+      if (finalStatus === 'deploying') {
+        // Argo CD monitoring timed out but deployment is still progressing
+        console.log('\n' + '='.repeat(80));
+        console.log('⏳ ARGO CD MONITORING COMPLETED (Deployment Still Progressing)');
+        console.log('='.repeat(80));
+        console.log(`👤 Customer: ${customerId}`);
+        console.log(`🏷️  Client: ${clientId}`);
+        console.log(`🌐 URL: ${instanceUrl}`);
+        console.log(`⏳ Status: Argo CD is still syncing in the background`);
+        console.log(`📋 Note: Check Argo CD UI at https://argocd.iotistica.com for real-time progress`);
+        console.log(`⏱️  Monitoring stopped at: ${new Date().toISOString()}`);
+        console.log('='.repeat(80) + '\n');
+
+        logger.info('Argo CD monitoring completed (deployment still progressing)', { customerId, clientId });
+
+        await job.progress(100);
+
+        return {
+          success: true,
+          customerId,
+          clientId,
+          instanceUrl,
+          completedAt: new Date().toISOString(),
+          note: 'Deployment is still progressing in Argo CD',
+        };
+      }
+
       // Update customer deployment status to 'ready'
       console.log('\n🔄 Updating customer status to: ready');
       console.log(`🌐 Instance URL: ${instanceUrl}`);

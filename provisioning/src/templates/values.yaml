@@ -51,7 +51,7 @@ mosquitto:
 mqttBroker:
   protocol: mqtt
   #  host: "mqtt2.iotistica.com"
-  host: "{{CLIENT_ID}}-release-iotistic-mosquitto.{{CLIENT_ID}}.svc.cluster.local"
+  host: "{{CLIENT_ID}}-iotistic-mosquitto.{{CLIENT_ID}}.svc.cluster.local"
   port: 1883
   useTls: false
   verifyCertificate: false

@@ -133,13 +133,12 @@ COMMENT ON MATERIALIZED VIEW endpoint_devices IS 'List of actual endpoint device
 -- ============================================================================
 -- Recent anomaly events (last 24 hours)
 -- Uses existing anomaly_events table from migration 110
+-- Note: Uses device_id column (renamed to agent_uuid in migration 134)
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS recent_anomalies AS
 SELECT 
     ae.timestamp_ms,
-    ae.agent_uuid as agent_id,
-    ae.device_name,
-    ae.device_type,
+    ae.device_id as agent_id,
     ae.metric,
     ae.observed_value,
     ae.anomaly_score,
@@ -158,7 +157,7 @@ SELECT
     d.uuid as agent_uuid_full,
     d.is_online as agent_is_online
 FROM anomaly_events ae
-LEFT JOIN devices d ON ae.agent_uuid = d.uuid::text
+LEFT JOIN devices d ON ae.device_id = d.uuid::text
 WHERE ae.timestamp_ms > EXTRACT(EPOCH FROM (NOW() - INTERVAL '24 hours'))::BIGINT * 1000
 ORDER BY ae.timestamp_ms DESC;
 

@@ -90,6 +90,54 @@ COMMENT ON COLUMN anomaly_alerts.affected_devices IS 'JSONB array of monitored d
 COMMENT ON COLUMN anomaly_alerts.device_name IS 'Primary device name for this alert';
 
 -- ========================================
+-- 4. UPDATE RECENT_ANOMALIES VIEW
+-- ========================================
+-- Recreate the view from migration 129 with updated column names
+
+DROP MATERIALIZED VIEW IF EXISTS recent_anomalies;
+
+CREATE MATERIALIZED VIEW recent_anomalies AS
+SELECT 
+    ae.timestamp_ms,
+    ae.agent_uuid as agent_id,
+    ae.device_name,
+    ae.device_type,
+    ae.metric,
+    ae.observed_value,
+    ae.anomaly_score,
+    ae.confidence,
+    ae.severity,
+    ae.severity_reason,
+    ae.fingerprint,
+    ae.triggered_by,
+    ae.baseline,
+    ae.expected_range,
+    ae.deviation,
+    ae.consecutive_count,
+    ae.event_count,
+    -- Join with devices table for agent info
+    d.device_name as agent_name,
+    d.uuid as agent_uuid_full,
+    d.is_online as agent_is_online
+FROM anomaly_events ae
+LEFT JOIN devices d ON ae.agent_uuid = d.uuid::text
+WHERE ae.timestamp_ms > EXTRACT(EPOCH FROM (NOW() - INTERVAL '24 hours'))::BIGINT * 1000
+ORDER BY ae.timestamp_ms DESC;
+
+-- Recreate indexes
+CREATE INDEX IF NOT EXISTS idx_recent_anomalies_agent ON recent_anomalies (agent_id, timestamp_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_recent_anomalies_severity ON recent_anomalies (severity, timestamp_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_recent_anomalies_metric ON recent_anomalies (metric);
+CREATE INDEX IF NOT EXISTS idx_recent_anomalies_fingerprint ON recent_anomalies (fingerprint);
+CREATE INDEX IF NOT EXISTS idx_recent_anomalies_device_name ON recent_anomalies (device_name);
+CREATE INDEX IF NOT EXISTS idx_recent_anomalies_device_type ON recent_anomalies (device_type);
+
+COMMENT ON MATERIALIZED VIEW recent_anomalies IS 'Recent anomaly events (last 24 hours) with device tracking. Updated in migration 134 after schema changes.';
+
+-- Refresh the view with existing data
+REFRESH MATERIALIZED VIEW recent_anomalies;
+
+-- ========================================
 -- MIGRATION NOTES
 -- ========================================
 --
