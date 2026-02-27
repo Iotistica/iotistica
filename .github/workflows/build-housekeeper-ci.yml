@@ -91,7 +91,7 @@ jobs:
             git fetch origin master
             
             # Rebase our commit on top of latest origin/master
-            git rebase origin/master
+            git -c rebase.autoStash=true rebase origin/master
             
             # Try to push
             if git push origin HEAD:master; then
