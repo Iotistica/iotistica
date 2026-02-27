@@ -52,8 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_version: ${{ steps.set_version.outputs.release_version }}
-      api_src_tag: ${{ steps.verify.outputs.api_src_tag }}
-      dashboard_src_tag: ${{ steps.verify.outputs.dashboard_src_tag }}
+      short_sha: ${{ steps.verify.outputs.short_sha }}
     steps:
       - name: Checkout repository (full)
         uses: actions/checkout@v4
@@ -175,114 +174,24 @@ jobs:
           
           echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
-
-      - name: Verify CI-built images exist (and determine source tags)
+      - name: Verify git tag exists and extract SHA
         id: verify
         shell: bash
         run: |
-          set -euo pipefail
-          
-          # Fetch all tags from remote
-          git fetch origin 'refs/tags/*:refs/tags/*' --force
-          
-          # Debug: Show available tags
-          echo "=== DEBUG: Available tags ==="
-          git tag --list 'v*' --sort=-version:refname | head -10
-          echo ""
-          
           RELEASE="${{ steps.set_version.outputs.release_version }}"
-          VERSION="${RELEASE#v}"
-
-          # For RC releases, strip the RC suffix to find CI images
-          # CI builds push images as X.Y.Z, but RC tags are X.Y.Z-rc.N
-          if [[ "$RELEASE" == *"-rc."* ]]; then
-            BASE_VERSION="${VERSION%%-rc.*}"
-            echo "RC release detected: ${RELEASE}"
-            echo "Looking for CI images with base version: ${BASE_VERSION}"
-            VERSION="$BASE_VERSION"
-          fi
-
-          # Test for rate limiting first
-          echo "Testing Docker Hub connectivity..."
-          TEST_OUTPUT=$(docker manifest inspect iotistic/api:latest 2>&1 || true)
-          if [[ $? -ne 0 ]]; then
-            echo "⚠️ WARNING: Cannot access Docker Hub"
-            echo "Error output: $TEST_OUTPUT"
-            if echo "$TEST_OUTPUT" | grep -qi "rate limit\|429"; then
-              echo "❌ RATE LIMITED by Docker Hub"
-            elif echo "$TEST_OUTPUT" | grep -qi "unauthorized\|401\|403"; then
-              echo "❌ AUTHENTICATION FAILED - check DOCKERHUB_USERNAME and DOCKERHUB_PASSWORD secrets"
-            else
-              echo "❌ UNKNOWN ERROR accessing Docker Hub"
-            fi
-            echo ""
-            echo "⚠️ All image checks will return 'skip'"
-            echo "⚠️ Release will be created without Docker images"
-          else
-            echo "✅ Docker Hub connectivity OK"
-          fi
-          echo ""
-
-          # Helper: check image existence (returns tag to use or "skip")
-          check_image() {
-            local svc="$1"
-            local prefer_tag="$2"
-            
-            # If no preferred tag provided, return skip
-            if [ -z "$prefer_tag" ]; then
-              echo "skip"
-              return 1
-            fi
-            
-            echo "Checking ${DOCKER_ORG}/${svc}:${prefer_tag}..." >&2
-            
-            # Try the package.json tag first (exact match)
-            if docker manifest inspect "${DOCKER_ORG}/${svc}:${prefer_tag}" >/dev/null 2>&1; then
-              echo "  ✅ Found: ${DOCKER_ORG}/${svc}:${prefer_tag}" >&2
-              echo "$prefer_tag"
-              return 0
-            fi
-            
-            # If prefer_tag doesn't start with v, also try with v prefix
-            if [[ "$prefer_tag" != v* ]]; then
-              echo "Checking ${DOCKER_ORG}/${svc}:v${prefer_tag}..." >&2
-              if docker manifest inspect "${DOCKER_ORG}/${svc}:v${prefer_tag}" >/dev/null 2>&1; then
-                echo "  ✅ Found: ${DOCKER_ORG}/${svc}:v${prefer_tag}" >&2
-                echo "v${prefer_tag}"
-                return 0
-              fi
-            fi
-            
-            # Fallback: Use latest image (for cases where CI didn't run for this service)
-            echo "  ⚠️ Version not found, attempting fallback to latest..." >&2
-            if docker manifest inspect "${DOCKER_ORG}/${svc}:latest" >/dev/null 2>&1; then
-              echo "  ✅ Found latest: ${DOCKER_ORG}/${svc}:latest" >&2
-              echo "  ℹ️ Will retag latest to ${prefer_tag} (CI did not run for ${svc})" >&2
-              echo "latest"
-              return 0
-            fi
-            
-            # No image found at all
-            echo "  ❌ Result: skip (no images found)" >&2
-            echo "skip"
-          }
           
-          # Check each service (Dashboard & API only)
-          API_SRC=$(check_image "api" "$VERSION" || true)
-          DASHBOARD_SRC=$(check_image "dashboard" "$VERSION" || true)
-
-          echo "api_src_tag=$API_SRC" >> $GITHUB_OUTPUT
-          echo "dashboard_src_tag=$DASHBOARD_SRC" >> $GITHUB_OUTPUT
-
-          echo ""
-          echo "Image verification complete:"
-          echo "  API  -> $API_SRC"
-          echo "  Dashboard -> $DASHBOARD_SRC"
+          # Verify the release tag exists in git
+          if ! git rev-parse "$RELEASE" >/dev/null 2>&1; then
+            echo "❌ ERROR: Release tag $RELEASE not found in git"
+            exit 1
+          fi
+          
+          # Extract the short SHA that this tag points to
+          SHORT_SHA=$(git rev-list -n 1 "$RELEASE" | cut -c1-12)
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          
+          echo "✅ Release tag verified: $RELEASE"
+          echo "   Points to commit: $SHORT_SHA"
 
       - name: Summary for step output
         run: |
@@ -329,20 +238,15 @@ jobs:
             echo "- The release will still be created (git tag + GitHub Release)" >> $GITHUB_STEP_SUMMARY
           fi
 
-  retag-and-push:
-    name: Retag & push release images
+  promote-images:
+    name: Promote images to release version
     runs-on: ubuntu-latest
     needs: validate-release
-    if: always() && (needs.validate-release.outputs.api_src_tag != 'skip' || needs.validate-release.outputs.dashboard_src_tag != 'skip')
     steps:
-      - name: Log execution decision
-        run: |
-          echo "✅ retag-and-push job is RUNNING"
-          echo "At least one Docker image was found in Docker Hub"
-          echo ""
-          echo "Images found:"
-          echo "  API: ${{ needs.validate-release.outputs.api_src_tag }}"
-          echo "  Dashboard: ${{ needs.validate-release.outputs.dashboard_src_tag }}"
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -350,37 +254,56 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Retag & push images
+      - name: Extract commit SHA and promote images
         shell: bash
         run: |
           set -euo pipefail
           RELEASE="${{ needs.validate-release.outputs.release_version }}"
-
-          retag_and_push() {
+          
+          # Get the SHA of the commit that this release tag points to
+          SHA=$(git rev-list -n 1 "$RELEASE")
+          SHORT_SHA="${SHA:0:12}"
+          
+          echo "Release: $RELEASE"
+          echo "Commit SHA: $SHA"
+          echo "Short SHA: $SHORT_SHA"
+          echo ""
+          
+          promote_image() {
             local svc="$1"
-            local src_tag="$2"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Promoting $svc"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             
-            # If no specific version found, fall back to latest
-            if [ -z "$src_tag" ] || [ "$src_tag" = "skip" ]; then
-              echo "No specific version found for $svc, attempting fallback to latest..."
-              if docker pull "${DOCKER_ORG}/${svc}:latest" 2>/dev/null; then
-                src_tag="latest"
-                echo "✅ Using latest tag for $svc"
-              else
-                echo "❌ Cannot find latest tag for $svc either, skipping"
-                return 0
-              fi
+            # Pull the immutable SHA image
+            echo "Pulling ${DOCKER_ORG}/${svc}:${SHORT_SHA}..."
+            if ! docker pull "${DOCKER_ORG}/${svc}:${SHORT_SHA}"; then
+              echo "❌ ERROR: Failed to pull ${DOCKER_ORG}/${svc}:${SHORT_SHA}"
+              echo ""
+              echo "This means CI did not build this commit for $svc"
+              echo "The release process requires all services to be built."
+              exit 1
             fi
-
-            echo "Processing $svc: ${DOCKER_ORG}/${svc}:${src_tag} -> ${DOCKER_ORG}/${svc}:${RELEASE}"
-            docker pull "${DOCKER_ORG}/${svc}:${src_tag}"
-            docker tag "${DOCKER_ORG}/${svc}:${src_tag}" "${DOCKER_ORG}/${svc}:${RELEASE}"
+            
+            # Tag as release version
+            echo "Tagging as ${DOCKER_ORG}/${svc}:${RELEASE}..."
+            docker tag "${DOCKER_ORG}/${svc}:${SHORT_SHA}" "${DOCKER_ORG}/${svc}:${RELEASE}"
+            
+            # Push release tag
+            echo "Pushing ${DOCKER_ORG}/${svc}:${RELEASE}..."
             docker push "${DOCKER_ORG}/${svc}:${RELEASE}"
-            echo "Retagged & pushed ${DOCKER_ORG}/${svc}:${RELEASE}"
+            
+            echo "✅ Promoted ${DOCKER_ORG}/${svc}:${SHORT_SHA} → ${DOCKER_ORG}/${svc}:${RELEASE}"
+            echo ""
           }
-
-          retag_and_push "api" "${{ needs.validate-release.outputs.api_src_tag }}"
-          retag_and_push "dashboard" "${{ needs.validate-release.outputs.dashboard_src_tag }}"
+          
+          # Promote all services
+          promote_image "api"
+          promote_image "dashboard"
+          
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ Image promotion complete"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
   create-release:
     name: Create GitHub Release (changelog)
