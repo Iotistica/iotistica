@@ -472,7 +472,7 @@ export class MqttManager extends EventEmitter {
         }
 
         this.lastConnectionTimestamp = Date.now();
-        logger.info('✅ MQTT CLIENT CONNECTED TO BROKER', { 
+        logger.info('MQTT CLIENT CONNECTED TO BROKER', { 
           brokerUrl: this.config.brokerUrl,
           clientId: this.config.clientId, 
           username: this.config.username,
@@ -502,7 +502,7 @@ export class MqttManager extends EventEmitter {
         // Throttle error logging to reduce spam
         const now = Date.now();
         if (now - this.lastErrorLog > this.errorLogThrottle) {
-          logger.error('❌ MQTT CONNECTION ERROR', { 
+          logger.error('MQTT CONNECTION ERROR', { 
             error: error.message || (error as any).code,
             reconnectAttempts: this.reconnectAttempts,
             initialConnection: !initialConnectionSucceeded,
@@ -517,14 +517,13 @@ export class MqttManager extends EventEmitter {
           this.lastErrorLog = now;
         }
         
-        // Only reject and cleanup if initial connection failed
-        if (!initialConnectionSucceeded && !this.reconnecting) {
-          this.client?.end(true); // Force close to prevent further events
-          reject(error);
-        } else if (initialConnectionSucceeded && !this.reconnecting) {
-          // Connection was established but now errored (ECONNRESET, ECONNREFUSED, etc.)
-          // Schedule reconnection since offline/close events may not fire with reconnectPeriod=0
-          logger.warn('MQTT connection error after successful connect, scheduling reconnect');
+        // Always schedule reconnect on error (including initial connection failures)
+        // This makes the API resilient to cold-start scenarios where MQTT broker starts late
+        if (!this.reconnecting) {
+          logger.warn('MQTT connection error, scheduling reconnect', {
+            initialConnection: !initialConnectionSucceeded,
+            reconnectAttempts: this.reconnectAttempts
+          });
           this.scheduleReconnect();
         }
       });
@@ -736,7 +735,7 @@ export class MqttManager extends EventEmitter {
 
     // Wait for all subscriptions and log summary
     await Promise.all(subscriptionPromises);
-    logger.info('✅ SUCCESSFULLY SUBSCRIBED TO ALL MQTT TOPICS', { 
+    logger.info('SUCCESSFULLY SUBSCRIBED TO ALL MQTT TOPICS', { 
       count: topicPatterns.length,
       topics: topicPatterns,
       clientId: this.config.clientId,
@@ -1219,7 +1218,7 @@ export class MqttManager extends EventEmitter {
         return;
       }
       
-      logger.info('✅ Anomaly event validated, emitting to handler', {
+      logger.info('Anomaly event validated, emitting to handler', {
         deviceId: deviceUuid.substring(0, 8),
         metric: event.metric,
         timestampMs: event.timestampMs,

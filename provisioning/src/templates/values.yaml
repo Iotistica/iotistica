@@ -66,7 +66,7 @@ api:
   port: 3002
   serviceType: ClusterIP
   tlsCommonName: api-{{CLIENT_ID}}.iotistica.com
-  cloudApiUrl: "http://{{CLIENT_ID}}-release-iotistic-api.{{CLIENT_ID}}.svc.cluster.local:3002"
+  cloudApiUrl: "http://{{CLIENT_ID}}-iotistic-api.{{CLIENT_ID}}.svc.cluster.local:3002"
   # CORS configuration for cross-origin requests from dashboard
   # Use wildcard pattern like "http://*:30000" to allow any IP on NodePort 30000
   corsOrigins: "https://{{CLIENT_ID}}.iotistica.com"
