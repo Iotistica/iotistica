@@ -45,6 +45,7 @@ env:
   K8S_NAMESPACE: iotistic-nodeport
   CHART_PATH: ./k8s/charts/iotistic
   VALUES_FILE: ./k8s/charts/iotistic/values.yaml
+  APPS: api dashboard
 
 jobs:
   validate-release:
@@ -216,10 +217,11 @@ jobs:
           echo "5. ⏳ deploy-to-k8s: Update ArgoCD values" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Services to Promote" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/api\` (last commit changing api/** or API CI workflow)" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/dashboard\` (last commit changing dashboard/** or Dashboard CI workflow)" >> $GITHUB_STEP_SUMMARY
+          for APP in ${{ env.APPS }}; do
+            echo "- \`iotistic/${APP}\` (last built commit from ${APP}/** or CI workflow)" >> $GITHUB_STEP_SUMMARY
+          done
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Note:** Each service uses its last built commit (matches CI trigger paths)" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Searches last 10 commits per app for built Docker images" >> $GITHUB_STEP_SUMMARY
 
   create-tag:
     name: Create git tag (for workflow_dispatch)
@@ -269,110 +271,73 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Extract commit SHA and promote images
+      - name: Promote images per app
         shell: bash
         run: |
           set -euo pipefail
           RELEASE="${{ needs.validate-release.outputs.release_version }}"
           
-          # Fetch all tags from remote (race condition fix)
-          # Tag might have been created by create-tag job seconds ago
-          git fetch origin 'refs/tags/*:refs/tags/*' --force
-          
-          # Get the commit that this release tag points to
-          RELEASE_COMMIT=$(git rev-list -n 1 "$RELEASE")
-          
-          echo "Release: $RELEASE"
-          echo "Release tag points to commit: $RELEASE_COMMIT"
+          echo "Release version: $RELEASE"
           echo ""
-          
-          promote_image() {
-            local svc="$1"
-            local path_filter="$2"
-            
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "Promoting $svc"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            
-            # Find all commits that changed this service, starting from release commit
-            echo "Finding commits with $svc changes (path filter: $path_filter)..."
-            local commits=$(git log --format=%H "$RELEASE_COMMIT" -- $path_filter | head -10)
-            
-            if [ -z "$commits" ]; then
-              echo "❌ ERROR: No commits found with changes to $path_filter"
-              exit 1
-            fi
-            
+
+          promote_app() {
+            local APP="$1"
+            local PATH_FILTER="${APP}/** .github/workflows/build-${APP}-ci.yml"
             local SHA=""
-            # Try each commit until we find one with a built image
-            for commit_sha in $commits; do
-              echo "   Checking commit: $commit_sha"
-              if docker pull "${DOCKER_ORG}/${svc}:${commit_sha}" 2>&1 | grep -q "Digest:"; then
-                SHA="$commit_sha"
-                echo "   ✅ Found built image at commit: $SHA"
+
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Promoting $APP"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+            # Get last 10 commits affecting this app
+            for COMMIT in $(git log --format=%H -n 10 -- $PATH_FILTER); do
+              echo -n "   Trying $COMMIT... "
+              if docker pull "${DOCKER_ORG}/${APP}:${COMMIT}" >/dev/null 2>&1; then
+                SHA="$COMMIT"
+                echo "✅ Found"
                 break
               else
-                echo "   ⏭️  No image found, trying previous commit..."
+                echo "⏭️  Skip"
               fi
             done
-            
+
             if [ -z "$SHA" ]; then
-              echo "❌ ERROR: No built images found in last 10 commits for $svc"
-              echo "   Tried commits:"
-              echo "$commits" | while read c; do echo "     - $c"; done
               echo ""
-              echo "   You need to trigger CI build for this service."
+              echo "❌ No built images found for $APP in last 10 commits"
+              echo "   Run: gh workflow run build-${APP}-ci.yml"
               exit 1
             fi
-            
+
+            # Tag as release
+            docker tag "${DOCKER_ORG}/${APP}:${SHA}" "${DOCKER_ORG}/${APP}:${RELEASE}"
+            docker push "${DOCKER_ORG}/${APP}:${RELEASE}"
+            echo "✅ ${DOCKER_ORG}/${APP}:${SHA} → ${RELEASE}"
             echo ""
-            
-            # Tag as release version
-            echo "Tagging as ${DOCKER_ORG}/${svc}:${RELEASE}..."
-            docker tag "${DOCKER_ORG}/${svc}:${SHA}" "${DOCKER_ORG}/${svc}:${RELEASE}"
-            
-            # Push release tag
-            echo "Pushing ${DOCKER_ORG}/${svc}:${RELEASE}..."
-            docker push "${DOCKER_ORG}/${svc}:${RELEASE}"
-            
-            echo "✅ Promoted ${DOCKER_ORG}/${svc}:${SHA} → ${DOCKER_ORG}/${svc}:${RELEASE}"
-            echo ""
-            
-            # Store SHA for latest tagging
-            echo "$SHA" > "/tmp/${svc}_sha.txt"
+
+            # Save SHA for latest tagging
+            echo "$SHA" > "/tmp/${APP}_sha.txt"
           }
-          
-          # Promote all services with their respective path filters
-          # These match the CI workflow triggers (code + workflow changes)
-          promote_image "api" "api/** .github/workflows/build-api-ci.yml"
-          promote_image "dashboard" "dashboard/** .github/workflows/build-dashboard-ci.yml"
-          
-          # Read SHAs from temp files
-          API_SHA=$(cat /tmp/api_sha.txt)
-          DASHBOARD_SHA=$(cat /tmp/dashboard_sha.txt)
-          
-          # For final releases, also tag as 'latest'
+
+          # Promote all apps
+          for APP in ${{ env.APPS }}; do
+            promote_app "$APP"
+          done
+
+          # Tag as 'latest' for final releases
           if [[ "$RELEASE" != *"-rc."* ]]; then
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "Release is FINAL - also tagging as 'latest'"
+            echo "Tagging as 'latest'"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo ""
-            
-            echo "Tagging ${DOCKER_ORG}/api as latest (from $API_SHA)..."
-            docker tag "${DOCKER_ORG}/api:${API_SHA}" "${DOCKER_ORG}/api:latest"
-            docker push "${DOCKER_ORG}/api:latest"
-            echo "✅ Pushed ${DOCKER_ORG}/api:latest"
-            echo ""
-            
-            echo "Tagging ${DOCKER_ORG}/dashboard as latest (from $DASHBOARD_SHA)..."
-            docker tag "${DOCKER_ORG}/dashboard:${DASHBOARD_SHA}" "${DOCKER_ORG}/dashboard:latest"
-            docker push "${DOCKER_ORG}/dashboard:latest"
-            echo "✅ Pushed ${DOCKER_ORG}/dashboard:latest"
-            echo ""
+            for APP in ${{ env.APPS }}; do
+              SHA=$(cat /tmp/${APP}_sha.txt)
+              docker tag "${DOCKER_ORG}/${APP}:${SHA}" "${DOCKER_ORG}/${APP}:latest"
+              docker push "${DOCKER_ORG}/${APP}:latest"
+              echo "✅ ${DOCKER_ORG}/${APP}:latest"
+            done
           fi
-          
+
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "✅ Image promotion complete"
+          echo "✅ All images promoted"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
   create-release:
