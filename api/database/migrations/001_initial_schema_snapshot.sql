@@ -66,8 +66,6 @@ CREATE FUNCTION public.anomaly_events_integer_now() RETURNS bigint
 $$;
 
 
-ALTER FUNCTION public.anomaly_events_integer_now() OWNER TO postgres;
-
 --
 -- Name: archive_device_api_key(); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -99,8 +97,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.archive_device_api_key() OWNER TO postgres;
 
 --
 -- Name: FUNCTION archive_device_api_key(); Type: COMMENT; Schema: public; Owner: postgres
@@ -149,8 +145,6 @@ END;
 $_$;
 
 
-ALTER FUNCTION public.calculate_fleet_cost(p_agent_count integer, p_devices_per_agent integer, p_billing_mode character varying) OWNER TO postgres;
-
 --
 -- Name: FUNCTION calculate_fleet_cost(p_agent_count integer, p_devices_per_agent integer, p_billing_mode character varying); Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -178,8 +172,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.cleanup_old_housekeeper_runs(retention_days integer) OWNER TO postgres;
-
 --
 -- Name: cleanup_old_traffic_stats(integer); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -199,8 +191,6 @@ CREATE FUNCTION public.cleanup_old_traffic_stats(retention_days integer DEFAULT 
     END;
     $$;
 
-
-ALTER FUNCTION public.cleanup_old_traffic_stats(retention_days integer) OWNER TO postgres;
 
 --
 -- Name: FUNCTION cleanup_old_traffic_stats(retention_days integer); Type: COMMENT; Schema: public; Owner: postgres
@@ -284,8 +274,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.close_fleet_billing_period(p_fleet_id character varying, p_period_end timestamp without time zone) OWNER TO postgres;
-
 --
 -- Name: FUNCTION close_fleet_billing_period(p_fleet_id character varying, p_period_end timestamp without time zone); Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -343,8 +331,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.compare_deployment_versions(p_device_uuid uuid, p_from_version integer, p_to_version integer) OWNER TO postgres;
-
 --
 -- Name: count_devices_by_tags(jsonb); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -355,8 +341,6 @@ CREATE FUNCTION public.count_devices_by_tags(p_tag_selectors jsonb) RETURNS inte
     SELECT COUNT(*)::INTEGER FROM find_devices_by_tags(p_tag_selectors);
 $$;
 
-
-ALTER FUNCTION public.count_devices_by_tags(p_tag_selectors jsonb) OWNER TO postgres;
 
 --
 -- Name: FUNCTION count_devices_by_tags(p_tag_selectors jsonb); Type: COMMENT; Schema: public; Owner: postgres
@@ -408,8 +392,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.create_deployment_history_snapshot() OWNER TO postgres;
-
 --
 -- Name: create_device_logs_partition(date); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -450,8 +432,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.create_device_logs_partition(partition_date date) OWNER TO postgres;
-
 --
 -- Name: create_device_logs_partitions_range(integer, integer); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -470,8 +450,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.create_device_logs_partitions_range(start_months_ago integer, end_months_ahead integer) OWNER TO postgres;
 
 --
 -- Name: create_device_metrics_partition(date); Type: FUNCTION; Schema: public; Owner: postgres
@@ -512,8 +490,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.create_device_metrics_partition(partition_date date) OWNER TO postgres;
-
 --
 -- Name: create_device_metrics_partitions_range(integer, integer); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -532,8 +508,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.create_device_metrics_partitions_range(start_days_ago integer, end_days_ahead integer) OWNER TO postgres;
 
 --
 -- Name: create_events_partition(date); Type: FUNCTION; Schema: public; Owner: postgres
@@ -568,8 +542,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.create_events_partition(partition_date date) OWNER TO postgres;
 
 --
 -- Name: create_state_snapshot(uuid, character varying, jsonb, character varying, text); Type: FUNCTION; Schema: public; Owner: postgres
@@ -623,8 +595,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.create_state_snapshot(p_device_uuid uuid, p_state_type character varying, p_state jsonb, p_source character varying, p_notes text) OWNER TO postgres;
-
 --
 -- Name: drop_old_device_logs_partitions(integer); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -668,8 +638,6 @@ BEGIN
 END;
 $_$;
 
-
-ALTER FUNCTION public.drop_old_device_logs_partitions(retention_days integer) OWNER TO postgres;
 
 --
 -- Name: drop_old_device_metrics_partitions(integer); Type: FUNCTION; Schema: public; Owner: postgres
@@ -715,8 +683,6 @@ END;
 $_$;
 
 
-ALTER FUNCTION public.drop_old_device_metrics_partitions(retention_days integer) OWNER TO postgres;
-
 --
 -- Name: drop_old_event_partitions(); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -759,8 +725,6 @@ END;
 $_$;
 
 
-ALTER FUNCTION public.drop_old_event_partitions() OWNER TO postgres;
-
 --
 -- Name: FUNCTION drop_old_event_partitions(); Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -782,8 +746,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.ensure_device_logs_partitions() OWNER TO postgres;
-
 --
 -- Name: ensure_one_default_broker(); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -802,8 +764,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.ensure_one_default_broker() OWNER TO postgres;
 
 --
 -- Name: find_devices_by_tags(jsonb); Type: FUNCTION; Schema: public; Owner: postgres
@@ -840,8 +800,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.find_devices_by_tags(p_tag_selectors jsonb) OWNER TO postgres;
-
 --
 -- Name: FUNCTION find_devices_by_tags(p_tag_selectors jsonb); Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -868,8 +826,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.get_aggregate_events(p_aggregate_type character varying, p_aggregate_id character varying, p_since bigint) OWNER TO postgres;
 
 --
 -- Name: get_customer_fleets(uuid); Type: FUNCTION; Schema: public; Owner: postgres
@@ -903,8 +859,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.get_customer_fleets(p_customer_id uuid) OWNER TO postgres;
-
 --
 -- Name: get_deployment_history(uuid, integer); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -929,8 +883,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.get_deployment_history(p_device_uuid uuid, p_limit integer) OWNER TO postgres;
 
 --
 -- Name: get_deployment_stats(uuid, integer); Type: FUNCTION; Schema: public; Owner: postgres
@@ -968,8 +920,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.get_deployment_stats(p_device_uuid uuid, p_days_back integer) OWNER TO postgres;
-
 --
 -- Name: get_deployment_version(uuid, integer); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -990,8 +940,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.get_deployment_version(p_device_uuid uuid, p_version integer) OWNER TO postgres;
 
 --
 -- Name: get_device_latest_update(uuid); Type: FUNCTION; Schema: public; Owner: postgres
@@ -1016,8 +964,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.get_device_latest_update(p_device_uuid uuid) OWNER TO postgres;
 
 --
 -- Name: get_device_logs_partition_stats(); Type: FUNCTION; Schema: public; Owner: postgres
@@ -1048,8 +994,6 @@ END;
 $_$;
 
 
-ALTER FUNCTION public.get_device_logs_partition_stats() OWNER TO postgres;
-
 --
 -- Name: get_device_metrics_partition_stats(); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -1079,8 +1023,6 @@ END;
 $_$;
 
 
-ALTER FUNCTION public.get_device_metrics_partition_stats() OWNER TO postgres;
-
 --
 -- Name: get_device_tags_json(uuid); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -1096,8 +1038,6 @@ CREATE FUNCTION public.get_device_tags_json(p_device_uuid uuid) RETURNS jsonb
     WHERE device_uuid = p_device_uuid;
 $$;
 
-
-ALTER FUNCTION public.get_device_tags_json(p_device_uuid uuid) OWNER TO postgres;
 
 --
 -- Name: FUNCTION get_device_tags_json(p_device_uuid uuid); Type: COMMENT; Schema: public; Owner: postgres
@@ -1126,8 +1066,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.get_event_chain(p_correlation_id uuid) OWNER TO postgres;
-
 --
 -- Name: get_event_retention_days(character varying); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -1146,8 +1084,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.get_event_retention_days(p_event_type character varying) OWNER TO postgres;
 
 --
 -- Name: FUNCTION get_event_retention_days(p_event_type character varying); Type: COMMENT; Schema: public; Owner: postgres
@@ -1178,8 +1114,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.get_event_stats(p_days_back integer) OWNER TO postgres;
 
 --
 -- Name: get_fleet_stats(character varying); Type: FUNCTION; Schema: public; Owner: postgres
@@ -1228,8 +1162,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.get_fleet_stats(p_fleet_identifier character varying) OWNER TO postgres;
-
 --
 -- Name: get_housekeeper_stats(); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -1261,8 +1193,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.get_housekeeper_stats() OWNER TO postgres;
-
 --
 -- Name: FUNCTION get_housekeeper_stats(); Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1293,8 +1223,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.get_pending_updates(p_timeout_minutes integer) OWNER TO postgres;
-
 --
 -- Name: get_reconciliation_summary(uuid, integer); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -1318,8 +1246,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.get_reconciliation_summary(p_device_uuid uuid, p_days_back integer) OWNER TO postgres;
 
 --
 -- Name: get_state_diff(uuid, character varying, integer, integer); Type: FUNCTION; Schema: public; Owner: postgres
@@ -1360,8 +1286,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.get_state_diff(p_device_uuid uuid, p_state_type character varying, p_from_version integer, p_to_version integer) OWNER TO postgres;
-
 --
 -- Name: get_topic_id(character varying); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -1378,8 +1302,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.get_topic_id(topic_name character varying) OWNER TO postgres;
-
 --
 -- Name: get_topic_name(uuid); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -1395,8 +1317,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.get_topic_name(tid uuid) OWNER TO postgres;
 
 --
 -- Name: log_state_change(uuid, character varying, character varying, character varying, character varying, text, jsonb, jsonb, character varying, uuid, jsonb); Type: FUNCTION; Schema: public; Owner: postgres
@@ -1433,8 +1353,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.log_state_change(p_device_uuid uuid, p_state_type character varying, p_change_type character varying, p_entity_type character varying, p_entity_id character varying, p_field_path text, p_old_value jsonb, p_new_value jsonb, p_triggered_by character varying, p_correlation_id uuid, p_metadata jsonb) OWNER TO postgres;
 
 --
 -- Name: publish_event(character varying, character varying, character varying, jsonb, character varying, uuid, uuid, jsonb, character varying, character varying, character varying, character varying); Type: FUNCTION; Schema: public; Owner: postgres
@@ -1480,8 +1398,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.publish_event(p_event_type character varying, p_aggregate_type character varying, p_aggregate_id character varying, p_data jsonb, p_source character varying, p_correlation_id uuid, p_causation_id uuid, p_metadata jsonb, p_actor_type character varying, p_actor_id character varying, p_severity character varying, p_impact character varying) OWNER TO postgres;
 
 --
 -- Name: FUNCTION publish_event(p_event_type character varying, p_aggregate_type character varying, p_aggregate_id character varying, p_data jsonb, p_source character varying, p_correlation_id uuid, p_causation_id uuid, p_metadata jsonb, p_actor_type character varying, p_actor_id character varying, p_severity character varying, p_impact character varying); Type: COMMENT; Schema: public; Owner: postgres
@@ -1537,8 +1453,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.rebuild_device_state(p_device_uuid uuid) OWNER TO postgres;
-
 --
 -- Name: record_fleet_usage_event(character varying, character varying, character varying, jsonb); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -1581,8 +1495,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.record_fleet_usage_event(p_fleet_id character varying, p_event_type character varying, p_triggered_by character varying, p_details jsonb) OWNER TO postgres;
-
 --
 -- Name: FUNCTION record_fleet_usage_event(p_fleet_id character varying, p_event_type character varying, p_triggered_by character varying, p_details jsonb); Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1604,8 +1516,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.refresh_all_catalog_views() OWNER TO postgres;
 
 --
 -- Name: FUNCTION refresh_all_catalog_views(); Type: COMMENT; Schema: public; Owner: postgres
@@ -1630,8 +1540,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.refresh_all_dashboard_views() OWNER TO postgres;
-
 --
 -- Name: FUNCTION refresh_all_dashboard_views(); Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1651,8 +1559,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.refresh_endpoint_devices() OWNER TO postgres;
 
 --
 -- Name: FUNCTION refresh_endpoint_devices(); Type: COMMENT; Schema: public; Owner: postgres
@@ -1674,8 +1580,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.refresh_latest_readings() OWNER TO postgres;
-
 --
 -- Name: FUNCTION refresh_latest_readings(); Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1695,8 +1599,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.refresh_metric_catalog() OWNER TO postgres;
 
 --
 -- Name: FUNCTION refresh_metric_catalog(); Type: COMMENT; Schema: public; Owner: postgres
@@ -1718,8 +1620,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.refresh_recent_anomalies() OWNER TO postgres;
-
 --
 -- Name: update_dashboard_layouts_updated_at(); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -1733,8 +1633,6 @@ CREATE FUNCTION public.update_dashboard_layouts_updated_at() RETURNS trigger
         END;
         $$;
 
-
-ALTER FUNCTION public.update_dashboard_layouts_updated_at() OWNER TO postgres;
 
 --
 -- Name: update_device_sensor_timestamp(); Type: FUNCTION; Schema: public; Owner: postgres
@@ -1750,8 +1648,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.update_device_sensor_timestamp() OWNER TO postgres;
-
 --
 -- Name: update_device_tags_timestamp(); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -1765,8 +1661,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.update_device_tags_timestamp() OWNER TO postgres;
 
 --
 -- Name: update_fleet_billing_history_timestamp(); Type: FUNCTION; Schema: public; Owner: postgres
@@ -1782,8 +1676,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.update_fleet_billing_history_timestamp() OWNER TO postgres;
-
 --
 -- Name: update_fleet_timestamp(); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -1797,8 +1689,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.update_fleet_timestamp() OWNER TO postgres;
 
 --
 -- Name: update_job_updated_at(); Type: FUNCTION; Schema: public; Owner: postgres
@@ -1814,8 +1704,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.update_job_updated_at() OWNER TO postgres;
-
 --
 -- Name: update_modified_at_column(); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -1829,8 +1717,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.update_modified_at_column() OWNER TO postgres;
 
 --
 -- Name: update_mqtt_topics_updated_at(); Type: FUNCTION; Schema: public; Owner: postgres
@@ -1846,8 +1732,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.update_mqtt_topics_updated_at() OWNER TO postgres;
-
 --
 -- Name: update_nodered_updated_at(); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -1862,8 +1746,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.update_nodered_updated_at() OWNER TO postgres;
-
 --
 -- Name: update_profile_configs_updated_at(); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -1877,8 +1759,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.update_profile_configs_updated_at() OWNER TO postgres;
 
 --
 -- Name: update_sensor_deployment_timestamp(); Type: FUNCTION; Schema: public; Owner: postgres
@@ -1897,8 +1777,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.update_sensor_deployment_timestamp() OWNER TO postgres;
-
 --
 -- Name: update_tag_definitions_timestamp(); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -1912,8 +1790,6 @@ BEGIN
 END;
 $$;
 
-
-ALTER FUNCTION public.update_tag_definitions_timestamp() OWNER TO postgres;
 
 --
 -- Name: update_traffic_stats_updated_at(); Type: FUNCTION; Schema: public; Owner: postgres
@@ -1929,8 +1805,6 @@ CREATE FUNCTION public.update_traffic_stats_updated_at() RETURNS trigger
         $$;
 
 
-ALTER FUNCTION public.update_traffic_stats_updated_at() OWNER TO postgres;
-
 --
 -- Name: update_updated_at_column(); Type: FUNCTION; Schema: public; Owner: postgres
 --
@@ -1945,8 +1819,6 @@ END;
 $$;
 
 
-ALTER FUNCTION public.update_updated_at_column() OWNER TO postgres;
-
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -1959,7 +1831,6 @@ CREATE TABLE _timescaledb_internal._compressed_hypertable_16 (
 );
 
 
-ALTER TABLE _timescaledb_internal._compressed_hypertable_16 OWNER TO postgres;
 
 --
 -- Name: _compressed_hypertable_2; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -1969,7 +1840,6 @@ CREATE TABLE _timescaledb_internal._compressed_hypertable_2 (
 );
 
 
-ALTER TABLE _timescaledb_internal._compressed_hypertable_2 OWNER TO postgres;
 
 --
 -- Name: _compressed_hypertable_24; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -1979,7 +1849,6 @@ CREATE TABLE _timescaledb_internal._compressed_hypertable_24 (
 );
 
 
-ALTER TABLE _timescaledb_internal._compressed_hypertable_24 OWNER TO postgres;
 
 --
 -- Name: _compressed_hypertable_26; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -1989,7 +1858,6 @@ CREATE TABLE _timescaledb_internal._compressed_hypertable_26 (
 );
 
 
-ALTER TABLE _timescaledb_internal._compressed_hypertable_26 OWNER TO postgres;
 
 --
 -- Name: _compressed_hypertable_6; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -1999,7 +1867,6 @@ CREATE TABLE _timescaledb_internal._compressed_hypertable_6 (
 );
 
 
-ALTER TABLE _timescaledb_internal._compressed_hypertable_6 OWNER TO postgres;
 
 --
 -- Name: device_metrics; Type: TABLE; Schema: public; Owner: postgres
@@ -2019,7 +1886,6 @@ CREATE TABLE public.device_metrics (
 );
 
 
-ALTER TABLE public.device_metrics OWNER TO postgres;
 
 --
 -- Name: _direct_view_10; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -2044,7 +1910,6 @@ CREATE VIEW _timescaledb_internal._direct_view_10 AS
   GROUP BY (public.time_bucket('00:05:00'::interval, recorded_at)), device_uuid;
 
 
-ALTER VIEW _timescaledb_internal._direct_view_10 OWNER TO postgres;
 
 --
 -- Name: _direct_view_11; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -2069,7 +1934,6 @@ CREATE VIEW _timescaledb_internal._direct_view_11 AS
   GROUP BY (public.time_bucket('01:00:00'::interval, recorded_at)), device_uuid;
 
 
-ALTER VIEW _timescaledb_internal._direct_view_11 OWNER TO postgres;
 
 --
 -- Name: _direct_view_12; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -2094,7 +1958,6 @@ CREATE VIEW _timescaledb_internal._direct_view_12 AS
   GROUP BY (public.time_bucket('1 day'::interval, recorded_at)), device_uuid;
 
 
-ALTER VIEW _timescaledb_internal._direct_view_12 OWNER TO postgres;
 
 --
 -- Name: readings; Type: TABLE; Schema: public; Owner: postgres
@@ -2116,7 +1979,6 @@ CREATE TABLE public.readings (
 );
 
 
-ALTER TABLE public.readings OWNER TO postgres;
 
 --
 -- Name: TABLE readings; Type: COMMENT; Schema: public; Owner: postgres
@@ -2200,7 +2062,6 @@ CREATE VIEW _timescaledb_internal._direct_view_13 AS
   GROUP BY (public.time_bucket('01:00:00'::interval, "time")), device_uuid, (extra ->> 'deviceName'::text), metric_name, protocol;
 
 
-ALTER VIEW _timescaledb_internal._direct_view_13 OWNER TO postgres;
 
 --
 -- Name: _direct_view_14; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -2230,7 +2091,6 @@ CREATE VIEW _timescaledb_internal._direct_view_14 AS
   GROUP BY (public.time_bucket('1 day'::interval, "time")), device_uuid, (extra ->> 'deviceName'::text), metric_name, protocol;
 
 
-ALTER VIEW _timescaledb_internal._direct_view_14 OWNER TO postgres;
 
 --
 -- Name: _direct_view_17; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -2258,7 +2118,6 @@ CREATE VIEW _timescaledb_internal._direct_view_17 AS
   GROUP BY (public.time_bucket('00:01:00'::interval, "time")), device_uuid, (extra ->> 'deviceName'::text), protocol, metric_name, unit;
 
 
-ALTER VIEW _timescaledb_internal._direct_view_17 OWNER TO postgres;
 
 --
 -- Name: _direct_view_18; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -2285,7 +2144,6 @@ CREATE VIEW _timescaledb_internal._direct_view_18 AS
   GROUP BY (public.time_bucket('01:00:00'::interval, "time")), device_uuid, (extra ->> 'deviceName'::text), protocol, metric_name, unit;
 
 
-ALTER VIEW _timescaledb_internal._direct_view_18 OWNER TO postgres;
 
 --
 -- Name: _direct_view_21; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -2314,7 +2172,6 @@ CREATE VIEW _timescaledb_internal._direct_view_21 AS
   GROUP BY (public.time_bucket('01:00:00'::interval, "time")), device_uuid, (extra ->> 'deviceName'::text), metric_name, protocol;
 
 
-ALTER VIEW _timescaledb_internal._direct_view_21 OWNER TO postgres;
 
 --
 -- Name: _direct_view_22; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -2343,7 +2200,6 @@ CREATE VIEW _timescaledb_internal._direct_view_22 AS
   GROUP BY (public.time_bucket('1 day'::interval, "time")), device_uuid, (extra ->> 'deviceName'::text), metric_name, protocol;
 
 
-ALTER VIEW _timescaledb_internal._direct_view_22 OWNER TO postgres;
 
 --
 -- Name: device_logs; Type: TABLE; Schema: public; Owner: postgres
@@ -2362,7 +2218,6 @@ CREATE TABLE public.device_logs (
 );
 
 
-ALTER TABLE public.device_logs OWNER TO postgres;
 
 --
 -- Name: TABLE device_logs; Type: COMMENT; Schema: public; Owner: postgres
@@ -2394,7 +2249,6 @@ CREATE VIEW _timescaledb_internal._direct_view_3 AS
   GROUP BY device_uuid, service_name, (public.time_bucket('00:05:00'::interval, "timestamp"));
 
 
-ALTER VIEW _timescaledb_internal._direct_view_3 OWNER TO postgres;
 
 --
 -- Name: _direct_view_4; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -2415,7 +2269,6 @@ CREATE VIEW _timescaledb_internal._direct_view_4 AS
   GROUP BY device_uuid, service_name, (public.time_bucket('01:00:00'::interval, "timestamp"));
 
 
-ALTER VIEW _timescaledb_internal._direct_view_4 OWNER TO postgres;
 
 --
 -- Name: _materialized_hypertable_10; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2439,7 +2292,6 @@ CREATE TABLE _timescaledb_internal._materialized_hypertable_10 (
 );
 
 
-ALTER TABLE _timescaledb_internal._materialized_hypertable_10 OWNER TO postgres;
 
 --
 -- Name: _hyper_10_2_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2451,7 +2303,6 @@ CREATE TABLE _timescaledb_internal._hyper_10_2_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_10);
 
 
-ALTER TABLE _timescaledb_internal._hyper_10_2_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_10_89_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2463,7 +2314,6 @@ CREATE TABLE _timescaledb_internal._hyper_10_89_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_10);
 
 
-ALTER TABLE _timescaledb_internal._hyper_10_89_chunk OWNER TO postgres;
 
 --
 -- Name: _materialized_hypertable_11; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2487,7 +2337,6 @@ CREATE TABLE _timescaledb_internal._materialized_hypertable_11 (
 );
 
 
-ALTER TABLE _timescaledb_internal._materialized_hypertable_11 OWNER TO postgres;
 
 --
 -- Name: _hyper_11_3_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2499,7 +2348,6 @@ CREATE TABLE _timescaledb_internal._hyper_11_3_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_11);
 
 
-ALTER TABLE _timescaledb_internal._hyper_11_3_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_11_90_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2511,7 +2359,6 @@ CREATE TABLE _timescaledb_internal._hyper_11_90_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_11);
 
 
-ALTER TABLE _timescaledb_internal._hyper_11_90_chunk OWNER TO postgres;
 
 --
 -- Name: _materialized_hypertable_12; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2535,7 +2382,6 @@ CREATE TABLE _timescaledb_internal._materialized_hypertable_12 (
 );
 
 
-ALTER TABLE _timescaledb_internal._materialized_hypertable_12 OWNER TO postgres;
 
 --
 -- Name: _hyper_12_47_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2547,7 +2393,6 @@ CREATE TABLE _timescaledb_internal._hyper_12_47_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_12);
 
 
-ALTER TABLE _timescaledb_internal._hyper_12_47_chunk OWNER TO postgres;
 
 --
 -- Name: _materialized_hypertable_13; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2573,7 +2418,6 @@ CREATE TABLE _timescaledb_internal._materialized_hypertable_13 (
 );
 
 
-ALTER TABLE _timescaledb_internal._materialized_hypertable_13 OWNER TO postgres;
 
 --
 -- Name: _hyper_13_74_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2585,7 +2429,6 @@ CREATE TABLE _timescaledb_internal._hyper_13_74_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_13);
 
 
-ALTER TABLE _timescaledb_internal._hyper_13_74_chunk OWNER TO postgres;
 
 --
 -- Name: _materialized_hypertable_14; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2613,7 +2456,6 @@ CREATE TABLE _timescaledb_internal._materialized_hypertable_14 (
 );
 
 
-ALTER TABLE _timescaledb_internal._materialized_hypertable_14 OWNER TO postgres;
 
 --
 -- Name: _hyper_14_79_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2625,7 +2467,6 @@ CREATE TABLE _timescaledb_internal._hyper_14_79_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_14);
 
 
-ALTER TABLE _timescaledb_internal._hyper_14_79_chunk OWNER TO postgres;
 
 --
 -- Name: anomaly_events; Type: TABLE; Schema: public; Owner: postgres
@@ -2661,7 +2502,6 @@ CREATE TABLE public.anomaly_events (
 );
 
 
-ALTER TABLE public.anomaly_events OWNER TO postgres;
 
 --
 -- Name: TABLE anomaly_events; Type: COMMENT; Schema: public; Owner: postgres
@@ -2736,7 +2576,6 @@ CREATE TABLE _timescaledb_internal._hyper_15_113_chunk (
 INHERITS (public.anomaly_events);
 
 
-ALTER TABLE _timescaledb_internal._hyper_15_113_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_15_114_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2748,7 +2587,6 @@ CREATE TABLE _timescaledb_internal._hyper_15_114_chunk (
 INHERITS (public.anomaly_events);
 
 
-ALTER TABLE _timescaledb_internal._hyper_15_114_chunk OWNER TO postgres;
 
 --
 -- Name: _materialized_hypertable_17; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2771,7 +2609,6 @@ CREATE TABLE _timescaledb_internal._materialized_hypertable_17 (
 );
 
 
-ALTER TABLE _timescaledb_internal._materialized_hypertable_17 OWNER TO postgres;
 
 --
 -- Name: _hyper_17_41_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2783,7 +2620,6 @@ CREATE TABLE _timescaledb_internal._hyper_17_41_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_17);
 
 
-ALTER TABLE _timescaledb_internal._hyper_17_41_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_17_50_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2795,7 +2631,6 @@ CREATE TABLE _timescaledb_internal._hyper_17_50_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_17);
 
 
-ALTER TABLE _timescaledb_internal._hyper_17_50_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_17_88_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2807,7 +2642,6 @@ CREATE TABLE _timescaledb_internal._hyper_17_88_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_17);
 
 
-ALTER TABLE _timescaledb_internal._hyper_17_88_chunk OWNER TO postgres;
 
 --
 -- Name: _materialized_hypertable_18; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2829,7 +2663,6 @@ CREATE TABLE _timescaledb_internal._materialized_hypertable_18 (
 );
 
 
-ALTER TABLE _timescaledb_internal._materialized_hypertable_18 OWNER TO postgres;
 
 --
 -- Name: _hyper_18_42_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2841,7 +2674,6 @@ CREATE TABLE _timescaledb_internal._hyper_18_42_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_18);
 
 
-ALTER TABLE _timescaledb_internal._hyper_18_42_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_18_51_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2853,7 +2685,6 @@ CREATE TABLE _timescaledb_internal._hyper_18_51_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_18);
 
 
-ALTER TABLE _timescaledb_internal._hyper_18_51_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_18_91_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2865,7 +2696,6 @@ CREATE TABLE _timescaledb_internal._hyper_18_91_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_18);
 
 
-ALTER TABLE _timescaledb_internal._hyper_18_91_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_1_115_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2877,7 +2707,6 @@ CREATE TABLE _timescaledb_internal._hyper_1_115_chunk (
 INHERITS (public.device_logs);
 
 
-ALTER TABLE _timescaledb_internal._hyper_1_115_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_1_62_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2889,7 +2718,6 @@ CREATE TABLE _timescaledb_internal._hyper_1_62_chunk (
 INHERITS (public.device_logs);
 
 
-ALTER TABLE _timescaledb_internal._hyper_1_62_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_1_72_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2901,7 +2729,6 @@ CREATE TABLE _timescaledb_internal._hyper_1_72_chunk (
 INHERITS (public.device_logs);
 
 
-ALTER TABLE _timescaledb_internal._hyper_1_72_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_1_75_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2913,7 +2740,6 @@ CREATE TABLE _timescaledb_internal._hyper_1_75_chunk (
 INHERITS (public.device_logs);
 
 
-ALTER TABLE _timescaledb_internal._hyper_1_75_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_1_77_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2925,7 +2751,6 @@ CREATE TABLE _timescaledb_internal._hyper_1_77_chunk (
 INHERITS (public.device_logs);
 
 
-ALTER TABLE _timescaledb_internal._hyper_1_77_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_1_80_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2937,7 +2762,6 @@ CREATE TABLE _timescaledb_internal._hyper_1_80_chunk (
 INHERITS (public.device_logs);
 
 
-ALTER TABLE _timescaledb_internal._hyper_1_80_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_1_82_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2949,7 +2773,6 @@ CREATE TABLE _timescaledb_internal._hyper_1_82_chunk (
 INHERITS (public.device_logs);
 
 
-ALTER TABLE _timescaledb_internal._hyper_1_82_chunk OWNER TO postgres;
 
 --
 -- Name: _materialized_hypertable_21; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2973,7 +2796,6 @@ CREATE TABLE _timescaledb_internal._materialized_hypertable_21 (
 );
 
 
-ALTER TABLE _timescaledb_internal._materialized_hypertable_21 OWNER TO postgres;
 
 --
 -- Name: _hyper_21_64_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -2985,7 +2807,6 @@ CREATE TABLE _timescaledb_internal._hyper_21_64_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_21);
 
 
-ALTER TABLE _timescaledb_internal._hyper_21_64_chunk OWNER TO postgres;
 
 --
 -- Name: _materialized_hypertable_22; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3009,7 +2830,6 @@ CREATE TABLE _timescaledb_internal._materialized_hypertable_22 (
 );
 
 
-ALTER TABLE _timescaledb_internal._materialized_hypertable_22 OWNER TO postgres;
 
 --
 -- Name: _hyper_22_71_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3021,7 +2841,6 @@ CREATE TABLE _timescaledb_internal._hyper_22_71_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_22);
 
 
-ALTER TABLE _timescaledb_internal._hyper_22_71_chunk OWNER TO postgres;
 
 --
 -- Name: mqtt_topic_metrics; Type: TABLE; Schema: public; Owner: postgres
@@ -3043,7 +2862,6 @@ CREATE TABLE public.mqtt_topic_metrics (
 );
 
 
-ALTER TABLE public.mqtt_topic_metrics OWNER TO postgres;
 
 --
 -- Name: TABLE mqtt_topic_metrics; Type: COMMENT; Schema: public; Owner: postgres
@@ -3083,7 +2901,6 @@ CREATE TABLE _timescaledb_internal._hyper_23_52_chunk (
 INHERITS (public.mqtt_topic_metrics);
 
 
-ALTER TABLE _timescaledb_internal._hyper_23_52_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_23_53_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3095,7 +2912,6 @@ CREATE TABLE _timescaledb_internal._hyper_23_53_chunk (
 INHERITS (public.mqtt_topic_metrics);
 
 
-ALTER TABLE _timescaledb_internal._hyper_23_53_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_23_59_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3107,7 +2923,6 @@ CREATE TABLE _timescaledb_internal._hyper_23_59_chunk (
 INHERITS (public.mqtt_topic_metrics);
 
 
-ALTER TABLE _timescaledb_internal._hyper_23_59_chunk OWNER TO postgres;
 
 --
 -- Name: mqtt_broker_stats; Type: TABLE; Schema: public; Owner: postgres
@@ -3135,7 +2950,6 @@ CREATE TABLE public.mqtt_broker_stats (
 );
 
 
-ALTER TABLE public.mqtt_broker_stats OWNER TO postgres;
 
 --
 -- Name: TABLE mqtt_broker_stats; Type: COMMENT; Schema: public; Owner: postgres
@@ -3210,7 +3024,6 @@ CREATE TABLE _timescaledb_internal._hyper_25_54_chunk (
 INHERITS (public.mqtt_broker_stats);
 
 
-ALTER TABLE _timescaledb_internal._hyper_25_54_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_25_55_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3222,7 +3035,6 @@ CREATE TABLE _timescaledb_internal._hyper_25_55_chunk (
 INHERITS (public.mqtt_broker_stats);
 
 
-ALTER TABLE _timescaledb_internal._hyper_25_55_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_25_58_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3234,7 +3046,6 @@ CREATE TABLE _timescaledb_internal._hyper_25_58_chunk (
 INHERITS (public.mqtt_broker_stats);
 
 
-ALTER TABLE _timescaledb_internal._hyper_25_58_chunk OWNER TO postgres;
 
 --
 -- Name: _materialized_hypertable_3; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3258,7 +3069,6 @@ CREATE TABLE _timescaledb_internal._materialized_hypertable_3 (
 );
 
 
-ALTER TABLE _timescaledb_internal._materialized_hypertable_3 OWNER TO postgres;
 
 --
 -- Name: _hyper_3_5_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3270,7 +3080,6 @@ CREATE TABLE _timescaledb_internal._hyper_3_5_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_3);
 
 
-ALTER TABLE _timescaledb_internal._hyper_3_5_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_3_63_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3282,7 +3091,6 @@ CREATE TABLE _timescaledb_internal._hyper_3_63_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_3);
 
 
-ALTER TABLE _timescaledb_internal._hyper_3_63_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_3_83_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3294,7 +3102,6 @@ CREATE TABLE _timescaledb_internal._hyper_3_83_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_3);
 
 
-ALTER TABLE _timescaledb_internal._hyper_3_83_chunk OWNER TO postgres;
 
 --
 -- Name: _materialized_hypertable_4; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3314,7 +3121,6 @@ CREATE TABLE _timescaledb_internal._materialized_hypertable_4 (
 );
 
 
-ALTER TABLE _timescaledb_internal._materialized_hypertable_4 OWNER TO postgres;
 
 --
 -- Name: _hyper_4_66_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3326,7 +3132,6 @@ CREATE TABLE _timescaledb_internal._hyper_4_66_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_4);
 
 
-ALTER TABLE _timescaledb_internal._hyper_4_66_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_4_6_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3338,7 +3143,6 @@ CREATE TABLE _timescaledb_internal._hyper_4_6_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_4);
 
 
-ALTER TABLE _timescaledb_internal._hyper_4_6_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_4_84_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3350,7 +3154,6 @@ CREATE TABLE _timescaledb_internal._hyper_4_84_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_4);
 
 
-ALTER TABLE _timescaledb_internal._hyper_4_84_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_5_116_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3362,7 +3165,6 @@ CREATE TABLE _timescaledb_internal._hyper_5_116_chunk (
 INHERITS (public.readings);
 
 
-ALTER TABLE _timescaledb_internal._hyper_5_116_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_5_40_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3374,7 +3176,6 @@ CREATE TABLE _timescaledb_internal._hyper_5_40_chunk (
 INHERITS (public.readings);
 
 
-ALTER TABLE _timescaledb_internal._hyper_5_40_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_5_43_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3386,7 +3187,6 @@ CREATE TABLE _timescaledb_internal._hyper_5_43_chunk (
 INHERITS (public.readings);
 
 
-ALTER TABLE _timescaledb_internal._hyper_5_43_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_5_49_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3398,7 +3198,6 @@ CREATE TABLE _timescaledb_internal._hyper_5_49_chunk (
 INHERITS (public.readings);
 
 
-ALTER TABLE _timescaledb_internal._hyper_5_49_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_5_60_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3410,7 +3209,6 @@ CREATE TABLE _timescaledb_internal._hyper_5_60_chunk (
 INHERITS (public.readings);
 
 
-ALTER TABLE _timescaledb_internal._hyper_5_60_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_5_73_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3422,7 +3220,6 @@ CREATE TABLE _timescaledb_internal._hyper_5_73_chunk (
 INHERITS (public.readings);
 
 
-ALTER TABLE _timescaledb_internal._hyper_5_73_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_5_76_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3434,7 +3231,6 @@ CREATE TABLE _timescaledb_internal._hyper_5_76_chunk (
 INHERITS (public.readings);
 
 
-ALTER TABLE _timescaledb_internal._hyper_5_76_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_5_78_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3446,7 +3242,6 @@ CREATE TABLE _timescaledb_internal._hyper_5_78_chunk (
 INHERITS (public.readings);
 
 
-ALTER TABLE _timescaledb_internal._hyper_5_78_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_5_81_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3458,7 +3253,6 @@ CREATE TABLE _timescaledb_internal._hyper_5_81_chunk (
 INHERITS (public.readings);
 
 
-ALTER TABLE _timescaledb_internal._hyper_5_81_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_5_87_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3470,7 +3264,6 @@ CREATE TABLE _timescaledb_internal._hyper_5_87_chunk (
 INHERITS (public.readings);
 
 
-ALTER TABLE _timescaledb_internal._hyper_5_87_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_9_1_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3482,7 +3275,6 @@ CREATE TABLE _timescaledb_internal._hyper_9_1_chunk (
 INHERITS (public.device_metrics);
 
 
-ALTER TABLE _timescaledb_internal._hyper_9_1_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_9_44_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3494,7 +3286,6 @@ CREATE TABLE _timescaledb_internal._hyper_9_44_chunk (
 INHERITS (public.device_metrics);
 
 
-ALTER TABLE _timescaledb_internal._hyper_9_44_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_9_61_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3506,7 +3297,6 @@ CREATE TABLE _timescaledb_internal._hyper_9_61_chunk (
 INHERITS (public.device_metrics);
 
 
-ALTER TABLE _timescaledb_internal._hyper_9_61_chunk OWNER TO postgres;
 
 --
 -- Name: _hyper_9_86_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3518,7 +3308,6 @@ CREATE TABLE _timescaledb_internal._hyper_9_86_chunk (
 INHERITS (public.device_metrics);
 
 
-ALTER TABLE _timescaledb_internal._hyper_9_86_chunk OWNER TO postgres;
 
 --
 -- Name: _partial_view_10; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -3543,7 +3332,6 @@ CREATE VIEW _timescaledb_internal._partial_view_10 AS
   GROUP BY (public.time_bucket('00:05:00'::interval, recorded_at)), device_uuid;
 
 
-ALTER VIEW _timescaledb_internal._partial_view_10 OWNER TO postgres;
 
 --
 -- Name: _partial_view_11; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -3568,7 +3356,6 @@ CREATE VIEW _timescaledb_internal._partial_view_11 AS
   GROUP BY (public.time_bucket('01:00:00'::interval, recorded_at)), device_uuid;
 
 
-ALTER VIEW _timescaledb_internal._partial_view_11 OWNER TO postgres;
 
 --
 -- Name: _partial_view_12; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -3593,7 +3380,6 @@ CREATE VIEW _timescaledb_internal._partial_view_12 AS
   GROUP BY (public.time_bucket('1 day'::interval, recorded_at)), device_uuid;
 
 
-ALTER VIEW _timescaledb_internal._partial_view_12 OWNER TO postgres;
 
 --
 -- Name: _partial_view_13; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -3621,7 +3407,6 @@ CREATE VIEW _timescaledb_internal._partial_view_13 AS
   GROUP BY (public.time_bucket('01:00:00'::interval, "time")), device_uuid, (extra ->> 'deviceName'::text), metric_name, protocol;
 
 
-ALTER VIEW _timescaledb_internal._partial_view_13 OWNER TO postgres;
 
 --
 -- Name: _partial_view_14; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -3651,7 +3436,6 @@ CREATE VIEW _timescaledb_internal._partial_view_14 AS
   GROUP BY (public.time_bucket('1 day'::interval, "time")), device_uuid, (extra ->> 'deviceName'::text), metric_name, protocol;
 
 
-ALTER VIEW _timescaledb_internal._partial_view_14 OWNER TO postgres;
 
 --
 -- Name: _partial_view_17; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -3679,7 +3463,6 @@ CREATE VIEW _timescaledb_internal._partial_view_17 AS
   GROUP BY (public.time_bucket('00:01:00'::interval, "time")), device_uuid, (extra ->> 'deviceName'::text), protocol, metric_name, unit;
 
 
-ALTER VIEW _timescaledb_internal._partial_view_17 OWNER TO postgres;
 
 --
 -- Name: _partial_view_18; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -3706,7 +3489,6 @@ CREATE VIEW _timescaledb_internal._partial_view_18 AS
   GROUP BY (public.time_bucket('01:00:00'::interval, "time")), device_uuid, (extra ->> 'deviceName'::text), protocol, metric_name, unit;
 
 
-ALTER VIEW _timescaledb_internal._partial_view_18 OWNER TO postgres;
 
 --
 -- Name: _partial_view_21; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -3735,7 +3517,6 @@ CREATE VIEW _timescaledb_internal._partial_view_21 AS
   GROUP BY (public.time_bucket('01:00:00'::interval, "time")), device_uuid, (extra ->> 'deviceName'::text), metric_name, protocol;
 
 
-ALTER VIEW _timescaledb_internal._partial_view_21 OWNER TO postgres;
 
 --
 -- Name: _partial_view_22; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -3764,7 +3545,6 @@ CREATE VIEW _timescaledb_internal._partial_view_22 AS
   GROUP BY (public.time_bucket('1 day'::interval, "time")), device_uuid, (extra ->> 'deviceName'::text), metric_name, protocol;
 
 
-ALTER VIEW _timescaledb_internal._partial_view_22 OWNER TO postgres;
 
 --
 -- Name: _partial_view_3; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -3789,7 +3569,6 @@ CREATE VIEW _timescaledb_internal._partial_view_3 AS
   GROUP BY device_uuid, service_name, (public.time_bucket('00:05:00'::interval, "timestamp"));
 
 
-ALTER VIEW _timescaledb_internal._partial_view_3 OWNER TO postgres;
 
 --
 -- Name: _partial_view_4; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
@@ -3810,7 +3589,6 @@ CREATE VIEW _timescaledb_internal._partial_view_4 AS
   GROUP BY device_uuid, service_name, (public.time_bucket('01:00:00'::interval, "timestamp"));
 
 
-ALTER VIEW _timescaledb_internal._partial_view_4 OWNER TO postgres;
 
 --
 -- Name: compress_hyper_24_57_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3855,7 +3633,6 @@ ALTER TABLE ONLY _timescaledb_internal.compress_hyper_24_57_chunk ALTER COLUMN _
 ALTER TABLE ONLY _timescaledb_internal.compress_hyper_24_57_chunk ALTER COLUMN topic_id SET STATISTICS 0;
 
 
-ALTER TABLE _timescaledb_internal.compress_hyper_24_57_chunk OWNER TO postgres;
 
 --
 -- Name: compress_hyper_24_69_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3900,7 +3677,6 @@ ALTER TABLE ONLY _timescaledb_internal.compress_hyper_24_69_chunk ALTER COLUMN _
 ALTER TABLE ONLY _timescaledb_internal.compress_hyper_24_69_chunk ALTER COLUMN topic_id SET STATISTICS 0;
 
 
-ALTER TABLE _timescaledb_internal.compress_hyper_24_69_chunk OWNER TO postgres;
 
 --
 -- Name: compress_hyper_26_56_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -3956,7 +3732,6 @@ ALTER TABLE ONLY _timescaledb_internal.compress_hyper_26_56_chunk ALTER COLUMN _
 ALTER TABLE ONLY _timescaledb_internal.compress_hyper_26_56_chunk ALTER COLUMN "timestamp" SET STATISTICS 0;
 
 
-ALTER TABLE _timescaledb_internal.compress_hyper_26_56_chunk OWNER TO postgres;
 
 --
 -- Name: compress_hyper_26_68_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -4012,7 +3787,6 @@ ALTER TABLE ONLY _timescaledb_internal.compress_hyper_26_68_chunk ALTER COLUMN _
 ALTER TABLE ONLY _timescaledb_internal.compress_hyper_26_68_chunk ALTER COLUMN "timestamp" SET STATISTICS 0;
 
 
-ALTER TABLE _timescaledb_internal.compress_hyper_26_68_chunk OWNER TO postgres;
 
 --
 -- Name: compress_hyper_6_117_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -4061,7 +3835,6 @@ ALTER TABLE ONLY _timescaledb_internal.compress_hyper_6_117_chunk ALTER COLUMN d
 ALTER TABLE ONLY _timescaledb_internal.compress_hyper_6_117_chunk ALTER COLUMN detection_methods SET STORAGE EXTENDED;
 
 
-ALTER TABLE _timescaledb_internal.compress_hyper_6_117_chunk OWNER TO postgres;
 
 --
 -- Name: compress_hyper_6_65_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -4110,7 +3883,6 @@ ALTER TABLE ONLY _timescaledb_internal.compress_hyper_6_65_chunk ALTER COLUMN de
 ALTER TABLE ONLY _timescaledb_internal.compress_hyper_6_65_chunk ALTER COLUMN detection_methods SET STORAGE EXTENDED;
 
 
-ALTER TABLE _timescaledb_internal.compress_hyper_6_65_chunk OWNER TO postgres;
 
 --
 -- Name: compress_hyper_6_70_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -4159,7 +3931,6 @@ ALTER TABLE ONLY _timescaledb_internal.compress_hyper_6_70_chunk ALTER COLUMN de
 ALTER TABLE ONLY _timescaledb_internal.compress_hyper_6_70_chunk ALTER COLUMN detection_methods SET STORAGE EXTENDED;
 
 
-ALTER TABLE _timescaledb_internal.compress_hyper_6_70_chunk OWNER TO postgres;
 
 --
 -- Name: compress_hyper_6_85_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
@@ -4208,7 +3979,6 @@ ALTER TABLE ONLY _timescaledb_internal.compress_hyper_6_85_chunk ALTER COLUMN de
 ALTER TABLE ONLY _timescaledb_internal.compress_hyper_6_85_chunk ALTER COLUMN detection_methods SET STORAGE EXTENDED;
 
 
-ALTER TABLE _timescaledb_internal.compress_hyper_6_85_chunk OWNER TO postgres;
 
 --
 -- Name: active_rollouts; Type: VIEW; Schema: public; Owner: postgres
@@ -4254,7 +4024,6 @@ SELECT
     NULL::bigint AS devices_pending;
 
 
-ALTER VIEW public.active_rollouts OWNER TO postgres;
 
 --
 -- Name: VIEW active_rollouts; Type: COMMENT; Schema: public; Owner: postgres
@@ -4291,7 +4060,6 @@ CREATE TABLE public.agent_updates (
 );
 
 
-ALTER TABLE public.agent_updates OWNER TO postgres;
 
 --
 -- Name: agent_update_stats; Type: VIEW; Schema: public; Owner: postgres
@@ -4308,7 +4076,6 @@ CREATE VIEW public.agent_update_stats AS
   ORDER BY (date_trunc('day'::text, created_at)) DESC, status;
 
 
-ALTER VIEW public.agent_update_stats OWNER TO postgres;
 
 --
 -- Name: agent_updates_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -4322,7 +4089,6 @@ CREATE SEQUENCE public.agent_updates_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.agent_updates_id_seq OWNER TO postgres;
 
 --
 -- Name: agent_updates_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -4351,7 +4117,6 @@ CREATE TABLE public.anomaly_alerts (
 );
 
 
-ALTER TABLE public.anomaly_alerts OWNER TO postgres;
 
 --
 -- Name: TABLE anomaly_alerts; Type: COMMENT; Schema: public; Owner: postgres
@@ -4393,7 +4158,6 @@ CREATE SEQUENCE public.anomaly_alerts_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.anomaly_alerts_id_seq OWNER TO postgres;
 
 --
 -- Name: anomaly_alerts_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -4414,7 +4178,6 @@ CREATE SEQUENCE public.anomaly_events_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.anomaly_events_id_seq OWNER TO postgres;
 
 --
 -- Name: anomaly_events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -4458,7 +4221,6 @@ CREATE TABLE public.anomaly_incidents (
 );
 
 
-ALTER TABLE public.anomaly_incidents OWNER TO postgres;
 
 --
 -- Name: TABLE anomaly_incidents; Type: COMMENT; Schema: public; Owner: postgres
@@ -4542,7 +4304,6 @@ CREATE SEQUENCE public.anomaly_incidents_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.anomaly_incidents_id_seq OWNER TO postgres;
 
 --
 -- Name: anomaly_incidents_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -4577,7 +4338,6 @@ CREATE VIEW public.anomaly_scores_daily AS
    FROM _timescaledb_internal._materialized_hypertable_14;
 
 
-ALTER VIEW public.anomaly_scores_daily OWNER TO postgres;
 
 --
 -- Name: anomaly_scores_hourly; Type: VIEW; Schema: public; Owner: postgres
@@ -4603,7 +4363,6 @@ CREATE VIEW public.anomaly_scores_hourly AS
    FROM _timescaledb_internal._materialized_hypertable_13;
 
 
-ALTER VIEW public.anomaly_scores_hourly OWNER TO postgres;
 
 --
 -- Name: api_keys; Type: TABLE; Schema: public; Owner: postgres
@@ -4621,7 +4380,6 @@ CREATE TABLE public.api_keys (
 );
 
 
-ALTER TABLE public.api_keys OWNER TO postgres;
 
 --
 -- Name: api_keys_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -4636,7 +4394,6 @@ CREATE SEQUENCE public.api_keys_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.api_keys_id_seq OWNER TO postgres;
 
 --
 -- Name: api_keys_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -4661,7 +4418,6 @@ CREATE TABLE public.app_service_ids (
 );
 
 
-ALTER TABLE public.app_service_ids OWNER TO postgres;
 
 --
 -- Name: TABLE app_service_ids; Type: COMMENT; Schema: public; Owner: postgres
@@ -4711,7 +4467,6 @@ CREATE SEQUENCE public.app_service_ids_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.app_service_ids_id_seq OWNER TO postgres;
 
 --
 -- Name: app_service_ids_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -4737,7 +4492,6 @@ CREATE TABLE public.applications (
 );
 
 
-ALTER TABLE public.applications OWNER TO postgres;
 
 --
 -- Name: TABLE applications; Type: COMMENT; Schema: public; Owner: postgres
@@ -4766,7 +4520,6 @@ CREATE SEQUENCE public.applications_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.applications_id_seq OWNER TO postgres;
 
 --
 -- Name: applications_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -4792,7 +4545,6 @@ CREATE TABLE public.audit_logs (
 );
 
 
-ALTER TABLE public.audit_logs OWNER TO postgres;
 
 --
 -- Name: TABLE audit_logs; Type: COMMENT; Schema: public; Owner: postgres
@@ -4827,7 +4579,6 @@ CREATE SEQUENCE public.audit_logs_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.audit_logs_id_seq OWNER TO postgres;
 
 --
 -- Name: audit_logs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -4853,7 +4604,6 @@ CREATE TABLE public.dashboard_layouts (
 );
 
 
-ALTER TABLE public.dashboard_layouts OWNER TO postgres;
 
 --
 -- Name: TABLE dashboard_layouts; Type: COMMENT; Schema: public; Owner: postgres
@@ -4903,7 +4653,6 @@ CREATE SEQUENCE public.dashboard_layouts_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.dashboard_layouts_id_seq OWNER TO postgres;
 
 --
 -- Name: dashboard_layouts_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -4944,7 +4693,6 @@ CREATE VIEW public.device_anomaly_summary AS
   GROUP BY device_uuid, (extra ->> 'deviceName'::text);
 
 
-ALTER VIEW public.device_anomaly_summary OWNER TO postgres;
 
 --
 -- Name: VIEW device_anomaly_summary; Type: COMMENT; Schema: public; Owner: postgres
@@ -4970,7 +4718,6 @@ CREATE TABLE public.device_api_key_history (
 );
 
 
-ALTER TABLE public.device_api_key_history OWNER TO postgres;
 
 --
 -- Name: TABLE device_api_key_history; Type: COMMENT; Schema: public; Owner: postgres
@@ -4999,7 +4746,6 @@ CREATE SEQUENCE public.device_api_key_history_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.device_api_key_history_id_seq OWNER TO postgres;
 
 --
 -- Name: device_api_key_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -5025,7 +4771,6 @@ CREATE TABLE public.device_api_keys (
 );
 
 
-ALTER TABLE public.device_api_keys OWNER TO postgres;
 
 --
 -- Name: TABLE device_api_keys; Type: COMMENT; Schema: public; Owner: postgres
@@ -5047,7 +4792,6 @@ CREATE SEQUENCE public.device_api_keys_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.device_api_keys_id_seq OWNER TO postgres;
 
 --
 -- Name: device_api_keys_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -5071,7 +4815,6 @@ CREATE TABLE public.device_current_state (
 );
 
 
-ALTER TABLE public.device_current_state OWNER TO postgres;
 
 --
 -- Name: COLUMN device_current_state.version; Type: COMMENT; Schema: public; Owner: postgres
@@ -5093,7 +4836,6 @@ CREATE SEQUENCE public.device_current_state_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.device_current_state_id_seq OWNER TO postgres;
 
 --
 -- Name: device_current_state_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -5116,7 +4858,6 @@ CREATE TABLE public.device_environment_variable (
 );
 
 
-ALTER TABLE public.device_environment_variable OWNER TO postgres;
 
 --
 -- Name: device_environment_variable_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -5131,7 +4872,6 @@ CREATE SEQUENCE public.device_environment_variable_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.device_environment_variable_id_seq OWNER TO postgres;
 
 --
 -- Name: device_environment_variable_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -5211,7 +4951,6 @@ CREATE TABLE public.devices (
 );
 
 
-ALTER TABLE public.devices OWNER TO postgres;
 
 --
 -- Name: COLUMN devices.api_key_expires_at; Type: COMMENT; Schema: public; Owner: postgres
@@ -5453,7 +5192,6 @@ CREATE TABLE public.fleets (
 );
 
 
-ALTER TABLE public.fleets OWNER TO postgres;
 
 --
 -- Name: TABLE fleets; Type: COMMENT; Schema: public; Owner: postgres
@@ -5563,7 +5301,6 @@ CREATE VIEW public.device_fleet_references AS
         END, d.device_name;
 
 
-ALTER VIEW public.device_fleet_references OWNER TO postgres;
 
 --
 -- Name: VIEW device_fleet_references; Type: COMMENT; Schema: public; Owner: postgres
@@ -5593,7 +5330,6 @@ CREATE TABLE public.device_flows (
 );
 
 
-ALTER TABLE public.device_flows OWNER TO postgres;
 
 --
 -- Name: TABLE device_flows; Type: COMMENT; Schema: public; Owner: postgres
@@ -5678,7 +5414,6 @@ CREATE SEQUENCE public.device_flows_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.device_flows_id_seq OWNER TO postgres;
 
 --
 -- Name: device_flows_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -5714,7 +5449,6 @@ CREATE TABLE public.device_job_status (
 );
 
 
-ALTER TABLE public.device_job_status OWNER TO postgres;
 
 --
 -- Name: device_job_status_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -5729,7 +5463,6 @@ CREATE SEQUENCE public.device_job_status_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.device_job_status_id_seq OWNER TO postgres;
 
 --
 -- Name: device_job_status_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -5760,7 +5493,6 @@ CREATE VIEW public.device_logs_5min AS
    FROM _timescaledb_internal._materialized_hypertable_3;
 
 
-ALTER VIEW public.device_logs_5min OWNER TO postgres;
 
 --
 -- Name: device_logs_hourly; Type: VIEW; Schema: public; Owner: postgres
@@ -5780,7 +5512,6 @@ CREATE VIEW public.device_logs_hourly AS
    FROM _timescaledb_internal._materialized_hypertable_4;
 
 
-ALTER VIEW public.device_logs_hourly OWNER TO postgres;
 
 --
 -- Name: device_logs_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -5794,7 +5525,6 @@ CREATE SEQUENCE public.device_logs_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.device_logs_id_seq OWNER TO postgres;
 
 --
 -- Name: device_logs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -5825,7 +5555,6 @@ CREATE VIEW public.device_metrics_5min AS
    FROM _timescaledb_internal._materialized_hypertable_10;
 
 
-ALTER VIEW public.device_metrics_5min OWNER TO postgres;
 
 --
 -- Name: device_metrics_daily; Type: VIEW; Schema: public; Owner: postgres
@@ -5849,7 +5578,6 @@ CREATE VIEW public.device_metrics_daily AS
    FROM _timescaledb_internal._materialized_hypertable_12;
 
 
-ALTER VIEW public.device_metrics_daily OWNER TO postgres;
 
 --
 -- Name: device_metrics_hourly; Type: VIEW; Schema: public; Owner: postgres
@@ -5873,7 +5601,6 @@ CREATE VIEW public.device_metrics_hourly AS
    FROM _timescaledb_internal._materialized_hypertable_11;
 
 
-ALTER VIEW public.device_metrics_hourly OWNER TO postgres;
 
 --
 -- Name: device_metrics_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -5887,7 +5614,6 @@ CREATE SEQUENCE public.device_metrics_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.device_metrics_id_seq OWNER TO postgres;
 
 --
 -- Name: device_metrics_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -5929,7 +5655,6 @@ CREATE TABLE public.device_rollout_status (
 );
 
 
-ALTER TABLE public.device_rollout_status OWNER TO postgres;
 
 --
 -- Name: TABLE device_rollout_status; Type: COMMENT; Schema: public; Owner: postgres
@@ -5951,7 +5676,6 @@ CREATE SEQUENCE public.device_rollout_status_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.device_rollout_status_id_seq OWNER TO postgres;
 
 --
 -- Name: device_rollout_status_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -5997,7 +5721,6 @@ CREATE TABLE public.device_sensors (
 );
 
 
-ALTER TABLE public.device_sensors OWNER TO postgres;
 
 --
 -- Name: TABLE device_sensors; Type: COMMENT; Schema: public; Owner: postgres
@@ -6131,7 +5854,6 @@ CREATE SEQUENCE public.device_sensors_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.device_sensors_id_seq OWNER TO postgres;
 
 --
 -- Name: device_sensors_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -6156,7 +5878,6 @@ CREATE TABLE public.device_services (
 );
 
 
-ALTER TABLE public.device_services OWNER TO postgres;
 
 --
 -- Name: device_services_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -6171,7 +5892,6 @@ CREATE SEQUENCE public.device_services_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.device_services_id_seq OWNER TO postgres;
 
 --
 -- Name: device_services_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -6195,7 +5915,6 @@ CREATE TABLE public.device_shadow_history (
 );
 
 
-ALTER TABLE public.device_shadow_history OWNER TO postgres;
 
 --
 -- Name: TABLE device_shadow_history; Type: COMMENT; Schema: public; Owner: postgres
@@ -6237,7 +5956,6 @@ CREATE SEQUENCE public.device_shadow_history_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.device_shadow_history_id_seq OWNER TO postgres;
 
 --
 -- Name: device_shadow_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -6261,7 +5979,6 @@ CREATE TABLE public.device_shadows (
 );
 
 
-ALTER TABLE public.device_shadows OWNER TO postgres;
 
 --
 -- Name: TABLE device_shadows; Type: COMMENT; Schema: public; Owner: postgres
@@ -6304,7 +6021,6 @@ CREATE SEQUENCE public.device_shadows_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.device_shadows_id_seq OWNER TO postgres;
 
 --
 -- Name: device_shadows_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -6330,7 +6046,6 @@ CREATE TABLE public.device_tags (
 );
 
 
-ALTER TABLE public.device_tags OWNER TO postgres;
 
 --
 -- Name: TABLE device_tags; Type: COMMENT; Schema: public; Owner: postgres
@@ -6380,7 +6095,6 @@ CREATE SEQUENCE public.device_tags_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.device_tags_id_seq OWNER TO postgres;
 
 --
 -- Name: device_tags_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -6407,7 +6121,6 @@ CREATE TABLE public.device_target_state (
 );
 
 
-ALTER TABLE public.device_target_state OWNER TO postgres;
 
 --
 -- Name: COLUMN device_target_state.needs_deployment; Type: COMMENT; Schema: public; Owner: postgres
@@ -6452,7 +6165,6 @@ CREATE TABLE public.device_target_state_history (
 );
 
 
-ALTER TABLE public.device_target_state_history OWNER TO postgres;
 
 --
 -- Name: TABLE device_target_state_history; Type: COMMENT; Schema: public; Owner: postgres
@@ -6502,7 +6214,6 @@ CREATE SEQUENCE public.device_target_state_history_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.device_target_state_history_id_seq OWNER TO postgres;
 
 --
 -- Name: device_target_state_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -6524,7 +6235,6 @@ CREATE SEQUENCE public.device_target_state_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.device_target_state_id_seq OWNER TO postgres;
 
 --
 -- Name: device_target_state_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -6554,7 +6264,6 @@ CREATE TABLE public.device_traffic_stats (
 );
 
 
-ALTER TABLE public.device_traffic_stats OWNER TO postgres;
 
 --
 -- Name: TABLE device_traffic_stats; Type: COMMENT; Schema: public; Owner: postgres
@@ -6646,7 +6355,6 @@ CREATE SEQUENCE public.device_traffic_stats_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.device_traffic_stats_id_seq OWNER TO postgres;
 
 --
 -- Name: device_traffic_stats_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -6668,7 +6376,6 @@ CREATE SEQUENCE public.devices_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.devices_id_seq OWNER TO postgres;
 
 --
 -- Name: devices_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -6694,7 +6401,6 @@ CREATE VIEW public.devices_needing_rotation AS
   ORDER BY api_key_expires_at;
 
 
-ALTER VIEW public.devices_needing_rotation OWNER TO postgres;
 
 --
 -- Name: VIEW devices_needing_rotation; Type: COMMENT; Schema: public; Owner: postgres
@@ -6716,7 +6422,6 @@ CREATE TABLE public.dictionary_entries (
 );
 
 
-ALTER TABLE public.dictionary_entries OWNER TO postgres;
 
 --
 -- Name: TABLE dictionary_entries; Type: COMMENT; Schema: public; Owner: postgres
@@ -6764,7 +6469,6 @@ CREATE TABLE public.dictionary_enum_devices (
 );
 
 
-ALTER TABLE public.dictionary_enum_devices OWNER TO postgres;
 
 --
 -- Name: TABLE dictionary_enum_devices; Type: COMMENT; Schema: public; Owner: postgres
@@ -6806,7 +6510,6 @@ CREATE SEQUENCE public.dictionary_enum_devices_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.dictionary_enum_devices_id_seq OWNER TO postgres;
 
 --
 -- Name: dictionary_enum_devices_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -6833,7 +6536,6 @@ CREATE TABLE public.dictionary_enum_metrics (
 );
 
 
-ALTER TABLE public.dictionary_enum_metrics OWNER TO postgres;
 
 --
 -- Name: TABLE dictionary_enum_metrics; Type: COMMENT; Schema: public; Owner: postgres
@@ -6875,7 +6577,6 @@ CREATE SEQUENCE public.dictionary_enum_metrics_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.dictionary_enum_metrics_id_seq OWNER TO postgres;
 
 --
 -- Name: dictionary_enum_metrics_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -6905,7 +6606,6 @@ CREATE TABLE public.dictionary_enum_observations (
 );
 
 
-ALTER TABLE public.dictionary_enum_observations OWNER TO postgres;
 
 --
 -- Name: TABLE dictionary_enum_observations; Type: COMMENT; Schema: public; Owner: postgres
@@ -6961,7 +6661,6 @@ CREATE SEQUENCE public.dictionary_enum_observations_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.dictionary_enum_observations_id_seq OWNER TO postgres;
 
 --
 -- Name: dictionary_enum_observations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -6987,7 +6686,6 @@ CREATE TABLE public.dictionary_enum_quality_codes (
 );
 
 
-ALTER TABLE public.dictionary_enum_quality_codes OWNER TO postgres;
 
 --
 -- Name: TABLE dictionary_enum_quality_codes; Type: COMMENT; Schema: public; Owner: postgres
@@ -7022,7 +6720,6 @@ CREATE SEQUENCE public.dictionary_enum_quality_codes_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.dictionary_enum_quality_codes_id_seq OWNER TO postgres;
 
 --
 -- Name: dictionary_enum_quality_codes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -7048,7 +6745,6 @@ CREATE TABLE public.dictionary_enum_units (
 );
 
 
-ALTER TABLE public.dictionary_enum_units OWNER TO postgres;
 
 --
 -- Name: TABLE dictionary_enum_units; Type: COMMENT; Schema: public; Owner: postgres
@@ -7121,7 +6817,6 @@ UNION ALL
   GROUP BY dictionary_enum_units.device_uuid;
 
 
-ALTER VIEW public.dictionary_enum_summary OWNER TO postgres;
 
 --
 -- Name: VIEW dictionary_enum_summary; Type: COMMENT; Schema: public; Owner: postgres
@@ -7142,7 +6837,6 @@ CREATE SEQUENCE public.dictionary_enum_units_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.dictionary_enum_units_id_seq OWNER TO postgres;
 
 --
 -- Name: dictionary_enum_units_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -7174,7 +6868,6 @@ CREATE TABLE public.dictionary_metadata (
 );
 
 
-ALTER TABLE public.dictionary_metadata OWNER TO postgres;
 
 --
 -- Name: TABLE dictionary_metadata; Type: COMMENT; Schema: public; Owner: postgres
@@ -7265,7 +6958,6 @@ CREATE TABLE public.email_logs (
 );
 
 
-ALTER TABLE public.email_logs OWNER TO postgres;
 
 --
 -- Name: TABLE email_logs; Type: COMMENT; Schema: public; Owner: postgres
@@ -7343,7 +7035,6 @@ CREATE SEQUENCE public.email_logs_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.email_logs_id_seq OWNER TO postgres;
 
 --
 -- Name: email_logs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -7379,7 +7070,6 @@ CREATE MATERIALIZED VIEW public.endpoint_devices AS
   WITH NO DATA;
 
 
-ALTER MATERIALIZED VIEW public.endpoint_devices OWNER TO postgres;
 
 --
 -- Name: MATERIALIZED VIEW endpoint_devices; Type: COMMENT; Schema: public; Owner: postgres
@@ -7399,7 +7089,6 @@ CREATE TABLE public.event_cursors (
 );
 
 
-ALTER TABLE public.event_cursors OWNER TO postgres;
 
 --
 -- Name: event_types; Type: TABLE; Schema: public; Owner: postgres
@@ -7417,7 +7106,6 @@ CREATE TABLE public.event_types (
 );
 
 
-ALTER TABLE public.event_types OWNER TO postgres;
 
 --
 -- Name: COLUMN event_types.retention_tier; Type: COMMENT; Schema: public; Owner: postgres
@@ -7459,7 +7147,6 @@ CREATE TABLE public.events (
 PARTITION BY RANGE ("timestamp");
 
 
-ALTER TABLE public.events OWNER TO postgres;
 
 --
 -- Name: COLUMN events.actor_type; Type: COMMENT; Schema: public; Owner: postgres
@@ -7505,7 +7192,6 @@ CREATE VIEW public.event_retention_summary AS
   ORDER BY et.retention_days DESC;
 
 
-ALTER VIEW public.event_retention_summary OWNER TO postgres;
 
 --
 -- Name: VIEW event_retention_summary; Type: COMMENT; Schema: public; Owner: postgres
@@ -7535,7 +7221,6 @@ CREATE VIEW public.event_type_statistics AS
   ORDER BY (count(e.event_id)) DESC;
 
 
-ALTER VIEW public.event_type_statistics OWNER TO postgres;
 
 --
 -- Name: VIEW event_type_statistics; Type: COMMENT; Schema: public; Owner: postgres
@@ -7556,7 +7241,6 @@ CREATE SEQUENCE public.events_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.events_id_seq OWNER TO postgres;
 
 --
 -- Name: events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -7590,7 +7274,6 @@ CREATE TABLE public.events_2026_01_11 (
 );
 
 
-ALTER TABLE public.events_2026_01_11 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_12; Type: TABLE; Schema: public; Owner: postgres
@@ -7617,7 +7300,6 @@ CREATE TABLE public.events_2026_01_12 (
 );
 
 
-ALTER TABLE public.events_2026_01_12 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_13; Type: TABLE; Schema: public; Owner: postgres
@@ -7644,7 +7326,6 @@ CREATE TABLE public.events_2026_01_13 (
 );
 
 
-ALTER TABLE public.events_2026_01_13 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_14; Type: TABLE; Schema: public; Owner: postgres
@@ -7671,7 +7352,6 @@ CREATE TABLE public.events_2026_01_14 (
 );
 
 
-ALTER TABLE public.events_2026_01_14 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_15; Type: TABLE; Schema: public; Owner: postgres
@@ -7698,7 +7378,6 @@ CREATE TABLE public.events_2026_01_15 (
 );
 
 
-ALTER TABLE public.events_2026_01_15 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_16; Type: TABLE; Schema: public; Owner: postgres
@@ -7725,7 +7404,6 @@ CREATE TABLE public.events_2026_01_16 (
 );
 
 
-ALTER TABLE public.events_2026_01_16 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_17; Type: TABLE; Schema: public; Owner: postgres
@@ -7752,7 +7430,6 @@ CREATE TABLE public.events_2026_01_17 (
 );
 
 
-ALTER TABLE public.events_2026_01_17 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_18; Type: TABLE; Schema: public; Owner: postgres
@@ -7779,7 +7456,6 @@ CREATE TABLE public.events_2026_01_18 (
 );
 
 
-ALTER TABLE public.events_2026_01_18 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_19; Type: TABLE; Schema: public; Owner: postgres
@@ -7806,7 +7482,6 @@ CREATE TABLE public.events_2026_01_19 (
 );
 
 
-ALTER TABLE public.events_2026_01_19 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_20; Type: TABLE; Schema: public; Owner: postgres
@@ -7833,7 +7508,6 @@ CREATE TABLE public.events_2026_01_20 (
 );
 
 
-ALTER TABLE public.events_2026_01_20 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_21; Type: TABLE; Schema: public; Owner: postgres
@@ -7860,7 +7534,6 @@ CREATE TABLE public.events_2026_01_21 (
 );
 
 
-ALTER TABLE public.events_2026_01_21 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_22; Type: TABLE; Schema: public; Owner: postgres
@@ -7887,7 +7560,6 @@ CREATE TABLE public.events_2026_01_22 (
 );
 
 
-ALTER TABLE public.events_2026_01_22 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_23; Type: TABLE; Schema: public; Owner: postgres
@@ -7914,7 +7586,6 @@ CREATE TABLE public.events_2026_01_23 (
 );
 
 
-ALTER TABLE public.events_2026_01_23 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_24; Type: TABLE; Schema: public; Owner: postgres
@@ -7941,7 +7612,6 @@ CREATE TABLE public.events_2026_01_24 (
 );
 
 
-ALTER TABLE public.events_2026_01_24 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_25; Type: TABLE; Schema: public; Owner: postgres
@@ -7968,7 +7638,6 @@ CREATE TABLE public.events_2026_01_25 (
 );
 
 
-ALTER TABLE public.events_2026_01_25 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_26; Type: TABLE; Schema: public; Owner: postgres
@@ -7995,7 +7664,6 @@ CREATE TABLE public.events_2026_01_26 (
 );
 
 
-ALTER TABLE public.events_2026_01_26 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_27; Type: TABLE; Schema: public; Owner: postgres
@@ -8022,7 +7690,6 @@ CREATE TABLE public.events_2026_01_27 (
 );
 
 
-ALTER TABLE public.events_2026_01_27 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_28; Type: TABLE; Schema: public; Owner: postgres
@@ -8049,7 +7716,6 @@ CREATE TABLE public.events_2026_01_28 (
 );
 
 
-ALTER TABLE public.events_2026_01_28 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_29; Type: TABLE; Schema: public; Owner: postgres
@@ -8076,7 +7742,6 @@ CREATE TABLE public.events_2026_01_29 (
 );
 
 
-ALTER TABLE public.events_2026_01_29 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_30; Type: TABLE; Schema: public; Owner: postgres
@@ -8103,7 +7768,6 @@ CREATE TABLE public.events_2026_01_30 (
 );
 
 
-ALTER TABLE public.events_2026_01_30 OWNER TO postgres;
 
 --
 -- Name: events_2026_01_31; Type: TABLE; Schema: public; Owner: postgres
@@ -8130,7 +7794,6 @@ CREATE TABLE public.events_2026_01_31 (
 );
 
 
-ALTER TABLE public.events_2026_01_31 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_01; Type: TABLE; Schema: public; Owner: postgres
@@ -8157,7 +7820,6 @@ CREATE TABLE public.events_2026_02_01 (
 );
 
 
-ALTER TABLE public.events_2026_02_01 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_02; Type: TABLE; Schema: public; Owner: postgres
@@ -8184,7 +7846,6 @@ CREATE TABLE public.events_2026_02_02 (
 );
 
 
-ALTER TABLE public.events_2026_02_02 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_03; Type: TABLE; Schema: public; Owner: postgres
@@ -8211,7 +7872,6 @@ CREATE TABLE public.events_2026_02_03 (
 );
 
 
-ALTER TABLE public.events_2026_02_03 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_04; Type: TABLE; Schema: public; Owner: postgres
@@ -8238,7 +7898,6 @@ CREATE TABLE public.events_2026_02_04 (
 );
 
 
-ALTER TABLE public.events_2026_02_04 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_05; Type: TABLE; Schema: public; Owner: postgres
@@ -8265,7 +7924,6 @@ CREATE TABLE public.events_2026_02_05 (
 );
 
 
-ALTER TABLE public.events_2026_02_05 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_06; Type: TABLE; Schema: public; Owner: postgres
@@ -8292,7 +7950,6 @@ CREATE TABLE public.events_2026_02_06 (
 );
 
 
-ALTER TABLE public.events_2026_02_06 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_07; Type: TABLE; Schema: public; Owner: postgres
@@ -8319,7 +7976,6 @@ CREATE TABLE public.events_2026_02_07 (
 );
 
 
-ALTER TABLE public.events_2026_02_07 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_08; Type: TABLE; Schema: public; Owner: postgres
@@ -8346,7 +8002,6 @@ CREATE TABLE public.events_2026_02_08 (
 );
 
 
-ALTER TABLE public.events_2026_02_08 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_09; Type: TABLE; Schema: public; Owner: postgres
@@ -8373,7 +8028,6 @@ CREATE TABLE public.events_2026_02_09 (
 );
 
 
-ALTER TABLE public.events_2026_02_09 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_10; Type: TABLE; Schema: public; Owner: postgres
@@ -8400,7 +8054,6 @@ CREATE TABLE public.events_2026_02_10 (
 );
 
 
-ALTER TABLE public.events_2026_02_10 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_11; Type: TABLE; Schema: public; Owner: postgres
@@ -8427,7 +8080,6 @@ CREATE TABLE public.events_2026_02_11 (
 );
 
 
-ALTER TABLE public.events_2026_02_11 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_12; Type: TABLE; Schema: public; Owner: postgres
@@ -8454,7 +8106,6 @@ CREATE TABLE public.events_2026_02_12 (
 );
 
 
-ALTER TABLE public.events_2026_02_12 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_13; Type: TABLE; Schema: public; Owner: postgres
@@ -8481,7 +8132,6 @@ CREATE TABLE public.events_2026_02_13 (
 );
 
 
-ALTER TABLE public.events_2026_02_13 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_14; Type: TABLE; Schema: public; Owner: postgres
@@ -8508,7 +8158,6 @@ CREATE TABLE public.events_2026_02_14 (
 );
 
 
-ALTER TABLE public.events_2026_02_14 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_15; Type: TABLE; Schema: public; Owner: postgres
@@ -8535,7 +8184,6 @@ CREATE TABLE public.events_2026_02_15 (
 );
 
 
-ALTER TABLE public.events_2026_02_15 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_16; Type: TABLE; Schema: public; Owner: postgres
@@ -8562,7 +8210,6 @@ CREATE TABLE public.events_2026_02_16 (
 );
 
 
-ALTER TABLE public.events_2026_02_16 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_17; Type: TABLE; Schema: public; Owner: postgres
@@ -8589,7 +8236,6 @@ CREATE TABLE public.events_2026_02_17 (
 );
 
 
-ALTER TABLE public.events_2026_02_17 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_22; Type: TABLE; Schema: public; Owner: postgres
@@ -8616,7 +8262,6 @@ CREATE TABLE public.events_2026_02_22 (
 );
 
 
-ALTER TABLE public.events_2026_02_22 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_23; Type: TABLE; Schema: public; Owner: postgres
@@ -8643,7 +8288,6 @@ CREATE TABLE public.events_2026_02_23 (
 );
 
 
-ALTER TABLE public.events_2026_02_23 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_24; Type: TABLE; Schema: public; Owner: postgres
@@ -8670,7 +8314,6 @@ CREATE TABLE public.events_2026_02_24 (
 );
 
 
-ALTER TABLE public.events_2026_02_24 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_25; Type: TABLE; Schema: public; Owner: postgres
@@ -8697,7 +8340,6 @@ CREATE TABLE public.events_2026_02_25 (
 );
 
 
-ALTER TABLE public.events_2026_02_25 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_26; Type: TABLE; Schema: public; Owner: postgres
@@ -8724,7 +8366,6 @@ CREATE TABLE public.events_2026_02_26 (
 );
 
 
-ALTER TABLE public.events_2026_02_26 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_27; Type: TABLE; Schema: public; Owner: postgres
@@ -8751,7 +8392,6 @@ CREATE TABLE public.events_2026_02_27 (
 );
 
 
-ALTER TABLE public.events_2026_02_27 OWNER TO postgres;
 
 --
 -- Name: events_2026_02_28; Type: TABLE; Schema: public; Owner: postgres
@@ -8778,7 +8418,6 @@ CREATE TABLE public.events_2026_02_28 (
 );
 
 
-ALTER TABLE public.events_2026_02_28 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_01; Type: TABLE; Schema: public; Owner: postgres
@@ -8805,7 +8444,6 @@ CREATE TABLE public.events_2026_03_01 (
 );
 
 
-ALTER TABLE public.events_2026_03_01 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_02; Type: TABLE; Schema: public; Owner: postgres
@@ -8832,7 +8470,6 @@ CREATE TABLE public.events_2026_03_02 (
 );
 
 
-ALTER TABLE public.events_2026_03_02 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_03; Type: TABLE; Schema: public; Owner: postgres
@@ -8859,7 +8496,6 @@ CREATE TABLE public.events_2026_03_03 (
 );
 
 
-ALTER TABLE public.events_2026_03_03 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_04; Type: TABLE; Schema: public; Owner: postgres
@@ -8886,7 +8522,6 @@ CREATE TABLE public.events_2026_03_04 (
 );
 
 
-ALTER TABLE public.events_2026_03_04 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_05; Type: TABLE; Schema: public; Owner: postgres
@@ -8913,7 +8548,6 @@ CREATE TABLE public.events_2026_03_05 (
 );
 
 
-ALTER TABLE public.events_2026_03_05 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_06; Type: TABLE; Schema: public; Owner: postgres
@@ -8940,7 +8574,6 @@ CREATE TABLE public.events_2026_03_06 (
 );
 
 
-ALTER TABLE public.events_2026_03_06 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_07; Type: TABLE; Schema: public; Owner: postgres
@@ -8967,7 +8600,6 @@ CREATE TABLE public.events_2026_03_07 (
 );
 
 
-ALTER TABLE public.events_2026_03_07 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_08; Type: TABLE; Schema: public; Owner: postgres
@@ -8994,7 +8626,6 @@ CREATE TABLE public.events_2026_03_08 (
 );
 
 
-ALTER TABLE public.events_2026_03_08 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_09; Type: TABLE; Schema: public; Owner: postgres
@@ -9021,7 +8652,6 @@ CREATE TABLE public.events_2026_03_09 (
 );
 
 
-ALTER TABLE public.events_2026_03_09 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_10; Type: TABLE; Schema: public; Owner: postgres
@@ -9048,7 +8678,6 @@ CREATE TABLE public.events_2026_03_10 (
 );
 
 
-ALTER TABLE public.events_2026_03_10 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_11; Type: TABLE; Schema: public; Owner: postgres
@@ -9075,7 +8704,6 @@ CREATE TABLE public.events_2026_03_11 (
 );
 
 
-ALTER TABLE public.events_2026_03_11 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_12; Type: TABLE; Schema: public; Owner: postgres
@@ -9102,7 +8730,6 @@ CREATE TABLE public.events_2026_03_12 (
 );
 
 
-ALTER TABLE public.events_2026_03_12 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_13; Type: TABLE; Schema: public; Owner: postgres
@@ -9129,7 +8756,6 @@ CREATE TABLE public.events_2026_03_13 (
 );
 
 
-ALTER TABLE public.events_2026_03_13 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_14; Type: TABLE; Schema: public; Owner: postgres
@@ -9156,7 +8782,6 @@ CREATE TABLE public.events_2026_03_14 (
 );
 
 
-ALTER TABLE public.events_2026_03_14 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_15; Type: TABLE; Schema: public; Owner: postgres
@@ -9183,7 +8808,6 @@ CREATE TABLE public.events_2026_03_15 (
 );
 
 
-ALTER TABLE public.events_2026_03_15 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_16; Type: TABLE; Schema: public; Owner: postgres
@@ -9210,7 +8834,6 @@ CREATE TABLE public.events_2026_03_16 (
 );
 
 
-ALTER TABLE public.events_2026_03_16 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_17; Type: TABLE; Schema: public; Owner: postgres
@@ -9237,7 +8860,6 @@ CREATE TABLE public.events_2026_03_17 (
 );
 
 
-ALTER TABLE public.events_2026_03_17 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_18; Type: TABLE; Schema: public; Owner: postgres
@@ -9264,7 +8886,6 @@ CREATE TABLE public.events_2026_03_18 (
 );
 
 
-ALTER TABLE public.events_2026_03_18 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_19; Type: TABLE; Schema: public; Owner: postgres
@@ -9291,7 +8912,6 @@ CREATE TABLE public.events_2026_03_19 (
 );
 
 
-ALTER TABLE public.events_2026_03_19 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_20; Type: TABLE; Schema: public; Owner: postgres
@@ -9318,7 +8938,6 @@ CREATE TABLE public.events_2026_03_20 (
 );
 
 
-ALTER TABLE public.events_2026_03_20 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_21; Type: TABLE; Schema: public; Owner: postgres
@@ -9345,7 +8964,6 @@ CREATE TABLE public.events_2026_03_21 (
 );
 
 
-ALTER TABLE public.events_2026_03_21 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_22; Type: TABLE; Schema: public; Owner: postgres
@@ -9372,7 +8990,6 @@ CREATE TABLE public.events_2026_03_22 (
 );
 
 
-ALTER TABLE public.events_2026_03_22 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_23; Type: TABLE; Schema: public; Owner: postgres
@@ -9399,7 +9016,6 @@ CREATE TABLE public.events_2026_03_23 (
 );
 
 
-ALTER TABLE public.events_2026_03_23 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_24; Type: TABLE; Schema: public; Owner: postgres
@@ -9426,7 +9042,6 @@ CREATE TABLE public.events_2026_03_24 (
 );
 
 
-ALTER TABLE public.events_2026_03_24 OWNER TO postgres;
 
 --
 -- Name: events_2026_03_25; Type: TABLE; Schema: public; Owner: postgres
@@ -9453,7 +9068,6 @@ CREATE TABLE public.events_2026_03_25 (
 );
 
 
-ALTER TABLE public.events_2026_03_25 OWNER TO postgres;
 
 --
 -- Name: fleet_billing_history; Type: TABLE; Schema: public; Owner: postgres
@@ -9489,7 +9103,6 @@ CREATE TABLE public.fleet_billing_history (
 );
 
 
-ALTER TABLE public.fleet_billing_history OWNER TO postgres;
 
 --
 -- Name: TABLE fleet_billing_history; Type: COMMENT; Schema: public; Owner: postgres
@@ -9531,7 +9144,6 @@ CREATE SEQUENCE public.fleet_billing_history_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.fleet_billing_history_id_seq OWNER TO postgres;
 
 --
 -- Name: fleet_billing_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -9588,7 +9200,6 @@ CREATE VIEW public.fleet_billing_summary AS
   GROUP BY f.fleet_uuid, f.fleet_id, f.fleet_name, f.customer_id, f.fleet_type, f.billing_mode, f.cost_per_hour, f.cost_per_month, f.total_running_hours, f.current_cost, f.budget_limit, f.budget_alert_threshold, f.last_metered_at, f.started_at, f.status;
 
 
-ALTER VIEW public.fleet_billing_summary OWNER TO postgres;
 
 --
 -- Name: fleet_monthly_costs; Type: VIEW; Schema: public; Owner: postgres
@@ -9609,7 +9220,6 @@ CREATE VIEW public.fleet_monthly_costs AS
   ORDER BY fbh.billing_month DESC, (sum(fbh.total_cost)) DESC;
 
 
-ALTER VIEW public.fleet_monthly_costs OWNER TO postgres;
 
 --
 -- Name: VIEW fleet_monthly_costs; Type: COMMENT; Schema: public; Owner: postgres
@@ -9644,7 +9254,6 @@ CREATE TABLE public.fleet_namespaces (
 );
 
 
-ALTER TABLE public.fleet_namespaces OWNER TO postgres;
 
 --
 -- Name: TABLE fleet_namespaces; Type: COMMENT; Schema: public; Owner: postgres
@@ -9764,7 +9373,6 @@ CREATE VIEW public.fleet_summary AS
   GROUP BY f.id, f.fleet_uuid, f.fleet_id, f.fleet_name, f.customer_id, f.fleet_type, f.status, f.billing_enabled, f.current_cost, f.budget_limit, f.environment, f.location, f.created_at, f.updated_at;
 
 
-ALTER VIEW public.fleet_summary OWNER TO postgres;
 
 --
 -- Name: fleet_usage_events; Type: TABLE; Schema: public; Owner: postgres
@@ -9787,7 +9395,6 @@ CREATE TABLE public.fleet_usage_events (
 );
 
 
-ALTER TABLE public.fleet_usage_events OWNER TO postgres;
 
 --
 -- Name: TABLE fleet_usage_events; Type: COMMENT; Schema: public; Owner: postgres
@@ -9815,7 +9422,6 @@ CREATE SEQUENCE public.fleet_usage_events_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.fleet_usage_events_id_seq OWNER TO postgres;
 
 --
 -- Name: fleet_usage_events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -9837,7 +9443,6 @@ CREATE SEQUENCE public.fleets_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.fleets_id_seq OWNER TO postgres;
 
 --
 -- Name: fleets_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -9858,7 +9463,6 @@ CREATE SEQUENCE public.global_app_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.global_app_id_seq OWNER TO postgres;
 
 --
 -- Name: global_service_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -9872,7 +9476,6 @@ CREATE SEQUENCE public.global_service_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.global_service_id_seq OWNER TO postgres;
 
 --
 -- Name: housekeeper_config; Type: TABLE; Schema: public; Owner: postgres
@@ -9887,7 +9490,6 @@ CREATE TABLE public.housekeeper_config (
 );
 
 
-ALTER TABLE public.housekeeper_config OWNER TO postgres;
 
 --
 -- Name: TABLE housekeeper_config; Type: COMMENT; Schema: public; Owner: postgres
@@ -9914,7 +9516,6 @@ CREATE TABLE public.housekeeper_runs (
 );
 
 
-ALTER TABLE public.housekeeper_runs OWNER TO postgres;
 
 --
 -- Name: TABLE housekeeper_runs; Type: COMMENT; Schema: public; Owner: postgres
@@ -9936,7 +9537,6 @@ CREATE SEQUENCE public.housekeeper_runs_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.housekeeper_runs_id_seq OWNER TO postgres;
 
 --
 -- Name: housekeeper_runs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -9966,7 +9566,6 @@ CREATE TABLE public.image_approval_requests (
 );
 
 
-ALTER TABLE public.image_approval_requests OWNER TO postgres;
 
 --
 -- Name: TABLE image_approval_requests; Type: COMMENT; Schema: public; Owner: postgres
@@ -10009,7 +9608,6 @@ CREATE SEQUENCE public.image_approval_requests_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.image_approval_requests_id_seq OWNER TO postgres;
 
 --
 -- Name: image_approval_requests_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -10058,7 +9656,6 @@ CREATE TABLE public.image_rollouts (
 );
 
 
-ALTER TABLE public.image_rollouts OWNER TO postgres;
 
 --
 -- Name: TABLE image_rollouts; Type: COMMENT; Schema: public; Owner: postgres
@@ -10087,7 +9684,6 @@ CREATE SEQUENCE public.image_rollouts_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.image_rollouts_id_seq OWNER TO postgres;
 
 --
 -- Name: image_rollouts_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -10120,7 +9716,6 @@ CREATE TABLE public.image_tags (
 );
 
 
-ALTER TABLE public.image_tags OWNER TO postgres;
 
 --
 -- Name: TABLE image_tags; Type: COMMENT; Schema: public; Owner: postgres
@@ -10156,7 +9751,6 @@ CREATE SEQUENCE public.image_tags_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.image_tags_id_seq OWNER TO postgres;
 
 --
 -- Name: image_tags_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -10193,7 +9787,6 @@ CREATE TABLE public.image_update_policies (
 );
 
 
-ALTER TABLE public.image_update_policies OWNER TO postgres;
 
 --
 -- Name: TABLE image_update_policies; Type: COMMENT; Schema: public; Owner: postgres
@@ -10236,7 +9829,6 @@ CREATE SEQUENCE public.image_update_policies_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.image_update_policies_id_seq OWNER TO postgres;
 
 --
 -- Name: image_update_policies_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -10268,7 +9860,6 @@ CREATE TABLE public.images (
 );
 
 
-ALTER TABLE public.images OWNER TO postgres;
 
 --
 -- Name: TABLE images; Type: COMMENT; Schema: public; Owner: postgres
@@ -10311,7 +9902,6 @@ CREATE SEQUENCE public.images_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.images_id_seq OWNER TO postgres;
 
 --
 -- Name: images_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -10351,7 +9941,6 @@ CREATE TABLE public.job_executions (
 );
 
 
-ALTER TABLE public.job_executions OWNER TO postgres;
 
 --
 -- Name: job_executions_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -10366,7 +9955,6 @@ CREATE SEQUENCE public.job_executions_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.job_executions_id_seq OWNER TO postgres;
 
 --
 -- Name: job_executions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -10394,7 +9982,6 @@ CREATE TABLE public.job_handlers (
 );
 
 
-ALTER TABLE public.job_handlers OWNER TO postgres;
 
 --
 -- Name: job_handlers_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -10409,7 +9996,6 @@ CREATE SEQUENCE public.job_handlers_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.job_handlers_id_seq OWNER TO postgres;
 
 --
 -- Name: job_handlers_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -10435,7 +10021,6 @@ CREATE TABLE public.job_templates (
 );
 
 
-ALTER TABLE public.job_templates OWNER TO postgres;
 
 --
 -- Name: job_templates_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -10450,7 +10035,6 @@ CREATE SEQUENCE public.job_templates_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.job_templates_id_seq OWNER TO postgres;
 
 --
 -- Name: job_templates_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -10487,7 +10071,6 @@ CREATE MATERIALIZED VIEW public.latest_readings AS
   WITH NO DATA;
 
 
-ALTER MATERIALIZED VIEW public.latest_readings OWNER TO postgres;
 
 --
 -- Name: MATERIALIZED VIEW latest_readings; Type: COMMENT; Schema: public; Owner: postgres
@@ -10522,7 +10105,6 @@ CREATE TABLE public.log_alert_rules (
 );
 
 
-ALTER TABLE public.log_alert_rules OWNER TO postgres;
 
 --
 -- Name: TABLE log_alert_rules; Type: COMMENT; Schema: public; Owner: postgres
@@ -10600,7 +10182,6 @@ CREATE SEQUENCE public.log_alert_rules_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.log_alert_rules_id_seq OWNER TO postgres;
 
 --
 -- Name: log_alert_rules_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -10632,7 +10213,6 @@ CREATE TABLE public.log_alerts (
 );
 
 
-ALTER TABLE public.log_alerts OWNER TO postgres;
 
 --
 -- Name: TABLE log_alerts; Type: COMMENT; Schema: public; Owner: postgres
@@ -10688,7 +10268,6 @@ CREATE SEQUENCE public.log_alerts_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.log_alerts_id_seq OWNER TO postgres;
 
 --
 -- Name: log_alerts_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -10730,7 +10309,6 @@ CREATE MATERIALIZED VIEW public.metric_catalog AS
   WITH NO DATA;
 
 
-ALTER MATERIALIZED VIEW public.metric_catalog OWNER TO postgres;
 
 --
 -- Name: MATERIALIZED VIEW metric_catalog; Type: COMMENT; Schema: public; Owner: postgres
@@ -10757,7 +10335,6 @@ ALTER TABLE ONLY public.mqtt_acls ALTER COLUMN username SET STATISTICS 1000;
 ALTER TABLE ONLY public.mqtt_acls ALTER COLUMN topic SET STATISTICS 1000;
 
 
-ALTER TABLE public.mqtt_acls OWNER TO postgres;
 
 --
 -- Name: COLUMN mqtt_acls.access; Type: COMMENT; Schema: public; Owner: postgres
@@ -10779,7 +10356,6 @@ CREATE SEQUENCE public.mqtt_acls_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.mqtt_acls_id_seq OWNER TO postgres;
 
 --
 -- Name: mqtt_acls_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -10825,7 +10401,6 @@ CREATE TABLE public.mqtt_broker_config (
 );
 
 
-ALTER TABLE public.mqtt_broker_config OWNER TO postgres;
 
 --
 -- Name: TABLE mqtt_broker_config; Type: COMMENT; Schema: public; Owner: postgres
@@ -10901,7 +10476,6 @@ CREATE VIEW public.mqtt_broker_comparison AS
   ORDER BY is_default DESC, is_active DESC, name;
 
 
-ALTER VIEW public.mqtt_broker_comparison OWNER TO postgres;
 
 --
 -- Name: VIEW mqtt_broker_comparison; Type: COMMENT; Schema: public; Owner: postgres
@@ -10923,7 +10497,6 @@ CREATE SEQUENCE public.mqtt_broker_config_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.mqtt_broker_config_id_seq OWNER TO postgres;
 
 --
 -- Name: mqtt_broker_config_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -10945,7 +10518,6 @@ CREATE SEQUENCE public.mqtt_broker_stats_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.mqtt_broker_stats_id_seq OWNER TO postgres;
 
 --
 -- Name: mqtt_broker_stats_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -10983,7 +10555,6 @@ CREATE VIEW public.mqtt_broker_summary AS
   GROUP BY mbc.id, mbc.name, mbc.description, mbc.protocol, mbc.host, mbc.port, mbc.username, mbc.is_active, mbc.is_default, mbc.broker_type, mbc.use_tls, mbc.last_connected_at, mbc.created_at;
 
 
-ALTER VIEW public.mqtt_broker_summary OWNER TO postgres;
 
 --
 -- Name: VIEW mqtt_broker_summary; Type: COMMENT; Schema: public; Owner: postgres
@@ -11007,7 +10578,6 @@ CREATE TABLE public.mqtt_schema_history (
 );
 
 
-ALTER TABLE public.mqtt_schema_history OWNER TO postgres;
 
 --
 -- Name: TABLE mqtt_schema_history; Type: COMMENT; Schema: public; Owner: postgres
@@ -11043,7 +10613,6 @@ CREATE SEQUENCE public.mqtt_schema_history_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.mqtt_schema_history_id_seq OWNER TO postgres;
 
 --
 -- Name: mqtt_schema_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -11064,7 +10633,6 @@ CREATE SEQUENCE public.mqtt_topic_metrics_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.mqtt_topic_metrics_id_seq OWNER TO postgres;
 
 --
 -- Name: mqtt_topic_metrics_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -11094,7 +10662,6 @@ CREATE TABLE public.mqtt_topics (
 );
 
 
-ALTER TABLE public.mqtt_topics OWNER TO postgres;
 
 --
 -- Name: TABLE mqtt_topics; Type: COMMENT; Schema: public; Owner: postgres
@@ -11130,7 +10697,6 @@ CREATE SEQUENCE public.mqtt_topics_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.mqtt_topics_id_seq OWNER TO postgres;
 
 --
 -- Name: mqtt_topics_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -11155,7 +10721,6 @@ CREATE TABLE public.mqtt_users (
 ALTER TABLE ONLY public.mqtt_users ALTER COLUMN username SET STATISTICS 1000;
 
 
-ALTER TABLE public.mqtt_users OWNER TO postgres;
 
 --
 -- Name: mqtt_users_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -11170,7 +10735,6 @@ CREATE SEQUENCE public.mqtt_users_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.mqtt_users_id_seq OWNER TO postgres;
 
 --
 -- Name: mqtt_users_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -11193,7 +10757,6 @@ CREATE TABLE public.nodered_credentials (
 );
 
 
-ALTER TABLE public.nodered_credentials OWNER TO postgres;
 
 --
 -- Name: TABLE nodered_credentials; Type: COMMENT; Schema: public; Owner: postgres
@@ -11223,7 +10786,6 @@ CREATE TABLE public.nodered_flows (
 );
 
 
-ALTER TABLE public.nodered_flows OWNER TO postgres;
 
 --
 -- Name: TABLE nodered_flows; Type: COMMENT; Schema: public; Owner: postgres
@@ -11254,7 +10816,6 @@ CREATE TABLE public.nodered_library (
 );
 
 
-ALTER TABLE public.nodered_library OWNER TO postgres;
 
 --
 -- Name: TABLE nodered_library; Type: COMMENT; Schema: public; Owner: postgres
@@ -11276,7 +10837,6 @@ CREATE SEQUENCE public.nodered_library_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.nodered_library_id_seq OWNER TO postgres;
 
 --
 -- Name: nodered_library_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -11298,7 +10858,6 @@ CREATE TABLE public.nodered_sessions (
 );
 
 
-ALTER TABLE public.nodered_sessions OWNER TO postgres;
 
 --
 -- Name: TABLE nodered_sessions; Type: COMMENT; Schema: public; Owner: postgres
@@ -11320,7 +10879,6 @@ CREATE TABLE public.nodered_settings (
 );
 
 
-ALTER TABLE public.nodered_settings OWNER TO postgres;
 
 --
 -- Name: TABLE nodered_settings; Type: COMMENT; Schema: public; Owner: postgres
@@ -11344,7 +10902,6 @@ CREATE TABLE public.profile_configs (
 );
 
 
-ALTER TABLE public.profile_configs OWNER TO postgres;
 
 --
 -- Name: TABLE profile_configs; Type: COMMENT; Schema: public; Owner: postgres
@@ -11390,7 +10947,6 @@ CREATE TABLE public.provisioning_attempts (
 );
 
 
-ALTER TABLE public.provisioning_attempts OWNER TO postgres;
 
 --
 -- Name: TABLE provisioning_attempts; Type: COMMENT; Schema: public; Owner: postgres
@@ -11411,7 +10967,6 @@ CREATE SEQUENCE public.provisioning_attempts_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.provisioning_attempts_id_seq OWNER TO postgres;
 
 --
 -- Name: provisioning_attempts_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -11445,7 +11000,6 @@ CREATE TABLE public.provisioning_keys (
 );
 
 
-ALTER TABLE public.provisioning_keys OWNER TO postgres;
 
 --
 -- Name: TABLE provisioning_keys; Type: COMMENT; Schema: public; Owner: postgres
@@ -11524,7 +11078,6 @@ CREATE VIEW public.provisioning_key_fleet_references AS
   ORDER BY pk.created_at DESC;
 
 
-ALTER VIEW public.provisioning_key_fleet_references OWNER TO postgres;
 
 --
 -- Name: VIEW provisioning_key_fleet_references; Type: COMMENT; Schema: public; Owner: postgres
@@ -11553,7 +11106,6 @@ CREATE VIEW public.readings_1h AS
    FROM _timescaledb_internal._materialized_hypertable_18;
 
 
-ALTER VIEW public.readings_1h OWNER TO postgres;
 
 --
 -- Name: readings_1m; Type: VIEW; Schema: public; Owner: postgres
@@ -11576,7 +11128,6 @@ CREATE VIEW public.readings_1m AS
    FROM _timescaledb_internal._materialized_hypertable_17;
 
 
-ALTER VIEW public.readings_1m OWNER TO postgres;
 
 --
 -- Name: readings_daily; Type: VIEW; Schema: public; Owner: postgres
@@ -11600,7 +11151,6 @@ CREATE VIEW public.readings_daily AS
    FROM _timescaledb_internal._materialized_hypertable_22;
 
 
-ALTER VIEW public.readings_daily OWNER TO postgres;
 
 --
 -- Name: readings_hourly; Type: VIEW; Schema: public; Owner: postgres
@@ -11624,7 +11174,6 @@ CREATE VIEW public.readings_hourly AS
    FROM _timescaledb_internal._materialized_hypertable_21;
 
 
-ALTER VIEW public.readings_hourly OWNER TO postgres;
 
 --
 -- Name: recent_anomalies; Type: MATERIALIZED VIEW; Schema: public; Owner: postgres
@@ -11656,7 +11205,6 @@ CREATE MATERIALIZED VIEW public.recent_anomalies AS
   WITH NO DATA;
 
 
-ALTER MATERIALIZED VIEW public.recent_anomalies OWNER TO postgres;
 
 --
 -- Name: MATERIALIZED VIEW recent_anomalies; Type: COMMENT; Schema: public; Owner: postgres
@@ -11689,7 +11237,6 @@ CREATE TABLE public.reconciliation_history (
 );
 
 
-ALTER TABLE public.reconciliation_history OWNER TO postgres;
 
 --
 -- Name: reconciliation_history_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -11704,7 +11251,6 @@ CREATE SEQUENCE public.reconciliation_history_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.reconciliation_history_id_seq OWNER TO postgres;
 
 --
 -- Name: reconciliation_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -11731,7 +11277,6 @@ CREATE TABLE public.refresh_tokens (
 );
 
 
-ALTER TABLE public.refresh_tokens OWNER TO postgres;
 
 --
 -- Name: refresh_tokens_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -11746,7 +11291,6 @@ CREATE SEQUENCE public.refresh_tokens_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.refresh_tokens_id_seq OWNER TO postgres;
 
 --
 -- Name: refresh_tokens_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -11775,7 +11319,6 @@ CREATE TABLE public.releases (
 );
 
 
-ALTER TABLE public.releases OWNER TO postgres;
 
 --
 -- Name: releases_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -11790,7 +11333,6 @@ CREATE SEQUENCE public.releases_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.releases_id_seq OWNER TO postgres;
 
 --
 -- Name: releases_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -11815,7 +11357,6 @@ CREATE TABLE public.rollout_events (
 );
 
 
-ALTER TABLE public.rollout_events OWNER TO postgres;
 
 --
 -- Name: TABLE rollout_events; Type: COMMENT; Schema: public; Owner: postgres
@@ -11837,7 +11378,6 @@ CREATE SEQUENCE public.rollout_events_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.rollout_events_id_seq OWNER TO postgres;
 
 --
 -- Name: rollout_events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -11876,7 +11416,6 @@ CREATE TABLE public.scheduled_jobs (
 );
 
 
-ALTER TABLE public.scheduled_jobs OWNER TO postgres;
 
 --
 -- Name: scheduled_jobs_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -11891,7 +11430,6 @@ CREATE SEQUENCE public.scheduled_jobs_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.scheduled_jobs_id_seq OWNER TO postgres;
 
 --
 -- Name: scheduled_jobs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -11915,7 +11453,6 @@ CREATE TABLE public.schema_migrations (
 );
 
 
-ALTER TABLE public.schema_migrations OWNER TO postgres;
 
 --
 -- Name: schema_migrations_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -11930,7 +11467,6 @@ CREATE SEQUENCE public.schema_migrations_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.schema_migrations_id_seq OWNER TO postgres;
 
 --
 -- Name: schema_migrations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -11966,7 +11502,6 @@ CREATE TABLE public.sensor_health_history (
 );
 
 
-ALTER TABLE public.sensor_health_history OWNER TO postgres;
 
 --
 -- Name: TABLE sensor_health_history; Type: COMMENT; Schema: public; Owner: postgres
@@ -11988,7 +11523,6 @@ CREATE SEQUENCE public.sensor_health_history_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.sensor_health_history_id_seq OWNER TO postgres;
 
 --
 -- Name: sensor_health_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -12024,7 +11558,6 @@ CREATE VIEW public.sensor_health_latest AS
   ORDER BY device_uuid, sensor_name, reported_at DESC;
 
 
-ALTER VIEW public.sensor_health_latest OWNER TO postgres;
 
 --
 -- Name: VIEW sensor_health_latest; Type: COMMENT; Schema: public; Owner: postgres
@@ -12048,7 +11581,6 @@ CREATE TABLE public.shell_audit_log (
 );
 
 
-ALTER TABLE public.shell_audit_log OWNER TO postgres;
 
 --
 -- Name: TABLE shell_audit_log; Type: COMMENT; Schema: public; Owner: postgres
@@ -12077,7 +11609,6 @@ CREATE SEQUENCE public.shell_audit_log_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.shell_audit_log_id_seq OWNER TO postgres;
 
 --
 -- Name: shell_audit_log_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -12103,7 +11634,6 @@ CREATE TABLE public.shell_sessions (
 );
 
 
-ALTER TABLE public.shell_sessions OWNER TO postgres;
 
 --
 -- Name: TABLE shell_sessions; Type: COMMENT; Schema: public; Owner: postgres
@@ -12184,7 +11714,6 @@ CREATE TABLE public.state_changes (
 );
 
 
-ALTER TABLE public.state_changes OWNER TO postgres;
 
 --
 -- Name: state_changes_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -12199,7 +11728,6 @@ CREATE SEQUENCE public.state_changes_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.state_changes_id_seq OWNER TO postgres;
 
 --
 -- Name: state_changes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -12224,7 +11752,6 @@ CREATE TABLE public.state_projections (
 );
 
 
-ALTER TABLE public.state_projections OWNER TO postgres;
 
 --
 -- Name: state_snapshots; Type: TABLE; Schema: public; Owner: postgres
@@ -12244,7 +11771,6 @@ CREATE TABLE public.state_snapshots (
 );
 
 
-ALTER TABLE public.state_snapshots OWNER TO postgres;
 
 --
 -- Name: state_snapshots_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -12259,7 +11785,6 @@ CREATE SEQUENCE public.state_snapshots_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.state_snapshots_id_seq OWNER TO postgres;
 
 --
 -- Name: state_snapshots_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -12279,7 +11804,6 @@ CREATE TABLE public.system_config (
 );
 
 
-ALTER TABLE public.system_config OWNER TO postgres;
 
 --
 -- Name: TABLE system_config; Type: COMMENT; Schema: public; Owner: postgres
@@ -12326,7 +11850,6 @@ CREATE TABLE public.tag_definitions (
 );
 
 
-ALTER TABLE public.tag_definitions OWNER TO postgres;
 
 --
 -- Name: TABLE tag_definitions; Type: COMMENT; Schema: public; Owner: postgres
@@ -12369,7 +11892,6 @@ CREATE SEQUENCE public.tag_definitions_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.tag_definitions_id_seq OWNER TO postgres;
 
 --
 -- Name: tag_definitions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -12394,7 +11916,6 @@ CREATE TABLE public.user_sessions (
 );
 
 
-ALTER TABLE public.user_sessions OWNER TO postgres;
 
 --
 -- Name: user_sessions_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -12409,7 +11930,6 @@ CREATE SEQUENCE public.user_sessions_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.user_sessions_id_seq OWNER TO postgres;
 
 --
 -- Name: user_sessions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -12439,7 +11959,6 @@ CREATE TABLE public.users (
 );
 
 
-ALTER TABLE public.users OWNER TO postgres;
 
 --
 -- Name: TABLE users; Type: COMMENT; Schema: public; Owner: postgres
@@ -12489,7 +12008,6 @@ CREATE SEQUENCE public.users_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.users_id_seq OWNER TO postgres;
 
 --
 -- Name: users_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -12511,7 +12029,6 @@ CREATE SEQUENCE public.vendor_configs_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.vendor_configs_id_seq OWNER TO postgres;
 
 --
 -- Name: vendor_configs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -12538,7 +12055,6 @@ CREATE TABLE public.wg_config (
 );
 
 
-ALTER TABLE public.wg_config OWNER TO postgres;
 
 --
 -- Name: TABLE wg_config; Type: COMMENT; Schema: public; Owner: postgres
@@ -12560,7 +12076,6 @@ CREATE SEQUENCE public.wg_config_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.wg_config_id_seq OWNER TO postgres;
 
 --
 -- Name: wg_config_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -12582,7 +12097,6 @@ CREATE TABLE public.wg_ip_pool (
 );
 
 
-ALTER TABLE public.wg_ip_pool OWNER TO postgres;
 
 --
 -- Name: TABLE wg_ip_pool; Type: COMMENT; Schema: public; Owner: postgres
@@ -12604,7 +12118,6 @@ CREATE SEQUENCE public.wg_ip_pool_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.wg_ip_pool_id_seq OWNER TO postgres;
 
 --
 -- Name: wg_ip_pool_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -12639,7 +12152,6 @@ CREATE TABLE public.wg_peers (
 );
 
 
-ALTER TABLE public.wg_peers OWNER TO postgres;
 
 --
 -- Name: TABLE wg_peers; Type: COMMENT; Schema: public; Owner: postgres
@@ -12703,7 +12215,6 @@ CREATE SEQUENCE public.wg_peers_id_seq
     CACHE 1;
 
 
-ALTER SEQUENCE public.wg_peers_id_seq OWNER TO postgres;
 
 --
 -- Name: wg_peers_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
@@ -31353,6 +30864,8 @@ ALTER TABLE ONLY public.user_sessions
 --
 -- PostgreSQL database dump complete
 --
+
+
 
 
 
