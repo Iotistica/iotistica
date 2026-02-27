@@ -280,6 +280,11 @@ jobs:
           echo "Release version: $RELEASE"
           echo ""
 
+          # Commit the release tag points to (fallback to HEAD when tag is absent)
+          RELEASE_COMMIT=$(git rev-list -n 1 "$RELEASE" 2>/dev/null || git rev-parse HEAD)
+          echo "Release commit: $RELEASE_COMMIT"
+          echo ""
+
           promote_app() {
             local APP="$1"
             local PATH_FILTER="${APP}/** .github/workflows/build-${APP}-ci.yml"
