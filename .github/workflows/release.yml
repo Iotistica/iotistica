@@ -218,10 +218,10 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Services to Promote" >> $GITHUB_STEP_SUMMARY
           for APP in ${{ env.APPS }}; do
-            echo "- \`iotistic/${APP}\` (last built commit from ${APP}/** or CI workflow)" >> $GITHUB_STEP_SUMMARY
+            echo "- \`iotistic/${APP}\` (will find last built image from ${APP}/**)" >> $GITHUB_STEP_SUMMARY
           done
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Note:** Searches last 10 commits per app for built Docker images" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Each app searches last 10 commits for built Docker images" >> $GITHUB_STEP_SUMMARY
 
   create-tag:
     name: Create git tag (for workflow_dispatch)
@@ -339,6 +339,17 @@ jobs:
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "✅ All images promoted"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          # Generate summary with actual SHAs
+          echo "## Image Promotion Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** \`$RELEASE\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Promoted Images" >> $GITHUB_STEP_SUMMARY
+          for APP in ${{ env.APPS }}; do
+            SHA=$(cat /tmp/${APP}_sha.txt)
+            echo "- **${APP}**: \`${DOCKER_ORG}/${APP}:${SHA:0:12}\` → \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
+          done
 
   create-release:
     name: Create GitHub Release (changelog)
