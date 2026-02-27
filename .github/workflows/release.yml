@@ -64,8 +64,13 @@ jobs:
       - name: Set release version (auto bump)
         id: set_version
         run: |
-          # Ensure we have the latest tags from remote
-          git fetch origin --tags --prune --prune-tags --force
+          # Aggressively refresh tag cache
+          git tag -d $(git tag -l) 2>/dev/null || true
+          git fetch origin --tags --force
+          
+          echo "=== DEBUG: Available tags after aggressive refresh ==="
+          git tag -l 'v*.*.*' --sort=-version:refname | head -15
+          echo ""
           
           if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             # Tag push — use the pushed tag
@@ -80,9 +85,7 @@ jobs:
           TYPE="${{ github.event.inputs.release_type }}"
           
           # Debug: List all tags to verify fetch worked
-          echo "=== Available tags after fetch ==="
-          git tag -l 'v*.*.*' --sort=-version:refname | head -10
-          echo ""
+          echo "=== Searching for latest final release ==="
           
           # Find latest final release (no -rc suffix)
           LATEST_FINAL=$(git tag -l 'v*.*.*' --sort=-version:refname | grep -v '-rc' | head -n1)
@@ -187,12 +190,13 @@ jobs:
         run: |
           set -euo pipefail
           
-          # Ensure we have the latest tags from remote
-          git fetch origin --tags --prune --prune-tags --force
+          # Aggressively refresh tag cache
+          git tag -d $(git tag -l) 2>/dev/null || true
+          git fetch origin --tags --force
           
           # Debug: List all tags to verify fetch worked
-          echo "=== Available tags for image verification ==="
-          git tag -l 'v*.*.*' --sort=-version:refname | head -10
+          echo "=== DEBUG: Available tags for image verification ==="
+          git tag -l 'v*.*.*' --sort=-version:refname | head -15
           echo ""
           
           RELEASE="${{ steps.set_version.outputs.release_version }}"
