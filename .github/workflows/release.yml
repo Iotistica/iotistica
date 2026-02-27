@@ -67,9 +67,9 @@ jobs:
           # Fetch all tags from remote
           git fetch origin 'refs/tags/*:refs/tags/*' --force
           
-          # Debug: Show top tags
-          echo "=== DEBUG: Top 10 tags ==="
-          git tag --list 'v*' --sort=-version:refname | head -10
+          # Debug: Show top tags (v0.0.2+ only)
+          echo "=== DEBUG: Top 10 v0.0.2+ tags ==="
+          git tag --list 'v0.0.*' --sort=-version:refname | grep -E 'v0\.0\.[2-9]|v0\.0\.[0-9]{2,}' | head -10
           echo ""
           
           if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
@@ -83,16 +83,16 @@ jobs:
           MODE="${{ github.event.inputs.release_mode || 'final' }}"
           TYPE="${{ github.event.inputs.release_type }}"
           
-          # Find latest final (excluding RC tags)
-          LATEST_FINAL=$(git tag --list 'v*' --sort=-version:refname | grep -v -E '\-rc' | head -1)
+          # Find latest final (excluding RC tags and old v0.0.1-rc clutter) - start from v0.0.2
+          LATEST_FINAL=$(git tag --list 'v0.0.*' --sort=-version:refname | grep -E 'v0\.0\.[2-9]|v0\.0\.[0-9]{2,}' | grep -v -E '\-rc' | head -1)
           echo "Latest final release: $LATEST_FINAL"
           
           if [ -z "$LATEST_FINAL" ]; then
-            echo "No previous final releases found, starting from v0.0.0"
-            LATEST_FINAL="v0.0.0"
+            echo "No v0.0.2+ releases found, starting from v0.0.2"
+            LATEST_FINAL="v0.0.2"
             MAJOR=0
             MINOR=0
-            PATCH=0
+            PATCH=2
           else
             echo "Latest final release: $LATEST_FINAL"
             # Strip v prefix and parse version
