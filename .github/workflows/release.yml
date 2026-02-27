@@ -64,6 +64,9 @@ jobs:
       - name: Set release version (auto bump)
         id: set_version
         run: |
+          # Ensure we have the latest tags from remote
+          git fetch origin --tags --force
+          
           if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             # Tag push — use the pushed tag
             RELEASE="${GITHUB_REF#refs/tags/}"
@@ -178,6 +181,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          
+          # Ensure we have the latest tags from remote
+          git fetch origin --tags --force
+          
           RELEASE="${{ steps.set_version.outputs.release_version }}"
           VERSION="${RELEASE#v}"
 
