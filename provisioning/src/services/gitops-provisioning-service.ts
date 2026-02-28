@@ -17,14 +17,17 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
 import crypto from 'crypto';
+import bcrypt from 'bcrypt';
 import axios from 'axios';
 import { Job } from 'bull';
 import { logger } from '../utils/logger';
+import { generateInitialAdminPassword } from '../utils/password-generator';
 import { TigerDataService, TigerDataDatabase } from './tigerdata-service';
 import { OnePasswordService } from './onepassword-service';
 import { CustomerModel } from '../db/customer-model';
 import { SecretBuilder } from './secret-builder';
 import { releaseService } from './release-service';
+import { emailQueue } from './email-queue';
 
 interface ClientDeploymentData {
   clientId: string;           // Sanitized: dc5fec42901a (SHA256 hash)
@@ -361,9 +364,23 @@ export class GitOpsProvisioningService {
 
         console.log(`\n⏳ Waiting for database to become ready...`);
         // Wait for database to become ready
-        await this.tigerDataService.waitUntilReady(dbResult.serviceId);
-        console.log(`✅ Database is ready!`);
-        logger.info('TigerData database is ready', { serviceId: dbResult.serviceId });
+        // Note: We catch timeout errors but continue - the password has already been captured above
+        try {
+          await this.tigerDataService.waitUntilReady(dbResult.serviceId);
+          console.log(`✅ Database is ready!`);
+          logger.info('TigerData database is ready', { serviceId: dbResult.serviceId });
+        } catch (waitError: any) {
+          // Database not ready yet, but we have the password from provision response
+          console.log(`\n⚠️  Database status check timed out, but continuing deployment`);
+          console.log(`   The database is still provisioning on TigerData's end`);
+          console.log(`   Password has been captured from initial provision response`);
+          console.log(`   Deployment will continue with available credentials`);
+          logger.warn('Database readiness timeout - continuing with captured credentials', { 
+            serviceId: dbResult.serviceId,
+            hasPassword: !!dbResult.password,
+            waitError: waitError.message
+          });
+        }
 
         // Update customer record with DB details
         console.log(`\n💾 Saving database details to customer record...`);
@@ -484,11 +501,42 @@ export class GitOpsProvisioningService {
         // Now update SQL credentials with actual DB info
         console.log(`\n🔄 Updating SQL credentials with TigerData info...`);
         
-        // IMPORTANT: TigerData API only returns password on initial creation
-        // If database already exists, password will be empty
+        // IMPORTANT: TigerData API returns initial_password on initial creation
+        // If database already exists (retry scenario), check saved API response
         let dbPassword = dbResult.password;
+        
         if (!dbPassword) {
-          // Check if this is the final Bull retry attempt
+          console.log(`⚠️  Password not in current response, checking saved database details...`);
+          
+          // Try to retrieve password from previously saved db_api_response
+          const customer = await CustomerModel.getById(data.customerId);
+          if (customer && customer.db_api_response) {
+            console.log(`📦 Found saved database API response`);
+            try {
+              const savedResponse = typeof customer.db_api_response === 'string' 
+                ? JSON.parse(customer.db_api_response) 
+                : customer.db_api_response;
+              
+              dbPassword = savedResponse.initial_password || savedResponse.password;
+              
+              if (dbPassword) {
+                console.log(`✅ Retrieved password from saved API response`);
+                logger.info('Password retrieved from saved db_api_response', {
+                  customerId: data.customerId,
+                  serviceId: dbResult.serviceId,
+                });
+              }
+            } catch (parseError: any) {
+              logger.error('Failed to parse db_api_response', {
+                error: parseError.message,
+                customerId: data.customerId,
+              });
+            }
+          }
+        }
+        
+        if (!dbPassword) {
+          // Still no password - check if this is the final Bull retry attempt
           const isFinalRetry = job && (job.attemptsMade + 1) >= (job.opts.attempts || 1);
           
           if (!isFinalRetry) {
@@ -504,24 +552,23 @@ export class GitOpsProvisioningService {
           }
           
           // This is the final retry - database still not READY after all attempts
-          // Save all available DB data with placeholder password
+          // This should be rare now that we capture password on first attempt
           console.warn(`\n⚠️  ════════════════════════════════════════════════════════════════`);
-          console.warn(`⚠️  DATABASE NOT READY AFTER ALL RETRY ATTEMPTS`);
+          console.warn(`⚠️  DATABASE PASSWORD UNAVAILABLE AFTER ALL RETRY ATTEMPTS`);
           console.warn(`⚠️  ════════════════════════════════════════════════════════════════`);
           console.log(`   Final retry attempt: ${job?.attemptsMade ? job.attemptsMade + 1 : 1}/${job?.opts.attempts || 1}`);
           console.log(`   Database Service ID: ${dbResult.serviceId}`);
           console.log(`   Database Host: ${dbResult.host}`);
-          console.log(`   Status: Database provisioned but not yet READY`);
           console.log(``);
           console.log(`📋 MANUAL INTERVENTION REQUIRED:`);
-          console.log(`   1. Database is still provisioning on TigerData's end`);
+          console.log(`   1. Password was not captured from TigerData API response`);
           console.log(`   2. Saving deployment with placeholder password: "PENDING_MANUAL_UPDATE"`);
-          console.log(`   3. Once database is READY, retrieve password from TigerData console`);
+          console.log(`   3. Retrieve password from TigerData console`);
           console.log(`   4. Update 1Password secret with actual password`);
           console.log(`   5. TigerData Console: https://console.cloud.timescale.com`);
           console.log(`⚠️  ════════════════════════════════════════════════════════════════\n`);
           
-          // Use placeholder password
+          // Use placeholder password (rare case)
           dbPassword = 'PENDING_MANUAL_UPDATE';
           
           logger.warn('Database not ready after all retries - saving with placeholder password', {
@@ -691,6 +738,133 @@ export class GitOpsProvisioningService {
         clientId: data.clientId,
         branch: this.config.mainBranch,
       });
+
+      // === STEP 4: Bootstrap Initial Admin Password ===
+      console.log('\n' + '-'.repeat(80));
+      console.log('🔑 STEP 4/4: BOOTSTRAP INITIAL ADMIN PASSWORD');
+      console.log('-'.repeat(80));
+      
+      try {
+        // Generate initial admin password
+        console.log('   📝 Generating initial admin password...');
+        const initialPassword = generateInitialAdminPassword();
+        
+        logger.info('Initial admin password generated', {
+          clientId: data.clientId,
+          passwordLength: initialPassword.length,
+        });
+
+        // Create 1Password item for the initial admin password
+        // This will be synced to K8s Secret by 1Password Operator, then used by bootstrap Job
+        console.log('   🔐 Storing password in 1Password vault...');
+        
+        try {
+          // Use createGenericSecretItem with 'admin-password' type
+          await this.onePasswordService.createGenericSecretItem(
+            data.clientId,
+            'admin-password',
+            {
+              password: initialPassword,
+              email: data.email,
+              createdAt: new Date().toISOString(),
+              notes: `Initial admin password for ${data.clientId}. Set by provisioning service. Customer must change on first login.`,
+            }
+          );
+          
+          logger.info('Initial admin password stored in 1Password', {
+            clientId: data.clientId,
+            itemType: 'admin-password',
+          });
+          console.log('   ✅ Password stored in 1Password');
+        } catch (onePasswordError) {
+          logger.error('Failed to store initial admin password in 1Password', {
+            clientId: data.clientId,
+            error: onePasswordError instanceof Error ? onePasswordError.message : String(onePasswordError),
+          });
+          throw onePasswordError;
+        }
+
+        // Generate one-time password reset token (SOC2 compliant - no plaintext storage)
+        console.log('   🔐 Generating password reset token...');
+        const resetToken = crypto.randomBytes(32).toString('hex');
+        const tokenHash = await bcrypt.hash(resetToken, 10);
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+        logger.info('Admin password reset token generated', {
+          clientId: data.clientId,
+          tokenLength: resetToken.length,
+          expiresIn: '24 hours',
+        });
+
+        // Store token hash in database (hash, not plaintext)
+        await CustomerModel.createAdminPasswordResetToken(
+          data.customerId,
+          tokenHash,
+          expiresAt
+        );
+        console.log('   ✅ Reset token stored in database (hashed, not plaintext)');
+
+        // Queue email event with reset link
+        // Email service will send link to customer, never stores password
+        const resetLink = `https://app.iotistic.com/auth/set-initial-password?token=${resetToken}&customerId=${data.customerId}`;
+        
+        console.log('   📧 Queuing password reset email...');
+        logger.info('Password reset email queued', {
+          clientId: data.clientId,
+          customerId: data.customerId,
+          email: data.email,
+          expiresAt: expiresAt.toISOString(),
+        });
+        
+        // Queue Bull job for email delivery
+        const emailJob = await emailQueue.addPasswordResetLinkJob({
+          customerId: data.customerId,
+          email: data.email,
+          clientId: data.clientId,
+          resetLink: resetLink,
+          expiresAt: expiresAt.toISOString(),
+        });
+
+        console.log(`   ✅ Email job queued: ${emailJob.id}`);
+        console.log(`   ℹ️  Job Details:`);
+        console.log(`       - Type: send-admin-password-reset-link`);
+        console.log(`       - Email: ${data.email}`);
+        console.log(`       - Reset Link: ${resetLink}`);
+        console.log(`       - Expires: ${expiresAt.toISOString()}`);
+        console.log(`       - Retries: 3 (with exponential backoff)`);
+        console.log(`       - Status: Pending in queue`);;
+        
+        // Mark deployment as complete
+        // K8s bootstrap Job will run in customer namespace after Argo CD deploys API pod
+        await CustomerModel.updateDeploymentStatus(data.customerId, 'deployed');
+        console.log('   ✅ Deployment status: deployed');
+        console.log('   ℹ️  Bootstrap Job will run in K8s cluster after API pod is ready');
+        console.log('   ℹ️  Customer will receive password reset link via email');
+
+        logger.info('Provisioning complete - SOC2 compliant password flow', {
+          clientId: data.clientId,
+          customerId: data.customerId,
+          passwordStoredIn: '1Password (for bootstrap)',
+          resetTokenStoredIn: 'Database (bcrypt hashed)',
+          expiration: expiresAt.toISOString(),
+          bootstrapJobTiming: 'Runs after Argo CD deploys API pod',
+        });
+
+      } catch (bootstrapError: any) {
+        console.error(`\n⚠️  Password setup failed: ${bootstrapError.message}`);
+        logger.warn('Initial password setup failed - deployment may require manual intervention', {
+          customerId: data.customerId,
+          clientId: data.clientId,
+          error: bootstrapError.message,
+        });
+        
+        // Log warning but don't fail deployment
+        // Provisioning completed, but password needs to be manually generated and stored
+        await CustomerModel.updateDeploymentStatus(data.customerId, 'deployed', {
+          deploymentNote: 'Deployment complete but admin password setup requires manual intervention',
+          bootstrapError: bootstrapError.message,
+        });
+      }
 
     } catch (error: any) {
       logger.error('Client deployment failed', {
@@ -927,7 +1101,6 @@ export class GitOpsProvisioningService {
       throw new Error(`Client deletion failed: ${error.message}`);
     }
   }
-
   /**
    * Check if GitOps is enabled
    */

@@ -37,19 +37,19 @@ spec:
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata:
-  name: redis-credentials-{{ .Release.Namespace }}
+  name: redis-credentials-master
   namespace: {{ .Release.Namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/redis-credentials-{{ .Release.Namespace }}"
+  itemPath: "vaults/IOT-CLIENTS/items/redis-credentials-master"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata:
-  name: openai-credentials-{{ .Release.Namespace }}
+  name: openai-credentials-master
   namespace: {{ .Release.Namespace }}
 spec:
   # This item must contain a field/key named OPENAI_API_KEY
-  itemPath: "vaults/IOT-CLIENTS/items/openai-credentials-{{ .Release.Namespace }}"
+  itemPath: "vaults/IOT-CLIENTS/items/openai-credentials-master"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
@@ -57,8 +57,35 @@ metadata:
   name: api-jwt-{{ .Release.Namespace }}
   namespace: {{ .Release.Namespace }}
 spec:
-  # This item must contain a field/key named OPENAI_API_KEY
+  # This item must contain a field/key named API_JWT
   itemPath: "vaults/IOT-CLIENTS/items/api-jwt-{{ .Release.Namespace }}"
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: api-license-credentials-{{ .Release.Namespace }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  # This item must contain a field/key named API_JWT
+  itemPath: "vaults/IOT-CLIENTS/items/api-license-credentials-{{ .Release.Namespace }}"
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: api-license-public-key-master
+  namespace: {{ .Release.Namespace }}
+spec:
+  # Global license public key for JWT verification (shared across all namespaces)
+  itemPath: "vaults/IOT-CLIENTS/items/api-license-public-key-master"
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: api-bootstrap-token-master
+  namespace: {{ .Release.Namespace }}
+spec:
+  # Global bootstrap token for provisioning automation
+  itemPath: "vaults/IOT-CLIENTS/items/api-bootstrap-token-master"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -153,6 +180,7 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.api.jwt.SecretName }}
                   key: token
+            
             {{- if .Values.api.env.JWT_ACCESS_TOKEN_EXPIRY }}
             - name: JWT_ACCESS_TOKEN_EXPIRY
               value: {{ .Values.api.env.JWT_ACCESS_TOKEN_EXPIRY }}
@@ -161,6 +189,24 @@ spec:
             - name: JWT_REFRESH_TOKEN_EXPIRY
               value: {{ .Values.api.env.JWT_REFRESH_TOKEN_EXPIRY}}
             {{- end }}
+
+            - name: INITIAL_ADMIN_BOOTSTRAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: api-bootstrap-token-master
+                  key: INITIAL_ADMIN_BOOTSTRAP_TOKEN
+            
+            - name: IOTISTIC_LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.license.SecretName }}
+                  key: key
+                  
+            - name: LICENSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.publicKey.SecretName }}
+                  key: key
 
             - name: DB_HOST
               valueFrom:
@@ -261,12 +307,12 @@ spec:
             - name: CORS_ORIGINS
               value: {{ .Values.api.corsOrigins | default "http://localhost:5173,http://localhost:3001,http://localhost:3000,http://*:30000" | quote }}
             # License configuration
-            # Public key: Read from cluster-wide ConfigMap (shared by all customers)
+            # Public key: Read from 1Password-synced secret (shared across all namespaces)
             - name: LICENSE_PUBLIC_KEY
               valueFrom:
-                configMapKeyRef:
-                  name: iotistic-license-public-key
-                  key: public-key.pem
+                secretKeyRef:
+                  name: api-license-public-key-master
+                  key: LICENSE_PUBLIC_KEY
             # License JWT: Read from customer-specific 1Password secret
             {{- if .Values.api.license.SecretName }}
             - name: IOTISTIC_LICENSE_KEY
@@ -344,6 +390,12 @@ spec:
         periodSeconds: 30
       selectPolicy: Max  # Use whichever policy allows faster scaling
 {{- end }}
+            # --- Admin Password Bootstrap ---
+            # Bootstrap token for provisioning automation to authorize initial admin account creation
+            # Used by provisioning service to securely initialize the first admin account
+            # Flow: Provisioning service generates 32-byte reset token -> hashes with bcrypt -> 
+            # stores in database -> queues password reset email link -> customer follows link to set password
+            # Token pulled from 1Password via OnePasswordItem CRD (api-bootstrap-token-master)
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -362,4 +414,23 @@ spec:
           name: {{ include "iotistic.fullname" . }}-api
           port: 3002
           weight: 1
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: {{ include "iotistic.fullname" . }}-api-rate-limit
+  namespace: {{ .Release.Namespace }}
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: {{ include "iotistic.fullname" . }}-api-httproute
+  rateLimit:
+    type: Local
+    local:
+      rules:
+      - limit:
+          requests: 1000
+          unit: Minute
+
 {{- end }}

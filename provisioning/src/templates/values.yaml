@@ -120,6 +120,8 @@ api:
   # License configuration (JWT license + public key stored in 1Password)
   license: 
     SecretName: "api-license-credentials-{{CLIENT_ID}}" 
+  publicKey:
+    SecretName: "api-license-public-key-master"
   # Prometheus metrics monitoring
   monitoring:
     enabled: true # Enable ServiceMonitor for Prometheus scraping

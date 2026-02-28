@@ -56,9 +56,11 @@ export class TigerDataService {
   private client: AxiosInstance;
   private config: TigerDataConfig;
   private simulateMode: boolean;
+  private maxStatusChecks: number;
 
   constructor(config?: Partial<TigerDataConfig>) {
     this.simulateMode = process.env.SIMULATE_TIGERDATA === 'true';
+    this.maxStatusChecks = parseInt(process.env.TIGERDATA_MAX_STATUS_CHECKS || '40', 10);
     this.config = {
       apiUrl: config?.apiUrl || process.env.TIGERDATA_API_URL || 'https://console.cloud.timescale.com/public/api/v1',
       accessKey: config?.accessKey || process.env.TIGERDATA_ACCESS_KEY || '',
@@ -280,14 +282,16 @@ export class TigerDataService {
   /**
    * Wait until database is ready (polling)
    * @param serviceId - TigerData service ID
-   * @param maxRetries - Maximum number of status checks (default: 30)
+   * @param maxRetries - Maximum number of status checks (default: TIGERDATA_MAX_STATUS_CHECKS env var or 40)
    * @param delayMs - Delay between checks in milliseconds (default: 10000)
    */
   async waitUntilReady(
     serviceId: string,
-    maxRetries: number = 30,
+    maxRetries?: number,
     delayMs: number = 10000
   ): Promise<void> {
+    const retries = maxRetries ?? this.maxStatusChecks;
+    
     if (!serviceId || serviceId === 'undefined') {
       throw new TigerDataProvisioningError(
         'Cannot wait for database: serviceId is missing or undefined. ' +
@@ -296,6 +300,7 @@ export class TigerDataService {
     }
 
     console.log(`[TigerDataService] Waiting for database ${serviceId} to become ready...`);
+    console.log(`[TigerDataService] Max retries: ${retries} (configurable via TIGERDATA_MAX_STATUS_CHECKS)`);
 
     // In simulation mode, mock databases are always ready
     if (this.simulateMode) {
@@ -303,11 +308,11 @@ export class TigerDataService {
       return;
     }
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
       const status = await this.getDatabaseStatus(serviceId);
 
       console.log(
-        `[TigerDataService] Status check ${attempt}/${maxRetries}: ${status.status}`
+        `[TigerDataService] Status check ${attempt}/${retries}: ${status.status}`
       );
 
       // TigerData API returns 'READY' (uppercase), some APIs return 'active'
@@ -323,13 +328,13 @@ export class TigerDataService {
       }
 
       // Wait before next check
-      if (attempt < maxRetries) {
+      if (attempt < retries) {
         await this.delay(delayMs);
       }
     }
 
     throw new TigerDataProvisioningError(
-      `Database ${serviceId} did not become ready after ${maxRetries} attempts (${(maxRetries * delayMs) / 1000}s total). ` +
+      `Database ${serviceId} did not become ready after ${retries} attempts (${(retries * delayMs) / 1000}s total). ` +
       `The database may still be provisioning on TigerData's end. ` +
       `Database details have been saved to the customer record. ` +
       `You can retry the deployment job after the database becomes active - ` +

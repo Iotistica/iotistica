@@ -149,6 +149,81 @@ router.post('/login', authRateLimit, async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /auth/bootstrap-admin
+ *
+ * Bootstrap initial admin password for a newly deployed namespace.
+ * Protected by a deployment token (x-bootstrap-token header).
+ *
+ * Headers:
+ *   - x-bootstrap-token: string (required)
+ *
+ * Body:
+ *   - password: string (required, min 12)
+ *   - email: string (optional)
+ */
+router.post('/bootstrap-admin', authRateLimit, async (req: Request, res: Response) => {
+  try {
+    const configuredToken = process.env.INITIAL_ADMIN_BOOTSTRAP_TOKEN;
+
+    if (!configuredToken) {
+      res.status(503).json({
+        error: 'Service Unavailable',
+        message: 'Bootstrap token is not configured on this instance'
+      });
+      return;
+    }
+
+    const requestToken = req.headers['x-bootstrap-token'];
+    if (!requestToken || requestToken !== configuredToken) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Invalid bootstrap token'
+      });
+      return;
+    }
+
+    const { password, email } = req.body;
+
+    if (!password) {
+      res.status(400).json({
+        error: 'Bad Request',
+        message: 'password is required'
+      });
+      return;
+    }
+
+    await authService.bootstrapAdminPassword(password, email);
+
+    res.status(200).json({
+      message: 'Admin bootstrap password set successfully',
+      data: {
+        mustChangePassword: true
+      }
+    });
+  } catch (error: any) {
+    console.error('Bootstrap admin error:', error);
+
+    if (
+      error.message.includes('at least') ||
+      error.message.includes('required') ||
+      error.message.includes('not found') ||
+      error.message.includes('Valid email')
+    ) {
+      res.status(400).json({
+        error: 'Bad Request',
+        message: error.message
+      });
+      return;
+    }
+
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Bootstrap admin failed'
+    });
+  }
+});
+
+/**
  * POST /auth/refresh
  * 
  * Refresh access token using refresh token

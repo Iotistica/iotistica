@@ -30,8 +30,12 @@ export type DeploymentStatus =
   | 'failed_deployment'   // Deployment/GitOps failed (Git commit/push)
   | 'argo_failed'         // Argo CD sync/health check failed
   
+  // Admin bootstrap
+  | 'deployed'            // Argo CD synced, waiting for bootstrap or bootstrap complete
+  | 'deployed_bootstrap_pending'  // Deployment complete but bootstrap failed/pending
+  
   // Terminal states
-  | 'ready'               // Fully provisioned and operational
+  | 'ready'               // Fully provisioned, bootstrapped, and operational
   | 'failed'              // Generic failure (legacy)
   | 'cancelled'           // Subscription cancelled
   | 'deleting'            // Cleanup in progress
@@ -64,7 +68,9 @@ export function isProvisioningInProgress(status: DeploymentStatus): boolean {
     'secret_creating',
     'deploying',
     'git_committed',
-    'argo_syncing'
+    'argo_syncing',
+    'deployed',
+    'deployed_bootstrap_pending'
   ].includes(status);
 }
 
@@ -89,7 +95,9 @@ export function getNextStatus(currentStatus: DeploymentStatus): DeploymentStatus
     'secret_ready': 'deploying',
     'deploying': 'git_committed',
     'git_committed': 'argo_syncing',
-    'argo_syncing': 'ready',
+    'argo_syncing': 'deployed',
+    'deployed': 'ready',
+    'deployed_bootstrap_pending': 'ready',  // Retry leads to ready or stays terminal
     'ready': null,
     'failed': null,
     'failed_db': null,

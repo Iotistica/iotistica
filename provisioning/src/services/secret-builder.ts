@@ -52,6 +52,9 @@ export const secretTemplates: Record<string, SecretTemplate> = {
   'api-jwt': {
     token: { type: 'token', length: 64 },
   },
+  'api-bootstrap-admin-password': {
+    password: { type: 'password', length: 16 },  // Deployment-grade password (16+ chars)
+  },
   sql: {
     password: { type: 'static', value: 'PENDING' },
     port: { type: 'static', value: '5432' },
@@ -143,6 +146,22 @@ export class SecretBuilder {
       key: license
     };
     
+    return this;
+  }
+
+  /**
+   * Set initial admin password for customer instance
+   * Called after deployment to establish first-login password
+   * 
+   * @param password - Initial admin password (should be 16+ chars, deployment-grade)
+   * @returns this (for chaining)
+   */
+  public setAdminPassword(password: string): this {
+    if (!this.secrets['api-bootstrap-admin-password']) {
+      this.secrets['api-bootstrap-admin-password'] = {};
+    }
+    
+    this.secrets['api-bootstrap-admin-password'].password = password;
     return this;
   }
 

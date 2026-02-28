@@ -73,6 +73,140 @@ const options: MqttDiscoveryOptions = {
 };
 ```
 
+### 🔑 Key Difference: DataPoints Are Optional for MQTT
+
+**Critical Understanding**: Unlike Modbus/OPC-UA, MQTT **does not require predefined dataPoints** for discovery.
+
+| Protocol | DataPoints Required? | Why? |
+|----------|---------------------|------|
+| **Modbus** | ✅ **YES** | Must specify register addresses (1, 2, 3...) upfront - can't discover without knowing where to read |
+| **OPC-UA** | ⚠️ **Optional** | Can browse node hierarchy if no dataPoints provided |
+| **MQTT** | ❌ **NO** | Subscribes to topics and auto-discovers active publishers - dataType inferred from payload |
+
+**MQTT Discovery Advantage**: 
+- Subscribe to `sensor/#` wildcard
+- Listen for any messages
+- Auto-detect active topics
+- Infer dataType (number, boolean, string, json) from payload content
+- No need to know topic names upfront!
+
+#### MQTT Configuration Examples
+
+**Option 1: Discovery-First (Recommended) - No DataPoints Needed**
+```json
+{
+  "id": "8c4a7f3e-9b2d-4e5a-a1c6-7d8e9f0b1c2d",
+  "name": "mqtt-sensors",
+  "enabled": true,
+  "metadata": {
+    "createdAt": "2026-02-28T00:00:00.000Z",
+    "createdBy": "system"
+  },
+  "protocol": "mqtt",
+  "connection": {
+    "brokerUrl": "mqtt://mosquitto:1883",
+    "username": null,
+    "password": null,
+    "qos": 1
+  },
+  "discoveryRoots": [
+    "sensor/#",
+    "device/+/status",
+    "iot/sensors/+"
+  ],
+  "monitorDurationMs": 30000
+}
+```
+
+**What happens**:
+1. Agent subscribes to `sensor/#`, `device/+/status`, `iot/sensors/+`
+2. Monitors for 30 seconds
+3. Detects topics: `sensor/temperature`, `sensor/humidity`, `sensor/motion`
+4. Infers dataTypes: `float32`, `float32`, `boolean`
+5. Creates devices automatically
+
+**Option 2: Explicit DataPoints (When You Know Topics)**
+```json
+{
+  "id": "f5e8d2c1-4a6b-4d9e-8f3a-2c7d9e1b5a4f",
+  "name": "mqtt-sensors",
+  "enabled": true,
+  "protocol": "mqtt",
+  "connection": {
+    "brokerUrl": "mqtt://mosquitto:1883",
+    "qos": 1
+  },
+  "dataPoints": [
+    {
+      "name": "temperature-sensor",
+      "enabled": true,
+      "topic": "sensor/temperature",
+      "dataType": "float32",
+      "unit": "°C",
+      "metric": "temperature",
+      "qos": 1
+    },
+    {
+      "name": "humidity-sensor",
+      "enabled": true,
+      "topic": "sensor/humidity",
+      "dataType": "float32",
+      "unit": "%RH",
+      "metric": "humidity",
+      "qos": 1
+    },
+    {
+      "name": "motion-detector",
+      "enabled": true,
+      "topic": "sensor/motion",
+      "dataType": "boolean",
+      "metric": "motion_detected",
+      "qos": 0
+    }
+  ]
+}
+```
+
+**Use explicit dataPoints when**:
+- You know exact topic names
+- You want to override auto-detected dataType
+- You need to add units/metrics/descriptions
+- You want fine-grained QoS control per topic
+
+**Option 3: Hybrid Approach (Discovery + Overrides)**
+```json
+{
+  "id": "3b9f7e2a-6d4c-4a8e-9b1f-5e8a7c3d6f2b",
+  "name": "mqtt-sensors",
+  "enabled": true,
+  "protocol": "mqtt",
+  "connection": {
+    "brokerUrl": "mqtt://mosquitto:1883",
+    "qos": 1
+  },
+  "discoveryRoots": [
+    "sensor/#"
+  ],
+  "monitorDurationMs": 30000,
+  "dataPoints": [
+    {
+      "name": "critical-temperature",
+      "enabled": true,
+      "topic": "sensor/temperature",
+      "dataType": "float32",
+      "unit": "°C",
+      "qos": 2,
+      "description": "Override: Use QoS 2 for critical temperature sensor"
+    }
+  ]
+}
+```
+
+**Hybrid behavior**:
+- Discovery finds all topics under `sensor/#`
+- Explicit dataPoint for `sensor/temperature` overrides auto-detected config
+- Other discovered topics use default settings
+
 ### ⚠️ Missing: MQTT Discovery Targets in getDiscoveryTargets()
 
 **Issue Found**: `getDiscoveryTargets()` doesn't have a case for MQTT!
@@ -101,11 +235,89 @@ public getDiscoveryTargets(protocol: string): any[] {
 **Should Add**:
 ```typescript
 case 'mqtt':
-  // Accept endpoints with topics array (for validation)
-  return Array.isArray(connection?.topics) && connection.topics.length > 0;
+  // Accept endpoints with discoveryRoots (topics to monitor)
+  return Array.isArray(endpoint.discoveryRoots) && endpoint.discoveryRoots.length > 0;
 ```
 
 This would make MQTT consistent with other protocols.
+
+## MQTT vs Modbus Configuration Comparison
+
+### Side-by-Side: Minimal Required Configuration
+
+**Modbus (Requires DataPoints)**
+```json
+{
+  "protocol": "modbus",
+  "connection": {
+    "host": "10.0.0.60",
+    "port": 502,
+    "type": "tcp",
+    "slaveId": 1
+  },
+  "dataPoints": [
+    {
+      "name": "temperature",
+      "type": "holding",
+      "address": 10,
+      "dataType": "uint16"
+    }
+  ],
+  "pollInterval": 5000
+}
+```
+**Must have**: Register addresses (10, 11, 12...) - cannot discover without knowing where to read
+
+**MQTT (Discovery-First)**
+```json
+{
+  "protocol": "mqtt",
+  "connection": {
+    "brokerUrl": "mqtt://mosquitto:1883"
+  },
+  "discoveryRoots": [
+    "sensor/#"
+  ],
+  "monitorDurationMs": 30000
+}
+```
+**No dataPoints needed**: Subscribes to wildcard topics, auto-discovers active publishers
+
+### Configuration Philosophy Differences
+
+| Aspect | Modbus | MQTT |
+|--------|--------|------|
+| **Discovery Model** | Address-based scanning | Topic-based listening |
+| **Required Info** | IP, slave ID, register addresses | Broker URL, topic patterns |
+| **DataPoints** | ✅ Mandatory (must know addresses) | ❌ Optional (auto-discovered) |
+| **DataType Detection** | ❌ Cannot infer (must specify uint16/float32) | ✅ Auto-infers from payload |
+| **Topic/Address Format** | Numeric addresses (1, 2, 3, 100) | Hierarchical topics (sensor/temp) |
+| **Wildcard Support** | ❌ No (must enumerate addresses) | ✅ Yes (+, # wildcards) |
+| **Polling** | Required (pollInterval: 5000ms) | Push-based (no polling) |
+
+### When to Use DataPoints in MQTT
+
+```json
+// ✅ Use dataPoints when you need:
+{
+  "protocol": "mqtt",
+  "connection": { "brokerUrl": "mqtt://mosquitto:1883" },
+  "dataPoints": [
+    {
+      "topic": "sensor/temperature",
+      "dataType": "float32",  // Override auto-detection
+      "unit": "°C",           // Add metadata
+      "qos": 2                // Fine-grained QoS control
+    }
+  ]
+}
+
+// ❌ Don't use dataPoints when:
+// - You don't know topic names yet
+// - You want to discover all active topics
+// - Auto-detected dataType is sufficient
+// - Default QoS settings work for all topics
+```
 
 ## Data Flow Patterns
 
@@ -343,6 +555,85 @@ Update config schema to accept both:
 topics: cloudProtocol?.topics ?? cloudProtocol?.discoveryRoots ?? []
 ```
 
+## Quick Reference: Target State Configuration
+
+### Minimal MQTT Configuration (Discovery Mode)
+```json
+{
+  "endpoints": [
+    {
+      "id": "8c4a7f3e-9b2d-4e5a-a1c6-7d8e9f0b1c2d",
+      "name": "mqtt-sensors",
+      "enabled": true,
+      "protocol": "mqtt",
+      "connection": {
+        "brokerUrl": "mqtt://mosquitto:1883"
+      },
+      "discoveryRoots": ["sensor/#"]
+    }
+  ]
+}
+```
+
+### With Authentication
+```json
+{
+  "connection": {
+    "brokerUrl": "mqtt://mosquitto:1883",
+    "username": "iotistic",
+    "password": "secret123",
+    "clientId": "agent-unique-id"
+  }
+}
+```
+
+### With Explicit Topics (Skip Discovery)
+```json
+{
+  "protocol": "mqtt",
+  "connection": {
+    "brokerUrl": "mqtt://mosquitto:1883",
+    "qos": 1
+  },
+  "dataPoints": [
+    {
+      "name": "temp-sensor",
+      "topic": "sensor/temperature",
+      "dataType": "float32",
+      "unit": "°C",
+      "qos": 2
+    }
+  ]
+}
+```
+
+### Testing Multiple Protocols Together
+```json
+{
+  "endpoints": [
+    {
+      "id": "7a90f002-5162-43e2-bf13-156dbf7014f0",
+      "name": "modbus",
+      "protocol": "modbus",
+      "connection": { "host": "10.0.0.60", "port": 502, "slaveId": 1 },
+      "dataPoints": [
+        { "address": 10, "type": "holding", "dataType": "uint16" }
+      ],
+      "pollInterval": 5000
+    },
+    {
+      "id": "8c4a7f3e-9b2d-4e5a-a1c6-7d8e9f0b1c2d",
+      "name": "mqtt-sensors",
+      "protocol": "mqtt",
+      "connection": { "brokerUrl": "mqtt://mosquitto:1883" },
+      "discoveryRoots": ["sensor/#"]
+    }
+  ]
+}
+```
+
+**Key Takeaway**: MQTT is the **only** protocol that doesn't require dataPoints - use `discoveryRoots` to auto-discover active topics!
+
 ## Conclusion
 
 **MQTT architecture is sound** - The patterns are consistent with Modbus/OPC-UA:
@@ -352,9 +643,20 @@ topics: cloudProtocol?.topics ?? cloudProtocol?.discoveryRoots ?? []
 3. ✅ Device publish feature sends local data to cloud (via MQTT)
 4. ✅ Self-healing architecture (both adapter and publish survive broker downtime)
 
+**🔑 Key Difference from Other Protocols**:
+- **MQTT is the ONLY protocol that doesn't require predefined dataPoints**
+- Use `discoveryRoots: ["sensor/#"]` to auto-discover active topics
+- DataType is automatically inferred from payload content
+- DataPoints are optional and only needed for overrides/metadata
+
+**Configuration Flexibility**:
+- **Discovery Mode**: Just provide broker URL + topic patterns → auto-discover everything
+- **Explicit Mode**: Provide dataPoints → skip discovery, use exact topics
+- **Hybrid Mode**: Use both → discovery finds topics, dataPoints override specific ones
+
 **Minor improvements**:
 - Add MQTT to `getDiscoveryTargets()` for consistency
-- Rename `discoveryRoots` → `topics` in config schema
+- Rename `discoveryRoots` → `topics` in config schema (backward compatible)
 - Document two data flow patterns clearly
 
 **No breaking changes needed** - Everything works correctly, just needs minor cleanup for consistency.

@@ -47,6 +47,9 @@ export interface Customer {
   // Cancellation tracking
   is_active?: boolean;
   deleted_at?: Date;
+  // Admin bootstrap fields
+  initial_admin_password?: string;
+  bootstrapped_at?: Date;
   created_at: Date;
   updated_at: Date;
 }
@@ -245,6 +248,9 @@ export class CustomerModel {
       instanceUrl?: string;
       instanceNamespace?: string;
       deploymentError?: string;
+      deploymentNote?: string;
+      bootstrapError?: string;
+      bootstrappedAt?: Date;
     }
   ): Promise<Customer> {
     const fields = ['deployment_status = $1', 'updated_at = CURRENT_TIMESTAMP'];
@@ -266,6 +272,24 @@ export class CustomerModel {
     if (data?.deploymentError) {
       fields.push(`deployment_error = $${paramIndex}`);
       values.push(data.deploymentError);
+      paramIndex++;
+    }
+
+    if (data?.deploymentNote) {
+      fields.push(`last_provisioning_step = $${paramIndex}`);
+      values.push(data.deploymentNote);
+      paramIndex++;
+    }
+
+    if (data?.bootstrapError) {
+      fields.push(`last_provisioning_error = $${paramIndex}`);
+      values.push(data.bootstrapError);
+      paramIndex++;
+    }
+
+    if (data?.bootstrappedAt) {
+      fields.push(`bootstrapped_at = $${paramIndex}`);
+      values.push(data.bootstrappedAt);
       paramIndex++;
     }
 
@@ -456,6 +480,54 @@ export class CustomerModel {
       `UPDATE customers 
        SET argo_retry_count = 0,
            argo_last_retry_at = NULL,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE customer_id = $1 
+       RETURNING *`,
+      [customerId]
+    );
+
+    return result.rows[0];
+  }
+
+  /**
+   * Create admin password reset token (SOC2 compliant)
+   * Instead of storing plaintext password, creates one-time reset token
+   * 
+   * @param customerId - Customer ID
+   * @param tokenHash - bcrypt hash of reset token (not plaintext)
+   * @param expiresAt - When token expires (typically 24 hours)
+   */
+  static async createAdminPasswordResetToken(
+    customerId: string,
+    tokenHash: string,
+    expiresAt: Date
+  ): Promise<Customer> {
+    const result = await query<Customer>(
+      `UPDATE customers 
+       SET admin_reset_token_hash = $1,
+           admin_reset_token_expires_at = $2,
+           admin_reset_token_sent_at = CURRENT_TIMESTAMP,
+           admin_reset_token_used = false,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE customer_id = $3 
+       RETURNING *`,
+      [tokenHash, expiresAt, customerId]
+    );
+
+    return result.rows[0];
+  }
+
+  /**
+   * Mark admin password reset token as used
+   * Called when customer successfully sets their password
+   * 
+   * @param customerId - Customer ID
+   */
+  static async markAdminPasswordResetTokenUsed(customerId: string): Promise<Customer> {
+    const result = await query<Customer>(
+      `UPDATE customers 
+       SET admin_reset_token_used = true,
+           admin_reset_token_used_at = CURRENT_TIMESTAMP,
            updated_at = CURRENT_TIMESTAMP
        WHERE customer_id = $1 
        RETURNING *`,

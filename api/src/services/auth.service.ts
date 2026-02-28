@@ -15,7 +15,8 @@ const REFRESH_TOKEN_EXPIRY_DAYS = 7;
 
 export interface LoginResult {
   accessToken: string;
-  refreshToken: string;
+  refreshToken?: string;
+  mustChangePassword?: boolean;
   user: {
     id: number;
     username: string;
@@ -115,7 +116,7 @@ export async function loginUser(
 ): Promise<LoginResult> {
   // Find user by username or email
   const result = await query(
-    `SELECT id, username, email, password_hash, role, full_name, is_active
+    `SELECT id, username, email, password_hash, role, full_name, is_active, must_change_password
      FROM users
      WHERE username = $1 OR email = $1`,
     [usernameOrEmail]
@@ -159,10 +160,13 @@ export async function loginUser(
 
   // Generate tokens
   const accessToken = generateAccessToken(user);
-  const refreshToken = generateRefreshToken(user);
+  const shouldForcePasswordChange = !!user.must_change_password;
+  const refreshToken = shouldForcePasswordChange ? undefined : generateRefreshToken(user);
 
   // Store refresh token
-  await storeRefreshToken(user.id, refreshToken, ipAddress, userAgent);
+  if (refreshToken) {
+    await storeRefreshToken(user.id, refreshToken, ipAddress, userAgent);
+  }
 
   // Log successful login (non-blocking)
   logAuditEvent('user_login', user.id, ipAddress, {
@@ -175,6 +179,7 @@ export async function loginUser(
   return {
     accessToken,
     refreshToken,
+    mustChangePassword: shouldForcePasswordChange,
     user: {
       id: user.id,
       username: user.username,
@@ -316,7 +321,12 @@ export async function changePassword(
 
   // Update password
   await query(
-    'UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+    `UPDATE users
+     SET password_hash = $1,
+         must_change_password = false,
+         password_last_changed_at = CURRENT_TIMESTAMP,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $2`,
     [newPasswordHash, userId]
   );
 
@@ -333,6 +343,60 @@ export async function changePassword(
   }).catch(err => logger.warn('Failed to log audit event:', err));
 
   logger.info(`Password changed for user: ${user.username}`);
+}
+
+/**
+ * Bootstrap initial admin password for a newly provisioned namespace.
+ * This endpoint is intended to be called by provisioning automation only.
+ */
+export async function bootstrapAdminPassword(
+  newPassword: string,
+  email?: string
+): Promise<void> {
+  if (!newPassword || newPassword.length < 12) {
+    throw new Error('Bootstrap password must be at least 12 characters');
+  }
+
+  if (email && !email.includes('@')) {
+    throw new Error('Valid email address required');
+  }
+
+  const result = await query(
+    'SELECT id, username FROM users WHERE username = $1 LIMIT 1',
+    ['admin']
+  );
+
+  if (result.rows.length === 0) {
+    throw new Error('Admin user not found');
+  }
+
+  const admin = result.rows[0];
+  const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+
+  await query(
+    `UPDATE users
+     SET password_hash = $1,
+         email = COALESCE($2, email),
+         must_change_password = true,
+         password_last_changed_at = NULL,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $3`,
+    [passwordHash, email || null, admin.id]
+  );
+
+  await query(
+    `UPDATE refresh_tokens
+     SET revoked = true, revoked_at = CURRENT_TIMESTAMP
+     WHERE user_id = $1 AND revoked = false`,
+    [admin.id]
+  );
+
+  logAuditEvent('admin_bootstrap_password_set', admin.id, null, {
+    username: admin.username,
+    hasEmailOverride: !!email
+  }).catch(err => logger.warn('Failed to log audit event:', err));
+
+  logger.info('Bootstrap admin password set');
 }
 
 /**
