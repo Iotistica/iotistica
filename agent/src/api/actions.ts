@@ -9,7 +9,7 @@ import type { CloudSync } from '../device-manager/sync';
 import type { AgentLogger } from '../logging/agent-logger';
 import type { AnomalyDetectionService } from '../ai/anomaly';
 import type { SimulationOrchestrator } from '../simulation';
-import type { SensorsFeature } from '../features/endpoints';
+import type { SensorsFeature } from '../features/adapters';
 import { LogComponents } from '../logging/types';
 
 let containerManager: ContainerManager;

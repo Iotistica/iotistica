@@ -491,7 +491,6 @@ export class SensorsFeature extends BaseFeature {
             metric: d.connection.metric,
             deviceId: d.connection.deviceId
           })),
-          observerRoots: (this.config.mqtt as any)?.discoveryRoots, // Wildcard topics for observation
 
           logging: {
             level: 'info',

@@ -10,7 +10,7 @@ import type { DeviceInfo } from '../device-manager/types.js';
 import { LogComponents } from '../logging/types';
 import { JobsFeature } from '../features/jobs/src/monitor.js';
 import { SensorPublishFeature } from '../features/publish/index.js';
-import { SensorsFeature, type SensorConfig } from '../features/endpoints/index.js';
+import { SensorsFeature, type SensorConfig } from '../features/adapters/index.js';
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
 import { MqttManager } from '../mqtt/manager.js';

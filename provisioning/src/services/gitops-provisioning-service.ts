@@ -480,9 +480,80 @@ export class GitOpsProvisioningService {
         
         // Now update SQL credentials with actual DB info
         console.log(`\n🔄 Updating SQL credentials with TigerData info...`);
+        
+        // IMPORTANT: TigerData API only returns password on initial creation
+        // If database already exists, password will be empty - need to retrieve from 1Password or customer record
+        let dbPassword = dbResult.password;
+        if (!dbPassword) {
+          console.warn(`⚠️  Database password empty (database already exists)`);
+          
+          // Try to retrieve password from customer record first (in case previous job failed after DB creation)
+          const customer = await CustomerModel.getById(data.customerId);
+          if (customer?.db_api_response) {
+            console.log(`🔍 Checking customer DB API response for password...`);
+            try {
+              const apiResponse = typeof customer.db_api_response === 'string' 
+                ? JSON.parse(customer.db_api_response) 
+                : customer.db_api_response;
+              
+              const passwordFromApi = apiResponse.initial_password || apiResponse.password;
+              if (passwordFromApi) {
+                dbPassword = passwordFromApi;
+                console.log(`✅ Password retrieved from customer DB API response`);
+              }
+            } catch (error) {
+              console.warn(`⚠️  Could not parse DB API response:`, error);
+            }
+          }
+          
+          // If still no password, try to retrieve from existing 1Password secret
+          if (!dbPassword && customer?.secret_item_id) {
+            console.log(`🔑 Retrieving password from existing 1Password secret: ${customer.secret_item_id}`);
+            try {
+              const existingSecret = await this.onePasswordService.getItem(customer.secret_item_id);
+              // Extract password field from the secret
+              const passwordField = existingSecret.fields?.find((f: any) => 
+                f.label === 'password' || f.id === 'password'
+              );
+              if (passwordField?.value) {
+                dbPassword = passwordField.value;
+                console.log(`✅ Password retrieved from existing 1Password secret`);
+              } else {
+                console.warn(`⚠️  Password field not found in existing 1Password secret`);
+              }
+            } catch (error) {
+              console.error(`❌ Failed to retrieve password from 1Password:`, error);
+            }
+          }
+          
+          // If still no password, provide detailed error with recovery instructions
+          if (!dbPassword) {
+            const errorMsg = 
+              `Database already exists but password cannot be retrieved.\n` +
+              `\n` +
+              `This can happen if:\n` +
+              `1. A previous deployment job failed after database creation but before saving credentials\n` +
+              `2. TigerData was slow to provision and the job timed out\n` +
+              `\n` +
+              `Database Details:\n` +
+              `- Service ID: ${dbResult.serviceId}\n` +
+              `- Host: ${dbResult.host}\n` +
+              `- Namespace: ${data.namespace}\n` +
+              `\n` +
+              `Recovery Options:\n` +
+              `1. Retrieve the password from TigerData console (https://console.cloud.timescale.com)\n` +
+              `2. Delete the database via TigerData console and retry deployment\n` +
+              `3. Contact support with Service ID: ${dbResult.serviceId}\n` +
+              `\n` +
+              `Note: TigerData API only returns passwords on initial database creation.`;
+            
+            throw new Error(errorMsg);
+          }
+        }
+        
         secretBuilder.addDbCredentials({
           user: dbResult.username,
-          password: dbResult.password,
+          password: dbPassword,
           host: dbResult.host,
           port: dbResult.port,
           name: dbResult.dbName,

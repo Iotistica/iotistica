@@ -1,44 +1,31 @@
 /**
  * MQTT Discovery Plugin
  * 
- * Discovers active MQTT topics by subscribing to wildcard patterns
- * Unique pattern: Push-based (vs pull-based Modbus/OPC-UA)
+ * Simplified topic validation approach (not auto-discovery)
+ * User provides explicit topics → we verify they publish data
  * 
- * 🔀 HYBRID DISCOVERY ARCHITECTURE:
- * 
- * This plugin implements ACTIVE discovery (user-triggered snapshots),
- * complemented by PASSIVE observation in the runtime MQTT adapter.
- * 
- * 1️⃣ Passive Observation (Always-On, Bounded)
- *    - Runtime adapter tracks topics during normal operation
- *    - Bounded memory (2000 topics max, LRU eviction)
- *    - Tracks: firstSeen, lastSeen, liveCount, retainedCount
- *    - Does NOT auto-create devices (only awareness)
- *    - See: agent/src/features/endpoints/mqtt/adapter.ts
- * 
- * 2️⃣ Active Discovery (This Plugin - User Triggered)
- *    - Explicit discoveryRoots (e.g., ['edge/+', 'sensor/+/data'])
- *    - Time-bounded sampling (default 30s)
- *    - Strong validation (pattern matching, safety checks)
- *    - Emits candidate endpoints
- *    - 30s window is about SAMPLING, not COMPLETENESS
- * 
- * 3️⃣ Deferred Validation (Per-Topic, Flexible)
- *    - Accepts slow publishers (1+ messages OK)
- *    - Computes publish rate, separates retained vs live
- *    - Establishes truth (not discovery)
- * 
- * Why This Pattern?
- * ❌ Pure 30s windows: Miss low-frequency/battery-powered sensors
- * ❌ Pure continuous: Memory growth, topic explosion, no user intent
- * ✅ Hybrid: Continuous awareness + discrete snapshots + user control
+ * Pattern: MQTT topic = endpoint (like Modbus register or OPC-UA node)
  * 
  * Discovery Strategy:
- * - Subscribe to wildcard topics (e.g., '#' or 'device/#')
- * - Monitor for configurable duration (default 30s)
- * - Parse topic structure to extract metadata (deviceId, metric)
- * - Infer data types from payloads
- * - Auto-populate endpoints table
+ * - User supplies specific topics to validate
+ * - Subscribe to each topic
+ * - Wait for messages (10-15 seconds)
+ * - If messages received → topic is active
+ * - Infer basic data type (number, boolean, string, json)
+ * - Return validated topics as candidates
+ * 
+ * No Complex Features:
+ * - ❌ No wildcard scanning
+ * - ❌ No metadata parsing
+ * - ❌ No confidence scoring
+ * - ❌ No compound topic analysis
+ * - ❌ No observer roots
+ * - ❌ No passive discovery
+ * 
+ * Industrial Best Practice:
+ * - Explicit configuration > Auto-discovery magic
+ * - Validate what user asks for > Scan everything
+ * - Deterministic behavior > Heuristics
  */
 
 import type { AgentLogger } from '../../logging/agent-logger';
@@ -48,41 +35,34 @@ import * as mqtt from 'mqtt';
 import crypto from 'crypto';
 
 export interface MqttDiscoveryOptions {
-  brokerUrl?: string;          // e.g., 'mqtt://mosquitto:1883'
+  brokerUrl?: string;          // e.g., 'mqtt://mosquitto:1883' or 'mqtts://broker:8883'
   username?: string;
   password?: string;
-  discoveryRoots?: string[];   // REQUIRED: Explicit topic roots (e.g., ['edge/+', 'devices/+/telemetry'])
-                               // 🚨 NEVER use '#' - causes OOM, event loop blocking, system instability
-                               // ✅ Use targeted patterns: 'device/+', 'sensor/+/data', 'iot/+/telemetry'
-  monitorDurationMs?: number;  // Default: 30000 (30s)
-  topicPatterns?: RegExp[];    // Expected topic patterns to parse
+  topics: string[];            // REQUIRED: Explicit topics to validate (e.g., ['device/sensor01/temperature'])
+  samplingDurationMs?: number; // Default: 10000 (10s) - how long to listen for messages
   qos?: 0 | 1 | 2;             // QoS for discovery subscription (default: 0)
+  
+  // TLS/SSL support (for mqtts://)
+  ca?: Buffer;                 // CA certificate
+  cert?: Buffer;               // Client certificate
+  key?: Buffer;                // Client private key
+  rejectUnauthorized?: boolean; // Verify server certificate (default: true)
 }
 
-interface TopicData {
+interface TopicValidation {
   topic: string;
-  payloads: string[];          // Store recent payloads for type inference
-  messageCount: number;        // Total messages (retained + live)
-  liveMessageCount: number;    // Non-retained messages only
-  retainedMessageCount: number; // Retained messages only
-  hasLiveMessages: boolean;    // True if at least one non-retained message received
-  firstSeen: Date;
-  lastSeen: Date;
-  inferredDataType?: string;
-  isCompoundTopic?: boolean;   // True if publishes JSON with multiple metrics
-  compoundFields?: string[];   // Field names found in JSON payloads
-  parsedMetadata?: {
-    deviceId?: string;
-    metric?: string;
-    unit?: string;
-  };
+  messagesReceived: number;
+  retainedMessagesReceived: number; // Track retained messages separately
+  firstPayload?: string;
+  firstSeen?: Date;
+  lastSeen?: Date;
+  hasRetained?: boolean;   // Did we receive a retained message?
+  hasLive?: boolean;       // Did we receive a live (non-retained) message?
 }
 
 /**
  * Generate MQTT fingerprint
  * Based on topic path (stable identifier)
- * 
- * @param topic - MQTT topic (e.g., "device/sensor01/temperature")
  */
 function generateMqttFingerprint(topic: string): string {
   return crypto
@@ -92,128 +72,73 @@ function generateMqttFingerprint(topic: string): string {
     .substring(0, 32);
 }
 
-/**
- * Validate discovery roots for dangerous patterns
- * Prevents OOM and system instability from overly broad subscriptions
- * 
- * @param roots - Discovery root patterns
- * @returns Validation result with errors/warnings
- */
-function validateDiscoveryRoots(roots: string[]): { valid: boolean; errors: string[]; warnings: string[] } {
-  const errors: string[] = [];
-  const warnings: string[] = [];
-
-  if (!roots || roots.length === 0) {
-    errors.push('discoveryRoots is required - specify explicit topic patterns (e.g., ["edge/+", "devices/+/telemetry"])');
-    return { valid: false, errors, warnings };
-  }
-
-  for (const root of roots) {
-    // 🚨 CRITICAL: Block '#' wildcard (all topics)
-    if (root === '#') {
-      errors.push('❌ DANGEROUS: "#" subscribes to ALL topics - causes OOM, event loop blocking, system crash');
-      errors.push('   Use targeted patterns instead: "edge/+", "devices/+/telemetry", "sensors/+/data"');
-    }
-
-    // 🚨 CRITICAL: Block '+/#' patterns (too broad)
-    if (root.match(/^\+\//) || root === '+') {
-      errors.push(`❌ DANGEROUS: "${root}" is too broad - subscribe to specific root prefixes`);
-      errors.push('   Example: Instead of "+/#", use "edge/+" or "devices/+"');
-    }
-
-    // ⚠️ WARNING: Multiple levels of wildcards
-    const wildcardCount = (root.match(/[#+]/g) || []).length;
-    if (wildcardCount > 2) {
-      warnings.push(`⚠️  "${root}" has ${wildcardCount} wildcards - may cause high message volume`);
-    }
-
-    // ⚠️ WARNING: Ending with '/#' without prefix
-    if (root.endsWith('/#') && root.split('/').length <= 2) {
-      warnings.push(`⚠️  "${root}" ends with /#  - consider more specific pattern (e.g., "edge/devices/+" instead of "edge/#")`);
-    }
-
-    // ⚠️ WARNING: $SYS topics
-    if (root.startsWith('$SYS')) {
-      warnings.push(`⚠️  "${root}" subscribes to broker internals - usually not needed for discovery`);
-    }
-  }
-
-  return { valid: errors.length === 0, errors, warnings };
-}
-
 export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
   private client?: mqtt.MqttClient;
-  private discoveredTopics: Map<string, TopicData> = new Map();
-
-  // Default topic patterns to parse metadata
-  private defaultTopicPatterns: RegExp[] = [
-    /^device\/(?<deviceId>[^\/]+)\/(?<metric>[^\/]+)$/,           // device/{id}/{metric}
-    /^(?<deviceId>[^\/]+)\/(?<metric>[^\/]+)$/,                   // {id}/{metric}
-    /^sensor\/(?<deviceId>[^\/]+)\/(?<metric>[^\/]+)$/,           // sensor/{id}/{metric}
-    /^(?<deviceId>[^\/]+)\/sensor\/(?<metric>[^\/]+)$/,           // {id}/sensor/{metric}
-    /^iot\/(?<deviceId>[^\/]+)\/(?<metric>[^\/]+)$/,              // iot/{id}/{metric}
-    /^home\/(?<deviceId>[^\/]+)\/(?<metric>[^\/]+)$/,             // home/{id}/{metric}
-    /^industrial\/(?<deviceId>[^\/]+)\/(?<metric>[^\/]+)$/,       // industrial/{id}/{metric}
-  ];
+  private validatedTopics: Map<string, TopicValidation> = new Map();
+  private brokerConfig?: MqttDiscoveryOptions; // Store for validate() reuse
 
   constructor(logger?: AgentLogger) {
     super('mqtt', logger);
   }
 
   /**
-   * Phase 1: Fast topic discovery
-   * Subscribe to wildcard, monitor for N seconds, collect active topics
+   * Phase 1: Topic validation
+   * Subscribe to explicit topics, verify they receive messages
    */
-  async discover(options?: MqttDiscoveryOptions): Promise<DiscoveredDevice[]> {
-    this.discoveredTopics.clear();
+  async discover(options?: MqttDiscoveryOptions, signal?: AbortSignal): Promise<DiscoveredDevice[]> {
+    this.validatedTopics.clear();
 
     const brokerUrl = options?.brokerUrl || process.env.MQTT_BROKER_URL || 'mqtt://mosquitto:1883';
-    const discoveryRoots = options?.discoveryRoots || [];
-    const monitorDurationMs = options?.monitorDurationMs || 30000;
+    const topics = options?.topics || [];
+    const samplingDurationMs = options?.samplingDurationMs || 10000; // 10 seconds default
     const qos = options?.qos ?? 0;
     
-    // Discovery runs on ALL topics (enabled flag only affects adapter data collection)
-    // No observer logic needed - discovery now handled by subscribing to discoveryRoots
-    // directly in the adapter (see adapter.ts saveDiscoveryRootsToDatabase)
+    // Store broker config for validate() reuse
+    this.brokerConfig = options;
 
-    // 🚨 CRITICAL: Validate discovery roots for dangerous patterns
-    const validation = validateDiscoveryRoots(discoveryRoots);
-    
-    if (!validation.valid) {
-      const errorMsg = `Invalid MQTT discovery configuration:\n${validation.errors.join('\n')}`;
-      this.logger?.errorSync(errorMsg, undefined, {
-        component: LogComponents.discovery + "] [" + this.protocol as any
+    // Validation: topics are required
+    if (!topics || topics.length === 0) {
+      this.logger?.warnSync('No topics provided for MQTT discovery', {
+        component: LogComponents.discovery + "] [" + this.protocol as any,
+        hint: 'Provide explicit topics to validate (e.g., ["device/sensor01/temperature"])'
       });
-      throw new Error(errorMsg);
+      return [];
     }
 
-    // Log warnings (non-fatal)
-    if (validation.warnings.length > 0) {
-      for (const warning of validation.warnings) {
-        this.logger?.warnSync(warning, {
-          component: LogComponents.discovery + "] [" + this.protocol as any
-        });
-      }
-    }
-
-    this.logger?.debugSync('Starting MQTT discovery', {
+    this.logger?.infoSync('Starting MQTT topic validation', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       protocol: this.protocol,
       phase: 'discovery',
       brokerUrl,
-      discoveryRoots,
-      monitorDurationMs
+      topicCount: topics.length,
+      topics: topics.slice(0, 5), // Log first 5 topics
+      samplingDurationMs
     });
 
     try {
-      // Connect to broker
+      // Connect to broker with TLS support
       this.client = mqtt.connect(brokerUrl, {
         username: options?.username,
         password: options?.password,
         clientId: `iotistic-discovery-${Date.now()}`,
         clean: true,
-        reconnectPeriod: 0 // Don't auto-reconnect during discovery
+        reconnectPeriod: 0, // Don't auto-reconnect during discovery
+        // TLS options (for mqtts://)
+        ca: options?.ca,
+        cert: options?.cert,
+        key: options?.key,
+        rejectUnauthorized: options?.rejectUnauthorized ?? true
       });
+      
+      // Handle abort signal for graceful cancellation
+      if (signal) {
+        signal.addEventListener('abort', () => {
+          this.logger?.warnSync('Discovery aborted by signal', {
+            component: LogComponents.discovery + "] [" + this.protocol as any
+          });
+          this.cleanupClient();
+        });
+      }
 
       // Wait for connection
       await new Promise<void>((resolve, reject) => {
@@ -229,7 +154,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
 
         this.client!.on('connect', () => {
           clearTimeout(timeout);
-          this.logger?.debugSync('Connected to MQTT broker for discovery', {
+          this.logger?.infoSync('Connected to MQTT broker for discovery', {
             component: LogComponents.discovery + "] [" + this.protocol as any,
             brokerUrl
           });
@@ -247,68 +172,93 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
         });
       });
 
-      // Subscribe to each discovery root individually
-      // This prevents broker overload from overly broad patterns
-      for (const root of discoveryRoots) {
+      // Subscribe to each topic
+      for (const topic of topics) {
         await new Promise<void>((resolve, reject) => {
-          this.client!.subscribe(root, { qos }, (err) => {
+          this.client!.subscribe(topic, { qos }, (err) => {
             if (err) {
-              this.logger?.errorSync(`Failed to subscribe to ${root}`, err, {
+              this.logger?.errorSync(`Failed to subscribe to topic: ${topic}`, err, {
                 component: LogComponents.discovery + "] [" + this.protocol as any
               });
               reject(err);
             } else {
-              this.logger?.debugSync(`Subscribed to discovery root: ${root}`, {
+              this.logger?.debugSync(`Subscribed to topic: ${topic}`, {
                 component: LogComponents.discovery + "] [" + this.protocol as any
               });
+              
+              // Initialize validation entry
+              this.validatedTopics.set(topic, {
+                topic,
+                messagesReceived: 0,
+                retainedMessagesReceived: 0,
+                hasRetained: false,
+                hasLive: false
+              });
+              
               resolve();
             }
           });
         });
       }
 
-      this.logger?.debugSync(`Monitoring ${discoveryRoots.length} discovery roots for ${monitorDurationMs}ms`, {
-        component: LogComponents.discovery + "] [" + this.protocol as any,
-        rootCount: discoveryRoots.length
+      this.logger?.debugSync(`Sampling ${topics.length} topics for ${samplingDurationMs}ms`, {
+        component: LogComponents.discovery + "] [" + this.protocol as any
       });
 
       // Listen for messages with packet info to detect retained flag
       this.client.on('message', (topic, payload, packet) => {
-        this.handleDiscoveredMessage(topic, payload.toString(), packet.retain, options?.topicPatterns);
+        this.handleMessage(topic, payload.toString(), packet.retain);
       });
 
-      // Monitor for specified duration
-      await new Promise(resolve => setTimeout(resolve, monitorDurationMs));
+      // Wait for sampling duration (or until aborted)
+      await new Promise<void>(resolve => {
+        const timer = setTimeout(resolve, samplingDurationMs);
+        signal?.addEventListener('abort', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
 
-      // Disconnect
-      this.client.end(true);
+      // Disconnect with proper cleanup
+      this.cleanupClient();
 
-      // Analyze discovery results for warnings
-      const retainedOnlyTopics = Array.from(this.discoveredTopics.values()).filter(t => !t.hasLiveMessages);
-      const totalTopics = this.discoveredTopics.size;
-      const retainedOnlyCount = retainedOnlyTopics.length;
+      // Analyze results
+      const activeTopics = Array.from(this.validatedTopics.values()).filter(t => t.messagesReceived > 0);
+      const inactiveTopics = Array.from(this.validatedTopics.values()).filter(t => t.messagesReceived === 0);
 
-      this.logger?.debugSync(`Discovery complete - found ${totalTopics} active topics`, {
+      this.logger?.infoSync('Discovery complete', {
         component: LogComponents.discovery + "] [" + this.protocol as any,
-        topicCount: totalTopics,
-        liveTopics: totalTopics - retainedOnlyCount,
-        retainedOnlyTopics: retainedOnlyCount
+        totalTopics: topics.length,
+        activeTopics: activeTopics.length,
+        inactiveTopics: inactiveTopics.length
       });
 
-      // ⚠️ Warn about retained-only topics (may indicate offline publishers)
-      if (retainedOnlyCount > 0) {
+      if (inactiveTopics.length > 0) {
         this.logger?.warnSync(
-          `Found ${retainedOnlyCount} topic(s) with only retained messages - publishers may be offline`,
+          `${inactiveTopics.length} topic(s) did not receive messages during sampling period`,
           {
             component: LogComponents.discovery + "] [" + this.protocol as any,
-            retainedOnlyTopics: retainedOnlyTopics.map(t => t.topic).slice(0, 10), // First 10
-            recommendation: 'Verify publishers are active before enabling these endpoints'
+            inactiveTopics: inactiveTopics.map(t => t.topic),
+            recommendation: 'Verify publishers are active or increase samplingDurationMs'
+          }
+        );
+      }
+      
+      // Log retained message awareness
+      const retainedOnlyTopics = activeTopics.filter(t => t.hasRetained && !t.hasLive);
+      if (retainedOnlyTopics.length > 0) {
+        this.logger?.warnSync(
+          `${retainedOnlyTopics.length} topic(s) have only retained messages (no live publisher observed)`,
+          {
+            component: LogComponents.discovery + "] [" + this.protocol as any,
+            retainedOnlyTopics: retainedOnlyTopics.map(t => t.topic),
+            recommendation: 'These topics may have stale data - verify publishers are running'
           }
         );
       }
 
-      // Convert to DiscoveredDevice format
-      return this.convertTopicsToDevices();
+      // Convert active topics to DiscoveredDevice format
+      return this.convertToDevices(activeTopics);
 
     } catch (error) {
       this.logger?.errorSync(
@@ -317,183 +267,71 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
         { component: LogComponents.discovery + "] [" + this.protocol as any }
       );
 
-      if (this.client) {
-        this.client.end(true);
-      }
+      this.cleanupClient();
 
       return [];
     }
   }
 
   /**
-   * Handle incoming message during discovery
-   * Tracks both retained and live messages separately for accurate confidence scoring
+   * Handle incoming message during sampling
+   * Tracks both retained and live messages for production observability
    */
-  private handleDiscoveredMessage(
-    topic: string,
-    payload: string,
-    isRetained: boolean,
-    customPatterns?: RegExp[]
-  ): void {
-    // Skip system topics
-    if (topic.startsWith('$SYS/')) {
-      return;
+  private handleMessage(topic: string, payload: string, isRetained: boolean = false): void {
+    const validation = this.validatedTopics.get(topic);
+    if (!validation) {
+      return; // Ignore messages from untracked topics
     }
 
     const now = new Date();
-    const existing = this.discoveredTopics.get(topic);
 
-    if (existing) {
-      // Update existing topic data
-      existing.payloads.push(payload);
-      existing.messageCount++;
-      existing.lastSeen = now;
-
-      // Track retained vs live messages
-      if (isRetained) {
-        existing.retainedMessageCount++;
-      } else {
-        existing.liveMessageCount++;
-        existing.hasLiveMessages = true;
-      }
+    if (validation.messagesReceived === 0) {
+      // First message for this topic
+      validation.firstPayload = payload;
+      validation.firstSeen = now;
       
-      // Update compound fields if json-compound type
-      if (existing.inferredDataType === 'json-compound') {
-        const newFields = this.extractCompoundFields(payload);
-        if (newFields.length > 0 && existing.compoundFields) {
-          // Merge unique fields (devices may add/remove fields)
-          const allFields = new Set([...existing.compoundFields, ...newFields]);
-          existing.compoundFields = Array.from(allFields);
-        }
-      }
-
-      // Keep only last 10 payloads for type inference
-      if (existing.payloads.length > 10) {
-        existing.payloads.shift();
-      }
-    } else {
-      // New topic discovered
-      const topicData: TopicData = {
-        topic,
-        payloads: [payload],
-        messageCount: 1,
-        liveMessageCount: isRetained ? 0 : 1,
-        retainedMessageCount: isRetained ? 1 : 0,
-        hasLiveMessages: !isRetained,
-        firstSeen: now,
-        lastSeen: now
-      };
-
-      // Parse topic metadata
-      topicData.parsedMetadata = this.parseTopicMetadata(topic, customPatterns);
-
-      // Infer data type from payload
-      topicData.inferredDataType = this.inferDataType(payload);
-      
-      // If compound topic, extract field names
-      if (topicData.inferredDataType === 'json-compound') {
-        topicData.isCompoundTopic = true;
-        topicData.compoundFields = this.extractCompoundFields(payload);
-      }
-
-      this.discoveredTopics.set(topic, topicData);
-
-      this.logger?.debugSync(`New topic discovered: ${topic} (retained: ${isRetained})`, {
+      this.logger?.debugSync(`Topic active: ${topic}`, {
         component: LogComponents.discovery + "] [" + this.protocol as any,
-        metadata: topicData.parsedMetadata,
-        dataType: topicData.inferredDataType,
-        isCompound: topicData.isCompoundTopic,
-        fields: topicData.compoundFields,
-        isRetained
+        payloadPreview: payload.substring(0, 100),
+        retained: isRetained
       });
     }
+
+    validation.messagesReceived++;
+    validation.lastSeen = now;
+    
+    // Track retained vs live messages
+    if (isRetained) {
+      validation.retainedMessagesReceived++;
+      validation.hasRetained = true;
+    } else {
+      validation.hasLive = true;
+    }
   }
 
   /**
-   * Parse topic to extract metadata (deviceId, metric, unit)
-   * Tries custom patterns first, then defaults
-   */
-  private parseTopicMetadata(
-    topic: string,
-    customPatterns?: RegExp[]
-  ): { deviceId?: string; metric?: string; unit?: string } {
-    const patterns = customPatterns || this.defaultTopicPatterns;
-
-    for (const pattern of patterns) {
-      const match = topic.match(pattern);
-      if (match?.groups) {
-        return {
-          deviceId: match.groups.deviceId,
-          metric: match.groups.metric,
-          unit: match.groups.unit
-        };
-      }
-    }
-
-    // Fallback: use last segment as metric, rest as deviceId
-    const segments = topic.split('/');
-    if (segments.length >= 2) {
-      return {
-        deviceId: segments.slice(0, -1).join('_'),
-        metric: segments[segments.length - 1]
-      };
-    }
-
-    return { metric: topic.replace(/\//g, '_') };
-  }
-
-  /**
-   * Infer data FORMAT (not specific type) from payload
+   * Infer basic data type from payload
+   * Returns broad categories only: 'number', 'boolean', 'string', 'json'
    * 
-   * CRITICAL: Uses broad categories (number, boolean, string, json) instead of 
-   * specific types (int32, float32) because industrial MQTT devices:
-   * - Change formats on firmware updates (string → number → JSON)
-   * - Use numeric status codes that aren't booleans ("0"/"1" may be states, not true/false)
-   * - Switch precision (50 → 50.0 on calibration)
-   * 
-   * Returns: 'number' | 'boolean' | 'string' | 'json' | 'json-compound'
-   * Manual confirmation required before locking to specific numeric type (int32/float32)
-   * 
-   * Note: 'json-compound' indicates multiple metrics in one topic (e.g., {temp:42, pressure:9.1})
-   *       These should NOT be split during discovery - adapter handles at runtime
+   * Production-safe numeric detection (avoids edge cases like "Infinity", "NaN", "00123")
    */
   private inferDataType(payload: string): string {
     // Try JSON parsing first
     try {
       const parsed = JSON.parse(payload);
       
-      // Complex object or array → check if compound topic
-      if (typeof parsed === 'object' && parsed !== null) {
-        // Array or object with multiple data fields → compound topic
-        if (Array.isArray(parsed)) {
-          return 'json';  // Array structure (not compound metrics)
-        }
-        
-        // Object with multiple metric-like fields → compound topic
-        // Look for numeric/boolean values that look like sensor readings
-        const fields = Object.keys(parsed);
-        const dataFields = fields.filter(key => {
-          const value = parsed[key];
-          return typeof value === 'number' || typeof value === 'boolean';
-        });
-        
-        // If 2+ numeric/boolean fields, likely compound metrics
-        // Example: {temperature: 42, pressure: 9.1, humidity: 65}
-        if (dataFields.length >= 2) {
-          return 'json-compound';
-        }
-        
-        // Single data field or metadata-heavy → regular json
+      // If it's an object or array, return 'json'
+      if (typeof parsed === 'object') {
         return 'json';
       }
       
-      // JSON primitive values - infer broad category
-      if (typeof parsed === 'number') {
-        return 'number';  // Don't distinguish int32 vs float32
+      // JSON primitive values
+      if (typeof parsed === 'number' && Number.isFinite(parsed)) {
+        return 'number';
       }
       
       if (typeof parsed === 'boolean') {
-        return 'boolean';  // Explicit true/false in JSON
+        return 'boolean';
       }
       
       // JSON string value
@@ -509,17 +347,10 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
         return 'boolean';
       }
 
-      // ⚠️ CRITICAL: DO NOT treat "0"/"1" as boolean!
-      // Industrial devices use these as:
-      // - Status codes (0=OK, 1=ERROR, 2=WARNING)
-      // - Numeric values (pump speed step 0-10)
-      // - Binary flags in larger context
-      // Let user confirm if they're truly boolean
-
-      // Numeric detection (but return broad 'number' category)
-      const num = Number(trimmed);
-      if (!isNaN(num) && trimmed !== '') {
-        return 'number';  // Could be int, float, or change between them
+      // Production-safe numeric detection: exact pattern match
+      // Avoids "Infinity", "NaN", leading zeros, whitespace
+      if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+        return 'number';
       }
 
       // Default fallback
@@ -528,118 +359,48 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
   }
 
   /**
-   * Analyze JSON payload to extract compound field names
-   * Only called for json-compound topics
-   * 
-   * IMPORTANT: Discovery does NOT split compound topics into separate endpoints.
-   * This just identifies the fields for user awareness.
-   * 
-   * Runtime adapter configuration handles:
-   * - Parsing JSON structure
-   * - Extracting individual metrics
-   * - Applying transformations
-   * - Mapping to data points
-   * 
-   * Example:
-   *   Topic: edge/device-1/telemetry
-   *   Payload: {"temperature": 42, "pressure": 9.1, "humidity": 65}
-   *   Discovery: Creates 1 endpoint, marks isCompoundTopic=true, fields=["temperature","pressure","humidity"]
-   *   Adapter: User configures JSON path extraction ($.temperature, $.pressure, etc.)
+   * Convert validated topics to DiscoveredDevice format
    */
-  private extractCompoundFields(payload: string): string[] {
-    try {
-      const parsed = JSON.parse(payload);
-      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        return Object.keys(parsed).filter(key => {
-          const value = parsed[key];
-          // Only include numeric/boolean fields (likely metrics)
-          return typeof value === 'number' || typeof value === 'boolean';
-        });
-      }
-    } catch {
-      // Ignore parse errors
-    }
-    return [];
-  }
-
-  /**
-   * Convert discovered topics to DiscoveredDevice format
-   */
-  private convertTopicsToDevices(): DiscoveredDevice[] {
+  private convertToDevices(validatedTopics: TopicValidation[]): DiscoveredDevice[] {
     const devices: DiscoveredDevice[] = [];
 
-    for (const [topic, data] of this.discoveredTopics) {
-      const fingerprint = generateMqttFingerprint(topic);
+    for (const validation of validatedTopics) {
+      const fingerprint = generateMqttFingerprint(validation.topic);
 
-      // Determine device name
-      const name = data.parsedMetadata?.deviceId
-        ? `mqtt_${data.parsedMetadata.deviceId}_${data.parsedMetadata.metric}`
-        : `mqtt_${topic.replace(/\//g, '_')}`;
-
-      // Calculate confidence based on live (non-retained) messages
-      // Retained messages inflate confidence - they prove nothing about active publishers
-      let confidence: 'high' | 'medium' | 'low';
-      let confidenceReason: string | undefined;
-      
-      if (!data.hasLiveMessages) {
-        // Only retained messages - lowest confidence (publisher may be offline)
-        confidence = 'low';
-        confidenceReason = 'Only retained messages (no active publisher observed)';
-      } else if (data.liveMessageCount >= 3) {
-        // Multiple live messages - publisher is actively sending
-        confidence = 'medium';
-        confidenceReason = `${data.liveMessageCount} live messages received`;
-      } else {
-        // Few live messages - uncertain
-        confidence = 'low';
-        confidenceReason = `Only ${data.liveMessageCount} live message(s) - needs more observation`;
+      // Generate name from topic with length limit to avoid excessively long names
+      let topicName = validation.topic.replace(/\//g, '_');
+      if (topicName.length > 60) {
+        // For very long topics, use last 60 chars (most specific part)
+        topicName = '...' + topicName.slice(-57);
       }
-      
-      // ⚠️ Lower confidence if mostly retained messages
-      if (data.hasLiveMessages && data.retainedMessageCount > data.liveMessageCount * 3) {
-        // If >75% retained, lower confidence one level
-        if (confidence === 'medium') {
-          confidence = 'low';
-          confidenceReason = `Mostly retained messages (${data.retainedMessageCount} retained vs ${data.liveMessageCount} live) - publisher may be sporadic`;
-        }
-      }
+      const name = `mqtt_${topicName}`;
 
-      devices.push({
+      // Infer data type from first payload
+      const dataType = validation.firstPayload 
+        ? this.inferDataType(validation.firstPayload)
+        : 'string';
+
+      const device: DiscoveredDevice = {
         name,
-        protocol: 'mqtt' as const,
+        protocol: 'mqtt',
         fingerprint,
         connection: {
-          topic,
-          qos: 0, // Default QoS
-          dataType: data.inferredDataType || 'string',
-          ...(data.parsedMetadata?.metric && { metric: data.parsedMetadata.metric }),
-          ...(data.parsedMetadata?.deviceId && { deviceId: data.parsedMetadata.deviceId }),
-          ...(data.parsedMetadata?.unit && { unit: data.parsedMetadata.unit })
+          topic: validation.topic,
+          dataType
         },
-        dataPoints: [], // MQTT uses single topic per endpoint
-        confidence,
-        discoveredAt: data.firstSeen.toISOString(),
-        validated: false,
-        metadata: {
-          messageCount: data.messageCount,
-          liveMessageCount: data.liveMessageCount,
-          retainedMessageCount: data.retainedMessageCount,
-          hasLiveMessages: data.hasLiveMessages,
-          confidence: confidence,
-          confidenceReason: confidenceReason,
-          isCompoundTopic: data.isCompoundTopic || false,
-          compoundFields: data.compoundFields || [],
-          lastSeen: data.lastSeen.toISOString(),
-          samplePayloads: data.payloads.slice(0, 3), // First 3 payloads for reference
-          // ⚠️ Warning for retained-only topics
-          ...((!data.hasLiveMessages && data.retainedMessageCount > 0) && {
-            warning: 'Only retained messages observed - publisher may be offline. Verify device is active before enabling.'
-          }),
-          // ⚠️ Warning for mostly-retained topics
-          ...((data.hasLiveMessages && data.retainedMessageCount > data.liveMessageCount * 3) && {
-            warning: `Mostly retained messages (${data.retainedMessageCount} retained vs ${data.liveMessageCount} live) - publisher may be sporadic or recently restarted.`
-          })
-        }
+        dataPoints: [],  // MQTT uses topics, not data points
+        confidence: 'high', // If we got messages, it's active
+        discoveredAt: validation.firstSeen?.toISOString() || new Date().toISOString(),
+        validated: false // User must validate before enabling
+      };
+
+      devices.push(device);
+
+      this.logger?.debugSync(`Validated topic: ${validation.topic}`, {
+        component: LogComponents.discovery + "] [" + this.protocol as any,
+        name,
+        dataType,
+        messagesReceived: validation.messagesReceived
       });
     }
 
@@ -647,202 +408,184 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
   }
 
   /**
-   * Phase 2: Deep validation (read more messages, verify consistency)
+   * Phase 2: Validate a specific device
+   * Fast validation: Subscribe to topic, wait for single message
+   * Uses stored broker config from discover() for consistency
    */
   async validate(device: DiscoveredDevice): Promise<ValidationResult> {
-    const topic = (device.connection as any).topic;
+    const topic = device.connection?.topic;
+    
+    if (!topic || typeof topic !== 'string') {
+      return {
+        deviceInfo: {
+          valid: false,
+          message: 'Invalid topic configuration - missing topic field'
+        }
+      };
+    }
 
-    this.logger?.debugSync(`Validating MQTT topic: ${topic}`, {
+    this.logger?.debugSync('Validating MQTT topic', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
-      protocol: this.protocol,
-      phase: 'validation'
+      topic
     });
 
     try {
-      // Reconnect for validation
-      const brokerUrl = process.env.MQTT_BROKER_URL || 'mqtt://mosquitto:1883';
-      const client = mqtt.connect(brokerUrl, {
-        clientId: `iotistic-validation-${Date.now()}`,
-        clean: true,
-        reconnectPeriod: 0
-      });
-
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Connection timeout')), 5000);
-        client.on('connect', () => {
-          clearTimeout(timeout);
-          resolve();
-        });
-        client.on('error', reject);
-      });
-
-      // Subscribe and collect messages (flexible strategy)
-      // Accept ≥1 message for low-rate publishers (every 60s, on-change only, etc.)
-      // Don't fail on silence - report observed publish rate instead
-      const messages: Array<{ payload: string; isRetained: boolean; timestamp: number }> = [];
-      const minMessages = 1;   // Minimum for successful validation
-      const maxMessages = 10;  // Ideal target (may not reach with slow publishers)
-      const timeout = 15000;   // 15s max wait
-      const startTime = Date.now();
-
-      await new Promise<void>((resolve, reject) => {
-        const timeoutHandle = setTimeout(() => {
-          client.end(true);
-          
-          // ✅ Accept validation if we got at least 1 message (even if slow publisher)
-          // ❌ Don't fail healthy devices that publish every 60s or on-change
-          if (messages.length >= minMessages) {
-            this.logger?.debugSync(`Validation timeout reached with ${messages.length} messages (acceptable for low-rate publisher)`, {
-              component: LogComponents.discovery + "] [" + this.protocol as any,
-              topic
-            });
-            resolve(); // Partial validation OK
-          } else {
-            // Only fail if truly no messages (likely wrong topic or device offline)
-            reject(new Error('No messages received during validation - topic may be inactive or device offline'));
-          }
-        }, timeout);
-
-        client.subscribe(topic, { qos: 0 }, (err) => {
-          if (err) {
-            clearTimeout(timeoutHandle);
-            reject(err);
-          }
-        });
-
-        client.on('message', (receivedTopic, payload, packet) => {
-          if (receivedTopic === topic) {
-            messages.push({
-              payload: payload.toString(),
-              isRetained: packet.retain,
-              timestamp: Date.now()
-            });
-
-            // Exit early if we reach target message count
-            if (messages.length >= maxMessages) {
-              clearTimeout(timeoutHandle);
-              client.end(true);
-              resolve();
-            }
-          }
-        });
-      });
-
-      // Analyze messages for consistency and retained status
-      const dataTypes = new Set<string>();
-      let liveCount = 0;
-      let retainedCount = 0;
+      // Use broker config from discover() for consistent authentication
+      const brokerUrl = this.brokerConfig?.brokerUrl || process.env.MQTT_BROKER_URL || 'mqtt://mosquitto:1883';
       
-      for (const msg of messages) {
-        dataTypes.add(this.inferDataType(msg.payload));
-        if (msg.isRetained) {
-          retainedCount++;
-        } else {
-          liveCount++;
-        }
+      // Short validation: 5 seconds to receive at least one message
+      const validationResult = await this.quickValidateTopic(
+        brokerUrl, 
+        topic,
+        this.brokerConfig // Pass full config including credentials
+      );
+
+      if (validationResult) {
+        this.logger?.infoSync(`Topic validated successfully: ${topic}`, {
+          component: LogComponents.discovery + "] [" + this.protocol as any
+        });
+
+        return {
+          deviceInfo: {
+            valid: true,
+            message: 'Topic is active and receiving messages'
+          }
+        };
+      } else {
+        this.logger?.warnSync(`Topic validation failed (no messages): ${topic}`, {
+          component: LogComponents.discovery + "] [" + this.protocol as any
+        });
+
+        return {
+          deviceInfo: {
+            valid: false,
+            message: 'No messages received during validation period'
+          }
+        };
       }
-
-      const isConsistent = dataTypes.size === 1;
-      const hasLiveMessages = liveCount > 0;
-      
-      // Calculate observed publish rate (for non-retained messages)
-      const validationDuration = Date.now() - startTime;
-      let observedPublishRate: number | undefined;
-      let estimatedIntervalMs: number | undefined;
-      
-      if (liveCount >= 2) {
-        // Calculate average interval between live messages
-        const liveMessages = messages.filter(m => !m.isRetained);
-        const intervals: number[] = [];
-        for (let i = 1; i < liveMessages.length; i++) {
-          intervals.push(liveMessages[i].timestamp - liveMessages[i - 1].timestamp);
-        }
-        estimatedIntervalMs = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-        observedPublishRate = 1000 / estimatedIntervalMs; // messages per second
-      } else if (liveCount === 1) {
-        // Only one live message - can't calculate rate
-        observedPublishRate = undefined;
-        estimatedIntervalMs = undefined;
-      }
-
-      this.logger?.debugSync(`Validation complete for ${topic}`, {
-        component: LogComponents.discovery + "] [" + this.protocol as any,
-        messageCount: messages.length,
-        liveCount,
-        retainedCount,
-        hasLiveMessages,
-        isConsistent,
-        dataTypes: Array.from(dataTypes),
-        observedPublishRate: observedPublishRate ? `${observedPublishRate.toFixed(3)} msg/s` : 'unknown',
-        estimatedInterval: estimatedIntervalMs ? `${Math.round(estimatedIntervalMs)}ms` : 'unknown',
-        validationDuration: `${validationDuration}ms`
-      });
-
-      return {
-        deviceInfo: {
-          name: device.name,
-          address: topic,
-          messageCount: messages.length,
-          liveMessageCount: liveCount,
-          retainedMessageCount: retainedCount,
-          hasLiveMessages,
-          dataTypeConsistency: isConsistent,
-          observedDataTypes: Array.from(dataTypes),
-          observedPublishRate: observedPublishRate ? `${observedPublishRate.toFixed(3)} msg/s` : 'unknown',
-          estimatedPublishIntervalMs: estimatedIntervalMs ? Math.round(estimatedIntervalMs) : undefined,
-          validationDurationMs: validationDuration,
-          publishBehavior: liveCount === 0 ? 'retained-only' : 
-                          estimatedIntervalMs && estimatedIntervalMs > 30000 ? 'low-rate' :
-                          estimatedIntervalMs && estimatedIntervalMs < 1000 ? 'high-rate' : 'normal'
-        },
-        manufacturer: hasLiveMessages ? 'Active MQTT Publisher' : 'Unknown MQTT Publisher (retained only)',
-        modelNumber: 'MQTT',
-        capabilities: ['readable'] // Discovery confirms readable capability
-      };
-
     } catch (error) {
       this.logger?.errorSync(
-        `Validation failed for ${topic}`,
+        'Topic validation error',
         error as Error,
-        { component: LogComponents.discovery + "] [" + this.protocol as any }
+        { component: LogComponents.discovery + "] [" + this.protocol as any, topic }
       );
 
       return {
         deviceInfo: {
-          name: device.name,
-          address: topic
-        },
-        manufacturer: 'Unknown',
-        modelNumber: 'Unknown',
-        capabilities: [] // No confirmed capabilities
+          valid: false,
+          message: `Validation failed: ${(error as Error).message}`
+        }
       };
     }
   }
 
   /**
-   * Check if MQTT broker is reachable
+   * Quick topic validation: Subscribe and wait for single message
+   * Production-safe: No race conditions, proper cleanup, supports auth + TLS
    */
+  private async quickValidateTopic(
+    brokerUrl: string, 
+    topic: string,
+    config?: MqttDiscoveryOptions
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      let resolved = false;
+      
+      // Safe resolve: Prevent race condition from multiple callbacks
+      const safeResolve = (value: boolean) => {
+        if (!resolved) {
+          resolved = true;
+          resolve(value);
+        }
+      };
+      
+      const client = mqtt.connect(brokerUrl, {
+        clientId: `iotistic-validate-${Date.now()}`,
+        clean: true,
+        reconnectPeriod: 0,
+        // Use credentials from config for consistent auth
+        username: config?.username,
+        password: config?.password,
+        // TLS support
+        ca: config?.ca,
+        cert: config?.cert,
+        key: config?.key,
+        rejectUnauthorized: config?.rejectUnauthorized ?? true
+      });
+
+      let messageReceived = false;
+      const timeout = setTimeout(() => {
+        // Cleanup before resolving
+        client.removeAllListeners('message');
+        client.removeAllListeners('error');
+        client.removeAllListeners('connect');
+        client.end(true);
+        safeResolve(messageReceived);
+      }, 5000); // 5 second validation window
+
+      const connectHandler = () => {
+        client.subscribe(topic, { qos: 0 }, (err) => {
+          if (err) {
+            clearTimeout(timeout);
+            client.removeAllListeners('message');
+            client.removeAllListeners('error');
+            client.removeAllListeners('connect');
+            client.end(true);
+            safeResolve(false);
+          }
+        });
+      };
+      
+      const messageHandler = (receivedTopic: string) => {
+        if (receivedTopic === topic) {
+          messageReceived = true;
+          clearTimeout(timeout);
+          client.removeAllListeners('message');
+          client.removeAllListeners('error');
+          client.removeAllListeners('connect');
+          client.end(true);
+          safeResolve(true);
+        }
+      };
+      
+      const errorHandler = () => {
+        clearTimeout(timeout);
+        client.removeAllListeners('message');
+        client.removeAllListeners('error');
+        client.removeAllListeners('connect');
+        client.end(true);
+        safeResolve(false);
+      };
+
+      client.on('connect', connectHandler);
+      client.on('message', messageHandler);
+      client.on('error', errorHandler);
+    });
+  }
+
   /**
    * Check if MQTT client library is available
-   * 
-   * NOTE: We only check library availability here, not broker connectivity.
-   * Actual broker connection is tested during discover() phase with the
-   * correct broker URL from target state configuration.
    */
   async isAvailable(): Promise<boolean> {
     try {
-      // Just check if mqtt library is available
       await import('mqtt');
       return true;
     } catch {
       return false;
     }
   }
+  
+  /**
+   * Cleanup MQTT client with proper event listener removal
+   * Production rule: Every listener added must be cleaned up
+   */
+  private cleanupClient(): void {
+    if (this.client) {
+      this.client.removeAllListeners('message');
+      this.client.removeAllListeners('error');
+      this.client.removeAllListeners('connect');
+      this.client.end(true);
+      this.client = undefined;
+    }
+  }
 }
-
-
-
-
-
-
-

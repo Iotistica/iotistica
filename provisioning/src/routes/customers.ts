@@ -9,6 +9,8 @@ import { SubscriptionModel } from '../db/subscription-model';
 import { LicenseGenerator } from '../services/license-generator';
 import { LicenseHistoryModel } from '../db/license-history-model';
 import { deploymentQueue } from '../services/deployment-queue';
+import { TigerDataService } from '../services/tigerdata-service';
+import { OnePasswordService } from '../services/onepassword-service';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 
@@ -591,6 +593,199 @@ router.post('/:id/retry-deployment', async (req, res) => {
   } catch (error: any) {
     console.error('Error retrying deployment:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/customers/:id/recover-database-password
+ * Attempt to recover/reset TigerData database password
+ * 
+ * This endpoint tries to:
+ * 1. Reset the password via TigerData API (if supported)
+ * 2. Retrieve the password from TigerData API (if available)
+ * 3. Update the 1Password secret with the new password
+ * 
+ * Note: Most database providers do not expose passwords after creation for security.
+ * This endpoint attempts multiple recovery strategies but may require manual intervention.
+ */
+router.post('/:id/recover-database-password', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    console.log(`🔑 Attempting password recovery for customer: ${id}`);
+
+    // ========================================
+    // Step 1: Validate customer and database existence
+    // ========================================
+    const customer = await CustomerModel.getById(id);
+    if (!customer) {
+      return res.status(404).json({ 
+        error: 'Customer not found',
+        customerId: id 
+      });
+    }
+
+    if (!customer.db_service_id) {
+      return res.status(400).json({
+        error: 'No TigerData database provisioned',
+        message: 'This customer does not have a TigerData database. Deploy the customer first.',
+        customerId: id
+      });
+    }
+
+    console.log(`📊 Customer: ${customer.email}`);
+    console.log(`   Database Service ID: ${customer.db_service_id}`);
+    console.log(`   1Password Secret: ${customer.secret_item_id || 'Not created yet'}`);
+
+    // ========================================
+    // Step 2: Initialize services
+    // ========================================
+    const tigerDataService = new TigerDataService();
+    const onePasswordService = new OnePasswordService();
+
+    let recoveredPassword: string | undefined;
+    let recoveryMethod: string = 'unknown';
+
+    // ========================================
+    // Step 3: Try password reset (if API supports it)
+    // ========================================
+    try {
+      console.log(`🔄 Attempting password reset via TigerData API...`);
+      recoveredPassword = await tigerDataService.resetPassword(customer.db_service_id);
+      recoveryMethod = 'api_reset';
+      console.log(`✅ Password reset successful!`);
+    } catch (resetError: any) {
+      console.warn(`⚠️  Password reset failed:`, resetError.message);
+      
+      // ========================================
+      // Step 4: Try password retrieval (if API supports it)
+      // ========================================
+      try {
+        console.log(`🔍 Attempting password retrieval via TigerData API...`);
+        const credentials = await tigerDataService.getCredentials(customer.db_service_id);
+        if (credentials.password) {
+          recoveredPassword = credentials.password;
+          recoveryMethod = 'api_retrieve';
+          console.log(`✅ Password retrieved successfully!`);
+        }
+      } catch (retrieveError: any) {
+        console.warn(`⚠️  Password retrieval failed:`, retrieveError.message);
+      }
+    }
+
+    // ========================================
+    // Step 5: If password recovered, update 1Password secret
+    // ========================================
+    if (recoveredPassword) {
+      if (customer.secret_item_id) {
+        try {
+          console.log(`📝 Updating 1Password secret: ${customer.secret_item_id}`);
+          
+          // Get existing secret to extract current values
+          const existingSecret = await onePasswordService.getItem(customer.secret_item_id);
+          
+          // Extract current database credentials from fields
+          const getFieldValue = (fieldId: string, defaultValue: string = ''): string => {
+            const field = existingSecret.fields?.find(f => f.id === fieldId);
+            return field?.value || defaultValue;
+          };
+
+          // Build updated credentials with new password
+          const updatedCredentials = {
+            host: customer.db_host || getFieldValue('server', 'localhost'),
+            port: customer.db_port || parseInt(getFieldValue('port', '5432')),
+            username: getFieldValue('username', 'tsdbadmin'),
+            password: recoveredPassword,
+            database: customer.db_name || getFieldValue('dbname', 'tsdb'),
+          };
+
+          // Update in 1Password
+          await onePasswordService.updateItem(
+            customer.secret_item_id,
+            updatedCredentials
+          );
+
+          console.log(`✅ 1Password secret updated successfully`);
+
+          return res.json({
+            success: true,
+            message: 'Database password recovered and updated in 1Password',
+            customerId: id,
+            serviceId: customer.db_service_id,
+            secretId: customer.secret_item_id,
+            recoveryMethod,
+            password: process.env.SHOW_PASSWORDS_IN_API === 'true' ? recoveredPassword : '[redacted]',
+            note: 'Password has been updated in 1Password. Use the secret ID to retrieve it securely.',
+          });
+        } catch (onePasswordError: any) {
+          console.error(`❌ Failed to update 1Password secret:`, onePasswordError.message);
+          
+          return res.json({
+            success: true,
+            warning: 'Password recovered but failed to update 1Password',
+            message: 'Database password was recovered from TigerData but could not be saved to 1Password',
+            customerId: id,
+            serviceId: customer.db_service_id,
+            recoveryMethod,
+            password: recoveredPassword, // Return password since we can't store it
+            error: onePasswordError.message,
+            action: 'Please save this password manually in 1Password',
+          });
+        }
+      } else {
+        // No 1Password secret exists yet
+        return res.json({
+          success: true,
+          warning: 'No 1Password secret exists',
+          message: 'Password recovered but customer has no 1Password secret to update',
+          customerId: id,
+          serviceId: customer.db_service_id,
+          recoveryMethod,
+          password: recoveredPassword, // Return password since we can't store it
+          action: 'Create 1Password secret or save password manually',
+        });
+      }
+    }
+
+    // ========================================
+    // Step 6: Recovery failed - provide manual instructions
+    // ========================================
+    return res.status(422).json({
+      success: false,
+      error: 'Automatic password recovery not supported',
+      message: 'TigerData API does not support password reset or retrieval after database creation',
+      customerId: id,
+      serviceId: customer.db_service_id,
+      manualRecovery: {
+        steps: [
+          '1. Log in to TigerData console: https://console.cloud.timescale.com',
+          '2. Navigate to your project and find the database service',
+          '3. Look for password reset or credentials option',
+          '4. Copy the password and update it in 1Password manually',
+          `5. Update the secret: ${customer.secret_item_id || 'Create a new secret first'}`,
+        ],
+        alternativeApproach: [
+          'If password cannot be recovered:',
+          '1. Delete the existing database via TigerData console',
+          '2. Use POST /api/customers/:id/retry-deployment to provision a new database',
+          '3. The new database will have a fresh password saved automatically',
+        ],
+      },
+      databaseInfo: {
+        serviceId: customer.db_service_id,
+        host: customer.db_host,
+        port: customer.db_port,
+        username: 'tsdbadmin', // TigerData default username
+        dbName: customer.db_name || 'tsdb',
+      },
+    });
+  } catch (error: any) {
+    console.error('Error recovering database password:', error);
+    res.status(500).json({ 
+      error: error.message,
+      customerId: id,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+    });
   }
 });
 

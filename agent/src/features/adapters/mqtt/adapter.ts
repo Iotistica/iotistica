@@ -25,6 +25,7 @@ import { MqttAdapterConfig, MqttDevice } from './types.js';
  */
 export class MqttAdapter extends EventEmitter {
   private static readonly MAX_QUEUE_DEPTH = 1000; // Backpressure threshold
+  private static readonly MAX_PAYLOAD_BYTES = 10 * 1024 * 1024; // 10MB max payload
   
   private config: MqttAdapterConfig;
   private logger: Logger;
@@ -35,6 +36,7 @@ export class MqttAdapter extends EventEmitter {
   private connected = false;
   private emitQueueDepth = 0;
   private droppedMessageCount = 0;
+  private firstConnect = true; // Track first connection for subscription logic
 
   constructor(config: MqttAdapterConfig, logger: Logger) {
     super();
@@ -45,30 +47,33 @@ export class MqttAdapter extends EventEmitter {
   }
 
   /**
-   * Start the MQTT adapter - connect to broker and subscribe to topics
+   * Start the MQTT adapter - create client and let mqtt.js handle reconnection
+   * 
+   * Self-healing architecture:
+   * - Creates client immediately (doesn't wait for connection)
+   * - mqtt.js handles automatic reconnection via reconnectPeriod
+   * - Adapter survives broker downtime at startup
+   * - Connection state tracked via events, not promise resolution
+   * 
+   * This makes the adapter resilient in edge environments where:
+   * - Broker may start after agent
+   * - Network may be unavailable at startup
+   * - Transient failures should not kill the adapter
    */
   async start(): Promise<void> {
     if (this.running) {
       return;
     }
 
-    try {
-      this.logger.debug('Starting MQTT Adapter...');
+    this.logger.debug('Starting MQTT Adapter...');
 
-      // Connect to broker (endpoint) - subscriptions happen in connect event
-      await this.connect();
+    // Create client - let mqtt.js handle connection and reconnection
+    this.createClient();
 
-      this.running = true;
-      
-      this.emit('started');
-      this.logger.info('MQTT Adapter started successfully');
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Failed to start MQTT Adapter: ${errorMessage}`);
-      await this.stop();
-      throw error;
-    }
+    this.running = true;
+    
+    this.emit('started');
+    this.logger.info('MQTT Adapter started (connection state tracked via events)');
   }
 
   /**
@@ -83,6 +88,8 @@ export class MqttAdapter extends EventEmitter {
       this.logger.debug('Stopping MQTT Adapter...');
 
       if (this.client) {
+        // Production fix: Remove all listeners to prevent memory leaks
+        this.client.removeAllListeners();
         this.client.end();
         this.client = null;
         this.connected = false;
@@ -90,6 +97,7 @@ export class MqttAdapter extends EventEmitter {
 
       this.subscriptions.clear();
       this.running = false;
+      this.firstConnect = true; // Reset for next start
       
       this.logger.debug('MQTT Adapter stopped successfully');
       this.emit('stopped');
@@ -115,15 +123,37 @@ export class MqttAdapter extends EventEmitter {
   }
 
   /**
-   * Connect to MQTT broker (endpoint)
+   * Create MQTT client and attach event handlers
+   * 
+   * Self-healing architecture:
+   * - Does NOT wait for initial connection (no timeout rejection)
+   * - mqtt.js handles automatic reconnection via reconnectPeriod
+   * - Survives broker downtime at startup (edge-friendly)
+   * - Connection state tracked via events
+   * 
+   * Production-safe:
+   * - Cleans up old client before creating new one (prevents listener leaks)
+   * - Uses .on() for ongoing state tracking (not .once() for promises)
+   * - Handles persistent session subscription logic correctly
+   * - Emits events for connection state transitions
    */
-  private async connect(): Promise<void> {
+  private createClient(): void {
     const brokerUrl = `mqtt://${this.config.broker.host}:${this.config.broker.port}`;
     
     // Generate stable clientId for persistent sessions (critical for edge agents)
-    const stableClientId = this.config.broker.clientId || `iotistic-agent-${process.env.DEVICE_UUID || 'unknown'}`;
+    const stableClientId = this.config.broker.clientId || `iotistica-agent-${process.env.DEVICE_UUID || 'unknown'}`;
     
-    this.logger.info(`Connecting to MQTT broker endpoint: ${brokerUrl}`, { clientId: stableClientId });
+    this.logger.info(`Creating MQTT client for broker: ${brokerUrl}`, { 
+      clientId: stableClientId,
+      reconnectPeriod: this.config.reconnect.period 
+    });
+
+    // Cleanup old client before creating new one (prevents listener leaks)
+    if (this.client) {
+      this.client.removeAllListeners();
+      this.client.end(true);
+      this.client = null;
+    }
 
     this.client = mqtt.connect(brokerUrl, {
       clientId: stableClientId,
@@ -140,32 +170,22 @@ export class MqttAdapter extends EventEmitter {
       }
     });
 
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('MQTT connection timeout'));
-      }, 30000);
-
-      this.client!.on('connect', () => {
-        clearTimeout(timeout);
-        this.connected = true;
+    // Event-based state machine (not promise-based)
+    // mqtt.js will keep retrying automatically
+    
+    this.client.on('connect', () => {
+      this.connected = true;
+      
+      this.logger.info(`MQTT broker connected: ${brokerUrl}`);
+      this.emit('device-connected', 'mqtt-broker');
+      
+      // Persistent session subscription logic
+      // With clean: false, subscriptions persist on broker
+      // Only subscribe on first connection to avoid duplication
+      if (this.firstConnect) {
+        this.logger.debug('First connection - subscribing to all configured devices');
+        this.firstConnect = false;
         
-        this.logger.info(`MQTT broker connected: ${brokerUrl}`);
-        this.emit('device-connected', 'mqtt-broker');
-        
-        // Subscribe to discoveryRoots for forwarding
-        if (this.config.observerRoots && this.config.observerRoots.length > 0) {
-          this.logger.info(`[MQTT] Subscribing to ${this.config.observerRoots.length} discoveryRoot pattern(s): ${JSON.stringify(this.config.observerRoots)}`);
-          
-          // Subscribe to observer roots
-          for (const root of this.config.observerRoots) {
-            this.logger.info(`[MQTT] Subscribing to discoveryRoot: ${root}`);
-            this.subscribeToObserverRoot(root).catch(err => {
-              this.logger.error(`[MQTT] Failed to subscribe to discoveryRoot ${root}: ${err.message}`);
-            });
-          }
-        }
-        
-        // Subscribe to configured devices
         for (const device of this.config.devices) {
           if (device.enabled) {
             this.subscribeToDevice(device).catch(err => {
@@ -173,30 +193,36 @@ export class MqttAdapter extends EventEmitter {
             });
           }
         }
-        
-        resolve();
-      });
+      } else {
+        this.logger.debug('Reconnected - subscriptions persisted on broker (clean: false)');
+      }
+    });
 
-      this.client!.on('error', (err) => {
-        this.logger.error(`MQTT connection error: ${err.message}`);
-        this.emit('device-error', 'mqtt-broker', err);
-      });
+    this.client.on('error', (err) => {
+      this.logger.error(`MQTT client error: ${err.message}`);
+      this.emit('device-error', 'mqtt-broker', err);
+      // Don't kill the client - let mqtt.js retry
+    });
 
-      this.client!.on('offline', () => {
-        this.connected = false;
-        this.logger.warn('MQTT broker offline');
-        this.emit('device-disconnected', 'mqtt-broker');
-      });
+    this.client.on('offline', () => {
+      this.connected = false;
+      this.logger.warn('MQTT broker offline');
+      this.emit('device-disconnected', 'mqtt-broker');
+    });
 
-      this.client!.on('reconnect', () => {
-        this.logger.info('MQTT reconnecting to broker...');
-      });
+    this.client.on('reconnect', () => {
+      this.logger.info('MQTT reconnecting to broker...');
+    });
 
-      // Handle incoming messages
-      // Note: MQTT callback signature includes packet metadata (retain flag, qos, etc.)
-      this.client!.on('message', (topic, payload, packet) => {
-        this.handleMessage(topic, payload, packet.retain);
-      });
+    this.client.on('close', () => {
+      this.connected = false;
+      this.logger.debug('MQTT connection closed');
+    });
+
+    // Handle incoming messages
+    // Note: MQTT callback signature includes packet metadata (retain flag, qos, etc.)
+    this.client.on('message', (topic, payload, packet) => {
+      this.handleMessage(topic, payload, packet.retain);
     });
   }
 
@@ -228,33 +254,15 @@ export class MqttAdapter extends EventEmitter {
   }
 
   /**
-   * Subscribe to observer root (wildcard pattern for continuous discovery)
-   * Messages on these topics are tracked by observer but NOT emitted as data
-   */
-  private async subscribeToObserverRoot(root: string): Promise<void> {
-    if (!this.client || !this.connected) {
-      throw new Error('MQTT client not connected');
-    }
-
-    const qos = this.config.qos;
-
-    return new Promise((resolve, reject) => {
-      this.client!.subscribe(root, { qos }, (err) => {
-        if (err) {
-          this.logger.error(`Failed to subscribe to observer root: ${root} - ${err.message}`);
-          reject(err);
-          return;
-        }
-        
-        this.logger.info(`Subscribed to observer root: ${root} (QoS ${qos}) - now tracking all messages`);
-        resolve();
-      });
-    });
-  }
-
-  /**
    * Find device config for incoming topic (supports MQTT wildcards: +, #)
    * Uses mqtt-pattern library for proper wildcard matching
+   * 
+   * Performance Note: O(N) linear search through subscriptions.
+   * Fine for typical deployments (10-100 devices).
+   * For high-scale (1000+ wildcard filters), consider:
+   * - Pre-compile patterns
+   * - Index by first topic segment
+   * - Use trie-based matching
    */
   private findDeviceForTopic(topic: string): MqttDevice | undefined {
     for (const [filter, device] of this.subscriptions.entries()) {
@@ -277,7 +285,22 @@ export class MqttAdapter extends EventEmitter {
     
     this.logger.debug(`[MQTT] handleMessage: topic=${topic}, retain=${retain}, payloadSize=${payload.length}`);
     
-    // Backpressure guard: Drop messages if downstream can't keep up
+    // Production fix #8: Max payload size guard
+    // Protects against memory exhaustion from malicious/corrupt messages
+    if (payload.length > MqttAdapter.MAX_PAYLOAD_BYTES) {
+      this.logger.warn('Dropping oversized MQTT message', {
+        topic,
+        payloadSize: payload.length,
+        maxAllowed: MqttAdapter.MAX_PAYLOAD_BYTES,
+        hint: 'Possible JSON bomb or malicious payload'
+      });
+      return;
+    }
+    
+    // Production fix #5: Backpressure guard
+    // Note: This is a "soft" guard based on emit depth, not true async backpressure.
+    // Downstream listeners may perform async work not reflected in this counter.
+    // For strict backpressure, consider bounded queue or promise tracking.
     if (this.emitQueueDepth > MqttAdapter.MAX_QUEUE_DEPTH) {
       this.droppedMessageCount++;
       if (this.droppedMessageCount % 100 === 1) {
@@ -293,25 +316,7 @@ export class MqttAdapter extends EventEmitter {
     // Check if topic matches any configured device
     const device = this.findDeviceForTopic(topic);
     
-    // If no specific device, check if it matches observerRoots (subscribe & forward)
-    if (!device && this.config.observerRoots) {
-      const matchesObserverRoot = this.config.observerRoots.some(root => {
-        return this.topicMatches(root, topic);
-      });
-      
-      if (matchesObserverRoot) {
-        // Auto-save to database + forward message immediately
-        this.logger.debug(`[MQTT] Topic matches discoveryRoots: ${topic}`);
-        this.handleDiscoveryRootMessage(topic, payload, retain);
-        return;
-      }
-      
-      // Topic doesn't match any device or observerRoot - ignore
-      this.logger.debug(`Ignoring message for unmatched topic: ${topic}`);
-      return;
-    }
-    
-    // If still no device, ignore
+    // If no device configured for this topic, ignore
     if (!device) {
       this.logger.debug(`Ignoring message for unconfigured topic: ${topic}`);
       return;
@@ -398,22 +403,42 @@ export class MqttAdapter extends EventEmitter {
    * - Specific types from manual config: 'int32', 'float32', 'uint32'
    * 
    * Note: Discovery returns broad types for safety. Users confirm specific types manually.
+   * 
+   * Production-safe: Detects NaN and throws error rather than silently returning invalid data
    */
   private coerceType(value: any, dataType: string): number | boolean | string {
     switch (dataType) {
       case 'number':  // Broad category from discovery
       case 'float':
       case 'float32':
-      case 'double':
-        return parseFloat(value);
+      case 'double': {
+        const n = parseFloat(value);
+        // Production fix #6: Detect NaN and throw error
+        if (Number.isNaN(n)) {
+          throw new Error(`Invalid numeric payload: "${value}" (NaN)`);
+        }
+        return n;
+      }
       case 'int':
       case 'int16':
       case 'int32':
-      case 'integer':
-        return parseInt(value, 10);
+      case 'integer': {
+        const n = parseInt(value, 10);
+        // Production fix #6: Detect NaN and throw error
+        if (Number.isNaN(n)) {
+          throw new Error(`Invalid integer payload: "${value}" (NaN)`);
+        }
+        return n;
+      }
       case 'uint16':
-      case 'uint32':
-        return Math.abs(parseInt(value, 10));
+      case 'uint32': {
+        const n = Math.abs(parseInt(value, 10));
+        // Production fix #6: Detect NaN and throw error
+        if (Number.isNaN(n)) {
+          throw new Error(`Invalid unsigned integer payload: "${value}" (NaN)`);
+        }
+        return n;
+      }
       case 'boolean':
         return value === 'true' || value === '1' || value === 1 || value === true;
       case 'json':    // Broad category from discovery
@@ -481,46 +506,5 @@ export class MqttAdapter extends EventEmitter {
    * Handle message from discoveryRoots subscription
    * Forwards all messages matching the wildcard patterns
    */
-  private handleDiscoveryRootMessage(topic: string, payload: Buffer, retain: boolean): void {
-    try {
-      // Parse payload
-      let value: any;
-      try {
-        value = JSON.parse(payload.toString());
-      } catch {
-        value = payload.toString();
-      }
-      
-      // Create data point
-      const dataPoint: SensorDataPoint = {
-        deviceName: `mqtt_${topic.replace(/\//g, '_')}`,
-        metric: topic,
-        value,
-        unit: '',
-        timestamp: new Date().toISOString(),
-        quality: retain ? 'UNCERTAIN' : 'GOOD'
-      };
-      
-      // Emit with backpressure tracking
-      this.emitQueueDepth++;
-      this.emit('data', [dataPoint]);
-      setImmediate(() => this.emitQueueDepth--);
-      
-      this.logger.debug(`[MQTT] Forwarded message from discoveryRoot: ${topic}`);
-      
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Failed to handle discoveryRoot message for ${topic}: ${errorMessage}`);
-    }
-  }
-
-  /**
-   * Check if topic matches MQTT wildcard pattern
-   * Supports + (single level) and # (multi level)
-   */
-  private topicMatches(pattern: string, topic: string): boolean {
-    const mqttPattern = require('mqtt-pattern');
-    return mqttPattern.matches(pattern, topic);
-  }
 }
 

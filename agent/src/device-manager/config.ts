@@ -293,6 +293,12 @@ export class ConfigManager extends EventEmitter {
 				case 'bacnet':
 					return Array.isArray(connection?.discoveryTargets) && 
 						connection.discoveryTargets.length > 0;
+				case 'mqtt':
+					// Accept endpoints with topics array (for validation)
+					// Discovery validates that topics receive data (not auto-discovery)
+					const hasTopics = Array.isArray(connection?.topics) && connection.topics.length > 0;
+					const hasNoMqttDataPoints = !endpoint.dataPoints || endpoint.dataPoints.length === 0;
+					return hasTopics && hasNoMqttDataPoints;
 				default:
 					return false;
 			}

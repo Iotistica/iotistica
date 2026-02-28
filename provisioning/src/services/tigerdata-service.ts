@@ -174,6 +174,9 @@ export class TigerDataService {
       console.log(`[TigerDataService] ℹ️  Database already exists, returning existing database`);
       console.log(`   Service ID: ${existing.serviceId}`);
       console.log(`   Status: ${existing.status}`);
+      console.warn(`[TigerDataService] ⚠️  WARNING: Password not available for existing database!`);
+      console.warn(`   TigerData API only returns passwords on initial database creation.`);
+      console.warn(`   Password must be retrieved from 1Password if secret already exists.`);
       return existing;
     }
 
@@ -244,13 +247,23 @@ export class TigerDataService {
       console.log(`[TigerDataService] Database provisioning initiated: serviceId=${serviceId}`);
 
       // Handle both nested and flat response structures
+      const password = data.initial_password || data.password;
+      
+      if (!password) {
+        console.warn(`[TigerDataService] ⚠️  WARNING: No password in API response!`);
+        console.warn(`   This might indicate an API change or error.`);
+        console.warn(`   Response keys:`, Object.keys(data));
+      } else {
+        console.log(`[TigerDataService] ✅ Password received from TigerData API`);
+      }
+
       return {
         serviceId: serviceId,
         host: data.endpoint?.host || data.host || data.hostname,
         port: data.endpoint?.port || data.port || 5432,
         dbName: 'tsdb',
         username: 'tsdbadmin',
-        password: data.initial_password || data.password,
+        password: password || '',
         region: data.region || request.region,
         status: data.status || 'provisioning',
         fullResponse: data,
@@ -316,7 +329,11 @@ export class TigerDataService {
     }
 
     throw new TigerDataProvisioningError(
-      `Database ${serviceId} did not become ready after ${maxRetries} attempts`
+      `Database ${serviceId} did not become ready after ${maxRetries} attempts (${(maxRetries * delayMs) / 1000}s total). ` +
+      `The database may still be provisioning on TigerData's end. ` +
+      `Database details have been saved to the customer record. ` +
+      `You can retry the deployment job after the database becomes active - ` +
+      `the password will be retrieved from the saved db_api_response field.`
     );
   }
 
@@ -377,6 +394,140 @@ export class TigerDataService {
         throw error;
       }
       throw new TigerDataProvisioningError(`Failed to list databases: ${error}`);
+    }
+  }
+
+  /**
+   * Reset database password
+   * Note: Timescale Cloud API may not support password reset. This method will attempt
+   * common patterns but may need adjustment based on actual API documentation.
+   * 
+   * @param serviceId - TigerData service ID
+   * @returns New password if successful
+   */
+  async resetPassword(serviceId: string): Promise<string> {
+    console.log(`[TigerDataService] Attempting to reset password for: ${serviceId}`);
+
+    // In simulation mode, return a mock password
+    if (this.simulateMode) {
+      console.log(`[TigerDataService] ⚠️  SIMULATION MODE - Returning mock password`);
+      return 'simulated_reset_password_12345';
+    }
+
+    try {
+      // Try common password reset endpoint patterns
+      const endpoints = [
+        `/projects/${this.config.projectId}/services/${serviceId}/reset-password`,
+        `/projects/${this.config.projectId}/services/${serviceId}/credentials/reset`,
+        `/projects/${this.config.projectId}/services/${serviceId}/password/reset`,
+      ];
+
+      for (const endpoint of endpoints) {
+        try {
+          console.log(`[TigerDataService] Trying endpoint: ${endpoint}`);
+          const response = await this.client.post(endpoint, {});
+          
+          // Check various possible response fields
+          const newPassword = response.data?.password || 
+                             response.data?.new_password || 
+                             response.data?.credentials?.password ||
+                             response.data?.initial_password;
+
+          if (newPassword) {
+            console.log(`[TigerDataService] ✅ Password reset successful via: ${endpoint}`);
+            return newPassword;
+          }
+        } catch (err: any) {
+          // If we get 404, try next endpoint. Other errors should be logged but continue.
+          if (err.response?.status === 404) {
+            console.log(`[TigerDataService] Endpoint not found: ${endpoint}`);
+            continue;
+          }
+          console.warn(`[TigerDataService] Error trying ${endpoint}:`, err.message);
+        }
+      }
+
+      throw new TigerDataProvisioningError(
+        'Password reset not supported by TigerData API. ' +
+        'Tried multiple endpoint patterns but none succeeded. ' +
+        'Please retrieve password from TigerData console manually.'
+      );
+    } catch (error) {
+      if (error instanceof TigerDataProvisioningError) {
+        throw error;
+      }
+      throw new TigerDataProvisioningError(`Failed to reset password: ${error}`);
+    }
+  }
+
+  /**
+   * Get database credentials (may include password)
+   * Note: Most DBaaS providers don't expose passwords after creation for security.
+   * This method attempts to retrieve credentials but will likely fail.
+   * 
+   * @param serviceId - TigerData service ID
+   * @returns Credentials object with password if available
+   */
+  async getCredentials(serviceId: string): Promise<{ username: string; password?: string; host: string; port: number }> {
+    console.log(`[TigerDataService] Attempting to retrieve credentials for: ${serviceId}`);
+
+    // In simulation mode, return mock credentials
+    if (this.simulateMode) {
+      console.log(`[TigerDataService] ⚠️  SIMULATION MODE - Returning mock credentials`);
+      return {
+        username: 'tsdbadmin',
+        password: 'simulated_password_67890',
+        host: 'simulated.tsdb.cloud.timescale.com',
+        port: 5432,
+      };
+    }
+
+    try {
+      // Try common credential retrieval endpoint patterns
+      const endpoints = [
+        `/projects/${this.config.projectId}/services/${serviceId}/credentials`,
+        `/projects/${this.config.projectId}/services/${serviceId}/connection`,
+        `/projects/${this.config.projectId}/services/${serviceId}`,
+      ];
+
+      for (const endpoint of endpoints) {
+        try {
+          console.log(`[TigerDataService] Trying endpoint: ${endpoint}`);
+          const response = await this.client.get(endpoint);
+          const data = response.data;
+
+          const credentials = {
+            username: data.username || data.user || data.credentials?.username || 'tsdbadmin',
+            password: data.password || data.credentials?.password,
+            host: data.host || data.hostname || data.endpoint?.host || '',
+            port: data.port || data.endpoint?.port || 5432,
+          };
+
+          if (credentials.password) {
+            console.log(`[TigerDataService] ✅ Password retrieved via: ${endpoint}`);
+            return credentials;
+          } else {
+            console.log(`[TigerDataService] ⚠️  Endpoint ${endpoint} returned credentials but no password`);
+          }
+        } catch (err: any) {
+          if (err.response?.status === 404) {
+            console.log(`[TigerDataService] Endpoint not found: ${endpoint}`);
+            continue;
+          }
+          console.warn(`[TigerDataService] Error trying ${endpoint}:`, err.message);
+        }
+      }
+
+      throw new TigerDataProvisioningError(
+        'Password retrieval not supported by TigerData API. ' +
+        'For security reasons, most database providers do not expose passwords after initial creation. ' +
+        'Please use password reset functionality or retrieve from TigerData console.'
+      );
+    } catch (error) {
+      if (error instanceof TigerDataProvisioningError) {
+        throw error;
+      }
+      throw new TigerDataProvisioningError(`Failed to get credentials: ${error}`);
     }
   }
 

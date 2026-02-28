@@ -776,7 +776,8 @@ export class DiscoveryService extends EventEmitter {
       }
 
       const options: MqttDiscoveryOptions = {
-        brokerUrl: config.brokerUrl
+        brokerUrl: config.brokerUrl,
+        topics: []  // Will be populated below
       };
 
       // Optional authentication
@@ -788,14 +789,14 @@ export class DiscoveryService extends EventEmitter {
         options.password = config.password;
       }
 
-      // Discovery roots
+      // Topics to validate (renamed from discoveryRoots for simplified model)
       if (config.discoveryRoots && config.discoveryRoots.length > 0) {
-        options.discoveryRoots = config.discoveryRoots;
+        options.topics = config.discoveryRoots;
       }
 
-      // Monitor duration
+      // Sampling duration (renamed from monitorDurationMs)
       if (config.monitorDurationMs) {
-        options.monitorDurationMs = config.monitorDurationMs;
+        options.samplingDurationMs = config.monitorDurationMs;
       }
 
       // QoS
@@ -815,7 +816,10 @@ export class DiscoveryService extends EventEmitter {
       return undefined; // Use plugin defaults
     }
 
-    const options: MqttDiscoveryOptions = { brokerUrl };
+    const options: MqttDiscoveryOptions = { 
+      brokerUrl,
+      topics: []  // Will be populated below
+    };
 
     // Optional authentication
     if (process.env.MQTT_USERNAME) {
@@ -826,21 +830,21 @@ export class DiscoveryService extends EventEmitter {
       options.password = process.env.MQTT_PASSWORD;
     }
 
-    // Optional discovery roots (JSON array)
-    // Example: MQTT_DISCOVERY_ROOTS='["edge/+","devices/+/telemetry"]'
+    // Topics to validate (from env var - JSON array)
+    // Example: MQTT_DISCOVERY_ROOTS='["edge/device01/temperature","devices/sensor/data"]'
     if (process.env.MQTT_DISCOVERY_ROOTS) {
       try {
-        options.discoveryRoots = JSON.parse(process.env.MQTT_DISCOVERY_ROOTS);
+        options.topics = JSON.parse(process.env.MQTT_DISCOVERY_ROOTS);
       } catch (err) {
         this.logger?.warnSync(
-          `Failed to parse MQTT_DISCOVERY_ROOTS - expected JSON array (e.g., ["edge/+"]): ${(err as Error).message}`,
+          `Failed to parse MQTT_DISCOVERY_ROOTS - expected JSON array (e.g., ["topic1", "topic2"]): ${(err as Error).message}`,
           { component: LogComponents.discovery }
         );
       }
     }
 
     if (process.env.MQTT_DISCOVERY_DURATION_MS) {
-      options.monitorDurationMs = parseInt(process.env.MQTT_DISCOVERY_DURATION_MS, 10);
+      options.samplingDurationMs = parseInt(process.env.MQTT_DISCOVERY_DURATION_MS, 10);
     }
 
     if (process.env.MQTT_DISCOVERY_QOS) {
