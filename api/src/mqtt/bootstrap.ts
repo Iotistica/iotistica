@@ -108,10 +108,6 @@ export async function initializeNodeRedMqttCredentials(): Promise<{ username: st
       VALUES ($1, '#', 3, 100)
     `, [username]);
 
-    logger.info(`Node-RED MQTT user '${username}' created with generated credentials`);
-    logger.warn(`IMPORTANT: Set these environment variables for Node-RED:`);
-    logger.warn(`  MQTT_USERNAME=${username}`);
-    logger.warn(`  MQTT_PASSWORD=${password}`);
 
     return { username, password };
 
