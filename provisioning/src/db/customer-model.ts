@@ -50,6 +50,12 @@ export interface Customer {
   // Admin bootstrap fields
   initial_admin_password?: string;
   bootstrapped_at?: Date;
+  // Admin password reset token fields (SOC2 compliant)
+  admin_reset_token_hash?: string;
+  admin_reset_token_expires_at?: Date;
+  admin_reset_token_sent_at?: Date;
+  admin_reset_token_used?: boolean;
+  admin_reset_token_used_at?: Date;
   created_at: Date;
   updated_at: Date;
 }

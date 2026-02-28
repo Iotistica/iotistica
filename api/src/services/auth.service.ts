@@ -400,6 +400,62 @@ export async function bootstrapAdminPassword(
 }
 
 /**
+ * Set password from reset token (no current password required)
+ * Used for initial admin password setup
+ */
+export async function setPasswordFromReset(
+  username: string,
+  newPassword: string,
+  ipAddress?: string | null
+): Promise<void> {
+  // Validate new password
+  if (!newPassword || newPassword.length < 12) {
+    throw new Error('Password must be at least 12 characters');
+  }
+
+  // Fetch user
+  const result = await query(
+    'SELECT id, username FROM users WHERE username = $1',
+    [username]
+  );
+
+  if (result.rows.length === 0) {
+    throw new Error('User not found');
+  }
+
+  const user = result.rows[0];
+
+  // Hash new password
+  const newPasswordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+
+  // Update password
+  await query(
+    `UPDATE users
+     SET password_hash = $1,
+         must_change_password = false,
+         password_last_changed_at = CURRENT_TIMESTAMP,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $2`,
+    [newPasswordHash, user.id]
+  );
+
+  // Revoke all refresh tokens (force re-login)
+  await query(
+    `UPDATE refresh_tokens
+     SET revoked = true, revoked_at = CURRENT_TIMESTAMP
+     WHERE user_id = $1 AND revoked = false`,
+    [user.id]
+  );
+
+  // Log audit event
+  await logAuditEvent('password_reset_completed', user.id, ipAddress, {
+    username: user.username
+  });
+
+  logger.info('Password reset completed', { username: user.username });
+}
+
+/**
  * Store refresh token in database
  */
 async function storeRefreshToken(

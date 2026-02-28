@@ -348,6 +348,103 @@ router.post('/change-password', jwtAuth, async (req: Request, res: Response) => 
 });
 
 /**
+ * POST /auth/reset-password
+ * 
+ * Set initial admin password using reset token
+ * No authentication required (uses token from email link)
+ * 
+ * Body:
+ *   - token: string (reset token from email)
+ *   - customerId: string (customer ID from provisioning)
+ *   - password: string (new password, min 12 chars)
+ * 
+ * Returns: { message, data: { username } }
+ */
+router.post('/reset-password', authRateLimit, async (req: Request, res: Response) => {
+  try {
+    const { token, customerId, password } = req.body;
+
+    if (!token || !customerId || !password) {
+      res.status(400).json({
+        error: 'Bad Request',
+        message: 'Token, customerId, and password are required'
+      });
+      return;
+    }
+
+    if (password.length < 12) {
+      res.status(400).json({
+        error: 'Bad Request',
+        message: 'Password must be at least 12 characters'
+      });
+      return;
+    }
+
+    const provisioningApiUrl = process.env.PROVISIONING_API_URL || 'http://localhost:3100';
+    const axios = (await import('axios')).default;
+
+    // Step 1: Validate token with provisioning service
+    let validationResponse;
+    try {
+      validationResponse = await axios.post(
+        `${provisioningApiUrl}/api/auth/validate-reset-token`,
+        { token, customerId }
+      );
+    } catch (error: any) {
+      console.error('Token validation failed:', error.response?.data || error.message);
+      
+      const status = error.response?.status || 500;
+      const message = error.response?.data?.message || 'Token validation failed';
+      
+      res.status(status).json({
+        error: status === 400 ? 'Bad Request' : 'Internal Server Error',
+        message
+      });
+      return;
+    }
+
+    const { username } = validationResponse.data.data;
+
+    // Step 2: Set password in local users table
+    const ipAddress = req.ip || req.socket.remoteAddress;
+    await authService.setPasswordFromReset(username, password, ipAddress);
+
+    // Step 3: Mark token as used in provisioning service
+    try {
+      await axios.post(
+        `${provisioningApiUrl}/api/auth/mark-token-used`,
+        { token, customerId }
+      );
+    } catch (error: any) {
+      console.error('Failed to mark token as used:', error.response?.data || error.message);
+      // Continue - password already set, token invalidation is best-effort
+    }
+
+    res.status(200).json({
+      message: 'Initial password set successfully. You can now login.',
+      data: { username }
+    });
+
+  } catch (error: any) {
+    console.error('Set initial password error:', error);
+    
+    if (error.message.includes('at least') || 
+        error.message.includes('not found')) {
+      res.status(400).json({
+        error: 'Bad Request',
+        message: error.message
+      });
+      return;
+    }
+
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to set password'
+    });
+  }
+});
+
+/**
  * GET /auth/me
  * 
  * Get current authenticated user info with MQTT broker settings

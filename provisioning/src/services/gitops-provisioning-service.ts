@@ -806,7 +806,7 @@ export class GitOpsProvisioningService {
 
         // Queue email event with reset link
         // Email service will send link to customer, never stores password
-        const resetLink = `https://app.iotistic.com/auth/set-initial-password?token=${resetToken}&customerId=${data.customerId}`;
+        const resetLink = `https://client-${data.clientId}.iotistica.com/auth/reset-password?token=${resetToken}&customerId=${data.customerId}`;
         
         console.log('   📧 Queuing password reset email...');
         logger.info('Password reset email queued', {

@@ -21,6 +21,7 @@ import webhooksRouter from './routes/webhooks';
 import queueRouter from './routes/queue';
 import upgradesRouter from './routes/upgrades';
 import adminRouter from './routes/admin';
+import authRouter from './routes/auth';
 
 // Services
 import { deploymentQueue } from './services/deployment-queue';
@@ -61,6 +62,7 @@ app.get('/health', (req, res) => {
 });
 
 // API routes
+app.use('/api/auth', authRouter);  // Token validation for customer instances
 app.use('/api/customers', customersRouter);
 app.use('/api/subscriptions', subscriptionsRouter);
 app.use('/api/licenses', licensesRouter);
