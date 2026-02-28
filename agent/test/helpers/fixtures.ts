@@ -48,7 +48,8 @@ export interface DeviceStateReport {
 export interface MockDeviceInfo {
 	uuid: string;
 	provisioned: boolean;
-	apiKey: string;
+	deviceApiKey: string;  // Device-specific key (two-phase auth)
+	apiKey?: string;       // Legacy field for backward compatibility
 	osVersion: string;
 	agentVersion: string;
 }
@@ -263,7 +264,8 @@ export const createMockDeviceInfo = (
 ): MockDeviceInfo => ({
 	uuid: 'device-uuid-123',
 	provisioned: true,
-	apiKey: 'test-api-key-abc123',
+	deviceApiKey: 'test-api-key-abc123',  // Two-phase auth key
+	apiKey: 'test-api-key-abc123',        // Legacy fallback
 	osVersion: 'Debian 11',
 	agentVersion: '1.0.0',
 	...overrides
@@ -276,6 +278,7 @@ export const createMockDeviceInfo = (
 export const createUnprovisionedDeviceInfo = (): MockDeviceInfo => ({
 	uuid: 'device-uuid-123',
 	provisioned: false,
+	deviceApiKey: '',
 	apiKey: '',
 	osVersion: 'Debian 11',
 	agentVersion: '1.0.0'

@@ -7,16 +7,19 @@
  */
 
 import { stub, SinonStub } from 'sinon';
-import type { HttpClient, HttpResponse } from '../../src/http/client';
+import type { HttpClient, HttpResponse } from '../../src/lib/http-client';
 
 export class MockHttpClient implements HttpClient {
 	public getStub: SinonStub;
 	public postStub: SinonStub;
+	public patchStub: SinonStub;
 	private postCallIndex: number = 0;
+	private patchCallIndex: number = 0;
 	
 	constructor() {
 		this.getStub = stub();
 		this.postStub = stub();
+		this.patchStub = stub();
 	}
 	
 	async get<T = any>(url: string, options?: {
@@ -32,6 +35,15 @@ export class MockHttpClient implements HttpClient {
 		compress?: boolean;
 	}): Promise<HttpResponse<T>> {
 		return this.postStub(url, body, options);
+	}
+	
+	async patch<T = any>(url: string, body: any, options?: {
+		headers?: Record<string, string>;
+		timeout?: number;
+		compress?: boolean;
+		onCompressionStats?: (stats: any) => void;
+	}): Promise<HttpResponse<T>> {
+		return this.patchStub(url, body, options);
 	}
 	
 	/**
@@ -65,6 +77,24 @@ export class MockHttpClient implements HttpClient {
 		status?: number;
 	}): void {
 		this.postStub.onCall(this.postCallIndex++).resolves({
+			ok: true,
+			status: options?.status || 200,
+			statusText: 'OK',
+			headers: {
+				get: () => null
+			},
+			json: async () => body
+		});
+	}
+	
+	/**
+	 * Helper: Configure successful PATCH response
+	 * If called multiple times, queues responses in order (first call, second call, etc.)
+	 */
+	mockPatchSuccess<T>(body: T, options?: {
+		status?: number;
+	}): void {
+		this.patchStub.onCall(this.patchCallIndex++).resolves({
 			ok: true,
 			status: options?.status || 200,
 			statusText: 'OK',
@@ -121,6 +151,21 @@ export class MockHttpClient implements HttpClient {
 	}
 	
 	/**
+	 * Helper: Configure PATCH error response
+	 */
+	mockPatchError(status: number, statusText: string): void {
+		this.patchStub.resolves({
+			ok: false,
+			status,
+			statusText,
+			headers: {
+				get: () => null
+			},
+			json: async () => ({ error: statusText })
+		});
+	}
+	
+	/**
 	 * Helper: Configure network error
 	 */
 	mockNetworkError(message: string = 'Network request failed'): void {
@@ -142,6 +187,8 @@ export class MockHttpClient implements HttpClient {
 	reset(): void {
 		this.getStub.reset();
 		this.postStub.reset();
+		this.patchStub.reset();
 		this.postCallIndex = 0;
+		this.patchCallIndex = 0;
 	}
 }

@@ -1,5 +1,5 @@
-import { BaseProtocolAdapter, GenericDeviceConfig } from '../../../src/features/sensors/base';
-import { SensorDataPoint } from '../../../src/features/sensors/types';
+import { BaseProtocolAdapter, GenericDeviceConfig } from '../../../src/features/adapters/base';
+import { SensorDataPoint } from '../../../src/features/adapters/types';
 
 class TestAdapter extends BaseProtocolAdapter {
   getProtocolName(): string {
@@ -52,14 +52,14 @@ describe('BaseProtocolAdapter', () => {
   it('should start with no devices', async () => {
     const adapter = new TestAdapter(devices, mockLogger);
     await adapter.start();
-    expect(mockLogger.info).toHaveBeenCalled();
+    expect(mockLogger.debug).toHaveBeenCalled();
   });
 
   it('should stop adapter', async () => {
     const adapter = new TestAdapter(devices, mockLogger);
     await adapter.start();
     await adapter.stop();
-    expect(mockLogger.info).toHaveBeenCalled();
+    expect(mockLogger.debug).toHaveBeenCalled();
   });
 
   it('should return empty device statuses', () => {

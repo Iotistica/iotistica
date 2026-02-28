@@ -77,7 +77,10 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
   private validatedTopics: Map<string, TopicValidation> = new Map();
   private brokerConfig?: MqttDiscoveryOptions; // Store for validate() reuse
 
-  constructor(logger?: AgentLogger) {
+  constructor(
+    logger?: AgentLogger,
+    private mqttFactory: (url: string, options: any) => mqtt.MqttClient = mqtt.connect
+  ) {
     super('mqtt', logger);
   }
 
@@ -117,7 +120,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
 
     try {
       // Connect to broker with TLS support
-      this.client = mqtt.connect(brokerUrl, {
+      this.client = this.mqttFactory(brokerUrl, {
         username: options?.username,
         password: options?.password,
         clientId: `iotistic-discovery-${Date.now()}`,
@@ -278,9 +281,17 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
    * Tracks both retained and live messages for production observability
    */
   private handleMessage(topic: string, payload: string, isRetained: boolean = false): void {
-    const validation = this.validatedTopics.get(topic);
+    let validation = this.validatedTopics.get(topic);
     if (!validation) {
-      return; // Ignore messages from untracked topics
+      // Initialize new topic tracking
+      validation = {
+        topic,
+        messagesReceived: 0,
+        retainedMessagesReceived: 0,
+        hasRetained: false,
+        hasLive: false
+      };
+      this.validatedTopics.set(topic, validation);
     }
 
     const now = new Date();
@@ -353,7 +364,6 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
         return 'number';
       }
 
-      // Default fallback
       return 'string';
     }
   }
@@ -369,9 +379,10 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
 
       // Generate name from topic with length limit to avoid excessively long names
       let topicName = validation.topic.replace(/\//g, '_');
-      if (topicName.length > 60) {
-        // For very long topics, use last 60 chars (most specific part)
-        topicName = '...' + topicName.slice(-57);
+      if (topicName.length > 58) {
+        // For very long topics, use last 55 chars (most specific part)
+        // Final name = mqtt_ (5) + ... (3) + last 55 chars = 63 chars max
+        topicName = '...' + topicName.slice(-55);
       }
       const name = `mqtt_${topicName}`;
 
@@ -499,7 +510,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
         }
       };
       
-      const client = mqtt.connect(brokerUrl, {
+      const client = this.mqttFactory(brokerUrl, {
         clientId: `iotistic-validate-${Date.now()}`,
         clean: true,
         reconnectPeriod: 0,
@@ -567,12 +578,9 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
    * Check if MQTT client library is available
    */
   async isAvailable(): Promise<boolean> {
-    try {
-      await import('mqtt');
-      return true;
-    } catch {
-      return false;
-    }
+    // MQTT module is a hard dependency and already imported at the top of this file
+    // If the module wasn't available, this file wouldn't even load
+    return true;
   }
   
   /**

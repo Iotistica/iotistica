@@ -3,10 +3,9 @@
  * Manages protocol adapter device configurations (Modbus, CAN, OPC-UA) in SQLite
  */
 
+import { randomUUID } from 'crypto';
 import { models, getKnex } from '../connection';
 import { EndpointOutputModel } from './endpoint-outputs.model';
-// Use require for uuid to avoid ESM/CommonJS mismatch in Jest
-const { v4: uuidv4 } = require('uuid');
 
 export interface DeviceEndpoint {
   id?: number;
@@ -146,7 +145,7 @@ export class DeviceEndpointModel {
   static async create(device: DeviceEndpoint): Promise<DeviceEndpoint> {
     const [id] = await models(this.table).insert({
       ...device,
-      uuid: device.uuid || uuidv4(), // Generate UUID if not provided
+      uuid: device.uuid || randomUUID(), // Generate UUID if not provided
       connection: JSON.stringify(device.connection),
       data_points: device.data_points ? JSON.stringify(device.data_points) : null,
       metadata: device.metadata ? JSON.stringify(device.metadata) : null,

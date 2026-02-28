@@ -18,6 +18,7 @@ import * as path from 'path';
 import * as yaml from 'js-yaml';
 import crypto from 'crypto';
 import axios from 'axios';
+import { Job } from 'bull';
 import { logger } from '../utils/logger';
 import { TigerDataService, TigerDataDatabase } from './tigerdata-service';
 import { OnePasswordService } from './onepassword-service';
@@ -299,8 +300,10 @@ export class GitOpsProvisioningService {
 
   /**
    * Deploy a new client instance
+   * @param data - Client deployment configuration
+   * @param job - Optional Bull job for retry context (used to determine final retry)
    */
-  async deployClient(data: ClientDeploymentData): Promise<void> {
+  async deployClient(data: ClientDeploymentData, job?: Job): Promise<void> {
     if (!this.config.enabled) {
       logger.info('Skipping client deployment (GitOps disabled)');
       return;
@@ -482,73 +485,52 @@ export class GitOpsProvisioningService {
         console.log(`\n🔄 Updating SQL credentials with TigerData info...`);
         
         // IMPORTANT: TigerData API only returns password on initial creation
-        // If database already exists, password will be empty - need to retrieve from 1Password or customer record
+        // If database already exists, password will be empty
         let dbPassword = dbResult.password;
         if (!dbPassword) {
-          console.warn(`⚠️  Database password empty (database already exists)`);
+          // Check if this is the final Bull retry attempt
+          const isFinalRetry = job && (job.attemptsMade + 1) >= (job.opts.attempts || 1);
           
-          // Try to retrieve password from customer record first (in case previous job failed after DB creation)
-          const customer = await CustomerModel.getById(data.customerId);
-          if (customer?.db_api_response) {
-            console.log(`🔍 Checking customer DB API response for password...`);
-            try {
-              const apiResponse = typeof customer.db_api_response === 'string' 
-                ? JSON.parse(customer.db_api_response) 
-                : customer.db_api_response;
-              
-              const passwordFromApi = apiResponse.initial_password || apiResponse.password;
-              if (passwordFromApi) {
-                dbPassword = passwordFromApi;
-                console.log(`✅ Password retrieved from customer DB API response`);
-              }
-            } catch (error) {
-              console.warn(`⚠️  Could not parse DB API response:`, error);
-            }
+          if (!isFinalRetry) {
+            // Not the final retry - let Bull retry the job
+            console.warn(`⚠️  Database password not available (database still provisioning)`);
+            console.log(`🔄 Retry attempt ${job?.attemptsMade ? job.attemptsMade + 1 : 1}/${job?.opts.attempts || 1}`);
+            console.log(`⏳ Letting Bull queue retry - waiting for database to reach READY status`);
+            throw new Error(
+              `Database ${dbResult.serviceId} not ready yet. ` +
+              `Will retry (attempt ${job?.attemptsMade ? job.attemptsMade + 1 : 1}/${job?.opts.attempts || 1}). ` +
+              `Database is still provisioning on TigerData's end.`
+            );
           }
           
-          // If still no password, try to retrieve from existing 1Password secret
-          if (!dbPassword && customer?.secret_item_id) {
-            console.log(`🔑 Retrieving password from existing 1Password secret: ${customer.secret_item_id}`);
-            try {
-              const existingSecret = await this.onePasswordService.getItem(customer.secret_item_id);
-              // Extract password field from the secret
-              const passwordField = existingSecret.fields?.find((f: any) => 
-                f.label === 'password' || f.id === 'password'
-              );
-              if (passwordField?.value) {
-                dbPassword = passwordField.value;
-                console.log(`✅ Password retrieved from existing 1Password secret`);
-              } else {
-                console.warn(`⚠️  Password field not found in existing 1Password secret`);
-              }
-            } catch (error) {
-              console.error(`❌ Failed to retrieve password from 1Password:`, error);
-            }
-          }
+          // This is the final retry - database still not READY after all attempts
+          // Save all available DB data with placeholder password
+          console.warn(`\n⚠️  ════════════════════════════════════════════════════════════════`);
+          console.warn(`⚠️  DATABASE NOT READY AFTER ALL RETRY ATTEMPTS`);
+          console.warn(`⚠️  ════════════════════════════════════════════════════════════════`);
+          console.log(`   Final retry attempt: ${job?.attemptsMade ? job.attemptsMade + 1 : 1}/${job?.opts.attempts || 1}`);
+          console.log(`   Database Service ID: ${dbResult.serviceId}`);
+          console.log(`   Database Host: ${dbResult.host}`);
+          console.log(`   Status: Database provisioned but not yet READY`);
+          console.log(``);
+          console.log(`📋 MANUAL INTERVENTION REQUIRED:`);
+          console.log(`   1. Database is still provisioning on TigerData's end`);
+          console.log(`   2. Saving deployment with placeholder password: "PENDING_MANUAL_UPDATE"`);
+          console.log(`   3. Once database is READY, retrieve password from TigerData console`);
+          console.log(`   4. Update 1Password secret with actual password`);
+          console.log(`   5. TigerData Console: https://console.cloud.timescale.com`);
+          console.log(`⚠️  ════════════════════════════════════════════════════════════════\n`);
           
-          // If still no password, provide detailed error with recovery instructions
-          if (!dbPassword) {
-            const errorMsg = 
-              `Database already exists but password cannot be retrieved.\n` +
-              `\n` +
-              `This can happen if:\n` +
-              `1. A previous deployment job failed after database creation but before saving credentials\n` +
-              `2. TigerData was slow to provision and the job timed out\n` +
-              `\n` +
-              `Database Details:\n` +
-              `- Service ID: ${dbResult.serviceId}\n` +
-              `- Host: ${dbResult.host}\n` +
-              `- Namespace: ${data.namespace}\n` +
-              `\n` +
-              `Recovery Options:\n` +
-              `1. Retrieve the password from TigerData console (https://console.cloud.timescale.com)\n` +
-              `2. Delete the database via TigerData console and retry deployment\n` +
-              `3. Contact support with Service ID: ${dbResult.serviceId}\n` +
-              `\n` +
-              `Note: TigerData API only returns passwords on initial database creation.`;
-            
-            throw new Error(errorMsg);
-          }
+          // Use placeholder password
+          dbPassword = 'PENDING_MANUAL_UPDATE';
+          
+          logger.warn('Database not ready after all retries - saving with placeholder password', {
+            customerId: data.customerId,
+            serviceId: dbResult.serviceId,
+            host: dbResult.host,
+            finalAttempt: job?.attemptsMade ? job.attemptsMade + 1 : 1,
+            totalAttempts: job?.opts.attempts || 1,
+          });
         }
         
         secretBuilder.addDbCredentials({
@@ -648,18 +630,6 @@ export class GitOpsProvisioningService {
 
       // 2. Generate values file
       const valuesData = await this.generateValuesFile(data);
-      
-      // Inject customer-specific license key into values
-      // Note: Public key is provided via cluster-wide ConfigMap, not per-customer
-      if (valuesData.api && valuesData.api.license) {
-        valuesData.api.license.key = data.licenseKey;
-        logger.info('Injected license key into values', { 
-          clientId: data.clientId,
-          licenseKeyLength: data.licenseKey.length 
-        });
-      } else {
-        logger.warn('License section not found in values template', { clientId: data.clientId });
-      }
       
       const valuesDir = path.join(
         this.config.repoDir,

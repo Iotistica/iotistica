@@ -1,5 +1,5 @@
-import { SocketServer } from '../../../src/features/sensors/common/socket-server';
-import { SocketOutput } from '../../../src/features/sensors/types';
+import { SocketServer } from '../../../src/features/adapters/common/socket-server';
+import { SocketOutput } from '../../../src/features/adapters/types';
 
 describe('SocketServer', () => {
   let mockLogger: any;

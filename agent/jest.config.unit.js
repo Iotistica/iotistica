@@ -10,7 +10,6 @@ module.exports = {
   testMatch: [
     '**/*.unit.spec.ts',
     '!**/sensors/**/*.unit.spec.ts',     // Skip deprecated sensor tests
-    '!**/sync-state/**/*.unit.spec.ts'   // Skip CloudSync tests (module removed)
   ],
   moduleFileExtensions: ['ts', 'js', 'json'],
   moduleNameMapper: {

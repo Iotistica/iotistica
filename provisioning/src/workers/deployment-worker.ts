@@ -157,7 +157,7 @@ export class DeploymentWorker {
           namespace: clientNamespace,
           domain: domain || process.env.BASE_DOMAIN || 'iotistic.com',
           monitoring: licenseMonitoring,
-        });
+        }, job); // Pass job for retry context
 
         console.log('\n✅ GitOps deployment completed!');
         console.log('   ✓ Database provisioned');

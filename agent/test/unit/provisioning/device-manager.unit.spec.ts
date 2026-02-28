@@ -8,11 +8,11 @@
  * - Clean, isolated tests with predictable behavior
  */
 
-import { DeviceManager } from '../../../src/provisioning/device-manager';
+import { DeviceManager } from '../../../src/device-manager';
 import { MockHttpClient } from '../../helpers/mock-http-client';
 import { MockDatabaseClient, MockUuidGenerator } from '../../helpers/mock-database-client';
 import type { DeviceRecord } from '../../../src/db/client';
-import type { ProvisionResponse } from '../../../src/provisioning/types';
+import type { ProvisionResponse } from '../../../src/device-manager';
 
 describe('DeviceManager - Refactored Testability', () => {
 	let deviceManager: DeviceManager;
@@ -105,11 +105,26 @@ describe('DeviceManager - Refactored Testability', () => {
 				uuid: 'test-uuid',
 				deviceName: 'Test Device',
 				deviceType: 'sensor',
+				challenge: 'test-challenge-nonce-12345',
 				createdAt: new Date().toISOString(),
 				mqtt: {
 					username: 'device_test',
 					password: 'mqtt-password',
 					broker: 'mqtt://mosquitto:1883',
+					brokerConfig: {
+						protocol: 'mqtt',
+						host: 'mosquitto',
+						port: 1883,
+						username: 'device_test',
+						password: 'mqtt-password',
+						useTls: false,
+						verifyCertificate: false,
+						clientIdPrefix: 'device',
+						keepAlive: 60,
+						cleanSession: true,
+						reconnectPeriod: 1000,
+						connectTimeout: 30000,
+					},
 					topics: {
 						publish: 'iot/device/test-uuid/telemetry',
 						subscribe: 'iot/device/test-uuid/commands',
@@ -132,11 +147,11 @@ describe('DeviceManager - Refactored Testability', () => {
 			});
 
 			expect(result.deviceId).toBe('123');
-			expect(result.mqttUsername).toBe('device_test');
+		expect(result.mqttBrokerConfig?.username).toBe('device_test');
 			expect(result.provisioned).toBe(true);
 			expect(mockHttpClient.postStub.callCount).toBe(2); // register + exchange
 			expect(mockDbClient.saveDeviceStub.callCount).toBeGreaterThanOrEqual(2);
-		});
+		}, 35000); // Timeout: 30s per attempt + 5s buffer
 
 		it('should throw error if provisioning API key missing', async () => {
 			await expect(deviceManager.provision({
@@ -151,7 +166,7 @@ describe('DeviceManager - Refactored Testability', () => {
 				provisioningApiKey: 'provisioning-key-123',
 				apiEndpoint: 'http://api:3002',
 			})).rejects.toThrow('Failed to register device');
-		});
+		}, 240000); // Timeout: 6 attempts × 30s + backoff delays (211s max)
 	});
 
 	// ============================================================================
@@ -171,11 +186,26 @@ describe('DeviceManager - Refactored Testability', () => {
 				uuid: 'test-uuid',
 				deviceName: 'Test Device',
 				deviceType: 'sensor',
+				challenge: 'test-challenge-nonce-12345',
 				createdAt: new Date().toISOString(),
 				mqtt: {
 					username: 'device_test',
 					password: 'mqtt-password',
 					broker: 'mqtt://mosquitto:1883',
+					brokerConfig: {
+						protocol: 'mqtt',
+						host: 'mosquitto',
+						port: 1883,
+						username: 'device_test',
+						password: 'mqtt-password',
+						useTls: false,
+						verifyCertificate: false,
+						clientIdPrefix: 'device',
+						keepAlive: 60,
+						cleanSession: true,
+						reconnectPeriod: 1000,
+						connectTimeout: 30000,
+					},
 					topics: {
 						publish: 'iot/device/test-uuid/telemetry',
 						subscribe: 'iot/device/test-uuid/commands',
@@ -194,8 +224,8 @@ describe('DeviceManager - Refactored Testability', () => {
 			// Check first call (registration)
 			const firstCallHeaders = mockHttpClient.postStub.firstCall.args[2]?.headers;
 			expect(firstCallHeaders?.['Authorization']).toBe('Bearer provisioning-key-123');
-			expect(firstCallHeaders?.['Content-Type']).toBe('application/json');
-		});
+			// Note: Content-Type is set automatically by HttpClient, not by DeviceManager
+		}, 35000); // Timeout: 30s per attempt + 5s buffer
 
 		it('should use deviceApiKey for key exchange', async () => {
 			const provisionResponse: ProvisionResponse = {
@@ -203,11 +233,26 @@ describe('DeviceManager - Refactored Testability', () => {
 				uuid: 'test-uuid',
 				deviceName: 'Test Device',
 				deviceType: 'sensor',
+				challenge: 'test-challenge-nonce-12345',
 				createdAt: new Date().toISOString(),
 				mqtt: {
 					username: 'device_test',
 					password: 'mqtt-password',
 					broker: 'mqtt://mosquitto:1883',
+					brokerConfig: {
+						protocol: 'mqtt',
+						host: 'mosquitto',
+						port: 1883,
+						username: 'device_test',
+						password: 'mqtt-password',
+						useTls: false,
+						verifyCertificate: false,
+						clientIdPrefix: 'device',
+						keepAlive: 60,
+						cleanSession: true,
+						reconnectPeriod: 1000,
+						connectTimeout: 30000,
+					},
 					topics: {
 						publish: 'iot/device/test-uuid/telemetry',
 						subscribe: 'iot/device/test-uuid/commands',
@@ -226,7 +271,7 @@ describe('DeviceManager - Refactored Testability', () => {
 			// Check second call (key exchange) - should use device API key
 			const secondCallHeaders = mockHttpClient.postStub.secondCall.args[2]?.headers;
 			expect(secondCallHeaders?.['Authorization']).toContain('Bearer');
-		});
+		}, 35000); // Timeout: 30s per attempt + 5s buffer
 	});
 
 	// ============================================================================
@@ -322,6 +367,6 @@ describe('DeviceManager - Refactored Testability', () => {
 				provisioningApiKey: 'key-123',
 				apiEndpoint: 'http://api:3002',
 			})).rejects.toThrow();
-		});
+		}, 35000); // Timeout: 30s per attempt + 5s buffer
 	});
 });

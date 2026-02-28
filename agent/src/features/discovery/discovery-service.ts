@@ -124,16 +124,6 @@ export class DiscoveryService extends EventEmitter {
   private plugins: Map<string, BaseDiscoveryPlugin>;
   private lightTimer?: NodeJS.Timeout;
   private fullTimer?: NodeJS.Timeout;
-  private mqttObserverData?: Array<{
-    topic: string;
-    firstSeen: Date;
-    lastSeen: Date;
-    messageCount: number;
-    hasLiveMessages: boolean;
-    retainedCount: number;
-    liveCount: number;
-    samplePayload?: string;
-  }>; // HYBRID: Observer data from runtime MQTT adapter
   
   // CRITICAL: Cache discovered devices for reconciliation to access
   // When discovery runs with skipDbWrites, the discovered nodes aren't saved to DB
@@ -154,33 +144,6 @@ export class DiscoveryService extends EventEmitter {
     this.configManager = configManager;
     this.metadata = this.loadMetadata();
     this.plugins = this.initializePlugins();
-  }
-
-  /**
-   * Inject MQTT observer data (hybrid discovery pattern)
-   * 
-   * Call this before runDiscovery() to provide recently observed topics
-   * from the runtime MQTT adapter. This solves the "no data during 30s window"
-   * problem for low-frequency publishers.
-   * 
-   * @param observedTopics - Topics tracked by MQTT adapter during normal operation
-   */
-  public setMqttObserverData(observedTopics: Array<{
-    topic: string;
-    firstSeen: Date;
-    lastSeen: Date;
-    messageCount: number;
-    hasLiveMessages: boolean;
-    retainedCount: number;
-    liveCount: number;
-    samplePayload?: string;
-  }>): void {
-    this.mqttObserverData = observedTopics;
-    this.logger?.debugSync(`🔄 DISCOVERY: Injected ${observedTopics.length} observer topics for next MQTT discovery`, {
-      component: LogComponents.discovery,
-      observerTopics: observedTopics.length,
-      topics: observedTopics.map(t => ({ topic: t.topic, liveCount: t.liveCount, lastSeen: t.lastSeen }))
-    });
   }
 
   /**
@@ -288,11 +251,9 @@ export class DiscoveryService extends EventEmitter {
    */
   public cleanup(): void {
     this.stopPeriodicDiscovery();
-    this.mqttObserverData = undefined;
     this.removeAllListeners(); // Clear EventEmitter listeners
     
     // Note: plugins Map is intentionally NOT cleared - it's needed for service lifetime
-    // Only transient data (observer data, listeners) is cleared
   }
 
   /**
@@ -400,11 +361,6 @@ export class DiscoveryService extends EventEmitter {
             traceId
           });
           continue;
-        }
-        
-        // MQTT-specific: Log observer suggestions if available
-        if (protocol === 'mqtt') {
-          this.logMqttObserverSuggestions();
         }
         
         const discovered = await plugin.discover(pluginOptions);
@@ -577,9 +533,6 @@ export class DiscoveryService extends EventEmitter {
       skippedCount: saveResults.skipped,
       traceId
     });
-
-    // Clear observer data after use to prevent memory accumulation
-    this.mqttObserverData = undefined;
 
     // Return discovered devices to caller
     return allDiscovered;
@@ -803,8 +756,6 @@ export class DiscoveryService extends EventEmitter {
       if (config.qos !== undefined) {
         options.qos = config.qos;
       }
-      
-      // Observer data no longer used - discoveryRoots handle subscriptions
 
       return options;
     }
@@ -850,8 +801,6 @@ export class DiscoveryService extends EventEmitter {
     if (process.env.MQTT_DISCOVERY_QOS) {
       options.qos = parseInt(process.env.MQTT_DISCOVERY_QOS, 10) as 0 | 1 | 2;
     }
-    
-    // Observer data no longer used - discoveryRoots handle subscriptions
 
     return options;
   }
@@ -1364,41 +1313,5 @@ export class DiscoveryService extends EventEmitter {
     }
   }
 
-  /**
-   * Log MQTT observer suggestions (hybrid discovery pattern)
-   * 
-   * The MQTT adapter continuously tracks observed topics during normal operation.
-   * This provides "free" discovery suggestions without dedicated 30s scan windows.
-   * 
-   * Hybrid Pattern:
-   * 1. Runtime observation: Adapter tracks all topics seen (bounded, LRU)
-   * 2. Active discovery: User-triggered 30s sampling window
-   * 3. Deferred validation: Per-topic validation after discovery
-   * 
-   * This bridges continuous awareness with discrete discovery snapshots.
-   */
-  private logMqttObserverSuggestions(): void {
-    // Log observer stats if data was injected
-    if (this.mqttObserverData && this.mqttObserverData.length > 0) {
-      const liveTopics = this.mqttObserverData.filter(t => t.hasLiveMessages).length;
-      const retainedOnly = this.mqttObserverData.length - liveTopics;
-      
-      this.logger?.debugSync(`MQTT Observer: ${this.mqttObserverData.length} topics tracked (${liveTopics} with live messages)`, {
-        component: LogComponents.discovery,
-        totalObserved: this.mqttObserverData.length,
-        liveTopics,
-        retainedOnlyTopics: retainedOnly,
-        recentTopics: this.mqttObserverData.slice(0, 10).map(t => ({
-          topic: t.topic,
-          lastSeen: t.lastSeen,
-          liveCount: t.liveCount
-        }))
-      });
-    } else {
-      this.logger?.debugSync('MQTT Observer: No observer data available (adapter may not be started yet)', {
-        component: LogComponents.discovery,
-        note: 'Observer tracks topics during runtime - run discovery after MQTT adapter starts'
-      });
-    }
-  }
+
 }

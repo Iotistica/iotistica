@@ -32,7 +32,7 @@ async function start() {
     logger.info('Worker Configuration', {
       gitOpsEnabled: process.env.GITOPS_ENABLED === 'true',
       queueConcurrency: process.env.QUEUE_CONCURRENCY || '3',
-      maxRetries: process.env.QUEUE_MAX_RETRIES || '3',
+      maxRetries: process.env.QUEUE_MAX_RETRIES || '5',
       retryDelay: process.env.QUEUE_RETRY_DELAY || '60000',
     });
 

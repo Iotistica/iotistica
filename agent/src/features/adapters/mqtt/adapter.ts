@@ -3,6 +3,7 @@ import * as mqtt from 'mqtt';
 import * as mqttPattern from 'mqtt-pattern';
 import { SensorDataPoint, DeviceStatus, Logger } from '../types.js';
 import { MqttAdapterConfig, MqttDevice } from './types.js';
+import { parsePayload, coerceType } from './payload-parser.js';
 
 /**
  * MQTT Adapter
@@ -288,10 +289,12 @@ export class MqttAdapter extends EventEmitter {
     // Production fix #8: Max payload size guard
     // Protects against memory exhaustion from malicious/corrupt messages
     if (payload.length > MqttAdapter.MAX_PAYLOAD_BYTES) {
+      this.droppedMessageCount++;
       this.logger.warn('Dropping oversized MQTT message', {
         topic,
         payloadSize: payload.length,
         maxAllowed: MqttAdapter.MAX_PAYLOAD_BYTES,
+        droppedTotal: this.droppedMessageCount,
         hint: 'Possible JSON bomb or malicious payload'
       });
       return;
@@ -323,7 +326,7 @@ export class MqttAdapter extends EventEmitter {
     }
 
     try {
-      const value = this.parsePayload(payload, device.dataType);
+      const value = parsePayload(payload, device.dataType);
       const now = new Date().toISOString();
       
       // Create sensor data point
@@ -370,82 +373,6 @@ export class MqttAdapter extends EventEmitter {
       
       this.emit('data', [dataPoint]);
       // Note: Don't mark as "disconnected" - parsing errors don't mean device is offline
-    }
-  }
-
-  /**
-   * Parse MQTT payload based on dataType
-   */
-  private parsePayload(payload: Buffer, dataType: string): number | boolean | string {
-    const str = payload.toString();
-
-    // Try JSON first
-    try {
-      const json = JSON.parse(str);
-      
-      // If JSON object with 'value' key, extract it
-      if (typeof json === 'object' && json.value !== undefined) {
-        return this.coerceType(json.value, dataType);
-      }
-      
-      return this.coerceType(json, dataType);
-    } catch {
-      // Not JSON, parse as plain text
-      return this.coerceType(str, dataType);
-    }
-  }
-
-  /**
-   * Coerce value to expected dataType
-   * 
-   * Supports both:
-   * - Broad types from discovery: 'number', 'boolean', 'string', 'json'
-   * - Specific types from manual config: 'int32', 'float32', 'uint32'
-   * 
-   * Note: Discovery returns broad types for safety. Users confirm specific types manually.
-   * 
-   * Production-safe: Detects NaN and throws error rather than silently returning invalid data
-   */
-  private coerceType(value: any, dataType: string): number | boolean | string {
-    switch (dataType) {
-      case 'number':  // Broad category from discovery
-      case 'float':
-      case 'float32':
-      case 'double': {
-        const n = parseFloat(value);
-        // Production fix #6: Detect NaN and throw error
-        if (Number.isNaN(n)) {
-          throw new Error(`Invalid numeric payload: "${value}" (NaN)`);
-        }
-        return n;
-      }
-      case 'int':
-      case 'int16':
-      case 'int32':
-      case 'integer': {
-        const n = parseInt(value, 10);
-        // Production fix #6: Detect NaN and throw error
-        if (Number.isNaN(n)) {
-          throw new Error(`Invalid integer payload: "${value}" (NaN)`);
-        }
-        return n;
-      }
-      case 'uint16':
-      case 'uint32': {
-        const n = Math.abs(parseInt(value, 10));
-        // Production fix #6: Detect NaN and throw error
-        if (Number.isNaN(n)) {
-          throw new Error(`Invalid unsigned integer payload: "${value}" (NaN)`);
-        }
-        return n;
-      }
-      case 'boolean':
-        return value === 'true' || value === '1' || value === 1 || value === true;
-      case 'json':    // Broad category from discovery
-      case 'string':
-        return String(value);
-      default:
-        return value;
     }
   }
 
@@ -501,10 +428,5 @@ export class MqttAdapter extends EventEmitter {
     // - LWT messages
     // - Application requirements
   }
-
-  /**
-   * Handle message from discoveryRoots subscription
-   * Forwards all messages matching the wildcard patterns
-   */
 }
 

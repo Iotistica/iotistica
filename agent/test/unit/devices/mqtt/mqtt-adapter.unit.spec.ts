@@ -1,0 +1,626 @@
+/**
+ * Unit tests for MQTT Adapter
+ * Tests message handling, payload parsing, backpressure, and wildcard matching
+ */
+
+import { MqttAdapter } from '../../../../src/features/adapters/mqtt/adapter';
+import { MqttAdapterConfig } from '../../../../src/features/adapters/mqtt/types';
+import { parsePayload, coerceType } from '../../../../src/features/adapters/mqtt/payload-parser';
+
+describe('MqttAdapter', () => {
+  let mockLogger: any;
+  let mockConfig: MqttAdapterConfig;
+
+  beforeEach(() => {
+    mockLogger = {
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn()
+    };
+
+    mockConfig = {
+      broker: {
+        host: 'localhost',
+        port: 1883,
+        username: 'test',
+        password: 'test'
+      },
+      qos: 1,
+      reconnect: {
+        period: 5000,
+        maxAttempts: 10
+      },
+      devices: [],
+      logging: {
+        level: 'info',
+        enableConsole: false,
+        enableFile: false
+      }
+    };
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('parsePayload', () => {
+    it('should parse plain numeric string', () => {
+      const result = parsePayload(Buffer.from('42'), 'number');
+      expect(result).toBe(42);
+    });
+
+    it('should parse JSON with value key', () => {
+      const result = parsePayload(
+        Buffer.from(JSON.stringify({ value: 23.5 })), 
+        'number'
+      );
+      expect(result).toBe(23.5);
+    });
+
+    it('should parse JSON object without value key', () => {
+      const result = parsePayload(
+        Buffer.from(JSON.stringify({ temperature: 23.5, humidity: 65 })), 
+        'json'
+      );
+      expect(result).toBe('{"temperature":23.5,"humidity":65}');
+    });
+
+    it('should throw on invalid numeric string', () => {
+      expect(() => {
+        parsePayload(Buffer.from('not a number'), 'number');
+      }).toThrow();
+    });
+
+    it('should parse boolean true', () => {
+      const result = parsePayload(Buffer.from('true'), 'boolean');
+      expect(result).toBe(true);
+    });
+
+    it('should parse boolean false', () => {
+      const result = parsePayload(Buffer.from('false'), 'boolean');
+      expect(result).toBe(false);
+    });
+
+    it('should parse numeric 1 as boolean true', () => {
+      const result = parsePayload(Buffer.from('1'), 'boolean');
+      expect(result).toBe(true);
+    });
+
+    it('should parse numeric 0 as boolean false', () => {
+      const result = parsePayload(Buffer.from('0'), 'boolean');
+      expect(result).toBe(false);
+    });
+
+    it('should return string as-is', () => {
+      const result = parsePayload(Buffer.from('hello world'), 'string');
+      expect(result).toBe('hello world');
+    });
+
+    it('should handle JSON value extraction with coercion', () => {
+      const result = parsePayload(
+        Buffer.from(JSON.stringify({ value: '42.5' })), 
+        'number'
+      );
+      expect(result).toBe(42.5);
+    });
+
+    it('should handle whitespace in numeric values', () => {
+      const result = parsePayload(Buffer.from(' 42 '), 'number');
+      expect(result).toBe(42);
+    });
+
+    it('should handle negative numbers', () => {
+      const result = parsePayload(Buffer.from('-123.45'), 'number');
+      expect(result).toBe(-123.45);
+    });
+
+    it('should throw on NaN result', () => {
+      expect(() => {
+        parsePayload(Buffer.from('NaN'), 'number');
+      }).toThrow('Numeric coercion resulted in NaN');
+    });
+  });
+
+  describe('coerceType', () => {
+    it('should coerce string to number', () => {
+      const result = coerceType('42.5', 'number');
+      expect(result).toBe(42.5);
+    });
+
+    it('should coerce string to int32', () => {
+      const result = coerceType('42', 'int32');
+      expect(result).toBe(42);
+    });
+
+    it('should coerce string to uint32', () => {
+      const result = coerceType('42', 'uint32');
+      expect(result).toBe(42);
+    });
+
+    it('should coerce string to float32', () => {
+      const result = coerceType('42.5', 'float32');
+      expect(result).toBe(42.5);
+    });
+
+    it('should handle boolean string to boolean', () => {
+      expect(coerceType('true', 'boolean')).toBe(true);
+      expect(coerceType('false', 'boolean')).toBe(false);
+    });
+
+    it('should handle numeric strings to boolean', () => {
+      expect(coerceType('1', 'boolean')).toBe(true);
+      expect(coerceType('0', 'boolean')).toBe(false);
+    });
+
+    it('should return string as-is', () => {
+      const result = coerceType('hello', 'string');
+      expect(result).toBe('hello');
+    });
+
+    it('should throw on NaN coercion', () => {
+      expect(() => {
+        coerceType('not a number', 'number');
+      }).toThrow('Numeric coercion resulted in NaN');
+    });
+  });
+
+  describe('handleMessage - Backpressure', () => {
+    it('should drop messages when queue depth exceeds threshold', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number'
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      
+      // Set queue depth to exceed threshold (MAX_QUEUE_DEPTH = 1000)
+      (adapter as any).emitQueueDepth = 2000;
+
+      // Try to handle message
+      (adapter as any).handleMessage('test/topic', Buffer.from('42'), false);
+
+      // Should log warning about dropped message
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('backpressure'),
+        expect.anything()
+      );
+
+      // Should increment dropped count
+      expect((adapter as any).droppedMessageCount).toBeGreaterThan(0);
+    });
+
+    it('should process messages when queue depth is below threshold', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number'
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+      
+      // Manually populate subscriptions (normally done by start() → subscribe())
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+      
+      // Queue depth is 0 (below threshold)
+      (adapter as any).emitQueueDepth = 0;
+
+      // Handle message
+      (adapter as any).handleMessage('test/topic', Buffer.from('42'), false);
+
+      // Should emit data event
+      expect(dataSpy).toHaveBeenCalled();
+      expect((adapter as any).droppedMessageCount).toBe(0);
+    });
+  });
+
+  describe('handleMessage - Oversized Payload', () => {
+    it('should drop messages exceeding MAX_PAYLOAD_BYTES', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'string'
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      
+      // Create buffer > 10MB (MAX_PAYLOAD_BYTES)
+      const oversizedPayload = Buffer.alloc(11 * 1024 * 1024); // 11MB
+
+      // Handle oversized message
+      (adapter as any).handleMessage('test/topic', oversizedPayload, false);
+
+      // Should log warning
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('oversized'),
+        expect.anything()
+      );
+
+      // Should increment dropped count
+      expect((adapter as any).droppedMessageCount).toBeGreaterThan(0);
+    });
+
+    it('should process messages within MAX_PAYLOAD_BYTES', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'string'
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      // Manually populate subscriptions (normally done by start() → subscribe())
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+
+      // Create buffer < 10MB
+      const normalPayload = Buffer.from('normal size payload');
+
+      // Handle normal message
+      (adapter as any).handleMessage('test/topic', normalPayload, false);
+
+      // Should process normally
+      expect(dataSpy).toHaveBeenCalled();
+      expect((adapter as any).droppedMessageCount).toBe(0);
+    });
+  });
+
+  describe('findDeviceForTopic - Wildcard Matching', () => {
+    it('should match exact topic', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'device/room1/temp',
+          dataType: 'number'
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      
+      // Initialize subscriptions
+      (adapter as any).subscriptions.set('device/room1/temp', config.devices[0]);
+
+      const device = (adapter as any).findDeviceForTopic('device/room1/temp');
+      
+      expect(device).toBeDefined();
+      expect(device.name).toBe('test_device');
+    });
+
+    it('should match single-level wildcard (+)', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'device/+/temp',
+          dataType: 'number'
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      
+      // Initialize subscriptions with wildcard
+      (adapter as any).subscriptions.set('device/+/temp', config.devices[0]);
+
+      const device = (adapter as any).findDeviceForTopic('device/room1/temp');
+      
+      expect(device).toBeDefined();
+      expect(device.name).toBe('test_device');
+    });
+
+    it('should match multi-level wildcard (#)', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'device/#',
+          dataType: 'number'
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      
+      // Initialize subscriptions with wildcard
+      (adapter as any).subscriptions.set('device/#', config.devices[0]);
+
+      const device = (adapter as any).findDeviceForTopic('device/room1/temp/sensor01');
+      
+      expect(device).toBeDefined();
+      expect(device.name).toBe('test_device');
+    });
+
+    it('should return undefined for non-matching topic', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'device/room1/temp',
+          dataType: 'number'
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      
+      (adapter as any).subscriptions.set('device/room1/temp', config.devices[0]);
+
+      const device = (adapter as any).findDeviceForTopic('other/topic');
+      
+      expect(device).toBeUndefined();
+    });
+
+    it('should match complex wildcard pattern', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'building/+/floor/+/sensor/#',
+          dataType: 'number'
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      
+      (adapter as any).subscriptions.set('building/+/floor/+/sensor/#', config.devices[0]);
+
+      const device = (adapter as any).findDeviceForTopic('building/A/floor/3/sensor/temp/01');
+      
+      expect(device).toBeDefined();
+      expect(device.name).toBe('test_device');
+    });
+  });
+
+  describe('Basic Adapter Functions', () => {
+    it('should create adapter instance', () => {
+      const adapter = new MqttAdapter(mockConfig, mockLogger);
+      expect(adapter).toBeDefined();
+    });
+
+    it('should return empty device statuses when no devices', () => {
+      const adapter = new MqttAdapter(mockConfig, mockLogger);
+      const statuses = adapter.getDeviceStatuses();
+      expect(statuses).toEqual([]);
+    });
+
+    it('should initialize device statuses', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number'
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      
+      const statuses = adapter.getDeviceStatuses();
+      expect(statuses).toHaveLength(1);
+      expect(statuses[0].deviceName).toBe('test_device');
+      expect(statuses[0].connected).toBe(false);
+    });
+
+    it('should get specific device status', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number'
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+
+      const status = adapter.getDeviceStatus('test_device');
+      expect(status).toBeDefined();
+      expect(status?.deviceName).toBe('test_device');
+    });
+
+    it('should return undefined for non-existent device', () => {
+      const adapter = new MqttAdapter(mockConfig, mockLogger);
+      const status = adapter.getDeviceStatus('non_existent');
+      expect(status).toBeUndefined();
+    });
+  });
+
+  describe('trackMessageActivity', () => {
+    it('should update device status on message', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number'
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+
+      // Track message activity
+      (adapter as any).trackMessageActivity('test_device');
+
+      const status = adapter.getDeviceStatus('test_device');
+      expect(status?.lastSeen).toBeInstanceOf(Date);
+      expect(status?.lastPoll).toBeInstanceOf(Date);
+      expect(status?.registersUpdated).toBe(1);
+    });
+
+    it('should increment registersUpdated counter', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number'
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+
+      // Track multiple messages
+      (adapter as any).trackMessageActivity('test_device');
+      (adapter as any).trackMessageActivity('test_device');
+      (adapter as any).trackMessageActivity('test_device');
+
+      const status = adapter.getDeviceStatus('test_device');
+      expect(status?.registersUpdated).toBe(3);
+    });
+  });
+
+  describe('Message Quality', () => {
+    it('should mark retained messages as UNCERTAIN', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number'
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      // Manually populate subscriptions (normally done by start() → subscribe())
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+
+      // Handle retained message (retain = true)
+      (adapter as any).handleMessage('test/topic', Buffer.from('42'), true);
+
+      // Should emit data with UNCERTAIN quality
+      expect(dataSpy).toHaveBeenCalled();
+      const emitted = dataSpy.mock.calls[0][0][0];
+      expect(emitted.quality).toBe('UNCERTAIN');
+      expect(emitted.qualityCode).toBe('RETAINED_MESSAGE');
+    });
+
+    it('should mark fresh messages as GOOD', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number'
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      // Manually populate subscriptions (normally done by start() → subscribe())
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+
+      // Handle fresh message (retain = false)
+      (adapter as any).handleMessage('test/topic', Buffer.from('42'), false);
+
+      // Should emit data with GOOD quality
+      expect(dataSpy).toHaveBeenCalled();
+      const emitted = dataSpy.mock.calls[0][0][0];
+      expect(emitted.quality).toBe('GOOD');
+    });
+  });
+
+  describe('Unconfigured Topics', () => {
+    it('should ignore messages for unconfigured topics', () => {
+      const adapter = new MqttAdapter(mockConfig, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      // Handle message for topic not in config
+      (adapter as any).handleMessage('unknown/topic', Buffer.from('42'), false);
+
+      // Should NOT emit data event
+      expect(dataSpy).not.toHaveBeenCalled();
+      
+      // Should log debug message
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('Ignoring message for unconfigured topic')
+      );
+    });
+
+    it('should handle messages for configured topics', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number'
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      // Manually populate subscriptions (normally done by start() → subscribe())
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+
+      // Handle message for configured topic
+      (adapter as any).handleMessage('test/topic', Buffer.from('42'), false);
+
+      // Should emit data event
+      expect(dataSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('Edge Cases', () => {
+    it('should throw on JSON without value key when expecting number', () => {
+      // JSON object { temp: 42 } without 'value' key, expected type 'number'
+      // coerceType receives the object, tries parseFloat(object) → NaN → throw
+      expect(() => {
+        parsePayload(
+          Buffer.from(JSON.stringify({ temp: 42 })),
+          'number'
+        );
+      }).toThrow('Numeric coercion resulted in NaN');
+    });
+
+    it('should handle JSON without value key for json dataType', () => {
+      // JSON object without 'value' key, but type is 'json' → should stringify
+      const result = parsePayload(
+        Buffer.from(JSON.stringify({ temp: 42, humidity: 65 })),
+        'json'
+      );
+      expect(result).toBe('{\"temp\":42,\"humidity\":65}');
+    });
+  });
+});

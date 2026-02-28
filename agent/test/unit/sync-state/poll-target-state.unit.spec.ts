@@ -15,9 +15,9 @@
  */
 
 import { stub, restore } from 'sinon';
-import { CloudSync } from '../../../src/sync';
-import type { StateReconciler, DeviceState } from '../../../src/drivers/state-reconciler';
-import type { DeviceManager } from '../../../src/provisioning';
+import { CloudSync } from '../../../src/device-manager/sync';
+import type { StateReconciler, DeviceState } from '../../../src/device-manager/reconciler';
+import type { DeviceManager } from '../../../src/device-manager';
 import { EventEmitter } from 'events';
 import { MockHttpClient } from '../../helpers/mock-http-client';
 import {
@@ -97,28 +97,28 @@ describe('CloudSync.pollTargetState', () => {
 			const [url, options] = mockHttpClient.getStub.firstCall.args;
 			expect(url).toContain('/api/v1/device');
 			expect(url).toContain(deviceInfo.uuid);
-			expect(options.headers['X-Device-API-Key']).toBe(deviceInfo.apiKey);
-		});
+		expect(options.headers['X-Device-API-Key']).toBe(deviceInfo.deviceApiKey);
+	});
+	
+	it('should handle HTTP 200 response with state update', async () => {
+		const deviceInfo = createMockDeviceInfo();
+		const targetState = createMockTargetStateResponse(deviceInfo.uuid);
 		
-		it('should handle HTTP 200 response with state update', async () => {
-			const deviceInfo = createMockDeviceInfo();
-			const targetState = createMockTargetStateResponse(deviceInfo.uuid);
-			
-			mockHttpClient.mockGetSuccess(targetState);
-			
-			await cloudSync.pollTargetState();
-			
-			expect(mockStateReconciler.setTarget.callCount).toBe(1);
-		});
+		mockHttpClient.mockGetSuccess(targetState);
 		
-		it('should handle HTTP 304 Not Modified', async () => {
-			mockHttpClient.mockGetNotModified();
-			
-			await cloudSync.pollTargetState();
-			
-			// Should not call setTarget on 304
-			expect(mockStateReconciler.setTarget.called).toBe(false);
-		});
+		await cloudSync.pollTargetState();
+		
+		expect(mockStateReconciler.setTarget.callCount).toBe(1);
+	});
+	
+	it('should handle HTTP 304 Not Modified', async () => {
+		mockHttpClient.mockGetNotModified();
+		
+		await cloudSync.pollTargetState();
+		
+		// Should not call setTarget on 304
+		expect(mockStateReconciler.setTarget.called).toBe(false);
+	});
 		
 		it('should reject on HTTP 500 Server Error', async () => {
 			mockHttpClient.mockGetError(500, 'Internal Server Error');

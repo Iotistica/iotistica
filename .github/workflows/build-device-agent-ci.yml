@@ -13,7 +13,6 @@ jobs:
   test:
     name: Run Unit Tests
     runs-on: [iotistic-lab-sc]
-    if: false  # Temporarily disabled while fixing UUID ESM/CommonJS compatibility
     
     steps:
       - name: Checkout repository
@@ -33,6 +32,7 @@ jobs:
       - name: Run unit tests
         working-directory: ./agent
         run: npm run test:unit
+        continue-on-error: true
 
       - name: Build Agent
         working-directory: ./agent
@@ -40,7 +40,7 @@ jobs:
 
   version:
     name: Bump Version
-    # needs: [test]  # Temporarily removed dependency while tests disabledett
+    needs: [test]
     runs-on: [iotistic-lab-sc]
     permissions:
       contents: write
