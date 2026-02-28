@@ -1,0 +1,84 @@
+# Cluster-Wide License Public Key ConfigMap
+# This ConfigMap should be created ONCE per cluster, not per customer
+# 
+# Benefits:
+# - Single source of truth for license validation
+# - Easy key rotation (update one resource, all customers get it)
+# - Reduces per-customer values.yaml size
+# - No duplication across 100+ customer namespaces
+#
+# Deployment:
+#   kubectl create namespace iotistic-system  # Or use existing system namespace
+#   kubectl apply -f license-public-key-configmap.yaml
+#
+# Usage in Helm Chart:
+#   See provisioning/src/templates/values.yaml for how customer instances
+#   reference this ConfigMap via volumeMount
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: iotistic-license-public-key
+  namespace: iotistic-system  # System namespace (NOT per-customer)
+  labels:
+    app.kubernetes.io/name: iotistic
+    app.kubernetes.io/component: license-validation
+    app.kubernetes.io/managed-by: iotistic-billing
+immutable: true  # Prevent accidental edits (create new version instead)
+data:
+  # RSA-2048 public key for JWT signature verification
+  # Generated with: cd provisioning && npm run generate-keys
+  # Algorithm: RS256
+  # Matches private key in: provisioning/keys/private-key.pem
+  public-key.pem:
+
+---
+# Example: How Customer API Pods Mount This ConfigMap
+# Add this to charts/customer-instance/templates/api-deployment.yaml:
+#
+# spec:
+#   template:
+#     spec:
+#       volumes:
+#         - name: license-public-key
+#           configMap:
+#             name: iotistic-license-public-key
+#             defaultMode: 0444  # Read-only
+#       containers:
+#         - name: api
+#           volumeMounts:
+#             - name: license-public-key
+#               mountPath: /etc/iotistic/license
+#               readOnly: true
+#           env:
+#             # API reads from file instead of env var
+#             - name: LICENSE_PUBLIC_KEY_PATH
+#               value: "/etc/iotistic/license/public-key.pem"
+#             # Customer-specific JWT (still comes from values.yaml)
+#             - name: IOTISTIC_LICENSE_KEY
+#               value: {{ .Values.api.license.key | quote }}
+
+---
+# Key Rotation Strategy (when you need to update the public key):
+#
+# 1. Generate new key pair:
+#    cd provisioning && npm run generate-keys
+#
+# 2. Create new ConfigMap version (blue/green approach):
+#    kubectl create configmap iotistic-license-public-key-v2 \
+#      --from-file=public-key.pem=keys/public-key.pem \
+#      -n iotistic-system
+#
+# 3. Update Helm chart to reference v2:
+#    Update charts/customer-instance/templates/api-deployment.yaml:
+#      configMap:
+#        name: iotistic-license-public-key-v2
+#
+# 4. Deploy updates to all customers (gradual rollout):
+#    helm upgrade --reuse-values ...
+#
+# 5. After all customers updated, delete old ConfigMap:
+#    kubectl delete configmap iotistic-license-public-key -n iotistic-system
+#
+# Note: Keep old ConfigMap until ALL customers are on new key to avoid
+#       breaking existing deployments.

@@ -117,10 +117,9 @@ api:
     SecretName: "openai-credentials-master"
   jwt:
     SecretName: "api-jwt-{{CLIENT_ID}}"
-  # License configuration (optional)
+  # License configuration (JWT license + public key stored in 1Password)
   license:
-    publicKey: ""
-    key: ""
+    SecretName: "api-license-{{CLIENT_ID}}"
   # Prometheus metrics monitoring
   monitoring:
     enabled: true # Enable ServiceMonitor for Prometheus scraping

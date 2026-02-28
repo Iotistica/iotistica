@@ -1,5 +1,6 @@
 import { Job } from 'bull';
 import crypto from 'crypto';
+import axios from 'axios';
 import { deploymentQueue, DeploymentJobData, UpdateJobData, DeleteJobData, MonitorArgoJobData } from '../services/deployment-queue';
 import { gitOpsProvisioningService } from '../services/gitops-provisioning-service';
 import { argoStatusService } from '../services/argo-status-service';
@@ -62,7 +63,7 @@ export class DeploymentWorker {
    * Handle deployment job
    */
   private async handleDeployment(job: Job<DeploymentJobData>) {
-    const { customerId, email, companyName, licenseKey, namespace, plan, licensePublicKey, domain } = job.data;
+    const { customerId, email, companyName, namespace, plan, domain } = job.data;
 
     console.log('\n' + '='.repeat(80));
     console.log('🚀 STARTING DEPLOYMENT JOB');
@@ -102,15 +103,21 @@ export class DeploymentWorker {
       console.log('📊 Progress: 20% - Starting database provisioning');
       await job.progress(20);
 
+      // Fetch license from provisioning API
+      const provisioningUrl = process.env.BASE_URL || 'http://localhost:3100';
+      console.log('🔑 Fetching license from provisioning API...');
+      const licenseRes = await axios.get<{ license: string; plan: 'starter' | 'professional' | 'enterprise'; monitoring: any }>(
+        `${provisioningUrl}/api/licenses/${customerId}`
+      );
+      const { license: licenseKey, plan: licensePlan, monitoring: licenseMonitoring } = licenseRes.data;
+      console.log(`✓ License fetched for plan: ${licensePlan}`);
+
       // GitOps flow: Provision DB, create secrets, write to Git, let Argo CD handle deployment
       logger.info('Using GitOps provisioning with TigerData + 1Password', { customerId });
 
         // Sanitize client ID
         const clientId = this.sanitizeClientId(customerId);
         const clientNamespace = namespace || `client-${clientId}`;
-
-        // Decode license to extract monitoring config and other settings
-        const licenseData = this.decodeLicense(licenseKey);
 
         // GitOps service handles:
         // - TigerData DB provisioning (status: db_provisioning -> db_ready)
@@ -145,12 +152,11 @@ export class DeploymentWorker {
           customerId,
           email,
           companyName,
-          plan: plan || licenseData.plan || 'starter',
+          plan: plan || licensePlan,
           licenseKey,
-          licensePublicKey: licensePublicKey || process.env.LICENSE_PUBLIC_KEY || '',
           namespace: clientNamespace,
           domain: domain || process.env.BASE_DOMAIN || 'iotistic.com',
-          monitoring: licenseData.monitoring,
+          monitoring: licenseMonitoring,
         });
 
         console.log('\n✅ GitOps deployment completed!');
@@ -379,7 +385,7 @@ export class DeploymentWorker {
    * Handle update job
    */
   private async handleUpdate(job: Job<UpdateJobData>) {
-    const { customerId, licenseKey, namespace } = job.data;
+    const { customerId, namespace } = job.data;
 
     logger.info('Processing update', { customerId });
 
@@ -393,23 +399,30 @@ export class DeploymentWorker {
 
       await job.progress(20);
 
+      // Fetch license from provisioning API
+      const provisioningUrl = process.env.BASE_URL || 'http://localhost:3100';
+      const licenseRes = await axios.get<{ license: string; plan: 'starter' | 'professional' | 'enterprise'; monitoring: any }>(
+        `${provisioningUrl}/api/licenses/${customerId}`
+      );
+      const { license: licenseKey, plan: licensePlan, monitoring } = licenseRes.data;
+
+      await job.progress(30);
+
       // GitOps flow: Update client in Git
       logger.info('Using GitOps update', { customerId });
 
         const clientId = this.sanitizeClientId(customerId);
-        const licenseData = this.decodeLicense(licenseKey);
 
         await gitOpsProvisioningService.updateClient({
           clientId,
           customerId,
           email: customer.email,
           companyName: customer.company_name || 'Unknown',
-          plan: licenseData.plan || 'starter',
+          plan: licensePlan || 'starter',
           licenseKey,
-          licensePublicKey: process.env.LICENSE_PUBLIC_KEY || '',
           namespace: namespace || `client-${clientId}`,
           domain: process.env.BASE_DOMAIN || 'iotistic.com',
-          monitoring: licenseData.monitoring,
+          monitoring,
         });
 
         await job.progress(60);

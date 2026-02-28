@@ -242,22 +242,6 @@ export class StripeService {
       
       try {
         const { deploymentQueue } = await import('./deployment-queue');
-        const { LicenseGenerator } = await import('./license-generator');
-        const { SubscriptionModel } = await import('../db/subscription-model');
-        
-        // Get subscription for license generation
-        const customerSubscription = await SubscriptionModel.getByCustomerId(customer.customer_id);
-        
-        if (!customerSubscription) {
-          console.error(`❌ Cannot generate license - subscription not found for ${customer.customer_id}`);
-          return;
-        }
-        
-        // Generate license for deployment
-        const licenseKey = await LicenseGenerator.generateLicense(
-          customer,
-          customerSubscription
-        );
 
         // Hash customer_id to get 12-char client ID
         // CRITICAL: Must match deployment-worker.ts sanitizeClientId() method
@@ -269,18 +253,17 @@ export class StripeService {
         
         const namespace = `client-${clientId}`;
         
+        // License will be fetched by gitops-provisioning-service from provisioning API
         await deploymentQueue.add('deploy-customer-stack', {
           customerId: customer.customer_id,
           email: customer.email,
           companyName: customer.company_name || customer.full_name || 'Customer',
-          licenseKey,
           namespace,
           // GitOps-specific fields
           plan,
-          licensePublicKey: process.env.LICENSE_PUBLIC_KEY || '',
-          domain: process.env.BASE_DOMAIN || 'iotistic.com',
+          domain: process.env.BASE_DOMAIN || 'iotistica.com',
         }, {
-          attempts: 3,
+          attempts: 5,
           backoff: {
             type: 'exponential',
             delay: 5000,

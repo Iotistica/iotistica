@@ -5,6 +5,7 @@
  */
 
 import jwt from 'jsonwebtoken';
+import fs from 'fs';
 import { SystemConfigModel } from '../db/system-config-model';
 
 export interface LicenseData {
@@ -58,8 +59,29 @@ export class LicenseValidator {
   private licenseKey: string | null = null;
   
   // Public key for verifying JWT (Global Billing API signs with private key)
-  // Convert \n literals to actual newlines if needed
-  private static readonly PUBLIC_KEY = (process.env.LICENSE_PUBLIC_KEY || '').replace(/\\n/g, '\n');
+  // Priority:
+  //   1. LICENSE_PUBLIC_KEY_PATH - Read from file (Kubernetes ConfigMap mount)
+  //   2. LICENSE_PUBLIC_KEY - Read from env var (development/legacy)
+  private static readonly PUBLIC_KEY = (() => {
+    const keyPath = process.env.LICENSE_PUBLIC_KEY_PATH;
+    if (keyPath) {
+      try {
+        const key = fs.readFileSync(keyPath, 'utf8');
+        console.log(`✅ License public key loaded from file: ${keyPath}`);
+        return key;
+      } catch (error: any) {
+        console.error(`❌ Failed to read license public key from ${keyPath}:`, error.message);
+        console.warn('   Falling back to LICENSE_PUBLIC_KEY environment variable');
+      }
+    }
+    
+    // Fallback: env var (convert \n literals to actual newlines)
+    const envKey = (process.env.LICENSE_PUBLIC_KEY || '').replace(/\\n/g, '\n');
+    if (envKey) {
+      console.log('✅ License public key loaded from environment variable');
+    }
+    return envKey;
+  })();
 
   private constructor() {}
 

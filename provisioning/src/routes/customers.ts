@@ -133,22 +133,23 @@ router.post('/signup', async (req, res) => {
     // Add deployment job to queue (instant response, deployment happens in background)
     await CustomerModel.updateDeploymentStatus(customer.customer_id, 'pending');
 
-    // Determine priority based on plan (1=highest, 10=lowest)
-    const priority = subscription.plan === 'enterprise' ? 1 : 
-                     subscription.plan === 'professional' ? 2 : 
-                     subscription.plan === 'starter' ? 3 : 5; // trial = 5
+    // Hash customer_id to get 12-char client ID (matches Stripe flow)
+    const clientId = crypto
+      .createHash('sha256')
+      .update(customer.customer_id)
+      .digest('hex')
+      .substring(0, 12);
+    
+    const namespace = `client-${clientId}`;
 
+    // License will be fetched by gitops-provisioning-service from provisioning API
     const job = await deploymentQueue.addDeploymentJob({
       customerId: customer.customer_id,
       email,
       companyName: company_name,
-      licenseKey: license,
-      priority,
-      metadata: {
-        signupSource: 'self_service',
-        plan: subscription.plan,
-        trialDays: TRIAL_DAYS,
-      },
+      namespace,
+      plan: subscription.plan,
+      domain: process.env.BASE_DOMAIN || 'iotistica.com',
     });
 
     console.log(`🚀 Deployment job queued: ${job.id} for customer ${customer.customer_id}`);
@@ -187,25 +188,19 @@ router.post('/signup', async (req, res) => {
           (new Date(subscription.trial_ends_at!).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
         ),
       },
-      license: {
-        jwt: license,
-        expires_at: new Date(decoded.expiresAt * 1000).toISOString(),
-        public_key: LicenseGenerator.getPublicKey(),
-        features: decoded.features,
-        limits: decoded.limits,
-      },
       deployment: {
         status: 'queued',
         job_id: job.id,
+        namespace,
         message: 'Your instance deployment is queued and will begin shortly',
         estimated_time: '2-5 minutes',
-        instance_url: `https://client-${customer.customer_id}.${process.env.BASE_DOMAIN || 'iotistica.com'}`,
+        instance_url: `https://${namespace}.${process.env.BASE_DOMAIN || 'iotistica.com'}`,
         check_status_url: `/api/queue/jobs/${job.id}`,
       },
       next_steps: [
-        'Save your license key (JWT) - you\'ll need it to configure your instance',
-        'Download and deploy the Iotistic stack using the provided license',
-        'Connect your first BME688 sensor',
+        'Your instance is being deployed and will be ready in 2-5 minutes',
+        'You will receive an email with access instructions once deployment completes',
+        'Connect your first BME688 sensor to start collecting data',
         `Your trial expires in ${TRIAL_DAYS} days - upgrade anytime to continue`,
       ]
     });
@@ -426,24 +421,26 @@ router.post('/:id/deploy', async (req, res) => {
       });
     }
 
-    // Generate fresh license
-    const license = await LicenseGenerator.generateLicense(customer, subscription);
-
     // Update deployment status
     await CustomerModel.updateDeploymentStatus(customer.customer_id, 'pending');
 
-    // Queue deployment job
+    // Hash customer_id to get 12-char client ID (matches Stripe flow)
+    const clientId = crypto
+      .createHash('sha256')
+      .update(customer.customer_id)
+      .digest('hex')
+      .substring(0, 12);
+    
+    const namespace = `client-${clientId}`;
+
+    // License will be fetched by gitops-provisioning-service from provisioning API
     const job = await deploymentQueue.addDeploymentJob({
       customerId: customer.customer_id,
       email: customer.email,
       companyName: customer.company_name || 'Unknown Company',
-      licenseKey: license,
-      priority: subscription.plan === 'enterprise' ? 1 : 
-               subscription.plan === 'professional' ? 2 : 3,
-      metadata: {
-        manualTrigger: true,
-        plan: subscription.plan,
-      },
+      namespace,
+      plan: subscription.plan,
+      domain: process.env.BASE_DOMAIN || 'iotistica.com',
     });
 
     console.log(`🚀 Deployment job queued: ${job.id} for customer ${customer.customer_id}`);
@@ -542,9 +539,6 @@ router.post('/:id/retry-deployment', async (req, res) => {
       });
     }
 
-    // Generate fresh license
-    const license = await LicenseGenerator.generateLicense(customer, subscription);
-
     console.log(`📝 Resetting deployment state for retry...`);
 
     // Reset deployment error and Argo retry count
@@ -562,19 +556,23 @@ router.post('/:id/retry-deployment', async (req, res) => {
       deploymentError: '', // Clear error message
     });
 
-    // Re-enqueue deployment job
+    // Hash customer_id to get 12-char client ID (matches Stripe flow)
+    const clientId = crypto
+      .createHash('sha256')
+      .update(customer.customer_id)
+      .digest('hex')
+      .substring(0, 12);
+    
+    const namespace = customer.instance_namespace || `client-${clientId}`;
+
+    // License will be fetched by gitops-provisioning-service from provisioning API
     const job = await deploymentQueue.addDeploymentJob({
       customerId: customer.customer_id,
       email: customer.email,
       companyName: customer.company_name || 'Unknown Company',
-      licenseKey: license,
-      namespace: customer.instance_namespace || undefined,
-      priority: 1, // High priority for retries
-      metadata: {
-        isRetry: true,
-        previousError: customer.deployment_error,
-        skipDatabase: !!customer.db_service_id, // Flag to skip DB if already exists
-      },
+      namespace,
+      plan: subscription.plan,
+      domain: process.env.BASE_DOMAIN || 'iotistica.com',
     });
 
     console.log(`✅ Deployment retry queued: ${job.id}`);

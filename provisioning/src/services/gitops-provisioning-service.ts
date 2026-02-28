@@ -17,6 +17,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
 import crypto from 'crypto';
+import axios from 'axios';
 import { logger } from '../utils/logger';
 import { TigerDataService, TigerDataDatabase } from './tigerdata-service';
 import { OnePasswordService } from './onepassword-service';
@@ -30,8 +31,7 @@ interface ClientDeploymentData {
   email: string;
   companyName: string;
   plan: 'starter' | 'professional' | 'enterprise';
-  licenseKey: string;         // JWT token
-  licensePublicKey: string;   // RSA public key
+  licenseKey: string;         // JWT token (customer-specific)
   namespace: string;          // client-dc5fec42901a
   domain?: string;            // iotistica.com
   
@@ -415,7 +415,7 @@ export class GitOpsProvisioningService {
         const secretBuilder = new SecretBuilder(data.clientId).preGenerate([
           'mqtt',
           'api-jwt',
-          'sql'   // SQL with PENDING placeholders
+          'sql'  // SQL with PENDING placeholders
         ]);
         
         let allSecrets = secretBuilder.build();
@@ -425,10 +425,31 @@ export class GitOpsProvisioningService {
         console.log(`   ├─ api-jwt (token)`);
         console.log(`   └─ sql (PENDING placeholders)`);
         
+        // Fetch license from provisioning API
+        console.log(`\n🔑 Fetching license from provisioning API...`);
+        try {
+          const provisioningUrl = process.env.BASE_URL || 'http://localhost:3100';
+          
+          // Fetch customer-specific JWT license
+          const licenseRes = await axios.get(`${provisioningUrl}/api/licenses/${data.customerId}`);
+          const { license } = licenseRes.data;
+          
+          // Add license to secret builder (only JWT token, public key is cluster-wide)
+          secretBuilder.addLicenseCredentials(license);
+          allSecrets = secretBuilder.build();
+          
+          console.log(`✅ License credential added`);
+          console.log(`   JWT length: ${license.length} chars`);
+        } catch (error: any) {
+          console.error(`❌ Failed to fetch license from provisioning API: ${error.message}`);
+          logger.error('License fetch failed', { error: error.message, customerId: data.customerId });
+          throw new Error(`License generation failed: ${error.message}`);
+        }
+        
         // Create separate 1Password items for each component
         console.log(`\n🔑 Creating 1Password secret bundle...`);
         
-        const apps = ['sql', 'mqtt', 'api-jwt'];
+        const apps = ['sql', 'mqtt', 'api-jwt', 'api-license'];
         for (let i = 0; i < apps.length; i++) {
           const app = apps[i];
           const appSecrets = allSecrets[app];
@@ -556,6 +577,19 @@ export class GitOpsProvisioningService {
 
       // 2. Generate values file
       const valuesData = await this.generateValuesFile(data);
+      
+      // Inject customer-specific license key into values
+      // Note: Public key is provided via cluster-wide ConfigMap, not per-customer
+      if (valuesData.api && valuesData.api.license) {
+        valuesData.api.license.key = data.licenseKey;
+        logger.info('Injected license key into values', { 
+          clientId: data.clientId,
+          licenseKeyLength: data.licenseKey.length 
+        });
+      } else {
+        logger.warn('License section not found in values template', { clientId: data.clientId });
+      }
+      
       const valuesDir = path.join(
         this.config.repoDir,
         'charts',
@@ -618,12 +652,12 @@ export class GitOpsProvisioningService {
       });
 
     } catch (error: any) {
-      logger.error('GitOps client deployment failed', {
+      logger.error('Client deployment failed', {
         clientId: data.clientId,
         error: error.message,
         stack: error.stack,
       });
-      throw new Error(`GitOps deployment failed: ${error.message}`);
+      throw new Error(`Deployment failed for client ${data.clientId}: ${error.message}`);
     }
   }
 

@@ -197,9 +197,6 @@ export class UpgradeService {
       .digest('hex')
       .substring(0, 12);
     
-    // Get LICENSE_PUBLIC_KEY from environment
-    const licensePublicKey = process.env.LICENSE_PUBLIC_KEY || '';
-    
     const values = {
       // Update image tags to new version
       api: {
@@ -226,11 +223,8 @@ export class UpgradeService {
         companyName: customer.company_name
       },
       
-      // Keep license (re-generate if needed)
-      license: {
-        key: customer.license_key || '',
-        publicKey: licensePublicKey
-      },
+      // License is stored in 1Password and referenced via SecretName
+      // No need to pass license data in values - it's fetched from 1Password
       
       // Merge any additional values
       ...options.additionalValues

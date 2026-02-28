@@ -5,20 +5,19 @@ export interface DeploymentJobData {
   customerId: string;
   email: string;
   companyName: string;
-  licenseKey: string;
   namespace?: string;
   priority?: number;
   metadata?: Record<string, any>;
   // GitOps-specific fields
   plan?: 'starter' | 'professional' | 'enterprise';
-  licensePublicKey?: string;
   domain?: string;
+  // Note: License is fetched from provisioning API by gitops-provisioning-service
 }
 
 export interface UpdateJobData {
   customerId: string;
-  licenseKey: string;
   namespace: string;
+  // Note: License is fetched from provisioning API by gitops-provisioning-service
 }
 
 export interface DeleteJobData {
@@ -48,7 +47,7 @@ export class DeploymentQueue extends EventEmitter {
         db: parseInt(process.env.REDIS_DB || '0'),
       },
       defaultJobOptions: {
-        attempts: parseInt(process.env.QUEUE_MAX_RETRIES || '3'),
+        attempts: parseInt(process.env.QUEUE_MAX_RETRIES || '5'),
         backoff: {
           type: 'exponential',
           delay: parseInt(process.env.QUEUE_RETRY_DELAY || '60000'), // 1 min

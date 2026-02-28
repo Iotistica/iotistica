@@ -260,13 +260,20 @@ spec:
               value: {{ .Values.redis.cluster | quote }}
             - name: CORS_ORIGINS
               value: {{ .Values.api.corsOrigins | default "http://localhost:5173,http://localhost:3001,http://localhost:3000,http://*:30000" | quote }}
-            {{- if .Values.api.license.publicKey }}
+            # License configuration
+            # Public key: Read from cluster-wide ConfigMap (shared by all customers)
             - name: LICENSE_PUBLIC_KEY
-              value: {{ .Values.api.license.publicKey | quote }}
-            {{- end }}
-            {{- if .Values.api.license.key }}
+              valueFrom:
+                configMapKeyRef:
+                  name: iotistic-license-public-key
+                  key: public-key.pem
+            # License JWT: Read from customer-specific 1Password secret
+            {{- if .Values.api.license.SecretName }}
             - name: IOTISTIC_LICENSE_KEY
-              value: {{ .Values.api.license.key | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.license.SecretName }}
+                  key: key
             {{- end }}
           livenessProbe:
             httpGet:

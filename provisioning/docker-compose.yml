@@ -150,6 +150,9 @@ services:
       QUEUE_MAX_RETRIES: ${QUEUE_MAX_RETRIES:-3}
       QUEUE_RETRY_DELAY: ${QUEUE_RETRY_DELAY:-60000}
       
+      # Provisioning API URL (for fetching licenses)
+      BASE_URL: http://provisioning:3100
+      
       # License keys
       LICENSE_PRIVATE_KEY_PATH: /app/keys/private-key.pem
       LICENSE_PUBLIC_KEY_PATH: /app/keys/public-key.pem

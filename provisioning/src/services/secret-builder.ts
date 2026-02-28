@@ -132,6 +132,21 @@ export class SecretBuilder {
   }
 
   /**
+   * Add license credentials (customer-specific JWT token only)
+   * Public key is shared cluster-wide, not stored per-customer
+   * 
+   * @param license - JWT license token generated for customer
+   * @returns this (for chaining)
+   */
+  public addLicenseCredentials(license: string): this {
+    this.secrets['api-license'] = {
+      key: license
+    };
+    
+    return this;
+  }
+
+  /**
    * Get secrets for a specific app
    * 
    * @param app - App name (e.g., 'redis', 'mqtt', 'sql')
