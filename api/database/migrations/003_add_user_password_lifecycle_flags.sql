@@ -1,5 +1,5 @@
 -- Migration 003: Add password lifecycle and first-login enforcement fields
--- Purpose: Support secure initial admin onboarding and forced password updates
+-- Purpose: Support secure initial admin onboarding and forced password updatessdfsdf
 
 ALTER TABLE users
   ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false,
