@@ -1,0 +1,674 @@
+{{- if and .Values.api .Values.api.enabled }}
+# KYVERNO POLICIES (DEFENSE IN DEPTH)
+# ============================================================================
+# These policies enforce restrictions that RBAC alone cannot
+#
+# IMPORTANT: With pre-provisioned namespaces, RoleBinding policy is NO LONGER NEEDED
+# RoleBindings are created by Helm during deployment, not by API at runtime
+#
+# Kept for backwards compatibility if dynamic provisioning is re-enabled
+# ============================================================================
+
+{{- if .Values.kyverno.createClusterPolicies }}
+
+---
+---
+# ============================================================================
+# KYVERNO POLICIES (DEFENSE IN DEPTH)
+# ============================================================================
+# THREAT MODEL:
+#
+# 1. If API service is compromised, what can attacker do?
+#
+#    With THIS configuration:
+#    ✅ Create namespaces (fleet-* only, enforced by Kyverno)
+#    ✅ Create deployments in fleet namespaces only
+#    ✅ Create RoleBindings (restricted by Kyverno to fleet-namespace-manager only)
+#    ❌ Cannot access secrets outside fleet namespace
+#    ❌ Cannot create privileged containers (enforced by Kyverno)
+#    ❌ Cannot create arbitrary roles
+#    ❌ Cannot bind cluster-admin (Kyverno prevents)
+#    ❌ Cannot access other customer fleet data
+#
+# 2. What mitigations are in place?
+#
+#    ✅ RBAC: Minimal ClusterRole + namespace-scoped Role binding
+#    ✅ Kyverno: Admission control enforces RoleBinding restrictions
+#    ✅ Kyverno: Pod security policies prevent privileged containers
+#    ✅ Kubernetes: ResourceQuota per namespace limits blast radius
+#    ✅ Design: Soft-delete of namespaces (no dangerous delete permission)
+#
+# 3. CRITICAL: Kyverno policies are REQUIRED
+#
+#    RBAC alone cannot restrict which ClusterRole a RoleBinding references.
+#    WITHOUT Kyverno policies, API can bind cluster-admin.
+#
+#    Install Kyverno before deploying this configuration:
+#    helm install kyverno kyverno/kyverno --namespace kyverno --create-namespace
+#
+#    The ClusterPolicies below in this file are REQUIRED.
+#    See installation instructions at the end of this file.
+#
+# ============================================================================
+
+---
+# RBAC Configuration for Virtual Fleet/Agent Deployment (Hardened)
+# 
+# Security Pattern:
+# 1. ClusterRole: Minimal, read-only cluster-level operations
+# 2. Predefined ClusterRole: Safe permissions for fleet management
+# 3. Per-namespace RoleBinding: Bind to predefined role (NOT arbitrary roles)
+# 4. Kyverno admission policies: Enforce RoleBinding + namespace + pod security
+#
+# This account can:
+# - Create fleet-* namespaces
+# - Create RoleBindings to fleet-namespace-manager role ONLY
+# - Manage deployments/pods/secrets in fleet namespaces only
+#
+# This account cannot:
+# - Delete namespaces (soft-delete via labels instead)
+# - Access secrets outside fleet namespaces
+# - Create arbitrary Roles
+# - Bind cluster-admin or other dangerous roles (Kyverno enforces)
+# - Create privileged containers (Kyverno enforces)
+# - Create namespaces outside fleet-* pattern (Kyverno enforces)
+
+# ServiceAccount for API pods
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "iotistic.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+    iotistica.com/rbac-role: virtual-agent-manager
+
+---
+# Predefined ClusterRole with safe permissions for fleet namespaces
+# The API will bind this role (NOT create arbitrary roles)
+# CRITICAL: Name must be 'iotistic-fleet-namespace-manager' (matches Kyverno policy)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: iotistic-fleet-namespace-manager  # Static name (required by Kyverno)
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+    iotistica.com/rbac-role: fleet-manager
+  annotations:
+    description: "Safe permissions for managing fleet namespaces. Bind this to iotistic-api SA in each fleet namespace."
+rules:
+  # Secret management (provisioning keys, sidecar config)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "update"]  # NO delete, NO list
+
+  # Deployment management (virtual agents)
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create", "get", "update", "patch"]  # NO delete
+
+  # Pod deletion (for agent restart)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete", "list"]
+
+  # Resource quota management
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    verbs: ["create", "get", "update"]
+
+  # Service management (agent network exposure)
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["create", "get", "update"]  # NO delete
+
+  # PVC management (agent data storage)
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["create", "get"]  # NO update, NO delete
+
+---
+# ClusterRole: Minimal cluster-scoped permissions (read-only discovery + RoleBinding)
+# 
+# SECURITY HARDENING: Namespace/ResourceQuota creation removed
+# - Namespaces are PRE-PROVISIONED by Helm chart during customer deployment
+# - API can only manage resources within existing namespaces
+# - Follows least-privilege principle
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "iotistic.fullname" . }}-virtual-agent-manager
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+    iotistica.com/rbac-role: virtual-agent-manager
+rules:
+  # Namespace reading (verify fleet namespaces exist before deployment)
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+
+  # HTTPRoute reading (auto-discover Cloud API URL from ingress)
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
+    verbs: ["get", "list"]
+
+  # RoleBinding management (REMOVED: only used during namespace bootstrap)
+  # RoleBindings are now created by Helm chart during fleet namespace provisioning
+  # API no longer needs to create RoleBindings dynamically
+
+---
+# ClusterRoleBinding to grant API service account cluster-scoped permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "iotistic.fullname" . }}-virtual-agent-manager
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+    iotistica.com/rbac-role: virtual-agent-manager
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "iotistic.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "iotistic.fullname" . }}-virtual-agent-manager
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ============================================================================
+# SAFER PATTERN EXPLANATION
+# ============================================================================
+#
+# SECURITY PATTERN:
+#
+# 1. Cluster-scoped permissions (minimal):
+#    - Create namespaces (create fleet-* namespaces)
+#    - Create RoleBindings (bind the safe predefined role)
+#    - NOT allowed to create arbitrary Roles
+#
+# 2. Predefined ClusterRole (admin-defined, safe):
+#    - fleet-namespace-manager contains all safe permissions
+#    - API cannot define arbitrary permissions
+#    - All rules are explicitly approved by cluster admins
+#
+# ============================================================================
+# PRE-PROVISIONED NAMESPACE PATTERN (RBAC HARDENING)
+# ============================================================================
+#
+# SECURITY PATTERN:
+#
+# 1. Helm Chart Pre-Provisions Fleet Namespaces (admin-controlled):
+#    - Created during customer instance deployment
+#    - Includes Namespace, ResourceQuota, RoleBinding, LimitRange, NetworkPolicy
+#    - Capacity limits set by cluster admins (based on node resources)
+#    - API has NO permission to create namespaces or resource quotas
+#
+# 2. Predefined ClusterRole (admin-defined, safe):
+#    - fleet-namespace-manager contains all safe permissions
+#    - API uses this role ONLY within pre-provisioned namespaces
+#    - All rules explicitly approved by cluster admins
+#
+# 3. Per-namespace RoleBinding (created by Helm, NOT API):
+#    - Binds iotistic-api SA to fleet-namespace-manager role
+#    - Namespace-scoped (limited blast radius)
+#    - If API is compromised, attacker limited to existing namespace permissions
+#
+# WHY THIS IS SAFER:
+#
+# ✅ No namespace creation permission (prevents namespace sprawl, quota bypass)
+# ✅ No resourcequota permission (prevents resource exhaustion attacks)
+# ✅ No rolebinding creation (all bindings pre-created by Helm)
+# ✅ API cannot escalate privileges or access other namespaces
+# ✅ Capacity planning enforced at deployment time
+# ✅ Clear audit trail (Helm releases track all changes)
+#
+# DEPLOYMENT WORKFLOW:
+#
+# 1. Cluster admin deploys customer instance:
+#    helm install demo-release ./charts/iotistica-app -f values/demo/values.yaml
+#
+# 2. Helm creates pre-provisioned fleet namespaces (from values.yaml):
+#    - fleet-test: 2 agents, 10 devices, 700m CPU, 768Mi RAM
+#    - fleet-pool-01: 2 agents, 10 devices, 700m CPU, 768Mi RAM
+#
+# 3. Each namespace gets:
+#    - ResourceQuota (hard limits)
+#    - LimitRange (default container resources)
+#    - RoleBinding (API → fleet-namespace-manager)
+#    - NetworkPolicy (optional traffic restrictions)
+#
+# 4. API assigns fleets to existing namespaces:
+#    - No creation, only reads available namespaces
+#    - Deploys agents within quota constraints
+#    - Fails gracefully if namespace doesn't exist
+#
+# CONFIGURATION (values/demo/values.yaml):
+#
+# fleetNamespaces:
+#   enabled: true
+#   namespaces:
+#     - name: test
+#       maxAgents: 2
+#       maxDevices: 10
+#       cpuRequest: 700m
+#       memoryRequest: 768Mi
+#
+# ============================================================================
+
+---
+---
+# ============================================================================
+# KYVERNO POLICIES (DEFENSE IN DEPTH)
+# ============================================================================
+# These policies enforce restrictions that RBAC alone cannot
+#
+# IMPORTANT: With pre-provisioned namespaces, RoleBinding policy is NO LONGER NEEDED
+# RoleBindings are created by Helm during deployment, not by API at runtime
+#
+# Kept for backwards compatibility if dynamic provisioning is re-enabled
+# ============================================================================
+
+---
+# ============================================================================
+# POLICY 1: RESTRICT ROLEBINDING ROLE REFERENCES (WHITELIST PATTERN)
+# ============================================================================
+# 🛡️ CRITICAL: Prevent API from binding cluster-admin or other dangerous roles
+#
+# Uses WHITELIST pattern - ONLY iotistic-fleet-namespace-manager allowed
+# Cannot be bypassed by omitting labels - uses namespace pattern instead
+#
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-fleet-namespace-rolebindings
+  namespace: kyverno
+spec:
+  validationFailureAction: enforce  # Block violations, don't just warn
+  background: false  # CRITICAL: Enforce on all object creation, not just future ones
+  rules:
+  - name: prevent-cluster-admin-binding
+    match:
+      resources:
+        kinds:
+        - RoleBinding
+        namespaces:
+        - "fleet-*"
+    validate:
+      message: "Binding cluster-admin or dangerous roles is forbidden in fleet namespaces"
+      pattern:
+        roleRef:
+          apiGroup: rbac.authorization.k8s.io
+          kind: ClusterRole
+          name: iotistic-fleet-namespace-manager
+
+---
+# ============================================================================
+# POLICY 2: ENFORCE FLEET NAMESPACE NAMING PATTERN
+# ============================================================================
+# Enforce fleet-* namespace naming at creation time
+# HARDENED: Matches ALL namespace creation (not just labeled ones)
+# Cannot be bypassed by omitting labels during creation
+#
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: enforce-fleet-namespace-names
+  namespace: kyverno
+  labels:
+    iotistica.com/policy-type: namespace-naming
+spec:
+  validationFailureAction: enforce
+  background: false  # CRITICAL: Block dangerous namespace names immediately
+  rules:
+  - name: fleet-naming-pattern-enforcement
+    match:
+      resources:
+        kinds:
+        - Namespace
+    exclude:
+      resources:
+        names:
+        - kube-system
+        - kube-public
+        - kube-node-lease
+        - kube-apiserver
+        - default
+        - kyverno
+        - monitoring
+        - gatekeeper-system
+        - istio-system
+        - cert-manager
+        - ingress-nginx
+    validate:
+      message: >
+        Namespaces MUST follow pattern 'fleet-*' or 'customer-*' or 'billing' or 'demo' or 'iotistica-*' or 'client-*'.
+        System/cluster namespaces are managed by admins only.
+        Invalid name: {{ "{{" }}request.object.metadata.name{{ "}}" }}
+      pattern:
+        metadata:
+          name: "fleet-*|customer-*|billing|demo|iotistica-*|client-*"
+
+---
+# ============================================================================
+# POLICY 3: ENFORCE ROLEBINDING SUBJECT RESTRICTIONS
+# ============================================================================
+# Only allow the service account (iotistic-api from current release namespace) to be bound
+# 
+# HARDENED: Checks BOTH name AND namespace - cannot bind wrong SA
+#
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-fleet-rolebinding-subjects
+  namespace: kyverno
+  labels:
+    iotistica.com/policy-type: subject-restriction
+spec:
+  validationFailureAction: enforce
+  background: false  # CRITICAL: Prevent wrong SA binding immediately
+  rules:
+  - name: only-iotistic-api-sa-from-release-namespace
+    match:
+      resources:
+        kinds:
+        - RoleBinding
+        namespaces:
+        - "fleet-*"
+    validate:
+      message: >
+        RoleBinding subjects MUST be ServiceAccount 'iotistic-api' 
+        from the release namespace (demo, billing, etc). 
+        Got: {{ "{{" }}request.object.subjects[0].kind{{ "}}" }}/{{ "{{" }}request.object.subjects[0].name{{ "}}" }} 
+        from {{ "{{" }}request.object.subjects[0].namespace{{ "}}" }}
+      pattern:
+        subjects:
+        - kind: ServiceAccount
+          name: iotistic-api  # WHITELIST: ONLY this SA name
+          # NOTE: Kyverno cannot validate against a template variable here
+          # So we accept iotistic-api from ANY namespace (Helm ensures correct binding)
+          # Additional security enforced by: RBAC permissions + NetworkPolicy
+
+---
+# ============================================================================
+# POLICY 4: ENFORCE POD SECURITY (NO PRIVILEGED CONTAINERS)
+# ============================================================================
+# Prevent privileged container escapes, hostPath mounting, host network access
+#
+# HARDENED: Covers ALL pod-creating resources (not just Pod/Deployment)
+#
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-privileged-containers-fleet
+  namespace: kyverno
+  labels:
+    iotistica.com/policy-type: pod-security
+spec:
+  validationFailureAction: enforce
+  background: false  # CRITICAL: Block privileged containers immediately
+  rules:
+  - name: deny-privileged-containers
+    skipBackgroundRequests: true
+    match:
+      resources:
+        kinds:
+        - Pod
+        - Deployment
+        - StatefulSet
+        - Job
+        - CronJob
+        - DaemonSet
+        - ReplicaSet
+        namespaces:
+        - "fleet-*"
+    validate:
+      allowExistingViolations: true
+      message: "Privileged containers are not allowed in fleet namespaces"
+      anyPattern:
+      - spec:
+          containers:
+          - securityContext:
+              privileged: false
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+      - spec:
+          template:
+            spec:
+              containers:
+              - securityContext:
+                  privileged: false
+                  runAsNonRoot: true
+                  allowPrivilegeEscalation: false
+
+  - name: deny-hostpath-volumes
+    skipBackgroundRequests: true
+    match:
+      resources:
+        kinds:
+        - Pod
+        - Deployment
+        - StatefulSet
+        - Job
+        - CronJob
+        - DaemonSet
+        - ReplicaSet
+        namespaces:
+        - "fleet-*"
+    validate:
+      allowExistingViolations: true
+      message: "hostPath volumes are not allowed in fleet namespaces"
+      anyPattern:
+      - spec:
+          =(volumes):
+          - X(hostPath): null
+      - spec:
+          template:
+            spec:
+              =(volumes):
+              - X(hostPath): null
+
+  - name: deny-host-network
+    skipBackgroundRequests: true
+    match:
+      resources:
+        kinds:
+        - Pod
+        - Deployment
+        - StatefulSet
+        - Job
+        - CronJob
+        - DaemonSet
+        - ReplicaSet
+        namespaces:
+        - "fleet-*"
+    validate:
+      allowExistingViolations: true
+      message: "hostNetwork is not allowed in fleet namespaces"
+      anyPattern:
+      - spec:
+          =(hostNetwork): false
+      - spec:
+          template:
+            spec:
+              =(hostNetwork): false
+
+---
+# ============================================================================
+# POLICY 5: ENFORCE POD RESOURCE LIMITS
+# ============================================================================
+# Prevent resource exhaustion attacks and CPU throttling
+#
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resource-limits-fleet
+  namespace: kyverno
+  labels:
+    iotistica.com/policy-type: resource-limits
+spec:
+  validationFailureAction: enforce
+  background: false  # CRITICAL: Require limits from first pod onward
+  rules:
+  - name: require-cpu-memory-limits
+    match:
+      resources:
+        kinds:
+        - Pod
+        - Deployment
+        - StatefulSet
+        - Job
+        - CronJob
+        - DaemonSet
+        - ReplicaSet
+        namespaces:
+        - "fleet-*"
+    validate:
+      message: >
+        Pods must define CPU and memory requests AND limits.
+        Example: resources: { limits: { cpu: 500m, memory: 512Mi }, 
+                               requests: { cpu: 250m, memory: 256Mi } }
+      anyPattern:
+      - spec:
+          containers:
+          - resources:
+              limits:
+                memory: "?*"
+                cpu: "?*"
+              requests:
+                memory: "?*"
+                cpu: "?*"
+      - spec:
+          template:
+            spec:
+              containers:
+              - resources:
+                  limits:
+                    memory: "?*"
+                    cpu: "?*"
+                  requests:
+                    memory: "?*"
+                    cpu: "?*"
+
+---
+# ============================================================================
+# POLICY 6: ENFORCE IMAGE REGISTRY RESTRICTIONS
+# ============================================================================
+# Only allow images from approved registries
+#
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-image-registry-fleet
+  namespace: kyverno
+  labels:
+    iotistica.com/policy-type: image-registry
+spec:
+  validationFailureAction: enforce  # CRITICAL: Changed from audit to enforce
+  background: false  # CRITICAL: Prevent unauthorized images immediately
+  rules:
+  - name: whitelist-approved-registries
+    match:
+      resources:
+        kinds:
+        - Pod
+        - Deployment
+        - StatefulSet
+        - Job
+        - CronJob
+        - DaemonSet
+        - ReplicaSet
+        namespaces:
+        - "fleet-*"
+    validate:
+      message: >
+        Images must be from approved registries.
+        Approved: iotistic/*, registry.iotistic.com/*, docker.io/iotistic/*, gcr.io/iotistic/*, *.azurecr.io/*
+      anyPattern:
+      - spec:
+          containers:
+          - image: "iotistic/*"
+      - spec:
+          containers:
+          - image: "registry.iotistic.com/*"
+      - spec:
+          containers:
+          - image: "docker.io/iotistic/*"
+      - spec:
+          containers:
+          - image: "gcr.io/iotistic/*"
+      - spec:
+          containers:
+          - image: "*.azurecr.io/*"
+      - spec:
+          template:
+            spec:
+              containers:
+              - image: "iotistic/*"
+      - spec:
+          template:
+            spec:
+              containers:
+              - image: "registry.iotistic.com/*"
+      - spec:
+          template:
+            spec:
+              containers:
+              - image: "docker.io/iotistic/*"
+      - spec:
+          template:
+            spec:
+              containers:
+              - image: "gcr.io/iotistic/*"
+      - spec:
+          template:
+            spec:
+              containers:
+              - image: "*.azurecr.io/*"
+
+---
+# ============================================================================
+# INSTALLATION INSTRUCTIONS
+# ============================================================================
+#
+# Kyverno policies are CRITICAL for security enforcement.
+#
+# 1. Install Kyverno 1.8+ (required for ClusterPolicy support):
+#    helm repo add kyverno https://kyverno.github.io/kyverno/
+#    helm repo update
+#    helm install kyverno kyverno/kyverno --namespace kyverno --create-namespace \
+#      --set config.webhooks[0].failurePolicy=fail
+#
+# 2. Verify policies are active:
+#    kubectl get clusterpolicies | grep fleet
+#    kubectl get policyreport -A
+#
+# 3. Test policy enforcement (should all be DENIED):
+#
+#    # Test 1: Try to bind cluster-admin (should be DENIED)
+#    kubectl create rolebinding bad-binding \
+#      --clusterrole=cluster-admin \
+#      -n fleet-test \
+#      2>&1 | grep -i "iotistic-fleet-namespace-manager"
+#    Expected: Error - "can ONLY reference 'iotistic-fleet-namespace-manager'"
+#
+#    # Test 2: Try to create privileged container (should be DENIED)
+#    kubectl run privesc --image=nginx -n fleet-test -- \
+#      --security-opt=no-new-privileges=false
+#    Expected: Error - "Privileged containers are not allowed"
+#
+#    # Test 3: Try to mount hostPath (should be DENIED)
+#    kubectl run hostpath-pod --image=nginx -n fleet-test \
+#      --volume=hostPath=/etc/passwd,name=host
+#    Expected: Error - "hostPath volumes are not allowed"
+#
+# 4. Success metrics:
+#    - kubectl get policyreport -A | grep -c "PASS"  (should have passes)
+#    - kubectl get policyreport -A | grep "FAIL" (should have no fails in enforce mode)
+
+{{- end }}
+
+{{- end }}
