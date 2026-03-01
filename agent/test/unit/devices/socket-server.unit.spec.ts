@@ -41,7 +41,7 @@ describe('SocketServer', () => {
     const server = new SocketServer(config, mockLogger);
     const dataPoints = [{
       deviceName: 'test',
-      registerName: 'temp',
+      metric: 'temp',
       value: 25,
       unit: 'C',
       timestamp: new Date().toISOString(),
