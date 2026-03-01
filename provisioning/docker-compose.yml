@@ -46,6 +46,10 @@ services:
       NODE_ENV: development
       PORT: 3100
       
+      # URLs
+      BASE_URL: ${BASE_URL:-http://localhost:3100}
+      WEBSITE_URL: ${WEBSITE_URL:-http://localhost:3000}
+      
       # Database
       DATABASE_URL: postgres://billing:billing123@postgres:5432/billing
       DB_HOST: postgres
@@ -58,6 +62,11 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_DB: 0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_USERNAME: ${REDIS_USERNAME:-}
+      REDIS_CLUSTER: ${REDIS_CLUSTER:-false}
+      REDIS_TLS: ${REDIS_TLS:-false}
+      REDIS_USE_TLS: ${REDIS_USE_TLS:-false}
       
       # Stripe (use your test keys)
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
@@ -87,10 +96,10 @@ services:
       JWT_REFRESH_TOKEN_EXPIRY: ${JWT_REFRESH_TOKEN_EXPIRY}
 
       # Trial configuration
-      DEFAULT_TRIAL_DAYS: 14
+      DEFAULT_TRIAL_DAYS: ${DEFAULT_TRIAL_DAYS:-14}
       
       # Base configuration
-      BASE_DOMAIN: ${BASE_DOMAIN:-iotistic.com}
+      BASE_DOMAIN: ${BASE_DOMAIN:-iotistica.com}
       
       # TigerData API (TimescaleDB provisioning)
       TIGERDATA_API_URL: ${TIGERDATA_API_URL:-https://console.cloud.timescale.com/public/api/v1}
@@ -112,11 +121,11 @@ services:
       GITOPS_REPO_DIR: /tmp/iot-k8s-main
       GITOPS_BRANCH: ${GITOPS_BRANCH:-main}
       GITOPS_PAT: ${GITOPS_PAT}  # GitHub Personal Access Token (repo scope)
-      GITOPS_AUTHOR_NAME: "IoTistic provisioning Bot"
-      GITOPS_AUTHOR_EMAIL: "billing@iotistic.com"
+      GITOPS_AUTHOR_NAME: "Iotistica provisioning Bot"
+      GITOPS_AUTHOR_EMAIL: "info@iotistica.com"
       
       # Argo CD Configuration (NEW)
-      ARGOCD_BASE_URL: ${ARGOCD_BASE_URL:-https://argocd.iotistic.com}
+      ARGOCD_BASE_URL: ${ARGOCD_BASE_URL:-https://argocd.iotistica.com}
       ARGOCD_TOKEN: ${ARGOCD_TOKEN}  # Argo CD API token
       ARGOCD_NAMESPACE: ${ARGOCD_NAMESPACE:-argocd}
       ARGOCD_MAX_RETRIES: ${ARGOCD_MAX_RETRIES:-10}
@@ -124,8 +133,6 @@ services:
       SKIP_ARGOCD_STATUS_CHECK: ${SKIP_ARGOCD_STATUS_CHECK:-false}
       ARGOCD_TEST_CLIENT_ID: ${ARGOCD_TEST_CLIENT_ID:-}  # For testing: use existing app (e.g., db949acf)
       
-      # Legacy Helm deployment (for gradual migration)
-      SIMULATE_K8S_DEPLOYMENT: ${SIMULATE_K8S_DEPLOYMENT:-true}
     volumes:
       - ./keys:/app/keys
       # Git repository cache (GitOps operations)
@@ -157,6 +164,11 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_DB: 0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_USERNAME: ${REDIS_USERNAME:-}
+      REDIS_CLUSTER: ${REDIS_CLUSTER:-false}
+      REDIS_TLS: ${REDIS_TLS:-false}
+      REDIS_USE_TLS: ${REDIS_USE_TLS:-false}
       QUEUE_CONCURRENCY: ${QUEUE_CONCURRENCY:-3}
       QUEUE_MAX_RETRIES: ${QUEUE_MAX_RETRIES:-3}
       QUEUE_RETRY_DELAY: ${QUEUE_RETRY_DELAY:-60000}

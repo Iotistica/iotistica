@@ -5,7 +5,9 @@
 
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import dotenv from 'dotenv';
+import path from 'path';
 import { testConnection } from './db/connection';
 import { LicenseGenerator } from './services/license-generator';
 import { createBullBoard } from '@bull-board/api';
@@ -24,6 +26,10 @@ import adminRouter from './routes/admin';
 import authRouter from './routes/auth';
 import internalRbacRouter from './routes/internal-rbac';
 
+// Middleware
+import { authenticateAdmin } from './middleware/auth';
+import { apiLimiter, strictLimiter } from './middleware/rate-limit';
+
 // Services
 import { deploymentQueue } from './services/deployment-queue';
 
@@ -34,7 +40,31 @@ const app = express();
 const PORT = process.env.PORT || 3100;
 
 // Middleware
+// Security headers with Helmet
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:"],
+    },
+  },
+  crossOriginEmbedderPolicy: false, // Allow embedding resources from other origins
+}));
 app.use(cors());
+
+// Serve static website files from the website directory
+// This allows /success.html and other website pages to be accessible
+const websiteDir = path.join(__dirname, '..', '..', 'website');
+app.use(express.static(websiteDir, { 
+  setHeaders: (res, filePath) => {
+    // Don't cache HTML files (they change)
+    if (filePath.endsWith('.html')) {
+      res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+  }
+}));
 
 // IMPORTANT: Stripe webhooks need raw body, other routes need JSON
 app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
@@ -62,17 +92,24 @@ app.get('/health', (req, res) => {
   });
 });
 
-// API routes
-app.use('/api/auth', authRouter);  // Token validation for customer instances
-app.use('/api/customers', customersRouter);
-app.use('/api/subscriptions', subscriptionsRouter);
-app.use('/api/licenses', licensesRouter);
-app.use('/api/usage', usageRouter);
-app.use('/api/webhooks', webhooksRouter);
-app.use('/api/queue', queueRouter);
-app.use('/api/upgrades', upgradesRouter);
-app.use('/api/admin', adminRouter);
-app.use('/api/internal', internalRbacRouter);  // Internal RBAC endpoints for tenant API
+// API routes with security
+// Public routes (rate limited, no auth)
+app.use('/api/auth', apiLimiter, authRouter);  // Auth0 token validation
+app.use('/api/webhooks', webhooksRouter);  // Stripe webhooks (signature verified internally)
+app.use('/api/customers', apiLimiter, customersRouter);  // Signup is public, other routes handle auth internally
+
+// Customer-authenticated routes (rate limited)
+app.use('/api/subscriptions', apiLimiter, subscriptionsRouter);
+app.use('/api/licenses', apiLimiter, licensesRouter);
+app.use('/api/usage', apiLimiter, usageRouter);
+app.use('/api/upgrades', apiLimiter, upgradesRouter);
+
+// Admin-only routes (protected)
+app.use('/api/admin', authenticateAdmin, adminRouter);
+app.use('/api/queue', authenticateAdmin, queueRouter);
+
+// Internal routes (protected by internal token)
+app.use('/api/internal', internalRbacRouter);  // Has its own verifyInternalToken middleware
 
 // 404 handler
 app.use((req, res) => {
@@ -88,7 +125,7 @@ app.use((err: any, req: any, res: any, next: any) => {
 // Initialize and start server
 async function start() {
   try {
-    console.log('🚀 Starting Billing...');
+    console.log('🚀 Starting Provisioning...');
 
     // Test database connection
     await testConnection();
@@ -100,7 +137,7 @@ async function start() {
 
     // Start server
     app.listen(PORT, () => {
-      console.log(`✅ Billing API listening on port ${PORT}`);
+      console.log(`✅ Provisioning API listening on port ${PORT}`);
       console.log(`   Health: http://localhost:${PORT}/health`);
       console.log(`   API: http://localhost:${PORT}/api`);
       console.log(`   Queue Dashboard: http://localhost:${PORT}/admin/queues`);

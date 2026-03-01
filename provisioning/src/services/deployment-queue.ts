@@ -38,14 +38,44 @@ export class DeploymentQueue extends EventEmitter {
   constructor() {
     super();
 
-    // Initialize Bull queue with Redis connection
+    // Initialize Bull queue with Redis connection (Azure-compatible)
+    const host = process.env.REDIS_HOST || 'localhost';
+    const port = parseInt(process.env.REDIS_PORT || '6379');
+    const username = process.env.REDIS_USERNAME || undefined;
+    const password = process.env.REDIS_PASSWORD || undefined;
+    const db = parseInt(process.env.REDIS_DB || '0');
+    
+    const tlsFlag = (process.env.REDIS_TLS || process.env.REDIS_USE_TLS || '')
+      .toLowerCase();
+    const useTls = tlsFlag === 'true' || tlsFlag === '1' || tlsFlag === 'yes';
+    
     this.queue = new Bull('customer-deployments', {
       redis: {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379'),
-        password: process.env.REDIS_PASSWORD,
-        db: parseInt(process.env.REDIS_DB || '0'),
+        host,
+        port,
+        username,
+        password,
+        db,
+        tls: useTls 
+          ? { 
+              servername: host,
+              rejectUnauthorized: true, // Azure uses valid certs
+            } 
+          : undefined,
+        // Note: maxRetriesPerRequest and enableReadyCheck are not compatible with Bull
+        // Bull sets maxRetriesPerRequest to null internally
+        enableOfflineQueue: true,
+        connectTimeout: 20000, // 20s for Azure failover
+        commandTimeout: 10000, // 10s for commands
+        keepAlive: 30000,
       },
+      settings: {
+        // Stall interval: how often to check if job is still processing (K8s deployments take 5-15min)
+        stalledInterval: 60000, // 1 minute (default is 5s - too short for deployments)
+        // Max times a job can stall before failing
+        maxStalledCount: 5, // Allow 5 stall events before giving up (default is 2)
+      },
+      prefix: 'provisioning', // Namespace Bull keys
       defaultJobOptions: {
         attempts: parseInt(process.env.QUEUE_MAX_RETRIES || '5'),
         backoff: {

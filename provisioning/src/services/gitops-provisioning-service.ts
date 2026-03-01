@@ -5,29 +5,27 @@
  * Flow:
  * 1. Clone/pull iot-k8s-main repository
  * 2. Provision TigerData database
- * 3. Create 1Password secrets
+ * 3. Create 1Password secrets (SQL, MQTT, API-JWT, License)
  * 4. Generate Argo CD Application manifest
  * 5. Generate client-specific values file
  * 6. Commit and push to main branch
  * 7. Argo CD auto-syncs changes to Kubernetes
+ * 
+ * Auth: Uses Auth0 for authentication (no password bootstrap needed)
  */
 
 import simpleGit, { SimpleGit } from 'simple-git';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
-import crypto from 'crypto';
-import bcrypt from 'bcrypt';
 import axios from 'axios';
 import { Job } from 'bull';
 import { logger } from '../utils/logger';
-import { generateInitialAdminPassword } from '../utils/password-generator';
 import { TigerDataService, TigerDataDatabase } from './tigerdata-service';
 import { OnePasswordService } from './onepassword-service';
 import { CustomerModel } from '../db/customer-model';
 import { SecretBuilder } from './secret-builder';
 import { releaseService } from './release-service';
-import { emailQueue } from './email-queue';
 
 interface ClientDeploymentData {
   clientId: string;           // Sanitized: dc5fec42901a (SHA256 hash)
@@ -399,6 +397,12 @@ export class GitOpsProvisioningService {
         console.log(`🔄 Status updated to: db_ready`);
         console.log('-'.repeat(80));
         
+        // Update job progress (30 → 35%)
+        if (job) {
+          await job.progress(35);
+          console.log(`📊 Job progress: 35% (DB provisioned)`);
+        }
+        
         logger.info('TigerData details saved to database');
       } catch (error: any) {
         console.log(`\n❌ TigerData provisioning FAILED!`);
@@ -620,6 +624,12 @@ export class GitOpsProvisioningService {
         console.log(`🔄 Status updated to: secret_ready`);
         console.log('-'.repeat(80));
         
+        // Update job progress (35 → 45%)
+        if (job) {
+          await job.progress(45);
+          console.log(`📊 Job progress: 45% (Secrets created)`);
+        }
+        
         logger.info('1Password details saved to database');
       } catch (error: any) {
         console.log(`\n❌ 1Password secret creation FAILED!`);
@@ -738,133 +748,21 @@ export class GitOpsProvisioningService {
         clientId: data.clientId,
         branch: this.config.mainBranch,
       });
-
-      // === STEP 4: Bootstrap Initial Admin Password ===
-      console.log('\n' + '-'.repeat(80));
-      console.log('🔑 STEP 4/4: BOOTSTRAP INITIAL ADMIN PASSWORD');
-      console.log('-'.repeat(80));
       
-      try {
-        // Generate initial admin password
-        console.log('   📝 Generating initial admin password...');
-        const initialPassword = generateInitialAdminPassword();
-        
-        logger.info('Initial admin password generated', {
-          clientId: data.clientId,
-          passwordLength: initialPassword.length,
-        });
-
-        // Create 1Password item for the initial admin password
-        // This will be synced to K8s Secret by 1Password Operator, then used by bootstrap Job
-        console.log('   🔐 Storing password in 1Password vault...');
-        
-        try {
-          // Use createGenericSecretItem with 'admin-password' type
-          await this.onePasswordService.createGenericSecretItem(
-            data.clientId,
-            'admin-password',
-            {
-              password: initialPassword,
-              email: data.email,
-              createdAt: new Date().toISOString(),
-              notes: `Initial admin password for ${data.clientId}. Set by provisioning service. Customer must change on first login.`,
-            }
-          );
-          
-          logger.info('Initial admin password stored in 1Password', {
-            clientId: data.clientId,
-            itemType: 'admin-password',
-          });
-          console.log('   ✅ Password stored in 1Password');
-        } catch (onePasswordError) {
-          logger.error('Failed to store initial admin password in 1Password', {
-            clientId: data.clientId,
-            error: onePasswordError instanceof Error ? onePasswordError.message : String(onePasswordError),
-          });
-          throw onePasswordError;
-        }
-
-        // Generate one-time password reset token (SOC2 compliant - no plaintext storage)
-        console.log('   🔐 Generating password reset token...');
-        const resetToken = crypto.randomBytes(32).toString('hex');
-        const tokenHash = await bcrypt.hash(resetToken, 10);
-        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
-
-        logger.info('Admin password reset token generated', {
-          clientId: data.clientId,
-          tokenLength: resetToken.length,
-          expiresIn: '24 hours',
-        });
-
-        // Store token hash in database (hash, not plaintext)
-        await CustomerModel.createAdminPasswordResetToken(
-          data.customerId,
-          tokenHash,
-          expiresAt
-        );
-        console.log('   ✅ Reset token stored in database (hashed, not plaintext)');
-
-        // Queue email event with reset link
-        // Email service will send link to customer, never stores password
-        const resetLink = `https://client-${data.clientId}.iotistica.com/auth/reset-password?token=${resetToken}&customerId=${data.customerId}`;
-        
-        console.log('   📧 Queuing password reset email...');
-        logger.info('Password reset email queued', {
-          clientId: data.clientId,
-          customerId: data.customerId,
-          email: data.email,
-          expiresAt: expiresAt.toISOString(),
-        });
-        
-        // Queue Bull job for email delivery
-        const emailJob = await emailQueue.addPasswordResetLinkJob({
-          customerId: data.customerId,
-          email: data.email,
-          clientId: data.clientId,
-          resetLink: resetLink,
-          expiresAt: expiresAt.toISOString(),
-        });
-
-        console.log(`   ✅ Email job queued: ${emailJob.id}`);
-        console.log(`   ℹ️  Job Details:`);
-        console.log(`       - Type: send-admin-password-reset-link`);
-        console.log(`       - Email: ${data.email}`);
-        console.log(`       - Reset Link: ${resetLink}`);
-        console.log(`       - Expires: ${expiresAt.toISOString()}`);
-        console.log(`       - Retries: 3 (with exponential backoff)`);
-        console.log(`       - Status: Pending in queue`);;
-        
-        // Mark deployment as complete
-        // K8s bootstrap Job will run in customer namespace after Argo CD deploys API pod
-        await CustomerModel.updateDeploymentStatus(data.customerId, 'deployed');
-        console.log('   ✅ Deployment status: deployed');
-        console.log('   ℹ️  Bootstrap Job will run in K8s cluster after API pod is ready');
-        console.log('   ℹ️  Customer will receive password reset link via email');
-
-        logger.info('Provisioning complete - SOC2 compliant password flow', {
-          clientId: data.clientId,
-          customerId: data.customerId,
-          passwordStoredIn: '1Password (for bootstrap)',
-          resetTokenStoredIn: 'Database (bcrypt hashed)',
-          expiration: expiresAt.toISOString(),
-          bootstrapJobTiming: 'Runs after Argo CD deploys API pod',
-        });
-
-      } catch (bootstrapError: any) {
-        console.error(`\n⚠️  Password setup failed: ${bootstrapError.message}`);
-        logger.warn('Initial password setup failed - deployment may require manual intervention', {
-          customerId: data.customerId,
-          clientId: data.clientId,
-          error: bootstrapError.message,
-        });
-        
-        // Log warning but don't fail deployment
-        // Provisioning completed, but password needs to be manually generated and stored
-        await CustomerModel.updateDeploymentStatus(data.customerId, 'deployed', {
-          deploymentNote: 'Deployment complete but admin password setup requires manual intervention',
-          bootstrapError: bootstrapError.message,
-        });
+      // Update job progress (45 → 55%)
+      if (job) {
+        await job.progress(55);
+        console.log(`📊 Job progress: 55% (Manifests committed and pushed)`);
       }
+
+      // Mark deployment as complete (Auth0 handles authentication)
+      await CustomerModel.updateDeploymentStatus(data.customerId, 'deployed');
+      console.log('   ✅ Deployment status: deployed');
+      
+      logger.info('Provisioning complete - Auth0 authentication enabled', {
+        clientId: data.clientId,
+        customerId: data.customerId,
+      });
 
     } catch (error: any) {
       logger.error('Client deployment failed', {

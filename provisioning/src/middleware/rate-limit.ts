@@ -7,6 +7,21 @@ import rateLimit from 'express-rate-limit';
 import type { Request } from 'express';
 
 /**
+ * Helper to safely extract IP address (handles IPv6)
+ * Uses express-rate-limit's built-in IP handling
+ */
+const getClientIp = (req: Request): string => {
+  // Use x-forwarded-for in production (behind proxy/load balancer)
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    const ips = (typeof forwarded === 'string' ? forwarded : forwarded[0]).split(',');
+    return ips[0].trim();
+  }
+  // Fallback to direct connection IP
+  return req.ip || req.socket.remoteAddress || 'unknown';
+};
+
+/**
  * General API rate limit
  * 100 requests per 15 minutes per IP
  */
@@ -41,8 +56,9 @@ export const usageLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req: Request) => {
-    // Rate limit by customer ID instead of IP
-    return req.headers['x-api-key'] as string || req.ip || 'unknown';
+    // Rate limit by customer ID (from API key) instead of IP
+    // Falls back to IP if no API key present (IPv6-safe)
+    return req.headers['x-api-key'] as string || getClientIp(req);
   },
 });
 

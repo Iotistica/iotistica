@@ -82,6 +82,8 @@ export class StripeService {
   ): Promise<void> {
     const customerId = session.metadata?.customer_id;
     const plan = session.metadata?.plan as 'starter' | 'professional' | 'enterprise';
+    const upgradeFromTrial = session.metadata?.upgrade_from_trial === 'true';
+    const oldSubscriptionId = session.metadata?.old_subscription_id;
 
     if (!customerId || !plan) {
       console.error('Missing metadata in checkout session:', session.id);
@@ -92,6 +94,18 @@ export class StripeService {
     const stripeSubscription = await stripe.subscriptions.retrieve(
       session.subscription as string
     );
+
+    // Handle trial-to-paid upgrade: Cancel old trial subscription
+    if (upgradeFromTrial && oldSubscriptionId) {
+      try {
+        console.log(`♻️  Upgrading from trial: Canceling old subscription ${oldSubscriptionId}`);
+        await stripe.subscriptions.cancel(oldSubscriptionId);
+        console.log(`✅ Old trial subscription ${oldSubscriptionId} canceled`);
+      } catch (error: any) {
+        console.error(`⚠️  Failed to cancel old trial subscription ${oldSubscriptionId}:`, error.message);
+        // Continue anyway - the new subscription is what matters
+      }
+    }
 
     // Create or update subscription in database
     const existingSub = await SubscriptionModel.getByCustomerId(customerId);
@@ -115,7 +129,11 @@ export class StripeService {
       );
     }
 
-    console.log(`✅ Subscription created for customer ${customerId}`);
+    if (upgradeFromTrial) {
+      console.log(`🎉 Trial upgraded to ${plan} for customer ${customerId}`);
+    } else {
+      console.log(`✅ Subscription created for customer ${customerId}`);
+    }
   }
 
   /**
@@ -194,6 +212,14 @@ export class StripeService {
       return;
     }
 
+    // Determine if this is a trial subscription
+    const isTrialSubscription = subscription.status === 'trialing' || subscription.trial_end !== null;
+    const trialEndsAt = isTrialSubscription && subscription.trial_end 
+      ? new Date(subscription.trial_end * 1000) 
+      : null;
+
+    console.log(`🎯 Subscription status: ${subscription.status}${isTrialSubscription ? ' (trial)' : ''}`);
+
     // Check if customer has an existing subscription (e.g., canceled one)
     const customerSubscription = await SubscriptionModel.getByCustomerId(customer.customer_id);
     if (customerSubscription) {
@@ -201,22 +227,41 @@ export class StripeService {
       await SubscriptionModel.update(customer.customer_id, {
         stripe_subscription_id: subscription.id,
         plan,
-        status: 'active',
+        status: subscription.status as any,  // Use actual Stripe status: 'trialing', 'active', 'past_due', etc
         current_period_start: new Date(subscription.current_period_start * 1000),
         current_period_ends_at: new Date(subscription.current_period_end * 1000),
-        trial_ends_at: null, // Clear trial if any
+        trial_ends_at: trialEndsAt,
       });
-      console.log(`✅ Subscription updated for customer ${customer.customer_id} (${plan})`);
+      console.log(`✅ Subscription updated for customer ${customer.customer_id} (${plan})${isTrialSubscription ? ` - Trial ends: ${trialEndsAt?.toISOString()}` : ''}`);
     } else {
       // Create new subscription
-      await SubscriptionModel.createPaid(
-        customer.customer_id,
-        plan,
-        subscription.id,
-        new Date(subscription.current_period_end * 1000),
-        new Date(subscription.current_period_start * 1000)
-      );
-      console.log(`✅ Subscription created for customer ${customer.customer_id} (${plan})`);
+      // For trial subscriptions, create with the trial info
+      if (isTrialSubscription) {
+        await pool.query(
+          `INSERT INTO subscriptions (customer_id, stripe_subscription_id, plan, status, 
+           current_period_start, current_period_ends_at, trial_ends_at, cancel_at_period_end)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [
+            customer.customer_id,
+            subscription.id,
+            plan,
+            subscription.status,
+            new Date(subscription.current_period_start * 1000),
+            new Date(subscription.current_period_end * 1000),
+            trialEndsAt,
+            subscription.cancel_at_period_end || false
+          ]
+        );
+      } else {
+        await SubscriptionModel.createPaid(
+          customer.customer_id,
+          plan,
+          subscription.id,
+          new Date(subscription.current_period_end * 1000),
+          new Date(subscription.current_period_start * 1000)
+        );
+      }
+      console.log(`✅ Subscription created for customer ${customer.customer_id} (${plan})${isTrialSubscription ? ` - Trial ends: ${trialEndsAt?.toISOString()}` : ''}`);
     }
 
     // Reactivate customer if they were deactivated (subscription canceled then re-subscribed)

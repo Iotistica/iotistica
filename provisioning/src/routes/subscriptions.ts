@@ -107,6 +107,98 @@ router.post('/trial', async (req, res) => {
 });
 
 /**
+ * POST /api/subscriptions/upgrade-from-trial
+ * Convert trial subscription to paid (add payment method)
+ * 
+ * Request body:
+ * - customer_id: Customer ID
+ * - plan: 'starter' | 'professional' | 'enterprise'
+ * - success_url: URL to redirect after successful payment
+ * - cancel_url: URL to redirect if payment cancelled
+ * 
+ * Response:
+ * - checkout_url: Redirect user to this URL for payment
+ */
+router.post('/upgrade-from-trial', async (req, res) => {
+  try {
+    const { customer_id, plan, success_url, cancel_url } = req.body;
+
+    if (!customer_id || !plan) {
+      return res.status(400).json({ error: 'customer_id and plan are required' });
+    }
+
+    if (!['starter', 'professional', 'enterprise'].includes(plan)) {
+      return res.status(400).json({ error: 'Invalid plan. Must be starter, professional, or enterprise' });
+    }
+
+    const customer = await CustomerModel.getById(customer_id);
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    const subscription = await SubscriptionModel.getByCustomerId(customer_id);
+    if (!subscription) {
+      return res.status(404).json({ error: 'No subscription found' });
+    }
+
+    if (subscription.status !== 'trialing') {
+      return res.status(400).json({ 
+        error: 'Subscription is not in trial status',
+        current_status: subscription.status,
+      });
+    }
+
+    console.log(`🔄 Creating upgrade checkout for trial customer ${customer_id} (${plan})`);
+
+    // Create Stripe checkout session for adding payment method
+    // Mode: setup + subscription to add payment and convert trial to paid
+    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+    
+    const session = await stripe.checkout.sessions.create({
+      customer: customer.stripe_customer_id,
+      mode: 'subscription',
+      line_items: [
+        {
+          price: plan === 'starter' 
+            ? process.env.STRIPE_PRICE_STARTER 
+            : plan === 'professional' 
+            ? process.env.STRIPE_PRICE_PROFESSIONAL 
+            : process.env.STRIPE_PRICE_ENTERPRISE,
+          quantity: 1,
+        },
+      ],
+      subscription_data: {
+        metadata: {
+          customer_id,
+          plan,
+          upgrade_from_trial: 'true',
+          old_subscription_id: subscription.stripe_subscription_id,
+        },
+      },
+      success_url: success_url || `${req.protocol}://${req.get('host')}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: cancel_url || `${req.protocol}://${req.get('host')}/cancel`,
+      metadata: {
+        customer_id,
+        plan,
+        upgrade_from_trial: 'true',
+      },
+    });
+
+    console.log(`✅ Upgrade checkout created: ${session.id}`);
+    console.log(`   Trial will be replaced with paid subscription on completion`);
+
+    res.json({
+      session_id: session.id,
+      checkout_url: session.url,
+      message: 'Redirect user to checkout_url to add payment method and upgrade',
+    });
+  } catch (error: any) {
+    console.error('Error creating trial upgrade checkout:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * POST /api/subscriptions/upgrade
  * Upgrade subscription plan
  */

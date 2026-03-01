@@ -379,11 +379,12 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
     const { code, state } = req.query;
 
     if (!code || !state) {
+      const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
       return res.status(400).send(`
         <html><head><title>Signup Error</title></head><body>
           <h1>Signup Error</h1>
           <p>Missing authorization code or state parameter.</p>
-          <a href="http://localhost:3000">Back to Home</a>
+          <a href="${WEBSITE_URL}">Back to Home</a>
         </body></html>
       `);
     }
@@ -393,11 +394,12 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
     try {
       signupData = JSON.parse(atob(decodeURIComponent(state as string)));
     } catch (e) {
+      const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
       return res.status(400).send(`
         <html><head><title>Signup Error</title></head><body>
           <h1>Signup Error</h1>
           <p>Invalid signup data.</p>
-          <a href="http://localhost:3000">Back to Home</a>
+          <a href="${WEBSITE_URL}">Back to Home</a>
         </body></html>
       `);
     }
@@ -405,11 +407,12 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
     const { email, company, plan } = signupData;
 
     if (!email || !company) {
+      const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
       return res.status(400).send(`
         <html><head><title>Signup Error</title></head><body>
           <h1>Signup Error</h1>
           <p>Missing email or company name.</p>
-          <a href="http://localhost:3000">Back to Home</a>
+          <a href="${WEBSITE_URL}">Back to Home</a>
         </body></html>
       `);
     }
@@ -418,6 +421,8 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
     const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;
     const AUTH0_CLIENT_ID = process.env.AUTH0_CLIENT_ID;
     const AUTH0_CLIENT_SECRET = process.env.AUTH0_CLIENT_SECRET;
+    const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
+    const BASE_URL = process.env.BASE_URL || 'http://localhost:3100';
 
     if (!AUTH0_DOMAIN || !AUTH0_CLIENT_ID || !AUTH0_CLIENT_SECRET) {
       logger.error('[Signup Callback] Auth0 not configured');
@@ -425,7 +430,7 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
         <html><head><title>Configuration Error</title></head><body>
           <h1>Configuration Error</h1>
           <p>Auth0 is not properly configured.</p>
-          <a href="http://localhost:3000">Back to Home</a>
+          <a href="${WEBSITE_URL}">Back to Home</a>
         </body></html>
       `);
     }
@@ -439,17 +444,18 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
           client_secret: AUTH0_CLIENT_SECRET,
           grant_type: 'authorization_code',
           code: code,
-          redirect_uri: 'http://localhost:3100/api/auth/signup-callback',
+          redirect_uri: `${BASE_URL}/api/auth/signup-callback`,
         },
         { headers: { 'Content-Type': 'application/json' } }
       );
     } catch (error: any) {
       logger.error('[Signup Callback] Token exchange failed', { error: error.response?.data || error.message });
+      const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
       return res.status(401).send(`
         <html><head><title>Authentication Error</title></head><body>
           <h1>Authentication Error</h1>
           <p>Failed to verify your authentication.</p>
-          <a href="http://localhost:3000">Back to Home</a>
+          <a href="${WEBSITE_URL}">Back to Home</a>
         </body></html>
       `);
     }
@@ -466,11 +472,12 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
       userInfo = userInfoResponse.data;
     } catch (error: any) {
       logger.error('[Signup Callback] Failed to get user info', { error: error.message });
+      const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
       return res.status(401).send(`
         <html><head><title>Authentication Error</title></head><body>
           <h1>Authentication Error</h1>
           <p>Failed to retrieve user information.</p>
-          <a href="http://localhost:3000">Back to Home</a>
+          <a href="${WEBSITE_URL}">Back to Home</a>
         </body></html>
       `);
     }
@@ -487,11 +494,12 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
     );
 
     if (existingMembership.rows.length > 0) {
+      const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
       return res.status(409).send(`
         <html><head><title>Account Exists</title></head><body>
           <h1>Account Already Exists</h1>
           <p>This account is already registered.</p>
-          <a href="http://localhost:3000">Back to Home</a>
+          <a href="${WEBSITE_URL}">Back to Home</a>
         </body></html>
       `);
     }
@@ -503,11 +511,12 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
     );
 
     if (existingCustomer.rows.length > 0) {
+      const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
       return res.status(409).send(`
         <html><head><title>Email Already Registered</title></head><body>
           <h1>Email Already Registered</h1>
           <p>This email address is already associated with an account.</p>
-          <a href="http://localhost:3000">Back to Home</a>
+          <a href="${WEBSITE_URL}">Back to Home</a>
         </body></html>
       `);
     }
@@ -541,15 +550,112 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
 
     logger.info('[Signup Callback] Admin role assigned', { customerId, auth0Sub });
 
-    // Create Stripe checkout session for the new customer
+    // Handle trial vs paid plans
+    if (plan === 'trial') {
+      // Free trial - create subscription directly without payment
+      logger.info('[Signup Callback] Creating trial subscription', { customerId });
+
+      try {
+        const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+
+        // Create or get Stripe customer
+        const customers = await stripe.customers.list({ email, limit: 1 });
+        let stripeCustomerId: string;
+
+        if (customers.data.length > 0) {
+          stripeCustomerId = customers.data[0].id;
+          logger.info('[Signup Callback] Found existing Stripe customer', { stripeCustomerId });
+        } else {
+          const stripeCustomer = await stripe.customers.create({
+            email,
+            name: company || userName,
+            metadata: {
+              customer_id: customerId,
+              company_name: company,
+            },
+          });
+          stripeCustomerId = stripeCustomer.id;
+          logger.info('[Signup Callback] Created Stripe customer', { stripeCustomerId });
+        }
+
+        // Link Stripe customer to our customer record
+        await query(
+          `UPDATE customers SET stripe_customer_id = $1, updated_at = CURRENT_TIMESTAMP WHERE customer_id = $2 RETURNING *`,
+          [stripeCustomerId, customerId]
+        );
+
+        // Create trial subscription (14 days, no payment required, auto-cancel if not upgraded)
+        const trialEndTimestamp = Math.floor(Date.now() / 1000) + (14 * 24 * 60 * 60); // 14 days from now
+        const subscription = await stripe.subscriptions.create({
+          customer: stripeCustomerId,
+          items: [{ price: process.env.STRIPE_PRICE_STARTER }], // Use starter price for trial
+          trial_end: trialEndTimestamp,
+          cancel_at_period_end: true, // Auto-cancel if no payment method added
+          metadata: {
+            customer_id: customerId,
+            plan: 'trial',
+            is_trial: 'true',
+          },
+        });
+
+        logger.info('[Signup Callback] Trial subscription created', {
+          customerId,
+          subscriptionId: subscription.id,
+          trialEnd: new Date(subscription.trial_end! * 1000).toISOString(),
+        });
+
+        // Webhook will fire customer.subscription.created and trigger K8s deployment
+        // Redirect to success page
+        const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
+        return res.send(`
+          <html>
+            <head>
+              <title>Trial Started</title>
+              <meta http-equiv="refresh" content="3;url=${WEBSITE_URL}/success.html">
+              <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial; background: #0a0e27; color: #e4e8f0; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+                .container { text-align: center; max-width: 500px; padding: 2rem; }
+                h1 { color: #3b82f6; margin-bottom: 1rem; }
+                p { color: #9ca3af; line-height: 1.6; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <h1>✅ Trial Started!</h1>
+                <p>Your 14-day free trial has been activated. Your platform is being set up and will be ready in 5-10 minutes.</p>
+                <p>Redirecting to confirmation page...</p>
+              </div>
+            </body>
+          </html>
+        `);
+      } catch (trialError: any) {
+        logger.error('[Signup Callback] Failed to create trial subscription', {
+          customerId,
+          error: trialError.message,
+        });
+
+        const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
+        return res.status(500).send(`
+          <html><head><title>Trial Setup Error</title></head><body>
+            <h1>Trial Setup Error</h1>
+            <p>We couldn't set up your trial subscription. Please try again or contact support.</p>
+            <p>Error: ${trialError.message}</p>
+            <a href="${WEBSITE_URL}">Back to Home</a>
+          </body></html>
+        `);
+      }
+    }
+
+    // Paid plans - create Stripe checkout session
     try {
       logger.info('[Signup Callback] Creating Stripe checkout session', { customerId, plan });
 
+      const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
       const session = await StripeService.createCheckoutSession({
         customerId,
         plan: (plan || 'starter') as 'starter' | 'professional' | 'enterprise',
-        successUrl: 'http://localhost:3000/success', // After payment, redirect to website
-        cancelUrl: 'http://localhost:3000', // If user cancels, go back to website
+        successUrl: `${WEBSITE_URL}/success.html`, // After payment, redirect to website
+        cancelUrl: WEBSITE_URL, // If user cancels, go back to website
       });
 
       logger.info('[Signup Callback] Stripe checkout created', {
@@ -566,6 +672,7 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
         error: stripeError.message,
       });
 
+      const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
       // Show error page
       return res.status(500).send(`
         <html>
@@ -603,7 +710,7 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
               <h1>⚠️ Billing Setup Error</h1>
               <p>We encountered an error setting up your billing account.</p>
               <p>Please contact support or try again.</p>
-              <a href="http://localhost:3000">Back to Home</a>
+              <a href="${WEBSITE_URL}">Back to Home</a>
             </div>
           </body>
         </html>
@@ -612,18 +719,103 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
 
   } catch (error: any) {
     logger.error('[Signup Callback] Error', { error: error.message });
+    const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
     return res.status(500).send(`
       <html><head><title>Signup Error</title></head><body>
         <h1>Signup Error</h1>
         <p>An unexpected error occurred during signup.</p>
-        <a href="http://localhost:3000">Back to Home</a>
+        <a href="${WEBSITE_URL}">Back to Home</a>
       </body></html>
     `);
   }
 });
 
-/**
- * POST /api/customers/complete-signup
+/** * POST /api/auth/token
+ * Exchange Auth0 authorization code for access token
+ * Called by website signup flow (SPA callback handler)
+ * 
+ * This endpoint is needed because the website is a static SPA
+ * and cannot safely exchange auth codes directly with Auth0
+ * (would expose client secret to browser)
+ * 
+ * Body:
+ * {
+ *   "code": "authorization_code_from_auth0"
+ * }
+ */
+router.post('/token', async (req: Request, res: Response) => {
+  try {
+    const { code } = req.body;
+
+    if (!code) {
+      return res.status(400).json({
+        error: 'Missing authorization code',
+      });
+    }
+
+    // Environment check
+    const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;
+    const AUTH0_CLIENT_ID = process.env.AUTH0_CLIENT_ID;
+    const AUTH0_CLIENT_SECRET = process.env.AUTH0_CLIENT_SECRET;
+
+    if (!AUTH0_DOMAIN || !AUTH0_CLIENT_ID || !AUTH0_CLIENT_SECRET) {
+      logger.error('[Token] Auth0 not configured');
+      return res.status(500).json({
+        error: 'Auth0 not configured on server',
+      });
+    }
+
+    // Exchange authorization code for tokens
+    logger.info('[Token] Exchanging authorization code');
+
+    let tokenResponse;
+    try {
+      tokenResponse = await axios.post(
+        `https://${AUTH0_DOMAIN}/oauth/token`,
+        {
+          client_id: AUTH0_CLIENT_ID,
+          client_secret: AUTH0_CLIENT_SECRET,
+          audience: process.env.AUTH0_AUDIENCE,
+          grant_type: 'authorization_code',
+          code: code,
+          redirect_uri: process.env.AUTH0_REDIRECT_URI || 'http://localhost:3000/auth-callback.html',
+        },
+        {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 10000,
+        }
+      );
+    } catch (error: any) {
+      logger.error('[Token] Code exchange failed', {
+        error: error.response?.data || error.message,
+        code: code.substring(0, 10) + '***',
+      });
+      return res.status(401).json({
+        error: 'Failed to exchange authorization code',
+        details: error.response?.data?.error_description || error.message,
+      });
+    }
+
+    const { access_token, id_token } = tokenResponse.data;
+
+    logger.info('[Token] Code exchanged successfully');
+
+    // Return the access token to client
+    res.json({
+      access_token,
+      id_token,
+      token_type: 'Bearer',
+    });
+
+  } catch (error: any) {
+    logger.error('[Token] Error', { error: error.message });
+    res.status(500).json({
+      error: 'Failed to exchange token',
+    });
+  }
+});
+
+/** * POST /api/customers/complete-signup
  * Complete registration after Auth0 authentication
  * Called when new user has no tenant assignment
  */

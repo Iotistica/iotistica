@@ -11,6 +11,8 @@ import { LicenseHistoryModel } from '../db/license-history-model';
 import { deploymentQueue } from '../services/deployment-queue';
 import { TigerDataService } from '../services/tigerdata-service';
 import { OnePasswordService } from '../services/onepassword-service';
+import { authenticateCustomer, authenticateAdmin } from '../middleware/auth';
+import { strictLimiter } from '../middleware/rate-limit';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 
@@ -19,6 +21,7 @@ const router = Router();
 /**
  * POST /api/customers/signup
  * Public endpoint - Customer self-signup with trial
+ * Rate limited: 10 signups per hour per IP
  * 
  * This is the main entry point for new customer registration.
  * Creates customer account, trial subscription, license, and triggers deployment.
@@ -29,7 +32,7 @@ const router = Router();
  * - company_name: Company name (required)
  * - full_name: Contact name (optional)
  */
-router.post('/signup', async (req, res) => {
+router.post('/signup', strictLimiter, async (req, res) => {
   try {
     const { email, password, company_name, full_name } = req.body;
 
@@ -220,12 +223,13 @@ router.post('/signup', async (req, res) => {
 /**
  * POST /api/customers/login
  * Customer authentication
+ * Rate limited: 10 attempts per hour per IP
  * 
  * Body:
  * - email: Customer email
  * - password: Password
  */
-router.post('/login', async (req, res) => {
+router.post('/login', strictLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -297,8 +301,9 @@ router.post('/login', async (req, res) => {
 /**
  * POST /api/customers
  * Create new customer (admin/internal use)
+ * Protected: Requires admin token
  */
-router.post('/', async (req, res) => {
+router.post('/', authenticateAdmin, async (req, res) => {
   try {
     const { email, company_name } = req.body;
 
@@ -366,9 +371,10 @@ router.get('/:id', async (req, res) => {
 
 /**
  * GET /api/customers
- * List all customers
+ * List all customers (admin only)
+ * Protected: Requires admin token
  */
-router.get('/', async (req, res) => {
+router.get('/', authenticateAdmin, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit as string) || 50;
     const offset = parseInt(req.query.offset as string) || 0;
@@ -404,8 +410,9 @@ router.patch('/:id', async (req, res) => {
 /**
  * POST /api/customers/:id/deploy
  * Manually trigger/retry deployment for a customer
+ * Protected: Requires admin token
  */
-router.post('/:id/deploy', async (req, res) => {
+router.post('/:id/deploy', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -510,8 +517,10 @@ router.get('/:id/deployment/status', async (req, res) => {
  * - Argo CD sync failed (after 3 retries)
  * - 1Password secret creation failed
  * - Transient network errors during deployment
+ * 
+ * Protected: Requires admin token
  */
-router.post('/:id/retry-deployment', async (req, res) => {
+router.post('/:id/retry-deployment', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -792,8 +801,9 @@ router.post('/:id/recover-database-password', async (req, res) => {
 /**
  * DELETE /api/customers/:id/deployment
  * Delete customer instance from Kubernetes
+ * Protected: Requires admin token
  */
-router.delete('/:id/deployment', async (req, res) => {
+router.delete('/:id/deployment', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -841,8 +851,9 @@ router.delete('/:id/deployment', async (req, res) => {
  * 3. Returns immediately (deletion happens asynchronously)
  * 
  * Use case: Customer cancellation, account termination, cleanup
+ * Protected: Requires admin token
  */
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 

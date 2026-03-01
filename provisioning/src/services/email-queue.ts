@@ -20,14 +20,43 @@ export class EmailQueue extends EventEmitter {
   constructor() {
     super();
 
-    // Initialize Bull queue with Redis connection
+    // Initialize Bull queue with Redis connection (Azure-compatible)
+    const host = process.env.REDIS_HOST || 'localhost';
+    const port = parseInt(process.env.REDIS_PORT || '6379');
+    const username = process.env.REDIS_USERNAME || undefined;
+    const password = process.env.REDIS_PASSWORD || undefined;
+    const db = parseInt(process.env.REDIS_DB || '0');
+    
+    const tlsFlag = (process.env.REDIS_TLS || process.env.REDIS_USE_TLS || '')
+      .toLowerCase();
+    const useTls = tlsFlag === 'true' || tlsFlag === '1' || tlsFlag === 'yes';
+    
     this.queue = new Bull('customer-emails', {
       redis: {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379'),
-        password: process.env.REDIS_PASSWORD,
-        db: parseInt(process.env.REDIS_DB || '0'),
+        host,
+        port,
+        username,
+        password,
+        db,
+        tls: useTls 
+          ? { 
+              servername: host,
+              rejectUnauthorized: true, // Azure uses valid certs
+            } 
+          : undefined,
+        // Note: maxRetriesPerRequest and enableReadyCheck are not compatible with Bull
+        // Bull sets maxRetriesPerRequest to null internally
+        enableOfflineQueue: true,
+        connectTimeout: 20000, // 20s for Azure failover
+        commandTimeout: 10000, // 10s for commands
+        keepAlive: 30000,
       },
+      settings: {
+        // Stall interval for email jobs (faster than deployments)
+        stalledInterval: 30000, // 30 seconds (default is 5s)
+        maxStalledCount: 3, // Allow 3 stall events before giving up
+      },
+      prefix: 'provisioning', // Namespace Bull keys
       defaultJobOptions: {
         attempts: parseInt(process.env.QUEUE_EMAIL_MAX_RETRIES || '3'),
         backoff: {

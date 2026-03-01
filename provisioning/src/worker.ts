@@ -7,7 +7,6 @@ import dotenv from 'dotenv';
 import { testConnection } from './db/connection';
 import { LicenseGenerator } from './services/license-generator';
 import { deploymentWorker } from './workers/deployment-worker';
-import { startEmailWorker } from './workers/email-worker';
 import { logger } from './utils/logger';
 
 // Load environment variables
@@ -28,10 +27,6 @@ async function start() {
     // Start deployment worker
     await deploymentWorker.start();
     logger.info('✅ Deployment worker started and listening for jobs');
-
-    // Start email worker
-    startEmailWorker();
-    logger.info('✅ Email worker started and listening for jobs');
 
     // Log configuration
     logger.info('Worker Configuration', {

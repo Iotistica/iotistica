@@ -8,7 +8,6 @@ import {
   getAuth0ErrorFromUrl,
   exchangeAuth0Code,
 } from '../config/auth0';
-import { getApiUrl } from '../config/api';
 import { useAuth } from '../contexts/AuthContext';
 
 interface CallbackPageProps {
@@ -51,10 +50,8 @@ export function CallbackPage({ onLogin }: CallbackPageProps) {
         console.log('[Auth0 Callback] Processing authorization code...');
 
         // Exchange code for tokens (server-side)
-        const apiUrl = getApiUrl();
-        
         try {
-          const { accessToken, refreshToken, user } = await exchangeAuth0Code(code, apiUrl);
+          const { accessToken, refreshToken, user } = await exchangeAuth0Code(code);
 
           console.log('[Auth0 Callback] Token exchange successful, user:', user.email);
 
@@ -102,8 +99,10 @@ export function CallbackPage({ onLogin }: CallbackPageProps) {
             sessionStorage.setItem('signup_pending', JSON.stringify(signupData));
             
             // Redirect to website signup page (separate from dashboard)
-            console.log('[Auth0 Callback] Redirecting to: http://localhost:3000/complete-signup.html');
-            window.location.href = 'http://localhost:3000/complete-signup.html';
+            const websiteUrl = import.meta.env.VITE_WEBSITE_URL || 'http://localhost:3000';
+            const signupUrl = `${websiteUrl}/complete-signup.html`;
+            console.log('[Auth0 Callback] Redirecting to:', signupUrl);
+            window.location.href = signupUrl;
             return;
           }
           

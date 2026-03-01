@@ -955,10 +955,6 @@ export default function App() {
     logout();
   };
 
-  const handleLogin = (accessToken: string, refreshToken: string, userData: any) => {
-    login(accessToken, refreshToken, userData);
-  };
-
   const handleSelectDevice = async (deviceId: string) => {
     const device = devices.find((d) => d.id === deviceId);
     setSidebarOpen(false); // Close sidebar on mobile after selection
@@ -1152,7 +1148,7 @@ export default function App() {
   if (!isAuthenticated) {
     return (
       <>
-        <LoginPage onLogin={handleLogin} />
+        <LoginPage />
         <Toaster />
       </>
     );

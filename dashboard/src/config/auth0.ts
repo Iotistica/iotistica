@@ -2,24 +2,25 @@
  * Auth0 Configuration
  * 
  * Handles Auth0 SPA authentication and token exchange.
- * Supports dual-mode: Auth0 + Legacy local authentication
  */
 
-// Auth0 configuration from environment
+// Auth0 configuration from environment (required)
 const AUTH0_DOMAIN = import.meta.env.VITE_AUTH0_DOMAIN || '';
 const AUTH0_CLIENT_ID = import.meta.env.VITE_AUTH0_CLIENT_ID || '';
 const AUTH0_AUDIENCE = import.meta.env.VITE_AUTH0_AUDIENCE || '';
 const AUTH0_CALLBACK_URL = import.meta.env.VITE_AUTH0_CALLBACK_URL || '';
-const AUTH0_ENABLED = import.meta.env.VITE_AUTH0_ENABLED === 'true' && AUTH0_DOMAIN && AUTH0_CLIENT_ID;
 const AUTH0_SHOW_SOCIAL = import.meta.env.VITE_AUTH0_SHOW_SOCIAL_LOGIN === 'true';
+
+// Provisioning API URL (billing service)
+const PROVISIONING_API_URL = import.meta.env.VITE_PROVISIONING_API_URL || 'http://localhost:3100';
 
 export const auth0Config = {
   domain: AUTH0_DOMAIN,
   clientId: AUTH0_CLIENT_ID,
   audience: AUTH0_AUDIENCE,
   callbackUrl: AUTH0_CALLBACK_URL,
-  enabled: AUTH0_ENABLED,
   showSocialLogin: AUTH0_SHOW_SOCIAL,
+  provisioningApiUrl: PROVISIONING_API_URL,
 };
 
 /**
@@ -31,8 +32,8 @@ export const auth0Config = {
  * - Scope for ID token + user info
  */
 export function getAuth0LoginUrl(): string {
-  if (!AUTH0_ENABLED) {
-    throw new Error('Auth0 not configured');
+  if (!AUTH0_DOMAIN || !AUTH0_CLIENT_ID) {
+    throw new Error('Auth0 not configured - check VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID');
   }
 
   const params = new URLSearchParams({
@@ -40,10 +41,8 @@ export function getAuth0LoginUrl(): string {
     redirect_uri: AUTH0_CALLBACK_URL,
     response_type: 'code',
     scope: 'openid profile email',
-    // Note: audience removed for SPA login flow
-    // Audience is used for M2M access tokens, not ID tokens
-    // Optional: prompt=login forces login even if user has session (no SSO)
-    // Add ?prompt=login if you want to always show login page
+    // Force login screen only (no signup tab) - new signups go through provisioning API
+    screen_hint: 'login',
   });
 
   return `https://${AUTH0_DOMAIN}/authorize?${params.toString()}`;
@@ -59,21 +58,18 @@ export function getAuth0LoginUrl(): string {
  * @returns { accessToken, refreshToken, user }
  */
 export async function exchangeAuth0Code(
-  code: string,
-  apiUrl: string
+  code: string
 ): Promise<{
   accessToken: string;
   refreshToken: string;
   user: any;
 }> {
-  if (!AUTH0_ENABLED) {
-    throw new Error('Auth0 not enabled');
+  if (!AUTH0_DOMAIN || !AUTH0_CLIENT_ID) {
+    throw new Error('Auth0 not configured - check environment variables');
   }
 
-  // Provisioning service handles Auth0 callback on port 3100
-  const provisioningUrl = 'http://localhost:3100';
-  
-  const response = await fetch(`${provisioningUrl}/api/auth/callback-auth0`, {
+  // Use provisioning API URL from config (defaults to localhost:3100 for development)
+  const response = await fetch(`${PROVISIONING_API_URL}/api/auth/callback-auth0`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

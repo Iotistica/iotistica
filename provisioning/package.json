@@ -1,7 +1,7 @@
 {
-  "name": "Iotistic-billing",
+  "name": "Iotistica-provisioning",
   "version": "1.0.11",
-  "description": "Global Billing - Stripe integration, license management, and subscription control for Iotistic SaaS",
+  "description": "Provisioning - Stripe integration, license management, and subscription control for Iotistica",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
@@ -11,10 +11,7 @@
     "worker": "node dist/worker.js",
     "dev:worker": "ts-node src/worker.ts",
     "clean": "rimraf dist",
-    "migrate": "psql $DATABASE_URL -f migrations/001_initial_schema.sql",
-    "generate-keys": "tsx scripts/generate-keys.ts",
-    "customer": "tsx scripts/customer-manager.ts",
-    "usage": "tsx scripts/usage-viewer.ts"
+    "migrate": "psql $DATABASE_URL -f migrations/001_initial_schema.sql"
   },
   "keywords": [
     "billing",
@@ -36,6 +33,7 @@
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "express-rate-limit": "^8.1.0",
+    "helmet": "^8.1.0",
     "ioredis": "^5.8.2",
     "js-yaml": "^4.1.0",
     "jsonwebtoken": "^9.0.2",

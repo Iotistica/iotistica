@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Iotistic Agent - Lightweight IoT Device Orchestrator</title>
+    <title>Iotistica Agent - Lightweight IoT Device Orchestrator</title>
     <link rel="stylesheet" href="styles.css">
     <style>
         /* Agent-specific styles */
@@ -394,7 +394,7 @@
     <nav class="navbar">
         <div class="container">
             <div class="nav-brand">
-                <a href="index.html" class="logo">Iotistic</a>
+                <a href="index.html" class="logo">Iotistica</a>
             </div>
                         <ul class="nav-menu">
                 <li><a href="index.html#services">Services</a></li>
@@ -415,7 +415,7 @@
     <section class="agent-hero">
         <div class="container">
             <div class="agent-hero-content">
-                <h1>Iotistic Agent</h1>
+                <h1>Iotistica Agent</h1>
                 <p>A lightweight container orchestrator and device management agent designed for IoT edge devices. Deploy and manage applications remotely with enterprise-grade reliability.</p>
                 <div class="badge-container">
                     <span class="badge">
@@ -517,19 +517,19 @@
                     <ul class="requirements-list">
                         <li>Docker Engine 20.10+ installed</li>
                         <li>Root/sudo access on the device</li>
-                        <li>Provisioning key from Iotistic dashboard</li>
+                        <li>Provisioning key from Iotistica dashboard</li>
                     </ul>
 
                     <h4>Installation Command:</h4>
                     <div class="command-box">
-                        <code id="docker-command">curl -H 'Cache-Control: no-cache' -sL --proto '=https' https://apps.iotistic.ca/agent/install-docker | sudo bash</code>
+                        <code id="docker-command">curl -H 'Cache-Control: no-cache' -sL --proto '=https' https://get.iotistica.com/agent/install-docker | sudo bash</code>
                         <button class="copy-button" onclick="copyCommand('docker-command')">Copy</button>
                     </div>
                     <p class="command-note">The script will prompt for your provisioning key and cloud API endpoint</p>
 
                     <h4>What Gets Installed:</h4>
                     <ul class="features-list">
-                        <li>Iotistic Agent container with host network mode</li>
+                        <li>Iotistica Agent container with host network mode</li>
                         <li>Docker Compose orchestrator for managing applications</li>
                         <li>VPN client for secure cloud connectivity</li>
                         <li>Auto-restart on failure or system reboot</li>
@@ -538,8 +538,8 @@
                     <div class="post-install-box">
                         <h4>Post-Installation:</h4>
                         <p style="color: #666; margin-bottom: 0.75rem;">Check agent status and logs:</p>
-                        <code>docker ps | grep iotistic-agent
-docker logs -f iotistic-agent</code>
+                        <code>docker ps | grep iotistica-agent
+docker logs -f iotistica-agent</code>
                     </div>
                 </div>
             </div>
@@ -559,29 +559,29 @@ docker logs -f iotistic-agent</code>
                     <ul class="requirements-list">
                         <li>Systemd-based Linux distribution (Ubuntu, Debian, RHEL, etc.)</li>
                         <li>Root/sudo access on the device</li>
-                        <li>Provisioning key from Iotistic dashboard</li>
+                        <li>Provisioning key from Iotistica dashboard</li>
                     </ul>
 
                     <h4>Installation Command:</h4>
                     <div class="command-box">
-                        <code id="systemd-command">curl -H 'Cache-Control: no-cache' -sL --proto '=https' https://apps.iotistic.ca/agent/install-systemd | sudo bash</code>
+                        <code id="systemd-command">curl -H 'Cache-Control: no-cache' -sL --proto '=https' https://get.iotistica.com/agent/install-systemd | sudo bash</code>
                         <button class="copy-button" onclick="copyCommand('systemd-command')">Copy</button>
                     </div>
                     <p class="command-note">The script will prompt for your provisioning key and cloud API endpoint</p>
 
                     <h4>What Gets Installed:</h4>
                     <ul class="features-list">
-                        <li>Iotistic Agent binary in /usr/local/bin</li>
+                        <li>Iotistica Agent binary in /usr/local/bin</li>
                         <li>Systemd service unit with auto-restart</li>
-                        <li>Configuration files in /etc/iotistic</li>
+                        <li>Configuration files in /etc/iotistica</li>
                         <li>Systemd service enabled on boot</li>
                     </ul>
 
                     <div class="post-install-box">
                         <h4>Post-Installation:</h4>
                         <p style="color: #666; margin-bottom: 0.75rem;">Check agent status and logs:</p>
-                        <code>sudo systemctl status iotistic-agent
-sudo journalctl -u iotistic-agent -f</code>
+                        <code>sudo systemctl status iotistica-agent
+sudo journalctl -u iotistica-agent -f</code>
                     </div>
                 </div>
             </div>
@@ -636,7 +636,7 @@ sudo journalctl -u iotistic-agent -f</code>
             <div class="section-header">
                 <h2 class="section-title" style="color: white;">Ready to Deploy?</h2>
                 <p class="section-subtitle" style="color: rgba(255,255,255,0.9);">
-                    Get started with the Iotistic Agent today and transform your edge devices into a managed fleet
+                    Get started with the Iotistica Agent today and transform your edge devices into a managed fleet
                 </p>
             </div>
             <div style="text-align: center; margin-top: 2rem;">
@@ -650,7 +650,7 @@ sudo journalctl -u iotistic-agent -f</code>
         <div class="container">
             <div class="footer-content">
                 <div class="footer-brand">
-                    <span class="logo">Iotistic</span>
+                    <span class="logo">Iotistica</span>
                     <p>Custom IoT solutions that scale with your business</p>
                 </div>
                 <div class="footer-links">
@@ -662,7 +662,7 @@ sudo journalctl -u iotistic-agent -f</code>
                     </div>
                     <div class="footer-column">
                         <h4>Products</h4>
-                        <a href="agent.html">Iotistic Agent</a>
+                        <a href="agent.html">Iotistica Agent</a>
                         <a href="solutions.html">Platform Capabilities</a>
                         <a href="documentation.html">Documentation</a>
                         <a href="index.html#services">Custom Platforms</a>
@@ -685,7 +685,7 @@ sudo journalctl -u iotistic-agent -f</code>
                 </div>
             </div>
             <div class="footer-bottom">
-                <p>&copy; 2025 Iotistic. All rights reserved.</p>
+                <p>&copy; 2025 Iotistica.com. All rights reserved.</p>
             </div>
         </div>
     </footer>

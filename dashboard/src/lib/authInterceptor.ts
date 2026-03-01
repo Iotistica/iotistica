@@ -63,10 +63,8 @@ window.fetch = async function (...args: Parameters<typeof fetch>): Promise<Respo
   // Only intercept API calls (not external resources)
   const isApiCall = urlString.includes('/api/v1/');
   
-  // Don't intercept auth endpoints
-  const isAuthEndpoint = urlString.includes('/api/v1/auth/login') || 
-                         urlString.includes('/api/v1/auth/register') ||
-                         urlString.includes('/api/v1/auth/refresh');
+  // Don't intercept token refresh endpoint
+  const isAuthEndpoint = urlString.includes('/api/v1/auth/refresh');
 
   if (isApiCall && !isAuthEndpoint) {
     // Add Authorization header
