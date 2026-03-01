@@ -1,6 +1,6 @@
 {
   "name": "Iotistic-billing",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "Global Billing - Stripe integration, license management, and subscription control for Iotistic SaaS",
   "main": "dist/index.js",
   "scripts": {
