@@ -52,28 +52,63 @@ export function CallbackPage({ onLogin }: CallbackPageProps) {
 
         // Exchange code for tokens (server-side)
         const apiUrl = getApiUrl();
-        const { accessToken, refreshToken, user } = await exchangeAuth0Code(code, apiUrl);
+        
+        try {
+          const { accessToken, refreshToken, user } = await exchangeAuth0Code(code, apiUrl);
 
-        console.log('[Auth0 Callback] Token exchange successful, user:', user.email);
+          console.log('[Auth0 Callback] Token exchange successful, user:', user.email);
 
-        // Update auth context
-        authContextLogin(accessToken, refreshToken, user);
+          // Update auth context
+          authContextLogin(accessToken, refreshToken, user);
 
-        // Call optional parent handler
-        if (onLogin) {
-          onLogin(accessToken, refreshToken, user);
+          // Call optional parent handler
+          if (onLogin) {
+            onLogin(accessToken, refreshToken, user);
+          }
+
+          sessionStorage.setItem('auth0_last_processed_code', code);
+
+          if (window.location.pathname === '/auth/callback' && window.location.search) {
+            window.history.replaceState({}, document.title, '/auth/callback');
+          }
+
+          // Redirect to dashboard
+          setTimeout(() => {
+            navigate('/');
+          }, 500);
+        } catch (tokenError: any) {
+          // Debug: Log full error object
+          console.log('[Auth0 Callback] Token error caught:', {
+            message: tokenError.message,
+            data: tokenError.data,
+            error: tokenError.data?.error,
+            hasAuth0User: !!tokenError.data?.auth0User
+          });
+          
+          // Check if this is a "needs signup" scenario
+          if (tokenError.data?.error === 'needs_signup') {
+            console.log('[Auth0 Callback] User needs to complete signup, redirecting...');
+            
+            // Store Auth0 code for signup page to exchange directly
+            sessionStorage.setItem('auth0_signup_code', code);
+            
+            // Store pending signup data
+            const signupData = tokenError.data.auth0User ? {
+              auth0Sub: tokenError.data.auth0User.sub,
+              email: tokenError.data.auth0User.email,
+              name: tokenError.data.auth0User.name
+            } : {};
+            
+            sessionStorage.setItem('signup_pending', JSON.stringify(signupData));
+            
+            // Redirect to website signup page (separate from dashboard)
+            console.log('[Auth0 Callback] Redirecting to: http://localhost:3000/complete-signup.html');
+            window.location.href = 'http://localhost:3000/complete-signup.html';
+            return;
+          }
+          
+          throw tokenError;
         }
-
-        sessionStorage.setItem('auth0_last_processed_code', code);
-
-        if (window.location.pathname === '/auth/callback' && window.location.search) {
-          window.history.replaceState({}, document.title, '/auth/callback');
-        }
-
-        // Redirect to dashboard
-        setTimeout(() => {
-          navigate('/');
-        }, 500);
       } catch (err: any) {
         hasProcessedRef.current = false;
         console.error('[Auth0 Callback] Error:', err);

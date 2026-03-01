@@ -497,11 +497,16 @@ export default function App() {
         
         // Get auth token from localStorage
         const accessToken = localStorage.getItem('accessToken');
+        if (!accessToken || accessToken.split('.').length !== 3) {
+          console.warn('[AUTH] Missing or invalid access token while fetching devices');
+          setIsLoadingDevices(false);
+          return;
+        }
+
         const apiUrl = buildApiUrl('/api/v1/devices?limit=100');
         console.log('[DEBUG] API URL:', apiUrl);
-        console.log('[DEBUG] Fetching devices with token:', accessToken ? `${accessToken.substring(0, 20)}...` : 'NULL');
-        console.log('[DEBUG] Full auth header:', `Bearer ${accessToken}`);
-        
+        console.log('[DEBUG] Fetching devices with token:', `${accessToken.substring(0, 20)}...`);
+
         const response = await fetch(apiUrl, {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -1163,7 +1168,7 @@ export default function App() {
           isAuthenticated={isAuthenticated}
           onLogout={handleLogout}
           userEmail={user?.email || ''}
-          userName={user?.username || ''}
+          userName={user?.name || user?.email || ''}
           deviceUuid={selectedDevice?.deviceUuid}
           deviceName={selectedDevice?.name}
           onHomeClick={() => handleGlobalViewChange('home')}

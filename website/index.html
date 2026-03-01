@@ -42,7 +42,7 @@
                     and scale with your business needs.
                 </p>
                 <div class="hero-cta">
-                    <a href="#contact" class="btn btn-primary">Get Started</a>
+                    <button onclick="openSignupModal()" class="btn btn-primary">Start Free Trial</button>
                     <a href="#services" class="btn btn-secondary">Learn More</a>
                 </div>
             </div>
@@ -340,6 +340,183 @@
             </div>
         </div>
     </footer>
+
+    <!-- Signup Modal -->
+    <div id="signupModal" class="modal">
+        <div class="modal-content">
+            <span class="modal-close" onclick="closeSignupModal()">&times;</span>
+            <div class="modal-header">
+                <h2>Start Your Free Trial</h2>
+                <p>No credit card required • 14 days free</p>
+            </div>
+            <form id="signupForm" class="signup-form">
+                <div class="form-group">
+                    <label for="signupEmail">Email Address *</label>
+                    <input type="email" id="signupEmail" name="email" required>
+                </div>
+                <div class="form-group">
+                    <label for="signupCompany">Company Name *</label>
+                    <input type="text" id="signupCompany" name="company" required>
+                </div>
+                <div class="form-group">
+                    <label for="signupPlan">Select Plan *</label>
+                    <select id="signupPlan" name="plan" required>
+                        <option value="">Choose a plan</option>
+                        <option value="starter">Starter - Free 14-day trial</option>
+                        <option value="professional">Professional - Free 14-day trial</option>
+                        <option value="enterprise">Enterprise - Free 14-day trial</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary btn-large">Continue to Sign Up</button>
+            </form>
+        </div>
+    </div>
+
+    <style>
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-content {
+            background-color: var(--bg-card);
+            margin: 5% auto;
+            padding: 2rem;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            width: 90%;
+            max-width: 500px;
+            position: relative;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-close {
+            color: var(--text-secondary);
+            float: right;
+            font-size: 2rem;
+            font-weight: 300;
+            line-height: 1;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .modal-close:hover {
+            color: var(--text-primary);
+        }
+
+        .modal-header {
+            margin-bottom: 2rem;
+        }
+
+        .modal-header h2 {
+            margin-bottom: 0.5rem;
+        }
+
+        .modal-header p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .signup-form .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .signup-form label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .signup-form input,
+        .signup-form select {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 1rem;
+            transition: var(--transition);
+        }
+
+        .signup-form input:focus,
+        .signup-form select:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .btn-large {
+            width: 100%;
+            padding: 1rem;
+            font-size: 1.1rem;
+        }
+    </style>
+
+    <script>
+        // Signup Modal Functions
+        function openSignupModal() {
+            document.getElementById('signupModal').style.display = 'block';
+        }
+
+        function closeSignupModal() {
+            document.getElementById('signupModal').style.display = 'none';
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('signupModal');
+            if (event.target == modal) {
+                closeSignupModal();
+            }
+        }
+
+        // Handle signup form submission
+        document.addEventListener('DOMContentLoaded', function() {
+            const signupForm = document.getElementById('signupForm');
+            if (signupForm) {
+                signupForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    
+                    const email = document.getElementById('signupEmail').value;
+                    const company = document.getElementById('signupCompany').value;
+                    const plan = document.getElementById('signupPlan').value;
+                    
+                    // Encode signup data to pass via Auth0 state parameter
+                    const signupData = {
+                        email: email,
+                        company: company,
+                        plan: plan,
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    // Redirect to Auth0 for authentication
+                    // Callback goes to provisioning service (no dashboard exists yet for new signups)
+                    const auth0Domain = 'dev-hmwhgxw10boqpmrw.us.auth0.com';
+                    const clientId = 'Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR';
+                    const redirectUri = 'http://localhost:3100/api/auth/signup-callback';
+                    const state = encodeURIComponent(btoa(JSON.stringify(signupData)));
+                    
+                    const auth0Url = `https://${auth0Domain}/authorize?` +
+                        `response_type=code&` +
+                        `client_id=${clientId}&` +
+                        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+                        `scope=${encodeURIComponent('openid profile email')}&` +
+                        `state=${state}`;
+                    
+                    window.location.href = auth0Url;
+                });
+            }
+        });
+    </script>
 
     <script src="script.js"></script>
 </body>

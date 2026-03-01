@@ -5,6 +5,7 @@ interface User {
   id: number;
   username: string;
   email: string;
+  name?: string; // Display name from Auth0
   role: string;
   isActive: boolean;
 }
@@ -23,6 +24,18 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const handleTokensCleared = () => {
+      setUser(null);
+      setIsLoading(false);
+    };
+
+    window.addEventListener('auth:tokens-cleared', handleTokensCleared as EventListener);
+    return () => {
+      window.removeEventListener('auth:tokens-cleared', handleTokensCleared as EventListener);
+    };
+  }, []);
 
   // Initialize auth state from localStorage
   useEffect(() => {
@@ -155,6 +168,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('refreshToken');
     localStorage.removeItem('selectedDeviceId');
     setUser(null);
+
+    // If Auth0 is enabled, log out from Auth0 too
+    const auth0Enabled = import.meta.env.VITE_AUTH0_ENABLED === 'true';
+    if (auth0Enabled) {
+      const auth0Domain = import.meta.env.VITE_AUTH0_DOMAIN;
+      const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID;
+      const returnTo = window.location.origin; // Redirect back to home page
+
+      // Redirect to Auth0 logout
+      window.location.href = `https://${auth0Domain}/v2/logout?client_id=${clientId}&returnTo=${encodeURIComponent(returnTo)}`;
+    }
   };
 
   const refreshToken = async (): Promise<boolean> => {

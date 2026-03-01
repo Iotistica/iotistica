@@ -86,7 +86,10 @@ export async function exchangeAuth0Code(
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.message || 'Auth0 callback exchange failed');
+    // Preserve full error object for needs_signup detection
+    const err = new Error(error.message || 'Auth0 callback exchange failed');
+    (err as any).data = error;
+    throw err;
   }
 
   const data = await response.json();

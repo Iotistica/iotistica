@@ -178,16 +178,16 @@ export function ProfilePage() {
                 )}
 
                 <div className="space-y-2">
-                  <Label htmlFor="username">Username</Label>
+                  <Label htmlFor="name">Display Name</Label>
                   <Input
-                    id="username"
+                    id="name"
                     type="text"
-                    value={user?.username || ''}
+                    value={user?.name || user?.email || ''}
                     disabled
                     className="bg-muted"
                   />
                   <p className="text-sm text-muted-foreground">
-                    Username cannot be changed
+                    Name is provided by your Auth0 profile
                   </p>
                 </div>
 

@@ -17,6 +17,12 @@ const originalFetch = window.fetch;
 let isRefreshing = false;
 let refreshPromise: Promise<boolean> | null = null;
 
+function clearAuthTokens(reason: string): void {
+  localStorage.removeItem('accessToken');
+  localStorage.removeItem('refreshToken');
+  window.dispatchEvent(new CustomEvent('auth:tokens-cleared', { detail: { reason } }));
+}
+
 async function refreshAccessToken(): Promise<boolean> {
   const refreshToken = localStorage.getItem('refreshToken');
 
@@ -35,8 +41,7 @@ async function refreshAccessToken(): Promise<boolean> {
 
     if (!response.ok) {
       // Refresh failed, clear tokens
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
+      clearAuthTokens('refresh_failed');
       return false;
     }
 
@@ -45,8 +50,7 @@ async function refreshAccessToken(): Promise<boolean> {
     return true;
   } catch (error) {
     console.error('Token refresh error:', error);
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
+    clearAuthTokens('refresh_exception');
     return false;
   }
 }
@@ -71,6 +75,14 @@ window.fetch = async function (...args: Parameters<typeof fetch>): Promise<Respo
       options.headers = {
         ...options.headers,
         Authorization: `Bearer ${accessToken}`,
+      };
+    }
+
+    // For localhost development, add X-Tenant-ID header (required by API fallback)
+    if (urlString.includes('localhost:4002')) {
+      options.headers = {
+        ...options.headers,
+        'X-Tenant-ID': 'customer-dev-local',
       };
     }
   }

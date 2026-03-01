@@ -235,7 +235,7 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   
   // Allowed headers (explicit allowlist)
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-API-Key'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-API-Key', 'X-Tenant-ID'],
   
   // Expose custom headers to browser (if needed)
   exposedHeaders: ['RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset'],

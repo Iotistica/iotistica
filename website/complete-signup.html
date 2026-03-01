@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Complete Your Signup - Iotistic</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .signup-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            background: var(--bg-primary);
+        }
+
+        .signup-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 3rem;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .signup-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .signup-logo {
+            font-size: 2rem;
+            font-weight: 700;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+
+        .signup-title {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .signup-subtitle {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-label {
+            display: block;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 1rem;
+            transition: var(--transition);
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .form-input:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-submit {
+            width: 100%;
+            padding: 0.875rem;
+            background: var(--accent-gradient);
+            border: none;
+            border-radius: 6px;
+            color: white;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .btn-submit:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(59, 130, 246, 0.4);
+        }
+
+        .btn-submit:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .alert {
+            padding: 1rem;
+            border-radius: 6px;
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+        }
+
+        .alert-error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+        }
+
+        .alert-success {
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            color: #86efac;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 0.5rem;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .back-link {
+            display: block;
+            text-align: center;
+            margin-top: 1.5rem;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: var(--transition);
+        }
+
+        .back-link:hover {
+            color: var(--accent-primary);
+        }
+    </style>
+</head>
+<body>
+    <div class="signup-container">
+        <div class="signup-card">
+            <div class="signup-header">
+                <div class="signup-logo">Iotistic</div>
+                <h1 class="signup-title">Complete Your Account</h1>
+                <p class="signup-subtitle">Just one more step to get started</p>
+            </div>
+
+            <div id="alertContainer"></div>
+
+            <form id="signupForm">
+                <div class="form-group">
+                    <label class="form-label" for="email">Email Address</label>
+                    <input 
+                        type="email" 
+                        id="email" 
+                        class="form-input" 
+                        disabled 
+                        placeholder="Loading..."
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="companyName">Company Name *</label>
+                    <input 
+                        type="text" 
+                        id="companyName" 
+                        class="form-input" 
+                        placeholder="Enter your company name"
+                        required
+                        maxlength="255"
+                    >
+                </div>
+
+                <button type="submit" class="btn-submit" id="submitBtn">
+                    Create My Account
+                </button>
+            </form>
+
+            <a href="index.html" class="back-link">← Back to Home</a>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const PROVISIONING_API_URL = 'http://localhost:3100';
+        const DASHBOARD_URL = 'http://localhost:8080';
+        const AUTH0_DOMAIN = 'dev-hmwhgxw10boqpmrw.us.auth0.com';
+        const AUTH0_CLIENT_ID = 'Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR';
+        const AUTH0_CLIENT_SECRET = '0mJtueq_HIvR9s44YCvmUccg9NYZqWoVJkShDhqHUGcnKotRJ7TKLJSVb3gZmove';
+        const AUTH0_CALLBACK_URL = 'http://localhost:8080/auth/callback';
+
+        let auth0AccessToken = null;
+        let pendingSignup = null;
+
+        // Show alert messages
+        function showAlert(message, type = 'error') {
+            const alertContainer = document.getElementById('alertContainer');
+            alertContainer.innerHTML = `
+                <div class="alert alert-${type}">
+                    ${message}
+                </div>
+            `;
+        }
+
+        // Exchange Auth0 authorization code for access token
+        async function exchangeAuth0Code(code) {
+            try {
+                const response = await fetch(`https://${AUTH0_DOMAIN}/oauth/token`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        client_id: AUTH0_CLIENT_ID,
+                        client_secret: AUTH0_CLIENT_SECRET,
+                        grant_type: 'authorization_code',
+                        code: code,
+                        redirect_uri: AUTH0_CALLBACK_URL,
+                    }),
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error_description || 'Failed to exchange code');
+                }
+
+                const data = await response.json();
+                return data.access_token;
+            } catch (error) {
+                console.error('Code exchange error:', error);
+                throw error;
+            }
+        }
+
+        // Load user info and retrieve signup data
+        async function loadUserInfo() {
+            // Check for pending signup data from website form
+            const signupDataStr = sessionStorage.getItem('pending_signup');
+            if (!signupDataStr) {
+                showAlert('No signup data found. Please start from the homepage.');
+                setTimeout(() => {
+                    window.location.href = 'index.html';
+                }, 3000);
+                return;
+            }
+
+            pendingSignup = JSON.parse(signupDataStr);
+            document.getElementById('email').value = pendingSignup.email;
+            document.getElementById('companyName').value = pendingSignup.company;
+            document.getElementById('companyName').disabled = true; // Already provided
+
+            // Check for Auth0 code to exchange
+            const auth0Code = sessionStorage.getItem('auth0_signup_code');
+            if (auth0Code) {
+                try {
+                    showAlert('Verifying your authentication...', 'success');
+                    auth0AccessToken = await exchangeAuth0Code(auth0Code);
+                    sessionStorage.removeItem('auth0_signup_code');
+                    showAlert(`Welcome! Setting up your ${pendingSignup.plan} instance...`, 'success');
+                    
+                    // Auto-submit since we have all the data
+                    setTimeout(() => {
+                        document.getElementById('submitBtn').click();
+                    }, 1000);
+                } catch (error) {
+                    showAlert('Failed to verify authentication. Please try logging in again.');
+                    setTimeout(() => {
+                        window.location.href = 'index.html';
+                    }, 3000);
+                }
+            } else {
+                showAlert('No authentication found. Please log in first.');
+                setTimeout(() => {
+                    window.location.href = 'index.html';
+                }, 3000);
+            }
+        }
+
+        // Handle form submission
+        document.getElementById('signupForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const companyName = document.getElementById('companyName').value.trim();
+            
+            if (!companyName) {
+                showAlert('Please enter your company name');
+                return;
+            }
+
+            if (!auth0AccessToken) {
+                showAlert('Authentication token expired. Please log in again.');
+                return;
+            }
+
+            // Disable form
+            const submitBtn = document.getElementById('submitBtn');
+            const originalBtnText = submitBtn.innerHTML;
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="loading-spinner"></span> Creating your account...';
+            document.getElementById('companyName').disabled = true;
+
+            try {
+                const response = await fetch(`${PROVISIONING_API_URL}/api/auth/complete-signup`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        auth0AccessToken: auth0AccessToken,
+                        companyName: companyName,
+                        planId: pendingSignup?.plan || 'starter', // Include plan selection
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.message || 'Signup failed');
+                }
+
+                // Store tokens for future use
+                localStorage.setItem('accessToken', data.accessToken);
+                localStorage.setItem('refreshToken', data.refreshToken);
+                
+                // Clear signup data
+                sessionStorage.removeItem('auth0_access_token');
+                sessionStorage.removeItem('signup_pending');
+                sessionStorage.removeItem('signup_data');
+                sessionStorage.removeItem('auth0_signup_code');
+
+                // Show provisioning in progress message
+                const form = document.getElementById('signupForm');
+                form.innerHTML = `
+                    <div style="text-align: center; padding: 2rem;">
+                        <div style="font-size: 3rem; margin-bottom: 1rem;">✅</div>
+                        <h2 style="color: var(--accent-primary); margin-bottom: 1rem;">Account Created Successfully!</h2>
+                        <p style="color: var(--text-secondary); margin-bottom: 1.5rem; line-height: 1.6;">
+                            We're setting up your <strong>${pendingSignup?.plan || 'starter'}</strong> instance now.<br>
+                            This typically takes 5-10 minutes.
+                        </p>
+                        <div style="background: var(--bg-secondary); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem;">
+                            <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+                                📧 We'll send you an email at <strong style="color: var(--text-primary);">${data.user?.email || ''}</strong> when your instance is ready.
+                            </p>
+                            <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 0;">
+                                In the meantime, check your inbox for the confirmation email.
+                            </p>
+                        </div>
+                        <a href="index.html" class="btn-submit" style="display: inline-block; text-decoration: none; margin-top: 1rem;">
+                            Back to Home
+                        </a>
+                    </div>
+                `;
+
+            } catch (error) {
+                console.error('Signup error:', error);
+                showAlert(error.message || 'Failed to create account. Please try again.');
+                
+                // Re-enable form
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalBtnText;
+                document.getElementById('companyName').disabled = false;
+            }
+        });
+
+        // Load user info on page load
+        loadUserInfo();
+    </script>
+</body>
+</html>

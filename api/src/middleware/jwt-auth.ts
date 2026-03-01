@@ -223,6 +223,8 @@ export interface JWTPayload {
   username: string;
   email: string;
   role: string;
+  auth0Sub?: string;
+  customerId?: string;
   type: 'access' | 'refresh';
 }
 
@@ -395,20 +397,29 @@ async function handleAuth0Token(
       return;
     }
 
-    // Step 2: Resolve tenant from hostname
+    // Step 2: Resolve tenant from hostname (or fallback for dev)
     let customerId: string;
     try {
       const { getTenantIdFromHost } = await import('../services/tenant-resolution.service');
       customerId = getTenantIdFromHost(req.hostname);
-      console.log('[JWT-AUTH] Tenant resolved:', customerId);
+      console.log('[JWT-AUTH] Tenant resolved from hostname:', customerId);
     } catch (error: any) {
-      console.warn('[JWT-AUTH] Tenant resolution failed:', error.message);
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'Cannot determine tenant from hostname',
-        details: error.message
-      });
-      return;
+      // Fallback for development: check X-Tenant-ID header or env var
+      const headerTenantId = req.headers['x-tenant-id'] as string | undefined;
+      const envTenantId = process.env.DEVELOPMENT_TENANT_ID;
+      
+      if (req.hostname === 'localhost' && (headerTenantId || envTenantId)) {
+        customerId = headerTenantId || envTenantId || 'customer-local';
+        console.log('[JWT-AUTH] Using dev fallback tenant:', customerId);
+      } else {
+        console.warn('[JWT-AUTH] Tenant resolution failed:', error.message);
+        res.status(400).json({
+          error: 'Bad Request',
+          message: 'Cannot determine tenant from hostname. For localhost dev, set X-Tenant-ID header or DEVELOPMENT_TENANT_ID env var',
+          details: error.message
+        });
+        return;
+      }
     }
 
     // Step 3: Fetch role from provisioning
@@ -480,6 +491,14 @@ async function handleLegacyToken(
     try {
       payload = verifyToken(token);
       console.log('[JWT-AUTH] Legacy token verified for user:', payload.username);
+      console.log('[JWT-AUTH] Token payload claims:', {
+        type: payload.type,
+        username: payload.username,
+        auth0Sub: payload.auth0Sub,
+        customerId: payload.customerId,
+        userId: payload.userId,
+        role: payload.role
+      });
     } catch (error: any) {
       console.warn('[JWT-AUTH] Legacy token verification failed:', error.message);
       res.status(401).json({
@@ -496,6 +515,53 @@ async function handleLegacyToken(
         error: 'Unauthorized',
         message: 'Invalid token type. Use access token for API requests.'
       });
+      return;
+    }
+
+    // Phase 3: Federated Auth0 token issued by provisioning (HS256 shared secret)
+    if (payload.auth0Sub && payload.customerId) {
+      // For federated tokens, use the customerId already in the token payload
+      // Try to validate against hostname if possible, but allow localhost in dev
+      let resolvedTenantId: string = payload.customerId;  // Trust the token claim
+      
+      try {
+        const { getTenantIdFromHost } = await import('../services/tenant-resolution.service');
+        resolvedTenantId = getTenantIdFromHost(req.hostname);
+        // Validate that token tenant matches hostname tenant
+        if (payload.customerId !== resolvedTenantId) {
+          res.status(403).json({
+            error: 'Forbidden',
+            message: 'Token tenant does not match request tenant context'
+          });
+          return;
+        }
+      } catch (error: any) {
+        // On localhost or if hostname resolution fails, trust the token's customerId
+        if (req.hostname === 'localhost') {
+          console.log('[JWT-AUTH] Using tenant from federated token (dev mode):', payload.customerId);
+          // Continue with the token's customerId
+        } else {
+          console.warn('[JWT-AUTH] Tenant validation failed:', error.message);
+          res.status(400).json({
+            error: 'Bad Request',
+            message: 'Cannot determine tenant from hostname',
+            details: error.message
+          });
+          return;
+        }
+      }
+
+      req.user = {
+        id: payload.userId,
+        username: payload.username || payload.auth0Sub,
+        email: payload.email,
+        role: payload.role,
+        isActive: true,
+        customerId: payload.customerId
+      };
+
+      console.log('[JWT-AUTH] Federated HS256 token authenticated:', payload.auth0Sub);
+      next();
       return;
     }
 
@@ -614,8 +680,25 @@ export async function optionalAuth(
       // Try Auth0 RS256
       if (algorithm === 'RS256' && AUTH0_ENABLED) {
         const auth0Payload = await validateAuth0JWT(token);
-        const { getTenantIdFromHost } = await import('../services/tenant-resolution.service');
-        const customerId = getTenantIdFromHost(req.hostname);
+        
+        let customerId: string;
+        try {
+          const { getTenantIdFromHost } = await import('../services/tenant-resolution.service');
+          customerId = getTenantIdFromHost(req.hostname);
+        } catch (error: any) {
+          // Fallback for development: check X-Tenant-ID header or env var
+          const headerTenantId = req.headers['x-tenant-id'] as string | undefined;
+          const envTenantId = process.env.DEVELOPMENT_TENANT_ID;
+          
+          if (req.hostname === 'localhost' && (headerTenantId || envTenantId)) {
+            customerId = headerTenantId || envTenantId || 'customer-local';
+          } else {
+            req.user = null;
+            next();
+            return;
+          }
+        }
+        
         const { getRoleAndStatus } = await import('../services/rbac-cache.service');
         const roleData = await getRoleAndStatus(auth0Payload.sub, customerId, auth0Payload.exp);
 
@@ -643,6 +726,19 @@ export async function optionalAuth(
 
         if (payload.type !== 'access') {
           req.user = null;
+          next();
+          return;
+        }
+
+        if (payload.auth0Sub && payload.customerId) {
+          req.user = {
+            id: payload.userId,
+            username: payload.username || payload.auth0Sub,
+            email: payload.email,
+            role: payload.role,
+            isActive: true,
+            customerId: payload.customerId
+          };
           next();
           return;
         }

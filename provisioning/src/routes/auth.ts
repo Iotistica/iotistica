@@ -7,9 +7,12 @@
 import express, { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import axios from 'axios';
-import jwt, { Secret, SignOptions } from 'jsonwebtoken';
+import jwt, { Secret } from 'jsonwebtoken';
 import { CustomerModel } from '../db/customer-model';
+import { query } from '../db/connection';
 import { logger } from '../utils/logger';
+import { deploymentQueue } from '../services/deployment-queue';
+import { StripeService } from '../services/stripe-service';
 
 const router = express.Router();
 
@@ -224,44 +227,120 @@ router.post('/callback-auth0', async (req: Request, res: Response) => {
 
     logger.info('[Auth0] User authenticated', { auth0Sub, email });
 
-    // Step 3: Generate JWT for dashboard/API
-    // For Phase 2, create a minimal JWT with Auth0 user info
-    // Phase 3 will add multi-tenant assignment and real role lookup
-    
+    // Step 3: Resolve tenant + role from centralized RBAC table (Phase 3)
+    let membershipResult = await query(
+      `SELECT 
+         utr.id,
+         utr.auth0_sub,
+         utr.customer_id,
+         utr.role,
+         utr.created_at,
+         utr.updated_at,
+         c.deployment_status,
+         c.is_active
+       FROM user_tenant_roles utr
+       JOIN customers c ON c.customer_id = utr.customer_id
+       WHERE utr.auth0_sub = $1
+       ORDER BY
+         CASE
+           WHEN c.is_active = true AND c.deployment_status = 'ready' THEN 0
+           WHEN c.is_active = true THEN 1
+           ELSE 2
+         END,
+         utr.updated_at DESC
+       LIMIT 1`,
+      [auth0Sub]
+    );
+
+    // Auto-link first login by matching customer email when no membership exists yet
+    if (membershipResult.rows.length === 0) {
+      const autoLink = await query(
+        `INSERT INTO user_tenant_roles (auth0_sub, customer_id, role, created_by)
+         SELECT $1, c.customer_id, 'admin', 'auth0_auto_link'
+         FROM customers c
+         WHERE LOWER(c.email) = LOWER($2)
+         ON CONFLICT (auth0_sub, customer_id) DO NOTHING
+         RETURNING id, auth0_sub, customer_id, role, created_at, updated_at`,
+        [auth0Sub, email]
+      );
+
+      if (autoLink.rows.length > 0) {
+        membershipResult = await query(
+          `SELECT 
+             utr.id,
+             utr.auth0_sub,
+             utr.customer_id,
+             utr.role,
+             utr.created_at,
+             utr.updated_at,
+             c.deployment_status,
+             c.is_active
+           FROM user_tenant_roles utr
+           JOIN customers c ON c.customer_id = utr.customer_id
+           WHERE utr.id = $1
+           LIMIT 1`,
+          [autoLink.rows[0].id]
+        );
+      }
+    }
+
+    if (membershipResult.rows.length === 0) {
+      return res.status(403).json({
+        error: 'needs_signup',
+        message: 'Please complete your account setup',
+        auth0User: {
+          sub: auth0Sub,
+          email: email,
+          name: name
+        }
+      });
+    }
+
+    const membership = membershipResult.rows[0];
+
+    if (!membership.is_active) {
+      return res.status(403).json({
+        error: 'Customer suspended',
+        message: `Customer ${membership.customer_id} is suspended`,
+      });
+    }
+
     const JWT_SECRET: Secret = process.env.JWT_SECRET || 'test-secret-key';
-    
-    // Generate access token with Auth0 user info
-    // Note: userId is 0 as placeholder (Phase 3 will integrate with user database)
+    const accessExpiry = process.env.JWT_ACCESS_TOKEN_EXPIRY || '15m';
+    const refreshExpiry = process.env.JWT_REFRESH_TOKEN_EXPIRY || '7d';
+
+    // Step 4: Generate JWT with real user/tenant claims
     const accessToken = jwt.sign(
       {
-        userId: 0, // Placeholder: will be replaced in Phase 3 with real user ID
+        userId: membership.id,
         username: auth0Sub,
-        email: email,
-        role: 'user', // Placeholder: will be set from RBAC in Phase 3
-        auth0Sub: auth0Sub,
+        email,
+        role: membership.role,
+        auth0Sub,
+        customerId: membership.customer_id,
         type: 'access'
       },
       JWT_SECRET,
       {
-        expiresIn: '15m',
+        expiresIn: accessExpiry as any,
         issuer: 'iotistic-api',
         audience: 'iotistic-dashboard'
       }
     );
 
-    // Generate refresh token similarly
     const refreshToken = jwt.sign(
       {
-        userId: 0,
+        userId: membership.id,
         username: auth0Sub,
-        email: email,
-        role: 'user',
-        auth0Sub: auth0Sub,
+        email,
+        role: membership.role,
+        auth0Sub,
+        customerId: membership.customer_id,
         type: 'refresh'
       },
       JWT_SECRET,
       {
-        expiresIn: '7d',
+        expiresIn: refreshExpiry as any,
         issuer: 'iotistic-api',
         audience: 'iotistic-dashboard'
       }
@@ -272,11 +351,12 @@ router.post('/callback-auth0', async (req: Request, res: Response) => {
         accessToken,
         refreshToken,
         user: {
-          id: 0, // Placeholder
+          id: membership.id,
           auth0Sub,
+          customerId: membership.customer_id,
           email,
           name,
-          role: 'user'
+          role: membership.role
         },
       },
     });
@@ -285,6 +365,450 @@ router.post('/callback-auth0', async (req: Request, res: Response) => {
     logger.error('[Auth0] Callback handler error', { error: error.message });
     res.status(500).json({
       error: 'Internal server error',
+    });
+  }
+});
+
+/**
+ * GET /api/auth/signup-callback
+ * Handles Auth0 redirect for new customer signups
+ * Receives code and state (signup data) from Auth0, creates customer, queues deployment
+ */
+router.get('/signup-callback', async (req: Request, res: Response) => {
+  try {
+    const { code, state } = req.query;
+
+    if (!code || !state) {
+      return res.status(400).send(`
+        <html><head><title>Signup Error</title></head><body>
+          <h1>Signup Error</h1>
+          <p>Missing authorization code or state parameter.</p>
+          <a href="http://localhost:3000">Back to Home</a>
+        </body></html>
+      `);
+    }
+
+    // Decode signup data from state parameter
+    let signupData;
+    try {
+      signupData = JSON.parse(atob(decodeURIComponent(state as string)));
+    } catch (e) {
+      return res.status(400).send(`
+        <html><head><title>Signup Error</title></head><body>
+          <h1>Signup Error</h1>
+          <p>Invalid signup data.</p>
+          <a href="http://localhost:3000">Back to Home</a>
+        </body></html>
+      `);
+    }
+
+    const { email, company, plan } = signupData;
+
+    if (!email || !company) {
+      return res.status(400).send(`
+        <html><head><title>Signup Error</title></head><body>
+          <h1>Signup Error</h1>
+          <p>Missing email or company name.</p>
+          <a href="http://localhost:3000">Back to Home</a>
+        </body></html>
+      `);
+    }
+
+    // Exchange Auth0 code for tokens
+    const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;
+    const AUTH0_CLIENT_ID = process.env.AUTH0_CLIENT_ID;
+    const AUTH0_CLIENT_SECRET = process.env.AUTH0_CLIENT_SECRET;
+
+    if (!AUTH0_DOMAIN || !AUTH0_CLIENT_ID || !AUTH0_CLIENT_SECRET) {
+      logger.error('[Signup Callback] Auth0 not configured');
+      return res.status(500).send(`
+        <html><head><title>Configuration Error</title></head><body>
+          <h1>Configuration Error</h1>
+          <p>Auth0 is not properly configured.</p>
+          <a href="http://localhost:3000">Back to Home</a>
+        </body></html>
+      `);
+    }
+
+    let tokenResponse;
+    try {
+      tokenResponse = await axios.post(
+        `https://${AUTH0_DOMAIN}/oauth/token`,
+        {
+          client_id: AUTH0_CLIENT_ID,
+          client_secret: AUTH0_CLIENT_SECRET,
+          grant_type: 'authorization_code',
+          code: code,
+          redirect_uri: 'http://localhost:3100/api/auth/signup-callback',
+        },
+        { headers: { 'Content-Type': 'application/json' } }
+      );
+    } catch (error: any) {
+      logger.error('[Signup Callback] Token exchange failed', { error: error.response?.data || error.message });
+      return res.status(401).send(`
+        <html><head><title>Authentication Error</title></head><body>
+          <h1>Authentication Error</h1>
+          <p>Failed to verify your authentication.</p>
+          <a href="http://localhost:3000">Back to Home</a>
+        </body></html>
+      `);
+    }
+
+    const accessToken = tokenResponse.data.access_token;
+
+    // Get user info from Auth0
+    let userInfo;
+    try {
+      const userInfoResponse = await axios.get(
+        `https://${AUTH0_DOMAIN}/userinfo`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      userInfo = userInfoResponse.data;
+    } catch (error: any) {
+      logger.error('[Signup Callback] Failed to get user info', { error: error.message });
+      return res.status(401).send(`
+        <html><head><title>Authentication Error</title></head><body>
+          <h1>Authentication Error</h1>
+          <p>Failed to retrieve user information.</p>
+          <a href="http://localhost:3000">Back to Home</a>
+        </body></html>
+      `);
+    }
+
+    const auth0Sub = userInfo.sub;
+    const userName = userInfo.name || email;
+
+    logger.info('[Signup Callback] Creating customer', { auth0Sub, email, company });
+
+    // Check if user already has a tenant
+    const existingMembership = await query(
+      `SELECT customer_id FROM user_tenant_roles WHERE auth0_sub = $1 LIMIT 1`,
+      [auth0Sub]
+    );
+
+    if (existingMembership.rows.length > 0) {
+      return res.status(409).send(`
+        <html><head><title>Account Exists</title></head><body>
+          <h1>Account Already Exists</h1>
+          <p>This account is already registered.</p>
+          <a href="http://localhost:3000">Back to Home</a>
+        </body></html>
+      `);
+    }
+
+    // Check if email already used
+    const existingCustomer = await query(
+      `SELECT customer_id FROM customers WHERE LOWER(email) = LOWER($1) LIMIT 1`,
+      [email]
+    );
+
+    if (existingCustomer.rows.length > 0) {
+      return res.status(409).send(`
+        <html><head><title>Email Already Registered</title></head><body>
+          <h1>Email Already Registered</h1>
+          <p>This email address is already associated with an account.</p>
+          <a href="http://localhost:3000">Back to Home</a>
+        </body></html>
+      `);
+    }
+
+    // Generate customer ID (hash of email for uniqueness)
+    const crypto = await import('crypto');
+    const customerId = 'customer-' + crypto.createHash('sha256').update(email).digest('hex').substring(0, 12);
+
+    // Create customer record
+    const customerInsertResult = await query(
+      `INSERT INTO customers (
+        customer_id, email, company_name, full_name, 
+        deployment_status, is_active, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+      RETURNING customer_id`,
+      [customerId, email, company, userName, 'pending', true]
+    );
+
+    if (customerInsertResult.rows.length === 0) {
+      throw new Error('Failed to create customer record');
+    }
+
+    logger.info('[Signup Callback] Customer created', { customerId });
+
+    // Create user-tenant role assignment (admin)
+    await query(
+      `INSERT INTO user_tenant_roles (auth0_sub, customer_id, role, created_by, created_at)
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [auth0Sub, customerId, 'admin', 'self_signup']
+    );
+
+    logger.info('[Signup Callback] Admin role assigned', { customerId, auth0Sub });
+
+    // Create Stripe checkout session for the new customer
+    try {
+      logger.info('[Signup Callback] Creating Stripe checkout session', { customerId, plan });
+
+      const session = await StripeService.createCheckoutSession({
+        customerId,
+        plan: (plan || 'starter') as 'starter' | 'professional' | 'enterprise',
+        successUrl: 'http://localhost:3000/success', // After payment, redirect to website
+        cancelUrl: 'http://localhost:3000', // If user cancels, go back to website
+      });
+
+      logger.info('[Signup Callback] Stripe checkout created', {
+        customerId,
+        sessionId: session.id,
+      });
+
+      // Redirect to Stripe checkout
+      // The Stripe webhook will handle payment and trigger K8s deployment
+      return res.redirect(session.url || '');
+    } catch (stripeError: any) {
+      logger.error('[Signup Callback] Failed to create Stripe checkout', {
+        customerId,
+        error: stripeError.message,
+      });
+
+      // Show error page
+      return res.status(500).send(`
+        <html>
+          <head>
+            <title>Billing Error</title>
+            <style>
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial;
+                background: #0a0e27;
+                color: #e4e8f0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 100vh;
+              }
+              .container {
+                text-align: center;
+                padding: 2rem;
+              }
+              h1 { color: #ef4444; margin-bottom: 1rem; }
+              p { color: #9ba3b4; line-height: 1.6; }
+              a {
+                display: inline-block;
+                margin-top: 1.5rem;
+                padding: 1rem 2rem;
+                background: #3b82f6;
+                color: white;
+                text-decoration: none;
+                border-radius: 8px;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>⚠️ Billing Setup Error</h1>
+              <p>We encountered an error setting up your billing account.</p>
+              <p>Please contact support or try again.</p>
+              <a href="http://localhost:3000">Back to Home</a>
+            </div>
+          </body>
+        </html>
+      `);
+    }
+
+  } catch (error: any) {
+    logger.error('[Signup Callback] Error', { error: error.message });
+    return res.status(500).send(`
+      <html><head><title>Signup Error</title></head><body>
+        <h1>Signup Error</h1>
+        <p>An unexpected error occurred during signup.</p>
+        <a href="http://localhost:3000">Back to Home</a>
+      </body></html>
+    `);
+  }
+});
+
+/**
+ * POST /api/customers/complete-signup
+ * Complete registration after Auth0 authentication
+ * Called when new user has no tenant assignment
+ */
+router.post('/complete-signup', async (req: Request, res: Response) => {
+  try {
+    const { auth0AccessToken, companyName, planId } = req.body;
+
+    if (!auth0AccessToken || !companyName) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'auth0AccessToken and companyName are required',
+      });
+    }
+
+    // Verify Auth0 token and get user info
+    const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;
+    let userInfo;
+    try {
+      const userInfoResponse = await axios.get(
+        `https://${AUTH0_DOMAIN}/userinfo`,
+        {
+          headers: {
+            Authorization: `Bearer ${auth0AccessToken}`,
+          },
+          timeout: 10000,
+        }
+      );
+      userInfo = userInfoResponse.data;
+    } catch (error: any) {
+      logger.error('[Signup] Failed to verify Auth0 token', {
+        error: error.response?.data || error.message,
+      });
+      return res.status(401).json({
+        error: 'Invalid Auth0 token',
+        message: 'Could not verify authentication',
+      });
+    }
+
+    const auth0Sub = userInfo.sub;
+    const email = userInfo.email;
+    const name = userInfo.name || email;
+
+    logger.info('[Signup] New customer signup', { auth0Sub, email, companyName });
+
+    // Check if user already has a tenant
+    const existingMembership = await query(
+      `SELECT customer_id FROM user_tenant_roles WHERE auth0_sub = $1 LIMIT 1`,
+      [auth0Sub]
+    );
+
+    if (existingMembership.rows.length > 0) {
+      return res.status(409).json({
+        error: 'User already has account',
+        message: 'This user is already assigned to a tenant',
+      });
+    }
+
+    // Check if email already used (prevent duplicate accounts)
+    const existingCustomer = await query(
+      `SELECT customer_id FROM customers WHERE LOWER(email) = LOWER($1) LIMIT 1`,
+      [email]
+    );
+
+    if (existingCustomer.rows.length > 0) {
+      return res.status(409).json({
+        error: 'Email already registered',
+        message: 'An account with this email already exists. Please contact support if you need access.',
+      });
+    }
+
+    // Generate unique customer_id
+    const crypto = require('crypto');
+    const hash = crypto.createHash('sha256').update(auth0Sub + Date.now()).digest('hex');
+    const customerId = `customer-${hash.substring(0, 12)}`;
+
+    // Create customer record
+    await query(
+      `INSERT INTO customers (
+        customer_id,
+        email,
+        company_name,
+        full_name,
+        deployment_status,
+        is_active
+      ) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [customerId, email, companyName, name, 'pending', true]
+    );
+
+    logger.info('[Signup] Customer created', { customerId, email });
+
+    // Create user-tenant role assignment (admin)
+    await query(
+      `INSERT INTO user_tenant_roles (
+        auth0_sub,
+        customer_id,
+        role,
+        created_by
+      ) VALUES ($1, $2, $3, $4)`,
+      [auth0Sub, customerId, 'admin', 'self_signup']
+    );
+
+    logger.info('[Signup] User-tenant role created', { auth0Sub, customerId });
+
+    // Queue K8s deployment (GitOps)
+    try {
+      await deploymentQueue.addDeploymentJob({
+        customerId,
+        email,
+        companyName,
+        plan: planId || 'starter', // Default to starter plan
+        priority: 3, // High priority for new signups
+        metadata: {
+          source: 'self_signup',
+          auth0Sub,
+        },
+      });
+      logger.info('[Signup] K8s deployment queued', { customerId });
+    } catch (queueError: any) {
+      logger.error('[Signup] Failed to queue deployment', {
+        customerId,
+        error: queueError.message,
+      });
+      // Continue anyway - deployment can be retried later
+    }
+
+    // Generate JWT tokens (same as callback-auth0)
+    const JWT_SECRET: Secret = process.env.JWT_SECRET || 'test-secret-key';
+    const accessExpiry = process.env.JWT_ACCESS_TOKEN_EXPIRY || '15m';
+    const refreshExpiry = process.env.JWT_REFRESH_TOKEN_EXPIRY || '7d';
+
+    const accessToken = jwt.sign(
+      {
+        type: 'access',
+        userId: null, // No user ID yet in customer instance
+        username: auth0Sub,
+        email: email,
+        name: name,
+        role: 'admin',
+        customerId: customerId,
+        auth0Sub: auth0Sub,
+      },
+      JWT_SECRET,
+      {
+        expiresIn: accessExpiry as any,
+        issuer: 'iotistic-api',
+        audience: 'iotistic-dashboard'
+      }
+    );
+
+    const refreshToken = jwt.sign(
+      {
+        type: 'refresh',
+        userId: null,
+        username: auth0Sub,
+        email: email,
+        customerId: customerId,
+        auth0Sub: auth0Sub,
+      },
+      JWT_SECRET,
+      {
+        expiresIn: refreshExpiry as any,
+        issuer: 'iotistic-api',
+        audience: 'iotistic-dashboard'
+      }
+    );
+
+    logger.info('[Signup] Signup complete', { customerId, email });
+
+    res.json({
+      success: true,
+      accessToken,
+      refreshToken,
+      user: {
+        email,
+        name,
+        role: 'admin',
+        customerId,
+      },
+    });
+
+  } catch (error: any) {
+    logger.error('[Signup] Error during signup', { error: error.message });
+    res.status(500).json({
+      error: 'Signup failed',
+      message: 'An error occurred during account creation',
     });
   }
 });

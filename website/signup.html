@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Start Your Free Trial - Iotistic</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .signup-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            background: var(--bg-primary);
+        }
+
+        .signup-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 3rem;
+            max-width: 600px;
+            width: 100%;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .signup-header {
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .signup-logo {
+            font-size: 2rem;
+            font-weight: 700;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+
+        .signup-title {
+            font-size: 1.75rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .signup-subtitle {
+            color: var(--text-secondary);
+            font-size: 1rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-label {
+            display: block;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+
+        .form-input, .form-select {
+            width: 100%;
+            padding: 0.875rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 1rem;
+            transition: var(--transition);
+        }
+
+        .form-input:focus, .form-select:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .plan-cards {
+            display: grid;
+            gap: 1rem;
+            margin-top: 0.5rem;
+        }
+
+        .plan-card {
+            padding: 1.25rem;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .plan-card:hover {
+            border-color: var(--accent-primary);
+        }
+
+        .plan-card.selected {
+            border-color: var(--accent-primary);
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .plan-card input[type="radio"] {
+            display: none;
+        }
+
+        .plan-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .plan-name {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .plan-price {
+            color: var(--accent-primary);
+            font-weight: 600;
+        }
+
+        .plan-description {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .btn-submit {
+            width: 100%;
+            padding: 1rem;
+            background: var(--accent-gradient);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 1.05rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            margin-top: 1rem;
+        }
+
+        .btn-submit:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.4);
+        }
+
+        .terms {
+            text-align: center;
+            margin-top: 1.5rem;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        .terms a {
+            color: var(--accent-primary);
+            text-decoration: none;
+        }
+
+        .back-link {
+            display: block;
+            text-align: center;
+            margin-top: 1.5rem;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: var(--transition);
+        }
+
+        .back-link:hover {
+            color: var(--accent-primary);
+        }
+    </style>
+</head>
+<body>
+    <div class="signup-container">
+        <div class="signup-card">
+            <div class="signup-header">
+                <div class="signup-logo">Iotistic</div>
+                <h1 class="signup-title">Start Your Free Trial</h1>
+                <p class="signup-subtitle">14-day trial, no credit card required</p>
+            </div>
+
+            <form id="signupForm">
+                <div class="form-group">
+                    <label class="form-label" for="email">Work Email *</label>
+                    <input 
+                        type="email" 
+                        id="email" 
+                        class="form-input" 
+                        placeholder="you@company.com"
+                        required
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="companyName">Company Name *</label>
+                    <input 
+                        type="text" 
+                        id="companyName" 
+                        class="form-input" 
+                        placeholder="Your company"
+                        required
+                        maxlength="255"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Select Your Plan *</label>
+                    <div class="plan-cards">
+                        <label class="plan-card selected" data-plan="starter">
+                            <input type="radio" name="plan" value="starter" checked>
+                            <div class="plan-header">
+                                <span class="plan-name">Starter</span>
+                                <span class="plan-price">$49/month</span>
+                            </div>
+                            <p class="plan-description">Perfect for small teams and prototypes</p>
+                        </label>
+
+                        <label class="plan-card" data-plan="professional">
+                            <input type="radio" name="plan" value="professional">
+                            <div class="plan-header">
+                                <span class="plan-name">Professional</span>
+                                <span class="plan-price">$199/month</span>
+                            </div>
+                            <p class="plan-description">For growing businesses with advanced needs</p>
+                        </label>
+
+                        <label class="plan-card" data-plan="enterprise">
+                            <input type="radio" name="plan" value="enterprise">
+                            <div class="plan-header">
+                                <span class="plan-name">Enterprise</span>
+                                <span class="plan-price">Custom</span>
+                            </div>
+                            <p class="plan-description">Dedicated resources and premium support</p>
+                        </label>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn-submit">
+                    Continue with Auth0 →
+                </button>
+
+                <p class="terms">
+                    By signing up, you agree to our 
+                    <a href="#">Terms of Service</a> and 
+                    <a href="#">Privacy Policy</a>
+                </p>
+            </form>
+
+            <a href="index.html" class="back-link">← Back to Home</a>
+        </div>
+    </div>
+
+    <script>
+        // Auth0 configuration
+        const AUTH0_DOMAIN = 'dev-hmwhgxw10boqpmrw.us.auth0.com';
+        const AUTH0_CLIENT_ID = 'Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR';
+        const AUTH0_CALLBACK_URL = 'http://localhost:8080/auth/callback';
+
+        // Handle plan selection
+        document.querySelectorAll('.plan-card').forEach(card => {
+            card.addEventListener('click', () => {
+                document.querySelectorAll('.plan-card').forEach(c => c.classList.remove('selected'));
+                card.classList.add('selected');
+                card.querySelector('input[type="radio"]').checked = true;
+            });
+        });
+
+        // Handle form submission
+        document.getElementById('signupForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+
+            const email = document.getElementById('email').value;
+            const companyName = document.getElementById('companyName').value;
+            const plan = document.querySelector('input[name="plan"]:checked').value;
+
+            // Store signup data in sessionStorage (will be retrieved after Auth0 callback)
+            sessionStorage.setItem('signup_data', JSON.stringify({
+                email,
+                companyName,
+                plan,
+                timestamp: Date.now()
+            }));
+
+            // Redirect to Auth0 for authentication
+            const auth0Url = `https://${AUTH0_DOMAIN}/authorize?` +
+                `response_type=code&` +
+                `client_id=${AUTH0_CLIENT_ID}&` +
+                `redirect_uri=${encodeURIComponent(AUTH0_CALLBACK_URL)}&` +
+                `scope=openid%20profile%20email&` +
+                `state=${encodeURIComponent(JSON.stringify({ source: 'signup' }))}`;
+
+            window.location.href = auth0Url;
+        });
+    </script>
+</body>
+</html>

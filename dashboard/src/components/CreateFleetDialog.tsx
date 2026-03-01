@@ -105,7 +105,10 @@ export function CreateFleetDialog({
 
     try {
       const token = localStorage.getItem('accessToken');
-      
+      if (!token || token.split('.').length !== 3) {
+        throw new Error('Authentication expired. Please sign in again.');
+      }
+
       // Build request payload
       const payload: any = {
         fleet_name: formData.fleet_name,

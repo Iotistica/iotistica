@@ -38,7 +38,7 @@ param(
     #[string]$ApiUrl = "https://api.iotistica.com",
     #[string]$ApiUrl = "https://localhost:3443",
     [string]$ApiUrl = "https://localhost:3443",
-    [string]$FleetUuid = "71156440-0730-4c63-b211-3fbd8200d652",
+    [string]$FleetUuid = "9dba5910-040d-4544-862e-32d47dc18290",
     [bool]$UseDirectDb = $true,
     [string]$DbHost = "localhost",
     [int]$DbPort = 5432,
