@@ -64,11 +64,9 @@ export class DeploymentQueue extends EventEmitter {
           : undefined,
         // Bull requires enableOfflineQueue: true to buffer commands during connection
         enableOfflineQueue: true,
-        connectTimeout: 10000, // 10s connect timeout
-        // Don't use commandTimeout - causes issues with Bull's blocking operations
+        connectTimeout: 10000,
         keepAlive: 30000,
-        retryStrategy: (times)=>{
-          // Exponential backoff: 50ms, 100ms, 150ms... up to 2s
+        retryStrategy: (times) => {
           return Math.min(times * 50, 2000);
         },
       },
@@ -97,27 +95,6 @@ export class DeploymentQueue extends EventEmitter {
       },
     });
 
-    // Add Redis client event handlers for debugging
-    const client = this.queue.client;
-    client.on('connect', () => {
-      console.log('✅ Bull Redis client connected');
-    });
-    client.on('ready', () => {
-      console.log('✅ Bull Redis client ready');
-    });
-    client.on('error', (err) => {
-      console.error('❌ Bull Redis client error:', err.message);
-    });
-    client.on('close', () => {
-      console.warn('⚠️  Bull Redis client closed');
-    });
-    client.on('reconnecting', () => {
-      console.log('🔄 Bull Redis client reconnecting...');
-    });
-
-    console.log(`📋 Deployment queue initialized (redis://${host}:${port}/${db})`);
-
-    // Setup event handlers
     this.setupEventHandlers();
   }
 
@@ -333,16 +310,6 @@ export class DeploymentQueue extends EventEmitter {
    * Setup event handlers
    */
   private setupEventHandlers() {
-    // Add error handlers FIRST
-    this.queue.on('error', (error) => {
-      console.error('❌ Queue error:', error.message, error.stack);
-      this.emit('queue:error', { error });
-    });
-
-    this.queue.on('waiting', (jobId) => {
-      console.log(`⏳ Job ${jobId} waiting`);
-    });
-
     this.queue.on('completed', (job, result) => {
       console.log(`✅ Job ${job.id} completed:`, result);
       this.emit('job:completed', { job, result });
