@@ -92,29 +92,11 @@ jobs:
           for i in {1..5}; do
             echo "Push attempt $i of 5..."
             
-            # Abort any existing rebase from previous failed attempt
-            if [ -d ".git/rebase-merge" ]; then
-              echo "Cleaning up previous rebase state..."
-              git rebase --abort || true
-            fi
-            
             # Fetch latest state from remote
             git fetch origin master
             
             # Rebase our commit on top of latest origin/master
-            if ! git -c rebase.autoStash=true rebase origin/master; then
-              echo "Rebase failed, aborting..."
-              git rebase --abort || true
-              
-              if [ $i -lt 5 ]; then
-                echo "Retrying in 2 seconds..."
-                sleep 2
-                continue
-              else
-                echo "Failed to rebase after 5 attempts"
-                exit 1
-              fi
-            fi
+            git -c rebase.autoStash=true rebase origin/master
             
             # Try to push
             if git push origin HEAD:master; then
