@@ -153,12 +153,12 @@ services:
       NODE_ENV: development
       
       # Database
-      DATABASE_URL: ${DATABASE_URL} 
-      DB_HOST: ${DB_HOST} 
-      DB_PORT: ${DB_PORT} 
-      DB_USER: ${DB_USER} 
-      DB_PASSWORD: ${DB_PASSWORD} 
-      DB_NAME: ${DB_NAME} 
+      DATABASE_URL: postgres://billing:billing123@postgres:5432/billing
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: billing
+      DB_PASSWORD: billing123
+      DB_NAME: billing 
       
       # Redis (for deployment queue)
       REDIS_HOST: redis
