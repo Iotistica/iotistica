@@ -70,10 +70,12 @@ export class DeploymentQueue extends EventEmitter {
         keepAlive: 30000,
       },
       settings: {
-        // Stall interval: how often to check if job is still processing (K8s deployments take 5-15min)
-        stalledInterval: 60000, // 1 minute (default is 5s - too short for deployments)
+        // Stall interval: how often to check if job is still processing.
+        // GitOps provisioning includes long-running steps (DB provisioning, secrets, git push, Argo sync)
+        // that can exceed 1 minute without yielding in some environments.
+        stalledInterval: 300000, // 5 minutes (default is 5s)
         // Max times a job can stall before failing
-        maxStalledCount: 5, // Allow 5 stall events before giving up (default is 2)
+        maxStalledCount: 10,
       },
       prefix: 'provisioning', // Namespace Bull keys
       defaultJobOptions: {

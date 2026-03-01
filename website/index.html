@@ -511,6 +511,8 @@
                         `client_id=${clientId}&` +
                         `redirect_uri=${encodeURIComponent(redirectUri)}&` +
                         `scope=${encodeURIComponent('openid profile email')}&` +
+                        `screen_hint=signup&` +
+                        `login_hint=${encodeURIComponent(email)}&` +
                         `state=${state}`;
                     
                     window.location.href = auth0Url;
