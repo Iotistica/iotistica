@@ -75,6 +75,17 @@ services:
       LICENSE_PUBLIC_KEY_PATH: /app/keys/public-key.pem
       LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY}  # For K8s deployment injection
 
+      # Auth0 Configuration (for callback-auth0 endpoint)
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN}
+      AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID}
+      AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE}
+      
+      # JWT Configuration for Auth0 users
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ACCESS_TOKEN_EXPIRY: ${JWT_ACCESS_TOKEN_EXPIRY}
+      JWT_REFRESH_TOKEN_EXPIRY: ${JWT_REFRESH_TOKEN_EXPIRY}
+
       # Trial configuration
       DEFAULT_TRIAL_DAYS: 14
       
@@ -157,6 +168,17 @@ services:
       LICENSE_PRIVATE_KEY_PATH: /app/keys/private-key.pem
       LICENSE_PUBLIC_KEY_PATH: /app/keys/public-key.pem
       LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY}
+      
+      # Auth0 Configuration (for callback-auth0 endpoint)
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN}
+      AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID}
+      AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE}
+      
+      # JWT Configuration for Auth0 users
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ACCESS_TOKEN_EXPIRY: ${JWT_ACCESS_TOKEN_EXPIRY}
+      JWT_REFRESH_TOKEN_EXPIRY: ${JWT_REFRESH_TOKEN_EXPIRY}
       
       # Base configuration
       BASE_DOMAIN: ${BASE_DOMAIN:-iotistic.com}

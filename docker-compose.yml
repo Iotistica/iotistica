@@ -17,32 +17,32 @@ services:
     # Local PostgreSQL - REPLACED WITH TIGERDATA CLOUD
     # Using TigerData managed TimescaleDB: bg4k3yxway.pcwz234dvp.tsdb.cloud.timescale.com:30692
     # Migration completed: February 12, 2026
-    # postgres:
-    #     image: timescale/timescaledb:latest-pg16
-    #     container_name: iotistic-postgres
-    #     restart: unless-stopped
-    #     environment:
-    #         - POSTGRES_DB=${POSTGRES_DB:-iotistic}
-    #         - POSTGRES_USER=${POSTGRES_USER:-postgres}
-    #         - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-    #     ports:
-    #         - "5432:5432"
-    #     volumes:
-    #         - iotistic-pg-data:/var/lib/postgresql/data
-    #         - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
-    #         - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
-    #     command: >
-    #         postgres
-    #         -c shared_preload_libraries=timescaledb
-    #         -c config_file=/etc/postgresql/postgresql.conf
-    #         -c hba_file=/etc/postgresql/pg_hba.conf
-    #     healthcheck:
-    #         test: ["CMD-SHELL", "pg_isready -U postgres"]
-    #         interval: 10s
-    #         timeout: 5s
-    #         retries: 5
-    #     networks:
-    #         - iotistic-net
+    postgres:
+        image: timescale/timescaledb:latest-pg16
+        container_name: iotistic-postgres
+        restart: unless-stopped
+        environment:
+            - POSTGRES_DB=${POSTGRES_DB:-iotistic}
+            - POSTGRES_USER=${POSTGRES_USER:-postgres}
+            - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+        ports:
+            - "5432:5432"
+        volumes:
+            - iotistic-pg-data:/var/lib/postgresql/data
+            - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+            - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+        command: >
+            postgres
+            -c shared_preload_libraries=timescaledb
+            -c config_file=/etc/postgresql/postgresql.conf
+            -c hba_file=/etc/postgresql/pg_hba.conf
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U postgres"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+        networks:
+            - iotistic-net
 
     redis:
         image: redis:7-alpine

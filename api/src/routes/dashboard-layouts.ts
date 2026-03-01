@@ -4,16 +4,6 @@ import { jwtAuth } from '../middleware/jwt-auth';
 
 const router = Router();
 
-interface AuthRequest extends Request {
-  user?: {
-    id: number;
-    username: string;
-    email: string;
-    role: string;
-    isActive: boolean;
-  };
-}
-
 // All routes require authentication
 router.use(jwtAuth);
 
@@ -21,10 +11,10 @@ router.use(jwtAuth);
  * GET /api/v1/dashboard-layouts/:deviceUuid
  * Get dashboard layout for a device or 'global' for multi-device dashboard
  */
-router.get('/:deviceUuid', async (req: AuthRequest, res: Response) => {
+router.get('/:deviceUuid', async (req: Request, res: Response) => {
   try {
     const { deviceUuid } = req.params;
-    const userId = req.user?.id;
+    const userId = req.user.id;
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -89,10 +79,10 @@ router.get('/:deviceUuid', async (req: AuthRequest, res: Response) => {
  * GET /api/v1/dashboard-layouts/:deviceUuid/all
  * Get all dashboard layouts for a device or 'global' (for layout management)
  */
-router.get('/:deviceUuid/all', async (req: AuthRequest, res: Response) => {
+router.get('/:deviceUuid/all', async (req: Request, res: Response) => {
   try {
     const { deviceUuid } = req.params;
-    const userId = req.user?.id;
+    const userId = req.user.id;
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -129,11 +119,11 @@ router.get('/:deviceUuid/all', async (req: AuthRequest, res: Response) => {
  * POST /api/v1/dashboard-layouts/:deviceUuid
  * Save/create a dashboard layout (use 'global' for multi-device dashboard)
  */
-router.post('/:deviceUuid', async (req: AuthRequest, res: Response) => {
+router.post('/:deviceUuid', async (req: Request, res: Response) => {
   try {
     const { deviceUuid } = req.params;
     const { layoutName = 'Default', widgets, isDefault = false } = req.body;
-    const userId = req.user?.id;
+    const userId = req.user.id;
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -230,10 +220,10 @@ router.post('/:deviceUuid', async (req: AuthRequest, res: Response) => {
  * GET /api/v1/dashboard-layouts/by-share-token/:shareToken
  * Get a dashboard layout by share token (public access for shared dashboards)
  */
-router.get('/by-share-token/:shareToken', async (req: AuthRequest, res: Response) => {
+router.get('/by-share-token/:shareToken', async (req: Request, res: Response) => {
   try {
     const { shareToken } = req.params;
-    const userId = req.user?.id;
+    const userId = req.user.id;
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -269,10 +259,10 @@ router.get('/by-share-token/:shareToken', async (req: AuthRequest, res: Response
  * GET /api/v1/dashboard-layouts/by-id/:layoutId
  * Get a specific dashboard layout by ID
  */
-router.get('/by-id/:layoutId', async (req: AuthRequest, res: Response) => {
+router.get('/by-id/:layoutId', async (req: Request, res: Response) => {
   try {
     const { layoutId } = req.params;
-    const userId = req.user?.id;
+    const userId = req.user.id;
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -308,11 +298,11 @@ router.get('/by-id/:layoutId', async (req: AuthRequest, res: Response) => {
  * PUT /api/v1/dashboard-layouts/:layoutId
  * Update an existing dashboard layout
  */
-router.put('/:layoutId', async (req: AuthRequest, res: Response) => {
+router.put('/:layoutId', async (req: Request, res: Response) => {
   try {
     const { layoutId } = req.params;
     const { layoutName, widgets, isDefault } = req.body;
-    const userId = req.user?.id;
+    const userId = req.user.id;
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -410,10 +400,10 @@ router.put('/:layoutId', async (req: AuthRequest, res: Response) => {
  * DELETE /api/v1/dashboard-layouts/:layoutId
  * Delete a dashboard layout
  */
-router.delete('/:layoutId', async (req: AuthRequest, res: Response) => {
+router.delete('/:layoutId', async (req: Request, res: Response) => {
   try {
     const { layoutId } = req.params;
-    const userId = req.user?.id;
+    const userId = req.user.id;
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -444,3 +434,5 @@ router.delete('/:layoutId', async (req: AuthRequest, res: Response) => {
 });
 
 export default router;
+
+

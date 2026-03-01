@@ -4,8 +4,9 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Alert, AlertDescription } from '../components/ui/alert';
-import { AlertCircle, Loader2 } from 'lucide-react';
+import { AlertCircle, Loader2, Lock } from 'lucide-react';
 import { buildApiUrl } from '../config/api';
+import { auth0Config, getAuth0LoginUrl } from '../config/auth0';
 
 interface LoginPageProps {
   onLogin: (accessToken: string, refreshToken: string, user: any) => void;
@@ -59,6 +60,16 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     }
   };
 
+  const handleAuth0Login = () => {
+    try {
+      const loginUrl = getAuth0LoginUrl();
+      window.location.href = loginUrl;
+    } catch (err: any) {
+      console.error('Auth0 login error:', err);
+      setError(err.message || 'Auth0 login configuration error');
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 p-4">
       <Card className="w-full max-w-md">
@@ -72,7 +83,45 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               : 'Get started with Iotistic'}
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          {/* Auth0 Section (if enabled) */}
+          {auth0Config.enabled && (
+            <>
+              <Button
+                type="button"
+                onClick={handleAuth0Login}
+                disabled={isLoading}
+                className="w-full bg-blue-600 hover:bg-blue-700"
+              >
+                <Lock className="mr-2 h-4 w-4" />
+                Login with Auth0
+              </Button>
+
+              {auth0Config.showSocialLogin && (
+                <Button
+                  type="button"
+                  onClick={handleAuth0Login}
+                  variant="outline"
+                  disabled={isLoading}
+                  className="w-full"
+                >
+                  📧 Login with Google
+                </Button>
+              )}
+
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-300"></div>
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-2 bg-white dark:bg-slate-950 text-gray-500">
+                    Or continue with email
+                  </span>
+                </div>
+              </div>
+            </>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
               <Alert variant="destructive">

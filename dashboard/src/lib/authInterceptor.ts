@@ -110,11 +110,9 @@ window.fetch = async function (...args: Parameters<typeof fetch>): Promise<Respo
         };
         response = await originalFetch(url, options);
       } else {
-        // Refresh failed, redirect to login (only if not already there)
-        if (window.location.pathname !== '/login') {
-          console.log('Token refresh failed, redirecting to login...');
-          window.location.href = '/login';
-        }
+        // Refresh failed: keep current route and let page-level auth handling decide.
+        // Some endpoints can legitimately return 401/403 for authorization reasons.
+        console.log('Token refresh failed; preserving current route for app-level handling.');
       }
     }
   }

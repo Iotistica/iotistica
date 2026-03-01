@@ -22,6 +22,7 @@ import queueRouter from './routes/queue';
 import upgradesRouter from './routes/upgrades';
 import adminRouter from './routes/admin';
 import authRouter from './routes/auth';
+import internalRbacRouter from './routes/internal-rbac';
 
 // Services
 import { deploymentQueue } from './services/deployment-queue';
@@ -71,6 +72,7 @@ app.use('/api/webhooks', webhooksRouter);
 app.use('/api/queue', queueRouter);
 app.use('/api/upgrades', upgradesRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/internal', internalRbacRouter);  // Internal RBAC endpoints for tenant API
 
 // 404 handler
 app.use((req, res) => {
