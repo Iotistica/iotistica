@@ -168,23 +168,33 @@ jobs:
               Fixed: \(.properties.fixedVersion // "N/A")  
               Severity: \(.level)"
           ' trivy-results.sarif | head -20 >> $GITHUB_STEP_SUMMARY
-            - name: Fail build if critical vulnerabilities found
-              if: steps.trivy_summary.outputs.critical != '0'
-              run: |
-                echo "Critical vulnerabilities detected. Failing build."
-                exit 1
-      
-            # Push scanned image to registry
-            - name: Push image to Docker Hub
-              if: success()
-              run: docker push iotistic/api:ci-${{ steps.sha.outputs.short_sha }}
-      
-            # Move cache to prevent unlimited growth
-            - name: Move cache
-              if: always()
-              run: |
-                rm -rf /tmp/.buildx-cache
-                mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+
+      - name: Fail build if critical vulnerabilities found
+        if: steps.trivy_summary.outputs.critical != '0'
+        run: |
+          echo "Critical vulnerabilities detected. Failing build."
+          exit 1
+
+      # Upload Trivy results to GitHub Security tab
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        continue-on-error: true
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: 'trivy-api'
+
+      # Push scanned image to registry
+      - name: Push image to Docker Hub
+        if: success()
+        run: docker push iotistic/api:ci-${{ steps.sha.outputs.short_sha }}
+
+      # Move cache to prevent unlimited growth
+      - name: Move cache
+        if: always()
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
 
   report:
     name: Generate Reports
