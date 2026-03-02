@@ -12,8 +12,8 @@ CREATE TABLE IF NOT EXISTS customers (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_customers_email ON customers(email);
-CREATE INDEX idx_customers_stripe ON customers(stripe_customer_id);
+CREATE INDEX IF NOT EXISTS idx_customers_email ON customers(email);
+CREATE INDEX IF NOT EXISTS idx_customers_stripe ON customers(stripe_customer_id);
 
 -- Subscriptions table
 CREATE TABLE IF NOT EXISTS subscriptions (
@@ -28,9 +28,9 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_subscriptions_customer ON subscriptions(customer_id);
-CREATE INDEX idx_subscriptions_stripe ON subscriptions(stripe_subscription_id);
-CREATE INDEX idx_subscriptions_status ON subscriptions(status);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_customer ON subscriptions(customer_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe ON subscriptions(stripe_subscription_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status);
 
 -- Usage reports table (from customer instances)
 CREATE TABLE IF NOT EXISTS usage_reports (
@@ -42,8 +42,8 @@ CREATE TABLE IF NOT EXISTS usage_reports (
     reported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_usage_customer ON usage_reports(customer_id);
-CREATE INDEX idx_usage_reported_at ON usage_reports(reported_at);
+CREATE INDEX IF NOT EXISTS idx_usage_customer ON usage_reports(customer_id);
+CREATE INDEX IF NOT EXISTS idx_usage_reported_at ON usage_reports(reported_at);
 
 -- Update timestamp trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -55,12 +55,14 @@ END;
 $$ language 'plpgsql';
 
 -- Apply trigger to customers
+DROP TRIGGER IF EXISTS update_customers_updated_at ON customers;
 CREATE TRIGGER update_customers_updated_at
     BEFORE UPDATE ON customers
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
 -- Apply trigger to subscriptions
+DROP TRIGGER IF EXISTS update_subscriptions_updated_at ON subscriptions;
 CREATE TRIGGER update_subscriptions_updated_at
     BEFORE UPDATE ON subscriptions
     FOR EACH ROW

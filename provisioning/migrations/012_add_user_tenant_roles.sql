@@ -28,16 +28,17 @@ CREATE TABLE IF NOT EXISTS user_tenant_roles (
     FOREIGN KEY(customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_user_tenant_roles_lookup 
+CREATE INDEX IF NOT EXISTS idx_user_tenant_roles_lookup 
     ON user_tenant_roles(auth0_sub, customer_id);
 
-CREATE INDEX idx_user_tenant_roles_customer 
+CREATE INDEX IF NOT EXISTS idx_user_tenant_roles_customer 
     ON user_tenant_roles(customer_id);
 
-CREATE INDEX idx_user_tenant_roles_created 
+CREATE INDEX IF NOT EXISTS idx_user_tenant_roles_created 
     ON user_tenant_roles(created_at DESC);
 
 -- Trigger to update updated_at on modification
+DROP TRIGGER IF EXISTS update_user_tenant_roles_updated_at ON user_tenant_roles;
 CREATE TRIGGER update_user_tenant_roles_updated_at
     BEFORE UPDATE ON user_tenant_roles
     FOR EACH ROW

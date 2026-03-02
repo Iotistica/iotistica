@@ -2,7 +2,7 @@
 
 Create the following items in your 1Password vault (`IOT-CLIENTS`) for the provisioning service Helm chart.
 
-**Note**: Items #2 (`redis-credentials-master`) and #6 (`api-license-public-key-master`) already exist - no action required for those.
+**Note**: Items #2 (`redis-credentials-master`) and #7 (`api-license-public-key-master`) already exist - no action required for those. Item #6 (`api-license-private-key-master`) must be generated first using `npm run generate-keys`.
 
 ## 1. provisioning-db-credentials
 PostgreSQL database credentials
@@ -55,7 +55,25 @@ JWT token signing secret
 secret: [generate-strong-random-string, e.g., openssl rand -base64 32]
 ```
 
-## 6. api-license-public-key-master (Existing)
+## 6. provisioning-license-private-key
+RSA private key for signing license JWTs - **CREATE NEW ITEM**
+
+**IMPORTANT**: Generate the RSA key pair first:
+```bash
+cd provisioning
+npm run generate-keys
+```
+
+Then create the 1Password item with the **private key** content:
+```
+Item: provisioning-license-private-key
+Field: key
+Value: [Contents of keys/private-key.pem - full PEM including -----BEGIN PRIVATE KEY----- headers]
+```
+
+**Security**: Never commit this key to git. Store only in 1Password.
+
+## 7. api-license-public-key-master (Existing)
 License validation public key - **uses existing master secret**
 
 **Note**: This secret already exists in 1Password. No action required.
@@ -66,7 +84,7 @@ Field: key
 Value: [RSA public key - already configured]
 ```
 
-## 7. provisioning-tigerdata-credentials
+## 8. provisioning-tigerdata-credentials
 TimescaleDB cloud provisioning API
 
 ```
@@ -75,7 +93,7 @@ secret-key: [your-timescale-secret-key]
 project-id: [your-timescale-project-id]
 ```
 
-## 8. provisioning-onepassword-credentials
+## 9. provisioning-onepassword-credentials
 1Password Operator integration
 
 ```
@@ -83,7 +101,7 @@ token: [1password-connect-api-token]
 vault-id: [vault-id, e.g., jphmeuzr4ffmzlbq2ey5a75pvm]
 ```
 
-## 9. provisioning-gitops-credentials
+## 10. provisioning-gitops-credentials
 GitOps repository access
 
 ```
@@ -93,7 +111,7 @@ pat: ghp_xxxxx (GitHub Personal Access Token)
 Required GitHub token scopes:
 - `repo` (full control of repositories)
 
-## 10. provisioning-argocd-credentials
+## 11. provisioning-argocd-credentials
 Argo CD deployment automation
 
 ```

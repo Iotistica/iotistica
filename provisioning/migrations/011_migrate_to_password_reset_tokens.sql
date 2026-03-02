@@ -17,14 +17,11 @@ ALTER TABLE customers
 -- Create index for finding customers with pending password reset
 CREATE INDEX IF NOT EXISTS idx_customers_admin_reset_pending 
   ON customers(admin_reset_token_expires_at) 
-  WHERE admin_reset_token_used = false 
-  AND admin_reset_token_expires_at > CURRENT_TIMESTAMP;
+  WHERE admin_reset_token_used = false;
 
--- Create index for finding expired reset tokens
-CREATE INDEX IF NOT EXISTS idx_customers_admin_reset_expired 
-  ON customers(admin_reset_token_expires_at) 
-  WHERE admin_reset_token_used = false 
-  AND admin_reset_token_expires_at <= CURRENT_TIMESTAMP;
+-- Create index for finding expired reset tokens  
+-- Note: Cannot use CURRENT_TIMESTAMP in index predicate (not immutable)
+-- Use query-time filtering instead: WHERE expires_at <= NOW()
 
 -- Add comments for documentation
 COMMENT ON COLUMN customers.admin_reset_token_hash IS 'bcrypt hash of the admin password reset token (one-time use)';

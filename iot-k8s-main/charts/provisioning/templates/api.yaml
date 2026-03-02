@@ -93,6 +93,14 @@ spec:
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata:
+  name: provisioning-license-private-key
+  namespace: {{ .Release.Namespace }}
+spec:
+  itemPath: "vaults/IOT-CLIENTS/items/provisioning-license-private-key"
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
   name: provisioning-jwt-secret
   namespace: {{ .Release.Namespace }}
 spec:
@@ -264,7 +272,11 @@ spec:
             - name: JWT_REFRESH_TOKEN_EXPIRY
               value: "7d"
             
-            # License Keys
+            # License Keys (paths to mounted files)
+            - name: LICENSE_PRIVATE_KEY_PATH
+              value: "/app/keys/private-key.pem"
+            - name: LICENSE_PUBLIC_KEY_PATH
+              value: "/app/keys/public-key.pem"
             - name: LICENSE_PUBLIC_KEY
               valueFrom:
                 secretKeyRef:
@@ -353,6 +365,11 @@ spec:
             - name: SIMULATE_K8S_DEPLOYMENT
               value: {{ .Values.api.env.SIMULATE_K8S_DEPLOYMENT | quote }}
           
+          volumeMounts:
+            - name: license-keys
+              mountPath: /app/keys
+              readOnly: true
+          
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
           
@@ -369,4 +386,20 @@ spec:
               port: api
             initialDelaySeconds: 10
             periodSeconds: 5
+      
+      volumes:
+        - name: license-keys
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: provisioning-license-private-key
+                  items:
+                    - key: key
+                      path: private-key.pem
+              - secret:
+                  name: api-license-public-key-master
+                  items:
+                    - key: key
+                      path: public-key.pem
 {{- end }}
