@@ -205,6 +205,7 @@ jobs:
       - name: Upload Trivy API results to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
         if: always()
+        continue-on-error: true
         with:
           sarif_file: 'trivy-api-results.sarif'
           category: 'trivy-provisioning-api'
@@ -308,6 +309,7 @@ jobs:
       - name: Upload Trivy Worker results to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
         if: always()
+        continue-on-error: true
         with:
           sarif_file: 'trivy-worker-results.sarif'
           category: 'trivy-provisioning-worker'
