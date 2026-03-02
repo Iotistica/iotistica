@@ -127,6 +127,7 @@ jobs:
     runs-on: [iotistic-lab-sc]
     permissions:
       contents: write
+      security-events: write
 
     steps:
       - name: Checkout repository
@@ -201,7 +202,7 @@ jobs:
           exit-code: '0'
 
       - name: Upload Trivy API results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: 'trivy-api-results.sarif'
@@ -228,6 +229,7 @@ jobs:
     runs-on: [iotistic-lab-sc]
     permissions:
       contents: write
+      security-events: write
 
     steps:
       - name: Checkout repository
@@ -302,7 +304,7 @@ jobs:
           exit-code: '0'
 
       - name: Upload Trivy Worker results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: 'trivy-worker-results.sarif'
