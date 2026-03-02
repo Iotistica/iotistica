@@ -15,8 +15,27 @@ spec:
   rules:
     - matches:
         - path:
+            type: Exact
+            value: /provisioning/api/health
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplaceFullPath
+              replaceFullPath: /health
+      backendRefs:
+        - name: {{ include "provisioning.fullname" . }}-api
+          port: {{ .Values.api.port }}
+    - matches:
+        - path:
             type: PathPrefix
             value: /provisioning/api
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /api
       backendRefs:
         - name: {{ include "provisioning.fullname" . }}-api
           port: {{ .Values.api.port }}

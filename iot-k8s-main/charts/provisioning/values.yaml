@@ -22,7 +22,7 @@ api:
       memory: 2Gi
   env:
     NODE_ENV: production
-    BASE_DOMAIN: iotistica.com
+    BASE_DOMAIN: api.iotistica.com
     DEFAULT_TRIAL_DAYS: "14"
     GITOPS_ENABLED: "true"
     GITOPS_REPO_URL: https://github.com/Iotistica/iot-k8s-main
@@ -54,7 +54,7 @@ worker:
       memory: 2Gi
   env:
     NODE_ENV: production
-    BASE_DOMAIN: iotistica.com
+    BASE_DOMAIN: api.iotistica.com
     GITOPS_ENABLED: "true"
     GITOPS_REPO_URL: https://github.com/Iotistica/iot-k8s-main
     GITOPS_BRANCH: main
@@ -99,6 +99,6 @@ externalRedis:
 # Ingress (Envoy Gateway HTTPRoute)
 ingress:
   enabled: true
-  hostname: iotistica.com
-  gateway: eg
+  hostname: api.iotistica.com
+  gateway: iotistica-gateway
   gatewayNamespace: envoy-gateway-system
