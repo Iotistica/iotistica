@@ -81,9 +81,11 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+DROP TRIGGER IF EXISTS update_refunds_updated_at ON refunds;
 CREATE TRIGGER update_refunds_updated_at BEFORE UPDATE ON refunds
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_cleanup_queue_updated_at ON cleanup_queue;
 CREATE TRIGGER update_cleanup_queue_updated_at BEFORE UPDATE ON cleanup_queue
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 

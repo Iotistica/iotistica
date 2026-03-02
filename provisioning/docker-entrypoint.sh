@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Docker Entrypoint - Run migrations before starting app
 set -e
 
@@ -25,26 +25,22 @@ if command -v psql > /dev/null 2>&1; then
       echo "   Applying $migration_name..."
       
       # Run migration and capture output
-      if PGPASSWORD="${DB_PASSWORD}" psql \
+      PGPASSWORD="${DB_PASSWORD}" psql \
         -h "${DB_HOST:-postgres}" \
         -p "${DB_PORT:-5432}" \
         -U "${DB_USER:-billing}" \
         -d "${DB_NAME:-billing}" \
         -f "$migration" \
-        -v ON_ERROR_STOP=1 \
-        --quiet 2>&1 | grep -v "NOTICE: relation" | grep -v "NOTICE: type" | grep -v "^$"; then
+        -v ON_ERROR_STOP=1 2>&1 | grep -v "NOTICE:" || true
+      
+      # Check exit status
+      if [ ${PIPESTATUS[0]} -eq 0 ]; then
         echo "   ✓ Applied $migration_name"
       else
-        # Check if it was an actual error or just filtered output
-        exit_code=${PIPESTATUS[0]}
-        if [ $exit_code -ne 0 ]; then
-          echo "   ✗ Failed to apply $migration_name (exit code: $exit_code)"
-          echo "   ⚠️  Migration error detected - check connection settings"
-          echo "   DB_HOST=${DB_HOST:-postgres}, DB_PORT=${DB_PORT:-5432}, DB_USER=${DB_USER:-billing}"
-          exit 1
-        else
-          echo "   ✓ Applied $migration_name"
-        fi
+        echo "   ✗ Failed to apply $migration_name"
+        echo "   ⚠️  Migration error detected - check connection settings"
+        echo "   DB_HOST=${DB_HOST:-postgres}, DB_PORT=${DB_PORT:-5432}, DB_USER=${DB_USER:-billing}"
+        exit 1
       fi
     fi
   done

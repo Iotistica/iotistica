@@ -75,9 +75,15 @@ metadata:
   name: api-license-public-key-master
   namespace: {{ .Release.Namespace }}
 spec:
-  # Global license public key for JWT verification (shared across all namespaces)
+  # This item must contain a field/key named OPENAI_API_KEY
   itemPath: "vaults/IOT-CLIENTS/items/api-license-public-key-master"
 ---
+# --- Admin Password Bootstrap ---
+# Bootstrap token for provisioning automation to authorize initial admin account creation
+# Used by provisioning service to securely initialize the first admin account
+# Flow: Provisioning service generates 32-byte reset token -> hashes with bcrypt -> 
+# stores in database -> queues password reset email link -> customer follows link to set password
+# Token pulled from 1Password via OnePasswordItem CRD (api-bootstrap-token-master)
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata:
@@ -106,7 +112,7 @@ spec:
         {{- include "iotistic.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
     spec:
-     serviceAccountName: {{ include "iotistic.fullname" . }}   # Use service account with RBAC permissions
+      serviceAccountName: iotistic-api # Use service account with RBAC permissions
       terminationGracePeriodSeconds: 60  # Allow 60s for graceful shutdown
       containers:
         - name: api
@@ -190,24 +196,27 @@ spec:
               value: {{ .Values.api.env.JWT_REFRESH_TOKEN_EXPIRY}}
             {{- end }}
 
-            - name: INITIAL_ADMIN_BOOTSTRAP_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: api-bootstrap-token-master
-                  key: INITIAL_ADMIN_BOOTSTRAP_TOKEN
-            
+            # license key 
             - name: IOTISTIC_LICENSE_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.api.license.SecretName }}
                   key: key
                   
+            # public key
             - name: LICENSE_PUBLIC_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.api.publicKey.SecretName }}
                   key: key
-
+                  
+            # admin password bootstrap master token
+            - name: INITIAL_ADMIN_BOOTSTRAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: api-bootstrap-token-master
+                  key: token
+                  
             - name: DB_HOST
               valueFrom:
                 secretKeyRef:
@@ -306,20 +315,13 @@ spec:
               value: {{ .Values.redis.cluster | quote }}
             - name: CORS_ORIGINS
               value: {{ .Values.api.corsOrigins | default "http://localhost:5173,http://localhost:3001,http://localhost:3000,http://*:30000" | quote }}
-            # License configuration
-            # Public key: Read from 1Password-synced secret (shared across all namespaces)
+            {{- if .Values.api.license.publicKey }}
             - name: LICENSE_PUBLIC_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: api-license-public-key-master
-                  key: LICENSE_PUBLIC_KEY
-            # License JWT: Read from customer-specific 1Password secret
-            {{- if .Values.api.license.SecretName }}
+              value: {{ .Values.api.license.publicKey | quote }}
+            {{- end }}
+            {{- if .Values.api.license.key }}
             - name: IOTISTIC_LICENSE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.api.license.SecretName }}
-                  key: key
+              value: {{ .Values.api.license.key | quote }}
             {{- end }}
           livenessProbe:
             httpGet:
@@ -390,12 +392,6 @@ spec:
         periodSeconds: 30
       selectPolicy: Max  # Use whichever policy allows faster scaling
 {{- end }}
-            # --- Admin Password Bootstrap ---
-            # Bootstrap token for provisioning automation to authorize initial admin account creation
-            # Used by provisioning service to securely initialize the first admin account
-            # Flow: Provisioning service generates 32-byte reset token -> hashes with bcrypt -> 
-            # stores in database -> queues password reset email link -> customer follows link to set password
-            # Token pulled from 1Password via OnePasswordItem CRD (api-bootstrap-token-master)
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:

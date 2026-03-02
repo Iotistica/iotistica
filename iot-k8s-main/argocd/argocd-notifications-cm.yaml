@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+  namespace: iotistica-argocd
+data:
+  # Service for GitHub webhook
+  service.github-webhook: |
+    token: $github-token-iotistica-argocd
+
+  # Template: GitHub repository dispatch payload
+  templates.github-webhook: |
+    webhook:
+      url: https://api.github.com/repos/Iotistica/iot-k8s/dispatches
+      method: POST
+      headers:
+        Authorization: token $github-token-iotistica-argocd
+        Accept: application/vnd.github+json
+      body: |
+        {
+          "event_type": "argo-sync-{{app.status.sync.status | lower}}",
+          "client_payload": {
+            "app": "{{app.metadata.name}}",
+            "revision": "{{app.status.sync.revision}}",
+            "health": "{{app.status.health.status}}"
+          }
+        }
+
+  # Trigger notifications on sync events
+  triggers.on-sync-succeeded: |
+    - send:
+        - github-webhook
+  triggers.on-sync-failed: |
+    - send:
+        - github-webhook

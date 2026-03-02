@@ -1,0 +1,134 @@
+name: Kubernetes - Deploy Iotistic (Nodeport)
+
+# Trigger manually or from release workflow
+on:
+  workflow_dispatch:
+    inputs:
+      destroy:
+        description: 'If true will destroy the deployed Iotistic app'
+        required: false
+        default: 'false'
+        type: boolean
+
+      clean_before_deploy:
+        description: 'If true, delete Helm release + namespace before deploying'
+        required: false
+        default: false
+        type: boolean
+
+      release_version:
+        description: 'Release version to deploy (e.g., v1.2.3). Leave empty for latest.'
+        required: false
+        type: string
+        default: 'latest'
+
+  workflow_call:
+    inputs:
+      release_version:
+        description: 'Release version to deploy (e.g., v1.2.3)'
+        required: true
+        type: string
+
+      clean_before_deploy:
+        description: 'If true, delete Helm release + namespace before deploying'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  test-on-tagged-runner:
+    runs-on: [iotistic-lab-sc]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ------------------------------------
+      # OPTIONAL CLEAN BEFORE DEPLOY
+      # ------------------------------------
+      - name: Cleanup previous Helm release (before deploy)
+        if: ${{ inputs.destroy == false && inputs.clean_before_deploy == true }}
+        run: |
+          set -e
+          NAMESPACE=iotistic-nodeport
+
+          echo "Deleting previous Helm release (if exists)..."
+          helm uninstall iotistic -n "${NAMESPACE}" || true
+
+          echo "Deleting namespace (if exists)..."
+          kubectl delete namespace "${NAMESPACE}" --ignore-not-found --wait
+
+          echo "Waiting for namespace finalizers to clear..."
+          for i in {1..10}; do
+            if ! kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1; then
+              echo "Namespace removed."; break
+            fi
+            echo "Namespace still terminating... waiting"
+            sleep 3
+          done
+
+      # ------------------------------------
+      # DEPLOY
+      # ------------------------------------
+      - name: Deploy Iotistic NodePort (helm)
+        if: ${{ inputs.destroy == false }}
+        run: |
+          set -e
+          CHART_PATH=./k8s/charts/iotistic
+          VALUES_FILE=./k8s/charts/iotistic/values.yaml
+          NAMESPACE=iotistic-nodeport
+          RELEASE_VERSION="${{ inputs.release_version || 'latest' }}"
+
+          echo "Installing Helm chart with version: $RELEASE_VERSION"
+          helm upgrade --install iotistic "${CHART_PATH}" \
+            --namespace "${NAMESPACE}" \
+            --create-namespace \
+            -f "${VALUES_FILE}" \
+            --set api.image.tag="${RELEASE_VERSION}" \
+            --set dashboard.image.tag="${RELEASE_VERSION}" \
+            --wait \
+            --timeout 5m
+
+          kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-api --timeout=180s || true
+          kubectl -n "${NAMESPACE}" rollout status deploy/iotistic-dashboard --timeout=180s || true
+          kubectl -n "${NAMESPACE}" get svc -o wide
+          kubectl -n "${NAMESPACE}" get pods -o wide
+
+      - name: Display Deployment Info
+        if: ${{ inputs.destroy == false }}
+        run: |
+          NAMESPACE=iotistic-nodeport
+          RELEASE_VERSION="${{ inputs.release_version || 'latest' }}"
+          
+          echo "## Kubernetes Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`$RELEASE_VERSION\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Namespace:** \`$NAMESPACE\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Services" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          kubectl -n "$NAMESPACE" get svc >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Pods" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          kubectl -n "$NAMESPACE" get pods >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Access URLs" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dashboard:** http://localhost:30000" >> $GITHUB_STEP_SUMMARY
+          echo "- **API:** http://localhost:30002" >> $GITHUB_STEP_SUMMARY
+
+      # ------------------------------------
+      # DESTROY
+      # ------------------------------------
+      - name: Destroy deployed Iotistic NodePort (helm)
+        if: ${{ inputs.destroy == true }}
+        run: |
+          set -e
+          NAMESPACE=iotistic-nodeport
+          helm uninstall iotistic -n "${NAMESPACE}" || true
+          kubectl delete namespace "${NAMESPACE}" --wait --ignore-not-found

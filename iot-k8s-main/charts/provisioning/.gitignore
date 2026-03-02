@@ -1,0 +1,5 @@
+# Helm dependency charts
+charts/
+
+# Helm lock file (optional - can be committed for reproducibility)
+# Chart.lock

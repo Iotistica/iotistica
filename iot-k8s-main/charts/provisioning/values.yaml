@@ -1,0 +1,104 @@
+# Provisioning Service - Default Values
+
+global:
+  namespace: provisioning
+
+# API Service
+api:
+  enabled: true
+  image:
+    repository: iotistic/provisioning-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 3100
+  serviceType: ClusterIP
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+  env:
+    NODE_ENV: production
+    BASE_DOMAIN: iotistica.com
+    DEFAULT_TRIAL_DAYS: "14"
+    GITOPS_ENABLED: "true"
+    GITOPS_REPO_URL: https://github.com/Iotistica/iot-k8s-main
+    GITOPS_BRANCH: main
+    GITOPS_AUTHOR_NAME: Iotistica Provisioning Bot
+    GITOPS_AUTHOR_EMAIL: info@iotistica.com
+    SIMULATE_K8S_DEPLOYMENT: "false"
+    SIMULATE_TIGERDATA: "false"
+    SIMULATE_ONEPASSWORD: "false"
+    SKIP_ARGOCD_STATUS_CHECK: "false"
+
+# Worker Service  
+worker:
+  enabled: true
+  image:
+    repository: iotistic/provisioning-worker
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  concurrency: 3
+  retryAttempts: 3
+  retryDelay: 60000
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+  env:
+    NODE_ENV: production
+    BASE_DOMAIN: iotistica.com
+    GITOPS_ENABLED: "true"
+    GITOPS_REPO_URL: https://github.com/Iotistica/iot-k8s-main
+    GITOPS_BRANCH: main
+    GITOPS_AUTHOR_NAME: Iotistica Provisioning Bot
+    GITOPS_AUTHOR_EMAIL: info@iotistica.com
+    SIMULATE_K8S_DEPLOYMENT: "false"
+    SIMULATE_TIGERDATA: "false"
+    SIMULATE_ONEPASSWORD: "false"
+    SKIP_ARGOCD_STATUS_CHECK: "false"
+
+# PostgreSQL (custom deployment using official postgres:15-alpine)
+postgres:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "15-alpine"
+  database: billing
+  storage:
+    size: 10Gi
+    storageClass: ""  # Use default storage class
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+# PostgreSQL (Bitnami chart - disabled, using custom deployment above)
+postgresql:
+  enabled: false
+
+# Redis (Bitnami)
+redis:
+  enabled: false  # Using external Azure Redis instead
+
+# External Redis (used when redis.enabled: false)
+externalRedis:
+  host: ""  # e.g., redis.iotistica.com
+  port: 6379
+
+# Ingress (Envoy Gateway HTTPRoute)
+ingress:
+  enabled: true
+  hostname: iotistica.com
+  gateway: eg
+  gatewayNamespace: envoy-gateway-system

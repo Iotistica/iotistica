@@ -1,0 +1,190 @@
+{{- if and .Values.worker .Values.worker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "provisioning.fullname" . }}-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "provisioning.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      {{- include "provisioning.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "provisioning.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          securityContext:
+            runAsUser: 1001
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            privileged: false
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 30"]
+          env:
+            - name: NODE_ENV
+              value: {{ .Values.worker.env.NODE_ENV | quote }}
+            - name: BASE_DOMAIN
+              value: {{ .Values.worker.env.BASE_DOMAIN | quote }}
+            - name: BASE_URL
+              value: "https://{{ .Values.worker.env.BASE_DOMAIN }}/provisioning/api"
+            
+            # Database (PostgreSQL)
+            - name: DB_HOST
+              value: {{ include "provisioning.fullname" . }}-postgres
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: {{ .Values.postgres.database }}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-db-credentials
+                  key: user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-db-credentials
+                  key: password
+            - name: DATABASE_URL
+              value: "postgresql://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)"
+            
+            # Redis
+            - name: REDIS_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials-master
+                  key: host
+            - name: REDIS_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials-master
+                  key: port_ext
+            - name: REDIS_DB
+              value: "0"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials-master
+                  key: password
+            - name: REDIS_USERNAME
+              value: ""
+            - name: REDIS_CLUSTER
+              value: "false"
+            - name: REDIS_TLS
+              value: "false"
+            - name: REDIS_USE_TLS
+              value: "false"
+            
+            # Worker configuration (Bull queue)
+            - name: QUEUE_CONCURRENCY
+              value: {{ .Values.worker.concurrency | quote }}
+            - name: QUEUE_MAX_RETRIES
+              value: {{ .Values.worker.retryAttempts | quote }}
+            - name: QUEUE_RETRY_DELAY
+              value: {{ .Values.worker.retryDelay | quote }}
+            
+            # License Keys
+            - name: LICENSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: api-license-public-key-master
+                  key: key
+            
+            # TigerData
+            - name: TIGERDATA_API_URL
+              value: "https://console.cloud.timescale.com/public/api/v1"
+            - name: TIGERDATA_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-tigerdata-credentials
+                  key: access-key
+            - name: TIGERDATA_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-tigerdata-credentials
+                  key: secret-key
+            - name: TIGERDATA_PROJECT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-tigerdata-credentials
+                  key: project-id
+            - name: TIGERDATA_DEFAULT_REGION
+              value: "us-east-1"
+            - name: TIGERDATA_DEFAULT_PLAN
+              value: "dev"
+            - name: SIMULATE_TIGERDATA
+              value: {{ .Values.worker.env.SIMULATE_TIGERDATA | quote }}
+            
+            # 1Password
+            - name: ONEPASSWORD_CONNECT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-onepassword-credentials
+                  key: token
+            - name: ONEPASSWORD_VAULT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-onepassword-credentials
+                  key: vault-id
+            - name: SIMULATE_ONEPASSWORD
+              value: {{ .Values.worker.env.SIMULATE_ONEPASSWORD | quote }}
+            
+            # GitOps
+            - name: GITOPS_ENABLED
+              value: {{ .Values.worker.env.GITOPS_ENABLED | quote }}
+            - name: GITOPS_REPO_URL
+              value: {{ .Values.worker.env.GITOPS_REPO_URL | quote }}
+            - name: GITOPS_BRANCH
+              value: {{ .Values.worker.env.GITOPS_BRANCH | quote }}
+            - name: GITOPS_REPO_DIR
+              value: "/tmp/iot-k8s-main"
+            - name: GITOPS_PAT
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-gitops-credentials
+                  key: pat
+            - name: GITOPS_AUTHOR_NAME
+              value: {{ .Values.worker.env.GITOPS_AUTHOR_NAME | quote }}
+            - name: GITOPS_AUTHOR_EMAIL
+              value: {{ .Values.worker.env.GITOPS_AUTHOR_EMAIL | quote }}
+            
+            # Argo CD
+            - name: ARGOCD_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-argocd-credentials
+                  key: url
+            - name: ARGOCD_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-argocd-credentials
+                  key: token
+            - name: ARGOCD_NAMESPACE
+              value: "argocd"
+            - name: ARGOCD_MAX_RETRIES
+              value: "10"
+            - name: ARGOCD_RETRY_DELAY
+              value: "5000"
+            - name: SKIP_ARGOCD_STATUS_CHECK
+              value: {{ .Values.worker.env.SKIP_ARGOCD_STATUS_CHECK | quote }}
+            
+            # Legacy deployment
+            - name: SIMULATE_K8S_DEPLOYMENT
+              value: {{ .Values.worker.env.SIMULATE_K8S_DEPLOYMENT | quote }}
+          
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+{{- end }}

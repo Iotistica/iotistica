@@ -1,0 +1,372 @@
+{{- if and .Values.api .Values.api.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "provisioning.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "provisioning.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: {{ .Values.api.serviceType }}
+  ports:
+    - port: {{ .Values.api.port }}
+      targetPort: api
+      protocol: TCP
+      name: api
+  selector:
+    {{- include "provisioning.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: provisioning-db-credentials
+  namespace: {{ .Release.Namespace }}
+spec:
+  itemPath: "vaults/IOT-CLIENTS/items/provisioning-db-credentials"
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: redis-credentials-master
+  namespace: {{ .Release.Namespace }}
+spec:
+  itemPath: "vaults/IOT-CLIENTS/items/redis-credentials-master"
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: provisioning-stripe-credentials
+  namespace: {{ .Release.Namespace }}
+spec:
+  itemPath: "vaults/IOT-CLIENTS/items/provisioning-stripe-credentials"
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: provisioning-auth0-credentials
+  namespace: {{ .Release.Namespace }}
+spec:
+  itemPath: "vaults/IOT-CLIENTS/items/provisioning-auth0-credentials"
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: provisioning-tigerdata-credentials
+  namespace: {{ .Release.Namespace }}
+spec:
+  itemPath: "vaults/IOT-CLIENTS/items/provisioning-tigerdata-credentials"
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: provisioning-onepassword-credentials
+  namespace: {{ .Release.Namespace }}
+spec:
+  itemPath: "vaults/IOT-CLIENTS/items/provisioning-onepassword-credentials"
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: provisioning-gitops-credentials
+  namespace: {{ .Release.Namespace }}
+spec:
+  itemPath: "vaults/IOT-CLIENTS/items/provisioning-gitops-credentials"
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: provisioning-argocd-credentials
+  namespace: {{ .Release.Namespace }}
+spec:
+  itemPath: "vaults/IOT-CLIENTS/items/provisioning-argocd-credentials"
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: api-license-public-key-master
+  namespace: {{ .Release.Namespace }}
+spec:
+  itemPath: "vaults/IOT-CLIENTS/items/api-license-public-key-master"
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: provisioning-jwt-secret
+  namespace: {{ .Release.Namespace }}
+spec:
+  itemPath: "vaults/IOT-CLIENTS/items/provisioning-jwt-secret"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "provisioning.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "provisioning.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      {{- include "provisioning.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        {{- include "provisioning.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: api
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          securityContext:
+            runAsUser: 1001
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            privileged: false
+          ports:
+            - name: api
+              containerPort: {{ .Values.api.port }}
+              protocol: TCP
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 15"]
+          env:
+            - name: PORT
+              value: {{ .Values.api.port | quote }}
+            - name: NODE_ENV
+              value: {{ .Values.api.env.NODE_ENV | quote }}
+            - name: BASE_DOMAIN
+              value: {{ .Values.api.env.BASE_DOMAIN | quote }}
+            - name: BASE_URL
+              value: "https://{{ .Values.api.env.BASE_DOMAIN }}/provisioning/api"
+            - name: WEBSITE_URL
+              value: "https://{{ .Values.api.env.BASE_DOMAIN }}"
+            - name: DEFAULT_TRIAL_DAYS
+              value: {{ .Values.api.env.DEFAULT_TRIAL_DAYS | quote }}
+            
+            # Database (PostgreSQL)
+            - name: DB_HOST
+              value: {{ include "provisioning.fullname" . }}-postgres
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: {{ .Values.postgres.database }}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-db-credentials
+                  key: user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-db-credentials
+                  key: password
+            - name: DATABASE_URL
+              value: "postgresql://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)"
+            
+            # Redis
+            - name: REDIS_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials-master
+                  key: host
+            - name: REDIS_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials-master
+                  key: port_ext
+            - name: REDIS_DB
+              value: "0"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-credentials-master
+                  key: password
+            - name: REDIS_USERNAME
+              value: ""
+            - name: REDIS_CLUSTER
+              value: "false"
+            - name: REDIS_TLS
+              value: "false"
+            - name: REDIS_USE_TLS
+              value: "false"
+            
+            # Stripe
+            - name: STRIPE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-stripe-credentials
+                  key: secret-key
+            - name: STRIPE_PUBLISHABLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-stripe-credentials
+                  key: publishable-key
+            - name: STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-stripe-credentials
+                  key: webhook-secret
+            - name: STRIPE_PRICE_STARTER
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-stripe-credentials
+                  key: price-starter
+            - name: STRIPE_PRICE_PROFESSIONAL
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-stripe-credentials
+                  key: price-professional
+            - name: STRIPE_PRICE_ENTERPRISE
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-stripe-credentials
+                  key: price-enterprise
+            
+            # Auth0
+            - name: AUTH0_DOMAIN
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-auth0-credentials
+                  key: domain
+            - name: AUTH0_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-auth0-credentials
+                  key: client-id
+            - name: AUTH0_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-auth0-credentials
+                  key: client-secret
+            - name: AUTH0_AUDIENCE
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-auth0-credentials
+                  key: audience
+            - name: AUTH0_REDIRECT_URI
+              value: "https://{{ .Values.ingress.hostname }}/provisioning/api/auth/callback-auth0"
+            
+            # JWT
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-jwt-secret
+                  key: secret
+            - name: JWT_ACCESS_TOKEN_EXPIRY
+              value: "15m"
+            - name: JWT_REFRESH_TOKEN_EXPIRY
+              value: "7d"
+            
+            # License Keys
+            - name: LICENSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: api-license-public-key-master
+                  key: key
+            
+            # TigerData
+            - name: TIGERDATA_API_URL
+              value: "https://console.cloud.timescale.com/public/api/v1"
+            - name: TIGERDATA_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-tigerdata-credentials
+                  key: access-key
+            - name: TIGERDATA_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-tigerdata-credentials
+                  key: secret-key
+            - name: TIGERDATA_PROJECT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-tigerdata-credentials
+                  key: project-id
+            - name: TIGERDATA_DEFAULT_REGION
+              value: "us-east-1"
+            - name: TIGERDATA_DEFAULT_PLAN
+              value: "dev"
+            - name: SIMULATE_TIGERDATA
+              value: {{ .Values.api.env.SIMULATE_TIGERDATA | quote }}
+            
+            # 1Password
+            - name: ONEPASSWORD_CONNECT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-onepassword-credentials
+                  key: token
+            - name: ONEPASSWORD_VAULT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-onepassword-credentials
+                  key: vault-id
+            - name: SIMULATE_ONEPASSWORD
+              value: {{ .Values.api.env.SIMULATE_ONEPASSWORD | quote }}
+            
+            # GitOps
+            - name: GITOPS_ENABLED
+              value: {{ .Values.api.env.GITOPS_ENABLED | quote }}
+            - name: GITOPS_REPO_URL
+              value: {{ .Values.api.env.GITOPS_REPO_URL | quote }}
+            - name: GITOPS_BRANCH
+              value: {{ .Values.api.env.GITOPS_BRANCH | quote }}
+            - name: GITOPS_REPO_DIR
+              value: "/tmp/iot-k8s-main"
+            - name: GITOPS_PAT
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-gitops-credentials
+                  key: pat
+            - name: GITOPS_AUTHOR_NAME
+              value: {{ .Values.api.env.GITOPS_AUTHOR_NAME | quote }}
+            - name: GITOPS_AUTHOR_EMAIL
+              value: {{ .Values.api.env.GITOPS_AUTHOR_EMAIL | quote }}
+            
+            # Argo CD
+            - name: ARGOCD_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-argocd-credentials
+                  key: url
+            - name: ARGOCD_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-argocd-credentials
+                  key: token
+            - name: ARGOCD_NAMESPACE
+              value: "argocd"
+            - name: ARGOCD_MAX_RETRIES
+              value: "10"
+            - name: ARGOCD_RETRY_DELAY
+              value: "5000"
+            - name: SKIP_ARGOCD_STATUS_CHECK
+              value: {{ .Values.api.env.SKIP_ARGOCD_STATUS_CHECK | quote }}
+            
+            # Legacy deployment
+            - name: SIMULATE_K8S_DEPLOYMENT
+              value: {{ .Values.api.env.SIMULATE_K8S_DEPLOYMENT | quote }}
+          
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: api
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: api
+            initialDelaySeconds: 10
+            periodSeconds: 5
+{{- end }}

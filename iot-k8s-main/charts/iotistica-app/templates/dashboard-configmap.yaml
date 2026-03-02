@@ -1,0 +1,36 @@
+{{- if and .Values.dashboard .Values.dashboard.enabled }}
+---
+# Dashboard Runtime Configuration ConfigMap
+# 
+# This ConfigMap provides runtime configuration for the React/Vite dashboard.
+# It replaces the config.js file in the built assets, allowing the same
+# Docker image to be deployed to multiple clients with different API URLs.
+#
+# How it works:
+# 1. Dashboard build creates a placeholder config.js in /usr/share/nginx/html/
+# 2. This ConfigMap mounts over it with client-specific values
+# 3. index.html loads config.js before the React app starts
+# 4. Dashboard code reads from window.env (runtime) with fallback to import.meta.env (build-time)
+#
+# Benefits:
+# - Build once, deploy anywhere (same image for all clients)
+# - No rebuild needed to change API URL
+# - Follows Kubernetes best practices
+# - Easy to update config without redeploying pods
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "iotistic.fullname" . }}-dashboard-config
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dashboard
+data:
+  config.js: |
+    // Runtime configuration injected by Kubernetes ConfigMap
+    window.env = {
+      VITE_API_URL: '{{ .Values.dashboard.apiUrl }}',
+      NODE_ENV: '{{ .Values.dashboard.env.NODE_ENV }}',
+      APP_VERSION: '{{ .Values.dashboard.env.APP_VERSION | default .Values.dashboard.image.tag }}'
+    };
+{{- end }}

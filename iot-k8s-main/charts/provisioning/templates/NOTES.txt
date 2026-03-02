@@ -1,0 +1,36 @@
+✅ Provisioning Service deployed successfully!
+
+Release: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+📋 Components deployed:
+{{- if .Values.api.enabled }}
+  ✓ API ({{ .Values.api.replicas }} replicas)
+{{- end }}
+{{- if .Values.worker.enabled }}
+  ✓ Worker ({{ .Values.worker.replicas }} replicas)
+{{- end }}
+{{- if .Values.postgresql.enabled }}
+  ✓ PostgreSQL
+{{- end }}
+{{- if .Values.redis.enabled }}
+  ✓ Redis
+{{- end }}
+
+{{- if .Values.ingress.enabled }}
+
+🌐 Access the API at:
+   https://{{ .Values.ingress.hostname }}/api
+
+{{- end }}
+
+📊 Check deployment status:
+   kubectl get pods -n {{ .Release.Namespace }}
+
+📝 View API logs:
+   kubectl logs -n {{ .Release.Namespace }} deployment/{{ include "provisioning.fullname" . }}-api
+
+📝 View Worker logs:
+   kubectl logs -n {{ .Release.Namespace }} deployment/{{ include "provisioning.fullname" . }}-worker
+
+⚠️  Make sure all 1Password secrets are created (see README.md)

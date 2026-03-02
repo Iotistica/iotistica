@@ -1,0 +1,32 @@
+name: ArgoCD Deployment Status
+
+on:
+  repository_dispatch:
+    types: [argo-sync-succeeded, argo-sync-failed]
+
+jobs:
+  handle-deployment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log ArgoCD event
+        run: |
+          echo "Event type: ${{ github.event.action }}"
+          echo "Application: ${{ github.event.client_payload.app }}"
+          echo "Revision: ${{ github.event.client_payload.revision }}"
+          echo "Health: ${{ github.event.client_payload.health }}"
+
+      - name: Create Summary
+        run: |
+          STATUS="${{ github.event.action }}"
+          APP="${{ github.event.client_payload.app }}"
+          REV="${{ github.event.client_payload.revision }}"
+          HEALTH="${{ github.event.client_payload.health }}"
+
+          echo "## ArgoCD Deployment Result" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Application | $APP |" >> $GITHUB_STEP_SUMMARY
+          echo "| Revision | $REV |" >> $GITHUB_STEP_SUMMARY
+          echo "| Sync Status | $STATUS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Health | $HEALTH |" >> $GITHUB_STEP_SUMMARY

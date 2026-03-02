@@ -81,7 +81,7 @@ roleRef:
   name: iotistic-fleet-namespace-manager  # Static name (matches Kyverno policy)
 subjects:
   - kind: ServiceAccount
-    name: {{ include "iotistic.fullname" $.Release }}
+    name: iotistic-api
     namespace: {{ $.Release.Namespace }}  # Use the release namespace (e.g., demo, billing, customer-specific)
 
 ---

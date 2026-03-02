@@ -1,0 +1,36 @@
+# Example: Development Environment (10 agents)
+fleet:
+  name: agent-fleet-dev
+  replicaCount: 10
+  cloudApiEndpoint: https://dev-api.iotistic.com
+  fleetId: dev-fleet-001
+
+agent:
+  image:
+    repository: iotistica/agent
+    tag: "latest"
+  resources:
+    requests:
+      memory: "128Mi"  # Lower for dev
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+
+simulator:
+  vendor: "siemens"  # Test with specific vendor
+  slaves: 3          # Fewer devices for dev
+
+persistence:
+  enabled: true
+  size: "500Mi"      # Smaller for dev
+
+monitoring:
+  serviceMonitor:
+    enabled: false  # No Prometheus in dev
+
+podDisruptionBudget:
+  enabled: false    # Not needed for dev
+
+# Deploy with:
+# helm install agent-fleet-dev ./k8s/charts/agent-fleet -f examples/dev-values.yaml -n agent-fleet-dev
