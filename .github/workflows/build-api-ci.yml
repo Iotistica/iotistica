@@ -162,11 +162,16 @@ jobs:
       
           jq -r '
             .runs[].results[] |
-            "- **\(.ruleId)**  
-              Package: \(.properties.packageName // "N/A")  
-              Installed: \(.properties.installedVersion // "N/A")  
-              Fixed: \(.properties.fixedVersion // "N/A")  
-              Severity: \(.level)"
+            select(.level != "none") |
+            {
+              cve: .ruleId,
+              package: (.properties.package // .message.text | split("\n")[0]),
+              installed: (.properties.version // "N/A"),
+              fixed: (.properties.fixedVersion // "N/A"),
+              severity: .level,
+              message: (.message.text // "")
+            } |
+            "- **\(.cve)** | Package: \(.package) | Installed: \(.installed) | Fixed: \(.fixed) | Severity: \(.severity)"
           ' trivy-results.sarif | head -20 >> $GITHUB_STEP_SUMMARY
 
       - name: Fail build if critical vulnerabilities found
