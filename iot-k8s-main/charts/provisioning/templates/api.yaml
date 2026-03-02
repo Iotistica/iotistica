@@ -196,14 +196,12 @@ spec:
                 secretKeyRef:
                   name: redis-credentials-master
                   key: password
-            - name: REDIS_USERNAME
-              value: ""
             - name: REDIS_CLUSTER
-              value: "false"
+              value: {{ .Values.redis.cluster | quote }}
             - name: REDIS_TLS
-              value: "false"
+              value: {{ .Values.redis.tls | quote }}
             - name: REDIS_USE_TLS
-              value: "false"
+              value: {{ .Values.redis.tls | quote }}
             
             # Stripe
             - name: STRIPE_SECRET_KEY

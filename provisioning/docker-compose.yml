@@ -59,11 +59,10 @@ services:
       DB_NAME: billing
       
       # Redis (for deployment queue)
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_DB: 0
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      REDIS_USERNAME: ${REDIS_USERNAME:-}
       REDIS_CLUSTER: ${REDIS_CLUSTER:-false}
       REDIS_TLS: ${REDIS_TLS:-false}
       REDIS_USE_TLS: ${REDIS_USE_TLS:-false}
@@ -161,11 +160,10 @@ services:
       DB_NAME: billing 
       
       # Redis (for deployment queue)
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_DB: 0
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      REDIS_USERNAME: ${REDIS_USERNAME:-}
       REDIS_CLUSTER: ${REDIS_CLUSTER:-false}
       REDIS_TLS: ${REDIS_TLS:-false}
       REDIS_USE_TLS: ${REDIS_USE_TLS:-false}

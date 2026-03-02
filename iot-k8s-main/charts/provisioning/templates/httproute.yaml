@@ -13,6 +13,7 @@ spec:
   hostnames:
     - {{ .Values.ingress.hostname }}
   rules:
+    # Health check endpoint (public, unauthenticated)
     - matches:
         - path:
             type: Exact
@@ -26,6 +27,25 @@ spec:
       backendRefs:
         - name: {{ include "provisioning.fullname" . }}-api
           port: {{ .Values.api.port }}
+    
+    # Bull admin dashboard exposed at /admin/queues
+    # IP filtering happens via load balancer X-Forwarded-For header
+    # Only accessible from: 99.240.230.189
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /admin/queues
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /admin/queues
+      backendRefs:
+        - name: {{ include "provisioning.fullname" . }}-api
+          port: {{ .Values.api.port }}
+    
+    # API endpoints (webhooks, queue management endpoints)
     - matches:
         - path:
             type: PathPrefix

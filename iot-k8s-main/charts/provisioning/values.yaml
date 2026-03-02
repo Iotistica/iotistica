@@ -90,6 +90,8 @@ postgresql:
 # Redis (Bitnami)
 redis:
   enabled: false  # Using external Azure Redis instead
+  tls: true       # Azure Redis requires TLS for external connections
+  cluster: false  # Set to true if using Redis Cluster mode
 
 # External Redis (used when redis.enabled: false)
 externalRedis:

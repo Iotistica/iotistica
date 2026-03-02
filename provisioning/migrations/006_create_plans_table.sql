@@ -32,8 +32,8 @@ CREATE TABLE IF NOT EXISTS plans (
 );
 
 -- Indexes
-CREATE INDEX idx_plans_plan_name ON plans(plan_name);
-CREATE INDEX idx_plans_active ON plans(is_active);
+CREATE INDEX IF NOT EXISTS idx_plans_plan_name ON plans(plan_name);
+CREATE INDEX IF NOT EXISTS idx_plans_active ON plans(is_active);
 
 -- Plan history for audit trail
 CREATE TABLE IF NOT EXISTS plan_history (
@@ -156,6 +156,6 @@ INSERT INTO plans (plan_name, display_name, description, price_cents, features, 
   }'::jsonb,
   0,
   4
-);
+) ON CONFLICT (plan_name) DO NOTHING;
 
 -- Note: -1 in features means unlimited

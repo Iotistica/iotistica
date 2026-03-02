@@ -6,6 +6,8 @@ global:
   namespace: {{CLIENT_ID}}
 redis:
   enabled: false
+  tls: false     # Working configuration in production
+  cluster: true  # Azure Redis is in cluster mode
 # Mosquitto MQTT broker
 mosquitto:
   enabled: true
@@ -111,8 +113,6 @@ api:
     SecretName: "mqtt-credentials-{{CLIENT_ID}}"
   redis:
     SecretName: "redis-credentials-master"
-    cluster: true # Set to true if using Redis Cluster
-    tls: false # Set to true if Redis requires TLS
   openai:
     SecretName: "openai-credentials-master"
   jwt:

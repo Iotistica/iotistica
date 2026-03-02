@@ -1,5 +1,6 @@
 import Bull, { Queue, Job, JobOptions } from 'bull';
 import { EventEmitter } from 'events';
+import IORedis, { RedisOptions } from 'ioredis';
 
 export interface DeploymentJobData {
   customerId: string;
@@ -39,46 +40,74 @@ export class DeploymentQueue extends EventEmitter {
     super();
 
     // Initialize Bull queue with Redis connection (Azure-compatible)
+    // Note: Azure Redis with clustering is accessed as a single endpoint (standalone mode)
+    // Azure handles sharding internally - no Redis Cluster protocol needed from client
     const host = process.env.REDIS_HOST || 'localhost';
     const port = parseInt(process.env.REDIS_PORT || '6379');
-    const username = process.env.REDIS_USERNAME || undefined;
     const password = process.env.REDIS_PASSWORD || undefined;
     const db = parseInt(process.env.REDIS_DB || '0');
     
-    const tlsFlag = (process.env.REDIS_TLS || process.env.REDIS_USE_TLS || '')
+    const tlsFlag = (process.env.REDIS_TLS || process.env.REDIS_USE_TLS || process.env.REDIS_TLS_ENABLED || '')
       .toLowerCase();
     const useTls = tlsFlag === 'true' || tlsFlag === '1' || tlsFlag === 'yes';
+
+    const baseRedisOptions: RedisOptions = {
+      host,
+      port,
+      password,
+      db,
+      tls: useTls
+        ? {
+            servername: host,
+            rejectUnauthorized: true,
+          }
+        : undefined,
+      enableOfflineQueue: true,
+      enableAutoPipelining: true,
+      connectTimeout: 20000,
+      commandTimeout: 10000,
+      keepAlive: 30000,
+      maxLoadingRetryTime: 30000,
+      retryStrategy: (times: number) => {
+        if (times > 20) return null;
+        return Math.min(times * 1000, 5000);
+      },
+      reconnectOnError: (err: Error) => {
+        const targetErrors = ['READONLY', 'ECONNREFUSED', 'ETIMEDOUT'];
+        return targetErrors.some(e => err.message?.toUpperCase().includes(e));
+      },
+    };
     
     this.queue = new Bull('customer-deployments', {
       redis: {
         host,
         port,
-        username,
         password,
         db,
-        tls: useTls 
-          ? { 
-              servername: host,
-              rejectUnauthorized: true, // Azure uses valid certs
-            } 
-          : undefined,
-        // Bull requires enableOfflineQueue: true to buffer commands during connection
-        enableOfflineQueue: true,
-        connectTimeout: 10000,
-        keepAlive: 30000,
-        retryStrategy: (times) => {
-          return Math.min(times * 50, 2000);
-        },
+        tls: baseRedisOptions.tls,
+      },
+      createClient: (type: 'client' | 'subscriber' | 'bclient', redisOpts: RedisOptions) => {
+        if (type === 'client') {
+          return new IORedis({
+            ...baseRedisOptions,
+            ...redisOpts,
+            enableReadyCheck: true,
+            maxRetriesPerRequest: 20,
+          });
+        }
+
+        return new IORedis({
+          ...baseRedisOptions,
+          ...redisOpts,
+          enableReadyCheck: false,
+          maxRetriesPerRequest: null,
+        });
       },
       settings: {
-        // Stall interval: how often to check if job is still processing.
-        // GitOps provisioning includes long-running steps (DB provisioning, secrets, git push, Argo sync)
-        // that can exceed 1 minute without yielding in some environments.
-        stalledInterval: 300000, // 5 minutes (default is 5s)
-        // Max times a job can stall before failing
+        stalledInterval: 300000,
         maxStalledCount: 10,
       },
-      prefix: 'provisioning', // Namespace Bull keys
+      prefix: 'provisioning',
       defaultJobOptions: {
         attempts: parseInt(process.env.QUEUE_MAX_RETRIES || '5'),
         backoff: {
