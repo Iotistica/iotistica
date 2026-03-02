@@ -129,14 +129,39 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '0'
       
-      # Upload Trivy results to GitHub Security tab
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v4
-        if: always()
-        continue-on-error: true
-        with:
-          sarif_file: 'trivy-results.sarif'
-          category: 'trivy-api'
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+        
+      - name: Parse Trivy SARIF Results
+        id: trivy_summary
+        run: |
+          if [ ! -f trivy-results.sarif ]; then
+            echo "No SARIF file found"
+            exit 0
+          fi
+
+          CRITICAL=$(jq '[.runs[].results[] | select(.level=="error")] | length' trivy-results.sarif)
+          HIGH=$(jq '[.runs[].results[] | select(.level=="warning")] | length' trivy-results.sarif)
+          TOTAL=$(jq '[.runs[].results[]] | length' trivy-results.sarif)
+
+          echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+          echo "high=$HIGH" >> $GITHUB_OUTPUT
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+
+          echo "## 🔐 Trivy Security Scan" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Critical | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
+          echo "| High     | $HIGH |" >> $GITHUB_STEP_SUMMARY
+          echo "| Total    | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail build if critical vulnerabilities found
+        if: steps.trivy_summary.outputs.critical != '0'
+        run: |
+          echo "Critical vulnerabilities detected. Failing build."
+          exit 1
 
       # Push scanned image to registry
       - name: Push image to Docker Hub
