@@ -132,22 +132,22 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
         
-      - name: Parse Trivy SARIF Results
+      - name: Parse Trivy SARIF Results (Detailed)
         id: trivy_summary
         run: |
           if [ ! -f trivy-results.sarif ]; then
             echo "No SARIF file found"
             exit 0
           fi
-
+      
           CRITICAL=$(jq '[.runs[].results[] | select(.level=="error")] | length' trivy-results.sarif)
           HIGH=$(jq '[.runs[].results[] | select(.level=="warning")] | length' trivy-results.sarif)
           TOTAL=$(jq '[.runs[].results[]] | length' trivy-results.sarif)
-
+      
           echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
           echo "high=$HIGH" >> $GITHUB_OUTPUT
           echo "total=$TOTAL" >> $GITHUB_OUTPUT
-
+      
           echo "## 🔐 Trivy Security Scan" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
@@ -156,24 +156,35 @@ jobs:
           echo "| High     | $HIGH |" >> $GITHUB_STEP_SUMMARY
           echo "| Total    | $TOTAL |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-
-      - name: Fail build if critical vulnerabilities found
-        if: steps.trivy_summary.outputs.critical != '0'
-        run: |
-          echo "Critical vulnerabilities detected. Failing build."
-          exit 1
-
-      # Push scanned image to registry
-      - name: Push image to Docker Hub
-        if: success()
-        run: docker push iotistic/api:ci-${{ steps.sha.outputs.short_sha }}
-
-      # Move cache to prevent unlimited growth
-      - name: Move cache
-        if: always()
-        run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+      
+          echo "## 🚨 Vulnerability Details (Top 20)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+      
+          jq -r '
+            .runs[].results[] |
+            "- **\(.ruleId)**  
+              Package: \(.properties.packageName // "N/A")  
+              Installed: \(.properties.installedVersion // "N/A")  
+              Fixed: \(.properties.fixedVersion // "N/A")  
+              Severity: \(.level)"
+          ' trivy-results.sarif | head -20 >> $GITHUB_STEP_SUMMARY
+            - name: Fail build if critical vulnerabilities found
+              if: steps.trivy_summary.outputs.critical != '0'
+              run: |
+                echo "Critical vulnerabilities detected. Failing build."
+                exit 1
+      
+            # Push scanned image to registry
+            - name: Push image to Docker Hub
+              if: success()
+              run: docker push iotistic/api:ci-${{ steps.sha.outputs.short_sha }}
+      
+            # Move cache to prevent unlimited growth
+            - name: Move cache
+              if: always()
+              run: |
+                rm -rf /tmp/.buildx-cache
+                mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
 
   report:
     name: Generate Reports
