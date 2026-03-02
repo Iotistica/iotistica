@@ -185,6 +185,28 @@ spec:
             - name: SIMULATE_K8S_DEPLOYMENT
               value: {{ .Values.worker.env.SIMULATE_K8S_DEPLOYMENT | quote }}
           
+          volumeMounts:
+            - name: license-keys
+              mountPath: /app/keys
+              readOnly: true
+          
+          
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
+      
+      volumes:
+        - name: license-keys
+          projected:
+            defaultMode: 0444
+            sources:
+              - secret:
+                  name: provisioning-license-private-key
+                  items:
+                    - key: key
+                      path: private-key.pem
+              - secret:
+                  name: api-license-public-key-master
+                  items:
+                    - key: key
+                      path: public-key.pem
 {{- end }}

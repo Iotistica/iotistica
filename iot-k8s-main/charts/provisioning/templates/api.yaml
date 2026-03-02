@@ -390,7 +390,7 @@ spec:
       volumes:
         - name: license-keys
           projected:
-            defaultMode: 0440
+            defaultMode: 0444
             sources:
               - secret:
                   name: provisioning-license-private-key
