@@ -128,6 +128,7 @@ jobs:
     permissions:
       contents: write
       security-events: write
+      actions: read
 
     steps:
       - name: Checkout repository
@@ -202,7 +203,7 @@ jobs:
           exit-code: '0'
 
       - name: Upload Trivy API results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: 'trivy-api-results.sarif'
@@ -230,6 +231,7 @@ jobs:
     permissions:
       contents: write
       security-events: write
+      actions: read
 
     steps:
       - name: Checkout repository
@@ -304,7 +306,7 @@ jobs:
           exit-code: '0'
 
       - name: Upload Trivy Worker results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: 'trivy-worker-results.sarif'
