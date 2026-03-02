@@ -172,7 +172,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Build & Push Provisioning API image
+      - name: Build Provisioning API image for scanning
         id: docker_build_api
         if: success()
         uses: docker/build-push-action@v5
@@ -180,18 +180,41 @@ jobs:
           context: ./provisioning
           file: ./provisioning/Dockerfile
           target: provisioning
-          push: true
+          push: false
+          load: true
           platforms: linux/amd64
           cache-from: |
             type=local,src=/tmp/.buildx-cache-provisioning-api
             type=registry,ref=iotistic/provisioning-api:buildcache
           cache-to: type=local,dest=/tmp/.buildx-cache-provisioning-api-new,mode=max
-          tags: |
-            iotistic/provisioning-api:latest
-            iotistic/provisioning-api:${{ needs.version.outputs.sha_short }}
-            iotistic/provisioning-api:${{ needs.version.outputs.package_version }}
+          tags: iotistic/provisioning-api:${{ needs.version.outputs.package_version }}
           build-args: |
             BUILDKIT_INLINE_CACHE=1
+
+      - name: Run Trivy vulnerability scanner for API
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'iotistic/provisioning-api:${{ needs.version.outputs.package_version }}'
+          format: 'sarif'
+          output: 'trivy-api-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - name: Upload Trivy API results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-api-results.sarif'
+          category: 'trivy-provisioning-api'
+
+      - name: Push Provisioning API image to Docker Hub
+        if: success()
+        run: |
+          docker push iotistic/provisioning-api:${{ needs.version.outputs.package_version }}
+          docker tag iotistic/provisioning-api:${{ needs.version.outputs.package_version }} iotistic/provisioning-api:latest
+          docker tag iotistic/provisioning-api:${{ needs.version.outputs.package_version }} iotistic/provisioning-api:${{ needs.version.outputs.sha_short }}
+          docker push iotistic/provisioning-api:latest
+          docker push iotistic/provisioning-api:${{ needs.version.outputs.sha_short }}
 
       - name: Move cache
         if: always()
@@ -250,7 +273,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Build & Push Provisioning Worker image
+      - name: Build Provisioning Worker image for scanning
         id: docker_build_worker
         if: success()
         uses: docker/build-push-action@v5
@@ -258,18 +281,41 @@ jobs:
           context: ./provisioning
           file: ./provisioning/Dockerfile
           target: worker
-          push: true
+          push: false
+          load: true
           platforms: linux/amd64
           cache-from: |
             type=local,src=/tmp/.buildx-cache-provisioning-worker
             type=registry,ref=iotistic/provisioning-worker:buildcache
           cache-to: type=local,dest=/tmp/.buildx-cache-provisioning-worker-new,mode=max
-          tags: |
-            iotistic/provisioning-worker:latest
-            iotistic/provisioning-worker:${{ needs.version.outputs.sha_short }}
-            iotistic/provisioning-worker:${{ needs.version.outputs.package_version }}
+          tags: iotistic/provisioning-worker:${{ needs.version.outputs.package_version }}
           build-args: |
             BUILDKIT_INLINE_CACHE=1
+
+      - name: Run Trivy vulnerability scanner for Worker
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'iotistic/provisioning-worker:${{ needs.version.outputs.package_version }}'
+          format: 'sarif'
+          output: 'trivy-worker-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - name: Upload Trivy Worker results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-worker-results.sarif'
+          category: 'trivy-provisioning-worker'
+
+      - name: Push Provisioning Worker image to Docker Hub
+        if: success()
+        run: |
+          docker push iotistic/provisioning-worker:${{ needs.version.outputs.package_version }}
+          docker tag iotistic/provisioning-worker:${{ needs.version.outputs.package_version }} iotistic/provisioning-worker:latest
+          docker tag iotistic/provisioning-worker:${{ needs.version.outputs.package_version }} iotistic/provisioning-worker:${{ needs.version.outputs.sha_short }}
+          docker push iotistic/provisioning-worker:latest
+          docker push iotistic/provisioning-worker:${{ needs.version.outputs.sha_short }}
 
       - name: Move cache
         if: always()

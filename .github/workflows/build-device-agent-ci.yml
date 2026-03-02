@@ -166,25 +166,51 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      # Build and push to registry
-      - name: Build & Push final image
+      # Build image locally for scanning (no push yet)
+      - name: Build image for scanning
         id: docker_build
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./agent/Dockerfile
-          push: true
+          push: false
+          load: true
           platforms: linux/amd64
           cache-from: |
             type=local,src=/tmp/.buildx-cache
             type=registry,ref=iotistic/agent:buildcache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-          tags: |
-            iotistic/agent:latest
-            iotistic/agent:${{ needs.version.outputs.sha_short }}
-            iotistic/agent:${{ needs.version.outputs.package_version }}
+          tags: iotistic/agent:${{ needs.version.outputs.package_version }}
           build-args: |
             BUILDKIT_INLINE_CACHE=1
+
+      # Security scan with Trivy
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'iotistic/agent:${{ needs.version.outputs.package_version }}'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      # Upload Trivy results to GitHub Security tab
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: 'trivy-agent'
+
+      # Push scanned image to registry
+      - name: Push image to Docker Hub
+        if: success()
+        run: |
+          docker push iotistic/agent:${{ needs.version.outputs.package_version }}
+          docker tag iotistic/agent:${{ needs.version.outputs.package_version }} iotistic/agent:latest
+          docker tag iotistic/agent:${{ needs.version.outputs.package_version }} iotistic/agent:${{ needs.version.outputs.sha_short }}
+          docker push iotistic/agent:latest
+          docker push iotistic/agent:${{ needs.version.outputs.sha_short }}
 
       # Move cache to prevent unlimited growthe
       - name: Move cache
