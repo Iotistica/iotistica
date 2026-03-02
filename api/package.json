@@ -27,12 +27,12 @@
     "device-management"
   ],
   "dependencies": {
-    "@kubernetes/client-node": "^0.20.0",
+    "@kubernetes/client-node": "^1.4.0",
     "@types/is-utf8": "^0.2.3",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/swagger-ui-express": "^4.1.8",
     "@types/ws": "^8.18.1",
-    "axios": "^1.12.2",
+    "axios": "^1.13.5",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
     "cron": "^4.3.3",
@@ -46,7 +46,7 @@
     "jsonwebtoken": "^9.0.2",
     "mqtt": "^5.14.1",
     "msgpack-lite": "^0.1.26",
-    "multer": "^2.0.2",
+    "multer": "^2.0.3",
     "neo4j-driver": "^6.0.1",
     "node-cron": "^4.2.1",
     "node-fetch": "^2.7.0",

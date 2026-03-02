@@ -165,13 +165,30 @@ jobs:
             select(.level != "none") |
             {
               cve: .ruleId,
-              package: (.properties.package // .message.text | split("\n")[0]),
-              installed: (.properties.version // "N/A"),
-              fixed: (.properties.fixedVersion // "N/A"),
-              severity: .level,
-              message: (.message.text // "")
+              package: (
+                if .properties.name then .properties.name
+                elif .properties.package then .properties.package
+                else ""
+                end
+              ),
+              installed: (
+                if .properties.version then .properties.version
+                elif .properties.installedVersion then .properties.installedVersion
+                else "N/A"
+                end
+              ),
+              fixed: (
+                if .properties.fixedVersion then .properties.fixedVersion
+                else "N/A"
+                end
+              ),
+              severity: .level
             } |
-            "- **\(.cve)** | Package: \(.package) | Installed: \(.installed) | Fixed: \(.fixed) | Severity: \(.severity)"
+            if .package and .package != "" then
+              "- **\(.cve)** | \(.package) | Installed: \(.installed) | Fixed: \(.fixed) | \(.severity)"
+            else
+              "- **\(.cve)** | Installed: \(.installed) | Fixed: \(.fixed) | \(.severity)"
+            end
           ' trivy-results.sarif | head -20 >> $GITHUB_STEP_SUMMARY
 
       - name: Fail build if critical vulnerabilities found
