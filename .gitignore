@@ -2,11 +2,13 @@
 node_modules/
 **/node_modules/
 
-# Node-RED specific - ignore ALL runtime data EXCEPT our plugins
+# Node-RED specific - ignore ALL runtime data EXCEPT our plugins and config
 nodered/data/*
-# But DO track our custom plugins
+# But DO track our custom plugins and config files
 !nodered/data/@iotistic/
 !nodered/data/@iotistic/**
+!nodered/data/settings.js
+!nodered/data/package.json
 
 # InfluxDB data - ignore ALL runtime data
 influx/data/
