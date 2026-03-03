@@ -108,6 +108,76 @@ Each provisioned database is isolated: the `client-{id}` role can only access it
 
 ---
 
+## Template Database (Fast Client Provisioning)
+
+### Where the template is stored
+
+The template database lives on the **same PostgreSQL server** that you point to with `PROVISIONING_PG_HOST` / `PROVISIONING_PG_PORT`. It is a regular PostgreSQL database on that server – the only difference is that PostgreSQL marks it with `IS_TEMPLATE = true` and `ALLOW_CONNECTIONS = false` so it cannot be modified accidentally.
+
+Running 90+ migration scripts on every new client database at API startup is slow. PostgreSQL's native `CREATE DATABASE … TEMPLATE` mechanism clones an entire database (all tables, indexes, functions, and extensions) at the filesystem level, making provisioning nearly instantaneous regardless of how many schema objects exist.
+
+### Set the environment variable
+
+```bash
+# .env  (same server as PROVISIONING_PG_HOST)
+PROVISIONING_PG_TEMPLATE_DB=template_iotistica
+```
+
+Leave this variable unset to fall back to the standard PostgreSQL default (an empty database).
+
+### Create the template once
+
+Run this once after the provisioning server is set up and whenever you want to rebuild the template from scratch:
+
+```typescript
+import { PostgresProvisioningService } from './src/services/postgres-provisioning-service';
+import * as fs from 'fs';
+
+const svc = new PostgresProvisioningService();
+
+// Option A: create an empty template (migrations run at API startup as usual)
+await svc.provisionTemplateDatabase();
+
+// Option B: create a fully schema'd template (fastest client provisioning)
+const schemaSql = fs.readFileSync('./migrations/schema.sql', 'utf8');
+await svc.provisionTemplateDatabase(schemaSql);
+```
+
+The method is idempotent – if `template_iotistica` already exists on the server it is reused rather than recreated.
+
+### Keep the template up to date after a migration
+
+When a new migration is released, apply it to the template so future clients start with the latest schema:
+
+```typescript
+const migrationSql = fs.readFileSync('./migrations/0042_add_alerts_table.sql', 'utf8');
+await svc.updateTemplateDatabase(migrationSql);
+```
+
+`updateTemplateDatabase` temporarily re-enables connections, runs the SQL, then re-locks the database.
+
+### Full operator workflow
+
+```
+1. First deploy
+   provisionTemplateDatabase(fullSchemaSql)   # creates template_iotistica once
+
+2. New customer signs up
+   provisionDatabase('client-abc123')         # clones template_iotistica instantly
+
+3. New schema migration released
+   updateTemplateDatabase(migrationSql)       # keep template in sync
+   # (existing client databases run the migration normally at their next API startup)
+
+4. Full template reset (rare)
+   dropTemplateDatabase()                     # removes template_iotistica
+   provisionTemplateDatabase(fullSchemaSql)   # rebuilds from scratch
+```
+
+> **Note:** `deleteDatabase()` refuses to delete the template database by name to prevent accidental data loss. Use `dropTemplateDatabase()` if you intentionally want to remove it.
+
+---
+
 ## Local Development with Docker Compose
 
 The `docker-compose.yml` in this directory starts a local PostgreSQL container on port `5433` (to avoid conflicts with any existing PostgreSQL on port `5432`). You can point the provisioning service at this container for local testing.
