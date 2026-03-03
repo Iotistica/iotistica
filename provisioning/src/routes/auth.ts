@@ -8,6 +8,7 @@ import express, { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import axios from 'axios';
 import jwt, { Secret } from 'jsonwebtoken';
+import crypto from 'crypto';
 import { CustomerModel } from '../db/customer-model';
 import { query } from '../db/connection';
 import { logger } from '../utils/logger';
@@ -15,6 +16,7 @@ import { deploymentQueue } from '../services/deployment-queue';
 import { StripeService } from '../services/stripe-service';
 
 const router = express.Router();
+const SIGNUP_STATE_TTL_MS = 10 * 60 * 1000;
 
 /**
  * POST /api/auth/validate-reset-token
@@ -370,6 +372,70 @@ router.post('/callback-auth0', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/auth/start-signup
+ * Generate signed Auth0 authorization URL for customer signup flow
+ */
+router.post('/start-signup', async (req: Request, res: Response) => {
+  try {
+    const { email, company, plan } = req.body || {};
+
+    if (!email || !company) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        details: 'email and company are required',
+      });
+    }
+
+    const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;
+    const AUTH0_CLIENT_ID = process.env.AUTH0_CLIENT_ID;
+    const BASE_URL = process.env.BASE_URL || 'http://localhost:3100';
+    const SIGNUP_CALLBACK_URL = process.env.AUTH0_SIGNUP_CALLBACK_URL || `${BASE_URL}/api/auth/signup-callback`;
+    const STATE_SECRET = process.env.AUTH0_STATE_SECRET || process.env.AUTH0_CLIENT_SECRET;
+
+    if (!AUTH0_DOMAIN || !AUTH0_CLIENT_ID || !STATE_SECRET) {
+      logger.error('[Start Signup] Auth0 or state signing secret not configured');
+      return res.status(500).json({
+        error: 'Auth0 not configured',
+      });
+    }
+
+    const normalizedPlan = typeof plan === 'string' && plan.length > 0 ? plan : 'starter';
+    const statePayload = {
+      email,
+      company,
+      plan: normalizedPlan,
+      timestamp: new Date().toISOString(),
+      nonce: crypto.randomBytes(16).toString('hex'),
+    };
+
+    const payloadB64 = Buffer.from(JSON.stringify(statePayload)).toString('base64url');
+    const signatureB64 = crypto
+      .createHmac('sha256', STATE_SECRET)
+      .update(payloadB64)
+      .digest('base64url');
+    const signedState = `${payloadB64}.${signatureB64}`;
+
+    const auth0Url = `https://${AUTH0_DOMAIN}/authorize?` +
+      `response_type=code&` +
+      `client_id=${encodeURIComponent(AUTH0_CLIENT_ID)}&` +
+      `redirect_uri=${encodeURIComponent(SIGNUP_CALLBACK_URL)}&` +
+      `scope=${encodeURIComponent('openid profile email')}&` +
+      `screen_hint=signup&` +
+      `login_hint=${encodeURIComponent(email)}&` +
+      `state=${encodeURIComponent(signedState)}`;
+
+    return res.json({
+      auth0Url,
+    });
+  } catch (error: any) {
+    logger.error('[Start Signup] Failed to generate Auth0 URL', { error: error.message });
+    return res.status(500).json({
+      error: 'Failed to start signup flow',
+    });
+  }
+});
+
+/**
  * GET /api/auth/signup-callback
  * Handles Auth0 redirect for new customer signups
  * Receives code and state (signup data) from Auth0, creates customer, queues deployment
@@ -389,16 +455,45 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
       `);
     }
 
-    // Decode signup data from state parameter
+    // Validate and decode signed signup state payload
     let signupData;
     try {
-      signupData = JSON.parse(atob(decodeURIComponent(state as string)));
+      const STATE_SECRET = process.env.AUTH0_STATE_SECRET || process.env.AUTH0_CLIENT_SECRET;
+      if (!STATE_SECRET) {
+        throw new Error('State signing secret not configured');
+      }
+
+      const stateValue = decodeURIComponent(String(state));
+      const stateParts = stateValue.split('.');
+      if (stateParts.length !== 2) {
+        throw new Error('Malformed state payload');
+      }
+
+      const payloadB64 = stateParts[0];
+      const providedSigB64 = stateParts[1];
+      const expectedSigB64 = crypto
+        .createHmac('sha256', STATE_SECRET)
+        .update(payloadB64)
+        .digest('base64url');
+
+      const providedSig = Buffer.from(providedSigB64, 'base64url');
+      const expectedSig = Buffer.from(expectedSigB64, 'base64url');
+      if (providedSig.length !== expectedSig.length || !crypto.timingSafeEqual(providedSig, expectedSig)) {
+        throw new Error('Invalid state signature');
+      }
+
+      signupData = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+
+      const timestamp = Date.parse(signupData.timestamp || '');
+      if (!timestamp || Number.isNaN(timestamp) || (Date.now() - timestamp) > SIGNUP_STATE_TTL_MS) {
+        throw new Error('Expired or invalid signup state');
+      }
     } catch (e) {
       const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
       return res.status(400).send(`
         <html><head><title>Signup Error</title></head><body>
           <h1>Signup Error</h1>
-          <p>Invalid signup data.</p>
+          <p>Invalid or expired signup state.</p>
           <a href="${WEBSITE_URL}">Back to Home</a>
         </body></html>
       `);
@@ -523,8 +618,8 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
     }
 
     // Generate customer ID (hash of email for uniqueness)
-    const crypto = await import('crypto');
-    const customerId = 'customer-' + crypto.createHash('sha256').update(email).digest('hex').substring(0, 12);
+    const cryptoModule = await import('crypto');
+    const customerId = 'customer-' + cryptoModule.createHash('sha256').update(email).digest('hex').substring(0, 12);
 
     // Create customer record
     const customerInsertResult = await query(

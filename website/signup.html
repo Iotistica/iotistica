@@ -256,11 +256,8 @@
     </div>
 
     <script>
-        // Auth0 configuration
-        const AUTH0_DOMAIN = 'dev-hmwhgxw10boqpmrw.us.auth0.com';
-        const AUTH0_CLIENT_ID = 'Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR';
-        // Fixed production callback URL (hardcoded for security)
-        const AUTH0_CALLBACK_URL = 'https://api.iotistica.com/provisioning/api/auth/signup-callback';
+        // Provisioning API configuration
+        const PROVISIONING_API_URL = 'https://api.iotistica.com/provisioning';
 
         // Handle plan selection
         document.querySelectorAll('.plan-card').forEach(card => {
@@ -272,33 +269,40 @@
         });
 
         // Handle form submission
-        document.getElementById('signupForm').addEventListener('submit', (e) => {
+        document.getElementById('signupForm').addEventListener('submit', async (e) => {
             e.preventDefault();
 
             const email = document.getElementById('email').value;
             const companyName = document.getElementById('companyName').value;
             const plan = document.querySelector('input[name="plan"]:checked').value;
 
-            const signupData = {
-                email,
-                company: companyName,
-                plan,
-                timestamp: new Date().toISOString()
-            };
+            try {
+                const response = await fetch(`${PROVISIONING_API_URL}/api/auth/start-signup`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        email,
+                        company: companyName,
+                        plan
+                    })
+                });
 
-            const state = encodeURIComponent(btoa(JSON.stringify(signupData)));
+                if (!response.ok) {
+                    throw new Error('Failed to start signup flow');
+                }
 
-            // Redirect to Auth0 for authentication
-            const auth0Url = `https://${AUTH0_DOMAIN}/authorize?` +
-                `response_type=code&` +
-                `client_id=${AUTH0_CLIENT_ID}&` +
-                `redirect_uri=${encodeURIComponent(AUTH0_CALLBACK_URL)}&` +
-                `scope=${encodeURIComponent('openid profile email')}&` +
-                `screen_hint=signup&` +
-                `login_hint=${encodeURIComponent(email)}&` +
-                `state=${state}`;
+                const { auth0Url } = await response.json();
+                if (!auth0Url) {
+                    throw new Error('Missing Auth0 redirect URL');
+                }
 
-            window.location.href = auth0Url;
+                window.location.href = auth0Url;
+            } catch (error) {
+                alert('Unable to start signup. Please try again.');
+                console.error('Signup start failed:', error);
+            }
         });
     </script>
 </body>

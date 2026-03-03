@@ -209,6 +209,11 @@
         let auth0AccessToken = null;
         let pendingSignup = null;
 
+        // Clear stale browser tokens from previous sessions
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+        sessionStorage.removeItem('auth0_access_token');
+
         // Show alert messages
         function showAlert(message, type = 'error') {
             const alertContainer = document.getElementById('alertContainer');
@@ -329,11 +334,9 @@
                     throw new Error(data.message || 'Signup failed');
                 }
 
-                // Store tokens for future use
-                localStorage.setItem('accessToken', data.accessToken);
-                localStorage.setItem('refreshToken', data.refreshToken);
-                
-                // Clear signup data
+                // Clear signup and auth artifacts from browser storage
+                localStorage.removeItem('accessToken');
+                localStorage.removeItem('refreshToken');
                 sessionStorage.removeItem('auth0_access_token');
                 sessionStorage.removeItem('signup_pending');
                 sessionStorage.removeItem('signup_data');

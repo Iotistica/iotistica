@@ -472,6 +472,8 @@
             document.getElementById('signupModal').style.display = 'none';
         }
 
+        const PROVISIONING_API_URL = 'https://api.iotistica.com/provisioning';
+
         // Close modal when clicking outside
         window.onclick = function(event) {
             const modal = document.getElementById('signupModal');
@@ -484,39 +486,40 @@
         document.addEventListener('DOMContentLoaded', function() {
             const signupForm = document.getElementById('signupForm');
             if (signupForm) {
-                signupForm.addEventListener('submit', function(e) {
+                signupForm.addEventListener('submit', async function(e) {
                     e.preventDefault();
                     
                     const email = document.getElementById('signupEmail').value;
                     const company = document.getElementById('signupCompany').value;
                     const plan = document.getElementById('signupPlan').value;
                     
-                    // Encode signup data to pass via Auth0 state parameter
-                    const signupData = {
-                        email: email,
-                        company: company,
-                        plan: plan,
-                        timestamp: new Date().toISOString()
-                    };
-                    
-                    // Redirect to Auth0 for authentication
-                    // Callback goes to provisioning service (no dashboard exists yet for new signups)
-                    const auth0Domain = 'dev-hmwhgxw10boqpmrw.us.auth0.com';
-                    const clientId = 'Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR';
-                    // Fixed production callback URL (hardcoded for security)
-                    const redirectUri = 'https://api.iotistica.com/provisioning/api/auth/signup-callback';
-                    const state = encodeURIComponent(btoa(JSON.stringify(signupData)));
-                    
-                    const auth0Url = `https://${auth0Domain}/authorize?` +
-                        `response_type=code&` +
-                        `client_id=${clientId}&` +
-                        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-                        `scope=${encodeURIComponent('openid profile email')}&` +
-                        `screen_hint=signup&` +
-                        `login_hint=${encodeURIComponent(email)}&` +
-                        `state=${state}`;
-                    
-                    window.location.href = auth0Url;
+                    try {
+                        const response = await fetch(`${PROVISIONING_API_URL}/api/auth/start-signup`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                email,
+                                company,
+                                plan
+                            })
+                        });
+
+                        if (!response.ok) {
+                            throw new Error('Failed to start signup flow');
+                        }
+
+                        const data = await response.json();
+                        if (!data.auth0Url) {
+                            throw new Error('Missing Auth0 redirect URL');
+                        }
+
+                        window.location.href = data.auth0Url;
+                    } catch (error) {
+                        alert('Unable to start signup. Please try again.');
+                        console.error('Signup start failed:', error);
+                    }
                 });
             }
         });
