@@ -101,8 +101,8 @@ externalRedis:
 #   Required keys: username, password
 #
 # The admin role (iotistica_provisioning) must have CREATEDB and CREATEROLE
-# privileges.  It is created automatically by the iotistic postgres init job
-# when the iotistic chart is deployed.
+# privileges.  It is created automatically by this chart's postgres-init job
+# (see postgresProvisioning.initJob below).
 postgresProvisioning:
   # Database provider: 'postgres' (self-hosted) or 'tigerdata' (Timescale Cloud)
   provider: "postgres"
@@ -115,6 +115,12 @@ postgresProvisioning:
   # Template database cloned for every new client (created once by the provisioning
   # API on first startup when DB_PROVIDER=postgres and this value is non-empty)
   templateDatabase: "template_iotistica"
+  # Init job - runs against the shared PostgreSQL server on install/upgrade.
+  # Creates the TimescaleDB extension, fixes hypertable schema, and creates the
+  # iotistica_provisioning role used by the API and worker.
+  # Connects using provisioning-pg-admin-credentials (username/password keys).
+  initJob:
+    enabled: true
 
 # Ingress (Envoy Gateway HTTPRoute)
 ingress:
