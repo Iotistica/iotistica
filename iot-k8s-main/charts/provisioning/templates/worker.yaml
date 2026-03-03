@@ -182,6 +182,32 @@ spec:
             # Legacy deployment
             - name: SIMULATE_K8S_DEPLOYMENT
               value: {{ .Values.worker.env.SIMULATE_K8S_DEPLOYMENT | quote }}
+            
+            # PostgreSQL Provisioning (shared server for per-client databases)
+            - name: DB_PROVIDER
+              value: {{ .Values.postgresProvisioning.provider | default "postgres" | quote }}
+            - name: PROVISIONING_PG_HOST
+              value: {{ .Values.postgresProvisioning.host | quote }}
+            - name: PROVISIONING_PG_PORT
+              value: {{ .Values.postgresProvisioning.port | default "5432" | quote }}
+            - name: PROVISIONING_PG_ADMIN_DB
+              value: {{ .Values.postgresProvisioning.adminDatabase | default "postgres" | quote }}
+            - name: PROVISIONING_PG_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-pg-admin-credentials
+                  key: username
+            - name: PROVISIONING_PG_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-pg-admin-credentials
+                  key: password
+            - name: PROVISIONING_PG_SSL
+              value: {{ .Values.postgresProvisioning.ssl | default "true" | quote }}
+            - name: PROVISIONING_PG_SSL_REJECT_UNAUTHORIZED
+              value: {{ .Values.postgresProvisioning.sslRejectUnauthorized | default "true" | quote }}
+            - name: PROVISIONING_PG_TEMPLATE_DB
+              value: {{ .Values.postgresProvisioning.templateDatabase | default "template_iotistica" | quote }}
           
           volumeMounts:
             - name: license-keys

@@ -27,6 +27,13 @@ postgres:
       memory: 512Mi
   persistence:
     enabled: true
+  # Provisioning admin user created in the shared PostgreSQL server.
+  # Used by the provisioning service (billing API / worker) to create per-client
+  # databases and roles via CREATE DATABASE / CREATE ROLE.
+  # Set provisioningAdmin.password in values-secret.yaml (never commit to Git).
+  provisioningAdmin:
+    username: iotistica_provisioning
+    password: ""  # REQUIRED: set via values-secret.yaml or --set postgres.provisioningAdmin.password=<value>
 
 # Redis cache
 # RESOURCE TIERS - Choose based on your server capacity:
