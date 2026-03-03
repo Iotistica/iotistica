@@ -165,24 +165,22 @@ jobs:
             select(.level != "none") |
             {
               cve: .ruleId,
+              message: .message.text,
+              severity: .level
+            } |
+            {
+              cve: .cve,
+              message: .message,
+              severity: .severity,
               package: (
-                if .properties.name then .properties.name
-                elif .properties.package then .properties.package
-                else ""
-                end
+                (.message | match("Package: ([^\\s]+)") | .captures[0].string) // ""
               ),
               installed: (
-                if .properties.version then .properties.version
-                elif .properties.installedVersion then .properties.installedVersion
-                else "N/A"
-                end
+                (.message | match("[Vv]ersion: ([^\\s]+)") | .captures[0].string) // "N/A"
               ),
               fixed: (
-                if .properties.fixedVersion then .properties.fixedVersion
-                else "N/A"
-                end
-              ),
-              severity: .level
+                (.message | match("[Ff]ixed [Vv]ersion: ([^\\s]+)") | .captures[0].string) // "N/A"
+              )
             } |
             if .package and .package != "" then
               "- **\(.cve)** | \(.package) | Installed: \(.installed) | Fixed: \(.fixed) | \(.severity)"
