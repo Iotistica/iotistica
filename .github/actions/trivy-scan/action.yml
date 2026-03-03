@@ -1,0 +1,114 @@
+name: 'Trivy Vulnerability Scan'
+description: 'Scan Docker image with Trivy and report vulnerabilities'
+
+inputs:
+  image-ref:
+    description: 'Docker image reference to scan (e.g., iotistic/api:ci-abc123)'
+    required: true
+  output-file:
+    description: 'Output SARIF filename (e.g., trivy-results.sarif)'
+    required: true
+  fail-on-critical:
+    description: 'Fail if critical vulnerabilities are found'
+    required: false
+    default: 'true'
+  severity:
+    description: 'Severity levels to include in scan (comma-separated)'
+    required: false
+    default: 'CRITICAL,HIGH'
+
+outputs:
+  critical:
+    description: 'Number of critical vulnerabilities found'
+    value: ${{ steps.trivy_summary.outputs.critical }}
+  high:
+    description: 'Number of high vulnerabilities found'
+    value: ${{ steps.trivy_summary.outputs.high }}
+  total:
+    description: 'Total number of vulnerabilities found'
+    value: ${{ steps.trivy_summary.outputs.total }}
+
+runs:
+  using: 'composite'
+
+  steps:
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ inputs.image-ref }}
+        format: 'sarif'
+        output: ${{ inputs.output-file }}
+        severity: ${{ inputs.severity }}
+        exit-code: '0'
+
+    - name: Install jq
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y jq
+
+    - name: Parse Trivy SARIF Results
+      id: trivy_summary
+      shell: bash
+      run: |
+        if [ ! -f "${{ inputs.output-file }}" ]; then
+          echo "No SARIF file found at ${{ inputs.output-file }}"
+          echo "critical=0" >> $GITHUB_OUTPUT
+          echo "high=0" >> $GITHUB_OUTPUT
+          echo "total=0" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        CRITICAL=$(jq '[.runs[].results[] | select(.level=="error")] | length' "${{ inputs.output-file }}")
+        HIGH=$(jq '[.runs[].results[] | select(.level=="warning")] | length' "${{ inputs.output-file }}")
+        TOTAL=$(jq '[.runs[].results[]] | length' "${{ inputs.output-file }}")
+
+        echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
+        echo "high=$HIGH" >> $GITHUB_OUTPUT
+        echo "total=$TOTAL" >> $GITHUB_OUTPUT
+
+        echo "## 🔐 Trivy Security Scan: ${{ inputs.image-ref }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+        echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Critical | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
+        echo "| High     | $HIGH |" >> $GITHUB_STEP_SUMMARY
+        echo "| Total    | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        echo "## 🚨 Vulnerability Details (Top 20)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        jq -r '
+          .runs[].results[] |
+          select(.level != "none") |
+          {
+            cve: .ruleId,
+            message: .message.text,
+            severity: .level
+          } |
+          {
+            cve: .cve,
+            message: .message,
+            severity: .severity,
+            package: (
+              (.message | match("Package: ([^\\s]+)") | .captures[0].string) // ""
+            ),
+            installed: (
+              (.message | match("[Vv]ersion: ([^\\s]+)") | .captures[0].string) // "N/A"
+            ),
+            fixed: (
+              (.message | match("[Ff]ixed [Vv]ersion: ([^\\s]+)") | .captures[0].string) // "N/A"
+            )
+          } |
+          if .package and .package != "" then
+            "- **\(.cve)** | \(.package) | Installed: \(.installed) | Fixed: \(.fixed) | \(.severity)"
+          else
+            "- **\(.cve)** | Installed: \(.installed) | Fixed: \(.fixed) | \(.severity)"
+          end
+        ' "${{ inputs.output-file }}" | head -20 >> $GITHUB_STEP_SUMMARY
+
+    - name: Fail build if critical vulnerabilities found
+      shell: bash
+      if: inputs.fail-on-critical == 'true' && steps.trivy_summary.outputs.critical != '0'
+      run: |
+        echo "❌ Critical vulnerabilities detected in ${{ inputs.image-ref }}"
+        exit 1

@@ -187,78 +187,12 @@ jobs:
             BUILDKIT_INLINE_CACHE=1
 
       # Security scan with Trivy
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+      - name: Scan Agent image with Trivy
+        uses: ./.github/actions/trivy-scan
         with:
           image-ref: 'iotistic/agent:${{ needs.version.outputs.package_version }}'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '0'
-
-      # Parse Trivy results and generate step summary
-      - name: Parse Trivy results
-        id: trivy_summary
-        run: |
-          if [ ! -f trivy-results.sarif ]; then
-            echo "No Trivy results found"
-            exit 0
-          fi
-      
-          CRITICAL=$(jq '[.runs[].results[] | select(.level=="error")] | length' trivy-results.sarif)
-          HIGH=$(jq '[.runs[].results[] | select(.level=="warning")] | length' trivy-results.sarif)
-          TOTAL=$(jq '[.runs[].results[]] | length' trivy-results.sarif)
-      
-          echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
-          echo "high=$HIGH" >> $GITHUB_OUTPUT
-          echo "total=$TOTAL" >> $GITHUB_OUTPUT
-      
-          echo "## 🔐 Trivy Security Scan" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Critical | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
-          echo "| High     | $HIGH |" >> $GITHUB_STEP_SUMMARY
-          echo "| Total    | $TOTAL |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-      
-          echo "## 🚨 Vulnerability Details (Top 20)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-      
-          jq -r '
-            .runs[].results[] |
-            select(.level != "none") |
-            {
-              cve: .ruleId,
-              message: .message.text,
-              severity: .level
-            } |
-            {
-              cve: .cve,
-              message: .message,
-              severity: .severity,
-              package: (
-                (.message | match("Package: ([^\\s]+)") | .captures[0].string) // ""
-              ),
-              installed: (
-                (.message | match("[Vv]ersion: ([^\\s]+)") | .captures[0].string) // "N/A"
-              ),
-              fixed: (
-                (.message | match("[Ff]ixed [Vv]ersion: ([^\\s]+)") | .captures[0].string) // "N/A"
-              )
-            } |
-            if .package and .package != "" then
-              "- **\(.cve)** | \(.package) | Installed: \(.installed) | Fixed: \(.fixed) | \(.severity)"
-            else
-              "- **\(.cve)** | Installed: \(.installed) | Fixed: \(.fixed) | \(.severity)"
-            end
-          ' trivy-results.sarif | head -20 >> $GITHUB_STEP_SUMMARY
-
-      - name: Fail build if critical vulnerabilities found
-        if: steps.trivy_summary.outputs.critical != '0'
-        run: |
-          echo "Critical vulnerabilities detected. Failing build."
-          exit 1
+          output-file: 'trivy-results.sarif'
+          fail-on-critical: 'true'
 
       # Push scanned image to registry
       - name: Push image to Docker Hub

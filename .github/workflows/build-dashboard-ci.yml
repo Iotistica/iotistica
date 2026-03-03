@@ -151,6 +151,13 @@ jobs:
             BUILDKIT_INLINE_CACHE=1
             NODE_ENV=production
 
+      - name: Scan Dashboard image with Trivy
+        uses: ./.github/actions/trivy-scan
+        with:
+          image-ref: 'iotistic/dashboard:ci-${{ steps.sha.outputs.short_sha }}'
+          output-file: 'trivy-results.sarif'
+          fail-on-critical: 'true'
+
       # Move cache to prevent unlimited growth
       - name: Move cache
         if: always()
