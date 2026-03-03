@@ -71,7 +71,7 @@
     "network-checker": "^1.0.6",
     "node-pty": "^1.0.0",
     "p-limit": "^7.2.0",
-    "sqlite3": "^5.0.2",
+    "sqlite3": "^5.1.7",
     "strict-event-emitter-types": "^2.0.0",
     "systeminformation": "^5.23.5",
     "typed-error": "^3.2.1",
@@ -111,5 +111,8 @@
   },
   "optionalDependencies": {
     "node-opcua-client": "^2.130.0"
+  },
+  "overrides": {
+    "tar": "^7.5.8"
   }
 }
