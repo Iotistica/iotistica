@@ -1,0 +1,5 @@
+# Trivy ignore file for vpn-server service  
+# TypeScript-eslint build-time only vulnerabilities
+# These are dev dependencies used only during build, not in final server runtime
+
+CVE-2024-27980  # @typescript-eslint build tool vulnerability

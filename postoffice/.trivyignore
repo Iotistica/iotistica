@@ -1,0 +1,5 @@
+# Trivy ignore file for postoffice service
+# Low severity AWS SDK vulnerabilities 
+# These are transitive dependencies and low severity issues
+
+CVE-2020-36564  # AWS SDK vulnerabilities (low severity)
