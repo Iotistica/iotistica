@@ -95,6 +95,27 @@ externalRedis:
   host: ""  # e.g., redis.iotistica.com
   port: 6379
 
+# PostgreSQL Provisioning - shared server where per-client databases are created.
+# Admin credentials are pulled from the 1Password item:
+#   vaults/IOT-CLIENTS/items/provisioning-pg-admin-credentials
+#   Required keys: username, password
+#
+# The admin role (iotistic_provisioning) must have CREATEDB and CREATEROLE
+# privileges.  It is created automatically by the iotistic postgres init job
+# when the iotistic chart is deployed.
+postgresProvisioning:
+  # Database provider: 'postgres' (self-hosted) or 'tigerdata' (Timescale Cloud)
+  provider: "postgres"
+  # Hostname of the shared PostgreSQL server (the iotistic chart postgres service)
+  host: ""  # REQUIRED: e.g., iotistica-postgres.iotistica.svc.cluster.local
+  port: 5432
+  adminDatabase: "postgres"
+  ssl: true
+  sslRejectUnauthorized: true
+  # Template database cloned for every new client (created once by the provisioning
+  # API on first startup when DB_PROVIDER=postgres and this value is non-empty)
+  templateDatabase: "template_iotistica"
+
 # Ingress (Envoy Gateway HTTPRoute)
 ingress:
   enabled: true

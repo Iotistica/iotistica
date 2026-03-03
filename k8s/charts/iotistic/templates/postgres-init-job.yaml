@@ -107,7 +107,29 @@ spec:
           "
           
           echo "TimescaleDB initialization complete!"
+          
+          {{- if .Values.postgres.provisioningAdmin.password }}
+          echo "Creating provisioning admin role..."
+          ROLE_EXISTS=$(psql -h {{ include "iotistic.fullname" . }}-postgres \
+            -U {{ .Values.postgres.username }} \
+            -d {{ .Values.postgres.database }} \
+            -t -c "SELECT 1 FROM pg_roles WHERE rolname='iotistic_provisioning'" | xargs)
+          if [ "$ROLE_EXISTS" != "1" ]; then
+            psql -h {{ include "iotistic.fullname" . }}-postgres \
+              -U {{ .Values.postgres.username }} \
+              -d {{ .Values.postgres.database }} \
+              --variable="provisioning_pw=${PROVISIONING_ADMIN_PASSWORD}" \
+              -c "CREATE ROLE iotistic_provisioning WITH LOGIN PASSWORD :'provisioning_pw' CREATEDB CREATEROLE;"
+            echo "Created role: iotistic_provisioning"
+          else
+            echo "Role iotistic_provisioning already exists, skipping"
+          fi
+          {{- end }}
         env:
         - name: PGPASSWORD
           value: {{ .Values.postgres.password | quote }}
+        {{- if .Values.postgres.provisioningAdmin.password }}
+        - name: PROVISIONING_ADMIN_PASSWORD
+          value: {{ .Values.postgres.provisioningAdmin.password | quote }}
+        {{- end }}
 {{- end }}
