@@ -116,8 +116,7 @@ postgresProvisioning:
   # API on first startup when DB_PROVIDER=postgres and this value is non-empty)
   templateDatabase: "template_iotistica"
   # Init job - runs against the shared PostgreSQL server on install/upgrade.
-  # Creates the TimescaleDB extension, fixes hypertable schema, and creates the
-  # iotistica_provisioning role used by the API and worker.
+  # Creates the iotistica_provisioning role used by the API and worker.
   # Connects using provisioning-pg-admin-credentials (username/password keys).
   initJob:
     enabled: true

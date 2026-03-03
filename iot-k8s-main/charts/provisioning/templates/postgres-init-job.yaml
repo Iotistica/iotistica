@@ -20,7 +20,7 @@ spec:
       restartPolicy: OnFailure
       containers:
       - name: postgres-init
-        image: "timescale/timescaledb:latest-pg16"
+        image: "postgres:16.6-alpine"
         command:
         - /bin/sh
         - -c
@@ -30,86 +30,6 @@ spec:
             echo "Waiting for PostgreSQL..."
             sleep 2
           done
-
-          echo "PostgreSQL is ready, creating TimescaleDB extension..."
-          psql -X -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "${PG_DB}" \
-            -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
-
-          echo "Verifying TimescaleDB extension..."
-          psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "${PG_DB}" \
-            -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'timescaledb';"
-
-          echo "Fixing primary key to include timestamp for hypertable compatibility..."
-          psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "${PG_DB}" -c "
-            DO \$\$
-            BEGIN
-              -- Check if sensor_data table exists and primary key needs fixing
-              IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'sensor_data') THEN
-                -- Check if current primary key includes timestamp
-                IF NOT EXISTS (
-                  SELECT 1 FROM pg_constraint c
-                  JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
-                  WHERE c.conname = 'sensor_data_pkey' AND a.attname = 'timestamp'
-                ) THEN
-                  RAISE NOTICE 'Fixing primary key to include timestamp...';
-                  ALTER TABLE sensor_data DROP CONSTRAINT IF EXISTS sensor_data_pkey CASCADE;
-                  ALTER TABLE sensor_data ADD CONSTRAINT sensor_data_pkey PRIMARY KEY (device_uuid, sensor_name, timestamp);
-                  RAISE NOTICE 'Primary key fixed successfully';
-                ELSE
-                  RAISE NOTICE 'Primary key already includes timestamp, skipping';
-                END IF;
-              ELSE
-                RAISE NOTICE 'sensor_data table does not exist yet, skipping primary key fix';
-              END IF;
-            END \$\$;
-          "
-
-          echo "Checking if sensor_data is already a hypertable and marking migration 103 as applied..."
-          psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "${PG_DB}" -c "
-            DO \$\$
-            DECLARE
-              is_hypertable BOOLEAN;
-              migration_exists BOOLEAN;
-            BEGIN
-              -- Check if TimescaleDB extension exists
-              IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
-                -- Check if sensor_data is already a hypertable
-                SELECT EXISTS (
-                  SELECT 1 FROM timescaledb_information.hypertables
-                  WHERE hypertable_name = 'sensor_data'
-                ) INTO is_hypertable;
-
-                -- Check if migrations table exists
-                SELECT EXISTS (
-                  SELECT 1 FROM information_schema.tables
-                  WHERE table_name = 'migrations'
-                ) INTO migration_exists;
-
-                -- If table is already a hypertable and migrations table exists
-                IF is_hypertable AND migration_exists THEN
-                  -- Check if migration 103 is already recorded
-                  IF NOT EXISTS (SELECT 1 FROM migrations WHERE version = 103) THEN
-                    RAISE NOTICE 'sensor_data is already a hypertable, marking migration 103 as applied';
-                    INSERT INTO migrations (version, name, applied_at)
-                    VALUES (103, 'enable timescaledb hypertable', NOW())
-                    ON CONFLICT (version) DO NOTHING;
-                    RAISE NOTICE 'Migration 103 marked as applied';
-                  ELSE
-                    RAISE NOTICE 'Migration 103 already recorded';
-                  END IF;
-                ELSE
-                  IF NOT is_hypertable THEN
-                    RAISE NOTICE 'sensor_data is not yet a hypertable, migration 103 will run normally';
-                  END IF;
-                  IF NOT migration_exists THEN
-                    RAISE NOTICE 'migrations table does not exist yet, skipping';
-                  END IF;
-                END IF;
-              END IF;
-            END \$\$;
-          "
-
-          echo "TimescaleDB initialization complete!"
 
           echo "Creating provisioning admin role..."
           ROLE_EXISTS=$(psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "${PG_DB}" \
