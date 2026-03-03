@@ -34,7 +34,7 @@ export interface PostgresProvisioningConfig {
    */
   sslRejectUnauthorized: boolean;
   /**
-   * Optional name of a pre-schema'd template database (e.g. 'template_iotistic').
+   * Optional name of a pre-schema'd template database (e.g. 'template_iotistica').
    * When set, each new client database is created with
    *   CREATE DATABASE … TEMPLATE <templateDatabase>
    * which physically copies the template at the filesystem level instead of
