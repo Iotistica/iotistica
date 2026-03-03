@@ -26,6 +26,10 @@ export class DeploymentWorker {
 
     console.log('🚀 Starting deployment worker...');
 
+    // Activate consumer-mode event handlers and health-check timers.
+    // This must only run in the worker process, not in the API.
+    deploymentQueue.enableConsumerMode();
+
     const queue = deploymentQueue.getQueue();
     const concurrency = parseInt(process.env.QUEUE_CONCURRENCY || '3');
 

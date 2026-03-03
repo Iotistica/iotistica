@@ -131,8 +131,8 @@ export class DeploymentQueue extends EventEmitter {
           console.log(`🔌 Redis ${type} closed`);
         });
 
-        redisInstance.on('reconnecting', (info: any) => {
-          console.warn(`🔄 Redis ${type} reconnecting (attempt ${info.attempt}, delay ${info.delay}ms)`);
+        redisInstance.on('reconnecting', (delay: number) => {
+          console.warn(`🔄 Redis ${type} reconnecting (delay ${delay}ms)`);
         });
 
         redisInstance.on('warn', (msg) => {
@@ -162,8 +162,21 @@ export class DeploymentQueue extends EventEmitter {
       },
     });
 
+    // Event handlers and health-check timers are intentionally NOT started here.
+    // Call enableConsumerMode() from the worker process to activate them.
+    console.log('📋 DeploymentQueue ready (producer mode)');
+  }
+
+  /**
+   * Enable consumer mode.
+   * Must be called once from the worker process after start-up.
+   * Sets up queue event handlers and periodic Redis/queue health-check logging.
+   * The API process is a producer only and must NOT call this.
+   */
+  enableConsumerMode(): void {
     this.setupEventHandlers();
     this.setupRedisHealthCheck();
+    console.log('🔧 DeploymentQueue consumer mode enabled');
   }
 
   /**
