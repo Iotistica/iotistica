@@ -22,6 +22,7 @@ import axios from 'axios';
 import { Job } from 'bull';
 import { logger } from '../utils/logger';
 import { TigerDataService, TigerDataDatabase } from './tigerdata-service';
+import { PostgresProvisioningService } from './postgres-provisioning-service';
 import { OnePasswordService } from './onepassword-service';
 import { CustomerModel } from '../db/customer-model';
 import { SecretBuilder } from './secret-builder';
@@ -69,7 +70,9 @@ export class GitOpsProvisioningService {
   private git: SimpleGit;
   private config: GitOpsConfig;
   private initialized = false;
+  private dbProvider: 'tigerdata' | 'postgres';
   private tigerDataService: TigerDataService;
+  private postgresProvisioningService: PostgresProvisioningService;
   private onePasswordService: OnePasswordService;
 
   constructor() {
@@ -94,8 +97,13 @@ export class GitOpsProvisioningService {
       ],
     });
 
+    // Select database provisioning provider (DB_PROVIDER=tigerdata|postgres)
+    const rawProvider = (process.env.DB_PROVIDER ?? 'tigerdata').toLowerCase();
+    this.dbProvider = rawProvider === 'postgres' ? 'postgres' : 'tigerdata';
+
     // Initialize provisioning services
     this.tigerDataService = new TigerDataService();
+    this.postgresProvisioningService = new PostgresProvisioningService();
     this.onePasswordService = new OnePasswordService();
 
     if (!this.config.enabled) {
@@ -105,6 +113,8 @@ export class GitOpsProvisioningService {
     if (!this.config.pat) {
       logger.warn('GITOPS_PAT not set - Git push will fail');
     }
+
+    logger.info(`Database provisioning provider: ${this.dbProvider}`);
   }
 
   /**
@@ -328,60 +338,68 @@ export class GitOpsProvisioningService {
       await this.git.reset(['--hard', `origin/${this.config.mainBranch}`]);
       await this.git.pull('origin', this.config.mainBranch);
 
-      // === STEP 1: Provision TigerData Database ===
+      // === STEP 1: Provision Database ===
+      const providerLabel = this.dbProvider === 'postgres' ? 'POSTGRES' : 'TIGERDATA';
       console.log('\n' + '-'.repeat(80));
-      console.log('🏛️  STEP 1/4: PROVISION TIGERDATA DATABASE');
+      console.log(`STEP 1/4: PROVISION ${providerLabel} DATABASE`);
       console.log('-'.repeat(80));
-      logger.info('Step 1: Provisioning TigerData database', { 
-        customerId: data.customerId, 
-        namespace: data.namespace 
+      logger.info('Step 1: Provisioning database', {
+        provider: this.dbProvider,
+        customerId: data.customerId,
+        namespace: data.namespace,
       });
-      
-      console.log(`🔄 Updating status: db_provisioning`);
+
+      console.log(`Updating status: db_provisioning`);
       await CustomerModel.updateDeploymentStatus(data.customerId, 'db_provisioning');
-      
+
       let dbResult: TigerDataDatabase;
       try {
-        console.log(`\n🚀 Creating TigerData service for namespace: ${data.namespace}`);
-        dbResult = await this.tigerDataService.provisionDatabase(data.namespace);
-        
-        console.log(`\n📥 TigerData Response Received:`);
+        console.log(`\nCreating ${providerLabel} database for namespace: ${data.namespace}`);
+
+        if (this.dbProvider === 'postgres') {
+          dbResult = await this.postgresProvisioningService.provisionDatabase(data.namespace);
+        } else {
+          dbResult = await this.tigerDataService.provisionDatabase(data.namespace);
+        }
+
+        console.log(`\nDatabase provisioning response received:`);
         console.log(JSON.stringify(dbResult, null, 2));
-        
-        console.log(`\n✅ Database provisioned!`);
+
+        console.log(`\nDatabase provisioned:`);
         console.log(`   Service ID: ${dbResult.serviceId}`);
         console.log(`   Host: ${dbResult.host}`);
         console.log(`   Port: ${dbResult.port}`);
         console.log(`   Database: ${dbResult.dbName}`);
         console.log(`   Username: ${dbResult.username}`);
         console.log(`   Status: ${dbResult.status}`);
-        logger.info('TigerData database provisioned', { 
+        logger.info('Database provisioned', {
+          provider: this.dbProvider,
           serviceId: dbResult.serviceId,
-          host: dbResult.host 
+          host: dbResult.host,
         });
 
-        console.log(`\n⏳ Waiting for database to become ready...`);
-        // Wait for database to become ready
-        // Note: We catch timeout errors but continue - the password has already been captured above
+        console.log(`\nWaiting for database to become ready...`);
         try {
-          await this.tigerDataService.waitUntilReady(dbResult.serviceId);
-          console.log(`✅ Database is ready!`);
-          logger.info('TigerData database is ready', { serviceId: dbResult.serviceId });
+          if (this.dbProvider === 'postgres') {
+            await this.postgresProvisioningService.waitUntilReady(dbResult.serviceId);
+          } else {
+            await this.tigerDataService.waitUntilReady(dbResult.serviceId);
+          }
+          console.log(`Database is ready!`);
+          logger.info('Database is ready', { serviceId: dbResult.serviceId });
         } catch (waitError: any) {
-          // Database not ready yet, but we have the password from provision response
-          console.log(`\n⚠️  Database status check timed out, but continuing deployment`);
-          console.log(`   The database is still provisioning on TigerData's end`);
+          console.log(`\nDatabase status check timed out, but continuing deployment`);
           console.log(`   Password has been captured from initial provision response`);
           console.log(`   Deployment will continue with available credentials`);
-          logger.warn('Database readiness timeout - continuing with captured credentials', { 
+          logger.warn('Database readiness timeout - continuing with captured credentials', {
             serviceId: dbResult.serviceId,
             hasPassword: !!dbResult.password,
-            waitError: waitError.message
+            waitError: waitError.message,
           });
         }
 
         // Update customer record with DB details
-        console.log(`\n💾 Saving database details to customer record...`);
+        console.log(`\nSaving database details to customer record...`);
         await CustomerModel.updateTigerDataDetails(data.customerId, {
           db_service_id: dbResult.serviceId,
           db_host: dbResult.host,
@@ -392,31 +410,33 @@ export class GitOpsProvisioningService {
           db_api_response: dbResult.fullResponse,
           db_initialized: false,
           deployment_status: 'db_ready',
+          db_provider: this.dbProvider,
         });
-        console.log(`✅ Database details saved!`);
-        console.log(`🔄 Status updated to: db_ready`);
+        console.log(`Database details saved!`);
+        console.log(`Status updated to: db_ready`);
         console.log('-'.repeat(80));
-        
-        // Update job progress (30 → 35%)
+
+        // Update job progress (30 -> 35%)
         if (job) {
           await job.progress(35);
-          console.log(`📊 Job progress: 35% (DB provisioned)`);
+          console.log(`Job progress: 35% (DB provisioned)`);
         }
-        
-        logger.info('TigerData details saved to database');
+
+        logger.info('Database details saved to customer record', { provider: this.dbProvider });
       } catch (error: any) {
-        console.log(`\n❌ TigerData provisioning FAILED!`);
+        console.log(`\nDatabase provisioning FAILED!`);
         console.log(`   Error: ${error.message}`);
-        logger.error('TigerData provisioning failed', { 
+        logger.error('Database provisioning failed', {
+          provider: this.dbProvider,
           error: error.message,
-          customerId: data.customerId 
+          customerId: data.customerId,
         });
-        
+
         await CustomerModel.updateDeploymentStatus(data.customerId, 'failed_db', {
-          deploymentError: `TigerData provisioning failed: ${error.message}`,
+          deploymentError: `${providerLabel} provisioning failed: ${error.message}`,
         });
-        
-        throw new Error(`TigerData provisioning failed: ${error.message}`);
+
+        throw new Error(`${providerLabel} provisioning failed: ${error.message}`);
       }
 
       // === STEP 2: Build and Create Secret Bundle (Pre-DB) ===
@@ -945,38 +965,45 @@ export class GitOpsProvisioningService {
 
       console.log('-'.repeat(80) + '\n');
 
-      // === STEP 4: Delete TigerData database ===
-      console.log('🗄️  STEP 4/4: DELETE TIGERDATA DATABASE');
+      // === STEP 4: Delete database ===
+      const deleteProviderLabel = this.dbProvider === 'postgres' ? 'POSTGRES' : 'TIGERDATA';
+      console.log(`STEP 4/4: DELETE ${deleteProviderLabel} DATABASE`);
       console.log('-'.repeat(80));
-      
+
       try {
         if (customer?.db_service_id) {
-          console.log(`   🗄️  Database Service ID: ${customer.db_service_id}`);
-          await this.tigerDataService.deleteDatabase(customer.db_service_id);
-          console.log('   ✅ TigerData database deleted successfully');
-          logger.info('TigerData database deleted', { serviceId: customer.db_service_id });
+          console.log(`   Database Service ID: ${customer.db_service_id}`);
+          if (this.dbProvider === 'postgres') {
+            await this.postgresProvisioningService.deleteDatabase(customer.db_service_id);
+            console.log('   Postgres database deleted successfully');
+            logger.info('Postgres database deleted', { serviceId: customer.db_service_id });
+          } else {
+            await this.tigerDataService.deleteDatabase(customer.db_service_id);
+            console.log('   TigerData database deleted successfully');
+            logger.info('TigerData database deleted', { serviceId: customer.db_service_id });
+          }
           dbDeleted = true;
         } else {
-          console.log('   ⚠️  No db_service_id found (already deleted or never created)');
-          logger.info('No TigerData database to delete', { customerId });
+          console.log('   No db_service_id found (already deleted or never created)');
+          logger.info('No database to delete', { customerId });
           dbDeleted = true; // Consider it "deleted" if it never existed
         }
       } catch (error: any) {
-        const errorMsg = `TigerData cleanup failed: ${error.message}`;
+        const errorMsg = `${deleteProviderLabel} cleanup failed: ${error.message}`;
         errors.push(errorMsg);
-        console.log(`   ❌ ${errorMsg}`);
-        logger.error('TigerData cleanup failed', { customerId, error: error.message });
+        console.log(`   ${errorMsg}`);
+        logger.error(`${deleteProviderLabel} cleanup failed`, { customerId, error: error.message });
       }
 
       console.log('-'.repeat(80) + '\n');
 
       // === SUMMARY ===
       console.log('\n' + '='.repeat(80));
-      console.log('📊 DELETION SUMMARY');
+      console.log('DELETION SUMMARY');
       console.log('='.repeat(80));
-      console.log(`   Git Manifests: ${gitDeleted ? '✅ Deleted' : '❌ Failed'}`);
-      console.log(`   1Password Secret: ${secretDeleted ? '✅ Deleted' : '❌ Failed'}`);
-      console.log(`   TigerData Database: ${dbDeleted ? '✅ Deleted' : '❌ Failed'}`);
+      console.log(`   Git Manifests: ${gitDeleted ? 'Deleted' : 'Failed'}`);
+      console.log(`   1Password Secret: ${secretDeleted ? 'Deleted' : 'Failed'}`);
+      console.log(`   Database (${deleteProviderLabel}): ${dbDeleted ? 'Deleted' : 'Failed'}`);
       console.log('='.repeat(80) + '\n');
 
       // If any errors occurred, throw them
@@ -987,7 +1014,7 @@ export class GitOpsProvisioningService {
       }
 
       logger.info('Comprehensive deletion completed successfully', { clientId, customerId });
-      console.log('✅ COMPREHENSIVE DELETION COMPLETED SUCCESSFULLY\n');
+      console.log('COMPREHENSIVE DELETION COMPLETED SUCCESSFULLY\n');
 
     } catch (error: any) {
       logger.error('Client deletion failed', {

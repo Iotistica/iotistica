@@ -23,7 +23,7 @@ export interface Customer {
   instance_namespace?: string;
   deployed_at?: Date;
   deployment_error?: string;
-  // TigerData database provisioning fields
+  // Database provisioning fields
   db_service_id?: string;
   db_host?: string;
   db_port?: number;
@@ -32,6 +32,8 @@ export interface Customer {
   db_provisioned_at?: Date;
   db_api_response?: any;
   db_initialized?: boolean;
+  /** Which provisioning backend was used: 'tigerdata' or 'postgres' */
+  db_provider?: string;
   // 1Password secret management fields
   secret_item_id?: string;
   secret_created_at?: Date;
@@ -384,7 +386,8 @@ export class CustomerModel {
   }
 
   /**
-   * Update TigerData database provisioning details
+   * Update database provisioning details
+   * Works for both TigerData and self-hosted PostgreSQL provisioning.
    */
   static async updateTigerDataDetails(
     customerId: string,
@@ -398,6 +401,7 @@ export class CustomerModel {
       db_api_response: any;
       db_initialized: boolean;
       deployment_status: string;
+      db_provider?: string;
     }
   ): Promise<Customer> {
     const result = await query<Customer>(
@@ -411,6 +415,7 @@ export class CustomerModel {
            db_api_response = $7, 
            db_initialized = $8, 
            deployment_status = $9,
+           db_provider = COALESCE($11, db_provider, 'tigerdata'),
            updated_at = CURRENT_TIMESTAMP
        WHERE customer_id = $10 
        RETURNING *`,
@@ -425,6 +430,7 @@ export class CustomerModel {
         data.db_initialized,
         data.deployment_status,
         customerId,
+        data.db_provider ?? null,
       ]
     );
 
