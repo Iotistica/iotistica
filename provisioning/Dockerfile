@@ -63,6 +63,9 @@ COPY src/templates ./dist/templates
 # Copy migrations
 COPY migrations ./migrations
 
+# Copy API migrations (used by create-template-db script)
+COPY api-migrations ./api-migrations
+
 # Copy entrypoint script
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
