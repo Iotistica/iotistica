@@ -10,7 +10,7 @@ Namespace: {{ .Release.Namespace }}
 {{- if .Values.worker.enabled }}
   ✓ Worker ({{ .Values.worker.replicas }} replicas)
 {{- end }}
-{{- if .Values.postgresql.enabled }}
+{{- if .Values.postgres.enabled }}
   ✓ PostgreSQL
 {{- end }}
 {{- if .Values.redis.enabled }}

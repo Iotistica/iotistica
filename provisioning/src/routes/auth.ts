@@ -423,6 +423,7 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
     const AUTH0_CLIENT_SECRET = process.env.AUTH0_CLIENT_SECRET;
     const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
     const BASE_URL = process.env.BASE_URL || 'http://localhost:3100';
+    const SIGNUP_CALLBACK_URL = process.env.AUTH0_SIGNUP_CALLBACK_URL || `${BASE_URL}/api/auth/signup-callback`;
 
     if (!AUTH0_DOMAIN || !AUTH0_CLIENT_ID || !AUTH0_CLIENT_SECRET) {
       logger.error('[Signup Callback] Auth0 not configured');
@@ -444,7 +445,7 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
           client_secret: AUTH0_CLIENT_SECRET,
           grant_type: 'authorization_code',
           code: code,
-          redirect_uri: `${BASE_URL}/api/auth/signup-callback`,
+          redirect_uri: SIGNUP_CALLBACK_URL,
         },
         { headers: { 'Content-Type': 'application/json' } }
       );
@@ -778,7 +779,7 @@ router.post('/token', async (req: Request, res: Response) => {
           audience: process.env.AUTH0_AUDIENCE,
           grant_type: 'authorization_code',
           code: code,
-          redirect_uri: process.env.AUTH0_REDIRECT_URI || 'http://localhost:3000/auth-callback.html',
+          redirect_uri: process.env.AUTH0_REDIRECT_URI || `${process.env.WEBSITE_URL || 'http://localhost:3000'}/auth-callback.html`,
         },
         {
           headers: { 'Content-Type': 'application/json' },

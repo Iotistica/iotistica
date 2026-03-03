@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Completing Sign In - Iotistica</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        body {
+            min-height: 100vh;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: Inter, system-ui, -apple-system, sans-serif;
+        }
+        .card {
+            max-width: 560px;
+            width: 100%;
+            margin: 1rem;
+            padding: 2rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+        }
+        .muted {
+            color: var(--text-secondary);
+        }
+        .error {
+            color: #ef4444;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>Completing authentication...</h2>
+        <p id="message" class="muted">Please wait while we finish your signup.</p>
+    </div>
+
+    <script>
+        (function handleAuthCallback() {
+            const messageEl = document.getElementById('message');
+            const params = new URLSearchParams(window.location.search);
+
+            const code = params.get('code');
+            const error = params.get('error');
+            const errorDescription = params.get('error_description');
+            const state = params.get('state');
+
+            if (error) {
+                messageEl.className = 'error';
+                messageEl.textContent = errorDescription || error;
+                return;
+            }
+
+            if (!code) {
+                messageEl.className = 'error';
+                messageEl.textContent = 'Missing authorization code.';
+                return;
+            }
+
+            sessionStorage.setItem('auth0_signup_code', code);
+
+            if (state) {
+                try {
+                    const decoded = JSON.parse(atob(decodeURIComponent(state)));
+                    const pendingSignup = {
+                        email: decoded.email || '',
+                        company: decoded.company || decoded.companyName || '',
+                        plan: decoded.plan || 'starter'
+                    };
+
+                    if (pendingSignup.email && pendingSignup.company) {
+                        sessionStorage.setItem('pending_signup', JSON.stringify(pendingSignup));
+                    }
+                } catch (_) {
+                    // Ignore invalid state payload and continue with code-only flow
+                }
+            }
+
+            window.location.replace('./complete-signup.html');
+        })();
+    </script>
+</body>
+</html>

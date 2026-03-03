@@ -83,10 +83,6 @@ postgres:
       memory: "1Gi"
       cpu: "1000m"
 
-# PostgreSQL (Bitnami chart - disabled, using custom deployment above)
-postgresql:
-  enabled: false
-
 # Redis (Bitnami)
 redis:
   enabled: false  # Using external Azure Redis instead
