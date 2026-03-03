@@ -503,11 +503,8 @@
                     // Callback goes to provisioning service (no dashboard exists yet for new signups)
                     const auth0Domain = 'dev-hmwhgxw10boqpmrw.us.auth0.com';
                     const clientId = 'Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR';
-                    const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                    const provisioningBaseUrl = isLocalDev
-                        ? 'http://localhost:3100'
-                        : `${window.location.origin}/provisioning`;
-                    const redirectUri = `${provisioningBaseUrl}/api/auth/signup-callback`;
+                    // Fixed production callback URL (hardcoded for security)
+                    const redirectUri = 'https://api.iotistica.com/provisioning/api/auth/signup-callback';
                     const state = encodeURIComponent(btoa(JSON.stringify(signupData)));
                     
                     const auth0Url = `https://${auth0Domain}/authorize?` +

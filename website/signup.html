@@ -259,11 +259,8 @@
         // Auth0 configuration
         const AUTH0_DOMAIN = 'dev-hmwhgxw10boqpmrw.us.auth0.com';
         const AUTH0_CLIENT_ID = 'Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR';
-        const IS_LOCAL_DEV = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        const PROVISIONING_BASE_URL = IS_LOCAL_DEV
-            ? 'http://localhost:3100'
-            : `${window.location.origin}/provisioning`;
-        const AUTH0_CALLBACK_URL = `${PROVISIONING_BASE_URL}/api/auth/signup-callback`;
+        // Fixed production callback URL (hardcoded for security)
+        const AUTH0_CALLBACK_URL = 'https://api.iotistica.com/provisioning/api/auth/signup-callback';
 
         // Handle plan selection
         document.querySelectorAll('.plan-card').forEach(card => {

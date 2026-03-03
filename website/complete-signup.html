@@ -202,13 +202,9 @@
 
     <script>
         // Configuration
-        const IS_LOCAL_DEV = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        const PROVISIONING_API_URL = IS_LOCAL_DEV
-            ? 'http://localhost:3100'
-            : `${window.location.origin}/provisioning`;
-        const DASHBOARD_URL = IS_LOCAL_DEV
-            ? 'http://localhost:8080'
-            : window.location.origin;
+        // Fixed production API URL (hardcoded for security - no secrets exposed)
+        const PROVISIONING_API_URL = 'https://api.iotistica.com/provisioning';
+        const DASHBOARD_URL = 'https://www.iotistica.com';
         const AUTH0_CALLBACK_URL = `${window.location.origin}/auth-callback.html`;
 
         let auth0AccessToken = null;
