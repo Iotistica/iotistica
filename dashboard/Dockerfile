@@ -1,5 +1,8 @@
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:20-alpine3.22 AS builder
+
+# Patch base OS packages in build stage for image-layer vulnerability scans
+RUN apk upgrade --no-cache
 
 # Set working directory
 WORKDIR /app
@@ -23,7 +26,10 @@ ENV NODE_ENV=$NODE_ENV
 RUN npm run build
 
 # Production stage
-FROM nginx:alpine
+FROM nginx:1.28-alpine3.22
+
+# Ensure runtime OS packages include latest security patches
+RUN apk upgrade --no-cache
 
 # Copy built assets from builder stage
 COPY --from=builder /app/build /usr/share/nginx/html
