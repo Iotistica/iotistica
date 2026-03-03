@@ -114,6 +114,14 @@ metadata:
 spec:
   itemPath: "vaults/IOT-CLIENTS/items/provisioning-pg-admin-credentials"
 ---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: iotistic-pg-superuser-credentials
+  namespace: {{ .Release.Namespace }}
+spec:
+  itemPath: "vaults/IOT-CLIENTS/items/iotistic-pg-superuser-credentials"
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

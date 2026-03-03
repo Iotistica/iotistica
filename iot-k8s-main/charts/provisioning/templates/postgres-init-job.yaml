@@ -1,10 +1,11 @@
-{{- if .Values.postgres.enabled }}
+{{- if and .Values.postgresProvisioning.host .Values.postgresProvisioning.initJob.enabled }}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "iotistic.fullname" . }}-postgres-init
+  name: {{ include "provisioning.fullname" . }}-postgres-init
+  namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "iotistic.labels" . | nindent 4 }}
+    {{- include "provisioning.labels" . | nindent 4 }}
     app.kubernetes.io/component: postgres-init
   annotations:
     "helm.sh/hook": post-install,post-upgrade
@@ -19,25 +20,27 @@ spec:
       restartPolicy: OnFailure
       containers:
       - name: postgres-init
-        image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+        image: "timescale/timescaledb:latest-pg16"
         command:
         - /bin/sh
         - -c
         - |
           echo "Waiting for PostgreSQL to be ready..."
-          until pg_isready -h {{ include "iotistic.fullname" . }}-postgres -U {{ .Values.postgres.username }} -d {{ .Values.postgres.database }}; do
+          until pg_isready -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "${PG_DB}"; do
             echo "Waiting for PostgreSQL..."
             sleep 2
           done
-          
+
           echo "PostgreSQL is ready, creating TimescaleDB extension..."
-          psql -X -h {{ include "iotistic.fullname" . }}-postgres -U {{ .Values.postgres.username }} -d {{ .Values.postgres.database }} -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
-          
+          psql -X -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "${PG_DB}" \
+            -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+
           echo "Verifying TimescaleDB extension..."
-          psql -h {{ include "iotistic.fullname" . }}-postgres -U {{ .Values.postgres.username }} -d {{ .Values.postgres.database }} -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'timescaledb';"
-          
+          psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "${PG_DB}" \
+            -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'timescaledb';"
+
           echo "Fixing primary key to include timestamp for hypertable compatibility..."
-          psql -h {{ include "iotistic.fullname" . }}-postgres -U {{ .Values.postgres.username }} -d {{ .Values.postgres.database }} -c "
+          psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "${PG_DB}" -c "
             DO \$\$
             BEGIN
               -- Check if sensor_data table exists and primary key needs fixing
@@ -60,9 +63,9 @@ spec:
               END IF;
             END \$\$;
           "
-          
+
           echo "Checking if sensor_data is already a hypertable and marking migration 103 as applied..."
-          psql -h {{ include "iotistic.fullname" . }}-postgres -U {{ .Values.postgres.username }} -d {{ .Values.postgres.database }} -c "
+          psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "${PG_DB}" -c "
             DO \$\$
             DECLARE
               is_hypertable BOOLEAN;
@@ -72,16 +75,16 @@ spec:
               IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
                 -- Check if sensor_data is already a hypertable
                 SELECT EXISTS (
-                  SELECT 1 FROM timescaledb_information.hypertables 
+                  SELECT 1 FROM timescaledb_information.hypertables
                   WHERE hypertable_name = 'sensor_data'
                 ) INTO is_hypertable;
-                
+
                 -- Check if migrations table exists
                 SELECT EXISTS (
-                  SELECT 1 FROM information_schema.tables 
+                  SELECT 1 FROM information_schema.tables
                   WHERE table_name = 'migrations'
                 ) INTO migration_exists;
-                
+
                 -- If table is already a hypertable and migrations table exists
                 IF is_hypertable AND migration_exists THEN
                   -- Check if migration 103 is already recorded
@@ -105,31 +108,40 @@ spec:
               END IF;
             END \$\$;
           "
-          
+
           echo "TimescaleDB initialization complete!"
-          
-          {{- if .Values.postgres.provisioningAdmin.password }}
+
           echo "Creating provisioning admin role..."
-          ROLE_EXISTS=$(psql -h {{ include "iotistic.fullname" . }}-postgres \
-            -U {{ .Values.postgres.username }} \
-            -d {{ .Values.postgres.database }} \
+          ROLE_EXISTS=$(psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "${PG_DB}" \
             -t -c "SELECT 1 FROM pg_roles WHERE rolname='iotistica_provisioning'" | xargs)
           if [ "$ROLE_EXISTS" != "1" ]; then
-            psql -h {{ include "iotistic.fullname" . }}-postgres \
-              -U {{ .Values.postgres.username }} \
-              -d {{ .Values.postgres.database }} \
+            psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "${PG_DB}" \
               --variable="provisioning_pw=${PROVISIONING_ADMIN_PASSWORD}" \
               -c "CREATE ROLE iotistica_provisioning WITH LOGIN PASSWORD :'provisioning_pw' CREATEDB CREATEROLE;"
             echo "Created role: iotistica_provisioning"
           else
             echo "Role iotistica_provisioning already exists, skipping"
           fi
-          {{- end }}
         env:
+        - name: PG_HOST
+          value: {{ .Values.postgresProvisioning.host | quote }}
+        - name: PG_PORT
+          value: {{ .Values.postgresProvisioning.port | default "5432" | quote }}
+        - name: PG_DB
+          value: {{ .Values.postgresProvisioning.adminDatabase | default "postgres" | quote }}
+        - name: PGUSER
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.postgresProvisioning.initJob.superuserSecretName | default "iotistic-pg-superuser-credentials" | quote }}
+              key: username
         - name: PGPASSWORD
-          value: {{ .Values.postgres.password | quote }}
-        {{- if .Values.postgres.provisioningAdmin.password }}
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.postgresProvisioning.initJob.superuserSecretName | default "iotistic-pg-superuser-credentials" | quote }}
+              key: password
         - name: PROVISIONING_ADMIN_PASSWORD
-          value: {{ .Values.postgres.provisioningAdmin.password | quote }}
-        {{- end }}
+          valueFrom:
+            secretKeyRef:
+              name: provisioning-pg-admin-credentials
+              key: password
 {{- end }}
