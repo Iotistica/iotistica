@@ -195,15 +195,6 @@ jobs:
           echo "Critical vulnerabilities detected. Failing build."
           exit 1
 
-      # Upload Trivy results to GitHub Security tab
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v4
-        if: always()
-        continue-on-error: true
-        with:
-          sarif_file: 'trivy-results.sarif'
-          category: 'trivy-api'
-
       # Push scanned image to registry
       - name: Push image to Docker Hub
         if: success()

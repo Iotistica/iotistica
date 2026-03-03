@@ -265,14 +265,6 @@ jobs:
           echo "Critical vulnerabilities detected in API. Failing build."
           exit 1
 
-      - name: Upload Trivy API results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v4
-        if: always()
-        continue-on-error: true
-        with:
-          sarif_file: 'trivy-api-results.sarif'
-          category: 'trivy-provisioning-api'
-
       - name: Push Provisioning API image to Docker Hub
         if: success()
         run: |
@@ -431,14 +423,6 @@ jobs:
         run: |
           echo "Critical vulnerabilities detected in Worker. Failing build."
           exit 1
-
-      - name: Upload Trivy Worker results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v4
-        if: always()
-        continue-on-error: true
-        with:
-          sarif_file: 'trivy-worker-results.sarif'
-          category: 'trivy-provisioning-worker'
 
       - name: Push Provisioning Worker image to Docker Hub
         if: success()
