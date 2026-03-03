@@ -335,13 +335,13 @@ export class VirtualAgentDeployer {
    */
   private async ensureNamespace(namespace: string): Promise<void> {
     try {
-      await this.coreApi.readNamespace(namespace);
+      await this.coreApi.readNamespace({ name: namespace });
       logger.debug('Namespace already exists', { namespace });
     } catch (error: any) {
       if (error.statusCode === 404) {
         // Namespace doesn't exist, create it
         logger.info('Creating namespace', { namespace });
-        await this.coreApi.createNamespace({
+        const namespaceObj: k8s.V1Namespace = {
           metadata: {
             name: namespace,
             labels: {
@@ -349,7 +349,8 @@ export class VirtualAgentDeployer {
               'iotistica.com/namespace-type': 'virtual-agents'
             }
           }
-        });
+        };
+        await this.coreApi.createNamespace({ body: namespaceObj });
         logger.info('Namespace created', { namespace });
       } else {
         throw error;
@@ -364,13 +365,15 @@ export class VirtualAgentDeployer {
   private async validateNamespaceQuota(namespace: string, config: VirtualAgentConfig): Promise<void> {
     try {
       // Try to get ResourceQuota for namespace
-      const quotas = await this.coreApi.listNamespacedResourceQuota(namespace);
-      if (!quotas.body.items || quotas.body.items.length === 0) {
+      const quotas = await this.coreApi.listNamespacedResourceQuota({
+        namespace
+      });
+      if (!quotas.items || quotas.items.length === 0) {
         logger.debug('No ResourceQuota found for namespace, allowing deployment', { namespace });
         return; // No quota, nothing to validate
       }
 
-      const quota = quotas.body.items[0]; // Use first quota
+      const quota = quotas.items[0]; // Use first quota
       const hardLimits = quota.spec?.hard || {};
       const used = quota.status?.used || {};
 
@@ -477,12 +480,12 @@ export class VirtualAgentDeployer {
     };
 
     try {
-      await this.coreApi.createNamespacedSecret(namespace, secret);
+      await this.coreApi.createNamespacedSecret({ namespace, body: secret });
     } catch (error: any) {
       if (error.statusCode === 409) {
         // Secret already exists, replace it
         logger.warn('Secret already exists, replacing', { namespace, secretName });
-        await this.coreApi.replaceNamespacedSecret(secretName, namespace, secret);
+        await this.coreApi.replaceNamespacedSecret({ name: secretName, namespace, body: secret });
       } else {
         logger.error('Failed to create Secret', {
           namespace,
@@ -525,7 +528,7 @@ export class VirtualAgentDeployer {
     };
 
     try {
-      await this.coreApi.createNamespacedPersistentVolumeClaim(namespace, pvc);
+      await this.coreApi.createNamespacedPersistentVolumeClaim({ namespace, body: pvc });
       logger.info('PersistentVolumeClaim created', { namespace, pvcName });
     } catch (error: any) {
       if (error.statusCode === 409) {
@@ -663,12 +666,12 @@ export class VirtualAgentDeployer {
     };
 
     try {
-      await this.appsApi.createNamespacedDeployment(namespace, deployment);
+      await this.appsApi.createNamespacedDeployment({ namespace, body: deployment });
     } catch (error: any) {
       if (error.statusCode === 409) {
         // Deployment already exists, replace it
         logger.warn('Deployment already exists, replacing', { namespace, name });
-        await this.appsApi.replaceNamespacedDeployment(name, namespace, deployment);
+        await this.appsApi.replaceNamespacedDeployment({ name, namespace, body: deployment });
       } else {
         logger.error('Failed to create deployment', {
           namespace,
@@ -693,17 +696,13 @@ export class VirtualAgentDeployer {
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       // Get events in the namespace
-      const events = await this.coreApi.listNamespacedEvent(
+      const events = await this.coreApi.listNamespacedEvent({
         namespace,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        `involvedObject.kind=ReplicaSet`
-      );
+        fieldSelector: `involvedObject.kind=ReplicaSet`
+      });
 
       // Look for errors related to this deployment
-      const deploymentEvents = events.body.items.filter(event => 
+      const deploymentEvents = events.items.filter(event => 
         event.involvedObject?.name?.startsWith(deploymentName) &&
         event.type === 'Warning'
       );
@@ -784,19 +783,15 @@ export class VirtualAgentDeployer {
       const deploymentName = device.helm_release_name || this.sanitizeDnsName(device.device_name);
 
       // Get deployment
-      const deployment = await this.appsApi.readNamespacedDeployment(deploymentName, namespace);
+      const deployment = await this.appsApi.readNamespacedDeployment({ name: deploymentName, namespace });
 
       // Get pods for this deployment
-      const podList = await this.coreApi.listNamespacedPod(
+      const podList = await this.coreApi.listNamespacedPod({
         namespace,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        `app=${deploymentName}`
-      );
+        labelSelector: `app=${deploymentName}`
+      });
 
-      const pod = podList.body.items[0];
+      const pod = podList.items[0];
       const podName = pod?.metadata?.name;
 
       // Determine status
@@ -860,7 +855,7 @@ export class VirtualAgentDeployer {
       // OPTIMIZATION: Check if Secret exists first (cheap check)
       // If already deleted, cleanup is done - exit early
       try {
-        await this.coreApi.readNamespacedSecret(secretName, namespace);
+        await this.coreApi.readNamespacedSecret({ name: secretName, namespace });
         // Secret exists - proceed with cleanup
       } catch (error: any) {
         if (error.statusCode === 404) {
@@ -884,7 +879,7 @@ export class VirtualAgentDeployer {
 
       // 1. Delete the provisioning Secret
       try {
-        await this.coreApi.deleteNamespacedSecret(secretName, namespace);
+        await this.coreApi.deleteNamespacedSecret({ name: secretName, namespace });
         logger.info('Provisioning Secret deleted', { namespace, secretName });
       } catch (error: any) {
         if (error.statusCode === 404) {
@@ -901,8 +896,8 @@ export class VirtualAgentDeployer {
 
       // 2. Patch deployment to remove PROVISIONING_KEY env var
       try {
-        const deployment = await this.appsApi.readNamespacedDeployment(name, namespace);
-        const agentContainer = deployment.body.spec?.template.spec?.containers.find(c => c.name === 'agent');
+        const deployment = await this.appsApi.readNamespacedDeployment({ name, namespace });
+        const agentContainer = deployment.spec?.template.spec?.containers.find(c => c.name === 'agent');
         
         if (agentContainer && agentContainer.env) {
           // Check if PROVISIONING_KEY still exists
@@ -913,17 +908,11 @@ export class VirtualAgentDeployer {
             agentContainer.env = agentContainer.env.filter(e => e.name !== 'PROVISIONING_KEY');
             
             // Patch deployment
-            await this.appsApi.patchNamespacedDeployment(
+            await this.appsApi.patchNamespacedDeployment({
               name,
               namespace,
-              deployment.body,
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              { headers: { 'Content-Type': 'application/merge-patch+json' } }
-            );
+              body: deployment
+            });
             
             logger.info('Deployment patched to remove PROVISIONING_KEY env var', { namespace, deploymentName: name });
           } else {
@@ -979,16 +968,11 @@ export class VirtualAgentDeployer {
 
       // Delete deployment
       try {
-        await this.appsApi.deleteNamespacedDeployment(
+        await this.appsApi.deleteNamespacedDeployment({
           name,
           namespace,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          { propagationPolicy: 'Foreground' }
-        );
+          body: { propagationPolicy: 'Foreground' }
+        });
         logger.info('Deployment deleted', { namespace, name });
       } catch (error: any) {
         if (error.statusCode !== 404) {
@@ -999,7 +983,7 @@ export class VirtualAgentDeployer {
 
       // Delete secret
       try {
-        await this.coreApi.deleteNamespacedSecret(secretName, namespace);
+        await this.coreApi.deleteNamespacedSecret({ name: secretName, namespace });
         logger.info('Secret deleted', { namespace, secretName });
       } catch (error: any) {
         if (error.statusCode !== 404) {
@@ -1011,7 +995,7 @@ export class VirtualAgentDeployer {
       // Delete PVC
       const pvcName = `${name}-data`;
       try {
-        await this.coreApi.deleteNamespacedPersistentVolumeClaim(pvcName, namespace);
+        await this.coreApi.deleteNamespacedPersistentVolumeClaim({ name: pvcName, namespace });
         logger.info('PersistentVolumeClaim deleted', { namespace, pvcName });
       } catch (error: any) {
         if (error.statusCode !== 404) {
@@ -1069,16 +1053,12 @@ export class VirtualAgentDeployer {
 
       // Delete pod(s) - Deployment controller will automatically recreate them
       try {
-        const podList = await this.coreApi.listNamespacedPod(
+        const podList = await this.coreApi.listNamespacedPod({
           namespace,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          `app=${deploymentName}`
-        );
+          labelSelector: `app=${deploymentName}`
+        });
 
-        const pods = podList.body.items;
+        const pods = podList.items;
         
         if (pods.length === 0) {
           logger.warn('No pods found for virtual agent', {
@@ -1092,7 +1072,7 @@ export class VirtualAgentDeployer {
         for (const pod of pods) {
           const podName = pod.metadata?.name;
           if (podName) {
-            await this.coreApi.deleteNamespacedPod(podName, namespace);
+            await this.coreApi.deleteNamespacedPod({ name: podName, namespace });
             logger.info('Pod deleted (will be recreated by Deployment)', {
               deviceUuid: deviceUuid.substring(0, 8) + '...',
               podName,
@@ -1272,7 +1252,7 @@ export class VirtualAgentDeployer {
         ]
       };
 
-      await this.rbacApi.createNamespacedRoleBinding(namespace, roleBinding as any);
+      await this.rbacApi.createNamespacedRoleBinding({ namespace, body: roleBinding as any });
       logger.info('Fleet management RoleBinding created', { 
         namespace, 
         fleetUuid,
@@ -1331,7 +1311,7 @@ export class VirtualAgentDeployer {
     
     try {
       // Create namespace
-      await this.coreApi.createNamespace({
+      const namespaceObj: k8s.V1Namespace = {
         metadata: {
           name: namespace,
           labels: {
@@ -1347,7 +1327,9 @@ export class VirtualAgentDeployer {
             'iotistica.com/total-devices': (params.agent_count * params.devices_per_agent).toString()
           }
         }
-      });
+      };
+      
+      await this.coreApi.createNamespace({ body: namespaceObj });
       
       logger.info('Fleet namespace created', { namespace, fleet_uuid: params.fleet_uuid });
       
@@ -1379,7 +1361,7 @@ export class VirtualAgentDeployer {
       const totalMemoryLimit = params.agent_count * memoryLimitPerAgent;
       
       // Create ResourceQuota with calculated resources
-      await this.coreApi.createNamespacedResourceQuota(namespace, {
+      const quota: k8s.V1ResourceQuota = {
         metadata: {
           name: 'fleet-quota',
           labels: {
@@ -1395,7 +1377,9 @@ export class VirtualAgentDeployer {
             'pods': params.agent_count.toString()
           }
         }
-      });
+      };
+      
+      await this.coreApi.createNamespacedResourceQuota({ namespace, body: quota });
       
       logger.info('Fleet ResourceQuota created based on devices_per_agent estimate', {
         namespace,
@@ -1512,7 +1496,7 @@ export class VirtualAgentDeployer {
         }
       };
 
-      await this.coreApi.patchNamespace(namespace, patch);
+      await this.coreApi.patchNamespace({ name: namespace, body: patch });
       
       logger.info('Fleet namespace marked for soft-delete', { 
         namespace,

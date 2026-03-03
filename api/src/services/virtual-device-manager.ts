@@ -448,13 +448,13 @@ export class VirtualDeviceManager {
     }
 
     try {
-      const quotas = await this.coreApi.listNamespacedResourceQuota(namespace);
-      if (!quotas.body.items || quotas.body.items.length === 0) {
+      const quotas = await this.coreApi.listNamespacedResourceQuota({ namespace });
+      if (!quotas.items || quotas.items.length === 0) {
         logger.debug('[VirtualDeviceManager] No ResourceQuota found for namespace', { namespace });
         return; // No quota, nothing to validate
       }
 
-      const quota = quotas.body.items[0];
+      const quota = quotas.items[0];
       const hardLimits = quota.spec?.hard || {};
       const used = quota.status?.used || {};
 
@@ -654,19 +654,19 @@ export class VirtualDeviceManager {
         namespace: k8s_namespace
       });
 
-      const deployment = await this.appsApi.readNamespacedDeployment(
-        helm_release_name,
-        k8s_namespace
-      );
+      const deployment = await this.appsApi.readNamespacedDeployment({
+        name: helm_release_name,
+        namespace: k8s_namespace
+      });
 
       logger.info('[VirtualDeviceManager] Current deployment fetched', {
         helmRelease: helm_release_name,
         namespace: k8s_namespace,
-        currentContainerCount: deployment.body.spec?.template.spec?.containers?.length || 0,
-        currentContainers: deployment.body.spec?.template.spec?.containers?.map(c => c.name) || []
+        currentContainerCount: deployment.spec?.template.spec?.containers?.length || 0,
+        currentContainers: deployment.spec?.template.spec?.containers?.map(c => c.name) || []
       });
 
-      const agentContainer = deployment.body.spec?.template.spec?.containers?.[0];
+      const agentContainer = deployment.spec?.template.spec?.containers?.[0];
       if (!agentContainer) {
         logger.error('[VirtualDeviceManager] Agent container not found in deployment', {
           helmRelease: helm_release_name,
@@ -712,21 +712,11 @@ export class VirtualDeviceManager {
         patch: JSON.stringify(patch, null, 2)
       });
 
-      await this.appsApi.patchNamespacedDeployment(
-        helm_release_name,
-        k8s_namespace,
-        patch,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        {
-          headers: {
-            'Content-Type': 'application/strategic-merge-patch+json'
-          }
-        }
-      );
+      await this.appsApi.patchNamespacedDeployment({
+        name: helm_release_name,
+        namespace: k8s_namespace,
+        body: patch
+      });
 
       logger.info('[VirtualDeviceManager] Virtual agent deployment patched with sidecars successfully', {
         deviceUuid,
@@ -824,14 +814,14 @@ export class VirtualDeviceManager {
 
     const namespace = process.env.NAMESPACE || 'demo';
     const customApi = this.k8sConfig.makeApiClient(k8s.CustomObjectsApi);
-    const httproutes = await customApi.listNamespacedCustomObject(
-      'gateway.networking.k8s.io',
-      'v1',
+    const httproutes = await customApi.listNamespacedCustomObject({
+      group: 'gateway.networking.k8s.io',
+      version: 'v1',
       namespace,
-      'httproutes'
-    );
+      plural: 'httproutes'
+    });
 
-    const routes = (httproutes.body as any).items || [];
+    const routes = (httproutes as any).items || [];
     for (const route of routes) {
       const backends = route.spec?.rules?.[0]?.backendRefs || [];
       for (const backend of backends) {
