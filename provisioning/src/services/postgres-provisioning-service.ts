@@ -33,6 +33,19 @@ export interface PostgresProvisioningConfig {
    * Default true (production-safe). Set false only for self-signed certs in dev.
    */
   sslRejectUnauthorized: boolean;
+  /**
+   * Optional name of a pre-schema'd template database (e.g. 'template_iotistica').
+   * When set, each new client database is created with
+   *   CREATE DATABASE … TEMPLATE <templateDatabase>
+   * which physically copies the template at the filesystem level instead of
+   * replaying every migration script on first API startup.  This makes database
+   * provisioning nearly instantaneous regardless of how many schema objects exist
+   * in the template.
+   *
+   * Set via env PROVISIONING_PG_TEMPLATE_DB.  Leave unset to use the standard
+   * PostgreSQL default (template1 / empty database).
+   */
+  templateDatabase?: string;
 }
 
 export class PostgresProvisioningError extends Error {
@@ -62,6 +75,8 @@ export class PostgresProvisioningService {
       sslRejectUnauthorized:
         config?.sslRejectUnauthorized ??
         (process.env.PROVISIONING_PG_SSL_REJECT_UNAUTHORIZED !== 'false'),
+      templateDatabase:
+        config?.templateDatabase ?? process.env.PROVISIONING_PG_TEMPLATE_DB,
     };
 
     if (!this.simulateMode && !this.config.adminPassword) {
@@ -181,9 +196,15 @@ export class PostgresProvisioningService {
       console.log(`[PostgresProvisioningService] Creating database ${namespace}`);
       // CREATE DATABASE cannot be run inside a transaction block in PostgreSQL.
       // simple-pg already auto-commits DDL so this is fine.
+      // When a template database is configured it is cloned at the filesystem
+      // level (copying all schema objects at once) which is orders of magnitude
+      // faster than replaying individual migration scripts.
       // Handle pre-existing database gracefully (42P04 = duplicate_database)
+      const templateClause = this.config.templateDatabase
+        ? ` TEMPLATE ${this.quoteIdentifier(this.config.templateDatabase)}`
+        : '';
       await client.query(
-        `CREATE DATABASE ${quotedDb} OWNER ${quotedRole}`
+        `CREATE DATABASE ${quotedDb}${templateClause} OWNER ${quotedRole}`
       ).catch(async (err: any) => {
         if (err.code === '42P04') {
           console.log(`[PostgresProvisioningService] Database ${namespace} already exists, skipping`);
@@ -228,6 +249,200 @@ export class PostgresProvisioningService {
   }
 
   /**
+   * Create (or recreate) the shared schema template database.
+   *
+   * Why this exists
+   * ---------------
+   * Running 90+ migration scripts on every new client database at API startup
+   * is slow and error-prone.  PostgreSQL's native template mechanism lets you
+   * clone an entire database – including every table, index, function and
+   * extension – at the filesystem level via a single CREATE DATABASE statement.
+   * This method builds (or refreshes) that template once; afterwards every call
+   * to provisionDatabase() completes in milliseconds rather than seconds.
+   *
+   * Behaviour
+   * ---------
+   * 1. If the template database does not exist it is created from `template0`
+   *    (PostgreSQL's pristine built-in template) so that it begins completely
+   *    empty and independent.
+   * 2. If `schemaScriptSql` is provided the SQL is executed against the
+   *    template database so that every subsequently cloned client database
+   *    already contains the full schema.
+   * 3. After schema application the template database is marked with
+   *    `IS_TEMPLATE = true` and `ALLOW_CONNECTIONS = false`.  This protects it
+   *    from accidental connections while still allowing CREATE DATABASE … TEMPLATE.
+   * 4. If the database already exists (idempotent re-run) the existing database
+   *    is reused – use updateTemplateDatabase() to apply incremental migrations.
+   *
+   * @param schemaScriptSql - Optional full SQL to execute against the fresh
+   *   template (e.g. the contents of your consolidated schema file).
+   */
+  async provisionTemplateDatabase(schemaScriptSql?: string): Promise<void> {
+    const templateName = this.config.templateDatabase;
+    if (!templateName) {
+      throw new PostgresProvisioningError(
+        'templateDatabase is not configured. Set PROVISIONING_PG_TEMPLATE_DB.'
+      );
+    }
+
+    if (this.simulateMode) {
+      console.log(
+        `[PostgresProvisioningService] SIMULATION MODE - skipping provisionTemplateDatabase for ${templateName}`
+      );
+      return;
+    }
+
+    console.log(`[PostgresProvisioningService] Provisioning template database: ${templateName}`);
+
+    const adminClient = this.createAdminClient();
+    try {
+      await adminClient.connect();
+
+      // Check whether the template already exists
+      const exists = await adminClient.query<{ exists: boolean }>(
+        'SELECT 1 FROM pg_database WHERE datname = $1',
+        [templateName]
+      );
+
+      if (exists.rows.length === 0) {
+        // Create from template0 (the pristine PostgreSQL template) so the new
+        // database is completely empty and not connected to template1 state.
+        const quotedTemplate = this.quoteIdentifier(templateName);
+        console.log(
+          `[PostgresProvisioningService] Creating template database ${templateName} from template0`
+        );
+        await adminClient.query(
+          `CREATE DATABASE ${quotedTemplate} TEMPLATE template0`
+        );
+      } else {
+        console.log(
+          `[PostgresProvisioningService] Template database ${templateName} already exists`
+        );
+      }
+    } finally {
+      await adminClient.end().catch(() => undefined);
+    }
+
+    // Apply the schema script inside the template database when provided
+    if (schemaScriptSql) {
+      await this.runScriptInDatabase(templateName, schemaScriptSql);
+    }
+
+    // Lock down the template: no new connections allowed, but the server can
+    // still use it as a source for CREATE DATABASE … TEMPLATE.
+    await this.setTemplateDatabaseFlags(templateName, true);
+
+    console.log(
+      `[PostgresProvisioningService] Template database ${templateName} is ready`
+    );
+  }
+
+  /**
+   * Apply an incremental schema migration to the existing template database.
+   *
+   * This allows keeping the template in sync with new schema versions without
+   * dropping and recreating it (which would be destructive if the template were
+   * still in use by an ongoing provisionDatabase() call).
+   *
+   * Steps:
+   *  1. Temporarily re-enable connections on the template database.
+   *  2. Execute `schemaScriptSql` against it.
+   *  3. Re-lock it (IS_TEMPLATE=true, ALLOW_CONNECTIONS=false).
+   *
+   * @param schemaScriptSql - Incremental SQL to run (e.g. a single migration file).
+   */
+  async updateTemplateDatabase(schemaScriptSql: string): Promise<void> {
+    const templateName = this.config.templateDatabase;
+    if (!templateName) {
+      throw new PostgresProvisioningError(
+        'templateDatabase is not configured. Set PROVISIONING_PG_TEMPLATE_DB.'
+      );
+    }
+
+    if (this.simulateMode) {
+      console.log(
+        `[PostgresProvisioningService] SIMULATION MODE - skipping updateTemplateDatabase for ${templateName}`
+      );
+      return;
+    }
+
+    console.log(
+      `[PostgresProvisioningService] Updating template database: ${templateName}`
+    );
+
+    // Temporarily allow connections so the script client can connect
+    await this.setTemplateDatabaseFlags(templateName, false);
+
+    try {
+      await this.runScriptInDatabase(templateName, schemaScriptSql);
+    } finally {
+      // Always re-lock, even on error
+      await this.setTemplateDatabaseFlags(templateName, true).catch((err) =>
+        console.error(
+          '[PostgresProvisioningService] Failed to re-lock template database after update:',
+          err
+        )
+      );
+    }
+
+    console.log(
+      `[PostgresProvisioningService] Template database ${templateName} updated successfully`
+    );
+  }
+
+  /**
+   * Drop the template database entirely.
+   *
+   * This is a destructive operation intended for schema resets or re-provisioning
+   * the template from scratch.  Call provisionTemplateDatabase() afterwards to
+   * rebuild it.  Client databases that were already cloned from this template
+   * are NOT affected – they are independent copies.
+   */
+  async dropTemplateDatabase(): Promise<void> {
+    const templateName = this.config.templateDatabase;
+    if (!templateName) {
+      throw new PostgresProvisioningError(
+        'templateDatabase is not configured. Set PROVISIONING_PG_TEMPLATE_DB.'
+      );
+    }
+
+    if (this.simulateMode) {
+      console.log(
+        `[PostgresProvisioningService] SIMULATION MODE - skipping dropTemplateDatabase for ${templateName}`
+      );
+      return;
+    }
+
+    console.log(
+      `[PostgresProvisioningService] Dropping template database: ${templateName}`
+    );
+
+    // Re-enable connections first so the DROP DATABASE command can proceed
+    await this.setTemplateDatabaseFlags(templateName, false).catch(() => undefined);
+
+    const adminClient = this.createAdminClient();
+    try {
+      await adminClient.connect();
+      const quotedDb = this.quoteIdentifier(templateName);
+
+      // Terminate any lingering connections before dropping
+      await adminClient.query(
+        `SELECT pg_terminate_backend(pid)
+           FROM pg_stat_activity
+          WHERE datname = $1 AND pid <> pg_backend_pid()`,
+        [templateName]
+      ).catch(() => undefined);
+
+      await adminClient.query(`DROP DATABASE IF EXISTS ${quotedDb}`);
+      console.log(
+        `[PostgresProvisioningService] Template database ${templateName} dropped`
+      );
+    } finally {
+      await adminClient.end().catch(() => undefined);
+    }
+  }
+
+  /**
    * Drop the client database and its associated role.
    *
    * @param serviceId - The database / namespace name (e.g. "client-dc5fec42901a")
@@ -238,6 +453,14 @@ export class PostgresProvisioningService {
     if (this.simulateMode) {
       console.log('[PostgresProvisioningService] SIMULATION MODE - skipping deleteDatabase');
       return;
+    }
+
+    // Refuse to delete the template database to prevent accidental data loss
+    if (this.config.templateDatabase && serviceId === this.config.templateDatabase) {
+      throw new PostgresProvisioningError(
+        `Refusing to delete the template database '${serviceId}'. ` +
+        'Call dropTemplateDatabase() if you intentionally want to remove it.'
+      );
     }
 
     const client = this.createAdminClient();
@@ -368,5 +591,73 @@ export class PostgresProvisioningService {
    */
   private quoteLiteral(value: string): string {
     return "'" + value.replace(/'/g, "''") + "'";
+  }
+
+  /**
+   * Set IS_TEMPLATE and ALLOW_CONNECTIONS flags on the template database.
+   *
+   * When `lock` is true the database is marked as a template and connections
+   * are disallowed (protecting it from accidental modification).
+   * When `lock` is false connections are re-enabled so a schema script can run.
+   */
+  private async setTemplateDatabaseFlags(dbName: string, lock: boolean): Promise<void> {
+    const adminClient = this.createAdminClient();
+    try {
+      await adminClient.connect();
+      const quotedDb = this.quoteIdentifier(dbName);
+      const isTemplate = lock ? 'TRUE' : 'FALSE';
+      const allowConn = lock ? 'FALSE' : 'TRUE';
+      await adminClient.query(
+        `ALTER DATABASE ${quotedDb} WITH IS_TEMPLATE ${isTemplate} ALLOW_CONNECTIONS ${allowConn}`
+      );
+      console.log(
+        `[PostgresProvisioningService] Template database ${dbName}: ` +
+        `is_template=${isTemplate}, allow_connections=${allowConn}`
+      );
+    } finally {
+      await adminClient.end().catch(() => undefined);
+    }
+  }
+
+  /**
+   * Connect to the given database as admin and execute a raw SQL script.
+   *
+   * Used to apply the full schema (or an incremental migration) to the
+   * template database before it is locked.
+   *
+   * SECURITY: The `sql` parameter is executed verbatim.  This method must only
+   * ever be called with SQL that originates from trusted, operator-controlled
+   * sources (e.g. a file read from the local filesystem or a checked-in
+   * migration file).  Never pass user-supplied input directly.
+   */
+  private async runScriptInDatabase(dbName: string, sql: string): Promise<void> {
+    const clientConfig = {
+      host: this.config.host,
+      port: this.config.port,
+      user: this.config.adminUser,
+      password: this.config.adminPassword,
+      database: dbName,
+      ...(this.config.ssl
+        ? { ssl: { rejectUnauthorized: this.config.sslRejectUnauthorized } }
+        : {}),
+    };
+    const scriptClient = new PgClient(clientConfig);
+    try {
+      await scriptClient.connect();
+      console.log(
+        `[PostgresProvisioningService] Running schema script in database: ${dbName}`
+      );
+      await scriptClient.query(sql);
+      console.log(
+        `[PostgresProvisioningService] Schema script completed in database: ${dbName}`
+      );
+    } catch (error) {
+      throw new PostgresProvisioningError(
+        `Failed to run schema script in database ${dbName}: ${error}`,
+        error
+      );
+    } finally {
+      await scriptClient.end().catch(() => undefined);
+    }
   }
 }
