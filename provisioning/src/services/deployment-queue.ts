@@ -35,6 +35,7 @@ export interface MonitorArgoJobData {
 
 export class DeploymentQueue extends EventEmitter {
   private queue: Queue;
+  private redisClients: Map<string, IORedis> = new Map();
 
   constructor() {
     super();
@@ -50,6 +51,8 @@ export class DeploymentQueue extends EventEmitter {
     const tlsFlag = (process.env.REDIS_TLS || process.env.REDIS_USE_TLS || process.env.REDIS_TLS_ENABLED || '')
       .toLowerCase();
     const useTls = tlsFlag === 'true' || tlsFlag === '1' || tlsFlag === 'yes';
+
+    console.log(`🔐 Redis Config: host=${host}, port=${port}, db=${db}, tls=${useTls}, password=${password ? '***' : 'none'}`);
 
     const baseRedisOptions: RedisOptions = {
       host,
@@ -69,12 +72,19 @@ export class DeploymentQueue extends EventEmitter {
       keepAlive: 30000,
       maxLoadingRetryTime: 30000,
       retryStrategy: (times: number) => {
-        if (times > 20) return null;
-        return Math.min(times * 1000, 5000);
+        if (times > 20) {
+          console.error(`❌ Redis retry strategy exhausted after ${times} attempts`);
+          return null;
+        }
+        const delay = Math.min(times * 1000, 5000);
+        console.warn(`⏳ Redis retry attempt ${times}, delaying ${delay}ms`);
+        return delay;
       },
       reconnectOnError: (err: Error) => {
         const targetErrors = ['READONLY', 'ECONNREFUSED', 'ETIMEDOUT'];
-        return targetErrors.some(e => err.message?.toUpperCase().includes(e));
+        const shouldReconnect = targetErrors.some(e => err.message?.toUpperCase().includes(e));
+        console.warn(`🔄 Redis reconnectOnError check: ${err.message} -> should reconnect: ${shouldReconnect}`);
+        return shouldReconnect;
       },
     };
     
@@ -87,21 +97,49 @@ export class DeploymentQueue extends EventEmitter {
         tls: baseRedisOptions.tls,
       },
       createClient: (type: 'client' | 'subscriber' | 'bclient', redisOpts: RedisOptions) => {
-        if (type === 'client') {
-          return new IORedis({
-            ...baseRedisOptions,
-            ...redisOpts,
-            enableReadyCheck: true,
-            maxRetriesPerRequest: 20,
-          });
-        }
-
-        return new IORedis({
+        console.log(`🔌 Creating Redis ${type} connection`);
+        
+        const redisInstance = new IORedis({
           ...baseRedisOptions,
           ...redisOpts,
-          enableReadyCheck: false,
-          maxRetriesPerRequest: null,
+          enableReadyCheck: type === 'client',
+          maxRetriesPerRequest: type === 'client' ? 20 : null,
         });
+
+        // Store reference for monitoring
+        this.redisClients.set(type, redisInstance);
+
+        // Add detailed connection logging
+        redisInstance.on('connect', () => {
+          console.log(`✅ Redis ${type} connected`);
+        });
+
+        redisInstance.on('ready', () => {
+          console.log(`🟢 Redis ${type} ready`);
+        });
+
+        redisInstance.on('error', (err) => {
+          console.error(`❌ Redis ${type} error:`, {
+            message: err.message,
+            code: (err as any).code,
+            errno: (err as any).errno,
+            stack: err.stack?.split('\n')[0],
+          });
+        });
+
+        redisInstance.on('close', () => {
+          console.log(`🔌 Redis ${type} closed`);
+        });
+
+        redisInstance.on('reconnecting', (info: any) => {
+          console.warn(`🔄 Redis ${type} reconnecting (attempt ${info.attempt}, delay ${info.delay}ms)`);
+        });
+
+        redisInstance.on('warn', (msg) => {
+          console.warn(`⚠️  Redis ${type} warning:`, msg);
+        });
+
+        return redisInstance;
       },
       settings: {
         stalledInterval: 300000,
@@ -125,6 +163,7 @@ export class DeploymentQueue extends EventEmitter {
     });
 
     this.setupEventHandlers();
+    this.setupRedisHealthCheck();
   }
 
   /**
@@ -345,7 +384,10 @@ export class DeploymentQueue extends EventEmitter {
     });
 
     this.queue.on('failed', (job, err) => {
-      console.error(`❌ Job ${job.id} failed:`, err.message);
+      console.error(`❌ Job ${job.id} failed:`, {
+        message: err.message,
+        stack: err.stack?.split('\n')[0],
+      });
       this.emit('job:failed', { job, error: err });
     });
 
@@ -363,6 +405,82 @@ export class DeploymentQueue extends EventEmitter {
       console.warn(`⚠️  Job ${job.id} stalled`);
       this.emit('job:stalled', { job });
     });
+
+    // Bull queue connection events
+    this.queue.on('error', (err) => {
+      console.error(`❌ Bull queue error:`, {
+        message: err.message,
+        code: (err as any).code,
+        stack: err.stack?.split('\n')[0],
+      });
+    });
+
+    this.queue.on('waiting', (jobId: any) => {
+      console.log(`⏳ Job ${jobId} waiting`);
+    });
+
+    this.queue.on('removed', (job) => {
+      console.log(`🗑️  Job ${job.id} removed`);
+    });
+  }
+
+  /**
+   * Setup Redis health check monitoring
+   */
+  private setupRedisHealthCheck() {
+    // Check Redis connection every 30 seconds
+    setInterval(async () => {
+      try {
+        const count = await this.queue.count();
+        console.log(`📊 Bull Queue Health - Waiting: ${count} jobs`);
+
+        // Check all Redis client connections
+        for (const [type, client] of this.redisClients.entries()) {
+          const status = client.status;
+          console.log(`   Redis ${type}: ${status}`);
+        }
+      } catch (error) {
+        console.error('❌ Redis health check failed:', {
+          message: (error as any).message,
+          code: (error as any).code,
+        });
+      }
+    }, 30000);
+
+    // Log queue stats periodically
+    setInterval(async () => {
+      try {
+        const stats = await this.getStats();
+        console.log(`📈 Queue Stats:`, {
+          waiting: stats.waiting,
+          active: stats.active,
+          completed: stats.completed,
+          failed: stats.failed,
+          delayed: stats.delayed,
+          total: stats.total,
+        });
+      } catch (error) {
+        console.error('❌ Failed to get queue stats:', (error as any).message);
+      }
+    }, 60000);
+  }
+
+  /**
+   * Get Redis connection status
+   */
+  async getRedisStatus(): Promise<Record<string, string>> {
+    const status: Record<string, string> = {};
+    
+    for (const [type, client] of this.redisClients.entries()) {
+      try {
+        await client.ping();
+        status[type] = `OK (${client.status})`;
+      } catch (error) {
+        status[type] = `ERROR: ${(error as any).message}`;
+      }
+    }
+
+    return status;
   }
 
   /**

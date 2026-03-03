@@ -29,6 +29,40 @@ export class DeploymentWorker {
     const queue = deploymentQueue.getQueue();
     const concurrency = parseInt(process.env.QUEUE_CONCURRENCY || '3');
 
+    console.log(`🔌 Connecting to Bull queue: ${queue.name}`);
+
+    // Add queue event listeners for job processing flow
+    queue.on('checking', (job) => {
+      console.log(`👀 Checking job ${job.id}`);
+    });
+
+    queue.on('waiting', (jobId) => {
+      console.log(`⏳ Job ${jobId} waiting for processing`);
+    });
+
+    queue.on('active', (job, jobPromise) => {
+      console.log(`▶️  Job ${job.id} (${job.name}) started processing`);
+    });
+
+    queue.on('completed', (job, result) => {
+      console.log(`✅ Job ${job.id} completed successfully`);
+    });
+
+    queue.on('failed', (job, error) => {
+      console.error(`❌ Job ${job.id} failed:`, {
+        message: error.message,
+        attempt: job.attemptsMade,
+        maxAttempts: job.opts.attempts,
+      });
+    });
+
+    queue.on('error', (error) => {
+      console.error('❌ Bull queue error:', {
+        message: error.message,
+        code: (error as any).code,
+      });
+    });
+
     // Process deployment jobs
     queue.process('deploy-customer-stack', concurrency, async (job: Job<DeploymentJobData>) => {
       return this.handleDeployment(job);
@@ -57,6 +91,7 @@ export class DeploymentWorker {
 
     this.isRunning = true;
     console.log(`✅ Deployment worker started (concurrency: ${concurrency})`);
+    console.log(`📊 Configured processors: deploy-customer-stack, update-customer-stack, delete-customer-stack, monitor-argo`);
   }
 
   /**
@@ -642,11 +677,18 @@ export class DeploymentWorker {
    */
   async stop() {
     if (!this.isRunning) {
+      console.log('ℹ️  Worker not running, nothing to stop');
       return;
     }
 
     console.log('🛑 Stopping deployment worker...');
-    await deploymentQueue.close();
+    try {
+      console.log('🔌 Closing Bull queue connections...');
+      await deploymentQueue.close();
+      console.log('✅ Bull queue closed');
+    } catch (error) {
+      console.error('⚠️  Error closing Bull queue:', (error as any).message);
+    }
     this.isRunning = false;
     console.log('✅ Deployment worker stopped');
   }

@@ -84,12 +84,24 @@ createBullBoard({
 app.use('/admin/queues', serverAdapter.getRouter());
 
 // Health check
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    service: 'billing',
-    timestamp: new Date().toISOString(),
-  });
+app.get('/health', async (req, res) => {
+  try {
+    const redisStatus = await deploymentQueue.getRedisStatus();
+    res.json({
+      status: 'healthy',
+      service: 'billing',
+      timestamp: new Date().toISOString(),
+      redis: redisStatus,
+    });
+  } catch (error) {
+    console.error('Health check error:', error);
+    res.status(503).json({
+      status: 'unhealthy',
+      service: 'billing',
+      timestamp: new Date().toISOString(),
+      redis: { error: (error as any).message },
+    });
+  }
 });
 
 // API routes with security
