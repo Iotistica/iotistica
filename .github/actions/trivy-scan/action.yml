@@ -40,6 +40,9 @@ runs:
         output: ${{ inputs.output-file }}
         severity: ${{ inputs.severity }}
         exit-code: '0'
+        skip-files: |
+          .git/,
+          .github/
 
     - name: Install jq
       shell: bash
