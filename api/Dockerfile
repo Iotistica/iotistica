@@ -40,7 +40,9 @@ RUN apk add --no-cache \
     ca-certificates \
     iptables \
     ip6tables && \
-    rm -rf /var/cache/apk/*
+    rm -rf /var/cache/apk/* && \
+    rm -rf /usr/local/lib/node_modules/npm && \
+    rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
 # Install Tailscale (optional - only if API needs to join tailnet)
 # For most deployments, API only needs the Admin API (no client install needed)

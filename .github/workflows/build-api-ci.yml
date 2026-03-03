@@ -126,6 +126,7 @@ jobs:
           image-ref: 'iotistic/api:ci-${{ steps.sha.outputs.short_sha }}'
           output-file: 'trivy-results.sarif'
           fail-on-critical: 'true'
+          ignore-file: 'api/.trivyignore'
 
       # Push scanned image to registry
       - name: Push image to Docker Hub

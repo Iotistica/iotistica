@@ -16,6 +16,10 @@ inputs:
     description: 'Severity levels to include in scan (comma-separated)'
     required: false
     default: 'CRITICAL,HIGH'
+  ignore-file:
+    description: 'Optional Trivy ignore file path (e.g., api/.trivyignore)'
+    required: false
+    default: ''
 
 outputs:
   critical:
@@ -39,6 +43,7 @@ runs:
         format: 'sarif'
         output: ${{ inputs.output-file }}
         severity: ${{ inputs.severity }}
+        trivyignores: ${{ inputs.ignore-file }}
         exit-code: '0'
         skip-files: |
           .git/,
