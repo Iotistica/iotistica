@@ -154,7 +154,7 @@ spec:
             - name: BASE_URL
               value: "https://{{ .Values.api.env.BASE_DOMAIN }}/provisioning/api"
             - name: WEBSITE_URL
-              value: "https://{{ .Values.api.env.BASE_DOMAIN }}"
+              value: {{ default "https://www.iotistica.com" .Values.api.env.WEBSITE_URL | quote }}
             - name: DEFAULT_TRIAL_DAYS
               value: {{ .Values.api.env.DEFAULT_TRIAL_DAYS | quote }}
             

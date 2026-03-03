@@ -443,9 +443,10 @@ router.post('/start-signup', async (req: Request, res: Response) => {
 router.get('/signup-callback', async (req: Request, res: Response) => {
   try {
     const { code, state } = req.query;
+    const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
+    const SIGNUP_PAGE_URL = `${WEBSITE_URL.replace(/\/$/, '')}/signup.html`;
 
     if (!code || !state) {
-      const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
       return res.status(400).send(`
         <html><head><title>Signup Error</title></head><body>
           <h1>Signup Error</h1>
@@ -489,7 +490,6 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
         throw new Error('Expired or invalid signup state');
       }
     } catch (e) {
-      const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
       return res.status(400).send(`
         <html><head><title>Signup Error</title></head><body>
           <h1>Signup Error</h1>
@@ -502,7 +502,6 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
     const { email, company, plan } = signupData;
 
     if (!email || !company) {
-      const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
       return res.status(400).send(`
         <html><head><title>Signup Error</title></head><body>
           <h1>Signup Error</h1>
@@ -516,7 +515,6 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
     const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;
     const AUTH0_CLIENT_ID = process.env.AUTH0_CLIENT_ID;
     const AUTH0_CLIENT_SECRET = process.env.AUTH0_CLIENT_SECRET;
-    const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
     const BASE_URL = process.env.BASE_URL || 'http://localhost:3100';
     const SIGNUP_CALLBACK_URL = process.env.AUTH0_SIGNUP_CALLBACK_URL || `${BASE_URL}/api/auth/signup-callback`;
 
@@ -590,14 +588,11 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
     );
 
     if (existingMembership.rows.length > 0) {
-      const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
-      return res.status(409).send(`
-        <html><head><title>Account Exists</title></head><body>
-          <h1>Account Already Exists</h1>
-          <p>This account is already registered.</p>
-          <a href="${WEBSITE_URL}">Back to Home</a>
-        </body></html>
-      `);
+      const params = new URLSearchParams({
+        error: 'account_exists',
+        message: 'This account is already registered.',
+      });
+      return res.redirect(302, `${SIGNUP_PAGE_URL}?${params.toString()}`);
     }
 
     // Check if email already used
@@ -607,14 +602,11 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
     );
 
     if (existingCustomer.rows.length > 0) {
-      const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
-      return res.status(409).send(`
-        <html><head><title>Email Already Registered</title></head><body>
-          <h1>Email Already Registered</h1>
-          <p>This email address is already associated with an account.</p>
-          <a href="${WEBSITE_URL}">Back to Home</a>
-        </body></html>
-      `);
+      const params = new URLSearchParams({
+        error: 'email_registered',
+        message: 'This email address is already associated with an account.',
+      });
+      return res.redirect(302, `${SIGNUP_PAGE_URL}?${params.toString()}`);
     }
 
     // Generate customer ID (hash of email for uniqueness)
