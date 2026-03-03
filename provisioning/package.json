@@ -11,7 +11,9 @@
     "worker": "node dist/worker.js",
     "dev:worker": "ts-node src/worker.ts",
     "clean": "rimraf dist",
-    "migrate": "psql $DATABASE_URL -f migrations/001_initial_schema.sql"
+    "migrate": "psql $DATABASE_URL -f migrations/001_initial_schema.sql",
+    "create-template-db": "node dist/scripts/create-template-db.js",
+    "dev:create-template-db": "ts-node src/scripts/create-template-db.ts"
   },
   "keywords": [
     "billing",

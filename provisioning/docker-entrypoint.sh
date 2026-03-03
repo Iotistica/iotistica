@@ -58,6 +58,20 @@ if [ "$IS_WORKER" = false ]; then
     echo "⚠️  psql not found, skipping migrations"
     echo "   Migrations should be run manually"
   fi
+
+  # Create the API schema template database (if configured)
+  # This is only done when DB_PROVIDER=postgres and PROVISIONING_PG_TEMPLATE_DB is set.
+  # Admin credentials (PROVISIONING_PG_ADMIN_USER / PROVISIONING_PG_ADMIN_PASSWORD) are
+  # required since CREATE DATABASE and ALTER DATABASE require superuser or owner privileges.
+  if [ "${DB_PROVIDER}" = "postgres" ] && [ -n "${PROVISIONING_PG_TEMPLATE_DB}" ]; then
+    echo ""
+    echo "🗄️  Creating API schema template database: ${PROVISIONING_PG_TEMPLATE_DB}..."
+    if node dist/scripts/create-template-db.js; then
+      echo "✅ Template database ready"
+    else
+      echo "⚠️  Template database creation failed (non-fatal) – client databases will run migrations on first startup"
+    fi
+  fi
 else
   echo "⏭️  Skipping migrations (Worker container - API runs migrations)"
 fi
