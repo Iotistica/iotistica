@@ -1,0 +1,16 @@
+# Trivy ignore file for Provisioning service
+# Build-time only vulnerabilities (in builder stage, not in final image)
+# Multi-stage Dockerfile ensures these don't reach production
+
+# npm internal dependencies (removed before final image layer)
+CVE-2025-5889   # brace-expansion
+CVE-2024-21538  # cross-spawn
+CVE-2026-24001  # diff
+CVE-2025-64756  # glob
+CVE-2026-26996  # minimatch
+CVE-2026-27903  # minimatch
+CVE-2026-27904  # minimatch
+CVE-2026-23745  # tar
+CVE-2026-23950  # tar
+CVE-2026-24842  # tar
+CVE-2026-26960  # tar

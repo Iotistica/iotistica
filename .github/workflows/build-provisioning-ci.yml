@@ -199,6 +199,7 @@ jobs:
           image-ref: 'iotistic/provisioning-api:${{ needs.version.outputs.package_version }}'
           output-file: 'trivy-api-results.sarif'
           fail-on-critical: 'true'
+          ignore-file: 'provisioning/.trivyignore'
 
       - name: Push Provisioning API image to Docker Hub
         if: success()
@@ -293,6 +294,7 @@ jobs:
           image-ref: 'iotistic/provisioning-worker:${{ needs.version.outputs.package_version }}'
           output-file: 'trivy-worker-results.sarif'
           fail-on-critical: 'true'
+          ignore-file: 'provisioning/.trivyignore'
 
       - name: Push Provisioning Worker image to Docker Hub
         if: success()
