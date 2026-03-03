@@ -158,6 +158,7 @@ jobs:
 
       - name: Get Docker image size
         id: image_size
+        if: needs.buildx.result == 'success'
         run: |
           # Login to Docker Hub to pull the image
           echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
