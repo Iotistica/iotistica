@@ -276,7 +276,10 @@
             const companyName = document.getElementById('companyName').value;
             const plan = document.querySelector('input[name="plan"]:checked').value;
 
+            console.log('🚀 Signup form submitted:', { email, company: companyName, plan });
+
             try {
+                console.log(`📡 Calling: ${PROVISIONING_API_URL}/api/auth/start-signup`);
                 const response = await fetch(`${PROVISIONING_API_URL}/api/auth/start-signup`, {
                     method: 'POST',
                     headers: {
@@ -289,19 +292,26 @@
                     })
                 });
 
+                console.log(`📍 Response status: ${response.status} ${response.statusText}`);
+
                 if (!response.ok) {
-                    throw new Error('Failed to start signup flow');
+                    const errorData = await response.json().catch(() => ({ error: response.statusText }));
+                    console.error('❌ Server error:', errorData);
+                    throw new Error(`Server error: ${response.status} - ${errorData.error || response.statusText}`);
                 }
 
-                const { auth0Url } = await response.json();
-                if (!auth0Url) {
-                    throw new Error('Missing Auth0 redirect URL');
+                const data = await response.json();
+                console.log('✅ Received auth0Url:', !!data.auth0Url);
+                
+                if (!data.auth0Url) {
+                    throw new Error('Missing Auth0 redirect URL in response');
                 }
 
-                window.location.href = auth0Url;
+                console.log('🔗 Redirecting to Auth0...');
+                window.location.href = data.auth0Url;
             } catch (error) {
-                alert('Unable to start signup. Please try again.');
-                console.error('Signup start failed:', error);
+                console.error('❌ Signup failed:', error);
+                alert(`Unable to start signup: ${error.message}`);
             }
         });
     </script>

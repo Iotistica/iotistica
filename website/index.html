@@ -493,7 +493,10 @@
                     const company = document.getElementById('signupCompany').value;
                     const plan = document.getElementById('signupPlan').value;
                     
+                    console.log('🚀 Modal signup form submitted:', { email, company, plan });
+
                     try {
+                        console.log(`📡 Calling: ${PROVISIONING_API_URL}/api/auth/start-signup`);
                         const response = await fetch(`${PROVISIONING_API_URL}/api/auth/start-signup`, {
                             method: 'POST',
                             headers: {
@@ -506,19 +509,26 @@
                             })
                         });
 
+                        console.log(`📍 Response status: ${response.status} ${response.statusText}`);
+
                         if (!response.ok) {
-                            throw new Error('Failed to start signup flow');
+                            const errorData = await response.json().catch(() => ({ error: response.statusText }));
+                            console.error('❌ Server error:', errorData);
+                            throw new Error(`Server error: ${response.status} - ${errorData.error || response.statusText}`);
                         }
 
                         const data = await response.json();
+                        console.log('✅ Received auth0Url:', !!data.auth0Url);
+                        
                         if (!data.auth0Url) {
-                            throw new Error('Missing Auth0 redirect URL');
+                            throw new Error('Missing Auth0 redirect URL in response');
                         }
 
+                        console.log('🔗 Redirecting to Auth0...');
                         window.location.href = data.auth0Url;
                     } catch (error) {
-                        alert('Unable to start signup. Please try again.');
-                        console.error('Signup start failed:', error);
+                        console.error('❌ Signup failed:', error);
+                        alert(`Unable to start signup: ${error.message}`);
                     }
                 });
             }
