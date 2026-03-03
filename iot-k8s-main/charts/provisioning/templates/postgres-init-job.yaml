@@ -132,12 +132,12 @@ spec:
         - name: PGUSER
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.postgresProvisioning.initJob.superuserSecretName | default "iotistic-pg-superuser-credentials" | quote }}
+              name: provisioning-pg-admin-credentials
               key: username
         - name: PGPASSWORD
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.postgresProvisioning.initJob.superuserSecretName | default "iotistic-pg-superuser-credentials" | quote }}
+              name: provisioning-pg-admin-credentials
               key: password
         - name: PROVISIONING_ADMIN_PASSWORD
           valueFrom:

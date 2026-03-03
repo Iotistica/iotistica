@@ -118,14 +118,9 @@ postgresProvisioning:
   # Init job - runs against the shared PostgreSQL server on install/upgrade.
   # Creates the TimescaleDB extension, fixes hypertable schema, and creates the
   # iotistica_provisioning role used by the API and worker.
-  # Requires a Kubernetes secret with the shared postgres superuser credentials.
-  # The iotistica_provisioning role password is read from provisioning-pg-admin-credentials.
+  # Connects using provisioning-pg-admin-credentials (username/password keys).
   initJob:
     enabled: true
-    # Name of the Kubernetes secret containing the shared postgres superuser credentials.
-    # Required keys: username, password
-    # This secret is typically provisioned via 1Password (iotistic-pg-superuser-credentials).
-    superuserSecretName: "iotistic-pg-superuser-credentials"
 
 # Ingress (Envoy Gateway HTTPRoute)
 ingress:
