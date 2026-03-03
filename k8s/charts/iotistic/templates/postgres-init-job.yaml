@@ -113,16 +113,16 @@ spec:
           ROLE_EXISTS=$(psql -h {{ include "iotistic.fullname" . }}-postgres \
             -U {{ .Values.postgres.username }} \
             -d {{ .Values.postgres.database }} \
-            -t -c "SELECT 1 FROM pg_roles WHERE rolname='iotistic_provisioning'" | xargs)
+            -t -c "SELECT 1 FROM pg_roles WHERE rolname='iotistica_provisioning'" | xargs)
           if [ "$ROLE_EXISTS" != "1" ]; then
             psql -h {{ include "iotistic.fullname" . }}-postgres \
               -U {{ .Values.postgres.username }} \
               -d {{ .Values.postgres.database }} \
               --variable="provisioning_pw=${PROVISIONING_ADMIN_PASSWORD}" \
-              -c "CREATE ROLE iotistic_provisioning WITH LOGIN PASSWORD :'provisioning_pw' CREATEDB CREATEROLE;"
-            echo "Created role: iotistic_provisioning"
+              -c "CREATE ROLE iotistica_provisioning WITH LOGIN PASSWORD :'provisioning_pw' CREATEDB CREATEROLE;"
+            echo "Created role: iotistica_provisioning"
           else
-            echo "Role iotistic_provisioning already exists, skipping"
+            echo "Role iotistica_provisioning already exists, skipping"
           fi
           {{- end }}
         env:

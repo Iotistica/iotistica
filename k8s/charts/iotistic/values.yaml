@@ -32,7 +32,7 @@ postgres:
   # databases and roles via CREATE DATABASE / CREATE ROLE.
   # Set provisioningAdmin.password in values-secret.yaml (never commit to Git).
   provisioningAdmin:
-    username: iotistic_provisioning
+    username: iotistica_provisioning
     password: ""  # REQUIRED: set via values-secret.yaml or --set postgres.provisioningAdmin.password=<value>
 
 # Redis cache

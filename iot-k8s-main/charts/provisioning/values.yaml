@@ -100,7 +100,7 @@ externalRedis:
 #   vaults/IOT-CLIENTS/items/provisioning-pg-admin-credentials
 #   Required keys: username, password
 #
-# The admin role (iotistic_provisioning) must have CREATEDB and CREATEROLE
+# The admin role (iotistica_provisioning) must have CREATEDB and CREATEROLE
 # privileges.  It is created automatically by the iotistic postgres init job
 # when the iotistic chart is deployed.
 postgresProvisioning:
