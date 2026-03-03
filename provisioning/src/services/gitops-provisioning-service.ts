@@ -72,7 +72,7 @@ export class GitOpsProvisioningService {
   private initialized = false;
   private dbProvider: 'tigerdata' | 'postgres';
   private tigerDataService: TigerDataService;
-  private postgresProvisioningService: PostgresProvisioningService;
+  private postgresProvisioningService?: PostgresProvisioningService;
   private onePasswordService: OnePasswordService;
 
   constructor() {
@@ -103,7 +103,9 @@ export class GitOpsProvisioningService {
 
     // Initialize provisioning services
     this.tigerDataService = new TigerDataService();
-    this.postgresProvisioningService = new PostgresProvisioningService();
+    if (this.dbProvider === 'postgres') {
+      this.postgresProvisioningService = new PostgresProvisioningService();
+    }
     this.onePasswordService = new OnePasswordService();
 
     if (!this.config.enabled) {
@@ -357,7 +359,7 @@ export class GitOpsProvisioningService {
         console.log(`\nCreating ${providerLabel} database for namespace: ${data.namespace}`);
 
         if (this.dbProvider === 'postgres') {
-          dbResult = await this.postgresProvisioningService.provisionDatabase(data.namespace);
+          dbResult = await this.postgresProvisioningService!.provisionDatabase(data.namespace);
         } else {
           dbResult = await this.tigerDataService.provisionDatabase(data.namespace);
         }
@@ -381,7 +383,7 @@ export class GitOpsProvisioningService {
         console.log(`\nWaiting for database to become ready...`);
         try {
           if (this.dbProvider === 'postgres') {
-            await this.postgresProvisioningService.waitUntilReady(dbResult.serviceId);
+            await this.postgresProvisioningService!.waitUntilReady(dbResult.serviceId);
           } else {
             await this.tigerDataService.waitUntilReady(dbResult.serviceId);
           }
@@ -974,7 +976,7 @@ export class GitOpsProvisioningService {
         if (customer?.db_service_id) {
           console.log(`   Database Service ID: ${customer.db_service_id}`);
           if (this.dbProvider === 'postgres') {
-            await this.postgresProvisioningService.deleteDatabase(customer.db_service_id);
+            await this.postgresProvisioningService!.deleteDatabase(customer.db_service_id);
             console.log('   Postgres database deleted successfully');
             logger.info('Postgres database deleted', { serviceId: customer.db_service_id });
           } else {
