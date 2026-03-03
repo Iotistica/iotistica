@@ -131,8 +131,8 @@ export class DeploymentQueue extends EventEmitter {
           console.log(`🔌 Redis ${type} closed`);
         });
 
-        redisInstance.on('reconnecting', (info: any) => {
-          console.warn(`🔄 Redis ${type} reconnecting (attempt ${info.attempt}, delay ${info.delay}ms)`);
+        redisInstance.on('reconnecting', (delay: number) => {
+          console.warn(`🔄 Redis ${type} reconnecting (delay ${delay}ms)`);
         });
 
         redisInstance.on('warn', (msg) => {
