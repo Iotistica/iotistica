@@ -253,6 +253,60 @@ export class APIMigrationService {
   }
 
   /**
+   * Get Git version metadata (commit hash, tags) from the repository
+   * 
+   * @returns Version metadata object with commit hash, tag, and timestamp
+   */
+  async getVersionMetadata(): Promise<{
+    commitHash: string;
+    commitShort: string;
+    tag: string | null;
+    branch: string;
+    timestamp: string;
+  }> {
+    const git = this.getGit();
+
+    try {
+      // Get current commit hash (full and short)
+      const commitHash = await git.revparse(['HEAD']);
+      const commitShort = commitHash.substring(0, 7);
+
+      // Get tag if current commit is tagged
+      let tag: string | null = null;
+      try {
+        const tagResult = await git.tag(['--points-at', 'HEAD']);
+        tag = tagResult.trim() || null;
+      } catch (error) {
+        // No tag on current commit - that's fine
+        tag = null;
+      }
+
+      // Get commit timestamp
+      const timestampStr = await git.show(['-s', '--format=%cI', 'HEAD']);
+      const timestamp = timestampStr.trim();
+
+      logger.info('[APIMigrationService] Retrieved version metadata', {
+        commitHash: commitShort,
+        tag,
+        timestamp,
+      });
+
+      return {
+        commitHash,
+        commitShort,
+        tag,
+        branch: this.mainBranch,
+        timestamp,
+      };
+    } catch (error) {
+      logger.error('[APIMigrationService] Failed to retrieve version metadata', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Clean up local repository cache (destructive - use with caution)
    */
   async cleanup(): Promise<void> {
@@ -363,7 +417,7 @@ export class PostgresProvisioningService {
   /**
    * Get detailed status of the template database
    * 
-   * @returns Template metadata including existence, properties, and table count
+   * @returns Template metadata including existence, properties, table count, and version info
    */
   async getTemplateStatus(): Promise<{
     exists: boolean;
@@ -371,6 +425,15 @@ export class PostgresProvisioningService {
     datistemplate?: boolean;
     datallowconn?: boolean;
     tableCount?: number;
+    version?: {
+      commitHash?: string;
+      commitShort?: string;
+      tag?: string | null;
+      branch?: string;
+      appliedAt?: string;
+      source?: string;
+      migrationCount?: number;
+    };
     error?: string;
   }> {
     const templateName = this.config.templateDatabase;
@@ -420,12 +483,27 @@ export class PostgresProvisioningService {
 
       const tableCount = parseInt(tableQuery.rows[0].count, 10);
 
+      // Fetch version metadata from system_config table
+      let versionInfo: any = undefined;
+      try {
+        const versionQuery = await adminClient.query(
+          `SELECT value FROM system_config WHERE key = $1`,
+          ['schema.version']
+        );
+        if (versionQuery.rows.length > 0) {
+          versionInfo = versionQuery.rows[0].value;
+        }
+      } catch (error) {
+        logger.debug('[PostgresProvisioningService] No version metadata found in template');
+      }
+
       return {
         exists: true,
         datname: template.datname,
         datistemplate: template.datistemplate,
         datallowconn: template.datallowconn,
         tableCount,
+        version: versionInfo,
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -542,6 +620,9 @@ export class PostgresProvisioningService {
       // level (copying all schema objects at once) which is orders of magnitude
       // faster than replaying individual migration scripts.
       
+      // Start timing for database creation
+      const dbCreationStart = Date.now();
+      
       // Before creating from template, terminate any connections to the template database
       // (e.g., from pgAdmin or other tools) to allow cloning
       if (this.config.templateDatabase) {
@@ -591,6 +672,8 @@ export class PostgresProvisioningService {
       const templateClause = this.config.templateDatabase
         ? ` TEMPLATE ${this.quoteIdentifier(this.config.templateDatabase)}`
         : '';
+      
+      const createDbStart = Date.now();
       await client.query(
         `CREATE DATABASE ${quotedDb}${templateClause} OWNER ${quotedRole}`
       ).catch(async (err: any) => {
@@ -600,13 +683,48 @@ export class PostgresProvisioningService {
           throw err;
         }
       });
+      const createDbDuration = Date.now() - createDbStart;
+      console.log(`[PostgresProvisioningService] ⏱️  CREATE DATABASE completed in ${createDbDuration}ms`);
 
       console.log(`[PostgresProvisioningService] Granting privileges on ${namespace}`);
       await client.query(
         `GRANT ALL PRIVILEGES ON DATABASE ${quotedDb} TO ${quotedRole}`
       );
 
-      console.log(`[PostgresProvisioningService] Database ${namespace} provisioned successfully`);
+      const totalDuration = Date.now() - dbCreationStart;
+      console.log(`[PostgresProvisioningService] ✅ Database ${namespace} provisioned successfully`);
+      console.log(`[PostgresProvisioningService] ⏱️  Total provisioning time: ${totalDuration}ms (CREATE DATABASE: ${createDbDuration}ms)`);
+
+      // Log schema version inherited from template (if available)
+      if (this.config.templateDatabase) {
+        const versionClient = new PgClient({
+          host: this.config.host,
+          port: this.config.port,
+          user: this.config.adminUser,
+          password: this.config.adminPassword,
+          database: namespace,
+          ...(this.config.ssl
+            ? { ssl: { rejectUnauthorized: this.config.sslRejectUnauthorized } }
+            : {}),
+        });
+        
+        try {
+          await versionClient.connect();
+          const versionQuery = await versionClient.query(
+            `SELECT value FROM system_config WHERE key = $1`,
+            ['schema.version']
+          );
+          if (versionQuery.rows.length > 0) {
+            const version = versionQuery.rows[0].value;
+            console.log(`[PostgresProvisioningService] 📦 Schema version: ${version.commitShort || 'unknown'} (tag: ${version.tag || 'none'})`);
+          }
+        } catch (err) {
+          // Version info not critical, just log at debug level
+          logger.debug('[PostgresProvisioningService] Could not fetch schema version from new database');
+        } finally {
+          await versionClient.end().catch(() => undefined);
+        }
+      }
 
       return this.buildResult(namespace, namespace, password, {
         createdAt: new Date().toISOString(),
@@ -680,6 +798,7 @@ export class PostgresProvisioningService {
       return;
     }
 
+    const totalStart = Date.now();
     console.log(`[PostgresProvisioningService] Provisioning template database: ${templateName}`);
 
     const adminClient = this.createAdminClient();
@@ -720,9 +839,96 @@ export class PostgresProvisioningService {
     // still use it as a source for CREATE DATABASE … TEMPLATE.
     await this.setTemplateDatabaseFlags(templateName, true);
 
+    const totalDuration = Date.now() - totalStart;
     console.log(
-      `[PostgresProvisioningService] Template database ${templateName} is ready`
+      `[PostgresProvisioningService] ✅ Template database ${templateName} is ready (total time: ${totalDuration}ms)`
     );
+  }
+
+  /**
+   * Insert schema version metadata into the template database's system_config table
+   * 
+   * Since the template is locked (datallowconn=false) after provisioning, this method:
+   * 1. Temporarily re-enables connections on the template
+   * 2. Inserts the version metadata
+   * 3. Re-locks the template
+   * 
+   * @param templateName - Name of the template database
+   * @param versionMetadata - Git version metadata to store
+   * @param migrationCount - Number of migration files applied
+   */
+  async insertVersionMetadata(
+    templateName: string,
+    versionMetadata: {
+      commitHash: string;
+      commitShort: string;
+      tag: string | null;
+      branch: string;
+      timestamp: string;
+    },
+    migrationCount: number
+  ): Promise<void> {
+    console.log('[PostgresProvisioningService] Inserting schema version metadata into template');
+
+    // Step 1: Temporarily unlock the template so we can connect
+    await this.setTemplateDatabaseFlags(templateName, false);
+
+    const clientConfig = {
+      host: this.config.host,
+      port: this.config.port,
+      user: this.config.adminUser,
+      password: this.config.adminPassword,
+      database: templateName,
+      ...(this.config.ssl
+        ? { ssl: { rejectUnauthorized: this.config.sslRejectUnauthorized } }
+        : {}),
+    };
+
+    const client = new PgClient(clientConfig);
+
+    try {
+      await client.connect();
+
+      const versionData = {
+        commitHash: versionMetadata.commitHash,
+        commitShort: versionMetadata.commitShort,
+        tag: versionMetadata.tag,
+        branch: versionMetadata.branch,
+        appliedAt: new Date().toISOString(),
+        source: 'github',
+        migrationCount,
+        repoTimestamp: versionMetadata.timestamp,
+      };
+
+      // Insert or update version metadata in system_config
+      await client.query(
+        `INSERT INTO system_config (key, value, updated_at)
+         VALUES ($1, $2, CURRENT_TIMESTAMP)
+         ON CONFLICT (key) DO UPDATE
+         SET value = EXCLUDED.value,
+             updated_at = CURRENT_TIMESTAMP`,
+        ['schema.version', JSON.stringify(versionData)]
+      );
+
+      console.log('[PostgresProvisioningService] ✅ Version metadata inserted', {
+        commit: versionMetadata.commitShort,
+        tag: versionMetadata.tag || 'none',
+        migrations: migrationCount,
+      });
+    } catch (error) {
+      logger.error('[PostgresProvisioningService] Failed to insert version metadata', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new PostgresProvisioningError(
+        `Failed to insert version metadata: ${error}`,
+        error
+      );
+    } finally {
+      await client.end().catch(() => undefined);
+      
+      // Step 2: Re-lock the template
+      await this.setTemplateDatabaseFlags(templateName, true);
+    }
   }
 
   /**
@@ -1039,9 +1245,13 @@ export class PostgresProvisioningService {
       console.log(
         `[PostgresProvisioningService] Running schema script in database: ${dbName}`
       );
+      
+      const scriptStart = Date.now();
       await scriptClient.query(sql);
+      const scriptDuration = Date.now() - scriptStart;
+      
       console.log(
-        `[PostgresProvisioningService] Schema script completed in database: ${dbName}`
+        `[PostgresProvisioningService] ⏱️  Schema script completed in database: ${dbName} (${scriptDuration}ms)`
       );
     } catch (error) {
       throw new PostgresProvisioningError(

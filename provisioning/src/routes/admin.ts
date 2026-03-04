@@ -107,9 +107,23 @@ router.post('/template/rebuild', async (req: Request, res: Response) => {
     const migrationService = new APIMigrationService();
     const schemaSql = await migrationService.fetchLatestMigrations();
     const fetchDuration = Date.now() - startTime;
+    
+    // Count number of migration files
+    const migrationCount = (schemaSql.match(/^--.*\.sql$/gm) || []).length;
+    
     logger.info('[admin] Migrations fetched', { 
       durationMs: fetchDuration,
-      sqlBytes: schemaSql.length 
+      sqlBytes: schemaSql.length,
+      migrationCount 
+    });
+
+    // Step 1.5: Fetch Git version metadata
+    logger.info('[admin] Fetching Git version metadata...');
+    const versionMetadata = await migrationService.getVersionMetadata();
+    logger.info('[admin] Version metadata retrieved', {
+      commit: versionMetadata.commitShort,
+      tag: versionMetadata.tag || 'none',
+      branch: versionMetadata.branch,
     });
 
     // Step 2: Initialize PostgreSQL provisioning service
@@ -126,10 +140,16 @@ router.post('/template/rebuild', async (req: Request, res: Response) => {
     // Step 4: Create fresh template and apply migrations
     logger.info('[admin] Creating and provisioning template database...');
     await pgService.provisionTemplateDatabase(schemaSql);
+    
+    // Step 5: Insert schema version metadata into template
+    logger.info('[admin] Inserting schema version metadata...');
+    await pgService.insertVersionMetadata(templateName, versionMetadata, migrationCount);
+    
     const totalDuration = Date.now() - startTime;
     logger.info('[admin] Template database ready', { 
       totalDurationMs: totalDuration,
-      templateName 
+      templateName,
+      version: versionMetadata.commitShort,
     });
 
     res.json({
@@ -139,7 +159,15 @@ router.post('/template/rebuild', async (req: Request, res: Response) => {
         templateName,
         totalDurationMs: totalDuration,
         sqlBytes: schemaSql.length,
+        migrationCount,
         timestamp: new Date().toISOString(),
+      },
+      version: {
+        commit: versionMetadata.commitShort,
+        commitHash: versionMetadata.commitHash,
+        tag: versionMetadata.tag,
+        branch: versionMetadata.branch,
+        repoTimestamp: versionMetadata.timestamp,
       },
       repository: migrationService.getMetadata(),
     });
