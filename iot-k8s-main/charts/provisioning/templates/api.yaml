@@ -269,6 +269,8 @@ spec:
                 secretKeyRef:
                   name: provisioning-auth0-credentials
                   key: audience
+            - name: AUTH0_SIGNUP_CALLBACK_URL
+              value: "https://{{ .Values.api.env.WEBSITE_URL }}/auth-callback.html"
             - name: AUTH0_REDIRECT_URI
               value: "https://{{ .Values.ingress.hostname }}/provisioning/api/auth/callback-auth0"
             
@@ -396,9 +398,9 @@ spec:
                   name: provisioning-pg-admin-credentials
                   key: password
             - name: PROVISIONING_PG_SSL
-              value: {{ .Values.postgresProvisioning.ssl | default "true" | quote }}
+              value: {{ .Values.postgresProvisioning.ssl | quote }}
             - name: PROVISIONING_PG_SSL_REJECT_UNAUTHORIZED
-              value: {{ .Values.postgresProvisioning.sslRejectUnauthorized | default "true" | quote }}
+              value: {{ .Values.postgresProvisioning.sslRejectUnauthorized | quote }}
             - name: PROVISIONING_PG_TEMPLATE_DB
               value: {{ .Values.postgresProvisioning.templateDatabase | default "template_iotistica" | quote }}
           

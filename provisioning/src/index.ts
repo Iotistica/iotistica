@@ -52,6 +52,11 @@ app.use(helmet({
   },
   crossOriginEmbedderPolicy: false, // Allow embedding resources from other origins
 }));
+
+// Trust proxy - Required for rate limiting when behind a load balancer/reverse proxy (AKS ingress)
+// This allows express-rate-limit to correctly identify client IPs from X-Forwarded-For header
+app.set('trust proxy', 1);
+
 app.use(cors());
 
 // Serve static website files from the website directory
