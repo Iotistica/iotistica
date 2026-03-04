@@ -65,7 +65,14 @@
 
             if (state) {
                 try {
-                    const decoded = JSON.parse(atob(decodeURIComponent(state)));
+                    // State format is: payloadB64.signatureB64
+                    // We only need the payload part to reconstruct signup data
+                    const payloadB64 = state.split('.')[0];
+                    // Decode base64url (replace - with +, _ with /)
+                    const padding = '='.repeat((4 - payloadB64.length % 4) % 4);
+                    const jsonStr = atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/') + padding);
+                    const decoded = JSON.parse(jsonStr);
+                    
                     const pendingSignup = {
                         email: decoded.email || '',
                         company: decoded.company || decoded.companyName || '',
@@ -75,8 +82,9 @@
                     if (pendingSignup.email && pendingSignup.company) {
                         sessionStorage.setItem('pending_signup', JSON.stringify(pendingSignup));
                     }
-                } catch (_) {
+                } catch (err) {
                     // Ignore invalid state payload and continue with code-only flow
+                    console.warn('Failed to decode state parameter:', err);
                 }
             }
 
