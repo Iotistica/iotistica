@@ -307,6 +307,15 @@
                     throw new Error('Missing Auth0 redirect URL in response');
                 }
 
+                // Store signup data in sessionStorage so auth-callback.html can access it
+                const signupData = {
+                    email,
+                    company: companyName,
+                    plan
+                };
+                sessionStorage.setItem('pending_signup', JSON.stringify(signupData));
+                console.log('💾 Stored signup data in sessionStorage');
+
                 console.log('🔗 Redirecting to Auth0...');
                 window.location.href = data.auth0Url;
             } catch (error) {
