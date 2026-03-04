@@ -26,6 +26,11 @@ export class DeploymentWorker {
 
     console.log('🚀 Starting deployment worker...');
 
+    // Wait for Redis connection to stabilize before enabling consumer mode
+    // Prevents Bull from making operations on partially-ready connections
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    console.log('⏳ Redis connection stabilization complete');
+
     // Activate consumer-mode event handlers and health-check timers.
     // This must only run in the worker process, not in the API.
     deploymentQueue.enableConsumerMode();

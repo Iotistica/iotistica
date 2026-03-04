@@ -35,12 +35,57 @@ spec:
           ROLE_EXISTS=$(psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "${PG_DB}" \
             -t -c "SELECT 1 FROM pg_roles WHERE rolname='iotistica_provisioning'" | xargs)
           if [ "$ROLE_EXISTS" != "1" ]; then
+            PGPASSWORD_ESCAPED=$(echo "$PROVISIONING_APP_PASSWORD" | sed "s/'/''/g")
             psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "${PG_DB}" \
-              --variable="provisioning_pw=${PROVISIONING_ADMIN_PASSWORD}" \
-              -c "CREATE ROLE iotistica_provisioning WITH LOGIN PASSWORD :'provisioning_pw' CREATEDB CREATEROLE;"
+              -c "CREATE ROLE iotistica_provisioning WITH LOGIN PASSWORD '${PGPASSWORD_ESCAPED}' CREATEDB CREATEROLE;"
             echo "Created role: iotistica_provisioning"
+            
+            echo "Granting permissions to iotistica_provisioning..."
+            psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "${PG_DB}" <<EOF
+            -- Grant usage on public schema
+            GRANT USAGE ON SCHEMA public TO iotistica_provisioning;
+            
+            -- Allow role to create objects in public schema (for migrations)
+            GRANT CREATE ON SCHEMA public TO iotistica_provisioning;
+            
+            -- Grant all privileges on existing tables/sequences in public schema to role
+            GRANT ALL ON ALL TABLES IN SCHEMA public TO iotistica_provisioning;
+            GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO iotistica_provisioning;
+            
+            -- Set default privileges for future tables/sequences
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO iotistica_provisioning;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO iotistica_provisioning;
+            
+            -- Allow role to connect to databases
+            ALTER DEFAULT PRIVILEGES GRANT CONNECT ON DATABASES TO iotistica_provisioning;
+            
+            -- Log success
+            SELECT 'Permissions granted on admin database';
+            EOF
+            
+            echo "Granting permissions on application database ({{ .Values.postgres.database }})..."
+            psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "{{ .Values.postgres.database }}" <<EOF
+            -- Grant usage on public schema in application database
+            GRANT USAGE ON SCHEMA public TO iotistica_provisioning;
+            
+            -- Allow role to create objects in public schema (for migrations)
+            GRANT CREATE ON SCHEMA public TO iotistica_provisioning;
+            
+            -- Grant all privileges on existing tables/sequences
+            GRANT ALL ON ALL TABLES IN SCHEMA public TO iotistica_provisioning;
+            GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO iotistica_provisioning;
+            
+            -- Set default privileges for future tables/sequences (migrations)
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO iotistica_provisioning;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO iotistica_provisioning;
+            
+            -- Log success
+            SELECT 'Application database permissions granted';
+            EOF
+            
+            echo "PostgreSQL initialization complete"
           else
-            echo "Role iotistica_provisioning already exists, skipping"
+            echo "Role iotistica_provisioning already exists - skipping initialization (permissions already set)"
           fi
         env:
         - name: PG_HOST
@@ -59,9 +104,9 @@ spec:
             secretKeyRef:
               name: provisioning-pg-admin-credentials
               key: password
-        - name: PROVISIONING_ADMIN_PASSWORD
+        - name: PROVISIONING_APP_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: provisioning-pg-admin-credentials
+              name: provisioning-db-credentials
               key: password
 {{- end }}

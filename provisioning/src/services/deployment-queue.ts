@@ -68,7 +68,6 @@ export class DeploymentQueue extends EventEmitter {
       enableOfflineQueue: true,
       enableAutoPipelining: true,
       connectTimeout: 20000,
-      commandTimeout: 10000,
       keepAlive: 30000,
       maxLoadingRetryTime: 30000,
       retryStrategy: (times: number) => {
@@ -90,11 +89,11 @@ export class DeploymentQueue extends EventEmitter {
     
     this.queue = new Bull('customer-deployments', {
       redis: {
+        ...baseRedisOptions,
         host,
         port,
         password,
         db,
-        tls: baseRedisOptions.tls,
       },
       createClient: (type: 'client' | 'subscriber' | 'bclient', redisOpts: RedisOptions) => {
         console.log(`🔌 Creating Redis ${type} connection`);
@@ -103,6 +102,8 @@ export class DeploymentQueue extends EventEmitter {
           ...baseRedisOptions,
           ...redisOpts,
           enableReadyCheck: type === 'client',
+          // Bull uses blocking commands on bclient/subscriber; commandTimeout breaks those.
+          commandTimeout: type === 'client' ? 30000 : undefined,
           maxRetriesPerRequest: type === 'client' ? 20 : null,
         });
 
@@ -110,6 +111,14 @@ export class DeploymentQueue extends EventEmitter {
         this.redisClients.set(type, redisInstance);
 
         // Add detailed connection logging
+                // Log ALL commands sent to Redis (to catch timeout culprit)
+                redisInstance.on('command', (args: any) => {
+                  const cmd = args?.args?.[0];
+                  if (cmd && cmd !== 'PING') {
+                    console.log(`📤 Redis ${type} command: ${cmd}`);
+                  }
+                });
+
         redisInstance.on('connect', () => {
           console.log(`✅ Redis ${type} connected`);
         });
@@ -142,7 +151,7 @@ export class DeploymentQueue extends EventEmitter {
         return redisInstance;
       },
       settings: {
-        stalledInterval: 300000,
+        stalledInterval: 600000, // 10 minutes - reduce aggressive polling
         maxStalledCount: 10,
       },
       prefix: 'provisioning',
