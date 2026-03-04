@@ -193,10 +193,15 @@ spec:
                   name: redis-credentials-master
                   key: host
             - name: REDIS_PORT
+              {{- if .Values.redis.tls }}
+              # Azure Redis with TLS requires port 6380, not 6379
+              value: "6380"
+              {{- else }}
               valueFrom:
                 secretKeyRef:
                   name: redis-credentials-master
                   key: port_ext
+              {{- end }}
             - name: REDIS_DB
               value: "0"
             - name: REDIS_PASSWORD

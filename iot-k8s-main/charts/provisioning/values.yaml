@@ -83,17 +83,21 @@ postgres:
     limits:
       memory: "1Gi"
       cpu: "1000m"
+  ingress:
+    enabled: true
+    # The name of the Gateway resource that will host the TLSRoute.  An empty
+    # string here still causes the template to render, but the resulting
+    # TLSRoute has a parentRef with no name and Kubernetes will reject it with
+    # "TLSRoute.gateway.networking.k8s.io \"\" not found".  Provide a valid
+    # gateway name or disable postgres.ingress entirely if not needed.
+    gateway: "iotistica-gateway"
+    gatewayNamespace: "envoy-gateway-system"
+    hostname: "prov-postgres.iotistica.com"  # e.g., postgres.iotistica.com
 
-# Redis (Bitnami)
+# Redis connection settings (credentials from redis-credentials-master secret)
 redis:
-  enabled: false  # Using external Azure Redis instead
-  tls: true       # Azure Redis requires TLS for external connections
-  cluster: false  # Set to true if using Redis Cluster mode
-
-# External Redis (used when redis.enabled: false)
-externalRedis:
-  host: ""  # e.g., redis.iotistica.com
-  port: 6379
+  tls: false      # Azure Redis requires TLS for external connections
+  cluster: true  # Set to true if using Redis Cluster mode
 
 # PostgreSQL Provisioning - shared server where per-client databases are created.
 # Admin credentials are pulled from the 1Password item:
@@ -107,16 +111,16 @@ postgresProvisioning:
   # Database provider: 'postgres' (self-hosted) or 'tigerdata' (Timescale Cloud)
   provider: "postgres"
   # Hostname of the shared PostgreSQL server (the iotistic chart postgres service)
-  host: ""  # REQUIRED: e.g., iotistica-postgres.iotistica.svc.cluster.local
+  host: "provisioning-postgres.provisioning.svc.cluster.local"
   port: 5432
   adminDatabase: "postgres"
-  ssl: true
+  ssl: false
   sslRejectUnauthorized: true
   # Template database cloned for every new client (created once by the provisioning
   # API on first startup when DB_PROVIDER=postgres and this value is non-empty)
   templateDatabase: "template_iotistica"
   # Init job - runs against the shared PostgreSQL server on install/upgrade.
-  # Creates the iotistica_provisioning role used by the API and worker.
+  # iotistica_provisioning role used by the API and worker.
   # Connects using provisioning-pg-admin-credentials (username/password keys).
   initJob:
     enabled: true
