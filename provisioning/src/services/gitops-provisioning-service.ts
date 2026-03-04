@@ -97,8 +97,13 @@ export class GitOpsProvisioningService {
       ],
     });
 
-    // Select database provisioning provider (DB_PROVIDER=tigerdata|postgres)
-    const rawProvider = (process.env.DB_PROVIDER ?? 'tigerdata').toLowerCase();
+    // Select database provisioning provider (PROVISIONING_DB_PROVIDER=tigerdata|postgres)
+    // Backward-compatible fallback to legacy DB_PROVIDER.
+    const rawProvider = (
+      process.env.PROVISIONING_DB_PROVIDER ??
+      process.env.DB_PROVIDER ??
+      'tigerdata'
+    ).toLowerCase();
     this.dbProvider = rawProvider === 'postgres' ? 'postgres' : 'tigerdata';
 
     // Initialize provisioning services

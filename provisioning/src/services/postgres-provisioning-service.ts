@@ -13,7 +13,263 @@
 
 import * as crypto from 'crypto';
 import { Client as PgClient, ClientConfig } from 'pg';
+import simpleGit, { SimpleGit } from 'simple-git';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import { logger } from '../utils/logger';
 import { TigerDataDatabase } from './tigerdata-service';
+
+// =============================================================================
+// API Migration Service
+// =============================================================================
+
+/**
+ * APIMigrationService
+ *
+ * Fetches API database migration scripts from GitHub repository and loads them
+ * for template database provisioning.
+ *
+ * Follows the same pattern as GitOpsProvisioningService:
+ * - Uses simple-git for clone/pull operations
+ * - Authenticates with GITOPS_PAT
+ * - Caches repository locally to avoid repeated clones
+ */
+export class APIMigrationService {
+  private git: SimpleGit | null = null;
+  private repoDir: string;
+  private repoUrl: string;
+  private pat: string;
+  private mainBranch: string;
+
+  constructor(repoUrl?: string, pat?: string, repoDir?: string) {
+    // Use environment variables by default (consistent with GitOpsProvisioningService)
+    // For API migrations, we need the main Iotistica repo, not the K8s deployment repo
+    this.repoUrl = repoUrl || process.env.GITOPS_REPO_URL || 'https://github.com/Iotistica/iotistic.git';
+    
+    // If the repo is the K8s deployment repo, use the main Iotistica repo for migrations instead
+    if (this.repoUrl.includes('iot-k8s')) {
+      this.repoUrl = 'https://github.com/Iotistica/iotistic.git';
+    }
+    
+    this.pat = pat || process.env.GITOPS_PAT || '';
+    this.repoDir = repoDir || '/tmp/iotistic-migrations';
+    this.mainBranch = process.env.GITOPS_MAIN_BRANCH || 'master';
+
+    // Don't initialize git here - it will fail if repoDir doesn't exist yet
+    // Initialize lazily when first needed
+
+    if (!this.pat) {
+      logger.warn('[APIMigrationService] GITOPS_PAT not set - cloning may fail for private repos');
+    }
+  }
+
+  /**
+   * Initialize git instance lazily (only when first needed)
+   * This prevents errors at module load time when repoDir doesn't exist
+   */
+  private getGit(): SimpleGit {
+    if (!this.git) {
+      this.git = simpleGit({
+        baseDir: this.repoDir,
+        config: [
+          'user.name=Iotistica Template Builder',
+          'user.email=provisioning@iotistica.com',
+        ],
+      });
+    }
+    return this.git;
+  }
+
+  /**
+   * Fetch latest API migrations from GitHub and return concatenated SQL
+   *
+   * Steps:
+   * 1. Clone or pull latest from GitHub
+   * 2. Read all *.sql files from api/database/migrations/
+   * 3. Sort alphabetically (001_*, 002_*, etc.)
+   * 4. Concatenate all SQL with line breaks
+   *
+   * @returns Concatenated SQL string ready to apply to template database
+   */
+  async fetchLatestMigrations(): Promise<string> {
+    logger.info('[APIMigrationService] Fetching latest API migrations from GitHub', {
+      repo: this.repoUrl,
+      branch: this.mainBranch,
+    });
+
+    try {
+      // Ensure parent directory exists before any git operations
+      const parentDir = path.dirname(this.repoDir);
+      await fs.mkdir(parentDir, { recursive: true });
+      
+      // Sync repository (clone or pull)
+      await this.syncRepository();
+
+      // Read migration files
+      const migrationsDir = path.join(this.repoDir, 'api', 'database', 'migrations');
+
+      logger.info('[APIMigrationService] Reading migration files', {
+        directory: migrationsDir,
+      });
+
+      const files = (await fs.readdir(migrationsDir))
+        .filter((f) => f.endsWith('.sql'))
+        .sort(); // Alphabetical: 001_, 002_, etc.
+
+      if (files.length === 0) {
+        throw new Error(
+          `No migration files (*.sql) found in ${migrationsDir}\n` +
+            'Expected structure: api/database/migrations/001_*.sql, 002_*.sql, etc.'
+        );
+      }
+
+      logger.info('[APIMigrationService] Found migration files', {
+        count: files.length,
+        files: files.map((f) => `  - ${f}`).join('\n'),
+      });
+
+      // Read and concatenate all SQL files
+      const sqlParts: string[] = [];
+      for (const file of files) {
+        const filePath = path.join(migrationsDir, file);
+        const content = await fs.readFile(filePath, 'utf8');
+        sqlParts.push(content);
+        logger.debug('[APIMigrationService] Loaded migration', {
+          file,
+          bytes: content.length,
+        });
+      }
+
+      const combinedSql = sqlParts.join('\n\n');
+
+      logger.info('[APIMigrationService] Successfully loaded all migrations', {
+        fileCount: files.length,
+        totalBytes: combinedSql.length,
+      });
+
+      return combinedSql;
+    } catch (error) {
+      logger.error('[APIMigrationService] Failed to fetch migrations', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Clone or pull the latest changes from the GitHub repository
+   *
+   * - If repository doesn't exist: clone with shallow depth (--depth=1)
+   * - If repository exists: pull latest changes
+   *
+   * Authentication via GITOPS_PAT is handled automatically using
+   * GitHub's x-access-token mechanism.
+   */
+  private async syncRepository(): Promise<void> {
+    const dirExists = await fs
+      .access(this.repoDir)
+      .then(() => true)
+      .catch(() => false);
+
+    if (!dirExists) {
+      // Clone repository - create directory if needed
+      logger.info('[APIMigrationService] Repository not found locally, cloning...', {
+        directory: this.repoDir,
+      });
+
+      // Ensure parent directories exist
+      await fs.mkdir(path.dirname(this.repoDir), { recursive: true });
+
+      // Construct authenticated URL if PAT is available
+      let cloneUrl = this.repoUrl;
+      if (this.pat) {
+        // Replace https://github.com/Iotistica/iotistic.git
+        // with https://x-access-token:{PAT}@github.com/Iotistica/iotistic.git
+        cloneUrl = this.repoUrl.replace(
+          'https://github.com/',
+          `https://x-access-token:${this.pat}@github.com/`
+        );
+      }
+
+      try {
+        // Use simple-git without baseDir for clone, since the directory doesn't exist yet
+        // Create parent directory first to ensure it exists
+        const parentDir = path.dirname(this.repoDir);
+        const baseName = path.basename(this.repoDir);
+        
+        // Initialize git in current working directory and use clone with target directory
+        const git = simpleGit();
+        await git.clone(cloneUrl, this.repoDir, [
+          '--depth=1',
+          `--branch=${this.mainBranch}`,
+        ]);
+        
+        // Reset the git instance so it reinitializes with the now-existent directory
+        this.git = null;
+        
+        logger.info('[APIMigrationService] Repository cloned successfully', {
+          directory: this.repoDir,
+          branch: this.mainBranch,
+        });
+      } catch (error) {
+        logger.error('[APIMigrationService] Clone failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    } else {
+      // Pull latest changes
+      logger.info('[APIMigrationService] Repository exists, pulling latest changes...');
+
+      try {
+        // Ensure we're on the correct branch
+        const git = this.getGit();
+        await git.checkout(this.mainBranch);
+        await git.pull('origin', this.mainBranch);
+        logger.info('[APIMigrationService] Repository updated successfully', {
+          branch: this.mainBranch,
+        });
+      } catch (error) {
+        logger.error('[APIMigrationService] Pull failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Get repository metadata (for diagnostics)
+   *
+   * @returns Object with repo path, URL, and branch info
+   */
+  getMetadata() {
+    return {
+      repoDir: this.repoDir,
+      repoUrl: this.repoUrl,
+      branch: this.mainBranch,
+      authenticated: !!this.pat,
+    };
+  }
+
+  /**
+   * Clean up local repository cache (destructive - use with caution)
+   */
+  async cleanup(): Promise<void> {
+    try {
+      await fs.rm(this.repoDir, { recursive: true, force: true });
+      logger.info('[APIMigrationService] Repository cache cleaned');
+    } catch (error) {
+      logger.error('[APIMigrationService] Failed to clean cache', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+}
+
+// =============================================================================
+// PostgreSQL Provisioning Service
+// =============================================================================
 
 export interface PostgresProvisioningConfig {
   /** Hostname of the shared PostgreSQL server */
@@ -95,6 +351,92 @@ export class PostgresProvisioningService {
   // ---------------------------------------------------------------------------
   // Public API (compatible with TigerDataService)
   // ---------------------------------------------------------------------------
+
+  /**
+   * Get the configured template database name
+   * @returns The template database name or null if not configured
+   */
+  getTemplateDatabaseName(): string {
+    return this.config.templateDatabase || '';
+  }
+
+  /**
+   * Get detailed status of the template database
+   * 
+   * @returns Template metadata including existence, properties, and table count
+   */
+  async getTemplateStatus(): Promise<{
+    exists: boolean;
+    datname?: string;
+    datistemplate?: boolean;
+    datallowconn?: boolean;
+    tableCount?: number;
+    error?: string;
+  }> {
+    const templateName = this.config.templateDatabase;
+    if (!templateName) {
+      return {
+        exists: false,
+        error: 'Template database not configured. Set PROVISIONING_PG_TEMPLATE_DB.',
+      };
+    }
+
+    if (this.simulateMode) {
+      return {
+        exists: true,
+        datname: templateName,
+        datistemplate: true,
+        datallowconn: false,
+        tableCount: 0,
+      };
+    }
+
+    const adminClient = this.createAdminClient();
+    try {
+      await adminClient.connect();
+
+      // Get template database metadata
+      const templateQuery = await adminClient.query(
+        `SELECT datname, datistemplate, datallowconn 
+           FROM pg_database 
+          WHERE datname = $1`,
+        [templateName]
+      );
+
+      if (templateQuery.rows.length === 0) {
+        return { exists: false };
+      }
+
+      const template = templateQuery.rows[0];
+
+      // Count tables in template
+      const tableQuery = await adminClient.query(
+        `SELECT COUNT(*) as count
+           FROM information_schema.tables
+          WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+            AND table_catalog = $1`,
+        [templateName]
+      );
+
+      const tableCount = parseInt(tableQuery.rows[0].count, 10);
+
+      return {
+        exists: true,
+        datname: template.datname,
+        datistemplate: template.datistemplate,
+        datallowconn: template.datallowconn,
+        tableCount,
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      return {
+        exists: false,
+        error: `Failed to query template status: ${errorMsg}`,
+      };
+    } finally {
+      await adminClient.end().catch(() => undefined);
+    }
+  }
 
   /**
    * Check whether a client database already exists on the provisioning server.
@@ -199,6 +541,52 @@ export class PostgresProvisioningService {
       // When a template database is configured it is cloned at the filesystem
       // level (copying all schema objects at once) which is orders of magnitude
       // faster than replaying individual migration scripts.
+      
+      // Before creating from template, terminate any connections to the template database
+      // (e.g., from pgAdmin or other tools) to allow cloning
+      if (this.config.templateDatabase) {
+        console.log(`[PostgresProvisioningService] Terminating connections to template ${this.config.templateDatabase}...`);
+        
+        // Terminate active connections with retries to ensure they're all closed
+        let terminateAttempts = 0;
+        const maxTerminateAttempts = 3;
+        
+        while (terminateAttempts < maxTerminateAttempts) {
+          try {
+            // Terminate all connections to the template except ours
+            const result = await client.query(
+              `SELECT pg_terminate_backend(pid)
+                 FROM pg_stat_activity
+                WHERE datname = $1 AND pid <> pg_backend_pid()`,
+              [this.config.templateDatabase]
+            );
+            
+            const terminatedCount = result.rows.filter((r: any) => r.pg_terminate_backend).length;
+            console.log(`[PostgresProvisioningService] Terminated ${terminatedCount} connection(s) to template`);
+            
+            // Check if there are still any active connections
+            const activeResult = await client.query(
+              `SELECT count(*) as count FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`,
+              [this.config.templateDatabase]
+            );
+            
+            const activeCount = parseInt(activeResult.rows[0].count, 10);
+            if (activeCount === 0) {
+              console.log('[PostgresProvisioningService] All connections to template terminated successfully');
+              break;
+            }
+            
+            console.log(`[PostgresProvisioningService] Still ${activeCount} active connection(s), waiting...`);
+            // Wait before retrying
+            await new Promise(resolve => setTimeout(resolve, 500));
+            terminateAttempts++;
+          } catch (err: any) {
+            console.warn(`[PostgresProvisioningService] Error terminating connections (attempt ${terminateAttempts + 1}):`, err.message);
+            terminateAttempts++;
+          }
+        }
+      }
+      
       // Handle pre-existing database gracefully (42P04 = duplicate_database)
       const templateClause = this.config.templateDatabase
         ? ` TEMPLATE ${this.quoteIdentifier(this.config.templateDatabase)}`
@@ -524,7 +912,11 @@ export class PostgresProvisioningService {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  private createAdminClient(): PgClient {
+  /**
+   * Create a PostgreSQL admin client connected to the provisioning server
+   * @internal Exposed for internal/testing use only
+   */
+  createAdminClient(): PgClient {
     const clientConfig: ClientConfig = {
       host: this.config.host,
       port: this.config.port,

@@ -5,7 +5,8 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:15-alpine
+    image: timescale/timescaledb:latest-pg16
+    container_name: provisioning-postgres
     environment:
       POSTGRES_USER: billing
       POSTGRES_PASSWORD: billing123
@@ -94,6 +95,10 @@ services:
       JWT_ACCESS_TOKEN_EXPIRY: ${JWT_ACCESS_TOKEN_EXPIRY}
       JWT_REFRESH_TOKEN_EXPIRY: ${JWT_REFRESH_TOKEN_EXPIRY}
 
+      # API Security
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+      INTERNAL_AUTH_TOKEN: ${INTERNAL_AUTH_TOKEN}
+
       # Trial configuration
       DEFAULT_TRIAL_DAYS: ${DEFAULT_TRIAL_DAYS:-14}
       
@@ -101,9 +106,9 @@ services:
       BASE_DOMAIN: ${BASE_DOMAIN:-iotistica.com}
       
       # Database Provisioning Provider (tigerdata or postgres)
-      DB_PROVIDER: ${DB_PROVIDER:-tigerdata}
+      PROVISIONING_DB_PROVIDER: ${PROVISIONING_DB_PROVIDER:-tigerdata}
 
-      # TigerData API (TimescaleDB provisioning) – used when DB_PROVIDER=tigerdata
+      # TigerData API (TimescaleDB provisioning) – used when PROVISIONING_DB_PROVIDER=tigerdata
       TIGERDATA_API_URL: ${TIGERDATA_API_URL:-https://console.cloud.timescale.com/public/api/v1}
       TIGERDATA_ACCESS_KEY: ${TIGERDATA_ACCESS_KEY}
       TIGERDATA_SECRET_KEY: ${TIGERDATA_SECRET_KEY}
@@ -112,15 +117,16 @@ services:
       TIGERDATA_DEFAULT_PLAN: ${TIGERDATA_DEFAULT_PLAN:-dev}
       SIMULATE_TIGERDATA: ${SIMULATE_TIGERDATA:-true}
 
-      # Self-Hosted PostgreSQL Provisioning – used when DB_PROVIDER=postgres
+      # Self-Hosted PostgreSQL Provisioning – used when PROVISIONING_DB_PROVIDER=postgres
       # Admin credentials must have CREATEDB and CREATEROLE privileges.
-      # For local dev the 'postgres' service in this file is accessible on host port 5433.
-      # See provisioning/docs/POSTGRES-PROVISIONING.md for full setup instructions.
-      PROVISIONING_PG_HOST: ${PROVISIONING_PG_HOST:-localhost}
-      PROVISIONING_PG_PORT: ${PROVISIONING_PG_PORT:-5432}
-      PROVISIONING_PG_ADMIN_USER: ${PROVISIONING_PG_ADMIN_USER:-postgres}
-      PROVISIONING_PG_ADMIN_PASSWORD: ${PROVISIONING_PG_ADMIN_PASSWORD:-}
-      PROVISIONING_PG_ADMIN_DB: ${PROVISIONING_PG_ADMIN_DB:-postgres}
+      # IMPORTANT: For containers, use 'postgres' (service name) and 5432 (internal port).
+      # The .env file has 'localhost' and 5433 which are for external host machine access.
+      PROVISIONING_PG_HOST: postgres
+      PROVISIONING_PG_PORT: 5432
+      PROVISIONING_PG_ADMIN_USER: billing
+      PROVISIONING_PG_ADMIN_PASSWORD: billing123
+      PROVISIONING_PG_ADMIN_DB: billing
+      PROVISIONING_PG_TEMPLATE_DB: template_iotistica
       PROVISIONING_PG_SSL: ${PROVISIONING_PG_SSL:-false}
       PROVISIONING_PG_SSL_REJECT_UNAUTHORIZED: ${PROVISIONING_PG_SSL_REJECT_UNAUTHORIZED:-true}
       SIMULATE_POSTGRES_PROVISIONING: ${SIMULATE_POSTGRES_PROVISIONING:-false}
@@ -206,13 +212,17 @@ services:
       JWT_ACCESS_TOKEN_EXPIRY: ${JWT_ACCESS_TOKEN_EXPIRY}
       JWT_REFRESH_TOKEN_EXPIRY: ${JWT_REFRESH_TOKEN_EXPIRY}
       
+      # API Security
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+      INTERNAL_AUTH_TOKEN: ${INTERNAL_AUTH_TOKEN}
+      
       # Base configuration
       BASE_DOMAIN: ${BASE_DOMAIN:-iotistic.com}
       
       # Database Provisioning Provider (tigerdata or postgres)
-      DB_PROVIDER: ${DB_PROVIDER:-tigerdata}
+      PROVISIONING_DB_PROVIDER: ${PROVISIONING_DB_PROVIDER:-tigerdata}
 
-      # TigerData API (TimescaleDB provisioning) – used when DB_PROVIDER=tigerdata
+      # TigerData API (TimescaleDB provisioning) – used when PROVISIONING_DB_PROVIDER=tigerdata
       TIGERDATA_API_URL: ${TIGERDATA_API_URL:-https://console.cloud.timescale.com/public/api/v1}
       TIGERDATA_ACCESS_KEY: ${TIGERDATA_ACCESS_KEY}
       TIGERDATA_SECRET_KEY: ${TIGERDATA_SECRET_KEY}
@@ -221,7 +231,7 @@ services:
       TIGERDATA_DEFAULT_PLAN: ${TIGERDATA_DEFAULT_PLAN:-dev}
       SIMULATE_TIGERDATA: ${SIMULATE_TIGERDATA:-true}
 
-      # Self-Hosted PostgreSQL Provisioning – used when DB_PROVIDER=postgres
+      # Self-Hosted PostgreSQL Provisioning – used when PROVISIONING_DB_PROVIDER=postgres
       # Admin credentials must have CREATEDB and CREATEROLE privileges.
       # For local dev the 'postgres' service in this file is accessible on host port 5433.
       # See provisioning/docs/POSTGRES-PROVISIONING.md for full setup instructions.
