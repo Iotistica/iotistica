@@ -175,7 +175,10 @@ export class DeploymentQueue extends EventEmitter {
    */
   enableConsumerMode(): void {
     this.setupEventHandlers();
-    this.setupRedisHealthCheck();
+    // DISABLED: setupRedisHealthCheck() causes command timeouts in worker
+    // The automatic health check (queue.count every 30s) times out even though 
+    // Redis connection shows "ready". API works fine without it (manual /health calls).
+    // this.setupRedisHealthCheck();
     console.log('🔧 DeploymentQueue consumer mode enabled');
   }
 
