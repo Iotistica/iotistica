@@ -39,7 +39,7 @@ spec:
             - name: BASE_DOMAIN
               value: {{ .Values.worker.env.BASE_DOMAIN | quote }}
             - name: BASE_URL
-              value: "https://{{ .Values.worker.env.BASE_DOMAIN }}/provisioning/api"
+              value: "http://{{ include "provisioning.fullname" . }}-api:{{ .Values.api.port }}"
             
             # Database (PostgreSQL)
             - name: DB_HOST
