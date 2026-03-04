@@ -12,7 +12,6 @@ import crypto from 'crypto';
 import { CustomerModel } from '../db/customer-model';
 import { query } from '../db/connection';
 import { logger } from '../utils/logger';
-import { deploymentQueue } from '../services/deployment-queue';
 import { StripeService } from '../services/stripe-service';
 
 const router = express.Router();
@@ -1007,26 +1006,108 @@ router.post('/complete-signup', async (req: Request, res: Response) => {
 
     logger.info('[Signup] User-tenant role created', { auth0Sub, customerId });
 
-    // Queue K8s deployment (GitOps)
-    try {
-      await deploymentQueue.addDeploymentJob({
-        customerId,
-        email,
-        companyName,
-        plan: planId || 'starter', // Default to starter plan
-        priority: 3, // High priority for new signups
+    // IMPORTANT:
+    // Do NOT queue deployment here.
+    // Deployment is triggered only after subscription exists (via Stripe webhook handlers).
+
+    const selectedPlan = typeof planId === 'string' && planId.length > 0
+      ? planId.toLowerCase()
+      : 'starter';
+    const WEBSITE_URL = process.env.WEBSITE_URL || 'http://localhost:3000';
+
+    // Trial flow: create Stripe trial subscription now (webhook will queue deployment)
+    if (selectedPlan === 'trial') {
+      const stripeSecret = process.env.STRIPE_SECRET_KEY;
+      const starterPrice = process.env.STRIPE_PRICE_STARTER;
+
+      if (!stripeSecret || !starterPrice) {
+        logger.error('[Signup] Stripe configuration missing for trial signup', {
+          customerId,
+          hasStripeSecret: Boolean(stripeSecret),
+          hasStarterPrice: Boolean(starterPrice),
+        });
+        return res.status(500).json({
+          error: 'Billing configuration error',
+          message: 'Stripe trial configuration is incomplete',
+        });
+      }
+
+      const stripe = require('stripe')(stripeSecret);
+
+      const existingStripeCustomers = await stripe.customers.list({ email, limit: 1 });
+      let stripeCustomerId: string;
+
+      if (existingStripeCustomers.data.length > 0) {
+        stripeCustomerId = existingStripeCustomers.data[0].id;
+      } else {
+        const stripeCustomer = await stripe.customers.create({
+          email,
+          name: companyName || name,
+          metadata: {
+            customer_id: customerId,
+            company_name: companyName,
+            source: 'complete_signup',
+          },
+        });
+        stripeCustomerId = stripeCustomer.id;
+      }
+
+      await query(
+        `UPDATE customers
+         SET stripe_customer_id = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE customer_id = $2`,
+        [stripeCustomerId, customerId]
+      );
+
+      const trialEndTimestamp = Math.floor(Date.now() / 1000) + (14 * 24 * 60 * 60);
+      const subscription = await stripe.subscriptions.create({
+        customer: stripeCustomerId,
+        items: [{ price: starterPrice }],
+        trial_end: trialEndTimestamp,
+        cancel_at_period_end: true,
         metadata: {
-          source: 'self_signup',
-          auth0Sub,
+          customer_id: customerId,
+          plan: 'trial',
+          is_trial: 'true',
+          source: 'complete_signup',
         },
       });
-      logger.info('[Signup] K8s deployment queued', { customerId });
-    } catch (queueError: any) {
-      logger.error('[Signup] Failed to queue deployment', {
+
+      logger.info('[Signup] Trial subscription created from complete-signup', {
         customerId,
-        error: queueError.message,
+        stripeCustomerId,
+        subscriptionId: subscription.id,
       });
-      // Continue anyway - deployment can be retried later
+    } else {
+      // Paid flow: create checkout session, Stripe webhooks will create subscription and queue deployment
+      const planForCheckout = (selectedPlan === 'professional' || selectedPlan === 'enterprise')
+        ? selectedPlan
+        : 'starter';
+
+      const session = await StripeService.createCheckoutSession({
+        customerId,
+        plan: planForCheckout,
+        successUrl: `${WEBSITE_URL}/success.html`,
+        cancelUrl: WEBSITE_URL,
+      });
+
+      logger.info('[Signup] Checkout session created from complete-signup', {
+        customerId,
+        sessionId: session.id,
+        plan: planForCheckout,
+      });
+
+      return res.json({
+        success: true,
+        requiresCheckout: true,
+        checkoutUrl: session.url,
+        user: {
+          email,
+          name,
+          role: 'admin',
+          customerId,
+        },
+      });
     }
 
     // Generate JWT tokens (same as callback-auth0)

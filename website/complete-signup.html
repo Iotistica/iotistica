@@ -334,6 +334,13 @@
                     throw new Error(data.message || 'Signup failed');
                 }
 
+                // Paid plans require Stripe checkout before subscription/webhook can trigger deployment
+                if (data.requiresCheckout && data.checkoutUrl) {
+                    showAlert('Redirecting to secure checkout...', 'success');
+                    window.location.href = data.checkoutUrl;
+                    return;
+                }
+
                 // Clear signup and auth artifacts from browser storage
                 localStorage.removeItem('accessToken');
                 localStorage.removeItem('refreshToken');
