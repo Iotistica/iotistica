@@ -40,6 +40,7 @@ export class APIMigrationService {
   private repoUrl: string;
   private pat: string;
   private mainBranch: string;
+  private lastMigrationCount: number = 0;
 
   constructor(repoUrl?: string, pat?: string, repoDir?: string) {
     // Use environment variables by default (consistent with GitOpsProvisioningService)
@@ -147,6 +148,9 @@ export class APIMigrationService {
         totalBytes: combinedSql.length,
       });
 
+      // Store for later retrieval
+      this.lastMigrationCount = files.length;
+
       return combinedSql;
     } catch (error) {
       logger.error('[APIMigrationService] Failed to fetch migrations', {
@@ -250,6 +254,13 @@ export class APIMigrationService {
       branch: this.mainBranch,
       authenticated: !!this.pat,
     };
+  }
+
+  /**
+   * Get the number of migration files loaded in the last fetch
+   */
+  getMigrationCount(): number {
+    return this.lastMigrationCount;
   }
 
   /**

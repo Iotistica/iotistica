@@ -108,8 +108,8 @@ router.post('/template/rebuild', async (req: Request, res: Response) => {
     const schemaSql = await migrationService.fetchLatestMigrations();
     const fetchDuration = Date.now() - startTime;
     
-    // Count number of migration files
-    const migrationCount = (schemaSql.match(/^--.*\.sql$/gm) || []).length;
+    // Get the number of migration files that were loaded
+    const migrationCount = migrationService.getMigrationCount();
     
     logger.info('[admin] Migrations fetched', { 
       durationMs: fetchDuration,
