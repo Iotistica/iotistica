@@ -270,7 +270,7 @@ spec:
                   name: provisioning-auth0-credentials
                   key: audience
             - name: AUTH0_SIGNUP_CALLBACK_URL
-              value: "https://{{ .Values.api.env.WEBSITE_URL }}/auth-callback.html"
+              value: "{{ .Values.api.env.WEBSITE_URL }}/auth-callback.html"
             - name: AUTH0_REDIRECT_URI
               value: "https://{{ .Values.ingress.hostname }}/provisioning/api/auth/callback-auth0"
             

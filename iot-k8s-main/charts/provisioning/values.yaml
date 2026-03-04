@@ -23,7 +23,7 @@ api:
   env:
     NODE_ENV: production
     BASE_DOMAIN: api.iotistica.com
-    WEBSITE_URL: https://www.iotistica.com
+    WEBSITE_URL: https://iotistica.com
     DEFAULT_TRIAL_DAYS: "14"
     GITOPS_ENABLED: "true"
     GITOPS_REPO_URL: https://github.com/Iotistica/iot-k8s-main
