@@ -98,12 +98,7 @@ export class GitOpsProvisioningService {
     });
 
     // Select database provisioning provider (PROVISIONING_DB_PROVIDER=tigerdata|postgres)
-    // Backward-compatible fallback to legacy DB_PROVIDER.
-    const rawProvider = (
-      process.env.PROVISIONING_DB_PROVIDER ??
-      process.env.DB_PROVIDER ??
-      'tigerdata'
-    ).toLowerCase();
+    const rawProvider = (process.env.PROVISIONING_DB_PROVIDER ?? 'tigerdata').toLowerCase();
     this.dbProvider = rawProvider === 'postgres' ? 'postgres' : 'tigerdata';
 
     // Initialize provisioning services
@@ -237,18 +232,6 @@ export class GitOpsProvisioningService {
    * 
    * IMPORTANT: This MUST match deployment-worker.ts sanitizeClientId() method
    */
-
-  /**
-   * Generate random password for PostgreSQL
-   */
-  private generatePassword(): string {
-    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let password = '';
-    for (let i = 0; i < 32; i++) {
-      password += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return password;
-  }
 
   /**
    * Create Argo CD Application manifest for client

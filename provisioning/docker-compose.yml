@@ -233,13 +233,14 @@ services:
 
       # Self-Hosted PostgreSQL Provisioning – used when PROVISIONING_DB_PROVIDER=postgres
       # Admin credentials must have CREATEDB and CREATEROLE privileges.
-      # For local dev the 'postgres' service in this file is accessible on host port 5433.
-      # See provisioning/docs/POSTGRES-PROVISIONING.md for full setup instructions.
-      PROVISIONING_PG_HOST: ${PROVISIONING_PG_HOST:-localhost}
-      PROVISIONING_PG_PORT: ${PROVISIONING_PG_PORT:-5432}
-      PROVISIONING_PG_ADMIN_USER: ${PROVISIONING_PG_ADMIN_USER:-postgres}
-      PROVISIONING_PG_ADMIN_PASSWORD: ${PROVISIONING_PG_ADMIN_PASSWORD:-}
-      PROVISIONING_PG_ADMIN_DB: ${PROVISIONING_PG_ADMIN_DB:-postgres}
+      # IMPORTANT: For containers, use 'postgres' (service name) and 5432 (internal port).
+      # The .env file has 'localhost' and 5433 which are for external host machine access.
+      PROVISIONING_PG_HOST: postgres
+      PROVISIONING_PG_PORT: 5432
+      PROVISIONING_PG_ADMIN_USER: billing
+      PROVISIONING_PG_ADMIN_PASSWORD: billing123
+      PROVISIONING_PG_ADMIN_DB: billing
+      PROVISIONING_PG_TEMPLATE_DB: template_iotistica
       PROVISIONING_PG_SSL: ${PROVISIONING_PG_SSL:-false}
       PROVISIONING_PG_SSL_REJECT_UNAUTHORIZED: ${PROVISIONING_PG_SSL_REJECT_UNAUTHORIZED:-true}
       SIMULATE_POSTGRES_PROVISIONING: ${SIMULATE_POSTGRES_PROVISIONING:-false}
