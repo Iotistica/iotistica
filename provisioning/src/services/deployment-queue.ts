@@ -180,7 +180,7 @@ export class DeploymentQueue extends EventEmitter {
   }
 
   /**
-   * Add deployment job to queue
+   * Add deployment job to queuedd
    */
   async addDeploymentJob(
     data: DeploymentJobData,
