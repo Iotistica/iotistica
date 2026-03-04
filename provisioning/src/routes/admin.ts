@@ -1,9 +1,55 @@
 import express, { Request, Response } from 'express';
+import { Client as PgClient } from 'pg';
 import { deploymentQueue } from '../services/deployment-queue';
 import { APIMigrationService, PostgresProvisioningService } from '../services/postgres-provisioning-service';
 import { logger } from '../utils/logger';
 
 const router = express.Router();
+
+/**
+ * Insert an audit log entry into the billing database
+ * 
+ * @param action - The action being logged (e.g., "template_rebuild")
+ * @param metadata - Additional metadata as JSON
+ * @param request - Express request object (for IP and user agent)
+ */
+async function insertAuditLog(
+  action: string,
+  metadata: any,
+  request: Request
+): Promise<void> {
+  try {
+    const client = new PgClient({
+      connectionString: process.env.DATABASE_URL,
+    });
+
+    await client.connect();
+
+    await client.query(
+      `INSERT INTO audit_log (action, customer_id, user_id, metadata, ip_address, user_agent)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        action,
+        null, // customer_id - null for admin actions
+        null, // user_id - would need to extract from auth token
+        JSON.stringify(metadata),
+        request.ip || null,
+        request.get('user-agent') || null,
+      ]
+    );
+
+    logger.info('[audit] Log inserted', { action, ip: request.ip });
+  } catch (error) {
+    // Don't fail the request if audit logging fails, just log the error
+    logger.error('[audit] Failed to insert audit log', {
+      error: error instanceof Error ? error.message : String(error),
+      action,
+    });
+  } finally {
+    // Don't await, just let it close in background
+    // This prevents audit logging from blocking the response
+  }
+}
 
 /**
  * GET /api/admin/jobs
@@ -152,7 +198,7 @@ router.post('/template/rebuild', async (req: Request, res: Response) => {
       version: versionMetadata.commitShort,
     });
 
-    res.json({
+    const responseData = {
       success: true,
       message: 'Template database successfully rebuilt from latest migrations',
       metadata: {
@@ -170,15 +216,48 @@ router.post('/template/rebuild', async (req: Request, res: Response) => {
         repoTimestamp: versionMetadata.timestamp,
       },
       repository: migrationService.getMetadata(),
-    });
+    };
+
+    // Insert audit log entry (non-blocking)
+    insertAuditLog(
+      'template_rebuild',
+      {
+        templateName,
+        durationMs: totalDuration,
+        migrationCount,
+        commitHash: versionMetadata.commitShort,
+        tag: versionMetadata.tag,
+        skipDrop,
+        success: true,
+      },
+      req
+    ).catch((err) => logger.error('[audit] Failed to log template rebuild', { error: err }));
+
+    res.json(responseData);
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    const durationMs = Date.now() - startTime;
+    
     logger.error('[admin] Template rebuild failed', {
-      error: error instanceof Error ? error.message : String(error),
-      durationMs: Date.now() - startTime,
+      error: errorMsg,
+      durationMs,
     });
+    
+    // Insert audit log entry for failure (non-blocking)
+    insertAuditLog(
+      'template_rebuild_failed',
+      {
+        durationMs,
+        skipDrop,
+        success: false,
+        error: errorMsg,
+      },
+      req
+    ).catch((err) => logger.error('[audit] Failed to log template rebuild failure', { error: err }));
+
     res.status(500).json({
       error: 'Template rebuild failed',
-      message: error instanceof Error ? error.message : String(error),
+      message: errorMsg,
     });
   }
 });
@@ -265,7 +344,7 @@ router.post('/test/provision-database', async (req: Request, res: Response) => {
       username: provisionedDb.username,
     });
 
-    res.json({
+    const responseData = {
       success: true,
       message: 'Database provisioned successfully from template',
       database: {
@@ -296,16 +375,45 @@ router.post('/test/provision-database', async (req: Request, res: Response) => {
         'Test data insert: INSERT INTO your_table VALUES (...)',
         'Grant application user permissions: GRANT ALL ON SCHEMA public TO app_user',
       ],
-    });
+    };
+
+    // Insert audit log entry (non-blocking)
+    insertAuditLog(
+      'test_provision_database',
+      {
+        namespace,
+        durationMs: duration,
+        databaseName: provisionedDb.dbName,
+        username: provisionedDb.username,
+        success: true,
+      },
+      req
+    ).catch((err) => logger.error('[audit] Failed to log provision test', { error: err }));
+
+    res.json(responseData);
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
+    const namespace = req.query.namespace as string || 'unknown';
 
     logger.error('[admin] Database provisioning test failed', {
       error: errorMsg,
       errorCode: (error as any)?.code,
       errorDetail: (error as any)?.detail,
       timestamp: new Date().toISOString(),
+      namespace,
     });
+
+    // Insert audit log entry for failure (non-blocking)
+    insertAuditLog(
+      'test_provision_database_failed',
+      {
+        namespace,
+        success: false,
+        error: errorMsg,
+        errorCode: (error as any)?.code,
+      },
+      req
+    ).catch((err) => logger.error('[audit] Failed to log provision test failure', { error: err }));
 
     res.status(500).json({
       success: false,
