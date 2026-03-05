@@ -90,7 +90,7 @@ api:
     NODE_ENV: production
     LOG_LEVEL: info
     DB_POOL_SIZE: "20" # Increased for large fleet deployments (100+ agents)
-    DB_SSL: "true"
+    DB_SSL: "false" # Internal K8s PostgreSQL does not support SSL
     DB_SSL_REJECT_UNAUTHORIZED: "false"
     AI_PROVIDER: "openai"
     OPENAI_BASE_URL: "https://iotistic-openai-7307.openai.azure.com"
