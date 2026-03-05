@@ -12,7 +12,7 @@ on:
 jobs:
   test:
     name: Run Unit Tests
-    runs-on: [iotistic-lab-sc]
+    runs-on: ubuntu-latest
     
     steps:
       - name: Checkout repository
@@ -43,7 +43,7 @@ jobs:
   version:
     name: Bump Version
     needs: test
-    runs-on: [iotistic-lab-sc]
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     outputs:
@@ -124,7 +124,7 @@ jobs:
   buildx-api:
     name: Build & Push Provisioning API
     needs: version
-    runs-on: [iotistic-lab-sc]
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       security-events: write
@@ -219,7 +219,7 @@ jobs:
   buildx-worker:
     name: Build & Push Provisioning Worker
     needs: version
-    runs-on: [iotistic-lab-sc]
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       security-events: write
@@ -314,7 +314,7 @@ jobs:
   report:
     name: Generate Reports
     needs: [version, buildx-api, buildx-worker]
-    runs-on: [iotistic-lab-sc]
+    runs-on: ubuntu-latest
     if: always()
     
     steps:

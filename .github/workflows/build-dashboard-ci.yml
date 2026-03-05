@@ -12,7 +12,7 @@ on:
 jobs:
   test:
     name: Run Tests
-    runs-on: [iotistic-lab-sc]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./dashboard
@@ -86,7 +86,7 @@ jobs:
   buildx:
     name: Build & Push Dashboard Image
     needs: test
-    runs-on: [iotistic-lab-sc]
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
@@ -168,7 +168,7 @@ jobs:
   report:
     name: Generate Build Report
     needs: buildx
-    runs-on: [iotistic-lab-sc]
+    runs-on: ubuntu-latest
     if: always()
     
     steps:
