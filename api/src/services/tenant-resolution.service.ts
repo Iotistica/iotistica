@@ -35,6 +35,9 @@ const subdomainCache = new SimpleCache();
 // Example: api-client-a1b2c3d4e5f6.iotistica.com -> client-a1b2c3d4e5f6
 const SERVICE_PREFIXES = ['api-', 'dashboard-', 'mqtt-', 'grafana-', 'ws-'];
 
+const CUSTOMER_NAMESPACE_RE = /^customer-[a-f0-9]{12}$/i;
+const CLIENT_NAMESPACE_RE = /^client-[a-f0-9]{12}$/i;
+
 function normalizeTenantLabel(subdomain: string): string {
   let normalized = subdomain;
 
@@ -50,17 +53,21 @@ function normalizeTenantLabel(subdomain: string): string {
   return normalized;
 }
 
-function parseTenantMapping(): Record<string, string> {
-  if (!process.env.TENANT_MAPPING) {
-    return {};
+function getSubdomainCandidates(subdomain: string): string[] {
+  const normalizedSubdomain = normalizeTenantLabel(subdomain);
+  return Array.from(new Set([subdomain, normalizedSubdomain]));
+}
+
+function resolveFromNamespacePattern(candidates: string[]): string | null {
+  for (const candidate of candidates) {
+    const isClientNamespace = CLIENT_NAMESPACE_RE.test(candidate);
+
+    if (isClientNamespace) {
+      return candidate;
+    }
   }
 
-  try {
-    return JSON.parse(process.env.TENANT_MAPPING) as Record<string, string>;
-  } catch (err) {
-    console.warn('Failed to parse TENANT_MAPPING env var:', err);
-    return {};
-  }
+  return null;
 }
 
 /**
@@ -68,7 +75,7 @@ function parseTenantMapping(): Record<string, string> {
  * 
  * Examples:
  * - customer-a1b2c3.iotistic.cloud → customer_a1b2c3 (direct match)
- * - tenantX.app.local → lookup from TENANT_MAPPING or provisioning
+ * - api-client-a1b2c3d4e5f6.iotistic.cloud → client-a1b2c3d4e5f6 (service prefix normalized)
  * 
  * @throws Error if hostname doesn't match expected pattern or customer not found
  */
@@ -83,9 +90,8 @@ export function getTenantIdFromHost(hostname: string): string {
 
     // Extract subdomain (first part)
     const subdomain = parts[0];
-    const normalizedSubdomain = normalizeTenantLabel(subdomain);
-
-    const subdomainCandidates = Array.from(new Set([subdomain, normalizedSubdomain]));
+    const subdomainCandidates = getSubdomainCandidates(subdomain);
+    const normalizedSubdomain = subdomainCandidates[1] || subdomain;
 
     // Check cache first (both raw and normalized labels)
     for (const candidate of subdomainCandidates) {
@@ -95,31 +101,9 @@ export function getTenantIdFromHost(hostname: string): string {
       }
     }
 
-    // Lookup from static mapping (env var) or dynamic mapping
-    let customerId: string | null = null;
-
-    // Try static mapping first (usually: { "customer-abc123": "cust_xyz", ... })
-    const mapping = parseTenantMapping();
-    for (const candidate of subdomainCandidates) {
-      if (mapping[candidate]) {
-        customerId = mapping[candidate];
-        break;
-      }
-    }
-
-    // If not in static mapping, accept known namespace patterns.
+    // Resolve by known namespace patterns only.
     // Pattern: customer-{12hex} or client-{12hex}
-    if (!customerId) {
-      for (const candidate of subdomainCandidates) {
-        const isCustomerNamespace = /^customer-[a-f0-9]{12}$/i.test(candidate);
-        const isClientNamespace = /^client-[a-f0-9]{12}$/i.test(candidate);
-
-        if (isCustomerNamespace || isClientNamespace) {
-          customerId = candidate;
-          break;
-        }
-      }
-    }
+    const customerId: string | null = resolveFromNamespacePattern(subdomainCandidates);
 
     if (!customerId) {
       throw new Error(`No customer mapped to subdomain: ${subdomain} (normalized: ${normalizedSubdomain})`);
