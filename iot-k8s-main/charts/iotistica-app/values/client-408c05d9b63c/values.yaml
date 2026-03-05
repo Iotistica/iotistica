@@ -114,6 +114,21 @@ dashboard:
   serviceType: ClusterIP
   tlsCommonName: client-408c05d9b63c.iotistica.com
   apiUrl: https://api-client-408c05d9b63c.iotistica.com
+  
+  # Auth0 Configuration (set per-customer/environment)
+  auth0:
+    domain: "dev-hmwhgxw10boqpmrw.us.auth0.com"  # Auth0 tenant domain
+    clientId: "Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR"  # Auth0 Application ID
+    audience: "https://api.iotistica.com"  # Auth0 API Identifier
+    callbackUrl: "https://client-408c05d9b63c.iotistica.com/auth/callback"  # Redirect URI after login
+    showSocialLogin: "false"  # Show social login options
+  
+  # Provisioning API URL (billing service for Auth0 token exchange)
+  provisioningApiUrl: "https://api.iotistica.com/provisioning/api"
+  
+  # Website URL (for signup completion)
+  websiteUrl: "https://iotistic.cloud"
+  
   resources:
     requests:
       cpu: 100m

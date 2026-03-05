@@ -2,17 +2,29 @@
  * Auth0 Configuration
  * 
  * Handles Auth0 SPA authentication and token exchange.
+ * Reads from window.env (Kubernetes ConfigMap) at runtime,
+ * with fallback to import.meta.env (build-time environment variables).
  */
 
+// Read from window.env (Kubernetes ConfigMap) first, then fallback to import.meta.env
+const getEnv = (key: string): string => {
+  // @ts-ignore - window.env is set by Kubernetes ConfigMap injected config.js
+  if (typeof window !== 'undefined' && window.env && window.env[key]) {
+    // @ts-ignore
+    return window.env[key];
+  }
+  return import.meta.env[key as keyof typeof import.meta.env] || '';
+};
+
 // Auth0 configuration from environment (required)
-const AUTH0_DOMAIN = import.meta.env.VITE_AUTH0_DOMAIN || '';
-const AUTH0_CLIENT_ID = import.meta.env.VITE_AUTH0_CLIENT_ID || '';
-const AUTH0_AUDIENCE = import.meta.env.VITE_AUTH0_AUDIENCE || '';
-const AUTH0_CALLBACK_URL = import.meta.env.VITE_AUTH0_CALLBACK_URL || '';
-const AUTH0_SHOW_SOCIAL = import.meta.env.VITE_AUTH0_SHOW_SOCIAL_LOGIN === 'true';
+const AUTH0_DOMAIN = getEnv('VITE_AUTH0_DOMAIN');
+const AUTH0_CLIENT_ID = getEnv('VITE_AUTH0_CLIENT_ID');
+const AUTH0_AUDIENCE = getEnv('VITE_AUTH0_AUDIENCE');
+const AUTH0_CALLBACK_URL = getEnv('VITE_AUTH0_CALLBACK_URL');
+const AUTH0_SHOW_SOCIAL = getEnv('VITE_AUTH0_SHOW_SOCIAL_LOGIN') === 'true';
 
 // Provisioning API URL (billing service)
-const PROVISIONING_API_URL = import.meta.env.VITE_PROVISIONING_API_URL || 'http://localhost:3100';
+const PROVISIONING_API_URL = getEnv('VITE_PROVISIONING_API_URL') || 'http://localhost:3100';
 
 export const auth0Config = {
   domain: AUTH0_DOMAIN,

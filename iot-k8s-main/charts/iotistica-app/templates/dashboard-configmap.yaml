@@ -28,8 +28,24 @@ metadata:
 data:
   config.js: |
     // Runtime configuration injected by Kubernetes ConfigMap
+    // All VITE_ variables are read by the dashboard at runtime
     window.env = {
+      // API Configuration
       VITE_API_URL: '{{ .Values.dashboard.apiUrl }}',
+      
+      // Auth0 Configuration (set per-customer)
+      VITE_AUTH0_DOMAIN: '{{ .Values.dashboard.auth0.domain }}',
+      VITE_AUTH0_CLIENT_ID: '{{ .Values.dashboard.auth0.clientId }}',
+      VITE_AUTH0_AUDIENCE: '{{ .Values.dashboard.auth0.audience }}',
+      VITE_AUTH0_CALLBACK_URL: '{{ .Values.dashboard.auth0.callbackUrl }}',
+      VITE_AUTH0_SHOW_SOCIAL_LOGIN: '{{ .Values.dashboard.auth0.showSocialLogin}}',
+      
+      // Provisioning API
+      
+      // Website URL
+      VITE_WEBSITE_URL: '{{ .Values.dashboard.websiteUrl }}',
+      
+      // App Metadata
       NODE_ENV: '{{ .Values.dashboard.env.NODE_ENV }}',
       APP_VERSION: '{{ .Values.dashboard.env.APP_VERSION | default .Values.dashboard.image.tag }}'
     };
