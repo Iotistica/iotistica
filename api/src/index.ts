@@ -513,9 +513,13 @@ async function startServer() {
       process.exit(1);
     }
     
-    // Initialize schema
-    await db.initializeSchema();
-    logger.info('PostgreSQL database initialized successfully');
+    // Initialize schema (skip if DB_SKIP_MIGRATIONS is true - database pre-initialized)
+    if (process.env.DB_SKIP_MIGRATIONS !== 'true') {
+      await db.initializeSchema();
+      logger.info('PostgreSQL database initialized successfully');
+    } else {
+      logger.info('Skipping database migrations (DB_SKIP_MIGRATIONS=true)');
+    }
     
     // Initialize MQTT users (replaces K8s postgres-init-job)
     const { initializeMqttAdmin, initializeNodeRedMqttCredentials } = await import('./mqtt/bootstrap');
