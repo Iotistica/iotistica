@@ -289,9 +289,16 @@ export class GitOpsProvisioningService {
     // Replace placeholders:
     // - {{CLIENT_ID}} with actual client ID (prefixed with "client-")
     // - {{RELEASE_VERSION}} with current stable release version
+    // - {{CLIENT_BASE_DOMAIN}} with domain from environment (e.g., iotistica.com)
+    // - {{BASE_DOMAIN}} with API base domain from environment (e.g., api.iotistica.com)
+    const clientBaseDomain = process.env.CLIENT_BASE_DOMAIN || 'iotistica.com';
+    const baseDomain = process.env.BASE_DOMAIN || 'api.iotistica.com';
+    
     let processedContent = templateContent
       .replace(/\{\{CLIENT_ID\}\}/g, `client-${data.clientId}`)
-      .replace(/\{\{RELEASE_VERSION\}\}/g, releaseVersion);
+      .replace(/\{\{RELEASE_VERSION\}\}/g, releaseVersion)
+      .replace(/\{\{CLIENT_BASE_DOMAIN\}\}/g, clientBaseDomain)
+      .replace(/\{\{BASE_DOMAIN\}\}/g, baseDomain);
     
     // Parse YAML to object
     const values = yaml.load(processedContent) as any;

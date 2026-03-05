@@ -31,7 +31,7 @@ mosquitto:
   tlsSecret: mosquitto-tls # Secret created by cert-manager
   tlsCertName: mosquitto-tls
   tlsIssuer: letsencrypt-production
-  tlsCommonName: mqtt-{{CLIENT_ID}}.iotistica.com
+  tlsCommonName: mqtt-{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}
   resources:
     requests:
       cpu: 100m
@@ -67,11 +67,11 @@ api:
   replicas: 1 # Single replica for now
   port: 3002
   serviceType: ClusterIP
-  tlsCommonName: api-{{CLIENT_ID}}.iotistica.com
+  tlsCommonName: api-{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}
   cloudApiUrl: "http://{{CLIENT_ID}}-iotistic-api.{{CLIENT_ID}}.svc.cluster.local:3002"
   # CORS configuration for cross-origin requests from dashboard
   # Use wildcard pattern like "http://*:30000" to allow any IP on NodePort 30000
-  corsOrigins: "https://{{CLIENT_ID}}.iotistica.com"
+  corsOrigins: "https://{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}"
   resources:
     requests:
       cpu: 100m # Reduced to fit 2-node AKS cluster capacity
@@ -141,20 +141,20 @@ dashboard:
   port: 80
   serviceType: ClusterIP
   #  nodePort: 30000
-  tlsCommonName: "{{CLIENT_ID}}.iotistica.com"
+  tlsCommonName: "{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}"
   #   - Set to your API ingress URL
-  apiUrl: "https://api-{{CLIENT_ID}}.iotistica.com"
+  apiUrl: "https://api-{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}"
   
   # Auth0 Configuration (set per-customer/environment)
   auth0:
     domain: "dev-hmwhgxw10boqpmrw.us.auth0.com"  # Auth0 tenant domain
     clientId: "Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR"  # Auth0 Application ID
-    audience: "https://api.iotistica.com"  # Auth0 API Identifier
-    callbackUrl: "https://{{CLIENT_ID}}.iotistica.com/auth/callback"  # Redirect URI after login
+    audience: "https://{{BASE_DOMAIN}}"  # Auth0 API Identifier
+    callbackUrl: "https://{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}/auth/callback"  # Redirect URI after login
     showSocialLogin: "true"  # Show social login options
   
   # Provisioning API URL (billing service for Auth0 token exchange)
-  provisioningApiUrl: "https://api.iotistica.com/provisioning"
+  provisioningApiUrl: "https://{{BASE_DOMAIN}}/provisioning"
   
   # Website URL (for signup completion)
   websiteUrl: "https://iotistica.com"

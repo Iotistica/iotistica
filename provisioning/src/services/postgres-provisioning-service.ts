@@ -813,15 +813,39 @@ export class PostgresProvisioningService {
         : '';
       
       const createDbStart = Date.now();
-      await client.query(
-        `CREATE DATABASE ${quotedDb}${templateClause} OWNER ${quotedOwnerRole}`
-      ).catch(async (err: any) => {
+      try {
+        await client.query(
+          `CREATE DATABASE ${quotedDb}${templateClause} OWNER ${quotedOwnerRole}`
+        );
+      } catch (err: any) {
         if (err.code === '42P04') {
           console.log(`[PostgresProvisioningService] Database ${namespace} already exists, skipping`);
+        } else if (err.code === '55006' && this.config.templateDatabase) {
+          console.warn(
+            `[PostgresProvisioningService] Template ${this.config.templateDatabase} is busy (55006), retrying once after terminating active sessions`
+          );
+
+          await client.query(
+            `SELECT pg_terminate_backend(pid)
+               FROM pg_stat_activity
+              WHERE datname = $1 AND pid <> pg_backend_pid()`,
+            [this.config.templateDatabase]
+          ).catch((terminateErr: any) => {
+            console.warn(
+              `[PostgresProvisioningService] Could not terminate template sessions during retry: ${terminateErr.message}`
+            );
+          });
+
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          await client.query(
+            `CREATE DATABASE ${quotedDb}${templateClause} OWNER ${quotedOwnerRole}`
+          );
+          console.log('[PostgresProvisioningService] CREATE DATABASE retry succeeded after template session cleanup');
         } else {
           throw err;
         }
-      });
+      }
       const createDbDuration = Date.now() - createDbStart;
       console.log(`[PostgresProvisioningService] ⏱️  CREATE DATABASE completed in ${createDbDuration}ms`);
 
@@ -1419,6 +1443,32 @@ export class PostgresProvisioningService {
       const quotedDb = this.quoteIdentifier(dbName);
       const isTemplate = lock ? 'TRUE' : 'FALSE';
       const allowConn = lock ? 'FALSE' : 'TRUE';
+
+      // Hardening: when locking the template, first terminate any existing sessions.
+      // ALLOW_CONNECTIONS=false only blocks NEW sessions; existing sessions can remain.
+      if (lock) {
+        const terminateResult = await adminClient.query(
+          `SELECT pg_terminate_backend(pid)
+             FROM pg_stat_activity
+            WHERE datname = $1 AND pid <> pg_backend_pid()`,
+          [dbName]
+        ).catch((err: any) => {
+          console.warn(
+            `[PostgresProvisioningService] Could not terminate existing template sessions for ${dbName}: ${err.message}`
+          );
+          return null;
+        });
+
+        if (terminateResult) {
+          const terminated = terminateResult.rows.filter((r: any) => r.pg_terminate_backend).length;
+          if (terminated > 0) {
+            console.log(
+              `[PostgresProvisioningService] Terminated ${terminated} existing session(s) before locking template ${dbName}`
+            );
+          }
+        }
+      }
+
       await adminClient.query(
         `ALTER DATABASE ${quotedDb} WITH IS_TEMPLATE ${isTemplate} ALLOW_CONNECTIONS ${allowConn}`
       );
