@@ -89,7 +89,17 @@ export class SecretBuilder {
         switch (field.type) {
           case 'password':
           case 'token':
-            this.secrets[app][key] = this.generateRandom(field.length || 16);
+            if (app === 'api-jwt' && key === 'token') {
+              const federatedJwtSecret = process.env.JWT_SECRET;
+              if (federatedJwtSecret && federatedJwtSecret.trim().length > 0) {
+                this.secrets[app][key] = federatedJwtSecret;
+              } else {
+                console.warn('[SecretBuilder] JWT_SECRET not set; generating random api-jwt token (federated login may fail)');
+                this.secrets[app][key] = this.generateRandom(field.length || 16);
+              }
+            } else {
+              this.secrets[app][key] = this.generateRandom(field.length || 16);
+            }
             break;
           case 'username':
             this.secrets[app][key] = `${field.prefix || app}-${this.clientId}`;

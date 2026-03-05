@@ -205,6 +205,24 @@ export async function refreshAccessToken(
       throw new Error('Invalid token type');
     }
 
+    // Federated Auth0 refresh token (issued by provisioning, verified by shared JWT secret)
+    // These tokens are not stored in the local refresh_tokens table.
+    if (payload.auth0Sub && payload.customerId) {
+      const accessToken = generateAccessToken({
+        id: payload.userId,
+        username: payload.username || payload.auth0Sub,
+        email: payload.email,
+        role: payload.role
+      });
+
+      logAuditEvent('token_refreshed', payload.userId, ipAddress, {
+        username: payload.username || payload.auth0Sub,
+        mode: 'federated'
+      }).catch(err => logger.warn('Failed to log audit event:', err));
+
+      return { accessToken };
+    }
+
     // Check if refresh token exists and is not revoked
     const tokenHash = await bcrypt.hash(refreshToken, 10);
     const result = await query(
