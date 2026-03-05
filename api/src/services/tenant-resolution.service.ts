@@ -31,6 +31,38 @@ class SimpleCache {
 // In-memory cache for subdomain → customer_id mapping
 const subdomainCache = new SimpleCache();
 
+// API and dashboard hostnames often include a service prefix before the tenant label.
+// Example: api-client-a1b2c3d4e5f6.iotistica.com -> client-a1b2c3d4e5f6
+const SERVICE_PREFIXES = ['api-', 'dashboard-', 'mqtt-', 'grafana-', 'ws-'];
+
+function normalizeTenantLabel(subdomain: string): string {
+  let normalized = subdomain;
+
+  // Strip known service prefixes until we reach the tenant identifier label.
+  while (SERVICE_PREFIXES.some(prefix => normalized.startsWith(prefix))) {
+    const prefix = SERVICE_PREFIXES.find(p => normalized.startsWith(p));
+    if (!prefix) {
+      break;
+    }
+    normalized = normalized.substring(prefix.length);
+  }
+
+  return normalized;
+}
+
+function parseTenantMapping(): Record<string, string> {
+  if (!process.env.TENANT_MAPPING) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(process.env.TENANT_MAPPING) as Record<string, string>;
+  } catch (err) {
+    console.warn('Failed to parse TENANT_MAPPING env var:', err);
+    return {};
+  }
+}
+
 /**
  * Resolve customer_id from request hostname
  * 
@@ -51,42 +83,52 @@ export function getTenantIdFromHost(hostname: string): string {
 
     // Extract subdomain (first part)
     const subdomain = parts[0];
+    const normalizedSubdomain = normalizeTenantLabel(subdomain);
 
-    // Check cache first
-    const cached = subdomainCache.get(subdomain);
-    if (cached) {
-      return cached;
+    const subdomainCandidates = Array.from(new Set([subdomain, normalizedSubdomain]));
+
+    // Check cache first (both raw and normalized labels)
+    for (const candidate of subdomainCandidates) {
+      const cached = subdomainCache.get(candidate);
+      if (cached) {
+        return cached;
+      }
     }
 
     // Lookup from static mapping (env var) or dynamic mapping
     let customerId: string | null = null;
 
     // Try static mapping first (usually: { "customer-abc123": "cust_xyz", ... })
-    if (process.env.TENANT_MAPPING) {
-      try {
-        const mapping = JSON.parse(process.env.TENANT_MAPPING);
-        customerId = mapping[subdomain] || null;
-      } catch (err) {
-        console.warn('Failed to parse TENANT_MAPPING env var:', err);
+    const mapping = parseTenantMapping();
+    for (const candidate of subdomainCandidates) {
+      if (mapping[candidate]) {
+        customerId = mapping[candidate];
+        break;
       }
     }
 
-    // If not in static mapping, try to extract from namespace pattern
-    // Pattern: customer-{12hex} → extract {12hex} as reference
+    // If not in static mapping, accept known namespace patterns.
+    // Pattern: customer-{12hex} or client-{12hex}
     if (!customerId) {
-      const match = subdomain.match(/^customer-([a-f0-9]{12})$/i);
-      if (match) {
-        // This is the customer namespace hash; use as-is (matches provisioning)
-        customerId = subdomain;
+      for (const candidate of subdomainCandidates) {
+        const isCustomerNamespace = /^customer-[a-f0-9]{12}$/i.test(candidate);
+        const isClientNamespace = /^client-[a-f0-9]{12}$/i.test(candidate);
+
+        if (isCustomerNamespace || isClientNamespace) {
+          customerId = candidate;
+          break;
+        }
       }
     }
 
     if (!customerId) {
-      throw new Error(`No customer mapped to subdomain: ${subdomain}`);
+      throw new Error(`No customer mapped to subdomain: ${subdomain} (normalized: ${normalizedSubdomain})`);
     }
 
-    // Cache the result
-    subdomainCache.set(subdomain, customerId);
+    // Cache both raw and normalized labels to avoid repeated normalization work.
+    for (const candidate of subdomainCandidates) {
+      subdomainCache.set(candidate, customerId);
+    }
 
     return customerId;
   } catch (err: any) {
