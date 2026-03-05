@@ -26,7 +26,7 @@ ENV NODE_ENV=$NODE_ENV
 RUN npm run build
 
 # Production stage
-FROM nginx:1.27-alpine3.22
+FROM nginx:1.27-alpine
 
 # Ensure runtime OS packages include latest security patches
 RUN apk upgrade --no-cache
