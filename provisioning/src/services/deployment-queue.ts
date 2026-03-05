@@ -400,6 +400,43 @@ export class DeploymentQueue extends EventEmitter {
   }
 
   /**
+   * Clean ALL completed jobs (regardless of age)
+   */
+  async cleanAllCompleted() {
+    await this.queue.clean(0, 'completed');
+    console.log('🧹 All completed jobs cleaned');
+  }
+
+  /**
+   * Clean ALL failed jobs (regardless of age)
+   */
+  async cleanAllFailed() {
+    await this.queue.clean(0, 'failed');
+    console.log('🧹 All failed jobs cleaned');
+  }
+
+  /**
+   * Empty the entire queue (removes ALL jobs: waiting, active, completed, failed)
+   * ⚠️ DANGEROUS: Use with caution!
+   */
+  async emptyQueue() {
+    await this.queue.empty();
+    console.log('🗑️  Queue emptied completely');
+  }
+
+  /**
+   * Remove a specific job by ID
+   */
+  async removeJob(jobId: string): Promise<void> {
+    const job = await this.queue.getJob(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+    await job.remove();
+    console.log(`🗑️  Job ${jobId} removed`);
+  }
+
+  /**
    * Setup event handlers
    */
   private setupEventHandlers() {

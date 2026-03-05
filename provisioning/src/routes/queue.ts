@@ -109,4 +109,62 @@ router.post('/clean', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/queue/clean/completed
+ * Clean ALL completed jobs (regardless of age)
+ */
+router.post('/clean/completed', async (req, res) => {
+  try {
+    await deploymentQueue.cleanAllCompleted();
+    res.json({ success: true, message: 'All completed jobs cleaned' });
+  } catch (error: any) {
+    console.error('Error cleaning completed jobs:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/queue/clean/failed
+ * Clean ALL failed jobs (regardless of age)
+ */
+router.post('/clean/failed', async (req, res) => {
+  try {
+    await deploymentQueue.cleanAllFailed();
+    res.json({ success: true, message: 'All failed jobs cleaned' });
+  } catch (error: any) {
+    console.error('Error cleaning failed jobs:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/queue/empty
+ * Empty the entire queue (removes ALL jobs)
+ * ⚠️ DANGEROUS: Use with caution!
+ */
+router.post('/empty', async (req, res) => {
+  try {
+    await deploymentQueue.emptyQueue();
+    res.json({ success: true, message: 'Queue emptied completely' });
+  } catch (error: any) {
+    console.error('Error emptying queue:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * DELETE /api/queue/jobs/:jobId
+ * Remove a specific job by ID
+ */
+router.delete('/jobs/:jobId', async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    await deploymentQueue.removeJob(jobId);
+    res.json({ success: true, message: `Job ${jobId} removed` });
+  } catch (error: any) {
+    console.error('Error removing job:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;

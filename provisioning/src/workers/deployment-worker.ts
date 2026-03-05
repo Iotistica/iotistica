@@ -259,7 +259,7 @@ export class DeploymentWorker {
         await job.progress(60);
 
         // Deploy job ends here (60%) - monitoring job handles 60 → 100%
-        const instanceUrl = `https://client-${clientId}.${domain || process.env.BASE_DOMAIN || 'iotistic.com'}`;
+        const instanceUrl = `https://client-${clientId}.${domain || process.env.CLIENT_BASE_DOMAIN || 'iotistica.com'}`;
         console.log('\n🔄 Updating customer status to: argo_syncing');
         await CustomerModel.updateDeploymentStatus(customerId, 'argo_syncing', {
           instanceNamespace: clientNamespace,

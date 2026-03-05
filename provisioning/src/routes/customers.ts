@@ -199,7 +199,7 @@ router.post('/signup', strictLimiter, async (req, res) => {
         namespace,
         message: 'Your instance deployment is queued and will begin shortly',
         estimated_time: '2-5 minutes',
-        instance_url: `https://${namespace}.${process.env.BASE_DOMAIN || 'iotistica.com'}`,
+        instance_url: `https://${namespace}.${process.env.CLIENT_BASE_DOMAIN || 'iotistica.com'}`,
         check_status_url: `/api/queue/jobs/${job.id}`,
       },
       next_steps: [

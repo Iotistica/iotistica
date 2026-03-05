@@ -714,9 +714,9 @@ export class PostgresProvisioningService {
           user: this.config.adminUser,
           password: this.config.adminPassword,
           database: namespace,
-          ...(this.config.ssl
-            ? { ssl: { rejectUnauthorized: this.config.sslRejectUnauthorized } }
-            : {}),
+          ssl: this.config.ssl
+            ? { rejectUnauthorized: this.config.sslRejectUnauthorized }
+            : false,
         });
         
         try {
@@ -890,9 +890,9 @@ export class PostgresProvisioningService {
       user: this.config.adminUser,
       password: this.config.adminPassword,
       database: templateName,
-      ...(this.config.ssl
-        ? { ssl: { rejectUnauthorized: this.config.sslRejectUnauthorized } }
-        : {}),
+      ssl: this.config.ssl
+        ? { rejectUnauthorized: this.config.sslRejectUnauthorized }
+        : false,
     };
 
     const client = new PgClient(clientConfig);
@@ -1140,9 +1140,9 @@ export class PostgresProvisioningService {
       user: this.config.adminUser,
       password: this.config.adminPassword,
       database: this.config.adminDatabase,
-      ...(this.config.ssl
-        ? { ssl: { rejectUnauthorized: this.config.sslRejectUnauthorized } }
-        : {}),
+      ssl: this.config.ssl
+        ? { rejectUnauthorized: this.config.sslRejectUnauthorized }
+        : false,
     };
     return new PgClient(clientConfig);
   }
@@ -1246,9 +1246,9 @@ export class PostgresProvisioningService {
       user: this.config.adminUser,
       password: this.config.adminPassword,
       database: dbName,
-      ...(this.config.ssl
-        ? { ssl: { rejectUnauthorized: this.config.sslRejectUnauthorized } }
-        : {}),
+      ssl: this.config.ssl
+        ? { rejectUnauthorized: this.config.sslRejectUnauthorized }
+        : false,
     };
     const scriptClient = new PgClient(clientConfig);
     try {

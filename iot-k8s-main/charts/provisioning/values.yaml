@@ -23,10 +23,11 @@ api:
   env:
     NODE_ENV: production
     BASE_DOMAIN: api.iotistica.com
+    CLIENT_BASE_DOMAIN: iotistica.com
     WEBSITE_URL: https://iotistica.com
     DEFAULT_TRIAL_DAYS: "14"
     GITOPS_ENABLED: "true"
-    GITOPS_REPO_URL: https://github.com/Iotistica/iot-k8s-main
+    GITOPS_REPO_URL: https://github.com/Iotistica/iot-k8s.git
     GITOPS_BRANCH: main
     GITOPS_AUTHOR_NAME: Iotistica Provisioning Bot
     GITOPS_AUTHOR_EMAIL: info@iotistica.com
@@ -56,8 +57,9 @@ worker:
   env:
     NODE_ENV: production
     BASE_DOMAIN: api.iotistica.com
+    CLIENT_BASE_DOMAIN: iotistica.com
     GITOPS_ENABLED: "true"
-    GITOPS_REPO_URL: https://github.com/Iotistica/iot-k8s-main
+    GITOPS_REPO_URL: https://github.com/Iotistica/iot-k8s.git
     GITOPS_BRANCH: main
     GITOPS_AUTHOR_NAME: Iotistica Provisioning Bot
     GITOPS_AUTHOR_EMAIL: info@iotistica.com

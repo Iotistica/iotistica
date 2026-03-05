@@ -38,6 +38,8 @@ spec:
               value: {{ .Values.worker.env.NODE_ENV | quote }}
             - name: BASE_DOMAIN
               value: {{ .Values.worker.env.BASE_DOMAIN | quote }}
+            - name: CLIENT_BASE_DOMAIN
+              value: {{ .Values.worker.env.CLIENT_BASE_DOMAIN | quote }}
             - name: BASE_URL
               value: "http://{{ include "provisioning.fullname" . }}-api:{{ .Values.api.port }}"
             
@@ -189,7 +191,7 @@ spec:
               value: {{ .Values.worker.env.SIMULATE_K8S_DEPLOYMENT | quote }}
             
             # PostgreSQL Provisioning (shared server for per-client databases)
-            - name: DB_PROVIDER
+            - name: PROVISIONING_DB_PROVIDER
               value: {{ .Values.postgresProvisioning.provider | default "postgres" | quote }}
             - name: PROVISIONING_PG_HOST
               value: {{ .Values.postgresProvisioning.host | quote }}
