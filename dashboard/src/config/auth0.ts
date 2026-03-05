@@ -9,9 +9,15 @@
 // Read from window.env (Kubernetes ConfigMap) first, then fallback to import.meta.env
 const getEnv = (key: string): string => {
   // @ts-ignore - window.env is set by Kubernetes ConfigMap injected config.js
-  if (typeof window !== 'undefined' && window.env && window.env[key]) {
+  if (typeof window !== 'undefined' && window.env) {
     // @ts-ignore
-    return window.env[key];
+    const value = window.env[key];
+    // Skip placeholder values (e.g., "__VITE_AUTH0_DOMAIN__" from local config.js)
+    if (typeof value === 'string' && value.startsWith('__') && value.endsWith('__')) {
+      // Fall through to import.meta.env
+    } else if (value) {
+      return value;
+    }
   }
   return (import.meta.env as Record<string, string | undefined>)[key] || '';
 };
