@@ -520,10 +520,35 @@ async function startServer() {
       process.exit(1);
     }
     
-    // Initialize schema (skip if DB_SKIP_MIGRATIONS is true - database pre-initialized)
+    // Migration flow:
+    // 1) Connect DB
+    // 2) Check schema_migrations status
+    // 3) If outdated, start async migration and continue startup immediately
+    // 4) Serve requests without waiting for migration completion
     if (process.env.DB_SKIP_MIGRATIONS !== 'true') {
-      await db.initializeSchema();
-      logger.info('PostgreSQL database initialized successfully');
+      const { getMigrationStatus, runMigrations } = await import('./db/migrations');
+      const migrationStatus = await getMigrationStatus();
+
+      if (migrationStatus.pending.length > 0) {
+        logger.warn('Database schema is outdated - starting migrations in background', {
+          appliedMigrations: migrationStatus.applied.length,
+          pendingMigrations: migrationStatus.pending.length,
+          totalMigrations: migrationStatus.total,
+        });
+
+        void (async () => {
+          try {
+            await runMigrations();
+            logger.info('Background database migrations completed successfully');
+          } catch (migrationError) {
+            logger.error('Background database migrations failed', {
+              error: migrationError instanceof Error ? migrationError.message : String(migrationError),
+            });
+          }
+        })();
+      } else {
+        logger.info('Database schema is up to date (no pending migrations)');
+      }
     } else {
       logger.info('Skipping database migrations (DB_SKIP_MIGRATIONS=true)');
     }
