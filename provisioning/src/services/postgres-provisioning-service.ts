@@ -897,6 +897,20 @@ export class PostgresProvisioningService {
         await schemaClient.query(
           `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO ${quotedAppRole}`
         );
+        
+        // CRITICAL: Grant permissions on EXISTING tables/sequences/functions
+        // (these were copied from the template database and aren't covered by DEFAULT PRIVILEGES)
+        console.log(`[PostgresProvisioningService] Granting permissions on existing tables from template`);
+        await schemaClient.query(
+          `GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO ${quotedAppRole}`
+        );
+        await schemaClient.query(
+          `GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO ${quotedAppRole}`
+        );
+        await schemaClient.query(
+          `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO ${quotedAppRole}`
+        );
+        
         console.log(`[PostgresProvisioningService] Schema privileges granted to app role`);
       } finally {
         await schemaClient.end().catch(() => undefined);
