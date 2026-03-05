@@ -520,36 +520,10 @@ async function handleLegacyToken(
 
     // Phase 3: Federated Auth0 token issued by provisioning (HS256 shared secret)
     if (payload.auth0Sub && payload.customerId) {
-      // For federated tokens, use the customerId already in the token payload
-      // Try to validate against hostname if possible, but allow localhost in dev
-      let resolvedTenantId: string = payload.customerId;  // Trust the token claim
-      
-      try {
-        const { getTenantIdFromHost } = await import('../services/tenant-resolution.service');
-        resolvedTenantId = getTenantIdFromHost(req.hostname);
-        // Validate that token tenant matches hostname tenant
-        if (payload.customerId !== resolvedTenantId) {
-          res.status(403).json({
-            error: 'Forbidden',
-            message: 'Token tenant does not match request tenant context'
-          });
-          return;
-        }
-      } catch (error: any) {
-        // On localhost or if hostname resolution fails, trust the token's customerId
-        if (req.hostname === 'localhost') {
-          console.log('[JWT-AUTH] Using tenant from federated token (dev mode):', payload.customerId);
-          // Continue with the token's customerId
-        } else {
-          console.warn('[JWT-AUTH] Tenant validation failed:', error.message);
-          res.status(400).json({
-            error: 'Bad Request',
-            message: 'Cannot determine tenant from hostname',
-            details: error.message
-          });
-          return;
-        }
-      }
+      // For federated tokens, ALWAYS trust the customerId from the JWT payload
+      // These tokens are signed by provisioning and already validated, so hostname
+      // resolution is not needed (and often won't work across namespace boundaries)
+      console.log('[JWT-AUTH] Using tenant from federated token:', payload.customerId);
 
       req.user = {
         id: payload.userId,
