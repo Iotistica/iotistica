@@ -42,6 +42,17 @@ spec:
               value: {{ .Values.worker.env.CLIENT_BASE_DOMAIN | quote }}
             - name: BASE_URL
               value: "http://{{ include "provisioning.fullname" . }}-api:{{ .Values.api.port }}"
+
+            # JWT
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-jwt-secret
+                  key: secret
+            - name: JWT_ACCESS_TOKEN_EXPIRY
+              value: "15m"
+            - name: JWT_REFRESH_TOKEN_EXPIRY
+              value: "7d"
             
             # Database (PostgreSQL)
             - name: DB_HOST

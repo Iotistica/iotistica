@@ -306,7 +306,11 @@ router.post('/callback-auth0', async (req: Request, res: Response) => {
       });
     }
 
-    const JWT_SECRET: Secret = process.env.JWT_SECRET || 'test-secret-key';
+    const jwtSecretEnv = process.env.JWT_SECRET;
+    if (!jwtSecretEnv || jwtSecretEnv.trim().length === 0) {
+      throw new Error('JWT_SECRET is required for federated token signing');
+    }
+    const JWT_SECRET: Secret = jwtSecretEnv;
     const accessExpiry = process.env.JWT_ACCESS_TOKEN_EXPIRY || '15m';
     const refreshExpiry = process.env.JWT_REFRESH_TOKEN_EXPIRY || '7d';
 
@@ -1111,7 +1115,11 @@ router.post('/complete-signup', async (req: Request, res: Response) => {
     }
 
     // Generate JWT tokens (same as callback-auth0)
-    const JWT_SECRET: Secret = process.env.JWT_SECRET || 'test-secret-key';
+    const jwtSecretEnv = process.env.JWT_SECRET;
+    if (!jwtSecretEnv || jwtSecretEnv.trim().length === 0) {
+      throw new Error('JWT_SECRET is required for federated token signing');
+    }
+    const JWT_SECRET: Secret = jwtSecretEnv;
     const accessExpiry = process.env.JWT_ACCESS_TOKEN_EXPIRY || '15m';
     const refreshExpiry = process.env.JWT_REFRESH_TOKEN_EXPIRY || '7d';
 

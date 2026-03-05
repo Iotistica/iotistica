@@ -461,9 +461,22 @@ export class GitOpsProvisioningService {
         
         let allSecrets = secretBuilder.build();
         
+        // Validate JWT secret matches provisioning's secret
+        const provisioningJwtSecret = process.env.JWT_SECRET;
+        const generatedJwtSecret = allSecrets['api-jwt']?.token;
+        
+        if (provisioningJwtSecret !== generatedJwtSecret) {
+          throw new Error(
+            `[GitOps] JWT secret mismatch detected!\n` +
+            `  Provisioning: ${provisioningJwtSecret?.substring(0, 20)}...\n` +
+            `  Generated: ${generatedJwtSecret?.substring(0, 20)}...\n` +
+            `  This will cause authentication failures in customer deployment.`
+          );
+        }
+        
         console.log(`✅ Secrets pre-generated from templates:`);
         console.log(`   ├─ mqtt (username, password)`);
-        console.log(`   ├─ api-jwt (token)`);
+        console.log(`   ├─ api-jwt (token - validated against provisioning secret)`);
         console.log(`   └─ sql (PENDING placeholders)`);
         
         // Fetch license from provisioning API

@@ -91,12 +91,14 @@ export class SecretBuilder {
           case 'token':
             if (app === 'api-jwt' && key === 'token') {
               const federatedJwtSecret = process.env.JWT_SECRET;
-              if (federatedJwtSecret && federatedJwtSecret.trim().length > 0) {
-                this.secrets[app][key] = federatedJwtSecret;
-              } else {
-                console.warn('[SecretBuilder] JWT_SECRET not set; generating random api-jwt token (federated login may fail)');
-                this.secrets[app][key] = this.generateRandom(field.length || 16);
+              if (!federatedJwtSecret || federatedJwtSecret.trim().length === 0) {
+                throw new Error(
+                  '[SecretBuilder] JWT_SECRET environment variable is required but not set. ' +
+                  'Cannot create customer deployment without federated auth secret. ' +
+                  'Ensure JWT_SECRET is configured in provisioning service.'
+                );
               }
+              this.secrets[app][key] = federatedJwtSecret;
             } else {
               this.secrets[app][key] = this.generateRandom(field.length || 16);
             }
