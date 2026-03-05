@@ -879,6 +879,22 @@ export class PostgresProvisioningService {
       
       try {
         await schemaClient.connect();
+
+        // Validate platform-managed extensions are present in cloned customer DB.
+        // App-role migrations intentionally do not manage extension lifecycle.
+        const extensionCheck = await schemaClient.query(
+          `SELECT extname FROM pg_extension WHERE extname = ANY($1::text[])`,
+          [['timescaledb', 'pgcrypto']]
+        );
+        const installedExtensions = new Set(extensionCheck.rows.map((r: any) => r.extname));
+        const missingExtensions = ['timescaledb', 'pgcrypto'].filter(ext => !installedExtensions.has(ext));
+        if (missingExtensions.length > 0) {
+          throw new Error(
+            `Missing required extensions in customer database ${namespace}: ${missingExtensions.join(', ')}. ` +
+            `Ensure template database ${this.config.templateDatabase || '<none>'} has required extensions installed.`
+          );
+        }
+
         // Grant app role USAGE and CREATE on public schema
         await schemaClient.query(
           `GRANT USAGE ON SCHEMA public TO ${quotedAppRole}`

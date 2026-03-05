@@ -23,6 +23,66 @@ interface AppliedMigration {
   applied_at: Date;
 }
 
+interface SanitizedMigrationSql {
+  sql: string;
+  removedStatementCount: number;
+}
+
+function isAppRoleMigrationContext(): boolean {
+  const dbUser = process.env.DB_USER || '';
+  return dbUser.endsWith('-app');
+}
+
+/**
+ * App-role migrations must not execute privileged platform SQL.
+ * Extension lifecycle and Timescale internal schemas are managed by provisioning/admin context.
+ */
+function sanitizeMigrationSqlForAppRole(sql: string): SanitizedMigrationSql {
+  let sanitizedSql = sql;
+  let removedStatementCount = 0;
+
+  const removalPatterns: RegExp[] = [
+    /(^|\n)\s*CREATE\s+EXTENSION\s+IF\s+NOT\s+EXISTS\s+(?:timescaledb|pgcrypto)\b[^;]*;/gim,
+    /(^|\n)\s*COMMENT\s+ON\s+EXTENSION\s+(?:timescaledb|pgcrypto)\b[^;]*;/gim,
+    /(^|\n)\s*(?:CREATE|ALTER|COMMENT\s+ON|GRANT|REVOKE|DROP)\s+[\s\S]*?_timescaledb_(?:internal|catalog|config)\.[\s\S]*?;/gim,
+  ];
+
+  for (const pattern of removalPatterns) {
+    const matches = sanitizedSql.match(pattern);
+    if (matches) {
+      removedStatementCount += matches.length;
+      sanitizedSql = sanitizedSql.replace(pattern, '\n');
+    }
+  }
+
+  return {
+    sql: sanitizedSql,
+    removedStatementCount,
+  };
+}
+
+function getExecutableMigrationSql(migration: Migration): SanitizedMigrationSql {
+  const appSafeModeEnabled = process.env.DB_APP_SAFE_MIGRATIONS !== 'false';
+
+  if (!appSafeModeEnabled || !isAppRoleMigrationContext()) {
+    return {
+      sql: migration.sql,
+      removedStatementCount: 0,
+    };
+  }
+
+  const sanitized = sanitizeMigrationSqlForAppRole(migration.sql);
+  if (sanitized.removedStatementCount > 0) {
+    logger.warn('App-safe migration mode removed privileged statements', {
+      migration: migration.filename,
+      removedStatements: sanitized.removedStatementCount,
+      dbUser: process.env.DB_USER,
+    });
+  }
+
+  return sanitized;
+}
+
 /**
  * Ensure migrations tracking table exists
  */
@@ -110,6 +170,7 @@ function calculateChecksum(sql: string): string {
  */
 async function applyMigration(migration: Migration): Promise<void> {
   const startTime = Date.now();
+  const { sql: executableSql } = getExecutableMigrationSql(migration);
   
   logger.info(` Applying migration ${migration.id}: ${migration.name}`);
   
@@ -123,7 +184,7 @@ async function applyMigration(migration: Migration): Promise<void> {
         await client.query('SET statement_timeout = 600000'); // 10 minutes for migrations
         
         // Execute migration SQL
-        await client.query(migration.sql);
+        await client.query(executableSql);
         
         // Record migration as applied
         const executionTime = Date.now() - startTime;

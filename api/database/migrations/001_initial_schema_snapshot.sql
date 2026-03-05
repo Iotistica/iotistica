@@ -28,31 +28,13 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
--- Name: timescaledb; Type: EXTENSION; Schema: -; Owner: -
+-- Platform-managed extensions
 --
-
-CREATE EXTENSION IF NOT EXISTS timescaledb WITH SCHEMA public;
-
-
---
--- Name: EXTENSION timescaledb; Type: COMMENT; Schema: -; Owner: 
---
-
-COMMENT ON EXTENSION timescaledb IS 'Enables scalable inserts and complex queries for time-series data (Community Edition)';
-
-
---
--- Name: pgcrypto; Type: EXTENSION; Schema: -; Owner: -
---
-
-CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
-
-
---
--- Name: EXTENSION pgcrypto; Type: COMMENT; Schema: -; Owner: 
---
-
-COMMENT ON EXTENSION pgcrypto IS 'cryptographic functions';
+-- Extensions are provisioned by admin/provisioning context (template bootstrap),
+-- not by tenant app-role migrations.
+-- Required extensions for this schema:
+--   - timescaledb
+--   - pgcrypto
 
 
 --
