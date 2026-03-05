@@ -116,7 +116,7 @@ api:
     DB_POOL_SIZE: "200"  # Increased for large fleet deployments (100+ agents)
     DB_SSL: "true"
     DB_SSL_REJECT_UNAUTHORIZED: "false"
-    MQTT_PERSIST_TO_DB: "true"
+    DB_SKIP_MIGRATIONS: "true" # Database schema pre-initialized by provisioning service
     MQTT_DB_SYNC_INTERVAL: "10000"
     MQTT_MONITOR_ENABLED: "true"
     LOG_COMPRESSION: "true"

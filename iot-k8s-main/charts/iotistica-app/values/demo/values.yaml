@@ -91,7 +91,7 @@ api:
     DB_POOL_SIZE: "20" # Increased for large fleet deployments (100+ agents)
     DB_SSL: "true"
     DB_SSL_REJECT_UNAUTHORIZED: "false"
-    AI_PROVIDER: "openai"
+    DB_SKIP_MIGRATIONS: "true" # Database schema pre-initialized by provisioning service
     OPENAI_BASE_URL: "https://iotistic-openai-7307.openai.azure.com"
     OPENAI_MODEL: "gpt-4o-mini"
     AZURE_OPENAI_API_VERSION: "2024-08-01-preview"

@@ -137,7 +137,7 @@ spec:
               value: {{ .Values.api.port | quote }}
             - name: NODE_ENV
               value: {{ index $apiEnv "NODE_ENV" | default "production" | quote }}
-            
+
             # Namespace for discovering HTTPRoute (used to auto-discover CLOUD_API_URL)
             - name: NAMESPACE
               value: {{ .Release.Namespace | quote }}
@@ -249,7 +249,8 @@ spec:
               value: {{ .Values.api.env.DB_SSL | quote }}
             - name: DB_SSL_REJECT_UNAUTHORIZED
               value: {{ .Values.api.env.DB_SSL_REJECT_UNAUTHORIZED | quote }}
-            # MQTT Broker Configuration (supports local Mosquitto or cloud HiveMQ)
+            - name: DB_SKIP_MIGRATIONS
+              value: {{ .Values.api.env.DB_SKIP_MIGRATIONS | default "true" | quote }}
             # Read MQTT credentials from existing Kubernetes Secret
             - name: MQTT_USERNAME
               valueFrom:
@@ -314,7 +315,7 @@ spec:
             - name: REDIS_CLUSTER
               value: {{ .Values.redis.cluster | quote }}
             - name: CORS_ORIGINS
-              value: {{ .Values.api.corsOrigins | default "http://localhost:5173,http://localhost:3001,http://localhost:3000,http://*:30000" | quote }}
+              value: {{ .Values.api.corsOrigins | default "http://localhost:5173,http://localhost:3001,http://localhost:3000,https://*.iotistica.com" | quote }}
             {{- if .Values.api.license.publicKey }}
             - name: LICENSE_PUBLIC_KEY
               value: {{ .Values.api.license.publicKey | quote }}

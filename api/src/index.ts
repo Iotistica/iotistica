@@ -189,6 +189,12 @@ if (hasWildcards) {
   });
 }
 
+const wildcardToRegExp = (pattern: string): RegExp => {
+  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regexPattern = escaped.replace(/\\\*/g, '.*');
+  return new RegExp(`^${regexPattern}$`);
+};
+
 // Routes that should skip CORS checks (internal service-to-service only)
 const corsExemptPaths = [
   '/health',              // Kubernetes health checks
@@ -196,7 +202,7 @@ const corsExemptPaths = [
   '/mosquitto-auth',      // Mosquitto broker auth callbacks
 ];
 
-app.use(cors({
+const corsOptions = {
   origin: (origin, callback) => {
     // No origin header (server-to-server, mobile apps, curl, Postman)
     if (!origin) {
@@ -210,8 +216,7 @@ app.use(cors({
       // Support wildcard patterns (e.g., https://*.example.com:3000)
       // CAUTION: Use sparingly - prefer explicit origins for security
       if (allowed.includes('*')) {
-        const pattern = allowed.replace(/\*/g, '.*').replace(/\./g, '\\.');
-        return new RegExp(`^${pattern}$`).test(origin);
+        return wildcardToRegExp(allowed).test(origin);
       }
       // Exact match (preferred)
       return allowed === origin;
@@ -242,9 +247,11 @@ app.use(cors({
   
   // Preflight cache duration (24 hours)
   maxAge: 86400
-}));
+};
 
-app.options('*', cors());
+app.use(cors(corsOptions));
+
+app.options('*', cors(corsOptions));
 
 // Brotli decompression middleware
 app.use(brotliDecompressionMiddleware);
