@@ -1,5 +1,11 @@
 const fetch = require('undici').fetch
-const { Strategy } = require('./strategy')
+
+const TOKEN_LOGIN_SENTINELS = new Set([
+    '__token__',
+    '__access_token__',
+    'token',
+    'access-token'
+])
 
 module.exports = (options) => {
     if (!options.iotisticURL) {
@@ -7,26 +13,97 @@ module.exports = (options) => {
     }
 
     const iotisticURL = options.iotisticURL
-    
-    // Note: baseURL will be constructed at runtime when we have access to settings.uiPort
-    // For now, we'll defer URL construction until the strategy is actually used
-    
-    // Note: baseURL will be constructed at runtime when we have access to settings.uiPort
-    // For now, we'll defer URL construction until the strategy is actually used
-
-    const callbackURL = `http://localhost:${options.uiPort || 1880}/auth/strategy/callback`
     const loginURL = `${iotisticURL}/api/v1/auth/login`
     const refreshURL = `${iotisticURL}/api/v1/auth/refresh`
     const userInfoURL = `${iotisticURL}/api/v1/auth/me`
-
-    const version = require('../package.json').version
-
     const activeUsers = {}
 
-    async function refreshUserToken(username) {
+    function decodeJwtPayload (token) {
+        try {
+            const parts = token.split('.')
+            if (parts.length !== 3) {
+                return null
+            }
+            return JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'))
+        } catch (err) {
+            return null
+        }
+    }
+
+    function getRefreshDelayMs (accessToken) {
+        const payload = decodeJwtPayload(accessToken)
+        if (!payload || !payload.exp) {
+            return 10 * 60 * 1000
+        }
+
+        const nowSeconds = Math.floor(Date.now() / 1000)
+        const secondsUntilExpiry = payload.exp - nowSeconds
+        const refreshLeadSeconds = 60
+        const refreshInSeconds = Math.max(30, secondsUntilExpiry - refreshLeadSeconds)
+        return refreshInSeconds * 1000
+    }
+
+    function buildPermissions (user) {
+        if (user && user.role === 'admin') {
+            return ['*']
+        }
+        return ['read']
+    }
+
+    function normalizeProfileFromApiUser (user, accessToken, refreshToken) {
+        const username = user.username || user.email || user.auth0Sub || user.id
+        return {
+            username,
+            image: user.avatar || '',
+            name: user.fullName || user.name || username,
+            email: user.email,
+            role: user.role || 'user',
+            customerId: user.customerId,
+            permissions: buildPermissions(user),
+            accessToken,
+            refreshToken: refreshToken || null
+        }
+    }
+
+    async function fetchProfileFromAccessToken (accessToken, refreshToken) {
+        try {
+            const response = await fetch(userInfoURL, {
+                method: 'GET',
+                headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            })
+
+            if (!response.ok) {
+                return null
+            }
+
+            const data = await response.json()
+            const user = data && data.data && data.data.user
+            if (!user) {
+                return null
+            }
+
+            return normalizeProfileFromApiUser(user, accessToken, refreshToken)
+        } catch (err) {
+            console.error('Failed to validate access token with /auth/me:', err)
+            return null
+        }
+    }
+
+    function clearUser (username) {
+        const existing = activeUsers[username]
+        if (existing && existing.refreshTimeout) {
+            clearTimeout(existing.refreshTimeout)
+        }
+        delete activeUsers[username]
+    }
+
+    async function refreshUserToken (username) {
         const user = activeUsers[username]
         if (!user || !user.refreshToken) {
-            delete activeUsers[username]
+            clearUser(username)
             return
         }
 
@@ -37,33 +114,148 @@ module.exports = (options) => {
                 body: JSON.stringify({ refreshToken: user.refreshToken })
             })
 
-            if (response.ok) {
-                const data = await response.json()
-                addUser(username, user.profile, data.data.accessToken, data.data.refreshToken)
-                console.log('Refreshed JWT token for user', username)
-            } else {
+            if (!response.ok) {
                 console.error('Token refresh failed for user', username)
-                delete activeUsers[username]
+                clearUser(username)
+                return
             }
+
+            const data = await response.json()
+            const refreshedAccessToken = data && data.data && data.data.accessToken
+            const refreshedRefreshToken = (data && data.data && data.data.refreshToken) || user.refreshToken
+            if (!refreshedAccessToken) {
+                console.error('Refresh response did not include accessToken for user', username)
+                clearUser(username)
+                return
+            }
+
+            const refreshedProfile = await fetchProfileFromAccessToken(refreshedAccessToken, refreshedRefreshToken)
+            if (!refreshedProfile) {
+                console.error('Token refresh validation failed for user', username)
+                clearUser(username)
+                return
+            }
+
+            addUser(refreshedProfile.username, refreshedProfile, refreshedAccessToken, refreshedRefreshToken)
+            console.log('Refreshed JWT token for user', refreshedProfile.username)
         } catch (err) {
             console.error('Token refresh error:', err)
-            delete activeUsers[username]
+            clearUser(username)
         }
     }
 
     function addUser (username, profile, accessToken, refreshToken) {
-        if (activeUsers[username]) {
-            clearTimeout(activeUsers[username].refreshTimeout)
-        }
+        clearUser(username)
+
         activeUsers[username] = {
             profile,
             accessToken,
-            refreshToken
+            refreshToken: refreshToken || null
         }
-        // Refresh JWT token every 50 minutes (tokens expire in 1 hour)
-        activeUsers[username].refreshTimeout = setTimeout(function () {
-            refreshUserToken(username)
-        }, 50 * 60 * 1000)
+
+        if (refreshToken) {
+            const refreshDelayMs = getRefreshDelayMs(accessToken)
+            activeUsers[username].refreshTimeout = setTimeout(function () {
+                refreshUserToken(username)
+            }, refreshDelayMs)
+        }
+    }
+
+    function findActiveUserByToken (token) {
+        const entries = Object.keys(activeUsers)
+        for (const key of entries) {
+            const user = activeUsers[key]
+            if (user && user.accessToken === token) {
+                return user.profile
+            }
+        }
+        return null
+    }
+
+    async function authenticateWithPassword (username, password) {
+        const response = await fetch(loginURL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        })
+
+        if (!response.ok) {
+            console.error('Login failed:', response.status)
+            return null
+        }
+
+        const data = await response.json()
+        const accessToken = data && data.data && data.data.accessToken
+        const refreshToken = data && data.data && data.data.refreshToken
+        if (!accessToken) {
+            return null
+        }
+
+        const profile = await fetchProfileFromAccessToken(accessToken, refreshToken)
+        if (!profile) {
+            return null
+        }
+
+        addUser(profile.username, profile, accessToken, refreshToken)
+        console.log('JWT authenticated user:', profile.username)
+        return profile
+    }
+
+    async function authenticateWithAccessToken (accessToken) {
+        const profile = await fetchProfileFromAccessToken(accessToken)
+        if (!profile) {
+            return null
+        }
+
+        addUser(profile.username, profile, accessToken, null)
+        console.log('SSO token authenticated user:', profile.username)
+        return profile
+    }
+
+    async function exchangeBridgeToken (bridgeToken) {
+        const provisioning_url = options.provisioning_url || iotisticURL
+        const exchangeURL = `${provisioning_url}/api/auth/exchange-bridge-token`
+        
+        try {
+            const response = await fetch(exchangeURL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${bridgeToken}`
+                }
+            })
+            
+            if (!response.ok) {
+                console.error('[adminAuth] Bridge token exchange failed:', response.status)
+                return null
+            }
+            
+            const data = await response.json()
+            const accessToken = data.accessToken
+            const refreshToken = data.refreshToken
+            
+            if (!accessToken) {
+                console.error('[adminAuth] No accessToken in bridge exchange response')
+                return null
+            }
+            
+            const profile = await fetchProfileFromAccessToken(accessToken, refreshToken)
+            if (!profile) {
+                console.error('[adminAuth] Profile validation failed after bridge exchange')
+                return null
+            }
+
+            addUser(profile.username, profile, accessToken, refreshToken)
+            console.log('[adminAuth] Bridge token exchanged successfully for user:', profile.username)
+            return profile
+        } catch (err) {
+            console.error('[adminAuth] Bridge token exchange error:', err)
+            return null
+        }
+    }
+
+    function looksLikeJwt (value) {
+        return typeof value === 'string' && value.split('.').length === 3
     }
 
     return {
@@ -76,42 +268,48 @@ module.exports = (options) => {
             }
             return null
         },
-        authenticate: async function(username, password) {
-            try {
-                const response = await fetch(loginURL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
-                })
+        tokens: async function (token) {
+            if (!token) {
+                return null
+            }
 
-                if (!response.ok) {
-                    console.error('Login failed:', response.status)
+            const active = findActiveUserByToken(token)
+            if (active) {
+                return active
+            }
+
+            return authenticateWithAccessToken(token)
+        },
+        authenticate: async function (username, password) {
+            try {
+                // Check for bridge token in request object (passed from httpAuthMiddleware)
+                if (username && username.startsWith('__bridgeToken__:')) {
+                    const bridgeToken = username.substring('__bridgeToken__:'.length)
+                    console.log('[adminAuth] Bridge token detected, exchanging for access token...')
+                    const profile = await exchangeBridgeToken(bridgeToken)
+                    if (profile) {
+                        console.log('[adminAuth] Bridge token exchanged successfully for user:', profile.username)
+                        return profile
+                    }
                     return null
                 }
 
-                const data = await response.json()
-                const accessToken = data.data.accessToken
-                const refreshToken = data.data.refreshToken
-                const user = data.data.user
-
-                const profile = {
-                    username: user.username,
-                    image: user.avatar || '',
-                    name: user.fullName || user.username,
-                    email: user.email,
-                    permissions: ['*'],
-                    accessToken: accessToken  // Include token in profile
+                const tokenMode = TOKEN_LOGIN_SENTINELS.has((username || '').toLowerCase()) || looksLikeJwt(password)
+                if (tokenMode) {
+                    const candidateToken = looksLikeJwt(password) ? password : username
+                    if (!looksLikeJwt(candidateToken)) {
+                        return null
+                    }
+                    return authenticateWithAccessToken(candidateToken)
                 }
 
-                addUser(user.username, profile, accessToken, refreshToken)
-                console.log('JWT authenticated user:', user.username)
-                return profile
+                return authenticateWithPassword(username, password)
             } catch (err) {
                 console.error('Authentication error:', err)
                 return null
             }
         },
-        default: function() {
+        default: function () {
             return Promise.resolve(null)
         }
     }

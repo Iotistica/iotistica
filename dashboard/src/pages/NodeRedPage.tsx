@@ -1,0 +1,134 @@
+/**
+ * Node-RED Page - Embedded Node-RED interface
+ * 
+ * Provides seamless SSO integration where dashboard users can access Node-RED
+ * without additional authentication. Uses bridge token for iframe auth.
+ */
+
+import { useEffect, useState } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import { AlertCircle, RefreshCw } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+
+export function NodeRedPage() {
+  const { user } = useAuth();
+  const [bridgeToken, setBridgeToken] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) {
+      setError('User not authenticated');
+      setLoading(false);
+      return;
+    }
+
+    const fetchBridgeToken = async () => {
+      try {
+        setError(null);
+        const accessToken = localStorage.getItem('accessToken');
+        
+        if (!accessToken) {
+          setError('No access token found. Please log in again.');
+          setLoading(false);
+          return;
+        }
+
+        // Build provisioning API URL
+        const provisioningUrl = import.meta.env.VITE_PROVISIONING_API_URL || 'http://localhost:3100';
+        
+        // Call provisioning API to get bridge token
+        const response = await fetch(
+          `${provisioningUrl}/api/auth/create-bridge-token`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ accessToken }),
+          }
+        );
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to create bridge token');
+        }
+
+        const data = await response.json();
+        setBridgeToken(data.bridgeToken);
+        setLoading(false);
+      } catch (err: any) {
+        console.error('[NodeRedPage] Error:', err);
+        setError(err.message || 'Failed to authenticate with Node-RED');
+        setLoading(false);
+      }
+    };
+
+    fetchBridgeToken();
+  }, [user]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-600" />
+          <p className="text-muted-foreground">Loading Node-RED...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-8">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            <strong>Node-RED Access Error:</strong> {error}
+          </AlertDescription>
+        </Alert>
+        <p className="text-sm text-muted-foreground mt-4">
+          Please try refreshing the page or contact support if the problem persists.
+        </p>
+      </div>
+    );
+  }
+
+  if (!bridgeToken) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <p className="text-muted-foreground">Unable to initialize Node-RED</p>
+      </div>
+    );
+  }
+
+  // Embed Node-RED in iframe - internal K8s DNS: http://nodered:1880
+  const nodeRedUrl = `http://nodered:1880?bridgeToken=${encodeURIComponent(bridgeToken)}`;
+
+  return (
+    <div className="h-screen w-full flex flex-col">
+      {/* Header */}
+      <div className="border-b border-border bg-card px-6 py-4">
+        <h1 className="text-2xl font-bold">Node-RED</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Visual process automation for {user?.email}
+        </p>
+      </div>
+
+      {/* Iframe Container */}
+      <div className="flex-1 overflow-hidden">
+        <iframe
+          src={nodeRedUrl}
+          title="Node-RED"
+          className="w-full h-full border-0"
+          sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
+          onLoad={() => console.log('[NodeRedPage] iframe loaded')}
+          onError={(error) => {
+            console.error('[NodeRedPage] iframe error:', error);
+            setError('Failed to load Node-RED interface');
+          }}
+        />
+      </div>
+    </div>
+  );
+}

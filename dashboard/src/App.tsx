@@ -8,6 +8,7 @@ import { MqttPage } from "./pages/MqttPage";
 import { JobsPage } from "./pages/JobsPage";
 import { ApplicationsPage } from "./pages/ApplicationsPage";
 import { UsagePage } from "./pages/UsagePage";
+import { NodeRedPage } from "./pages/NodeRedPage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { SecurityPage } from "./pages/SecurityPage";
 import { Toaster } from "./components/ui/sonner";
@@ -1245,6 +1246,15 @@ export default function App() {
                 Security
               </Button>
               <Button
+                variant={currentView === 'nodered' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => handleGlobalViewChange('nodered')}
+                style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
+              >
+                <AlertOctagon className="w-5 h-5 mr-2" />
+                Node-RED
+              </Button>
+              <Button
                 variant={currentView === 'monitoring' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => handleGlobalViewChange('monitoring')}
@@ -1359,6 +1369,9 @@ export default function App() {
                 <div className="flex-1 bg-background overflow-auto p-6">
                   <SecurityPage />
                 </div>
+              )}
+              {currentView === 'nodered' && (
+                <NodeRedPage />
               )}
               {currentView === 'monitoring' && (
                 <AlertsPage />

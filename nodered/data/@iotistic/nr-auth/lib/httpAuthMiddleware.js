@@ -9,6 +9,14 @@ module.exports = {
         options = _options
         return (req, res, next) => {
             try {
+                // Check for bridge token in iframe mode
+                const bridgeToken = req.query.bridgeToken
+                if (bridgeToken && req.path === '/') {
+                    // iframe loading with bridge token - redirect to login with bridge token param
+                    console.log('[httpAuthMiddleware] Bridge token detected in iframe request')
+                    return res.redirect(`/login?bridgeToken=${encodeURIComponent(bridgeToken)}`)
+                }
+
                 if (req.query.logoutSession === 'true') {
                     console.log('Logging out session')
                     delete req.session.iotSession
@@ -58,6 +66,10 @@ module.exports = {
 
         // Login form
         app.get('/login', (req, res) => {
+            const bridgeToken = req.query.bridgeToken
+            const showLoading = bridgeToken ? 'block' : 'none'
+            const showForm = bridgeToken ? 'none' : 'block'
+            
             res.send(`
 <!DOCTYPE html>
 <html>
@@ -71,18 +83,32 @@ module.exports = {
         button { width: 100%; padding: 12px; background: #0066cc; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
         button:hover { background: #0052a3; }
         .error { color: red; font-size: 14px; margin-top: 10px; }
+        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #0066cc; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
     <div class="login-form">
         <h2>Iotistic Login</h2>
-        <form method="POST" action="/_iotAuth/login">
-            <input type="text" name="username" placeholder="Username or Email" required>
-            <input type="password" name="password" placeholder="Password" required>
-            <button type="submit">Login</button>
-        </form>
-        ${req.query.error ? '<div class="error">Login failed. Please try again.</div>' : ''}
+        <div id="loginForm" style="display: ${showForm};">
+            <form id="authForm" method="POST" action="/_iotAuth/login">
+                <input type="text" name="username" placeholder="Username or Email" required>
+                <input type="password" name="password" placeholder="Password" required>
+                ${bridgeToken ? `<input type="hidden" name="bridgeToken" value="${bridgeToken}">` : ''}
+                <button type="submit">Login</button>
+            </form>
+            ${req.query.error ? '<div class="error">Login failed. Please try again.</div>' : ''}
+        </div>
+        <div id="loading" style="display: ${showLoading}; text-align: center;">
+            <p>Authenticating...</p>
+            <div class="spinner"></div>
+        </div>
     </div>
+    <script>
+        if ('${bridgeToken}') {
+            document.getElementById('authForm').submit()
+        }
+    </script>
 </body>
 </html>
             `)

@@ -1182,4 +1182,227 @@ router.post('/complete-signup', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * POST /api/auth/create-bridge-token
+ * Create a single-use bridge token for Node-RED iframe authentication
+ * 
+ * Dashboard exchanges its JWT for a short-lived bridge token.
+ * Node-RED iframe receives token via query param, exchanges it for real JWT session.
+ * 
+ * Body:
+ * {
+ *   "accessToken": "<dashboard-jwt>"
+ * }
+ * 
+ * Returns:
+ * {
+ *   "bridgeToken": "<single-use-token>",
+ *   "expiresIn": 300
+ * }
+ */
+router.post('/create-bridge-token', async (req: Request, res: Response) => {
+  try {
+    const { accessToken } = req.body;
+
+    if (!accessToken || typeof accessToken !== 'string') {
+      return res.status(400).json({
+        error: 'Missing or invalid accessToken',
+      });
+    }
+
+    const jwtSecretEnv = process.env.JWT_SECRET;
+    if (!jwtSecretEnv || jwtSecretEnv.trim().length === 0) {
+      logger.error('[BridgeToken] JWT_SECRET not configured');
+      return res.status(500).json({
+        error: 'Server configuration error',
+      });
+    }
+    const JWT_SECRET: Secret = jwtSecretEnv;
+
+    let decoded: any;
+    try {
+      decoded = jwt.verify(accessToken, JWT_SECRET, {
+        audience: 'iotistic-dashboard',
+        algorithms: ['HS256'],
+      });
+    } catch (error: any) {
+      logger.warn('[BridgeToken] JWT verification failed', {
+        error: error.message,
+      });
+      return res.status(401).json({
+        error: 'Invalid or expired token',
+      });
+    }
+
+    const { userId, username, email, customerId, role } = decoded;
+
+    if (!userId || !customerId) {
+      return res.status(401).json({
+        error: 'Invalid token claims',
+      });
+    }
+
+    const bridgeTokenPayload = jwt.sign(
+      {
+        userId,
+        username,
+        email,
+        customerId,
+        role,
+        type: 'bridge',
+        nonce: crypto.randomBytes(16).toString('hex'),
+      },
+      JWT_SECRET,
+      {
+        expiresIn: '5m',
+        issuer: 'iotistic-provisioning',
+        audience: 'nodered-iframe',
+      }
+    );
+
+    logger.info('[BridgeToken] Created', {
+      userId,
+      customerId,
+      email,
+    });
+
+    res.json({
+      bridgeToken: bridgeTokenPayload,
+      expiresIn: 300,
+    });
+
+  } catch (error: any) {
+    logger.error('[BridgeToken] Error', {
+      error: error.message,
+    });
+    res.status(500).json({
+      error: 'Failed to create bridge token',
+    });
+  }
+});
+
+/**
+ * POST /api/auth/exchange-bridge-token
+ * Exchange bridge token (from Node-RED iframe) for access token
+ * 
+ * Node-RED calls this endpoint with bridge token (via Authorization header)
+ * Returns accessToken + refreshToken + user profile for Node-RED session
+ * 
+ * Headers:
+ * {
+ *   "Authorization": "Bearer <bridge-token>"
+ * }
+ */
+router.post('/exchange-bridge-token', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        error: 'Missing or invalid authorization header',
+      });
+    }
+
+    const bridgeToken = authHeader.substring('Bearer '.length);
+
+    const jwtSecretEnv = process.env.JWT_SECRET;
+    if (!jwtSecretEnv || jwtSecretEnv.trim().length === 0) {
+      logger.error('[ExchangeBridgeToken] JWT_SECRET not configured');
+      return res.status(500).json({
+        error: 'Server configuration error',
+      });
+    }
+    const JWT_SECRET: Secret = jwtSecretEnv;
+
+    let decoded: any;
+    try {
+      decoded = jwt.verify(bridgeToken, JWT_SECRET, {
+        audience: 'nodered-iframe',
+        algorithms: ['HS256'],
+      });
+    } catch (error: any) {
+      logger.warn('[ExchangeBridgeToken] Bridge token verification failed', {
+        error: error.message,
+      });
+      return res.status(401).json({
+        error: 'Invalid or expired bridge token',
+      });
+    }
+
+    if (decoded.type !== 'bridge') {
+      logger.warn('[ExchangeBridgeToken] Invalid token type', {
+        type: decoded.type,
+      });
+      return res.status(401).json({
+        error: 'Invalid token type',
+      });
+    }
+
+    const { userId, username, email, customerId, role } = decoded;
+
+    const accessExpiry = process.env.JWT_ACCESS_TOKEN_EXPIRY || '15m';
+    const refreshExpiry = process.env.JWT_REFRESH_TOKEN_EXPIRY || '7d';
+
+    const accessToken = jwt.sign(
+      {
+        userId,
+        username,
+        email,
+        customerId,
+        role,
+        type: 'access',
+      },
+      JWT_SECRET,
+      {
+        expiresIn: accessExpiry as any,
+        issuer: 'iotistic-provisioning',
+        audience: 'nodered',
+      }
+    );
+
+    const refreshToken = jwt.sign(
+      {
+        userId,
+        username,
+        email,
+        customerId,
+        role,
+        type: 'refresh',
+      },
+      JWT_SECRET,
+      {
+        expiresIn: refreshExpiry as any,
+        issuer: 'iotistic-provisioning',
+        audience: 'nodered',
+      }
+    );
+
+    logger.info('[ExchangeBridgeToken] Tokens issued', {
+      userId,
+      customerId,
+      email,
+    });
+
+    res.json({
+      accessToken,
+      refreshToken,
+      user: {
+        id: userId,
+        username,
+        email,
+        customerId,
+        role,
+      },
+    });
+
+  } catch (error: any) {
+    logger.error('[ExchangeBridgeToken] Error', {
+      error: error.message,
+    });
+    res.status(500).json({
+      error: 'Failed to exchange bridge token',
+    });
+  }
+});
+
 export default router;
