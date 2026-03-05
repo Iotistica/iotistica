@@ -143,7 +143,8 @@ dashboard:
   tlsCommonName: "{{CLIENT_ID}}.iotistica.com"
   #   - Set to your API ingress URL
   apiUrl: "https://api-{{CLIENT_ID}}.iotistica.com"
-    # Auth0 Configuration (set per-customer/environment)
+  
+  # Auth0 Configuration (set per-customer/environment)
   auth0:
     domain: "dev-hmwhgxw10boqpmrw.us.auth0.com"  # Auth0 tenant domain
     clientId: "Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR"  # Auth0 Application ID
