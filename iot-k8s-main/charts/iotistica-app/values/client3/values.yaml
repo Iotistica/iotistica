@@ -235,6 +235,40 @@ mqttMonitor:
     # Reference existing Kubernetes secret (recommended for production)
     existingSecret: "mqtt-credentials-client3"
 
+# Node-RED - Visual flow automation
+nodered:
+  enabled: true
+  image:
+    repository: iotistic/nodered
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 1880
+  serviceType: ClusterIP
+  # External URL for Node-RED (used for Auth0 callback and bridge token redirect)
+  baseUrl: "https://nodered3.iotistica.com"
+  tlsCommonName: nodered3.iotistica.com
+  # Storage token for API authentication (flows stored in API database)
+  storageToken:
+    secretName: "api-jwt-client3"
+    secretKey: "token"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  env:
+    TZ: "UTC"
+    NODE_RED_ENABLE_SAFE_MODE: "false"
+    NODE_RED_ENABLE_PROJECTS: "false"
+  # Ingress configuration
+  ingress:
+    enabled: true
+    gatewayName: "iotistica-gateway"
+    gatewayNamespace: "envoy-gateway-system"
+
 # Housekeeper service - Database maintenance and cleanup
 housekeeper:
   enabled: true

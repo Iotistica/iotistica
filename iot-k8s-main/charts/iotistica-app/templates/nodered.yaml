@@ -1,0 +1,116 @@
+{{- if and .Values.nodered .Values.nodered.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "iotistic.fullname" . }}-nodered
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nodered
+spec:
+  type: {{ .Values.nodered.serviceType }}
+  ports:
+    - port: {{ .Values.nodered.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+      {{- if and (eq .Values.nodered.serviceType "NodePort") .Values.nodered.nodePort }}
+      nodePort: {{ .Values.nodered.nodePort }}
+      {{- end }}
+  selector:
+    {{- include "iotistic.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: nodered
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "iotistic.fullname" . }}-nodered
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nodered
+spec:
+  replicas: {{ .Values.nodered.replicas }}
+  selector:
+    matchLabels:
+      {{- include "iotistic.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: nodered
+  template:
+    metadata:
+      labels:
+        {{- include "iotistic.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: nodered
+    spec:
+      containers:
+        - name: nodered
+          image: "{{ .Values.nodered.image.repository }}:{{ .Values.nodered.image.tag }}"
+          imagePullPolicy: {{ .Values.nodered.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.nodered.port }}
+              protocol: TCP
+          {{- $noderedEnv := .Values.nodered.env | default dict }}
+          env:
+            - name: TZ
+              value: {{ index $noderedEnv "TZ" | default "UTC" | quote }}
+            - name: NODE_RED_ENABLE_SAFE_MODE
+              value: {{ index $noderedEnv "NODE_RED_ENABLE_SAFE_MODE" | default "false" | quote }}
+            - name: NODE_RED_ENABLE_PROJECTS
+              value: {{ index $noderedEnv "NODE_RED_ENABLE_PROJECTS" | default "false" | quote }}
+            
+            # API service URL (internal cluster DNS)
+            - name: IOTISTIC_BASE_URL
+              value: "http://{{ include "iotistic.fullname" . }}-api:{{ .Values.api.port }}"
+            
+            # Node-RED external URL (for bridge token callback)
+            - name: NODERED_BASE_URL
+              value: {{ .Values.nodered.baseUrl | quote }}
+            
+            # Storage token for API authentication
+            {{- if .Values.nodered.storageToken }}
+            - name: IOTISTIC_STORAGE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.nodered.storageToken.secretName }}
+                  key: {{ .Values.nodered.storageToken.secretKey | default "token" }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.nodered.resources | nindent 12 }}
+---
+{{- if .Values.nodered.ingress.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "iotistic.fullname" . }}-nodered-httproute
+  namespace: {{ .Release.Namespace }}
+spec:
+  parentRefs:
+    - name: {{ .Values.nodered.ingress.gatewayName | default "iotistica-gateway" }}
+      namespace: {{ .Values.nodered.ingress.gatewayNamespace | default "envoy-gateway-system" }}
+  hostnames:
+    - {{ .Values.nodered.tlsCommonName }}
+  rules:
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: {{ include "iotistic.fullname" . }}-nodered
+          port: {{ .Values.nodered.port }}
+          weight: 1
+{{- end }}
+{{- end }}
