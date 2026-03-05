@@ -46,7 +46,7 @@
     "jsonwebtoken": "^9.0.2",
     "mqtt": "^5.14.1",
     "msgpack-lite": "^0.1.26",
-    "multer": "^2.0.3",
+    "multer": "2.1.1",
     "neo4j-driver": "^6.0.1",
     "node-cron": "^4.2.1",
     "node-fetch": "^2.7.0",
