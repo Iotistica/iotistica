@@ -90,7 +90,8 @@ export default function App() {
     'dashboard',
     'digital-twin',
     'event-debugger',
-    'monitoring'
+    'monitoring',
+    'nodered'
   ] as const;
   type View = typeof viewOptions[number];
   const agentViews: View[] = [
@@ -118,7 +119,7 @@ export default function App() {
     return stored && viewOptions.includes(stored as View) ? (stored as View) : 'metrics';
   });
   const [fleetNameById, setFleetNameById] = useState<Record<string, string>>({});
-  const isGlobalView = currentView === 'dashboard' || currentView === 'mqtt' || currentView === 'audit' || currentView === 'security' || currentView === 'fleets' || currentView === 'monitoring';
+  const isGlobalView = currentView === 'dashboard' || currentView === 'mqtt' || currentView === 'audit' || currentView === 'security' || currentView === 'fleets' || currentView === 'monitoring' || currentView === 'nodered';
   const [debugMode, setDebugMode] = useState(false);
   const [isKioskMode, setIsKioskMode] = useState<boolean>(() => {
     return localStorage.getItem('dashboard-kiosk-mode') === 'true';
