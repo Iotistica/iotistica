@@ -149,7 +149,10 @@ export class DeploymentWorker {
 
       // Fetch license from provisioning API (with retry for race conditions)
       const provisioningUrl = process.env.BASE_URL || 'http://localhost:3100';
+      const licenseUrl = `${provisioningUrl}/api/licenses/${customerId}`;
       console.log('🔑 Fetching license from provisioning API...');
+      console.log(`   📍 URL: ${licenseUrl}`);
+      console.log(`   👤 Customer ID: ${customerId}`);
       
       let licenseRes;
       let licenseAttempt = 0;
@@ -158,22 +161,36 @@ export class DeploymentWorker {
       
       while (licenseAttempt < maxAttempts) {
         try {
+          console.log(`   🔄 Attempt ${licenseAttempt + 1}/${maxAttempts}...`);
           licenseRes = await axios.get<{ license: string; plan: 'starter' | 'professional' | 'enterprise'; monitoring: any }>(
-            `${provisioningUrl}/api/licenses/${customerId}`
+            licenseUrl
           );
+          console.log(`   ✅ License fetched successfully`);
+          console.log(`      Status: ${licenseRes.status}`);
+          console.log(`      Plan: ${licenseRes.data.plan}`);
+          console.log(`      License key length: ${licenseRes.data.license?.length || 0} chars`);
           break; // Success, exit retry loop
         } catch (error: any) {
           licenseAttempt++;
+          const errorStatus = error.response?.status;
+          const errorMessage = error.response?.data?.error || error.message;
           
-          if (error.response?.status === 404 && licenseAttempt < maxAttempts) {
+          console.log(`   ❌ Attempt ${licenseAttempt} failed:`);
+          console.log(`      Status: ${errorStatus || 'No response'}`);
+          console.log(`      Error: ${errorMessage}`);
+          
+          if (errorStatus === 404 && licenseAttempt < maxAttempts) {
             // 404 likely means subscription not yet written to DB - wait and retry
             const delay = baseDelay * Math.pow(2, licenseAttempt - 1); // Exponential backoff: 1s, 2s, 4s, 8s
-            console.log(`⏳ License not yet available (attempt ${licenseAttempt}/${maxAttempts}), retrying in ${delay}ms...`);
+            console.log(`   ⏳ Subscription not yet in database (404 error)`);
+            console.log(`   ⏳ Waiting ${delay}ms before retry ${licenseAttempt + 1}/${maxAttempts}...`);
             await new Promise(resolve => setTimeout(resolve, delay));
             continue;
           }
           
           // Other errors or max attempts reached
+          console.log(`   ❌ Failed to fetch license after ${licenseAttempt} attempt(s)`);
+          logger.error('License fetch failed', { customerId, licenseUrl, status: errorStatus, error: errorMessage });
           throw error;
         }
       }
@@ -407,11 +424,58 @@ export class DeploymentWorker {
 
       await job.progress(20);
 
-      // Fetch license from provisioning API
+      // Fetch license from provisioning API (with retry for race conditions)
       const provisioningUrl = process.env.BASE_URL || 'http://localhost:3100';
-      const licenseRes = await axios.get<{ license: string; plan: 'starter' | 'professional' | 'enterprise'; monitoring: any }>(
-        `${provisioningUrl}/api/licenses/${customerId}`
-      );
+      const licenseUrl = `${provisioningUrl}/api/licenses/${customerId}`;
+      console.log('🔑 Fetching license from provisioning API...');
+      console.log(`   📍 URL: ${licenseUrl}`);
+      console.log(`   👤 Customer ID: ${customerId}`);
+      
+      let licenseRes;
+      let licenseAttempt = 0;
+      const maxAttempts = 5;
+      const baseDelay = 1000; // 1 second
+      
+      while (licenseAttempt < maxAttempts) {
+        try {
+          console.log(`   🔄 Attempt ${licenseAttempt + 1}/${maxAttempts}...`);
+          licenseRes = await axios.get<{ license: string; plan: 'starter' | 'professional' | 'enterprise'; monitoring: any }>(
+            licenseUrl
+          );
+          console.log(`   ✅ License fetched successfully`);
+          console.log(`      Status: ${licenseRes.status}`);
+          console.log(`      Plan: ${licenseRes.data.plan}`);
+          console.log(`      License key length: ${licenseRes.data.license?.length || 0} chars`);
+          break; // Success, exit retry loop
+        } catch (error: any) {
+          licenseAttempt++;
+          const errorStatus = error.response?.status;
+          const errorMessage = error.response?.data?.error || error.message;
+          
+          console.log(`   ❌ Attempt ${licenseAttempt} failed:`);
+          console.log(`      Status: ${errorStatus || 'No response'}`);
+          console.log(`      Error: ${errorMessage}`);
+          
+          if (errorStatus === 404 && licenseAttempt < maxAttempts) {
+            // 404 likely means subscription not yet written to DB - wait and retry
+            const delay = baseDelay * Math.pow(2, licenseAttempt - 1); // Exponential backoff: 1s, 2s, 4s, 8s
+            console.log(`   ⏳ Subscription not yet in database (404 error)`);
+            console.log(`   ⏳ Waiting ${delay}ms before retry ${licenseAttempt + 1}/${maxAttempts}...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          
+          // Other errors or max attempts reached
+          console.log(`   ❌ Failed to fetch license after ${licenseAttempt} attempt(s)`);
+          logger.error('License fetch failed', { customerId, licenseUrl, status: errorStatus, error: errorMessage });
+          throw error;
+        }
+      }
+      
+      if (!licenseRes) {
+        throw new Error(`Failed to fetch license after ${maxAttempts} attempts`);
+      }
+      
       const { license: licenseKey, plan: licensePlan, monitoring } = licenseRes.data;
 
       await job.progress(30);
