@@ -680,15 +680,17 @@ export class DeploymentWorker {
       // Wait for Argo CD (can block for 8-15 min - that's OK for this dedicated job)
       const isReady = await argoStatusService.waitForApplicationReady(clientIdToMonitor, customerId);
 
-      if (!isReady) {
-        throw new Error('Argo CD deployment did not reach healthy state within timeout');
-      }
-
       await job.progress(90);
 
       // Check if deployment is actually ready or still progressing
       const customer = await CustomerModel.getById(customerId);
       const finalStatus = customer?.deployment_status;
+      
+      // If monitoring timed out but deployment is still progressing, that's OK
+      // (Argo CD continues syncing in the background)
+      if (!isReady && finalStatus !== 'deploying') {
+        throw new Error('Argo CD deployment did not reach healthy state within timeout');
+      }
       
       if (finalStatus === 'deploying') {
         // Argo CD monitoring timed out but deployment is still progressing
