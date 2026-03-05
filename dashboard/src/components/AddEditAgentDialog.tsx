@@ -89,6 +89,16 @@ export function AddEditDeviceDialog({
   const [selectedFleetId, setSelectedFleetId] = useState<string>(UNASSIGNED_FLEET_ID);
   const [locations, setLocations] = useState<string[]>([]);
   const [locationOpen, setLocationOpen] = useState(false);
+  const [clientApiUrl, setClientApiUrl] = useState("");
+  const [copiedApiUrl, setCopiedApiUrl] = useState(false);
+
+  // Initialize client API URL with current API URL on mount
+  useEffect(() => {
+    if (open && !isEditMode && formData.type === 'standalone') {
+      const currentApiUrl = buildApiUrl('').replace(/\/$/, '');
+      setClientApiUrl(currentApiUrl);
+    }
+  }, [open, isEditMode, formData.type]);
 
   // Install command
   const installCommand = `curl -sfL https://iotistica.com/agent/install | sh`;
@@ -780,6 +790,33 @@ export function AddEditDeviceDialog({
                 </div>
                 <p className="text-xs text-gray-500">
                   Use this key during device provisioning. You can regenerate it if needed.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="client-api-url" className="text-sm font-semibold text-foreground">Client API URL</Label>
+                <div className="relative bg-muted border border-border rounded-md px-3 py-2.5">
+                  <code className="block font-mono text-xs text-foreground select-all break-all leading-relaxed pr-10">
+                    {clientApiUrl || "Loading..."}
+                  </code>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="absolute top-2 right-2 h-8 w-8"
+                    onClick={() => {
+                      navigator.clipboard.writeText(clientApiUrl);
+                      setCopiedApiUrl(true);
+                      setTimeout(() => setCopiedApiUrl(false), 2000);
+                      toast.success("API URL copied to clipboard");
+                    }}
+                    disabled={!clientApiUrl}
+                  >
+                    {copiedApiUrl ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4 text-muted-foreground" />}
+                  </Button>
+                </div>
+                <p className="text-xs text-gray-500">
+                  The API endpoint URL for this customer instance. Copy this to use in agent configuration.
                 </p>
               </div>
 
