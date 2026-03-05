@@ -13,7 +13,7 @@ const getEnv = (key: string): string => {
     // @ts-ignore
     return window.env[key];
   }
-  return import.meta.env[key as keyof typeof import.meta.env] || '';
+  return (import.meta.env as Record<string, string | undefined>)[key] || '';
 };
 
 // Auth0 configuration from environment (required)
