@@ -114,6 +114,8 @@ api:
     SecretName: "mqtt-credentials-{{CLIENT_ID}}"
   redis:
     SecretName: "redis-credentials-master"
+    cluster: false # Set to true if using Redis Cluster
+    tls: false # Set to true if Redis requires TLS
   openai:
     SecretName: "openai-credentials-master"
   jwt:
