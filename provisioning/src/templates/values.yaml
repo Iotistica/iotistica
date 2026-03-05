@@ -6,8 +6,8 @@ global:
   namespace: {{CLIENT_ID}}
 redis:
   enabled: false
-  tls: false     # Working configuration in production
-  cluster: true  # Azure Redis is in cluster mode
+  tls: false     # No TLS for port 10000
+  cluster: false # Azure Redis is NOT in cluster mode (Basic/Standard tier)
 # Mosquitto MQTT broker
 mosquitto:
   enabled: true
