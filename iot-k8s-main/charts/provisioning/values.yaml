@@ -106,9 +106,34 @@ redis:
 #   vaults/IOT-CLIENTS/items/provisioning-pg-admin-credentials
 #   Required keys: username, password
 #
-# The admin role (iotistica_provisioning) must have CREATEDB and CREATEROLE
-# privileges.  It is created automatically by this chart's postgres-init job
-# (see postgresProvisioning.initJob below).
+# SECURITY REQUIREMENT - Admin User Privileges (Principle of Least Privilege):
+# ============================================================================
+# The provisioning admin role MUST have:
+#   ✓ CREATEDB privilege (can create new databases)
+#   ✓ CREATEROLE privilege (can create and manage roles)
+#   ✗ NOT superuser privilege (no unrestricted system access)
+#
+# Recommended provisioning user setup (as PostgreSQL superuser):
+#   CREATE ROLE provisioner WITH LOGIN PASSWORD 'secure-password';
+#   ALTER ROLE provisioner CREATEDB CREATEROLE;
+#
+# To verify the provisioning user has correct privileges:
+#   SELECT usecreatedb, usecreaterole, usesuper FROM pg_user WHERE usename='provisioner';
+#   Expected output: (t, t, f) meaning (true, true, false)
+#
+# Why NOT superuser?
+#   - Violates principle of least privilege
+#   - Limits damage if credentials are compromised
+#   - Still allows database and role creation
+#   - Prevents dangerous operations like DROP DATABASE, ALTER SYSTEM
+#
+# The Provisioning Service will log warnings during initialization if:
+#   - Admin user lacks CREATEDB privilege
+#   - Admin user lacks CREATEROLE privilege  
+#   - Admin user has superuser privileges
+#
+# This chart's postgres-init job (see postgresProvisioning.initJob below)
+# will create the necessary admin role with correct privileges.
 postgresProvisioning:
   # Database provider: 'postgres' (self-hosted) or 'tigerdata' (Timescale Cloud)
   provider: "postgres"

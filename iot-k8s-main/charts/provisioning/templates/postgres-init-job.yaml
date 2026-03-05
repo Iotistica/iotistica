@@ -1,4 +1,28 @@
 {{- if and .Values.postgresProvisioning.host .Values.postgresProvisioning.initJob.enabled }}
+# PostgreSQL Initialization Job
+# 
+# This Helm hook runs after installation/upgrade to:
+#
+# 1. Create the iotistica_provisioning application role
+#    - Used by provisioning API and worker services
+#    - Privileges: CREATEDB, CREATEROLE (needed to create per-customer databases)
+#    - Credentials: From provisioning-db-credentials secret
+#
+# 2. Grant necessary permissions on admin and application databases
+#    - Allows role to create objects and perform migrations
+#    - Uses superuser credentials from provisioning-pg-admin-credentials secret
+#
+# IMPORTANT: The provisioning-pg-admin-credentials secret contains the
+# PostgreSQL admin credentials (username/password) used by this job to
+# bootstrap the database setup. These credentials MUST be for a user with
+# CREATEDB and CREATEROLE privileges (but NOT superuser - principle of
+# least privilege).
+#
+# If this job fails with "permission denied" or "role cannot create databases",
+# verify that the admin user has correct privileges:
+#   SELECT usecreatedb, usecreaterole, usesuper FROM pg_user WHERE usename='your-admin-user';
+#   Expected: (t, t, f) = (true, true, false)
+#
 apiVersion: batch/v1
 kind: Job
 metadata:

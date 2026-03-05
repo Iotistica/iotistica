@@ -34,3 +34,22 @@ Namespace: {{ .Release.Namespace }}
    kubectl logs -n {{ .Release.Namespace }} deployment/{{ include "provisioning.fullname" . }}-worker
 
 ⚠️  Make sure all 1Password secrets are created (see README.md)
+🔐 IMPORTANT - Provisioning Database User Security:
+   The provisioning-pg-admin-credentials secret must contain a PostgreSQL user with:
+   
+   Required: CREATEDB privilege (can create databases)
+   Required: CREATEROLE privilege (can create/manage roles)
+   Required: NOT a superuser (principle of least privilege)
+
+   To verify the provisioning user has correct privileges (connect as superuser):
+   
+   SELECT usecreatedb, usecreaterole, usesuper FROM pg_user WHERE usename='provisioner';
+   
+   Expected output: (t, t, f) meaning (true, true, false)
+   
+   If you need to set up the provisioning user:
+   
+   CREATE ROLE provisioner WITH LOGIN PASSWORD 'secure-password';
+   ALTER ROLE provisioner CREATEDB CREATEROLE;
+   
+   The Provisioning Service will log warnings during startup if user privileges are incorrect.
