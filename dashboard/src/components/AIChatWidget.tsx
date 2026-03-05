@@ -2,7 +2,7 @@
  * AI Chat Widget
  * 
  * Allows customers to interact with their IoT devices using natural language.
- * Powered by OpenAI + your API
+ * Powered by OpenAI + your API66
  */
 
 import { useState, useRef, useEffect } from 'react';
