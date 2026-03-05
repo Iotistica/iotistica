@@ -197,8 +197,8 @@ dashboard:
     callbackUrl: "https://tsdbdash.iotistica.com/auth/callback"  # Redirect URI after login
     showSocialLogin: "false"  # Show social login options
   
-  # Provisioning API URL (billing service for Auth0 token exchange)
-  provisioningApiUrl: "https://api.iotistica.com/provisioning/api"
+  # Provisioning API URL (global Auth0 token exchange service)
+  provisioningApiUrl: "https://api.iotistica.com/provisioning"
   
   # Website URL (for signup completion)
   websiteUrl: "https://iotistic.cloud"

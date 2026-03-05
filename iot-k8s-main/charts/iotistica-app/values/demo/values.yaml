@@ -178,7 +178,7 @@ dashboard:
     showSocialLogin: "false"  # Show social login options
   
   # Provisioning API URL (billing service for Auth0 token exchange)
-  provisioningApiUrl: "https://api.iotistica.com/provisioning/api"
+  provisioningApiUrl: "https://api.iotistica.com/provisioning"
   
   # Website URL (for signup completion)
   websiteUrl: "https://iotistic.cloud"
