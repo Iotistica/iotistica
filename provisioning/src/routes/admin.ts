@@ -154,13 +154,18 @@ router.post('/template/rebuild', async (req: Request, res: Response) => {
     const schemaSql = await migrationService.fetchLatestMigrations();
     const fetchDuration = Date.now() - startTime;
     
+    // Calculate SHA256 checksum of migration bundle for schema drift detection
+    const crypto = require('crypto');
+    const schemaHash = crypto.createHash('sha256').update(schemaSql).digest('hex');
+    
     // Get the number of migration files that were loaded
     const migrationCount = migrationService.getMigrationCount();
     
     logger.info('[admin] Migrations fetched', { 
       durationMs: fetchDuration,
       sqlBytes: schemaSql.length,
-      migrationCount 
+      migrationCount,
+      schemaHash
     });
 
     // Step 1.5: Fetch Git version metadata
@@ -189,7 +194,7 @@ router.post('/template/rebuild', async (req: Request, res: Response) => {
     
     // Step 5: Insert schema version metadata into template
     logger.info('[admin] Inserting schema version metadata...');
-    await pgService.insertVersionMetadata(templateName, versionMetadata, migrationCount);
+    await pgService.insertVersionMetadata(templateName, versionMetadata, migrationCount, schemaHash);
     
     const totalDuration = Date.now() - startTime;
     logger.info('[admin] Template database ready', { 

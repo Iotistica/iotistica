@@ -341,7 +341,26 @@ export interface PostgresProvisioningConfig {
   host: string;
   /** Port of the shared PostgreSQL server (default: 5432) */
   port: number;
-  /** Admin username used to create databases and roles */
+  /**
+   * Admin username used to create databases and roles.
+   * 
+   * SECURITY REQUIREMENT: This user MUST have CREATEDB and CREATEROLE privileges,
+   * but MUST NOT be a superuser.
+   * 
+   * Recommended setup for a dedicated provisioning user:
+   * 
+   *   -- As superuser (e.g., postgres):
+   *   CREATE ROLE provisioner WITH LOGIN PASSWORD '...';
+   *   ALTER ROLE provisioner CREATEDB CREATEROLE;
+   *   
+   *   -- Verify (should show true for both):
+   *   SELECT useCreatedb, useCreateRole FROM pg_user WHERE usename = 'provisioner';
+   * 
+   * This ensures the provisioning service can create databases and roles
+   * without full superuser privileges (principle of least privilege).
+   * 
+   * Set via env PROVISIONING_PG_ADMIN_USER (default: 'postgres' for backward compatibility).
+   */
   adminUser: string;
   /** Admin password */
   adminPassword: string;
@@ -409,6 +428,20 @@ export class PostgresProvisioningService {
     if (this.simulateMode) {
       console.log(
         '[PostgresProvisioningService] SIMULATION MODE ENABLED - no real database operations'
+      );
+    } else {
+      // Log provisioning config (sensitive values masked)
+      console.log('[PostgresProvisioningService] Initialized with:', {
+        host: this.config.host,
+        port: this.config.port,
+        adminUser: this.config.adminUser,
+        adminDatabase: this.config.adminDatabase,
+        ssl: this.config.ssl,
+        templateDatabase: this.config.templateDatabase || '(not configured)',
+      });
+      console.log(
+        '[PostgresProvisioningService] SECURITY: Provisioning user must have CREATEDB + CREATEROLE (not superuser).\n' +
+        '[PostgresProvisioningService] Setup: ALTER ROLE ' + this.config.adminUser + ' CREATEDB CREATEROLE;'
       );
     }
   }
@@ -528,6 +561,79 @@ export class PostgresProvisioningService {
   }
 
   /**
+   * Validate that the provisioning admin user has required privileges.
+   * 
+   * SECURITY CHECK: Verifies the admin user has:
+   * - CREATEDB privilege (to create client databases)
+   * - CREATEROLE privilege (to create client roles)
+   * - NOT superuser privileges (principle of least privilege)
+   * 
+   * @returns { valid: boolean, usecreatedb: boolean, usecreaterole: boolean, usesuper: boolean, warnings: string[] }
+   */
+  async validateProvisioningUserPermissions(): Promise<{
+    valid: boolean;
+    usecreatedb: boolean;
+    usecreaterole: boolean;
+    usesuper: boolean;
+    warnings: string[];
+  }> {
+    const adminClient = this.createAdminClient();
+    const warnings: string[] = [];
+    
+    try {
+      await adminClient.connect();
+      
+      const result = await adminClient.query(
+        `SELECT usecreatedb, usecreaterole, usesuper 
+         FROM pg_user WHERE usename = $1`,
+        [this.config.adminUser]
+      );
+      
+      if (result.rows.length === 0) {
+        return {
+          valid: false,
+          usecreatedb: false,
+          usecreaterole: false,
+          usesuper: false,
+          warnings: [`User '${this.config.adminUser}' not found in pg_user`],
+        };
+      }
+      
+      const user = result.rows[0];
+      const valid = user.usecreatedb && user.usecreaterole && !user.usesuper;
+      
+      if (!user.usecreatedb) {
+        warnings.push(`User '${this.config.adminUser}' lacks CREATEDB privilege`);
+      }
+      if (!user.usecreaterole) {
+        warnings.push(`User '${this.config.adminUser}' lacks CREATEROLE privilege`);
+      }
+      if (user.usesuper) {
+        warnings.push(`User '${this.config.adminUser}' has superuser privilege (not recommended)`);
+      }
+      
+      return {
+        valid,
+        usecreatedb: user.usecreatedb,
+        usecreaterole: user.usecreaterole,
+        usesuper: user.usesuper,
+        warnings,
+      };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return {
+        valid: false,
+        usecreatedb: false,
+        usecreaterole: false,
+        usesuper: false,
+        warnings: [`Failed to validate user permissions: ${msg}`],
+      };
+    } finally {
+      await adminClient.end().catch(() => undefined);
+    }
+  }
+
+  /**
    * Check whether a client database already exists on the provisioning server.
    *
    * @param namespace - The client namespace, e.g. "client-dc5fec42901a"
@@ -608,17 +714,39 @@ export class PostgresProvisioningService {
     try {
       await client.connect();
 
+      // Acquire advisory lock to prevent parallel provisioning of same tenant
+      // Uses hashtext(namespace) to create a consistent lock ID from the namespace name
+      console.log(`[PostgresProvisioningService] Acquiring advisory lock for ${namespace}`);
+      await client.query(
+        `SELECT pg_advisory_lock(hashtext($1))`,
+        [namespace]
+      );
+      console.log(`[PostgresProvisioningService] Lock acquired for ${namespace}`);
+
       // PostgreSQL identifiers that contain hyphens must be double-quoted.
       const quotedDb = this.quoteIdentifier(namespace);
-      const quotedRole = this.quoteIdentifier(namespace);
+      const quotedOwnerRole = this.quoteIdentifier(`${namespace}-owner`);
+      const quotedAppRole = this.quoteIdentifier(`${namespace}-app`);
 
-      console.log(`[PostgresProvisioningService] Creating role ${namespace}`);
-      // CREATE ROLE - handle pre-existing role gracefully (42710 = duplicate_object)
+      console.log(`[PostgresProvisioningService] Creating roles for ${namespace}`);
+      
+      // Create owner role (no login, used for database ownership only)
       await client.query(
-        `CREATE ROLE ${quotedRole} WITH LOGIN PASSWORD ${this.quoteLiteral(password)}`
+        `CREATE ROLE ${quotedOwnerRole}`
       ).catch(async (err: any) => {
         if (err.code === '42710') {
-          console.log(`[PostgresProvisioningService] Role ${namespace} already exists, skipping`);
+          console.log(`[PostgresProvisioningService] Owner role ${namespace}-owner already exists, skipping`);
+        } else {
+          throw err;
+        }
+      });
+      
+      // Create app role (with login, used by application)
+      await client.query(
+        `CREATE ROLE ${quotedAppRole} WITH LOGIN PASSWORD ${this.quoteLiteral(password)}`
+      ).catch(async (err: any) => {
+        if (err.code === '42710') {
+          console.log(`[PostgresProvisioningService] App role ${namespace}-app already exists, skipping`);
         } else {
           throw err;
         }
@@ -686,7 +814,7 @@ export class PostgresProvisioningService {
       
       const createDbStart = Date.now();
       await client.query(
-        `CREATE DATABASE ${quotedDb}${templateClause} OWNER ${quotedRole}`
+        `CREATE DATABASE ${quotedDb}${templateClause} OWNER ${quotedOwnerRole}`
       ).catch(async (err: any) => {
         if (err.code === '42P04') {
           console.log(`[PostgresProvisioningService] Database ${namespace} already exists, skipping`);
@@ -698,13 +826,57 @@ export class PostgresProvisioningService {
       console.log(`[PostgresProvisioningService] ⏱️  CREATE DATABASE completed in ${createDbDuration}ms`);
 
       console.log(`[PostgresProvisioningService] Granting privileges on ${namespace}`);
+      // Grant app role permission to connect to the database
       await client.query(
-        `GRANT ALL PRIVILEGES ON DATABASE ${quotedDb} TO ${quotedRole}`
+        `GRANT CONNECT ON DATABASE ${quotedDb} TO ${quotedAppRole}`
+      );
+      
+      // Grant owner role all privileges (for schema management and migrations)
+      await client.query(
+        `GRANT ALL PRIVILEGES ON DATABASE ${quotedDb} TO ${quotedOwnerRole}`
       );
 
       const totalDuration = Date.now() - dbCreationStart;
       console.log(`[PostgresProvisioningService] ✅ Database ${namespace} provisioned successfully`);
       console.log(`[PostgresProvisioningService] ⏱️  Total provisioning time: ${totalDuration}ms (CREATE DATABASE: ${createDbDuration}ms)`);
+
+      // Grant app role schema privileges (only to public schema, most restrictive)
+      console.log(`[PostgresProvisioningService] Granting schema privileges to app role`);
+      const schemaClient = new PgClient({
+        host: this.config.host,
+        port: this.config.port,
+        user: this.config.adminUser,
+        password: this.config.adminPassword,
+        database: namespace,
+        ssl: this.config.ssl
+          ? { rejectUnauthorized: this.config.sslRejectUnauthorized }
+          : false,
+      });
+      
+      try {
+        await schemaClient.connect();
+        // Grant app role USAGE and CREATE on public schema
+        await schemaClient.query(
+          `GRANT USAGE ON SCHEMA public TO ${quotedAppRole}`
+        );
+        await schemaClient.query(
+          `GRANT CREATE ON SCHEMA public TO ${quotedAppRole}`
+        );
+        // Set default privileges for all new objects created by owner
+        // So app role can access them
+        await schemaClient.query(
+          `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO ${quotedAppRole}`
+        );
+        await schemaClient.query(
+          `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE,SELECT ON SEQUENCES TO ${quotedAppRole}`
+        );
+        await schemaClient.query(
+          `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO ${quotedAppRole}`
+        );
+        console.log(`[PostgresProvisioningService] Schema privileges granted to app role`);
+      } finally {
+        await schemaClient.end().catch(() => undefined);
+      }
 
       // Log schema version inherited from template (if available)
       if (this.config.templateDatabase) {
@@ -737,9 +909,11 @@ export class PostgresProvisioningService {
         }
       }
 
-      return this.buildResult(namespace, namespace, password, {
+      return this.buildResult(namespace, `${namespace}-app`, password, {
         createdAt: new Date().toISOString(),
         namespace,
+        ownerRole: `${namespace}-owner`,
+        appRole: `${namespace}-app`,
       });
     } catch (error) {
       throw new PostgresProvisioningError(
@@ -747,6 +921,20 @@ export class PostgresProvisioningService {
         error
       );
     } finally {
+      // Release advisory lock to allow other provisioning requests
+      try {
+        console.log(`[PostgresProvisioningService] Releasing advisory lock for ${namespace}`);
+        await client.query(
+          `SELECT pg_advisory_unlock(hashtext($1))`,
+          [namespace]
+        );
+        console.log(`[PostgresProvisioningService] Lock released for ${namespace}`);
+      } catch (err: any) {
+        // Lock release failure should not block cleanup
+        console.warn(
+          `[PostgresProvisioningService] Warning: Failed to release advisory lock for ${namespace}: ${err.message}`
+        );
+      }
       await client.end().catch(() => undefined);
     }
   }
@@ -859,6 +1047,17 @@ export class PostgresProvisioningService {
   /**
    * Insert schema version metadata into the template database's system_config table
    * 
+   * Stores complete version information including:
+   * - Git commit hash, tag, branch
+   * - Migration count
+   * - SHA256 hash of migration bundle (for drift detection)
+   * - Timestamp of template initialization
+   * 
+   * The schemaHash field enables detection of accidental schema drift if:
+   * - Migrations are modified or reordered
+   * - SQL is edited inadvertently
+   * - Template database is corrupted
+   * 
    * Since the template is locked (datallowconn=false) after provisioning, this method:
    * 1. Temporarily re-enables connections on the template
    * 2. Inserts the version metadata
@@ -867,6 +1066,7 @@ export class PostgresProvisioningService {
    * @param templateName - Name of the template database
    * @param versionMetadata - Git version metadata to store
    * @param migrationCount - Number of migration files applied
+   * @param schemaHash - SHA256 hash of complete migration bundle (for drift detection)
    */
   async insertVersionMetadata(
     templateName: string,
@@ -877,7 +1077,8 @@ export class PostgresProvisioningService {
       branch: string;
       timestamp: string;
     },
-    migrationCount: number
+    migrationCount: number,
+    schemaHash?: string
   ): Promise<void> {
     console.log('[PostgresProvisioningService] Inserting schema version metadata into template');
 
@@ -909,6 +1110,7 @@ export class PostgresProvisioningService {
         source: 'github',
         migrationCount,
         repoTimestamp: versionMetadata.timestamp,
+        schemaHash: schemaHash || null,
       };
 
       // Insert or update version metadata in system_config
@@ -925,6 +1127,7 @@ export class PostgresProvisioningService {
         commit: versionMetadata.commitShort,
         tag: versionMetadata.tag || 'none',
         migrations: migrationCount,
+        schemaHash: schemaHash ? schemaHash.substring(0, 8) + '...' : 'none',
       });
     } catch (error) {
       logger.error('[PostgresProvisioningService] Failed to insert version metadata', {
@@ -1159,7 +1362,7 @@ export class PostgresProvisioningService {
       host: this.config.host,
       port: this.config.port,
       dbName,
-      username: dbName, // role name matches database name
+      username: serviceId, // serviceId is the app role (e.g., client-xxx-app)
       password,
       region: 'self-hosted',
       status: 'active',

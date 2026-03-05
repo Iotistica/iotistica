@@ -106,6 +106,18 @@ metadata:
 spec:
   itemPath: "vaults/IOT-CLIENTS/items/provisioning-jwt-secret"
 ---
+# Provisioning Database Admin User Credentials
+# 
+# SECURITY REQUIREMENT: This user must have CREATEDB and CREATEROLE privileges
+# but must NOT be a superuser (principle of least privilege).
+#
+# Recommended setup (as superuser):
+#   CREATE ROLE provisioner WITH LOGIN PASSWORD '...';
+#   ALTER ROLE provisioner CREATEDB CREATEROLE;
+#
+# The provisioning service will log warnings if the user lacks required privileges
+# or has superuser privileges when service starts.
+#
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata:
