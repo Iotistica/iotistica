@@ -9,6 +9,10 @@ const pool = new Pool({
   max: 50,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 30000,
+  // SSL configuration: disabled for internal Kubernetes connections, can be enabled via DB_SSL env var
+  ssl: process.env.DB_SSL === 'false' ? false : (process.env.DB_SSL === 'true' ? {
+    rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'false' ? false : true,
+  } : false),
 });
 
 export async function query<T extends QueryResultRow = any>(
