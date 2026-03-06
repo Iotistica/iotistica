@@ -44,17 +44,17 @@ module.exports = {
 
     // Custom HTTP middleware to set CSP headers
     httpAdminMiddleware: (req, res, next) => {
-        // Allow embedding from dashboard origins
+        // Allow embedding from dashboard origins and loading external resources
         // Patterns: https://dash*.iotistica.com, https://client-*.iotistic.ca
         res.setHeader(
             'Content-Security-Policy',
             "default-src 'self'; " +
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
-            "style-src 'self' 'unsafe-inline'; " +
-            "img-src 'self' data: https:; " +
-            "font-src 'self' data:; " +
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; " +
+            "style-src 'self' 'unsafe-inline' https:; " +
+            "img-src 'self' data: https: http:; " +
+            "font-src 'self' data: https: http:; " +
             "connect-src 'self' wss: ws: https: http:; " +
-            "frame-ancestors 'self' https://*.iotistica.com https://*.iotistic.ca"
+            "frame-ancestors 'self' https://*.iotistica.com https://*.iotistic.ca http://localhost:* http://*:30*"
         );
         next();
     }
