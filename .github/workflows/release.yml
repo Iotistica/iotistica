@@ -286,25 +286,27 @@ jobs:
 
           promote_app() {
             local APP="$1"
-            local PATH_FILTER="${APP}/** .github/workflows/build-${APP}-ci.yml"
+            local SOURCE_FILTER="${APP}/**"
+            local WORKFLOW_FILE=".github/workflows/build-${APP}-ci.yml"
             local APP_COMMIT=""
             local SHORT_SHA=""
 
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "Promoting $APP"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "Path filter: $PATH_FILTER"
+            echo "Source filter: $SOURCE_FILTER"
+            echo "Workflow file: $WORKFLOW_FILE"
             echo "Release commit: $RELEASE_COMMIT"
-            echo "Recent commits touching $APP (up to release commit):"
-            git log --format='  - %H %s' "$RELEASE_COMMIT" -n 5 -- $PATH_FILTER || true
+            echo "Recent commits touching $APP source (up to release commit):"
+            git log --format='  - %H %s' "$RELEASE_COMMIT" -n 5 -- $SOURCE_FILTER || true
             echo ""
 
-            # Pick the latest commit that affected this app at/before release commit.
-            APP_COMMIT=$(git log --format=%H "$RELEASE_COMMIT" -n 1 -- $PATH_FILTER || true)
+            # Pick image source commit from app code changes only.
+            APP_COMMIT=$(git log --format=%H "$RELEASE_COMMIT" -n 1 -- $SOURCE_FILTER || true)
             if [ -z "$APP_COMMIT" ]; then
               echo ""
-              echo "❌ No commits found for $APP up to release commit"
-              echo "   Check path filter: $PATH_FILTER"
+              echo "❌ No source commits found for $APP up to release commit"
+              echo "   Check source filter: $SOURCE_FILTER"
               exit 1
             fi
 
@@ -313,8 +315,8 @@ jobs:
             echo "Requiring ci-${SHORT_SHA}."
             echo "Checking image: ${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}"
 
-            echo "Files from selected commit that match filter:"
-            git show --name-only --pretty='format:' "$APP_COMMIT" -- $PATH_FILTER | sed 's/^/  - /' || true
+            echo "Files from selected commit that match source filter:"
+            git show --name-only --pretty='format:' "$APP_COMMIT" -- $SOURCE_FILTER | sed 's/^/  - /' || true
 
             if ! docker pull "${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}" >/dev/null 2>&1; then
               echo ""
