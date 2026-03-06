@@ -78,7 +78,7 @@ spec:
             
             # Storage token for API authentication
             {{- if .Values.nodered.storageToken }}
-            - name: IOTISTIC_NR_TOKEN
+            - name: TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.nodered.storageToken.secretName }}
@@ -114,7 +114,7 @@ spec:
     - name: {{ .Values.nodered.ingress.gatewayName | default "iotistica-gateway" }}
       namespace: {{ .Values.nodered.ingress.gatewayNamespace | default "envoy-gateway-system" }}
   hostnames:
-    - {{ .Values.nodered.tlsCommonName }}
+    - {{ .Values.nodered.baseUrl | trimPrefix "https://" }}
   rules:
     - backendRefs:
         - group: ""

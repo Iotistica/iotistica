@@ -215,7 +215,6 @@ nodered:
   baseUrl: "https://nr-{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}"
   # Provisioning service URL (for bridge token exchange)
   provisioningUrl: "https://api.{{BASE_DOMAIN}}/provisioning"
-  tlsCommonName: nr-{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}
   # Storage token for API authentication (flows stored in API database)
   storageToken:
     secretName: "api-jwt-{{CLIENT_ID}}"
