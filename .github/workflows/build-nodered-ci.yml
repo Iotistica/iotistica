@@ -10,45 +10,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  version:
-    name: Generate Version
-    runs-on: [iotistic-lab-sc]
-    permissions:
-      contents: write
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      sha_short: ${{ steps.version.outputs.sha_short }}
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Generate version
-        id: version
-        run: |
-          # Generate version from date and commit count
-          VERSION=$(date +%Y.%m.%d)-$(git rev-list --count HEAD)
-          SHA_SHORT=$(git rev-parse --short HEAD)
-          
-          echo "Generated version: $VERSION"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "sha_short=$SHA_SHORT" >> $GITHUB_OUTPUT
-
-      - name: Display version info
-        run: |
-          echo "## Version Generated" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Git SHA:** \`${{ steps.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-
   buildx:
-    name: Build & Push to Docker
-    needs: version
-    runs-on: [iotistic-lab-sc]
+    name: Build & Push Node-RED Image
+    runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+      short_sha: ${{ steps.sha.outputs.short_sha }}
 
     steps:
       - name: Checkout repository
@@ -56,10 +25,21 @@ jobs:
         with:
           ref: master
 
+      - name: Calculate commit SHA
+        id: sha
+        run: |
+          SHA=$(git rev-parse HEAD)
+          SHORT_SHA=${SHA:0:12}
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "Build for commit: $SHA ($SHORT_SHA)"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: nodered/data/@iotistic/nr-devices-plugin/package-lock.json
 
       - name: Build nr-devices-plugin
         run: |
@@ -67,19 +47,6 @@ jobs:
           npm ci
           npm run build
           echo "✅ nr-devices-plugin built successfully"
-
-      - name: Display Version Update
-        run: |
-          echo "## Building Version ${{ needs.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Platform:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Docker Tags:" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/nodered:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/nodered:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/nodered:${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -100,15 +67,12 @@ jobs:
             ${{ runner.os }}-buildx-nodered-
 
       - name: Login to Docker Hub
-        if: success()
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Build & Push final image
-        id: docker_build
-        if: success()
+      - name: Build & Push Node-RED image
         uses: docker/build-push-action@v5
         with:
           context: ./nodered
@@ -120,9 +84,7 @@ jobs:
             type=registry,ref=iotistic/nodered:buildcache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
           tags: |
-            iotistic/nodered:latest
-            iotistic/nodered:${{ needs.version.outputs.sha_short }}
-            iotistic/nodered:${{ needs.version.outputs.version }}
+            iotistic/nodered:ci-${{ steps.sha.outputs.short_sha }}
           build-args: |
             BUILDKIT_INLINE_CACHE=1
 
@@ -133,21 +95,26 @@ jobs:
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
 
   report:
-    name: Generate Reports
-    needs: [version, buildx]
-    runs-on: [iotistic-lab-sc]
+    name: Generate Build Report
+    needs: buildx
+    runs-on: ubuntu-latest
     if: always()
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Generate changelog
-        id: changelog
+      - name: Generate report
         run: |
-          # Get commits affecting nodered directory
+          echo "## Node-RED Build Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ needs.buildx.outputs.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Docker Tag:** \`iotistic/nodered:ci-${{ needs.buildx.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Recent Changes" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          git log --oneline --no-merges -10 -- nodered/ >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
           COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges -- nodered/)
           
           # Save to file
