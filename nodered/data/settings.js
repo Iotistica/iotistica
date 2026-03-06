@@ -17,12 +17,29 @@ module.exports = {
         })
         : null,
 
-    storageModule: (process.env.IOTISTIC_BASE_URL && process.env.IOTISTIC_NR_TOKEN)
-        ? require('@iotistic/nr-storage')({
+    storageModule: (() => {
+        const hasBaseUrl = process.env.IOTISTIC_BASE_URL;
+        const hasToken = process.env.IOTISTIC_NR_TOKEN;
+        
+        if (!hasBaseUrl) {
+            console.warn('[Settings] Storage: IOTISTIC_BASE_URL not set, using filesystem storage');
+            return undefined;
+        }
+        if (!hasToken) {
+            console.warn('[Settings] Storage: IOTISTIC_NR_TOKEN not set, using filesystem storage');
+            return undefined;
+        }
+        
+        console.log('[Settings] Storage: Initializing nr-storage plugin', {
+            baseUrl: hasBaseUrl,
+            hasToken: !!hasToken
+        });
+        
+        return require('@iotistic/nr-storage')({
             iotisticURL: process.env.IOTISTIC_BASE_URL,
             token: process.env.IOTISTIC_NR_TOKEN
-        })
-        : undefined,
+        });
+    })(),
 
     logging: {
         console: {
