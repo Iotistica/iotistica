@@ -139,14 +139,6 @@ export function NodeRedPage() {
 
   return (
     <div className="h-screen w-full flex flex-col">
-      {/* Header */}
-      <div className="border-b border-border bg-card px-6 py-4">
-        <h1 className="text-2xl font-bold">Node-RED</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Visual process automation for {user?.email}
-        </p>
-      </div>
-
       {/* Iframe Container */}
       <div className="flex-1 overflow-hidden">
         <iframe
