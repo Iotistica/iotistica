@@ -103,8 +103,39 @@ export function NodeRedPage() {
     );
   }
 
-  // Embed Node-RED in iframe - internal K8s DNS: http://nodered:1880
-  const nodeRedUrl = `http://nodered:1880?bridgeToken=${encodeURIComponent(bridgeToken)}`;
+  // Determine Node-RED URL based on environment
+  const getNodeRedUrl = (): string => {
+    const hostname = window.location.hostname;
+    
+    // Local development
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return `http://localhost:1880?bridgeToken=${encodeURIComponent(bridgeToken)}`;
+    }
+    
+    // K8s deployment - derive from dashboard URL
+    // Pattern: https://dash1.iotistica.com -> https://nodered1.iotistica.com
+    // Pattern: https://client-{id}.iotistic.ca -> https://nr-{id}.iotistic.ca
+    const protocol = window.location.protocol;
+    let noderedHostname = hostname;
+    
+    // Replace dashboard subdomain with nodered subdomain
+    if (hostname.startsWith('dash')) {
+      noderedHostname = hostname.replace(/^dash/, 'nodered');
+    } else if (hostname.startsWith('client-')) {
+      noderedHostname = hostname.replace(/^client-/, 'nr-');
+    } else {
+      // Fallback: prepend 'nodered-' or 'nr-'
+      noderedHostname = `nodered-${hostname}`;
+    }
+    
+    return `${protocol}//${noderedHostname}?bridgeToken=${encodeURIComponent(bridgeToken)}`;
+  };
+
+  const nodeRedUrl = getNodeRedUrl();
+  
+  // Log the URL for debugging
+  console.log('[NodeRedPage] Node-RED URL:', nodeRedUrl);
+  console.log('[NodeRedPage] Window location:', window.location.href);
 
   return (
     <div className="h-screen w-full flex flex-col">
