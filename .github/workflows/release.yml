@@ -286,20 +286,44 @@ jobs:
 
           promote_app() {
             local APP="$1"
-            local SHORT_SHA="${RELEASE_COMMIT:0:12}"
-            local RELEASE_SHORT_SHA="${RELEASE_COMMIT:0:12}"
+            local PATH_FILTER="${APP}/** .github/workflows/build-${APP}-ci.yml"
+            local APP_COMMIT=""
+            local SHORT_SHA=""
 
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "Promoting $APP"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Path filter: $PATH_FILTER"
+            echo "Release commit: $RELEASE_COMMIT"
+            echo "Recent commits touching $APP (up to release commit):"
+            git log --format='  - %H %s' "$RELEASE_COMMIT" -n 5 -- $PATH_FILTER || true
+            echo ""
 
-            echo "No fallback mode: requiring ci-${SHORT_SHA} for $APP."
+            # Pick the latest commit that affected this app at/before release commit.
+            APP_COMMIT=$(git log --format=%H "$RELEASE_COMMIT" -n 1 -- $PATH_FILTER || true)
+            if [ -z "$APP_COMMIT" ]; then
+              echo ""
+              echo "❌ No commits found for $APP up to release commit"
+              echo "   Check path filter: $PATH_FILTER"
+              exit 1
+            fi
+
+            SHORT_SHA="${APP_COMMIT:0:12}"
+            echo "Using latest $APP commit: $APP_COMMIT"
+            echo "Requiring ci-${SHORT_SHA}."
+            echo "Checking image: ${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}"
+
+            echo "Files from selected commit that match filter:"
+            git show --name-only --pretty='format:' "$APP_COMMIT" -- $PATH_FILTER | sed 's/^/  - /' || true
 
             if ! docker pull "${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}" >/dev/null 2>&1; then
               echo ""
               echo "❌ Missing required CI image: ${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}"
-              echo "   No fallback is allowed."
+              echo "   Build this app at that commit to avoid stale promotion."
               echo "   Run: gh workflow run build-${APP}-ci.yml"
+              echo ""
+              echo "Image manifest probe (for debug):"
+              docker manifest inspect "${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}" || true
               exit 1
             fi
 
@@ -309,6 +333,12 @@ jobs:
             docker push "${DOCKER_ORG}/${APP}:${RELEASE}"
             echo "✅ ${DOCKER_ORG}/${APP}:ci-${SHORT_SHA} → ${RELEASE}"
             echo ""
+
+            # Emit per-app selection details for run summary
+            echo "### ${APP}" >> $GITHUB_STEP_SUMMARY
+            echo "- selected commit: \`${APP_COMMIT}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- selected ci tag: \`iotistic/${APP}:ci-${SHORT_SHA}\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
 
             # Save SHORT_SHA for later use (no full SHA needed)
             echo "$SHORT_SHA" > "/tmp/${APP}_sha.txt"
