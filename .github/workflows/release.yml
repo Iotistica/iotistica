@@ -469,12 +469,14 @@ jobs:
           # Update image tags using yq (strict, no fallback)
           yq eval ".api.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
           yq eval ".dashboard.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
+          yq eval ".nodered.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
           
           echo "✅ Updated image tags to ${RELEASE}"
           echo ""
           echo "Updated fields:"
           yq eval ".api.image.tag" "$VALUES_FILE" | sed 's/^/  api.image.tag: /'
           yq eval ".dashboard.image.tag" "$VALUES_FILE" | sed 's/^/  dashboard.image.tag: /'
+          yq eval ".nodered.image.tag" "$VALUES_FILE" | sed 's/^/  nodered.image.tag: /'
 
       - name: Commit and push changes
         run: |
@@ -526,6 +528,7 @@ jobs:
           echo "**Updated Fields:**" >> $GITHUB_STEP_SUMMARY
           echo "- \`api.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`dashboard.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`nodered.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ **Successfully updated ArgoCD values and pushed to iot-k8s repository**" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
