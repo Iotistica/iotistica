@@ -8,7 +8,8 @@ module.exports = {
     flowFile: 'flows.json',
     credentialSecret: process.env.NR_CREDENTIAL_SECRET || false,
 
-    adminAuth: process.env.IOTISTIC_BASE_URL
+    // Keep UI auth optional. Storage auth remains enabled via IOTISTIC_NR_TOKEN.
+    adminAuth: (process.env.NODE_RED_ENABLE_UI_AUTH === 'true' && process.env.IOTISTIC_BASE_URL)
         ? require('@iotistic/nr-auth')({
             iotisticURL: process.env.IOTISTIC_BASE_URL,
             provisioningURL: process.env.IOTISTIC_PROVISIONING_URL,

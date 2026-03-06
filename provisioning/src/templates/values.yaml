@@ -213,8 +213,6 @@ nodered:
   serviceType: ClusterIP
   # External URL for Node-RED (used for Auth0 callback and bridge token redirect)
   baseUrl: "https://nr-{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}"
-  # Provisioning service URL (for bridge token exchange)
-  provisioningUrl: "https://api.{{BASE_DOMAIN}}/provisioning"
   # Storage token for API authentication (flows stored in API database)
   storageToken:
     secretName: "api-jwt-{{CLIENT_ID}}"
