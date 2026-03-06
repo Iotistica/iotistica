@@ -8,6 +8,12 @@ on:
       - 'nodered/**' 
       - '.github/workflows/build-nodered-ci.yml'
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to build (commit SHA, tag, or branch)'
+        required: false
+        default: master
+        type: string
 
 jobs:
   buildx:
@@ -23,7 +29,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: master
+          ref: ${{ github.event.inputs.ref || github.sha }}
 
       - name: Calculate commit SHA
         id: sha

@@ -8,6 +8,12 @@ on:
       - 'dashboard/**' 
       - '.github/workflows/build-dashboard-ci.yml'
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to build (commit SHA, tag, or branch)'
+        required: false
+        default: master
+        type: string
 
 jobs:
   test:
@@ -20,6 +26,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -102,7 +110,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: master
+          ref: ${{ github.event.inputs.ref || github.sha }}
 
       - name: Calculate commit SHA
         id: sha
@@ -174,6 +182,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.sha }}
 
       - name: Generate changelog
         id: changelog

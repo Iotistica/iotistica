@@ -320,7 +320,7 @@ jobs:
               echo ""
               echo "❌ Missing required CI image: ${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}"
               echo "   Build this app at that commit to avoid stale promotion."
-              echo "   Run: gh workflow run build-${APP}-ci.yml"
+              echo "   Run: gh workflow run build-${APP}-ci.yml -f ref=${APP_COMMIT}"
               echo ""
               echo "Image manifest probe (for debug):"
               docker manifest inspect "${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}" || true
