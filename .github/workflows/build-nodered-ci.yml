@@ -131,17 +131,17 @@ jobs:
           echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
           
           # Pull the image
-          docker pull iotistic/nodered:${{ needs.version.outputs.version }}
+          docker pull iotistic/nodered:ci-${{ needs.buildx.outputs.short_sha }}
           
-          # Get image size1
-          SIZE_BYTES=$(docker image inspect iotistic/nodered:${{ needs.version.outputs.version }} --format='{{.Size}}')
+          # Get image size
+          SIZE_BYTES=$(docker image inspect iotistic/nodered:ci-${{ needs.buildx.outputs.short_sha }} --format='{{.Size}}')
           SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
           
           echo "size_mb=$SIZE_MB" >> $GITHUB_OUTPUT
           echo "size_bytes=$SIZE_BYTES" >> $GITHUB_OUTPUT
           
           # Get layer count
-          LAYERS=$(docker image inspect iotistic/nodered:${{ needs.version.outputs.version }} --format='{{len .RootFS.Layers}}')
+          LAYERS=$(docker image inspect iotistic/nodered:ci-${{ needs.buildx.outputs.short_sha }} --format='{{len .RootFS.Layers}}')
           echo "layers=$LAYERS" >> $GITHUB_OUTPUT
 
       - name: Generate Summary Report
