@@ -78,7 +78,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.nodered.storageToken.secretName }}
-                  key: {{ .Values.nodered.storageToken.secretKey | default "token" }}
+                  key: {{ .Values.nodered.storageToken.secretKey | default "API_JWT" }}
             {{- end }}
           livenessProbe:
             httpGet:

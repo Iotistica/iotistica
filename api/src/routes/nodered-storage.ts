@@ -2,18 +2,32 @@
  * Node-RED Storage Routes
  * HTTP endpoints for Node-RED storage plugin to access flows, credentials, settings, sessions, and library
  * Single instance storage (no device isolation)
- * Protected by API key authentication
+ * Protected by JWT authentication (with API key fallback for migration)
  */
 
 import express from 'express';
 import { NodeRedStorageService } from '../services/nodered-storage.service';
-import { validateApiKey } from '../middleware/api-key-auth';
+import { jwtAuth } from '../middleware/jwt-auth';
 import logger from '../utils/logger';
 
 export const router = express.Router();
 
-// Apply API key authentication to all storage routes
-router.use('/nr/storage', validateApiKey);
+// JWT-only authentication for Node-RED storage routes.
+router.use('/nr/storage', async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
+  const isJwtLike = bearerToken.split('.').length === 3;
+
+  if (!isJwtLike) {
+    res.status(401).json({
+      error: 'Unauthorized',
+      message: 'JWT token required for Node-RED storage routes. Use Authorization: Bearer <jwt>'
+    });
+    return;
+  }
+
+  await jwtAuth(req, res, next);
+});
 
 /**
  * GET /api/v1/nr/storage/flows
