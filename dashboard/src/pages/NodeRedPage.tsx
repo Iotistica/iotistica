@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { auth0Config } from '@/config/auth0';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
@@ -24,6 +25,8 @@ export function NodeRedPage() {
     }
 
     const fetchBridgeToken = async () => {
+      const provisioningUrl = auth0Config.provisioningApiUrl || 'http://localhost:3100';
+
       try {
         setError(null);
         const accessToken = localStorage.getItem('accessToken');
@@ -34,9 +37,6 @@ export function NodeRedPage() {
           return;
         }
 
-        // Build provisioning API URL
-        const provisioningUrl = import.meta.env.VITE_PROVISIONING_API_URL || 'http://localhost:3100';
-        
         // Call provisioning API to get bridge token
         const response = await fetch(
           `${provisioningUrl}/api/auth/create-bridge-token`,
@@ -59,7 +59,8 @@ export function NodeRedPage() {
         setLoading(false);
       } catch (err: any) {
         console.error('[NodeRedPage] Error:', err);
-        setError(err.message || 'Failed to authenticate with Node-RED');
+        const message = err?.message || 'Failed to authenticate with Node-RED';
+        setError(`${message} (auth endpoint: ${provisioningUrl}/api/auth/create-bridge-token)`);
         setLoading(false);
       }
     };
@@ -88,7 +89,7 @@ export function NodeRedPage() {
           </AlertDescription>
         </Alert>
         <p className="text-sm text-muted-foreground mt-4">
-          Please try refreshing the page or contact support if the problem persists.
+          Verify `VITE_PROVISIONING_API_URL` points to the provisioning service, then refresh.
         </p>
       </div>
     );
