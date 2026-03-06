@@ -287,25 +287,46 @@ jobs:
           promote_app() {
             local APP="$1"
             local PATH_FILTER="${APP}/** .github/workflows/build-${APP}-ci.yml"
-            local SHA=""
+            local SHORT_SHA=""
+            local FOUND="false"
+            local RELEASE_SHORT_SHA="${RELEASE_COMMIT:0:12}"
 
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "Promoting $APP"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-            # Get last 50 commits affecting this app
-            for COMMIT in $(git log --format=%H "$RELEASE_COMMIT" -n 50 -- $PATH_FILTER); do
-              SHORT_SHA="${COMMIT:0:12}"
-              echo -n "   Trying ci-${SHORT_SHA}... "
-              if docker pull "${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}" >/dev/null 2>&1; then
-                echo "✅ Found"
-                break
+            # If release commit touched this app, require exact CI image match.
+            if git show --name-only --pretty='' "$RELEASE_COMMIT" -- $PATH_FILTER | grep -q .; then
+              echo "Release commit touched $APP. Requiring ci-${RELEASE_SHORT_SHA}."
+              if docker pull "${DOCKER_ORG}/${APP}:ci-${RELEASE_SHORT_SHA}" >/dev/null 2>&1; then
+                SHORT_SHA="$RELEASE_SHORT_SHA"
+                FOUND="true"
+                echo "✅ Found exact release-commit image"
               else
-                echo "⏭️  Skip"
+                echo "❌ Missing required CI image: ${DOCKER_ORG}/${APP}:ci-${RELEASE_SHORT_SHA}"
+                echo "   This prevents promoting a stale image for changed code."
+                echo "   Run: gh workflow run build-${APP}-ci.yml"
+                exit 1
               fi
-            done
+            fi
 
-            if [ -z "$SHORT_SHA" ]; then
+            # If app did not change in release commit, allow fallback to recent CI image.
+            if [ "$FOUND" != "true" ]; then
+              echo "Release commit did not touch $APP. Looking for latest available CI image."
+              for COMMIT in $(git log --format=%H "$RELEASE_COMMIT" -n 50 -- $PATH_FILTER); do
+                SHORT_SHA="${COMMIT:0:12}"
+                echo -n "   Trying ci-${SHORT_SHA}... "
+                if docker pull "${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}" >/dev/null 2>&1; then
+                  FOUND="true"
+                  echo "✅ Found"
+                  break
+                else
+                  echo "⏭️  Skip"
+                fi
+              done
+            fi
+
+            if [ "$FOUND" != "true" ] || [ -z "$SHORT_SHA" ]; then
               echo ""
               echo "❌ No CI-built images found for $APP (searched 50 commits)"
               echo "   Run: gh workflow run build-${APP}-ci.yml"
