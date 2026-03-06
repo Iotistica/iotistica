@@ -44,7 +44,7 @@ env:
   K8S_NAMESPACE: iotistic-nodeport
   CHART_PATH: ./k8s/charts/iotistic
   VALUES_FILE: ./k8s/charts/iotistic/values.yaml
-  APPS: api dashboard
+  APPS: api dashboard nodered
 
 jobs:
   validate-release:
