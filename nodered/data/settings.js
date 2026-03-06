@@ -11,6 +11,7 @@ module.exports = {
     adminAuth: process.env.IOTISTIC_BASE_URL
         ? require('@iotistic/nr-auth')({
             iotisticURL: process.env.IOTISTIC_BASE_URL,
+            provisioningURL: process.env.IOTISTIC_PROVISIONING_URL,
             uiPort: process.env.PORT || 1880
         })
         : null,

@@ -16,6 +16,7 @@ function Strategy (options, verify) {
     this._loginURL = options.loginURL
     this._userInfoURL = options.userInfoURL
     this._iotisticURL = options.iotisticURL
+    this._provisioningURL = options.provisioningURL || options.iotisticURL
 }
 
 util.inherits(Strategy, passport.Strategy)
@@ -26,10 +27,10 @@ Strategy.prototype.authenticate = function (req, options) {
     // Check if this is a bridge token flow (from iframe)
     if (req.body && req.body.bridgeToken) {
         const bridgeToken = req.body.bridgeToken
-        const provisioning_url = this._iotisticURL
+        const provisioning_url = this._provisioningURL
         const exchangeURL = `${provisioning_url}/api/auth/exchange-bridge-token`
         
-        console.log('[Strategy] Bridge token detected, exchanging for access token...')
+        console.log('[Strategy] Bridge token detected, exchanging for access token at:', exchangeURL)
         
         fetch(exchangeURL, {
             method: 'POST',

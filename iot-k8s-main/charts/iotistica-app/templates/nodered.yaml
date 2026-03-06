@@ -66,6 +66,10 @@ spec:
             - name: NODERED_BASE_URL
               value: {{ .Values.nodered.baseUrl | quote }}
             
+            # Provisioning service URL (for bridge token exchange)
+            - name: IOTISTIC_PROVISIONING_URL
+              value: {{ .Values.nodered.provisioningUrl | quote }}
+            
             # Content Security Policy configuration
             - name: NODE_RED_FRAME_ANCESTORS
               value: {{ index $noderedEnv "NODE_RED_FRAME_ANCESTORS" | default "'self' https://*.iotistica.com https://*.iotistic.ca" | quote }}
