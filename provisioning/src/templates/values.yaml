@@ -206,7 +206,7 @@ nodered:
   enabled: true
   image:
     repository: iotistic/nodered
-    tag: latest
+    tag: "{{RELEASE_VERSION}}"
     pullPolicy: IfNotPresent
   replicas: 1
   port: 1880
