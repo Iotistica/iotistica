@@ -52,7 +52,11 @@ RUN apk add --no-cache \
 COPY package*.json ./
 
 # Install production dependencies only (no devDependencies)
-RUN npm ci --only=production && npm cache clean --force
+# Remove npm/npx from runtime image to reduce attack surface and scanner findings.
+RUN npm ci --only=production \
+    && npm cache clean --force \
+    && rm -rf /usr/local/lib/node_modules/npm \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx
 
 # Copy compiled JavaScript from builder stage
 COPY --from=builder /app/dist ./dist
@@ -115,7 +119,11 @@ RUN apk add --no-cache \
 COPY package*.json ./
 
 # Install production dependencies only
-RUN npm ci --only=production && npm cache clean --force
+# Remove npm/npx from runtime image to reduce attack surface and scanner findings.
+RUN npm ci --only=production \
+    && npm cache clean --force \
+    && rm -rf /usr/local/lib/node_modules/npm \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx
 
 # Copy compiled JavaScript from builder stage
 COPY --from=builder /app/dist ./dist
