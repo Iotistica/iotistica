@@ -40,5 +40,22 @@ module.exports = {
         theme: 'dracula'
     },
 
-    functionExternalModules: true
+    functionExternalModules: true,
+
+    // Custom HTTP middleware to set CSP headers
+    httpAdminMiddleware: (req, res, next) => {
+        // Allow embedding from dashboard origins
+        // Patterns: https://dash*.iotistica.com, https://client-*.iotistic.ca
+        res.setHeader(
+            'Content-Security-Policy',
+            "default-src 'self'; " +
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+            "style-src 'self' 'unsafe-inline'; " +
+            "img-src 'self' data: https:; " +
+            "font-src 'self' data:; " +
+            "connect-src 'self' wss: ws: https: http:; " +
+            "frame-ancestors 'self' https://*.iotistica.com https://*.iotistic.ca"
+        );
+        next();
+    }
 }
