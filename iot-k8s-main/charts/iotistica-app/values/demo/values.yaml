@@ -238,7 +238,7 @@ nodered:
   # Storage token for API authentication (flows stored in API database)
   storageToken:
     secretName: "api-jwt-demo"
-    secretKey: "API_JWT"
+    secretKey: "token"
   resources:
     requests:
       cpu: 100m
