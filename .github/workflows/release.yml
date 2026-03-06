@@ -290,6 +290,8 @@ jobs:
             local WORKFLOW_FILE=".github/workflows/build-${APP}-ci.yml"
             local APP_COMMIT=""
             local SHORT_SHA=""
+            local FOUND="false"
+            local LATEST_SOURCE_COMMIT=""
 
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "Promoting $APP"
@@ -301,33 +303,45 @@ jobs:
             git log --format='  - %H %s' "$RELEASE_COMMIT" -n 5 -- $SOURCE_FILTER || true
             echo ""
 
-            # Pick image source commit from app code changes only.
-            APP_COMMIT=$(git log --format=%H "$RELEASE_COMMIT" -n 1 -- $SOURCE_FILTER || true)
-            if [ -z "$APP_COMMIT" ]; then
+            # Pick latest source commit for guidance and search backwards for latest CI-built image.
+            LATEST_SOURCE_COMMIT=$(git log --format=%H "$RELEASE_COMMIT" -n 1 -- $SOURCE_FILTER || true)
+            if [ -z "$LATEST_SOURCE_COMMIT" ]; then
               echo ""
               echo "❌ No source commits found for $APP up to release commit"
               echo "   Check source filter: $SOURCE_FILTER"
               exit 1
             fi
 
-            SHORT_SHA="${APP_COMMIT:0:12}"
-            echo "Using latest $APP commit: $APP_COMMIT"
-            echo "Requiring ci-${SHORT_SHA}."
-            echo "Checking image: ${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}"
+            echo "Latest source commit: $LATEST_SOURCE_COMMIT"
+            echo "Searching for latest CI image tag in source history..."
+            for COMMIT in $(git log --format=%H "$RELEASE_COMMIT" -n 50 -- $SOURCE_FILTER); do
+              SHORT_SHA="${COMMIT:0:12}"
+              echo -n "  - trying ci-${SHORT_SHA}... "
+              if docker manifest inspect "${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}" >/dev/null 2>&1; then
+                APP_COMMIT="$COMMIT"
+                FOUND="true"
+                echo "✅ found"
+                break
+              else
+                echo "not found"
+              fi
+            done
 
-            echo "Files from selected commit that match source filter:"
-            git show --name-only --pretty='format:' "$APP_COMMIT" -- $SOURCE_FILTER | sed 's/^/  - /' || true
-
-            if ! docker pull "${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}" >/dev/null 2>&1; then
+            if [ "$FOUND" != "true" ]; then
               echo ""
-              echo "❌ Missing required CI image: ${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}"
-              echo "   Build this app at that commit to avoid stale promotion."
-              echo "   Run: gh workflow run build-${APP}-ci.yml -f ref=${APP_COMMIT}"
+              echo "❌ No CI image found for $APP in the last 50 source commits"
+              echo "   Latest source commit is: $LATEST_SOURCE_COMMIT"
+              echo "   Build and push it first:"
+              echo "   Run: gh workflow run build-${APP}-ci.yml -f ref=${LATEST_SOURCE_COMMIT}"
               echo ""
-              echo "Image manifest probe (for debug):"
-              docker manifest inspect "${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}" || true
               exit 1
             fi
+
+            SHORT_SHA="${APP_COMMIT:0:12}"
+            echo "Using commit with available CI image: $APP_COMMIT"
+            echo "Selected ci tag: ${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}"
+            echo "Files from selected commit that match source filter:"
+            git show --name-only --pretty='format:' "$APP_COMMIT" -- $SOURCE_FILTER | sed 's/^/  - /' || true
 
             # Pull the single ci- tag and promote to release version
             docker pull "${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}"
