@@ -229,6 +229,9 @@ nodered:
     TZ: "UTC"
     NODE_RED_ENABLE_SAFE_MODE: "false"
     NODE_RED_ENABLE_PROJECTS: "false"
+    # Content Security Policy configuration
+    NODE_RED_FRAME_ANCESTORS: "'self' https://*.iotistica.com https://*.iotistic.ca"
+    NODE_RED_FONT_SRC: "'self' data: https:"
   # Ingress configuration
   ingress:
     enabled: true

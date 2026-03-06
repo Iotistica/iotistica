@@ -43,19 +43,32 @@ module.exports = {
     functionExternalModules: true,
 
     // Custom HTTP middleware to set CSP headers
+    // CSP can be customized via environment variables
     httpAdminMiddleware: (req, res, next) => {
-        // Allow embedding from dashboard origins and loading external resources
-        // Patterns: https://dash*.iotistica.com, https://client-*.iotistic.ca
+        // Frame ancestors can be set via ENV, defaults to localhost + production domains
+        const frameAncestors = process.env.NODE_RED_FRAME_ANCESTORS || 
+            "'self' https://*.iotistica.com https://*.iotistic.ca http://localhost:* http://*:30*"
+        
+        // Font sources can be customized via ENV
+        const fontSrc = process.env.NODE_RED_FONT_SRC || 
+            "'self' data: https: http:"
+        
         res.setHeader(
             'Content-Security-Policy',
             "default-src 'self'; " +
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; " +
             "style-src 'self' 'unsafe-inline' https:; " +
             "img-src 'self' data: https: http:; " +
-            "font-src 'self' data: https: http:; " +
+            `font-src ${fontSrc}; ` +
             "connect-src 'self' wss: ws: https: http:; " +
-            "frame-ancestors 'self' https://*.iotistica.com https://*.iotistic.ca http://localhost:* http://*:30*"
+            `frame-ancestors ${frameAncestors}`
         );
+        
+        // Allow overriding specific headers via env
+        if (process.env.NODE_RED_CSP_HEADER) {
+            res.setHeader('Content-Security-Policy', process.env.NODE_RED_CSP_HEADER)
+        }
+        
         next();
     }
 }
