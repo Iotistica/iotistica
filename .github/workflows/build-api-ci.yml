@@ -148,7 +148,7 @@ jobs:
   report:
     name: Generate Reports
     needs: buildx
-    runs-on: [iotistic-lab-sc]
+    runs-on: ubuntu-latest
     if: always()
     
     steps:
