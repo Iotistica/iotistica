@@ -439,6 +439,132 @@ router.post('/start-signup', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/auth/direct-signup
+ * Create Auth0 DB user and return Auth0 access token directly.
+ *
+ * This enables first-party signup forms to collect email/password once,
+ * then complete tenant signup without an extra Universal Login round trip.
+ */
+router.post('/direct-signup', async (req: Request, res: Response) => {
+  try {
+    const { email, password, fullName, username } = req.body || {};
+
+    if (!email || !password) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        details: 'email and password are required',
+      });
+    }
+
+    if (typeof password !== 'string' || password.length < 8) {
+      return res.status(400).json({
+        error: 'Invalid password',
+        details: 'Password must be at least 8 characters',
+      });
+    }
+
+    const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;
+    const AUTH0_CLIENT_ID = process.env.AUTH0_CLIENT_ID;
+    const AUTH0_CLIENT_SECRET = process.env.AUTH0_CLIENT_SECRET;
+    const AUTH0_AUDIENCE = process.env.AUTH0_AUDIENCE;
+    const AUTH0_DB_CONNECTION = process.env.AUTH0_DB_CONNECTION || 'Username-Password-Authentication';
+
+    if (!AUTH0_DOMAIN || !AUTH0_CLIENT_ID || !AUTH0_CLIENT_SECRET) {
+      logger.error('[Direct Signup] Auth0 config missing');
+      return res.status(500).json({
+        error: 'Auth0 not configured',
+      });
+    }
+
+    // 1) Create Auth0 database user
+    try {
+      await axios.post(
+        `https://${AUTH0_DOMAIN}/dbconnections/signup`,
+        {
+          client_id: AUTH0_CLIENT_ID,
+          email,
+          password,
+          connection: AUTH0_DB_CONNECTION,
+          user_metadata: {
+            fullName: fullName || '',
+            username: username || '',
+          },
+        },
+        {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 10000,
+        }
+      );
+    } catch (signupErr: any) {
+      const auth0Error = signupErr?.response?.data;
+      const description = auth0Error?.description || auth0Error?.error_description || signupErr.message;
+
+      if (signupErr?.response?.status === 400) {
+        return res.status(409).json({
+          error: 'Signup failed',
+          details: description || 'Account may already exist',
+        });
+      }
+
+      logger.error('[Direct Signup] Auth0 signup failed', {
+        status: signupErr?.response?.status,
+        error: description,
+      });
+
+      return res.status(502).json({
+        error: 'Auth0 signup failed',
+        details: description || 'Unable to create user in Auth0',
+      });
+    }
+
+    // 2) Authenticate with password-realm grant to get access token
+    // Note: Requires Auth0 tenant to enable Password Realm grant for this app.
+    let tokenResponse;
+    try {
+      tokenResponse = await axios.post(
+        `https://${AUTH0_DOMAIN}/oauth/token`,
+        {
+          grant_type: 'http://auth0.com/oauth/grant-type/password-realm',
+          client_id: AUTH0_CLIENT_ID,
+          client_secret: AUTH0_CLIENT_SECRET,
+          username: email,
+          password,
+          realm: AUTH0_DB_CONNECTION,
+          scope: 'openid profile email',
+          audience: AUTH0_AUDIENCE,
+        },
+        {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 10000,
+        }
+      );
+    } catch (tokenErr: any) {
+      const details = tokenErr?.response?.data?.error_description || tokenErr.message;
+      logger.error('[Direct Signup] Password grant failed', {
+        status: tokenErr?.response?.status,
+        error: details,
+      });
+
+      return res.status(401).json({
+        error: 'Authentication failed',
+        details,
+      });
+    }
+
+    return res.json({
+      auth0AccessToken: tokenResponse.data.access_token,
+      idToken: tokenResponse.data.id_token,
+      tokenType: tokenResponse.data.token_type || 'Bearer',
+    });
+  } catch (error: any) {
+    logger.error('[Direct Signup] Unexpected error', { error: error.message });
+    return res.status(500).json({
+      error: 'Direct signup failed',
+    });
+  }
+});
+
+/**
  * GET /api/auth/signup-callback
  * Handles Auth0 redirect for new customer signups
  * Receives code and state (signup data) from Auth0, creates customer, queues deployment

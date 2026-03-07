@@ -47,14 +47,54 @@
         }
 
         .form-wrapper {
-            max-width: 600px;
+            max-width: 1100px;
             width: 100%;
             margin: 0 auto;
+            display: grid;
+            grid-template-columns: minmax(300px, 1fr) minmax(360px, 540px);
+            gap: 2rem;
+            align-items: start;
         }
 
         .form-header {
             text-align: center;
             margin-bottom: 2rem;
+        }
+
+        .signup-value-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 2rem;
+        }
+
+        .value-title {
+            font-size: 2.1rem;
+            line-height: 1.2;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+        }
+
+        .value-subtitle {
+            color: var(--text-secondary);
+            margin-bottom: 1.5rem;
+        }
+
+        .value-list {
+            list-style: none;
+            display: grid;
+            gap: 1rem;
+        }
+
+        .value-item-title {
+            color: var(--text-primary);
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .value-item-desc {
+            color: var(--text-secondary);
+            font-size: 0.92rem;
         }
 
         .form-logo {
@@ -126,6 +166,33 @@
 
         .form-group {
             margin-bottom: 1.5rem;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        .checkbox-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.65rem;
+            margin-top: 0.4rem;
+        }
+
+        .checkbox-field {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .checkbox-field input[type="checkbox"] {
+            accent-color: var(--accent-primary);
+            width: 16px;
+            height: 16px;
         }
 
         .form-label {
@@ -248,6 +315,10 @@
                 padding: 6rem 1rem 2rem;
             }
 
+            .form-wrapper {
+                grid-template-columns: 1fr;
+            }
+
             .form-title {
                 font-size: 1.6rem;
             }
@@ -260,6 +331,11 @@
                 flex-direction: column;
                 text-align: center;
                 gap: 1rem;
+            }
+
+            .form-row,
+            .checkbox-grid {
+                grid-template-columns: 1fr;
             }
         }
     </style>
@@ -277,70 +353,163 @@
     <!-- Main Content -->
     <div class="form-container">
         <div class="form-wrapper">
-            <div class="form-header">
+            <div class="signup-value-panel">
                 <div class="form-logo">Iotistica</div>
-                <h1 class="form-title">Create Your Account</h1>
-                <p class="form-subtitle">Complete the form below to get started</p>
+                <h2 class="value-title">The Power of Integration at Industrial Scale</h2>
+                <p class="value-subtitle">Start your trial and deploy secure edge-to-cloud automation in minutes, not weeks.</p>
+                <ul class="value-list">
+                    <li>
+                        <div class="value-item-title">Quick to Start</div>
+                        <div class="value-item-desc">Launch your first devices, flows, and dashboards with guided onboarding.</div>
+                    </li>
+                    <li>
+                        <div class="value-item-title">Powerful Insights</div>
+                        <div class="value-item-desc">Monitor live telemetry and operational trends across your entire fleet.</div>
+                    </li>
+                    <li>
+                        <div class="value-item-title">Enterprise-Grade Security</div>
+                        <div class="value-item-desc">Built-in tenant isolation, encrypted transport, and role-based access controls.</div>
+                    </li>
+                    <li>
+                        <div class="value-item-title">No Credit Card Required</div>
+                        <div class="value-item-desc">Try all core capabilities for 14 days and upgrade only when you are ready.</div>
+                    </li>
+                </ul>
             </div>
 
-            <!-- Selected Plan Display -->
-            <div class="selected-plan-section" id="selectedPlanSection" style="display: none;">
-                <div class="plan-info">
-                    <h3 id="planName">Free Trial</h3>
-                    <p id="planDetails">14-day free trial</p>
+            <div>
+                <div class="form-header">
+                    <h1 class="form-title">Create Your Account</h1>
+                    <p class="form-subtitle">Complete the form below to get started</p>
                 </div>
-                <div style="text-align: right;">
-                    <div class="plan-price" id="planPrice">14 days</div>
-                    <button class="change-plan-btn" onclick="window.location.href='signup.html'">Change Plan</button>
+
+                <!-- Selected Plan Display -->
+                <div class="selected-plan-section" id="selectedPlanSection" style="display: none;">
+                    <div class="plan-info">
+                        <h3 id="planName">Free Trial</h3>
+                        <p id="planDetails">14-day free trial</p>
+                    </div>
+                    <div style="text-align: right;">
+                        <div class="plan-price" id="planPrice">14 days</div>
+                        <button class="change-plan-btn" onclick="window.location.href='signup.html'">Change Plan</button>
+                    </div>
                 </div>
-            </div>
 
-            <!-- Form Card -->
-            <div class="form-card">
-                <h2 class="form-section-title">Account Information</h2>
+                <!-- Form Card -->
+                <div class="form-card">
+                    <h2 class="form-section-title">Account Information</h2>
 
-                <div class="error-message" id="errorMessage"></div>
+                    <div class="error-message" id="errorMessage"></div>
 
-                <form id="signupForm">
-                    <div class="form-group">
-                        <label class="form-label" for="email">Work Email Address *</label>
-                        <input 
-                            type="email" 
-                            id="email" 
-                            class="form-input" 
-                            placeholder="you@company.com"
-                            required
-                            autocomplete="email"
-                        >
-                    </div>
+                    <form id="signupForm">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" for="username">Username *</label>
+                                <input
+                                    type="text"
+                                    id="username"
+                                    class="form-input"
+                                    placeholder="jane.operator"
+                                    required
+                                    autocomplete="username"
+                                    maxlength="64"
+                                >
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="fullName">Full Name *</label>
+                                <input
+                                    type="text"
+                                    id="fullName"
+                                    class="form-input"
+                                    placeholder="Jane Operator"
+                                    required
+                                    autocomplete="name"
+                                    maxlength="120"
+                                >
+                            </div>
+                        </div>
 
-                    <div class="form-group">
-                        <label class="form-label" for="companyName">Company Name *</label>
-                        <input 
-                            type="text" 
-                            id="companyName" 
-                            class="form-input" 
-                            placeholder="Your company name"
-                            required
-                            autocomplete="organization"
-                            maxlength="255"
-                        >
-                    </div>
+                        <div class="form-group">
+                            <label class="form-label" for="email">Work Email Address *</label>
+                            <input
+                                type="email"
+                                id="email"
+                                class="form-input"
+                                placeholder="you@company.com"
+                                required
+                                autocomplete="email"
+                            >
+                        </div>
 
-                    <input type="hidden" id="selectedPlan" name="plan" value="trial">
+                        <div class="form-group">
+                            <label class="form-label" for="companyName">Company Name *</label>
+                            <input
+                                type="text"
+                                id="companyName"
+                                class="form-input"
+                                placeholder="Your company name"
+                                required
+                                autocomplete="organization"
+                                maxlength="255"
+                            >
+                        </div>
 
-                    <button type="submit" class="btn-submit" id="submitBtn">
-                        Start Your Free Trial
-                    </button>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" for="password">Password *</label>
+                                <input
+                                    type="password"
+                                    id="password"
+                                    class="form-input"
+                                    placeholder="Create a secure password"
+                                    required
+                                    autocomplete="new-password"
+                                    minlength="8"
+                                >
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="confirmPassword">Confirm Password *</label>
+                                <input
+                                    type="password"
+                                    id="confirmPassword"
+                                    class="form-input"
+                                    placeholder="Re-enter password"
+                                    required
+                                    autocomplete="new-password"
+                                    minlength="8"
+                                >
+                            </div>
+                        </div>
 
-                    <p class="terms">
-                        By signing up, you agree to our 
-                        <a href="#">Terms of Service</a> and 
-                        <a href="#">Privacy Policy</a>
-                    </p>
-                </form>
+                        <div class="form-group">
+                            <label class="form-label">What brings you to Iotistica?</label>
+                            <div class="checkbox-grid">
+                                <label class="checkbox-field"><input type="checkbox" name="use_case" value="educational">Educational Use</label>
+                                <label class="checkbox-field"><input type="checkbox" name="use_case" value="business">Business Needs</label>
+                                <label class="checkbox-field"><input type="checkbox" name="use_case" value="personal">Personal Use</label>
+                            </div>
+                        </div>
 
-                <a href="signup.html" class="back-link">Back to Plans</a>
+                        <div class="form-group" style="margin-bottom: 0.75rem;">
+                            <label class="checkbox-field">
+                                <input type="checkbox" id="termsAccepted" required>
+                                I accept the Terms of Service and Privacy Policy.
+                            </label>
+                        </div>
+
+                        <input type="hidden" id="selectedPlan" name="plan" value="trial">
+
+                        <button type="submit" class="btn-submit" id="submitBtn">
+                            Start Your Free Trial
+                        </button>
+
+                        <p class="terms">
+                            Your account is created securely using Auth0. We never store your password in our application database.
+                        </p>
+                    </form>
+
+                    <a href="signup.html" class="back-link">Back to Plans</a>
+                </div>
             </div>
         </div>
     </div>
@@ -382,47 +551,82 @@
             hideError();
 
             const email = document.getElementById('email').value;
+            const username = document.getElementById('username').value.trim();
+            const fullName = document.getElementById('fullName').value.trim();
+            const password = document.getElementById('password').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
             const companyName = document.getElementById('companyName').value;
             const plan = document.getElementById('selectedPlan').value;
+            const useCase = Array.from(document.querySelectorAll('input[name="use_case"]:checked')).map((el) => el.value);
+            const termsAccepted = document.getElementById('termsAccepted').checked;
             const submitBtn = document.getElementById('submitBtn');
 
-            console.log('Signup form submitted:', { email, company: companyName, plan });
+            if (password !== confirmPassword) {
+                showError('Passwords do not match.');
+                return;
+            }
+
+            if (!termsAccepted) {
+                showError('Please accept the terms to continue.');
+                return;
+            }
 
             // Disable button during submission
             submitBtn.disabled = true;
             submitBtn.textContent = 'Creating account...';
 
             try {
-                console.log(`Calling: ${PROVISIONING_API_URL}/api/auth/start-signup`);
-                const response = await fetch(`${PROVISIONING_API_URL}/api/auth/start-signup`, {
+                const directSignupResponse = await fetch(`${PROVISIONING_API_URL}/api/auth/direct-signup`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
                         email,
-                        company: companyName,
-                        plan
+                        username,
+                        fullName,
+                        useCase,
+                        password,
+                        companyName,
+                        planId: plan
                     })
                 });
 
-                console.log(`Response status: ${response.status} ${response.statusText}`);
-
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ error: response.statusText }));
-                    console.error('Server error:', errorData);
-                    throw new Error(errorData.error || `Server error: ${response.status}`);
+                if (!directSignupResponse.ok) {
+                    const errorData = await directSignupResponse.json().catch(() => ({ error: 'Direct signup failed' }));
+                    throw new Error(errorData.details || errorData.error || 'Unable to create Auth0 account');
                 }
 
-                const data = await response.json();
-                console.log('Received auth0Url:', !!data.auth0Url);
-                
-                if (!data.auth0Url) {
-                    throw new Error('Missing Auth0 redirect URL in response');
+                const directSignupData = await directSignupResponse.json();
+                if (!directSignupData.auth0AccessToken) {
+                    throw new Error('Missing Auth0 access token from direct signup');
                 }
 
-                console.log('Redirecting to Auth0...');
-                window.location.href = data.auth0Url;
+                const completeSignupResponse = await fetch(`${PROVISIONING_API_URL}/api/auth/complete-signup`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        auth0AccessToken: directSignupData.auth0AccessToken,
+                        companyName,
+                        planId: plan
+                    })
+                });
+
+                if (!completeSignupResponse.ok) {
+                    const errorData = await completeSignupResponse.json().catch(() => ({ error: 'Signup completion failed' }));
+                    throw new Error(errorData.message || errorData.error || 'Unable to complete signup');
+                }
+
+                const completeSignupData = await completeSignupResponse.json();
+
+                if (completeSignupData.requiresCheckout && completeSignupData.checkoutUrl) {
+                    window.location.href = completeSignupData.checkoutUrl;
+                    return;
+                }
+
+                window.location.href = 'success.html';
             } catch (error) {
                 console.error('Signup failed:', error);
                 showError(error.message || 'Unable to start signup. Please try again.');
