@@ -3,23 +3,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "customer-instance.fullname" . }}-nodered
+  name: {{ include "iotistic.fullname" . }}-nodered
   labels:
-    {{- include "customer-instance.labels" . | nindent 4 }}
+    {{- include "iotistic.labels" . | nindent 4 }}
     app.kubernetes.io/component: nodered
 spec:
   replicas: {{ .Values.nodered.replicas }}
   selector:
     matchLabels:
-      {{- include "customer-instance.selectorLabels" . | nindent 6 }}
+      {{- include "iotistic.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: nodered
   template:
     metadata:
       labels:
-        {{- include "customer-instance.selectorLabels" . | nindent 8 }}
+        {{- include "iotistic.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: nodered
-      annotations:
-        checksum/config: {{ include (print $.Template.BasePath "/nodered.yaml") . | sha256sum }}
     spec:
       containers:
       - name: nodered
@@ -31,26 +29,22 @@ spec:
         env:
         # API configuration
         - name: IOTISTIC_BASE_URL
-          value: "http://{{ include "customer-instance.fullname" . }}-api:{{ .Values.api.port }}"
+          value: "http://{{ include "iotistic.fullname" . }}-api:{{ .Values.api.port }}"
         # Storage token (service API key)
-        - name: IOTISTIC_STORAGE_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: {{ include "customer-instance.fullname" . }}-secrets
-              key: NODERED_STORAGE_TOKEN
+      
         # MQTT connection
         - name: MQTT_BROKER_URL
-          value: "mqtt://{{ include "customer-instance.fullname" . }}-mosquitto:{{ .Values.mosquitto.ports.mqtt }}"
-        - name: MQTT_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: {{ include "customer-instance.fullname" . }}-secrets
-              key: NODERED_MQTT_USERNAME
-        - name: MQTT_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: {{ include "customer-instance.fullname" . }}-secrets
-              key: NODERED_MQTT_PASSWORD
+          value: "mqtt://{{ include "iotistic.fullname" . }}-mosquitto:{{ .Values.mosquitto.ports.mqtt }}"
+        # - name: MQTT_USERNAME
+        #   valueFrom:
+        #     secretKeyRef:
+        #       name: {{ include "iotistic.fullname" . }}-secrets
+        #       key: NODERED_MQTT_USERNAME
+        # - name: MQTT_PASSWORD
+        #   valueFrom:
+        #     secretKeyRef:
+        #       name: {{ include "iotistic.fullname" . }}-secrets
+        #       key: NODERED_MQTT_PASSWORD
         # Node-RED settings
         - name: NODE_RED_ENABLE_SAFE_MODE
           value: "false"
@@ -59,9 +53,9 @@ spec:
         - name: NODE_RED_ENABLE_UI_AUTH
           value: "true"
         - name: NODERED_TITLE
-          value: "{{ .Values.customer.companyName }}"
+          value: "{{ .Values.nodered.companyName | default .Release.Name }}"
         - name: TZ
-          value: {{ .Values.nodered.timezone }}
+          value: {{ .Values.nodered.timezone | default "UTC" }}
         # Auth0 configuration
         - name: AUTH0_DOMAIN
           value: "{{ .Values.nodered.auth0.domain }}"
@@ -69,6 +63,9 @@ spec:
           value: "{{ .Values.nodered.auth0.audience }}"
         - name: AUTH0_ISSUER
           value: "{{ .Values.nodered.auth0.issuer }}"
+        # CSP frame-ancestors policy - allow Node-RED to be embedded from dashboard and self
+        - name: NODE_RED_FRAME_ANCESTORS
+          value: "'self' https://*.iotistica.com https://*.iotistic.ca http://localhost:* http://*:30*"
         resources:
           {{- toYaml .Values.nodered.resources | nindent 10 }}
         livenessProbe:
@@ -89,9 +86,9 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "customer-instance.fullname" . }}-nodered
+  name: {{ include "iotistic.fullname" . }}-nodered
   labels:
-    {{- include "customer-instance.labels" . | nindent 4 }}
+    {{- include "iotistic.labels" . | nindent 4 }}
     app.kubernetes.io/component: nodered
 spec:
   type: ClusterIP
@@ -101,6 +98,34 @@ spec:
     protocol: TCP
     name: http
   selector:
-    {{- include "customer-instance.selectorLabels" . | nindent 4 }}
+    {{- include "iotistic.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: nodered
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "iotistic.fullname" . }}-nodered-httproute
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nodered
+spec:
+  parentRefs:
+    - name: {{ .Values.nodered.ingress.gatewayName | default "iotistica-gateway" }}
+      namespace: {{ .Values.nodered.ingress.gatewayNamespace | default "envoy-gateway-system" }}
+  hostnames:
+    - {{ .Values.nodered.baseUrl | trimPrefix "https://" }}
+  rules:
+    - filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Content-Security-Policy
+                value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; font-src 'self' data:; connect-src 'self' wss: ws: https: http:; frame-ancestors 'self' https://*.iotistica.com https://*.iotistic.ca http://localhost:* http://*:30*"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: {{ include "iotistic.fullname" . }}-nodered
+          port: {{ .Values.nodered.port }}
+          weight: 1
 {{- end }}
