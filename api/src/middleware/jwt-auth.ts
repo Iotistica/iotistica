@@ -12,7 +12,7 @@
  *   });
  */
 
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response, NextFunction, RequestHandler } from 'express';
 import jwt, { Secret } from 'jsonwebtoken';
 import { query } from '../db/connection';
 import axios from 'axios';
@@ -714,27 +714,33 @@ export async function customerStatusCheck(
 }
 
 /**
+ * Compose multiple middleware functions into a single middleware.
+ * Executes middleware in sequence, stopping if a middleware sends a response
+ * (i.e. does not call its `next` callback).
+ */
+export function composeMiddleware(...middlewares: RequestHandler[]): RequestHandler {
+  return (req, res, next) => {
+    let currentIndex = 0;
+    const executeNext = () => {
+      if (currentIndex >= middlewares.length) return next();
+      middlewares[currentIndex++](req, res, executeNext);
+    };
+    executeNext();
+  };
+}
+
+/**
  * Composed Authentication Middleware
  *
  * Chains jwtValidate → tenantResolve → rbacLookup → customerStatusCheck in sequence.
  * Equivalent to the previous monolithic jwtAuth implementation.
  */
-export const requireAuth = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  await jwtValidate(req, res, async () => {
-    if (res.headersSent) return;
-    await tenantResolve(req, res, async () => {
-      if (res.headersSent) return;
-      await rbacLookup(req, res, async () => {
-        if (res.headersSent) return;
-        await customerStatusCheck(req, res, next);
-      });
-    });
-  });
-};
+export const requireAuth = composeMiddleware(
+  jwtValidate,
+  tenantResolve,
+  rbacLookup,
+  customerStatusCheck
+);
 
 /**
  * JWT Authentication Middleware
