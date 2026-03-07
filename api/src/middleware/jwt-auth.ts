@@ -214,6 +214,12 @@ declare global {
         customerId?: string; // Multi-tenancy: customer ID for boundary enforcement
       } | null;
       id?: string; // Request ID for tracking and correlation
+
+      // Private middleware state – populated by jwtValidate, consumed by downstream middleware
+      _auth0Payload?: { sub: string; email: string; exp: number };
+      _legacyPayload?: JWTPayload;
+      _roleData?: { role: string; customer_status: string };
+      _dbUser?: { id: number; username: string; email: string; role: string; is_active: boolean };
     }
   }
 }
@@ -291,26 +297,25 @@ export function verifyToken(token: string): JWTPayload {
 }
 
 /**
- * JWT Authentication Middleware
- * 
- * Supports two authentication modes:
- * 1. Auth0 (RS256): Extract sub, resolve tenant, fetch role from provisioning
- * 2. Legacy (HS256): Fetch user from local users table
- * 
- * Expects: Authorization: Bearer <token> header
- * Sets: req.user with authenticated user information
+ * Step 1: JWT Validation Middleware
+ *
+ * Validates the JWT token from the Authorization header.
+ * Handles both Auth0 RS256 and legacy HS256 tokens.
+ * Attaches minimal user info to req.user (no DB calls, no tenant resolution).
+ *
+ * For Auth0 tokens:  req.user = { sub, email, exp }
+ * For legacy tokens: req.user = { userId, username, email, type, auth0Sub?, customerId?, role? }
+ *
+ * Returns 401 if token is missing or invalid.
  */
-export async function jwtAuth(
+export async function jwtValidate(
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> {
-  const startTime = Date.now();
-  
   try {
-    // Extract token from Authorization header
     const authHeader = req.headers.authorization;
-    
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       res.status(401).json({
         error: 'Unauthorized',
@@ -322,8 +327,8 @@ export async function jwtAuth(
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
     console.log('[JWT-AUTH] Token extracted, determining type...');
-    
-    // Detect token type by decoding header (without verification)
+
+    // Decode header without verification to detect algorithm
     const decoded = jwt.decode(token, { complete: true });
     if (!decoded) {
       res.status(401).json({
@@ -335,17 +340,82 @@ export async function jwtAuth(
 
     const algorithm = decoded.header?.alg;
 
-    // Try Auth0 first if RS256 and enabled
+    // Auth0 RS256 path
     if (algorithm === 'RS256' && AUTH0_ENABLED) {
       console.log('[JWT-AUTH] Detected RS256 token, validating with Auth0 JWKS...');
-      await handleAuth0Token(req, res, next, token);
+      let auth0Payload: { sub: string; email: string; exp: number };
+      try {
+        auth0Payload = await validateAuth0JWT(token);
+        console.log('[JWT-AUTH] Auth0 token validated for user:', auth0Payload.sub);
+      } catch (error: any) {
+        console.warn('[JWT-AUTH] Auth0 validation failed:', error.message);
+        res.status(401).json({
+          error: 'Unauthorized',
+          message: 'Invalid Auth0 token',
+          details: error.message
+        });
+        return;
+      }
+
+      // Attach minimal Auth0 user info - mark as auth0 type via username placeholder
+      req.user = {
+        id: 0,
+        username: auth0Payload.sub,
+        email: auth0Payload.email,
+        role: '',       // filled by rbacLookup
+        isActive: false // filled by customerStatusCheck
+      };
+      // Store auth0-specific claims for downstream middleware
+      req._auth0Payload = auth0Payload;
+      next();
       return;
     }
 
-    // Fall back to legacy HS256 local auth
+    // Legacy HS256 path
     if (algorithm === 'HS256') {
       console.log('[JWT-AUTH] Detected HS256 token, validating locally...');
-      await handleLegacyToken(req, res, next, token);
+      let payload: JWTPayload;
+      try {
+        payload = verifyToken(token);
+        console.log('[JWT-AUTH] Legacy token verified for user:', payload.username);
+        console.log('[JWT-AUTH] Token payload claims:', {
+          type: payload.type,
+          username: payload.username,
+          auth0Sub: payload.auth0Sub,
+          customerId: payload.customerId,
+          userId: payload.userId,
+          role: payload.role
+        });
+      } catch (error: any) {
+        console.warn('[JWT-AUTH] Legacy token verification failed:', error.message);
+        res.status(401).json({
+          error: 'Unauthorized',
+          message: 'Invalid or expired token',
+          details: error.message
+        });
+        return;
+      }
+
+      if (payload.type !== 'access') {
+        res.status(401).json({
+          error: 'Unauthorized',
+          message: 'Invalid token type. Use access token for API requests.'
+        });
+        return;
+      }
+
+      // Store the full legacy payload for downstream middleware
+      req._legacyPayload = payload;
+
+      req.user = {
+        id: payload.userId,
+        username: payload.username,
+        email: payload.email,
+        role: payload.role || '',
+        isActive: false, // filled by customerStatusCheck
+        customerId: payload.customerId
+      };
+      next();
       return;
     }
 
@@ -356,7 +426,7 @@ export async function jwtAuth(
     });
 
   } catch (error: any) {
-    console.error('[JWT-AUTH] Unexpected error:', error);
+    console.error('[JWT-AUTH] jwtValidate unexpected error:', error);
     res.status(500).json({
       error: 'Internal Server Error',
       message: 'Authentication failed'
@@ -365,49 +435,57 @@ export async function jwtAuth(
 }
 
 /**
- * Handle Auth0 RS256 tokens
- * 
- * Flow:
- * 1. Validate JWT signature with Auth0 JWKS
- * 2. Extract auth0_sub
- * 3. Resolve tenant from hostname
- * 4. Fetch role from provisioning RBAC API
- * 5. Check customer status
- * 6. Create synthetic req.user object
+ * Step 2: Tenant Resolution Middleware
+ *
+ * Reads hostname from req.hostname or X-Tenant-ID header and resolves the
+ * tenant (customerId). Requires jwtValidate to have run first.
+ *
+ * For federated HS256 tokens (auth0Sub + customerId in payload) the tenant is
+ * taken directly from the token and hostname resolution is skipped.
+ *
+ * Returns 400 if the tenant cannot be determined.
  */
-async function handleAuth0Token(
+export async function tenantResolve(
   req: Request,
   res: Response,
-  next: NextFunction,
-  token: string
+  next: NextFunction
 ): Promise<void> {
   try {
-    // Step 1: Validate Auth0 JWT
-    let auth0Payload: any;
-    try {
-      auth0Payload = await validateAuth0JWT(token);
-      console.log('[JWT-AUTH] Auth0 token validated for user:', auth0Payload.sub);
-    } catch (error: any) {
-      console.warn('[JWT-AUTH] Auth0 validation failed:', error.message);
+    if (!req.user) {
       res.status(401).json({
         error: 'Unauthorized',
-        message: 'Invalid Auth0 token',
-        details: error.message
+        message: 'jwtValidate middleware must run before tenantResolve'
       });
       return;
     }
 
-    // Step 2: Resolve tenant from hostname (or fallback for dev)
+    const legacyPayload: JWTPayload | undefined = req._legacyPayload;
+
+    // Federated token: trust the customerId embedded in the payload
+    if (legacyPayload && legacyPayload.auth0Sub && legacyPayload.customerId) {
+      console.log('[JWT-AUTH] Using tenant from federated token:', legacyPayload.customerId);
+      req.user.customerId = legacyPayload.customerId;
+      next();
+      return;
+    }
+
+    // Pure legacy local tokens don't require tenant resolution
+    if (legacyPayload && !legacyPayload.auth0Sub) {
+      next();
+      return;
+    }
+
+    // Auth0 token: resolve tenant from hostname
     let customerId: string;
     try {
       const { getTenantIdFromHost } = await import('../services/tenant-resolution.service');
       customerId = getTenantIdFromHost(req.hostname);
       console.log('[JWT-AUTH] Tenant resolved from hostname:', customerId);
     } catch (error: any) {
-      // Fallback for development: check X-Tenant-ID header or env var
+      // Fallback for development: X-Tenant-ID header or DEVELOPMENT_TENANT_ID env var
       const headerTenantId = req.headers['x-tenant-id'] as string | undefined;
       const envTenantId = process.env.DEVELOPMENT_TENANT_ID;
-      
+
       if (req.hostname === 'localhost' && (headerTenantId || envTenantId)) {
         customerId = headerTenantId || envTenantId || 'customer-local';
         console.log('[JWT-AUTH] Using dev fallback tenant:', customerId);
@@ -422,47 +500,11 @@ async function handleAuth0Token(
       }
     }
 
-    // Step 3: Fetch role from provisioning
-    let roleData: any;
-    try {
-      const { getRoleAndStatus } = await import('../services/rbac-cache.service');
-      roleData = await getRoleAndStatus(auth0Payload.sub, customerId, auth0Payload.exp);
-      console.log('[JWT-AUTH] Role fetched:', roleData.role, 'Status:', roleData.customer_status);
-    } catch (error: any) {
-      console.warn('[JWT-AUTH] Role fetch failed:', error.message);
-      res.status(403).json({
-        error: 'Forbidden',
-        message: 'Cannot determine user role in tenant',
-        details: error.message
-      });
-      return;
-    }
-
-    // Step 4: Check customer status
-    if (roleData.customer_status === 'suspended') {
-      res.status(403).json({
-        error: 'Forbidden',
-        message: 'Customer account is suspended'
-      });
-      return;
-    }
-
-    // Step 5: Create synthetic user object
-    // (Auth0 tokens don't have username/id, so we use auth0_sub as identifier)
-    req.user = {
-      id: 0,  // Placeholder (Auth0 users don't have local id)
-      username: auth0Payload.sub,  // Use sub as username
-      email: auth0Payload.email,
-      role: roleData.role,
-      isActive: roleData.customer_status === 'active',
-      customerId: customerId
-    };
-
-    console.log('[JWT-AUTH] Auth0 user authenticated:', auth0Payload.sub);
+    req.user.customerId = customerId;
     next();
 
   } catch (error: any) {
-    console.error('[JWT-AUTH] Auth0 token handling error:', error);
+    console.error('[JWT-AUTH] tenantResolve unexpected error:', error);
     res.status(500).json({
       error: 'Internal Server Error',
       message: 'Authentication failed'
@@ -471,121 +513,242 @@ async function handleAuth0Token(
 }
 
 /**
- * Handle legacy HS256 local tokens
- * 
- * Flow (backward compatible):
- * 1. Validate signature with JWT_SECRET
- * 2. Look up user from local users table
- * 3. Check user is active
- * 4. Populate req.user
+ * Step 3: RBAC Lookup Middleware
+ *
+ * Fetches the user's role from the database or RBAC cache.
+ * Requires jwtValidate (and tenantResolve for Auth0 users) to have run first.
+ *
+ * - Auth0 tokens: uses getRoleAndStatus from rbac-cache.service
+ * - Legacy local tokens: fetches role from the users table
+ * - Federated tokens: role is already in the token payload – lookup is skipped
+ *
+ * Returns 403 if the role cannot be determined.
  */
-async function handleLegacyToken(
+export async function rbacLookup(
   req: Request,
   res: Response,
-  next: NextFunction,
-  token: string
+  next: NextFunction
 ): Promise<void> {
   try {
-    // Validate token
-    let payload: JWTPayload;
-    try {
-      payload = verifyToken(token);
-      console.log('[JWT-AUTH] Legacy token verified for user:', payload.username);
-      console.log('[JWT-AUTH] Token payload claims:', {
-        type: payload.type,
-        username: payload.username,
-        auth0Sub: payload.auth0Sub,
-        customerId: payload.customerId,
-        userId: payload.userId,
-        role: payload.role
-      });
-    } catch (error: any) {
-      console.warn('[JWT-AUTH] Legacy token verification failed:', error.message);
+    if (!req.user) {
       res.status(401).json({
         error: 'Unauthorized',
-        message: 'Invalid or expired token',
-        details: error.message
+        message: 'jwtValidate middleware must run before rbacLookup'
       });
       return;
     }
 
-    // Ensure it's an access token
-    if (payload.type !== 'access') {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Invalid token type. Use access token for API requests.'
-      });
-      return;
-    }
+    const auth0Payload: { sub: string; email: string; exp: number } | undefined =
+      req._auth0Payload;
+    const legacyPayload: JWTPayload | undefined = req._legacyPayload;
 
-    // Phase 3: Federated Auth0 token issued by provisioning (HS256 shared secret)
-    if (payload.auth0Sub && payload.customerId) {
-      // For federated tokens, ALWAYS trust the customerId from the JWT payload
-      // These tokens are signed by provisioning and already validated, so hostname
-      // resolution is not needed (and often won't work across namespace boundaries)
-      console.log('[JWT-AUTH] Using tenant from federated token:', payload.customerId);
-
-      req.user = {
-        id: payload.userId,
-        username: payload.username || payload.auth0Sub,
-        email: payload.email,
-        role: payload.role,
-        isActive: true,
-        customerId: payload.customerId
-      };
-
-      console.log('[JWT-AUTH] Federated HS256 token authenticated:', payload.auth0Sub);
+    // Federated token: role is embedded in the payload – skip lookup
+    if (legacyPayload && legacyPayload.auth0Sub && legacyPayload.customerId) {
+      req.user.role = legacyPayload.role;
       next();
       return;
     }
 
-    // Fetch user from database
-    const result = await query(
-      `SELECT id, username, email, role, is_active, last_login_at
-       FROM users
-       WHERE id = $1`,
-      [payload.userId]
-    );
+    // Auth0 token: fetch role via RBAC cache service
+    if (auth0Payload) {
+      const customerId = req.user.customerId;
+      if (!customerId) {
+        res.status(400).json({
+          error: 'Bad Request',
+          message: 'Tenant not resolved. tenantResolve middleware must run before rbacLookup'
+        });
+        return;
+      }
 
-    if (result.rows.length === 0) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'User not found'
-      });
+      let roleData: any;
+      try {
+        const { getRoleAndStatus } = await import('../services/rbac-cache.service');
+        roleData = await getRoleAndStatus(auth0Payload.sub, customerId, auth0Payload.exp);
+        console.log('[JWT-AUTH] Role fetched:', roleData.role, 'Status:', roleData.customer_status);
+      } catch (error: any) {
+        console.warn('[JWT-AUTH] Role fetch failed:', error.message);
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'Cannot determine user role in tenant',
+          details: error.message
+        });
+        return;
+      }
+
+      req.user.role = roleData.role;
+      // Store roleData for customerStatusCheck
+      req._roleData = roleData;
+      next();
       return;
     }
 
-    const user = result.rows[0];
+    // Legacy local token: fetch role (and active status) from users table
+    if (legacyPayload) {
+      const result = await query(
+        `SELECT id, username, email, role, is_active, last_login_at
+         FROM users
+         WHERE id = $1`,
+        [legacyPayload.userId]
+      );
 
-    // Check if user is active
-    if (!user.is_active) {
-      res.status(403).json({
-        error: 'Forbidden',
-        message: 'User account is inactive. Contact administrator.'
-      });
+      if (result.rows.length === 0) {
+        res.status(401).json({
+          error: 'Unauthorized',
+          message: 'User not found'
+        });
+        return;
+      }
+
+      const dbUser = result.rows[0];
+      req.user.role = dbUser.role;
+      // Store dbUser for customerStatusCheck
+      req._dbUser = dbUser;
+      next();
       return;
     }
 
-    // Attach user info to request
-    req.user = {
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      role: user.role,
-      isActive: user.is_active
-    };
-
-    console.log('[JWT-AUTH] Legacy user authenticated:', user.username);
-    next();
+    res.status(403).json({
+      error: 'Forbidden',
+      message: 'Cannot determine user role'
+    });
 
   } catch (error: any) {
-    console.error('[JWT-AUTH] Legacy token handling error:', error);
+    console.error('[JWT-AUTH] rbacLookup unexpected error:', error);
     res.status(500).json({
       error: 'Internal Server Error',
       message: 'Authentication failed'
     });
   }
 }
+
+/**
+ * Step 4: Customer Status Check Middleware
+ *
+ * Verifies that the authenticated user/customer is active (not suspended).
+ * Requires rbacLookup to have run first.
+ *
+ * - Auth0: checks customer_status from roleData
+ * - Legacy local: checks is_active from dbUser
+ * - Federated: assumed active (already validated by provisioning)
+ *
+ * Attaches req.user.isActive and returns 403 if inactive/suspended.
+ */
+export async function customerStatusCheck(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'jwtValidate middleware must run before customerStatusCheck'
+      });
+      return;
+    }
+
+    const auth0Payload: { sub: string; email: string; exp: number } | undefined =
+      req._auth0Payload;
+    const legacyPayload: JWTPayload | undefined = req._legacyPayload;
+    const roleData: any = req._roleData;
+    const dbUser: any = req._dbUser;
+
+    // Federated token: always active
+    if (legacyPayload && legacyPayload.auth0Sub && legacyPayload.customerId) {
+      req.user.isActive = true;
+      console.log('[JWT-AUTH] Federated HS256 token authenticated:', legacyPayload.auth0Sub);
+      next();
+      return;
+    }
+
+    // Auth0 token: check customer_status from roleData
+    if (auth0Payload && roleData) {
+      if (roleData.customer_status === 'suspended') {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'Customer account is suspended'
+        });
+        return;
+      }
+
+      req.user.isActive = roleData.customer_status === 'active';
+      console.log('[JWT-AUTH] Auth0 user authenticated:', auth0Payload.sub);
+      next();
+      return;
+    }
+
+    // Legacy local token: check is_active from dbUser
+    if (dbUser) {
+      if (!dbUser.is_active) {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'User account is inactive. Contact administrator.'
+        });
+        return;
+      }
+
+      req.user.id = dbUser.id;
+      req.user.username = dbUser.username;
+      req.user.email = dbUser.email;
+      req.user.role = dbUser.role;
+      req.user.isActive = dbUser.is_active;
+
+      console.log('[JWT-AUTH] Legacy user authenticated:', dbUser.username);
+      next();
+      return;
+    }
+
+    // Fallback: should not reach here in normal usage
+    res.status(403).json({
+      error: 'Forbidden',
+      message: 'Cannot verify user status'
+    });
+
+  } catch (error: any) {
+    console.error('[JWT-AUTH] customerStatusCheck unexpected error:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Authentication failed'
+    });
+  }
+}
+
+/**
+ * Composed Authentication Middleware
+ *
+ * Chains jwtValidate → tenantResolve → rbacLookup → customerStatusCheck in sequence.
+ * Equivalent to the previous monolithic jwtAuth implementation.
+ */
+export const requireAuth = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  await jwtValidate(req, res, async () => {
+    if (res.headersSent) return;
+    await tenantResolve(req, res, async () => {
+      if (res.headersSent) return;
+      await rbacLookup(req, res, async () => {
+        if (res.headersSent) return;
+        await customerStatusCheck(req, res, next);
+      });
+    });
+  });
+};
+
+/**
+ * JWT Authentication Middleware
+ *
+ * Alias for requireAuth. Kept for backward compatibility.
+ *
+ * Supports two authentication modes:
+ * 1. Auth0 (RS256): Extract sub, resolve tenant, fetch role from provisioning
+ * 2. Legacy (HS256): Fetch user from local users table
+ *
+ * Expects: Authorization: Bearer <token> header
+ * Sets: req.user with authenticated user information
+ */
+export const jwtAuth = requireAuth;
 
 /**
  * Role-based authorization middleware
