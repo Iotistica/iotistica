@@ -787,10 +787,15 @@ export function requireRole(...allowedRoles: string[]) {
 
 /**
  * Optional Authentication Middleware
- * 
+ *
  * Supports both Auth0 and legacy tokens.
  * Sets req.user if valid token present, otherwise req.user = null
  * Always proceeds to next handler (never rejects)
+ *
+ * Reuses jwtValidate → tenantResolve → rbacLookup → customerStatusCheck via
+ * composeMiddleware. Any error response that those steps would send is
+ * intercepted: instead of being sent to the client, req.user is set to null
+ * and the request continues normally.
  */
 export async function optionalAuth(
   req: Request,
@@ -798,131 +803,44 @@ export async function optionalAuth(
   next: NextFunction
 ): Promise<void> {
   try {
+    // No token provided - continue without auth
     const authHeader = req.headers.authorization;
-
-    // No token provided
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       req.user = null;
       next();
       return;
     }
 
-    const token = authHeader.substring(7);
+    // Intercept any error responses the auth chain attempts to send.
+    // Instead of sending an error response, set req.user = null and continue.
+    const originalJson = res.json.bind(res);
+    let intercepted = false;
 
-    // Decode header to detect algorithm
-    const decoded = jwt.decode(token, { complete: true });
-    if (!decoded) {
-      req.user = null;
-      next();
-      return;
-    }
-
-    const algorithm = decoded.header?.alg;
-
-    try {
-      // Try Auth0 RS256
-      if (algorithm === 'RS256' && AUTH0_ENABLED) {
-        const auth0Payload = await validateAuth0JWT(token);
-        
-        let customerId: string;
-        try {
-          const { getTenantIdFromHost } = await import('../services/tenant-resolution.service');
-          customerId = getTenantIdFromHost(req.hostname);
-        } catch (error: any) {
-          // Fallback for development: check X-Tenant-ID header or env var
-          const headerTenantId = req.headers['x-tenant-id'] as string | undefined;
-          const envTenantId = process.env.DEVELOPMENT_TENANT_ID;
-          
-          if (req.hostname === 'localhost' && (headerTenantId || envTenantId)) {
-            customerId = headerTenantId || envTenantId || 'customer-local';
-          } else {
-            req.user = null;
-            next();
-            return;
-          }
-        }
-        
-        const { getRoleAndStatus } = await import('../services/rbac-cache.service');
-        const roleData = await getRoleAndStatus(auth0Payload.sub, customerId, auth0Payload.exp);
-
-        if (roleData.customer_status === 'suspended') {
-          req.user = null;
-          next();
-          return;
-        }
-
-        req.user = {
-          id: 0,
-          username: auth0Payload.sub,
-          email: auth0Payload.email,
-          role: roleData.role,
-          isActive: roleData.customer_status === 'active',
-          customerId: customerId
-        };
+    res.json = function (body: any) {
+      if (!intercepted && !res.headersSent && res.statusCode >= 400) {
+        intercepted = true;
+        res.json = originalJson;
+        res.statusCode = 200;
+        console.debug('[OPTIONAL-AUTH] Token invalid, continuing unauthenticated');
+        req.user = null;
         next();
-        return;
+        return res;
       }
+      return originalJson(body);
+    } as any;
 
-      // Try legacy HS256
-      if (algorithm === 'HS256') {
-        const payload = verifyToken(token);
-
-        if (payload.type !== 'access') {
-          req.user = null;
-          next();
-          return;
-        }
-
-        if (payload.auth0Sub && payload.customerId) {
-          req.user = {
-            id: payload.userId,
-            username: payload.username || payload.auth0Sub,
-            email: payload.email,
-            role: payload.role,
-            isActive: true,
-            customerId: payload.customerId
-          };
-          next();
-          return;
-        }
-
-        const result = await query(
-          `SELECT id, username, email, role, is_active
-           FROM users
-           WHERE id = $1`,
-          [payload.userId]
-        );
-
-        if (result.rows.length === 0 || !result.rows[0].is_active) {
-          req.user = null;
-          next();
-          return;
-        }
-
-        const user = result.rows[0];
-        req.user = {
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          role: user.role,
-          isActive: user.is_active
-        };
-        next();
-        return;
-      }
-    } catch (error: any) {
-      // Token is invalid, continue without auth
-      console.debug('[OPTIONAL-AUTH] Token invalid, continuing unauthenticated:', error.message);
-      req.user = null;
+    composeMiddleware(
+      jwtValidate,
+      tenantResolve,
+      rbacLookup,
+      customerStatusCheck
+    )(req, res, () => {
+      res.json = originalJson;
       next();
-      return;
-    }
-
-    req.user = null;
-    next();
+    });
 
   } catch (error: any) {
-    console.warn('[OPTIONAL-AUTH] Unexpected error:', error);
+    console.debug('[OPTIONAL-AUTH] Error during optional authentication:', error.message);
     req.user = null;
     next();
   }
