@@ -3,51 +3,247 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Start Your Free Trial - Iotistica</title>
+    <title>Choose Your Plan - Iotistica</title>
     <link rel="stylesheet" href="styles.css">
     <style>
-        .signup-container {
-            min-height: 100vh;
+        /* Navigation Bar */
+        .navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(10, 10, 10, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border-color);
+            z-index: 1000;
+            padding: 1rem 0;
+        }
+
+        .navbar .container {
             display: flex;
+            justify-content: space-between;
             align-items: center;
-            justify-content: center;
-            padding: 2rem;
-            background: var(--bg-primary);
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
         }
 
-        .signup-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 3rem;
-            max-width: 600px;
-            width: 100%;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-        }
-
-        .signup-header {
-            text-align: center;
-            margin-bottom: 2.5rem;
-        }
-
-        .signup-logo {
-            font-size: 2rem;
+        .nav-brand .logo {
+            font-size: 1.5rem;
             font-weight: 700;
             background: var(--accent-gradient);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
-            margin-bottom: 0.5rem;
+        }
+
+        /* Page Container */
+        .signup-container {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 8rem 2rem 4rem;
+            background: var(--bg-primary);
+        }
+
+        .signup-wrapper {
+            max-width: 1200px;
+            width: 100%;
+            margin: 0 auto;
+        }
+
+        .signup-header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        .signup-logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 1rem;
         }
 
         .signup-title {
-            font-size: 1.75rem;
-            margin-bottom: 0.5rem;
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin-bottom: 0.75rem;
+            color: var(--text-primary);
         }
 
         .signup-subtitle {
             color: var(--text-secondary);
+            font-size: 1.1rem;
+            max-width: 600px;
+            margin: 0 auto;
+            line-height: 1.6;
+        }
+
+        /* Plans Grid */
+        .plans-section {
+            margin-bottom: 3rem;
+        }
+
+        .plans-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .plan-card {
+            background: var(--bg-card);
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            padding: 2rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .plan-card:hover {
+            border-color: var(--accent-primary);
+            box-shadow: 0 10px 40px rgba(59, 130, 246, 0.15);
+        }
+
+        .plan-card.selected {
+            border-color: var(--accent-primary);
+            background: rgba(59, 130, 246, 0.08);
+            box-shadow: 0 10px 40px rgba(59, 130, 246, 0.2);
+        }
+
+        .plan-card input[type="radio"] {
+            display: none;
+        }
+
+        .plan-checkmark {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            width: 24px;
+            height: 24px;
+            border: 2px solid var(--border-color);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+
+        .plan-card.selected .plan-checkmark {
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+            color: white;
+        }
+
+        .plan-header {
+            margin-bottom: 1.5rem;
+        }
+
+        .plan-name {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .plan-price {
+            display: flex;
+            align-items: baseline;
+            gap: 0.25rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .plan-amount {
+            font-size: 2rem;
+            font-weight: 800;
+            color: var(--accent-primary);
+        }
+
+        .plan-period {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .plan-description {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+
+        .plan-features {
+            flex-grow: 1;
+            margin: 1.5rem 0;
+            border-top: 1px solid var(--border-color);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1.5rem 0;
+        }
+
+        .plan-features ul {
+            list-style: none;
+        }
+
+        .plan-features li {
+            padding: 0.5rem 0;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .plan-features li::before {
+            content: '✓';
+            color: var(--accent-primary);
+            font-weight: bold;
             font-size: 1rem;
+            flex-shrink: 0;
+        }
+
+        .plan-cta-btn {
+            width: 100%;
+            padding: 0.875rem 1.5rem;
+            margin-top: 1.5rem;
+            background: var(--accent-gradient);
+            color: white;
+            border: none;
+            border-radius: 0.5rem;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all var(--transition);
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+        }
+
+        .plan-cta-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+        }
+
+        .plan-cta-btn:active {
+            transform: translateY(0);
+        }
+
+        /* User Info Section */
+        .user-info-section {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 2rem;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .section-title {
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            color: var(--text-primary);
         }
 
         .form-group {
@@ -62,7 +258,7 @@
             font-weight: 500;
         }
 
-        .form-input, .form-select {
+        .form-input {
             width: 100%;
             padding: 0.875rem 1rem;
             background: var(--bg-secondary);
@@ -71,62 +267,13 @@
             color: var(--text-primary);
             font-size: 1rem;
             transition: var(--transition);
+            font-family: inherit;
         }
 
-        .form-input:focus, .form-select:focus {
+        .form-input:focus {
             outline: none;
             border-color: var(--accent-primary);
             box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-        }
-
-        .plan-cards {
-            display: grid;
-            gap: 1rem;
-            margin-top: 0.5rem;
-        }
-
-        .plan-card {
-            padding: 1.25rem;
-            background: var(--bg-secondary);
-            border: 2px solid var(--border-color);
-            border-radius: 8px;
-            cursor: pointer;
-            transition: var(--transition);
-        }
-
-        .plan-card:hover {
-            border-color: var(--accent-primary);
-        }
-
-        .plan-card.selected {
-            border-color: var(--accent-primary);
-            background: rgba(59, 130, 246, 0.1);
-        }
-
-        .plan-card input[type="radio"] {
-            display: none;
-        }
-
-        .plan-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 0.5rem;
-        }
-
-        .plan-name {
-            font-size: 1.1rem;
-            font-weight: 600;
-        }
-
-        .plan-price {
-            color: var(--accent-primary);
-            font-weight: 600;
-        }
-
-        .plan-description {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
         }
 
         .btn-submit {
@@ -160,10 +307,14 @@
             text-decoration: none;
         }
 
+        .terms a:hover {
+            text-decoration: underline;
+        }
+
         .back-link {
             display: block;
             text-align: center;
-            margin-top: 1.5rem;
+            margin-top: 2rem;
             color: var(--text-secondary);
             text-decoration: none;
             font-size: 0.9rem;
@@ -173,146 +324,203 @@
         .back-link:hover {
             color: var(--accent-primary);
         }
+
+        .selected-plan-display {
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            text-align: center;
+        }
+
+        .selected-plan-text {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .selected-plan-name {
+            color: var(--accent-primary);
+            font-size: 1.2rem;
+            font-weight: 700;
+        }
+
+        @media (max-width: 768px) {
+            .signup-container {
+                padding: 6rem 1rem 2rem;
+            }
+
+            .signup-title {
+                font-size: 1.8rem;
+            }
+
+            .plans-grid {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+            }
+
+            .user-info-section {
+                padding: 1.5rem;
+            }
+        }
     </style>
 </head>
 <body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <span class="logo">Iotistica</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
     <div class="signup-container">
-        <div class="signup-card">
+        <div class="signup-wrapper">
             <div class="signup-header">
                 <div class="signup-logo">Iotistica</div>
-                <h1 class="signup-title">Start Your Free Trial</h1>
-                <p class="signup-subtitle">14-day trial, no credit card required</p>
+                <h1 class="signup-title">Choose Your Plan</h1>
+                <p class="signup-subtitle">Start with a 14-day free trial, no credit card required. Upgrade anytime or cancel your subscription at any time.</p>
             </div>
 
-            <form id="signupForm">
-                <div class="form-group">
-                    <label class="form-label" for="email">Work Email *</label>
-                    <input 
-                        type="email" 
-                        id="email" 
-                        class="form-input" 
-                        placeholder="you@company.com"
-                        required
-                    >
+            <!-- Plans Section -->
+            <div class="plans-section">
+                <div class="plans-grid" id="plansGrid">
+                    <!-- Plans will be inserted here -->
                 </div>
-
-                <div class="form-group">
-                    <label class="form-label" for="companyName">Company Name *</label>
-                    <input 
-                        type="text" 
-                        id="companyName" 
-                        class="form-input" 
-                        placeholder="Your company"
-                        required
-                        maxlength="255"
-                    >
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label">Select Your Plan *</label>
-                    <div class="plan-cards">
-                        <label class="plan-card selected" data-plan="starter">
-                            <input type="radio" name="plan" value="starter" checked>
-                            <div class="plan-header">
-                                <span class="plan-name">Starter</span>
-                                <span class="plan-price">$49/month</span>
-                            </div>
-                            <p class="plan-description">Perfect for small teams and prototypes</p>
-                        </label>
-
-                        <label class="plan-card" data-plan="professional">
-                            <input type="radio" name="plan" value="professional">
-                            <div class="plan-header">
-                                <span class="plan-name">Professional</span>
-                                <span class="plan-price">$199/month</span>
-                            </div>
-                            <p class="plan-description">For growing businesses with advanced needs</p>
-                        </label>
-
-                        <label class="plan-card" data-plan="enterprise">
-                            <input type="radio" name="plan" value="enterprise">
-                            <div class="plan-header">
-                                <span class="plan-name">Enterprise</span>
-                                <span class="plan-price">Custom</span>
-                            </div>
-                            <p class="plan-description">Dedicated resources and premium support</p>
-                        </label>
-                    </div>
-                </div>
-
-                <button type="submit" class="btn-submit">
-                    Continue with Auth0 →
-                </button>
-
-                <p class="terms">
-                    By signing up, you agree to our 
-                    <a href="#">Terms of Service</a> and 
-                    <a href="#">Privacy Policy</a>
-                </p>
-            </form>
-
-            <a href="index.html" class="back-link">← Back to Home</a>
+            </div>
         </div>
     </div>
 
     <script>
-        // Provisioning API configuration
-        const PROVISIONING_API_URL = 'https://api.iotistica.com/provisioning';
+        // Plans data
+        const plansData = [
+            {
+                id: 'trial',
+                name: 'Free Trial',
+                price: '14 days',
+                period: 'free',
+                description: 'Get started with full access',
+                features: [
+                    'Up to 5 devices',
+                    'Full dashboard access',
+                    'MQTT broker included',
+                    'Basic analytics',
+                    'Community support'
+                ]
+            },
+            {
+                id: 'starter',
+                name: 'Starter',
+                price: '$49',
+                period: '/month',
+                description: 'Perfect for small teams',
+                features: [
+                    'Up to 50 devices',
+                    'Advanced dashboard',
+                    'MQTT broker & ACLs',
+                    'Real-time analytics',
+                    'Email support',
+                    'Up to 3 team members'
+                ]
+            },
+            {
+                id: 'professional',
+                name: 'Professional',
+                price: '$199',
+                period: '/month',
+                description: 'For growing businesses',
+                features: [
+                    'Up to 500 devices',
+                    'Full API access',
+                    'MQTT with advanced features',
+                    'Custom dashboards',
+                    'Priority support',
+                    'Up to 10 team members',
+                    'Dedicated database'
+                ]
+            },
+            {
+                id: 'enterprise',
+                name: 'Enterprise',
+                price: 'Custom',
+                period: 'pricing',
+                description: 'Unlimited everything',
+                features: [
+                    'Unlimited devices',
+                    'White-label solution',
+                    'Custom integrations',
+                    'Dedicated infrastructure',
+                    '24/7 phone support',
+                    'Unlimited team members',
+                    'SLA guarantee'
+                ]
+            }
+        ];
 
-        // Handle plan selection
-        document.querySelectorAll('.plan-card').forEach(card => {
-            card.addEventListener('click', () => {
-                document.querySelectorAll('.plan-card').forEach(c => c.classList.remove('selected'));
-                card.classList.add('selected');
-                card.querySelector('input[type="radio"]').checked = true;
-            });
-        });
+        // Render plans
+        function renderPlans() {
+            const plansGrid = document.getElementById('plansGrid');
+            plansGrid.innerHTML = plansData.map(plan => `
+                <div class="plan-card ${plan.id === 'trial' ? 'selected' : ''}" data-plan="${plan.id}">
+                    <input type="radio" name="plan" value="${plan.id}" ${plan.id === 'trial' ? 'checked' : ''} style="display: none;">
+                    <div class="plan-checkmark">
+                        ${plan.id === 'trial' ? '✓' : ''}
+                    </div>
+                    <div class="plan-header">
+                        <div class="plan-name">${plan.name}</div>
+                        <div class="plan-price">
+                            <span class="plan-amount">${plan.price}</span>
+                            <span class="plan-period">${plan.period}</span>
+                        </div>
+                    </div>
+                    <div class="plan-description">${plan.description}</div>
+                    <div class="plan-features">
+                        <ul>
+                            ${plan.features.map(feature => `<li>${feature}</li>`).join('')}
+                        </ul>
+                    </div>
+                    <button type="button" class="plan-cta-btn" data-plan-id="${plan.id}">
+                        Try for Free
+                    </button>
+                </div>
+            `).join('');
 
-        // Handle form submission
-        document.getElementById('signupForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            const email = document.getElementById('email').value;
-            const companyName = document.getElementById('companyName').value;
-            const plan = document.querySelector('input[name="plan"]:checked').value;
-
-            console.log('🚀 Signup form submitted:', { email, company: companyName, plan });
-
-            try {
-                console.log(`📡 Calling: ${PROVISIONING_API_URL}/api/auth/start-signup`);
-                const response = await fetch(`${PROVISIONING_API_URL}/api/auth/start-signup`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        email,
-                        company: companyName,
-                        plan
-                    })
+            // Add event listeners to plan cards
+            document.querySelectorAll('.plan-card').forEach(card => {
+                card.addEventListener('click', (e) => {
+                    // Don't trigger if clicking the button
+                    if (e.target.closest('.plan-cta-btn')) return;
                 });
 
-                console.log(`📍 Response status: ${response.status} ${response.statusText}`);
-
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ error: response.statusText }));
-                    console.error('❌ Server error:', errorData);
-                    throw new Error(`Server error: ${response.status} - ${errorData.error || response.statusText}`);
+                // Handle "Try for Free" button click
+                const ctaBtn = card.querySelector('.plan-cta-btn');
+                if (ctaBtn) {
+                    ctaBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        const planId = card.getAttribute('data-plan');
+                        const plan = plansData.find(p => p.id === planId);
+                        
+                        // Save plan to sessionStorage
+                        sessionStorage.setItem('selected_plan', JSON.stringify({
+                            id: plan.id,
+                            name: plan.name,
+                            price: plan.price,
+                            period: plan.period
+                        }));
+                        
+                        // Navigate to form page
+                        window.location.href = 'form.html';
+                    });
                 }
+            });
+        }
 
-                const data = await response.json();
-                console.log('✅ Received auth0Url:', !!data.auth0Url);
-                
-                if (!data.auth0Url) {
-                    throw new Error('Missing Auth0 redirect URL in response');
-                }
-
-                console.log('🔗 Redirecting to Auth0...');
-                window.location.href = data.auth0Url;
-            } catch (error) {
-                console.error('❌ Signup failed:', error);
-                alert(`Unable to start signup: ${error.message}`);
-            }
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            renderPlans();
         });
     </script>
 </body>

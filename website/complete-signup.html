@@ -3,16 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Complete Your Signup - Iotistica</title>
+    <title>Complete Your Account - Iotistica</title>
     <link rel="stylesheet" href="styles.css">
     <style>
-        .signup-container {
+        /* Navigation Bar */
+        .navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(10, 10, 10, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border-color);
+            z-index: 1000;
+            padding: 1rem 0;
+        }
+
+        .navbar .container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+
+        .nav-brand .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* Page Container */
+        .page-container {
             min-height: 100vh;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
             padding: 2rem;
             background: var(--bg-primary);
+            padding-top: 8rem;
         }
 
         .signup-card {
@@ -27,27 +61,29 @@
 
         .signup-header {
             text-align: center;
-            margin-bottom: 2rem;
+            margin-bottom: 2.5rem;
         }
 
         .signup-logo {
-            font-size: 2rem;
+            font-size: 1.8rem;
             font-weight: 700;
             background: var(--accent-gradient);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
-            margin-bottom: 0.5rem;
+            margin-bottom: 1rem;
         }
 
         .signup-title {
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
+            font-size: 1.75rem;
+            color: var(--text-primary);
+            margin-bottom: 0.75rem;
         }
 
         .signup-subtitle {
             color: var(--text-secondary);
-            font-size: 0.95rem;
+            font-size: 1rem;
+            line-height: 1.5;
         }
 
         .form-group {
@@ -59,17 +95,19 @@
             color: var(--text-secondary);
             font-size: 0.9rem;
             margin-bottom: 0.5rem;
+            font-weight: 500;
         }
 
         .form-input {
             width: 100%;
-            padding: 0.75rem 1rem;
+            padding: 0.875rem 1rem;
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
-            border-radius: 6px;
+            border-radius: 8px;
             color: var(--text-primary);
             font-size: 1rem;
             transition: var(--transition);
+            font-family: inherit;
         }
 
         .form-input:focus {
@@ -83,21 +121,353 @@
             cursor: not-allowed;
         }
 
+        .alert {
+            padding: 0.875rem 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+            border: 1px solid rgba(0, 0, 0, 0.2);
+        }
+
+        .alert-error {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+        }
+
+        .alert-success {
+            background: rgba(34, 197, 94, 0.1);
+            border-color: rgba(34, 197, 94, 0.3);
+            color: #86efac;
+        }
+
         .btn-submit {
             width: 100%;
             padding: 0.875rem;
             background: var(--accent-gradient);
             border: none;
-            border-radius: 6px;
+            border-radius: 8px;
             color: white;
             font-size: 1rem;
             font-weight: 600;
             cursor: pointer;
             transition: var(--transition);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
         }
 
         .btn-submit:hover:not(:disabled) {
             transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.4);
+        }
+
+        .btn-submit:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .back-link {
+            display: block;
+            text-align: center;
+            margin-top: 1.5rem;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: var(--transition);
+        }
+
+        .back-link:hover {
+            color: var(--accent-primary);
+        }
+
+        .success-content {
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .success-content h2 {
+            color: var(--text-primary);
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .success-content p {
+            color: var(--text-secondary);
+            line-height: 1.6;
+            margin-bottom: 1.5rem;
+        }
+
+        .info-box {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+        }
+
+        .info-box strong {
+            color: var(--text-primary);
+        }
+
+        @media (max-width: 768px) {
+            .page-container {
+                padding-top: 6rem;
+            }
+
+            .signup-card {
+                padding: 2rem;
+                max-width: 100%;
+            }
+
+            .signup-title {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <span class="logo">Iotistica</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="page-container">
+        <div class="signup-card">
+            <div class="signup-header">
+                <div class="signup-logo">Iotistica</div>
+                <h1 class="signup-title">Complete Your Account</h1>
+                <p class="signup-subtitle">Just one more step to get started</p>
+            </div>
+
+            <div id="alertContainer"></div>
+
+            <form id="signupForm">
+                <div class="form-group">
+                    <label class="form-label" for="email">Email Address</label>
+                    <input 
+                        type="email" 
+                        id="email" 
+                        class="form-input" 
+                        disabled 
+                        placeholder="Loading..."
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="companyName">Company Name</label>
+                    <input 
+                        type="text" 
+                        id="companyName" 
+                        class="form-input" 
+                        placeholder="Enter your company name"
+                        required
+                        maxlength="255"
+                    >
+                </div>
+
+                <button type="submit" class="btn-submit" id="submitBtn">
+                    Create My Account
+                </button>
+            </form>
+
+            <a href="index.html" class="back-link">Back to Home</a>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const PROVISIONING_API_URL = 'https://api.iotistica.com/provisioning';
+        const AUTH0_CALLBACK_URL = `${window.location.origin}/auth-callback.html`;
+
+        let auth0AccessToken = null;
+        let pendingSignup = null;
+
+        // Clear stale browser tokens from previous sessions
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+        sessionStorage.removeItem('auth0_access_token');
+
+        // Show alert messages
+        function showAlert(message, type = 'error') {
+            const alertContainer = document.getElementById('alertContainer');
+            alertContainer.innerHTML = `
+                <div class="alert alert-${type}">
+                    ${message}
+                </div>
+            `;
+        }
+
+        // Exchange Auth0 authorization code for access token via provisioning backend
+        async function exchangeAuth0Code(code) {
+            try {
+                const response = await fetch(`${PROVISIONING_API_URL}/api/auth/token`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ code }),
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.details || error.error || 'Failed to exchange code');
+                }
+
+                const data = await response.json();
+                return data.access_token;
+            } catch (error) {
+                console.error('Code exchange error:', error);
+                throw error;
+            }
+        }
+
+        // Load user info and retrieve signup data
+        async function loadUserInfo() {
+            // Check for pending signup data from website form
+            const signupDataStr = sessionStorage.getItem('pending_signup');
+            if (!signupDataStr) {
+                showAlert('No signup data found. Please start from the homepage.');
+                setTimeout(() => {
+                    window.location.href = 'index.html';
+                }, 3000);
+                return;
+            }
+
+            pendingSignup = JSON.parse(signupDataStr);
+            document.getElementById('email').value = pendingSignup.email;
+            document.getElementById('companyName').value = pendingSignup.company;
+            document.getElementById('companyName').disabled = true;
+
+            // Check for Auth0 code to exchange
+            const auth0Code = sessionStorage.getItem('auth0_signup_code');
+            if (auth0Code) {
+                try {
+                    showAlert('Verifying your authentication...', 'success');
+                    auth0AccessToken = await exchangeAuth0Code(auth0Code);
+                    sessionStorage.removeItem('auth0_signup_code');
+                    showAlert(`Welcome! Setting up your ${pendingSignup.plan} instance...`, 'success');
+                    
+                    // Auto-submit since we have all the data
+                    setTimeout(() => {
+                        document.getElementById('submitBtn').click();
+                    }, 1000);
+                } catch (error) {
+                    showAlert('Failed to verify authentication. Please try logging in again.');
+                    setTimeout(() => {
+                        window.location.href = 'index.html';
+                    }, 3000);
+                }
+            } else {
+                showAlert('No authentication found. Please log in first.');
+                setTimeout(() => {
+                    window.location.href = 'index.html';
+                }, 3000);
+            }
+        }
+
+        // Handle form submission
+        document.getElementById('signupForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const companyName = document.getElementById('companyName').value.trim();
+            
+            if (!companyName) {
+                showAlert('Please enter your company name');
+                return;
+            }
+
+            if (!auth0AccessToken) {
+                showAlert('Authentication token expired. Please log in again.');
+                return;
+            }
+
+            // Disable form
+            const submitBtn = document.getElementById('submitBtn');
+            const originalBtnText = submitBtn.innerHTML;
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="loading-spinner"></span> Creating your account...';
+            document.getElementById('companyName').disabled = true;
+
+            try {
+                const response = await fetch(`${PROVISIONING_API_URL}/api/auth/complete-signup`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        auth0AccessToken: auth0AccessToken,
+                        companyName: companyName,
+                        planId: pendingSignup?.plan || 'starter',
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.message || 'Signup failed');
+                }
+
+                // Paid plans require Stripe checkout before subscription/webhook can trigger deployment
+                if (data.requiresCheckout && data.checkoutUrl) {
+                    showAlert('Redirecting to secure checkout...', 'success');
+                    window.location.href = data.checkoutUrl;
+                    return;
+                }
+
+                // Clear signup and auth artifacts from browser storage
+                localStorage.removeItem('accessToken');
+                localStorage.removeItem('refreshToken');
+                sessionStorage.removeItem('auth0_access_token');
+                sessionStorage.removeItem('signup_pending');
+                sessionStorage.removeItem('signup_data');
+                sessionStorage.removeItem('auth0_signup_code');
+
+                // Redirect to success page with completion data
+                sessionStorage.setItem('signup_success', JSON.stringify({
+                    email: data.user?.email || pendingSignup.email,
+                    plan: pendingSignup?.plan || 'starter'
+                }));
+                
+                window.location.href = 'success.html';
+
+            } catch (error) {
+                console.error('Signup error:', error);
+                showAlert(error.message || 'Failed to create account. Please try again.');
+                
+                // Re-enable form
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalBtnText;
+                document.getElementById('companyName').disabled = false;
+            }
+        });
+
+        // Load user info on page load
+        loadUserInfo();
+    </script>
+</body>
+</html>
             box-shadow: 0 5px 20px rgba(59, 130, 246, 0.4);
         }
 
@@ -349,29 +719,13 @@
                 sessionStorage.removeItem('signup_data');
                 sessionStorage.removeItem('auth0_signup_code');
 
-                // Show provisioning in progress message
-                const form = document.getElementById('signupForm');
-                form.innerHTML = `
-                    <div style="text-align: center; padding: 2rem;">
-                        <div style="font-size: 3rem; margin-bottom: 1rem;">✅</div>
-                        <h2 style="color: var(--accent-primary); margin-bottom: 1rem;">Account Created Successfully!</h2>
-                        <p style="color: var(--text-secondary); margin-bottom: 1.5rem; line-height: 1.6;">
-                            We're setting up your <strong>${pendingSignup?.plan || 'starter'}</strong> instance now.<br>
-                            This typically takes 5-10 minutes.
-                        </p>
-                        <div style="background: var(--bg-secondary); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem;">
-                            <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
-                                📧 We'll send you an email at <strong style="color: var(--text-primary);">${data.user?.email || ''}</strong> when your instance is ready.
-                            </p>
-                            <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 0;">
-                                In the meantime, check your inbox for the confirmation email.
-                            </p>
-                        </div>
-                        <a href="index.html" class="btn-submit" style="display: inline-block; text-decoration: none; margin-top: 1rem;">
-                            Back to Home
-                        </a>
-                    </div>
-                `;
+                // Redirect to success page with completion data
+                sessionStorage.setItem('signup_success', JSON.stringify({
+                    email: data.user?.email || pendingSignup.email,
+                    plan: pendingSignup?.plan || 'starter'
+                }));
+                
+                window.location.href = 'success.html';
 
             } catch (error) {
                 console.error('Signup error:', error);

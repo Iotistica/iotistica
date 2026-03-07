@@ -28,6 +28,36 @@ router.use('/nr/storage', async (req, res, next) => {
 
   await jwtAuth(req, res, next);
 });
+  // JWT-only authentication for Node-RED storage routes.
+  router.use('/nr/storage', async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
+    const tokenParts = bearerToken.split('.');
+    const isJwtLike = tokenParts.length === 3;
+
+    logger.info('[NR-STORAGE] Incoming request', {
+      path: req.path,
+      method: req.method,
+      hasAuthHeader: !!authHeader,
+      tokenPartCount: tokenParts.length,
+      isJwtLike
+    });
+
+    if (!isJwtLike) {
+      logger.warn('[NR-STORAGE] Invalid token format', {
+        expectedParts: 3,
+        actualParts: tokenParts.length
+      });
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'JWT token required for Node-RED storage routes. Use Authorization: Bearer <jwt>'
+      });
+      return;
+    }
+
+    logger.info('[NR-STORAGE] Token valid, calling jwtAuth');
+    await jwtAuth(req, res, next);
+  });
 
 /**
  * GET /api/v1/nr/storage/flows

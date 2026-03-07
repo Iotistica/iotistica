@@ -87,3 +87,8 @@ document.querySelectorAll('.service-card, .about-feature, .stat-card, .contact-c
     el.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
     observer.observe(el);
 });
+
+// Open signup page (full page, not modal)
+function openSignupModal() {
+    window.location.href = 'signup.html';
+}

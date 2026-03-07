@@ -57,26 +57,25 @@ spec:
               value: {{ index $noderedEnv "NODE_RED_ENABLE_SAFE_MODE" | default "false" | quote }}
             - name: NODE_RED_ENABLE_PROJECTS
               value: {{ index $noderedEnv "NODE_RED_ENABLE_PROJECTS" | default "false" | quote }}
-            - name: NODE_RED_ENABLE_UI_AUTH
-              value: {{ index $noderedEnv "NODE_RED_ENABLE_UI_AUTH" | default "false" | quote }}
             
-            # API service URL (internal cluster DNS)
+            # API service URL for nr-storage plugin (internal cluster DNS)
             - name: IOTISTIC_BASE_URL
               value: "http://{{ include "iotistic.fullname" . }}-api:{{ .Values.api.port }}"
             
-            # Node-RED external URL (for bridge token callback)
-            - name: NODERED_BASE_URL
-              value: {{ .Values.nodered.baseUrl | quote }}
-            
+            # Node-RED title
+            - name: NODERED_TITLE
+              value: {{ .Values.nodered.baseUrl | trimPrefix "https://" }}
+
             # Content Security Policy configuration
             - name: NODE_RED_FRAME_ANCESTORS
               value: {{ index $noderedEnv "NODE_RED_FRAME_ANCESTORS" | default "'self' https://*.iotistica.com https://*.iotistic.ca" | quote }}
             - name: NODE_RED_FONT_SRC
               value: {{ index $noderedEnv "NODE_RED_FONT_SRC" | default "'self' data: https:" | quote }}
-            
-            # Storage token for API authentication
+            - name: NODE_RED_ENABLE_UI_AUTH
+              value: {{ index $noderedEnv "NODE_RED_ENABLE_UI_AUTH" | default "false" | quote }}
+            # Storage token for API authentication (used by nr-storage plugin)
             {{- if .Values.nodered.storageToken }}
-            - name: IOTISTIC_NR_TOKEN
+            - name: TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.nodered.storageToken.secretName }}
@@ -114,11 +113,18 @@ spec:
   hostnames:
     - {{ .Values.nodered.baseUrl | trimPrefix "https://" }}
   rules:
-    - backendRefs:
+     - filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Content-Security-Policy
+                value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' wss: ws: https: http:; frame-ancestors 'self' https://*.iotistica.com https://*.iotistic.ca"
+       backendRefs:
         - group: ""
           kind: Service
           name: {{ include "iotistic.fullname" . }}-nodered
           port: {{ .Values.nodered.port }}
           weight: 1
+      
 {{- end }}
 {{- end }}

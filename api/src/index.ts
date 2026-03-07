@@ -387,9 +387,6 @@ app.use(API_BASE, globalApiRateLimit);
 // This keeps versioning logic centralized and prevents mount path inconsistencies
 // ============================================================================
 
-// Profile endpoints - require JWT authentication
-app.use(`${API_BASE}/profiles`, profileRoutes);
-
 // Authentication routes - strict rate limiting (brute-force protection)
 app.use(`${API_BASE}/auth`, authRateLimit, authRoutes);
 
