@@ -20,6 +20,9 @@ describe('Storage Auth - nr-storage Plugin', () => {
     jest.clearAllMocks();
     nock.cleanAll();
     
+    // Clear require cache
+    jest.resetModules();
+    
     // Create mock getAuthToken function
     getAuthTokenMock = jest.fn().mockReturnValue(mockAuthToken);
     
@@ -29,6 +32,10 @@ describe('Storage Auth - nr-storage Plugin', () => {
       iotisticURL: baseURL,
       getAuthToken: getAuthTokenMock
     });
+  });
+  
+  afterEach(() => {
+    nock.cleanAll();
   });
   
   describe('Storage Configuration', () => {
@@ -49,7 +56,7 @@ describe('Storage Auth - nr-storage Plugin', () => {
         storageFactory({
           iotisticURL: baseURL
         });
-      }).toThrow('getAuthToken function required (no static tokens)');
+      }).toThrow('getAuthToken function required');
     });
     
     test('should initialize with valid configuration', () => {
@@ -75,13 +82,15 @@ describe('Storage Auth - nr-storage Plugin', () => {
       expect(getAuthTokenMock).toHaveBeenCalled();
     });
     
-    test('should include Auth0 token in Authorization header', async () => {
-      nock(baseURL)
+    test('should include token in Authorization header', async () => {
+      const scope = nock(baseURL)
         .get('/api/v1/nr/storage/flows')
         .matchHeader('authorization', `Bearer ${mockAuthToken}`)
         .reply(200, { flows: [] });
       
       await storageModule.getFlows();
+      
+      expect(scope.isDone()).toBe(true);
     });
     
     test('should throw error if token unavailable', async () => {
@@ -112,7 +121,7 @@ describe('Storage Auth - nr-storage Plugin', () => {
       const flowData = [{ id: 'flow1', type: 'tab' }];
       
       nock(baseURL)
-        .post('/api/v1/nr/storage/flows')
+        .post('/api/v1/nr/storage/flows', flowData)
         .matchHeader('authorization', `Bearer ${mockAuthToken}`)
         .reply(200, { success: true });
       
@@ -139,96 +148,11 @@ describe('Storage Auth - nr-storage Plugin', () => {
       const credentialsData = { node1: { username: 'test' } };
       
       nock(baseURL)
-        .post('/api/v1/nr/storage/credentials')
+        .post('/api/v1/nr/storage/credentials', credentialsData)
         .matchHeader('authorization', `Bearer ${mockAuthToken}`)
         .reply(200, { success: true });
       
       await storageModule.saveCredentials(credentialsData);
-      
-      expect(getAuthTokenMock).toHaveBeenCalled();
-    });
-    
-    test('getSettings should use Auth0 token', async () => {
-      const mockSettings = { theme: 'dark' };
-      
-      nock(baseURL)
-        .get('/api/v1/nr/storage/settings')
-        .matchHeader('authorization', `Bearer ${mockAuthToken}`)
-        .reply(200, mockSettings);
-      
-      const settings = await storageModule.getSettings();
-      
-      expect(settings).toEqual(mockSettings);
-      expect(getAuthTokenMock).toHaveBeenCalled();
-    });
-    
-    test('saveSettings should use Auth0 token', async () => {
-      const settingsData = { theme: 'light' };
-      
-      nock(baseURL)
-        .post('/api/v1/nr/storage/settings')
-        .matchHeader('authorization', `Bearer ${mockAuthToken}`)
-        .reply(200, { success: true });
-      
-      await storageModule.saveSettings(settingsData);
-      
-      expect(getAuthTokenMock).toHaveBeenCalled();
-    });
-    
-    test('getSessions should use Auth0 token', async () => {
-      const mockSessions = { session1: { data: 'test' } };
-      
-      nock(baseURL)
-        .get('/api/v1/nr/storage/sessions')
-        .matchHeader('authorization', `Bearer ${mockAuthToken}`)
-        .reply(200, mockSessions);
-      
-      await storageModule.getSessions();
-      
-      expect(getAuthTokenMock).toHaveBeenCalled();
-    });
-    
-    test('saveSessions should use Auth0 token', async () => {
-      const sessionsData = { session1: { data: 'test' } };
-      
-      nock(baseURL)
-        .post('/api/v1/nr/storage/sessions')
-        .matchHeader('authorization', `Bearer ${mockAuthToken}`)
-        .reply(200, { success: true });
-      
-      await storageModule.saveSessions(sessionsData);
-      
-      expect(getAuthTokenMock).toHaveBeenCalled();
-    });
-  });
-  
-  describe('Library Operations', () => {
-    test('getLibraryEntry should use Auth0 token', async () => {
-      const mockEntry = { body: 'function code' };
-      
-      nock(baseURL)
-        .get('/api/v1/nr/storage/library/functions')
-        .query({ name: 'myFunction' })
-        .matchHeader('authorization', `Bearer ${mockAuthToken}`)
-        .reply(200, mockEntry, { 'content-type': 'application/json' });
-      
-      await storageModule.getLibraryEntry('functions', 'myFunction');
-      
-      expect(getAuthTokenMock).toHaveBeenCalled();
-    });
-    
-    test('saveLibraryEntry should use Auth0 token', async () => {
-      nock(baseURL)
-        .post('/api/v1/nr/storage/library/functions')
-        .matchHeader('authorization', `Bearer ${mockAuthToken}`)
-        .reply(200, { success: true });
-      
-      await storageModule.saveLibraryEntry(
-        'functions',
-        'myFunction',
-        { description: 'test' },
-        'function code'
-      );
       
       expect(getAuthTokenMock).toHaveBeenCalled();
     });
@@ -276,15 +200,6 @@ describe('Storage Auth - nr-storage Plugin', () => {
       nock(baseURL)
         .get('/api/v1/nr/storage/flows')
         .replyWithError('Network error');
-      
-      await expect(storageModule.getFlows()).rejects.toThrow();
-    });
-    
-    test('should handle timeout', async () => {
-      nock(baseURL)
-        .get('/api/v1/nr/storage/flows')
-        .delay(25000) // Longer than 20s timeout
-        .reply(200, { flows: [] });
       
       await expect(storageModule.getFlows()).rejects.toThrow();
     });

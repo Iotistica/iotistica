@@ -4,12 +4,15 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { LicenseValidator, LicenseData } from '../services/license-validator';
+import { LicenseValidator } from '../services/license-validator';
+
+// Type for boolean feature keys only
+type BooleanFeatureKey = 'canExecuteJobs' | 'canScheduleJobs' | 'canRemoteAccess' | 'canOtaUpdates' | 'canExportData' | 'hasAdvancedAlerts' | 'hasCustomDashboards';
 
 /**
- * Middleware to check if feature is enabled
+ * Middleware to check if feature is enabled (boolean features only)
  */
-export function requireFeature(feature: keyof LicenseData['features']) {
+export function requireFeature(feature: BooleanFeatureKey) {
   return (req: Request, res: Response, next: NextFunction) => {
     const license = LicenseValidator.getInstance();
     

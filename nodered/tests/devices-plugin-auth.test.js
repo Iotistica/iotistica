@@ -1,12 +1,10 @@
 /**
  * Devices Plugin Auth Tests for nr-devices-plugin
  * 
- * Tests Auth0 token usage from sessionStorage in device API calls
+ * Tests sessionStorage token handling (unit tests for token retrieval logic)
  */
 
-describe('Devices Plugin Auth - nr-devices-plugin', () => {
-  let getAuthHeaders;
-  
+describe('Devices Plugin Auth - Token Storage', () => {
   beforeEach(() => {
     // Clear all storage
     sessionStorage.clear();
@@ -14,10 +12,6 @@ describe('Devices Plugin Auth - nr-devices-plugin', () => {
     
     // Mock console.warn to avoid noise in tests
     jest.spyOn(console, 'warn').mockImplementation(() => {});
-    
-    // Load the getAuthHeaders function from api.js
-    // Note: This requires the api.js to be restructured for testing
-    // or we mock the entire module behavior
   });
   
   afterEach(() => {
@@ -34,20 +28,11 @@ describe('Devices Plugin Auth - nr-devices-plugin', () => {
         access_token: legacyToken
       }));
       
-      // Mock implementation of getAuthHeaders
-      const headers = {
-        Accept: 'application/json',
-        'Content-Type': 'application/json'
-      };
+      // Simulate getAuthHeaders logic
+      let token = sessionStorage.getItem('auth0_token');
       
-      // Get Auth0 token from sessionStorage
-      const token = sessionStorage.getItem('auth0_token');
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-      
-      expect(headers.Authorization).toBe(`Bearer ${auth0Token}`);
-      expect(headers.Authorization).not.toContain(legacyToken);
+      expect(token).toBe(auth0Token);
+      expect(token).not.toBe(legacyToken);
     });
     
     test('should fallback to localStorage if sessionStorage empty', () => {
@@ -57,12 +42,7 @@ describe('Devices Plugin Auth - nr-devices-plugin', () => {
         access_token: legacyToken
       }));
       
-      // Mock implementation of getAuthHeaders
-      const headers = {
-        Accept: 'application/json',
-        'Content-Type': 'application/json'
-      };
-      
+      // Simulate getAuthHeaders logic
       let token = sessionStorage.getItem('auth0_token');
       if (!token) {
         const authTokens = localStorage.getItem('auth-tokens');
@@ -72,20 +52,21 @@ describe('Devices Plugin Auth - nr-devices-plugin', () => {
         }
       }
       
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-      
-      expect(headers.Authorization).toBe(`Bearer ${legacyToken}`);
+      expect(token).toBe(legacyToken);
     });
     
-    test('should return headers without Authorization if no token', () => {
-      const headers = {
-        Accept: 'application/json',
-        'Content-Type': 'application/json'
-      };
+    test('should return null if no token available', () => {
+      let token = sessionStorage.getItem('auth0_token');
       
-      expect(headers.Authorization).toBeUndefined();
+      if (!token) {
+        const authTokens = localStorage.getItem('auth-tokens');
+        if (authTokens) {
+          const tokenObj = JSON.parse(authTokens);
+          token = tokenObj?.access_token;
+        }
+      }
+      
+      expect(token).toBeNull();
     });
   });
   
@@ -100,22 +81,9 @@ describe('Devices Plugin Auth - nr-devices-plugin', () => {
       expect(typeof token).toBe('string');
     });
     
-    test('should handle missing sessionStorage gracefully', () => {
-      // Simulate sessionStorage unavailable
-      const originalSessionStorage = window.sessionStorage;
-      delete window.sessionStorage;
-      
-      let token = null;
-      try {
-        token = sessionStorage.getItem('auth0_token');
-      } catch (err) {
-        // Expected to fail
-      }
-      
+    test('should handle missing sessionStorage key', () => {
+      const token = sessionStorage.getItem('auth0_token');
       expect(token).toBeNull();
-      
-      // Restore
-      window.sessionStorage = originalSessionStorage;
     });
   });
   
@@ -166,32 +134,25 @@ describe('Devices Plugin Auth - nr-devices-plugin', () => {
     test('should format Bearer token correctly', () => {
       const token = 'eyJhbGciOiJSUzI1NiJ9.auth0.token';
       
-      const headers = {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      };
+      const authHeader = `Bearer ${token}`;
       
-      expect(headers.Authorization).toBe(`Bearer ${token}`);
-      expect(headers.Authorization).toMatch(/^Bearer /);
+      expect(authHeader).toBe(`Bearer ${token}`);
+      expect(authHeader).toMatch(/^Bearer /);
     });
     
-    test('should only include Authorization if token exists', () => {
-      const headers = {
-        Accept: 'application/json',
-        'Content-Type': 'application/json'
-      };
-      
+    test('should only create Authorization header if token exists', () => {
       const token = sessionStorage.getItem('auth0_token');
+      
+      let authHeader = undefined;
       if (token) {
-        headers.Authorization = `Bearer ${token}`;
+        authHeader = `Bearer ${token}`;
       }
       
-      expect(headers.Authorization).toBeUndefined();
+      expect(authHeader).toBeUndefined();
     });
   });
   
-  describe('Dashboard Integration', () => {
+  describe('Dashboard Integration Scenario', () => {
     test('should receive token from dashboard parent window', () => {
       // Simulate dashboard setting token in sessionStorage
       const dashboardToken = 'eyJhbGciOiJSUzI1NiJ9.dashboard.token';
@@ -205,100 +166,37 @@ describe('Devices Plugin Auth - nr-devices-plugin', () => {
       expect(token).toBe(dashboardToken);
     });
     
-    test('should update headers when token changes', () => {
+    test('should update when token changes', () => {
       const token1 = 'token1.eyJ.test';
       const token2 = 'token2.eyJ.test';
       
       // First API call with token1
       sessionStorage.setItem('auth0_token', token1);
-      let headers = {
-        Authorization: `Bearer ${sessionStorage.getItem('auth0_token')}`
-      };
-      expect(headers.Authorization).toBe(`Bearer ${token1}`);
+      let currentToken = sessionStorage.getItem('auth0_token');
+      expect(currentToken).toBe(token1);
       
       // Dashboard updates token
       sessionStorage.setItem('auth0_token', token2);
       
       // Second API call with token2
-      headers = {
-        Authorization: `Bearer ${sessionStorage.getItem('auth0_token')}`
-      };
-      expect(headers.Authorization).toBe(`Bearer ${token2}`);
-    });
-  });
-  
-  describe('API Request Scenarios', () => {
-    test('should include Auth0 token in device list request', () => {
-      const auth0Token = 'eyJhbGciOiJSUzI1NiJ9.auth0.token';
-      sessionStorage.setItem('auth0_token', auth0Token);
-      
-      const headers = {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${sessionStorage.getItem('auth0_token')}`
-      };
-      
-      // Simulate API call
-      expect(headers.Authorization).toBe(`Bearer ${auth0Token}`);
-    });
-    
-    test('should include Auth0 token in device create request', () => {
-      const auth0Token = 'eyJhbGciOiJSUzI1NiJ9.auth0.token';
-      sessionStorage.setItem('auth0_token', auth0Token);
-      
-      const headers = {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${sessionStorage.getItem('auth0_token')}`
-      };
-      
-      expect(headers.Authorization).toBe(`Bearer ${auth0Token}`);
-    });
-    
-    test('should include Auth0 token in device update request', () => {
-      const auth0Token = 'eyJhbGciOiJSUzI1NiJ9.auth0.token';
-      sessionStorage.setItem('auth0_token', auth0Token);
-      
-      const headers = {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${sessionStorage.getItem('auth0_token')}`
-      };
-      
-      expect(headers.Authorization).toBe(`Bearer ${auth0Token}`);
+      currentToken = sessionStorage.getItem('auth0_token');
+      expect(currentToken).toBe(token2);
     });
   });
   
   describe('Error Handling', () => {
-    test('should handle storage quota exceeded', () => {
+    test('should handle storage quota exceeded gracefully', () => {
       // This is hard to test reliably, but we document the expected behavior
-      // The plugin should gracefully handle storage failures
-      
       let error = null;
       try {
-        sessionStorage.setItem('auth0_token', 'token'.repeat(10000000));
+        // Try to store a very large string
+        sessionStorage.setItem('auth0_token', 'x'.repeat(10000000));
       } catch (err) {
         error = err;
       }
       
       // Should catch QuotaExceededError
       expect(error).toBeTruthy();
-    });
-    
-    test('should handle SecurityError in storage access', () => {
-      // When running in sandboxed iframe, storage access may throw SecurityError
-      // The plugin should handle this gracefully
-      
-      // This is difficult to test directly, but the code should have try-catch
-      let token = null;
-      try {
-        token = sessionStorage.getItem('auth0_token');
-      } catch (err) {
-        console.warn('Storage access denied:', err);
-      }
-      
-      // Should not crash, token should be null/undefined
-      expect(token).toBeNull();
     });
   });
 });

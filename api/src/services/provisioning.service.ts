@@ -852,7 +852,7 @@ export class ProvisioningService {
       }
       
       // Single source of truth for target state generation
-      const { apps, config } = await generateDefaultTargetState(licenseData, simulatorOptions);
+      const { apps, config } = await generateDefaultTargetState(licenseData);
       
       // Get required agent version from cloud policy (system_config)
       const requiredAgentVersion = await configService.get('required_agent_version');
