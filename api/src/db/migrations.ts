@@ -6,6 +6,7 @@
  */
 
 import { query, transaction } from './connection';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import logger from '../utils/logger';
@@ -117,18 +118,27 @@ async function getAppliedMigrations(): Promise<AppliedMigration[]> {
 
 /**
  * Get all migration files from migrations directory
+ *
+ * Path Resolution:
+ * - Default: Resolves to `database/migrations/` from project root
+ * - Development (ts-node): __dirname = src/db/ → ../../database/migrations
+ * - Production (compiled): __dirname = dist/db/ → ../../database/migrations
+ * - Override: Set MIGRATIONS_DIR env var to use a custom absolute path
+ *
+ * @throws Returns empty array if directory not found (logs warning)
  */
 function getMigrationFiles(): Migration[] {
-  // When compiled, __dirname is dist/db/, so we need to go up to project root
-  // In development (ts-node): __dirname = src/db/
-  // In production (compiled): __dirname = dist/db/
-  // Both need to find: database/migrations/
-  const migrationsDir = path.join(__dirname, '../../database/migrations');
-  
+  // Allow override via environment variable for custom deployments
+  const migrationsDir = process.env.MIGRATIONS_DIR
+    ? path.resolve(process.env.MIGRATIONS_DIR)
+    : path.resolve(__dirname, '../../database/migrations');
+
   if (!fs.existsSync(migrationsDir)) {
-    logger.warn('   Migrations directory not found:', migrationsDir);
-    logger.warn(`   Looked in: ${migrationsDir}`);
-    logger.warn(`   __dirname: ${__dirname}`);
+    logger.warn('Migrations directory not found', {
+      path: migrationsDir,
+      __dirname,
+      env_override: process.env.MIGRATIONS_DIR || 'not set',
+    });
     return [];
   }
 
@@ -142,7 +152,7 @@ function getMigrationFiles(): Migration[] {
     // Extract migration number from filename (e.g., "001_add_security_tables.sql" -> 1)
     const match = filename.match(/^(\d+)_(.+)\.sql$/);
     if (!match) {
-      logger.warn(`  Skipping invalid migration filename: ${filename}`);
+      logger.warn('Skipping invalid migration filename', { filename });
       continue;
     }
 
@@ -161,7 +171,6 @@ function getMigrationFiles(): Migration[] {
  * Calculate simple checksum for migration file
  */
 function calculateChecksum(sql: string): string {
-  const crypto = require('crypto');
   return crypto.createHash('sha256').update(sql).digest('hex');
 }
 
@@ -187,8 +196,8 @@ async function applyMigration(migration: Migration): Promise<void> {
         await client.query(executableSql);
         
         // Record migration as applied
-        const executionTime = Date.now() - startTime;
         const checksum = calculateChecksum(migration.sql);
+        const executionTime = Date.now() - startTime;
         
         await client.query(
           `INSERT INTO schema_migrations 
@@ -221,6 +230,28 @@ async function applyMigration(migration: Migration): Promise<void> {
 }
 
 /**
+ * Apply all pending migrations in order
+ */
+async function applyPendingMigrations(pendingMigrations: Migration[]): Promise<void> {
+  logger.info(`🔨 Found ${pendingMigrations.length} pending migration(s):\n`);
+
+  for (const migration of pendingMigrations) {
+    try {
+      await applyMigration(migration);
+    } catch (error) {
+      logger.error(`Migration ${migration.id} failed`, {
+        error,
+        filename: migration.filename,
+        migrationId: migration.id,
+      });
+      throw new Error(`Migration ${migration.id} failed: ${(error as Error).message}`);
+    }
+  }
+
+  logger.info(`\n Successfully applied ${pendingMigrations.length} migration(s)\n`);
+}
+
+/**
  * Run all pending migrations
  */
 export async function runMigrations(): Promise<void> {
@@ -246,7 +277,6 @@ export async function runMigrations(): Promise<void> {
       return;
     }
     
-    
     // Find pending migrations
     const pendingMigrations = allMigrations.filter(m => !appliedIds.has(m.id));
     
@@ -255,23 +285,11 @@ export async function runMigrations(): Promise<void> {
       return;
     }
     
-    logger.info(`🔨 Found ${pendingMigrations.length} pending migration(s):\n`);
-    
-    // Apply each pending migration in order
-    for (const migration of pendingMigrations) {
-      try {
-        await applyMigration(migration);
-      } catch (error) {
-        console.error(`\n Migration ${migration.id} failed:`, error);
-        console.error(`   File: ${migration.filename}`);
-        throw new Error(`Migration ${migration.id} failed: ${(error as Error).message}`);
-      }
-    }
-    
-    logger.info(`\n Successfully applied ${pendingMigrations.length} migration(s)\n`);
+    // Apply pending migrations
+    await applyPendingMigrations(pendingMigrations);
     
   } catch (error) {
-    console.error(' Migration system error:', error);
+    logger.error('Migration system error', { error });
     throw error;
   }
 }
