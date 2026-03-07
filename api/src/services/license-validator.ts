@@ -7,6 +7,7 @@
 import jwt from 'jsonwebtoken';
 import fs from 'fs';
 import { SystemConfigModel } from '../db/system-config-model';
+import logger from '../utils/logger';
 
 export interface LicenseData {
   customerId: string;
@@ -53,6 +54,16 @@ export interface LicenseData {
   nbf?: number; // JWT not before timestamp
 }
 
+type BooleanFeatureKey = {
+  [K in keyof LicenseData['features']]: LicenseData['features'][K] extends boolean ? K : never;
+}[keyof LicenseData['features']];
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function daysBetween(laterDate: Date, earlierDate: Date): number {
+  return Math.ceil((laterDate.getTime() - earlierDate.getTime()) / MS_PER_DAY);
+}
+
 export class LicenseValidator {
   private static instance: LicenseValidator;
   private licenseData: LicenseData | null = null;
@@ -67,18 +78,21 @@ export class LicenseValidator {
     if (keyPath) {
       try {
         const key = fs.readFileSync(keyPath, 'utf8');
-        console.log(`✅ License public key loaded from file: ${keyPath}`);
+        logger.info('License public key loaded from file', { keyPath });
         return key;
       } catch (error: any) {
-        console.error(`❌ Failed to read license public key from ${keyPath}:`, error.message);
-        console.warn('   Falling back to LICENSE_PUBLIC_KEY environment variable');
+        logger.error('Failed to read license public key from file', {
+          keyPath,
+          message: error?.message,
+        });
+        logger.warn('Falling back to LICENSE_PUBLIC_KEY environment variable');
       }
     }
     
     // Fallback: env var (convert \n literals to actual newlines)
     const envKey = (process.env.LICENSE_PUBLIC_KEY || '').replace(/\\n/g, '\n');
     if (envKey) {
-      console.log('✅ License public key loaded from environment variable');
+      logger.info('License public key loaded from environment variable');
     }
     return envKey;
   })();
@@ -99,7 +113,7 @@ export class LicenseValidator {
     const licenseKey = process.env.IOTISTIC_LICENSE_KEY;
     
     if (!licenseKey) {
-      console.warn('⚠️  No license key found. Running in unlicensed mode (limited features).');
+      logger.warn('No license key found. Running in unlicensed mode (limited features)');
       this.licenseData = this.getDefaultUnlicensedMode();
       return;
     }
@@ -111,39 +125,39 @@ export class LicenseValidator {
       // Cache license data in system_config
       await SystemConfigModel.set('license_data', this.licenseData);
       await SystemConfigModel.set('license_last_validated', new Date().toISOString());
-      
-      console.log(`✅ License validated for customer: ${this.licenseData.customerName}`);
-      console.log(`   Plan: ${this.licenseData.plan.toUpperCase()}`);
-      console.log(`   Max Devices: ${this.licenseData.features.maxDevices}`);
-      console.log(`   Subscription Status: ${this.licenseData.subscription.status}`);
+
+      logger.info('License validated successfully', {
+        customerId: this.licenseData.customerId,
+        plan: this.licenseData.plan,
+        maxDevices: this.licenseData.features.maxDevices,
+        subscriptionStatus: this.licenseData.subscription.status,
+      });
       
       if (this.licenseData.trial.isTrialMode) {
-        const daysLeft = Math.ceil(
-          (new Date(this.licenseData.trial.expiresAt!).getTime() - Date.now()) / (24 * 60 * 60 * 1000)
-        );
-        console.log(`   ⏰ TRIAL MODE - ${daysLeft} days remaining`);
+        const daysLeft = daysBetween(new Date(this.licenseData.trial.expiresAt!), new Date());
+        logger.info('Trial mode active', { daysRemaining: Math.max(0, daysLeft) });
       }
     } catch (error) {
-      console.error('❌ License validation failed:', error);
+      logger.error('License validation failed', { error });
       
       // Try to load cached license (offline mode)
       const cachedLicense = await SystemConfigModel.get<LicenseData>('license_data');
       const lastValidated = await SystemConfigModel.get<string>('license_last_validated');
       
       if (cachedLicense && lastValidated) {
-        const daysSinceValidation = Math.floor(
-          (Date.now() - new Date(lastValidated).getTime()) / (24 * 60 * 60 * 1000)
-        );
+        const daysSinceValidation = Math.floor(daysBetween(new Date(), new Date(lastValidated)));
         
         if (daysSinceValidation <= 30) {
-          console.warn(`⚠️  Using cached license (offline mode, last validated ${daysSinceValidation} days ago)`);
+          logger.warn('Using cached license in offline mode', {
+            daysSinceValidation,
+          });
           this.licenseData = cachedLicense;
           return;
         }
       }
       
       // Fallback to unlicensed mode
-      console.warn('⚠️  Entering unlicensed mode (limited features)');
+      logger.warn('Entering unlicensed mode (limited features)');
       this.licenseData = this.getDefaultUnlicensedMode();
     }
   }
@@ -195,6 +209,10 @@ export class LicenseValidator {
    * Get default unlicensed mode (very limited)
    */
   private getDefaultUnlicensedMode(): LicenseData {
+    const unlicensedTrialDays = 7;
+    const expiresAtDate = new Date(Date.now() + unlicensedTrialDays * MS_PER_DAY);
+    const expiresAtIso = expiresAtDate.toISOString();
+
     return {
       customerId: 'unlicensed',
       customerName: 'Unlicensed Mode',
@@ -217,14 +235,14 @@ export class LicenseValidator {
       },
       trial: {
         isTrialMode: true,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
+        expiresAt: expiresAtIso,
       },
       subscription: {
         status: 'trialing',
-        currentPeriodEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        currentPeriodEndsAt: expiresAtIso,
       },
       issuedAt: Date.now() / 1000,
-      expiresAt: (Date.now() / 1000) + (7 * 24 * 60 * 60), // 7 days
+      expiresAt: Math.floor(expiresAtDate.getTime() / 1000),
     };
   }
 
@@ -241,8 +259,16 @@ export class LicenseValidator {
   /**
    * Check if feature is enabled
    */
-  hasFeature(feature: keyof LicenseData['features']): boolean {
+  hasFeature(feature: BooleanFeatureKey): boolean {
     return this.getLicense().features[feature] === true;
+  }
+
+  /**
+   * Dynamic feature flag check for forward compatibility when new boolean flags are added.
+   */
+  hasFeatureFlag(feature: string): boolean {
+    const featureValue = (this.getLicense().features as Record<string, unknown>)[feature];
+    return featureValue === true;
   }
 
   /**
@@ -275,11 +301,9 @@ export class LicenseValidator {
     if (!license.trial.isTrialMode || !license.trial.expiresAt) {
       return null;
     }
-    
-    const daysLeft = Math.ceil(
-      (new Date(license.trial.expiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000)
-    );
-    
+
+    const daysLeft = daysBetween(new Date(license.trial.expiresAt), new Date());
+
     return Math.max(0, daysLeft);
   }
 }

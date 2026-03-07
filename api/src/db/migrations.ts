@@ -5,7 +5,7 @@
  * Tracks which migrations have been applied in a migrations table
  */
 
-import { query, transaction } from './connection';
+import { getClient, query, transaction } from './connection';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -21,12 +21,18 @@ interface Migration {
 interface AppliedMigration {
   id: number;
   name: string;
+  filename: string;
+  checksum: string | null;
   applied_at: Date;
 }
 
 interface SanitizedMigrationSql {
   sql: string;
   removedStatementCount: number;
+}
+
+interface MigrationExecutionOptions {
+  useTransaction: boolean;
 }
 
 function isAppRoleMigrationContext(): boolean {
@@ -84,6 +90,49 @@ function getExecutableMigrationSql(migration: Migration): SanitizedMigrationSql 
   return sanitized;
 }
 
+function getMigrationExecutionOptions(sql: string): MigrationExecutionOptions {
+  const noTransactionMarker = /^\s*--\s*NO\s+TRANSACTION\s*$/im;
+  return {
+    useTransaction: !noTransactionMarker.test(sql),
+  };
+}
+
+function getDuplicateMigrationIds(ids: number[]): number[] {
+  return Array.from(new Set(ids.filter((value, index, all) => all.indexOf(value) !== index)));
+}
+
+function isTransientMigrationError(error: unknown): boolean {
+  const err = error as { code?: string; message?: string };
+  const code = err?.code || '';
+  const message = (err?.message || '').toLowerCase();
+
+  const transientPgCodes = new Set([
+    '40001', // serialization_failure
+    '40P01', // deadlock_detected
+    '53300', // too_many_connections
+    '57P01', // admin_shutdown
+    '57P03', // cannot_connect_now
+    '08000',
+    '08001',
+    '08003',
+    '08004',
+    '08006',
+    '08P01',
+  ]);
+
+  if (transientPgCodes.has(code)) {
+    return true;
+  }
+
+  return (
+    message.includes('timeout') ||
+    message.includes('timed out') ||
+    message.includes('connection reset') ||
+    message.includes('connection terminated') ||
+    message.includes('temporarily unavailable')
+  );
+}
+
 /**
  * Ensure migrations tracking table exists
  */
@@ -109,7 +158,7 @@ async function ensureMigrationsTable(): Promise<void> {
  */
 async function getAppliedMigrations(): Promise<AppliedMigration[]> {
   const result = await query<AppliedMigration>(`
-    SELECT migration_number as id, name, applied_at 
+    SELECT migration_number as id, name, filename, checksum, applied_at
     FROM schema_migrations 
     ORDER BY migration_number ASC
   `);
@@ -164,6 +213,12 @@ function getMigrationFiles(): Migration[] {
     migrations.push({ id, name, filename, sql });
   }
 
+  const ids = migrations.map(m => m.id);
+  const duplicates = getDuplicateMigrationIds(ids);
+  if (duplicates.length > 0) {
+    throw new Error(`Duplicate migration IDs detected: ${duplicates.join(', ')}`);
+  }
+
   return migrations;
 }
 
@@ -174,57 +229,151 @@ function calculateChecksum(sql: string): string {
   return crypto.createHash('sha256').update(sql).digest('hex');
 }
 
+async function isMigrationAlreadyRecorded(migrationNumber: number): Promise<boolean> {
+  const result = await query<{ exists: boolean }>(
+    'SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE migration_number = $1) as exists',
+    [migrationNumber]
+  );
+  return Boolean(result.rows[0]?.exists);
+}
+
+function verifyAppliedMigrationChecksums(
+  appliedMigrations: AppliedMigration[],
+  allMigrations: Migration[]
+): void {
+  const migrationById = new Map(allMigrations.map(m => [m.id, m]));
+  const mismatches: Array<{ id: number; filename: string }> = [];
+
+  for (const applied of appliedMigrations) {
+    if (!applied.checksum) {
+      continue;
+    }
+
+    const migrationFile = migrationById.get(applied.id);
+    if (!migrationFile) {
+      continue;
+    }
+
+    const currentChecksum = calculateChecksum(migrationFile.sql);
+    if (currentChecksum !== applied.checksum) {
+      mismatches.push({ id: applied.id, filename: migrationFile.filename });
+    }
+  }
+
+  if (mismatches.length > 0) {
+    logger.warn('Checksum drift detected in applied migration files', {
+      count: mismatches.length,
+      migrations: mismatches,
+    });
+  }
+}
+
 /**
  * Apply a single migration with retry logic
  */
 async function applyMigration(migration: Migration): Promise<void> {
   const startTime = Date.now();
   const { sql: executableSql } = getExecutableMigrationSql(migration);
-  
-  logger.info(` Applying migration ${migration.id}: ${migration.name}`);
-  
-  let retries = 3;
+  const executionOptions = getMigrationExecutionOptions(executableSql);
+
+  logger.info(`Applying migration ${migration.id}: ${migration.name}`);
+
+  const maxAttempts = 3;
+  let attempt = 0;
   let lastError: Error | undefined;
-  
-  while (retries > 0) {
+
+  while (attempt < maxAttempts) {
+    attempt += 1;
+
     try {
-      await transaction(async (client) => {
-        // Increase statement timeout for migrations (some take longer, e.g., TimescaleDB extension)
-        await client.query('SET statement_timeout = 600000'); // 10 minutes for migrations
-        
-        // Execute migration SQL
-        await client.query(executableSql);
-        
-        // Record migration as applied
-        const checksum = calculateChecksum(migration.sql);
-        const executionTime = Date.now() - startTime;
-        
-        await client.query(
-          `INSERT INTO schema_migrations 
-           (migration_number, name, filename, checksum, execution_time_ms) 
-           VALUES ($1, $2, $3, $4, $5)`,
-          [migration.id, migration.name, migration.filename, checksum, executionTime]
-        );
-        
-        // Reset timeout to default
-        await client.query('RESET statement_timeout');
-      });
-      
+      const checksum = calculateChecksum(migration.sql);
+
+      if (executionOptions.useTransaction) {
+        await transaction(async (client) => {
+          // Increase statement timeout for migrations (some take longer, e.g., extension setup)
+          await client.query('SET statement_timeout = 600000');
+
+          // Execute migration SQL
+          await client.query(executableSql);
+
+          // Record migration as applied
+          const executionTime = Date.now() - startTime;
+          await client.query(
+            `INSERT INTO schema_migrations
+             (migration_number, name, filename, checksum, execution_time_ms)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [migration.id, migration.name, migration.filename, checksum, executionTime]
+          );
+
+          // Reset timeout to default
+          await client.query('RESET statement_timeout');
+        });
+      } else {
+        const client = await getClient();
+        try {
+          logger.info('Running migration without transaction (-- NO TRANSACTION marker found)', {
+            migration: migration.filename,
+          });
+
+          await client.query('SET statement_timeout = 600000');
+          await client.query(executableSql);
+
+          const executionTime = Date.now() - startTime;
+          await client.query(
+            `INSERT INTO schema_migrations
+             (migration_number, name, filename, checksum, execution_time_ms)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [migration.id, migration.name, migration.filename, checksum, executionTime]
+          );
+        } finally {
+          try {
+            await client.query('RESET statement_timeout');
+          } catch {
+            // Best effort reset; client release still occurs.
+          }
+          client.release();
+        }
+      }
+
       const executionTime = Date.now() - startTime;
-      logger.info(`    Applied in ${executionTime}ms`);
-      return; // Success
-      
+      logger.info(`Applied in ${executionTime}ms`);
+      return;
     } catch (error) {
       lastError = error as Error;
-      retries--;
-      
-      if (retries > 0) {
-        logger.warn(`    Migration failed, retrying... (${retries} attempts left)`);
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s before retry
+
+      // For non-transaction migrations, SQL might have completed even if recording failed.
+      if (!executionOptions.useTransaction) {
+        const alreadyRecorded = await isMigrationAlreadyRecorded(migration.id);
+        if (alreadyRecorded) {
+          logger.warn('Migration was already recorded after error; treating as successful', {
+            migrationId: migration.id,
+            filename: migration.filename,
+          });
+          return;
+        }
+      }
+
+      const transient = isTransientMigrationError(error);
+      const attemptsLeft = maxAttempts - attempt;
+
+      if (attemptsLeft > 0 && transient) {
+        logger.warn('Migration failed with transient error, retrying', {
+          migrationId: migration.id,
+          attemptsLeft,
+          errorCode: (error as { code?: string })?.code,
+        });
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } else if (attemptsLeft > 0 && !transient) {
+        logger.error('Migration failed with non-transient error; skipping retries', {
+          migrationId: migration.id,
+          errorCode: (error as { code?: string })?.code,
+          message: (error as Error).message,
+        });
+        break;
       }
     }
   }
-  
+
   // All retries exhausted
   throw lastError;
 }
@@ -233,7 +382,7 @@ async function applyMigration(migration: Migration): Promise<void> {
  * Apply all pending migrations in order
  */
 async function applyPendingMigrations(pendingMigrations: Migration[]): Promise<void> {
-  logger.info(`🔨 Found ${pendingMigrations.length} pending migration(s):\n`);
+  logger.info(`Found ${pendingMigrations.length} pending migration(s)`);
 
   for (const migration of pendingMigrations) {
     try {
@@ -248,14 +397,14 @@ async function applyPendingMigrations(pendingMigrations: Migration[]): Promise<v
     }
   }
 
-  logger.info(`\n Successfully applied ${pendingMigrations.length} migration(s)\n`);
+  logger.info(`Successfully applied ${pendingMigrations.length} migration(s)`);
 }
 
 /**
  * Run all pending migrations
  */
 export async function runMigrations(): Promise<void> {
-  logger.info(' Checking for database migrations...\n');
+  logger.info('Checking for database migrations...');
   
   try {
     // Ensure migrations tracking table exists
@@ -265,15 +414,17 @@ export async function runMigrations(): Promise<void> {
     const appliedMigrations = await getAppliedMigrations();
     const appliedIds = new Set(appliedMigrations.map(m => m.id));
     
-    logger.info(` Applied migrations: ${appliedMigrations.length}`);
+    logger.info(`Applied migrations: ${appliedMigrations.length}`);
     
     // Get all migration files
     const allMigrations = getMigrationFiles();
-    logger.info(` Total migrations available: ${allMigrations.length}`);
+    logger.info(`Total migrations available: ${allMigrations.length}`);
+
+    verifyAppliedMigrationChecksums(appliedMigrations, allMigrations);
     
     if (allMigrations.length === 0) {
-      logger.warn('  No migration files found!');
-      logger.warn('   This might indicate a path issue.');
+      logger.warn('No migration files found');
+      logger.warn('This might indicate a path issue');
       return;
     }
     
@@ -281,7 +432,7 @@ export async function runMigrations(): Promise<void> {
     const pendingMigrations = allMigrations.filter(m => !appliedIds.has(m.id));
     
     if (pendingMigrations.length === 0) {
-      logger.info(' Database is up to date (no pending migrations)\n');
+      logger.info('Database is up to date (no pending migrations)');
       return;
     }
     
