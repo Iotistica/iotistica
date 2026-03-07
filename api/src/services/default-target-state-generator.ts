@@ -213,7 +213,7 @@ export function generateDefaultTargetStateConfig(
   const features = licenseData.features || {};
   const subscriptionActive = licenseData.subscription?.status === 'active';
 
-  logger.info(`Generating V2 target state for plan: ${plan}, active: ${subscriptionActive}`);
+  logger.info(`Generating target state for plan: ${plan}, active: ${subscriptionActive}`);
 
   // Plan-based adjustments for logging level
   switch (plan) {
