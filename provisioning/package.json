@@ -1,6 +1,6 @@
 {
   "name": "Iotistica-provisioning",
-  "version": "1.0.75",
+  "version": "1.0.76",
   "description": "Provisioning - Stripe integration, license management, and subscription control for Iotistica",
   "main": "dist/index.js",
   "scripts": {
