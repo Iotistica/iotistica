@@ -3,7 +3,7 @@
 
 # Global configuration
 global:
-  namespace: {{CLIENT_ID}}
+  namespace: client-{{CLIENT_ID}}
 redis:
   enabled: false
   tls: false     # No TLS for port 10000
@@ -31,7 +31,7 @@ mosquitto:
   tlsSecret: mosquitto-tls # Secret created by cert-manager
   tlsCertName: mosquitto-tls
   tlsIssuer: letsencrypt-production
-  tlsCommonName: mqtt-{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}
+  tlsCommonName: mqtt-client-{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}
   resources:
     requests:
       cpu: 100m
@@ -53,7 +53,7 @@ mosquitto:
 mqttBroker:
   protocol: mqtt
   #  host: "mqtt2.iotistica.com"
-  host: "{{CLIENT_ID}}-iotistic-mosquitto.{{CLIENT_ID}}.svc.cluster.local"
+  host: "client-{{CLIENT_ID}}-iotistic-mosquitto.client-{{CLIENT_ID}}.svc.cluster.local"
   port: 1883
   useTls: false
   verifyCertificate: false
@@ -67,11 +67,11 @@ api:
   replicas: 1 # Single replica for now
   port: 3002
   serviceType: ClusterIP
-  tlsCommonName: api-{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}
-  cloudApiUrl: "http://{{CLIENT_ID}}-iotistic-api.{{CLIENT_ID}}.svc.cluster.local:3002"
+  tlsCommonName: api-client-{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}
+  cloudApiUrl: "http://client-{{CLIENT_ID}}-iotistic-api.client-{{CLIENT_ID}}.svc.cluster.local:3002"
   # CORS configuration for cross-origin requests from dashboard
   # Use wildcard pattern like "http://*:30000" to allow any IP on NodePort 30000
-  corsOrigins: "https://{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}"
+  corsOrigins: "https://client-{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}"
   resources:
     requests:
       cpu: 100m # Reduced to fit 2-node AKS cluster capacity
@@ -108,10 +108,10 @@ api:
     JWT_REFRESH_TOKEN_EXPIRY: "7d"
   sql:
     # Reference existing Kubernetes secret (recommended for production)
-    SecretName: "sql-credentials-{{CLIENT_ID}}"
+    SecretName: "sql-credentials-client-{{CLIENT_ID}}"
   mqtt:
     # Reference existing Kubernetes secret (recommended for production)
-    SecretName: "mqtt-credentials-{{CLIENT_ID}}"
+    SecretName: "mqtt-credentials-client-{{CLIENT_ID}}"
   redis:
     SecretName: "redis-credentials-master"
     cluster: false # Set to true if using Redis Cluster
@@ -119,10 +119,10 @@ api:
   openai:
     SecretName: "openai-credentials-master"
   jwt:
-    SecretName: "api-jwt-{{CLIENT_ID}}"
+    SecretName: "api-jwt-client-{{CLIENT_ID}}"
   # License configuration (JWT license + public key stored in 1Password)
   license: 
-    SecretName: "api-license-credentials-{{CLIENT_ID}}" 
+    SecretName: "api-license-credentials-client-{{CLIENT_ID}}" 
   publicKey:
     SecretName: "api-license-public-key-master"
   # Prometheus metrics monitoring
@@ -143,16 +143,16 @@ dashboard:
   port: 80
   serviceType: ClusterIP
   #  nodePort: 30000
-  tlsCommonName: "{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}"
+  tlsCommonName: "client-{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}"
   #   - Set to your API ingress URL
-  apiUrl: "https://api-{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}"
+  apiUrl: "https://api-client-{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}"
   
   # Auth0 Configuration (set per-customer/environment)
   auth0:
     domain: "dev-hmwhgxw10boqpmrw.us.auth0.com"  # Auth0 tenant domain
     clientId: "Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR"  # Auth0 Application ID
     audience: "https://{{BASE_DOMAIN}}"  # Auth0 API Identifier
-    callbackUrl: "https://{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}/auth/callback"  # Redirect URI after login
+    callbackUrl: "https://client-{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}/auth/callback"  # Redirect URI after login
     showSocialLogin: "true"  # Show social login options
   
   # Provisioning API URL (billing service for Auth0 token exchange)
@@ -198,7 +198,7 @@ mqttMonitor:
   # See api.mqtt configuration above for security options
   mqtt:
     # Reference existing Kubernetes secret (recommended for production)
-    existingSecret: "mqtt-credentials-{{CLIENT_ID}}"
+    existingSecret: "mqtt-credentials-client-{{CLIENT_ID}}"
 
 
 # Node-RED - Visual flow automation
@@ -215,7 +215,7 @@ nodered:
   baseUrl: "https://nr-{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}"
   # Storage token for API authentication (flows stored in API database)
   storageToken:
-    secretName: "api-jwt-{{CLIENT_ID}}"
+    secretName: "api-jwt-client-{{CLIENT_ID}}"
     secretKey: "token"
   resources:
     requests:

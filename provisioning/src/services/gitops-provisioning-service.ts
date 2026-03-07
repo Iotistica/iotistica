@@ -294,10 +294,11 @@ export class GitOpsProvisioningService {
     const clientBaseDomain = process.env.CLIENT_BASE_DOMAIN || 'iotistica.com';
     const baseDomain = process.env.BASE_DOMAIN || 'api.iotistica.com';
     
+    // Replace placeholders with actual values
+    // Template now contains explicit "client-" prefix where needed (e.g., client-{{CLIENT_ID}})
+    // Node-RED URL uses nr-{{CLIENT_ID}} without client- prefix
     let processedContent = templateContent
-      // Keep Node-RED external URL as nr-<raw-client-id>
-      .replace(/nr-\{\{CLIENT_ID\}\}/g, `nr-${data.clientId}`)
-      .replace(/\{\{CLIENT_ID\}\}/g, `client-${data.clientId}`)
+      .replace(/\{\{CLIENT_ID\}\}/g, data.clientId)
       .replace(/\{\{RELEASE_VERSION\}\}/g, releaseVersion)
       .replace(/\{\{CLIENT_BASE_DOMAIN\}\}/g, clientBaseDomain)
       .replace(/\{\{BASE_DOMAIN\}\}/g, baseDomain);
