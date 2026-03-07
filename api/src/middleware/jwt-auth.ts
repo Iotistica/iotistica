@@ -17,49 +17,6 @@ import jwt, { Secret } from 'jsonwebtoken';
 import { query } from '../db/connection';
 import axios from 'axios';
 
-/**
- * Simple in-memory cache with TTL support (replaces node-cache)
- */
-class SimpleCache<T> {
-  private cache = new Map<string, { value: T; expiry: number }>();
-
-  set(key: string, value: T, ttl?: number): void {
-    const expiry = ttl ? Date.now() + ttl * 1000 : Date.now() + 3600 * 1000; // Default 1 hour
-    this.cache.set(key, { value, expiry });
-  }
-
-  get(key: string): T | undefined {
-    const item = this.cache.get(key);
-    if (!item) return undefined;
-    if (Date.now() > item.expiry) {
-      this.cache.delete(key);
-      return undefined;
-    }
-    return item.value;
-  }
-
-  del(key: string): void {
-    this.cache.delete(key);
-  }
-
-  flushAll(): void {
-    this.cache.clear();
-  }
-
-  keys(): string[] {
-    const allKeys = Array.from(this.cache.keys());
-    // Filter out expired keys
-    return allKeys.filter(key => {
-      const item = this.cache.get(key);
-      if (!item || Date.now() > item.expiry) {
-        this.cache.delete(key);
-        return false;
-      }
-      return true;
-    });
-  }
-}
-
 // JWT Configuration
 // CRITICAL: JWT_SECRET must be set in environment - no fallback to prevent security bypass
 const JWT_SECRET: Secret = (() => {
@@ -82,21 +39,96 @@ const AUTH0_AUDIENCE = process.env.AUTH0_AUDIENCE || '';
 const AUTH0_ISSUER = process.env.AUTH0_ISSUER || `https://${AUTH0_DOMAIN}/`;
 const AUTH0_ENABLED = process.env.AUTH0_ENABLED === 'true' && AUTH0_DOMAIN && AUTH0_AUDIENCE;
 
-// JWKS cache (1-hour TTL)
-const jwksCache = new SimpleCache<any>();
+// JWKS cache TTL in seconds (default: 1 hour = 3600 seconds)
+const JWKS_CACHE_TTL = parseInt(process.env.JWKS_CACHE_TTL || '3600', 10);
+
+// Lazy-load Redis client
+let redisClient: any = null;
+async function getRedisClient() {
+  if (!redisClient) {
+    try {
+      const module = await import('../redis/client');
+      redisClient = module.redisClient;
+    } catch (error) {
+      console.warn('[JWT-AUTH] Redis client not available for JWKS caching');
+      return null;
+    }
+  }
+  return redisClient;
+}
+
+/**
+ * Get JWKS from Redis cache
+ */
+async function getJwksFromCache(): Promise<any | null> {
+  try {
+    const redis = await getRedisClient();
+    if (!redis || !redis.isReady()) {
+      return null;
+    }
+
+    const cacheKey = 'auth:jwks:auth0';
+    const cached = await redis.getClient().get(cacheKey);
+
+    if (!cached) {
+      return null;
+    }
+
+    const data = JSON.parse(cached);
+    console.log('[JWT-AUTH] JWKS cache hit');
+    return data;
+  } catch (error: any) {
+    console.debug('[JWT-AUTH] JWKS cache read failed:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Store JWKS in Redis cache
+ */
+async function storeJwksInCache(jwks: any): Promise<void> {
+  try {
+    const redis = await getRedisClient();
+    if (!redis || !redis.isReady()) {
+      return;
+    }
+
+    const cacheKey = 'auth:jwks:auth0';
+    await redis.getClient().setex(cacheKey, JWKS_CACHE_TTL, JSON.stringify(jwks));
+    console.log('[JWT-AUTH] JWKS cached in Redis', { ttl: JWKS_CACHE_TTL });
+  } catch (error: any) {
+    console.debug('[JWT-AUTH] JWKS cache write failed:', error.message);
+  }
+}
+
+/**
+ * Invalidate JWKS cache (call when Auth0 keys rotate)
+ */
+export async function invalidateJwksCache(): Promise<void> {
+  try {
+    const redis = await getRedisClient();
+    if (!redis || !redis.isReady()) {
+      return;
+    }
+    await redis.getClient().del('auth:jwks:auth0');
+    console.log('[JWT-AUTH] JWKS cache invalidated');
+  } catch (error: any) {
+    console.debug('[JWT-AUTH] JWKS cache invalidation failed:', error.message);
+  }
+}
 
 /**
  * Fetch Auth0 JWKS (JSON Web Key Set)
- * Caches for 1 hour to avoid repeated requests
+ * Caches in Redis to avoid repeated requests and share across all pods
  */
 async function getAuth0JWKS(): Promise<any> {
-  const cacheKey = 'auth0-jwks';
-  const cached = jwksCache.get(cacheKey);
-
+  // Try Redis cache first
+  const cached = await getJwksFromCache();
   if (cached) {
     return cached;
   }
 
+  // Cache miss - fetch from Auth0
   try {
     const response = await axios.get(`${AUTH0_ISSUER}.well-known/jwks.json`, {
       timeout: 5000
@@ -106,11 +138,13 @@ async function getAuth0JWKS(): Promise<any> {
       throw new Error('Invalid JWKS response: missing keys array');
     }
 
-    // Cache for 1 hour (3600 seconds)
-    jwksCache.set(cacheKey, response.data, 3600);
+    // Store in Redis for future requests
+    await storeJwksInCache(response.data);
+    console.log('[JWT-AUTH] JWKS fetched from Auth0 and cached');
+
     return response.data;
   } catch (error: any) {
-    console.error('[Auth0-JWKS] Failed to fetch JWKS:', error.message);
+    console.error('[JWT-AUTH] Failed to fetch JWKS:', error.message);
     throw new Error(`Cannot fetch Auth0 JWKS: ${error.message}`);
   }
 }
