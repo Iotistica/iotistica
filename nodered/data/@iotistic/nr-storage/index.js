@@ -1,52 +1,53 @@
 const got = require('got')
 
 let settings
+let getAuthToken
+
+/**
+ * Get authentication token (Auth0 from session)
+ * Throws error if token unavailable - no fallbacks
+ */
+function getToken() {
+    if (!getAuthToken) {
+        throw new Error('[nr-storage] Auth token getter not configured')
+    }
+    
+    const token = getAuthToken()
+    if (!token) {
+        throw new Error('[nr-storage] Auth0 token not available in session')
+    }
+    
+    return token
+}
 
 module.exports = (options) => {
     // If called as a function (like adminAuth pattern), use options directly
-    // Support both 'iotisticURL' and legacy 'baseURL' for backwards compatibility
-    if (options && ((options.iotisticURL || options.baseURL) || options.token)) {
+    if (options && (options.iotisticURL || options.baseURL)) {
         settings = {
-            baseURL: options.iotisticURL || options.baseURL,
-            token: options.token
+            baseURL: options.iotisticURL || options.baseURL
         }
         
         if (!settings.baseURL) {
             throw new Error('No iotisticURL found in storage settings')
         }
         
-        if (!settings.token) {
-            throw new Error('No token found in storage settings')
+        // Store the auth token getter function
+        getAuthToken = options.getAuthToken
+        if (!getAuthToken) {
+            throw new Error('[nr-storage] getAuthToken function required (no static tokens)')
         }
         
-        const client = got.extend({
-            prefixUrl: settings.baseURL + '/api/v1/nr/storage/',
-            headers: {
-                'user-agent': 'Iotistic HTTP Storage v0.1',
-                authorization: 'Bearer ' + settings.token
-            },
-            timeout: {
-                request: 20000
-            }
-        })
-        
-        return createStorageModule(client)
+        return createStorageModule()
     }
     
     // Return module with init() for legacy pattern
     return createStorageModule()
 }
 
-function createStorageModule(client) {
-    let _client = client
+function createStorageModule() {
 
     return {
         init: (nrSettings) => {
-            if (_client) {
-                // Already initialized via factory function
-                return Promise.resolve()
-            }
-
             settings = nrSettings.httpStorage || {}
 
             if (Object.keys(settings) === 0) {
@@ -59,66 +60,136 @@ function createStorageModule(client) {
                 return err
             }
 
-            if (!settings.token) {
-                const err = Promise.reject(new Error('No token found in storage settings'))
+            // Store the auth token getter function
+            getAuthToken = settings.getAuthToken
+            if (!getAuthToken) {
+                const err = Promise.reject(new Error('[nr-storage] getAuthToken function required'))
                 return err
             }
-
-            _client = got.extend({
-                prefixUrl: settings.baseURL + '/api/v1/nr/storage/',
-                headers: {
-                    'user-agent': 'Iotistic HTTP Storage v0.1',
-                    authorization: 'Bearer ' + settings.token
-                },
-                timeout: {
-                    request: 20000
-                }
-            })
 
             return Promise.resolve()
         },
         getFlows: async () => {
-            const response = await _client.get('flows').json()
+            const token = getToken()
+            const client = got.extend({
+                prefixUrl: settings.baseURL + '/api/v1/nr/storage/',
+                headers: {
+                    'user-agent': 'Iotistic HTTP Storage v0.1',
+                    authorization: 'Bearer ' + token
+                },
+                timeout: { request: 20000 }
+            })
+            const response = await client.get('flows').json()
             return response.flows
         },
         saveFlows: async (flow) => {
-            return _client.post('flows', {
+            const token = getToken()
+            const client = got.extend({
+                prefixUrl: settings.baseURL + '/api/v1/nr/storage/',
+                headers: {
+                    'user-agent': 'Iotistic HTTP Storage v0.1',
+                    authorization: 'Bearer ' + token
+                },
+                timeout: { request: 20000 }
+            })
+            return client.post('flows', {
                 json: flow,
                 responseType: 'json'
             })
         },
         getCredentials: async () => {
-            return _client.get('credentials').json()
+            const token = getToken()
+            const client = got.extend({
+                prefixUrl: settings.baseURL + '/api/v1/nr/storage/',
+                headers: {
+                    'user-agent': 'Iotistic HTTP Storage v0.1',
+                    authorization: 'Bearer ' + token
+                },
+                timeout: { request: 20000 }
+            })
+            return client.get('credentials').json()
         },
         saveCredentials: async (credentials) => {
-            return _client.post('credentials', {
+            const token = getToken()
+            const client = got.extend({
+                prefixUrl: settings.baseURL + '/api/v1/nr/storage/',
+                headers: {
+                    'user-agent': 'Iotistic HTTP Storage v0.1',
+                    authorization: 'Bearer ' + token
+                },
+                timeout: { request: 20000 }
+            })
+            return client.post('credentials', {
                 json: credentials,
                 responseType: 'json'
             })
         },
         getSettings: () => {
-            return _client.get('settings').json()
+            const token = getToken()
+            const client = got.extend({
+                prefixUrl: settings.baseURL + '/api/v1/nr/storage/',
+                headers: {
+                    'user-agent': 'Iotistic HTTP Storage v0.1',
+                    authorization: 'Bearer ' + token
+                },
+                timeout: { request: 20000 }
+            })
+            return client.get('settings').json()
         },
         saveSettings: (settings) => {
-            return _client.post('settings', {
+            const token = getToken()
+            const client = got.extend({
+                prefixUrl: settings.baseURL + '/api/v1/nr/storage/',
+                headers: {
+                    'user-agent': 'Iotistic HTTP Storage v0.1',
+                    authorization: 'Bearer ' + token
+                },
+                timeout: { request: 20000 }
+            })
+            return client.post('settings', {
                 json: settings,
                 responseType: 'json'
             })
         },
         getSessions: () => {
-            _client.get('sessions').json()
+            const token = getToken()
+            const client = got.extend({
+                prefixUrl: settings.baseURL + '/api/v1/nr/storage/',
+                headers: {
+                    'user-agent': 'Iotistic HTTP Storage v0.1',
+                    authorization: 'Bearer ' + token
+                },
+                timeout: { request: 20000 }
+            })
+            return client.get('sessions').json()
         },
         saveSessions: (sessions) => {
-            return _client.post('sessions', {
+            const token = getToken()
+            const client = got.extend({
+                prefixUrl: settings.baseURL + '/api/v1/nr/storage/',
+                headers: {
+                    'user-agent': 'Iotistic HTTP Storage v0.1',
+                    authorization: 'Bearer ' + token
+                },
+                timeout: { request: 20000 }
+            })
+            return client.post('sessions', {
                 json: sessions,
                 responseType: 'json'
             })
         },
         getLibraryEntry: (type, name) => {
-            return _client.get('library/' + type, {
-                searchParams: {
-                    name
-                }
+            const token = getToken()
+            const client = got.extend({
+                prefixUrl: settings.baseURL + '/api/v1/nr/storage/',
+                headers: {
+                    'user-agent': 'Iotistic HTTP Storage v0.1',
+                    authorization: 'Bearer ' + token
+                },
+                timeout: { request: 20000 }
+            })
+            return client.get('library/' + type, {
+                searchParams: { name }
             }).then(entry => {
                 if (entry.headers['content-type'].startsWith('application/json')) {
                     return JSON.parse(entry.body)
@@ -128,12 +199,17 @@ function createStorageModule(client) {
             })
         },
         saveLibraryEntry: (type, name, meta, body) => {
-            return _client.post('library/' + type, {
-                json: {
-                    name,
-                    meta,
-                    body
+            const token = getToken()
+            const client = got.extend({
+                prefixUrl: settings.baseURL + '/api/v1/nr/storage/',
+                headers: {
+                    'user-agent': 'Iotistic HTTP Storage v0.1',
+                    authorization: 'Bearer ' + token
                 },
+                timeout: { request: 20000 }
+            })
+            return client.post('library/' + type, {
+                json: { name, meta, body },
                 responseType: 'json'
             })
         }

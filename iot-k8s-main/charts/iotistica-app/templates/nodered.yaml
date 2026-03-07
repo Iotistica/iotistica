@@ -75,12 +75,20 @@ spec:
               value: {{ index $noderedEnv "NODE_RED_ENABLE_UI_AUTH" | default "false" | quote }}
             # Storage token for API authentication (used by nr-storage plugin)
             {{- if .Values.nodered.storageToken }}
-            - name: TOKEN
+            - name: IOTISTIC_NR_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.nodered.storageToken.secretName }}
                   key: {{ .Values.nodered.storageToken.secretKey | default "token" }}
             {{- end }}
+            
+            # Auth0 Configuration (reuse dashboard config)
+            - name: AUTH0_DOMAIN
+              value: {{ .Values.dashboard.auth0.domain | quote }}
+            - name: AUTH0_AUDIENCE
+              value: {{ .Values.dashboard.auth0.audience | quote }}
+            - name: AUTH0_ISSUER
+              value: {{ printf "https://%s/" .Values.dashboard.auth0.domain | quote }}
           livenessProbe:
             httpGet:
               path: /

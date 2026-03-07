@@ -44,7 +44,7 @@ import { AnomalyDetectionService } from "./ai/anomaly/index.js";
 import { loadConfigFromEnv, loadConfigFromTargetState } from "./ai/anomaly/utils.js";
 import { SimulationOrchestrator, loadSimulationConfig } from "./simulation/index.js";
 import { DiscoveryService } from "./features/discovery/discovery-service.js";
-import { FeatureInitializer, type FeatureContext } from "./bootstrap/init.js";
+import { FeatureInitializer, type FeatureContext } from "./init.js";
 import type { ConfigManager } from "./device-manager/config.js";
 
 /**

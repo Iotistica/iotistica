@@ -1,0 +1,22 @@
+{
+  "name": "nodered-tests",
+  "version": "1.0.0",
+  "description": "Node-RED Auth0 Integration Tests",
+  "private": true,
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "jest": "^29.5.0",
+    "jest-environment-node": "^29.5.0",
+    "nock": "^13.3.0"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "jsonwebtoken": "^9.0.0",
+    "got": "^11.8.6"
+  }
+}

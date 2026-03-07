@@ -15,6 +15,7 @@
 import { Request, Response, NextFunction, RequestHandler } from 'express';
 import jwt, { Secret } from 'jsonwebtoken';
 import { query } from '../db/connection';
+import logger from '../utils/logger';
 import axios from 'axios';
 
 // JWT Configuration
@@ -50,7 +51,7 @@ async function getRedisClient() {
       const module = await import('../redis/client');
       redisClient = module.redisClient;
     } catch (error) {
-      console.warn('[JWT-AUTH] Redis client not available for JWKS caching');
+      logger.warn('Redis client not available for JWKS caching');
       return null;
     }
   }
@@ -75,10 +76,10 @@ async function getJwksFromCache(): Promise<any | null> {
     }
 
     const data = JSON.parse(cached);
-    console.log('[JWT-AUTH] JWKS cache hit');
+    logger.info('JWKS cache hit');
     return data;
   } catch (error: any) {
-    console.debug('[JWT-AUTH] JWKS cache read failed:', error.message);
+    logger.debug('JWKS cache read failed', { message: error.message });
     return null;
   }
 }
@@ -95,9 +96,9 @@ async function storeJwksInCache(jwks: any): Promise<void> {
 
     const cacheKey = 'auth:jwks:auth0';
     await redis.getClient().setex(cacheKey, JWKS_CACHE_TTL, JSON.stringify(jwks));
-    console.log('[JWT-AUTH] JWKS cached in Redis', { ttl: JWKS_CACHE_TTL });
+    logger.info('JWKS cached in Redis', { ttl: JWKS_CACHE_TTL });
   } catch (error: any) {
-    console.debug('[JWT-AUTH] JWKS cache write failed:', error.message);
+    logger.debug('JWKS cache write failed', { message: error.message });
   }
 }
 
@@ -111,9 +112,9 @@ export async function invalidateJwksCache(): Promise<void> {
       return;
     }
     await redis.getClient().del('auth:jwks:auth0');
-    console.log('[JWT-AUTH] JWKS cache invalidated');
+      logger.info('JWKS cache invalidated');
   } catch (error: any) {
-    console.debug('[JWT-AUTH] JWKS cache invalidation failed:', error.message);
+      logger.debug('JWKS cache invalidation failed', { message: error.message });
   }
 }
 
@@ -140,11 +141,11 @@ async function getAuth0JWKS(): Promise<any> {
 
     // Store in Redis for future requests
     await storeJwksInCache(response.data);
-    console.log('[JWT-AUTH] JWKS fetched from Auth0 and cached');
+    logger.info('JWKS fetched from Auth0 and cached');
 
     return response.data;
   } catch (error: any) {
-    console.error('[JWT-AUTH] Failed to fetch JWKS:', error.message);
+    logger.error('Failed to fetch JWKS from Auth0', { message: error.message });
     throw new Error(`Cannot fetch Auth0 JWKS: ${error.message}`);
   }
 }
@@ -360,7 +361,7 @@ export async function jwtValidate(
 
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
-    console.log('[JWT-AUTH] Token extracted, determining type...');
+    logger.info('Token extracted from Authorization header, determining type...');
 
     // Decode header without verification to detect algorithm
     const decoded = jwt.decode(token, { complete: true });
@@ -376,13 +377,13 @@ export async function jwtValidate(
 
     // Auth0 RS256 path
     if (algorithm === 'RS256' && AUTH0_ENABLED) {
-      console.log('[JWT-AUTH] Detected RS256 token, validating with Auth0 JWKS...');
+      logger.info('Detected RS256 token, validating with Auth0 JWKS...');
       let auth0Payload: { sub: string; email: string; exp: number };
       try {
         auth0Payload = await validateAuth0JWT(token);
-        console.log('[JWT-AUTH] Auth0 token validated for user:', auth0Payload.sub);
+        logger.info('Auth0 token validated successfully', { sub: auth0Payload.sub });
       } catch (error: any) {
-        console.warn('[JWT-AUTH] Auth0 validation failed:', error.message);
+        logger.warn('Auth0 token validation failed', { message: error.message });
         res.status(401).json({
           error: 'Unauthorized',
           message: 'Invalid Auth0 token',
@@ -407,12 +408,12 @@ export async function jwtValidate(
 
     // Legacy HS256 path
     if (algorithm === 'HS256') {
-      console.log('[JWT-AUTH] Detected HS256 token, validating locally...');
+      logger.info('Detected HS256 token, validating locally...');
       let payload: JWTPayload;
       try {
         payload = verifyToken(token);
-        console.log('[JWT-AUTH] Legacy token verified for user:', payload.username);
-        console.log('[JWT-AUTH] Token payload claims:', {
+        logger.info('Legacy token verified successfully', { username: payload.username });
+        logger.info('Token payload claims', {
           type: payload.type,
           username: payload.username,
           auth0Sub: payload.auth0Sub,
@@ -421,7 +422,7 @@ export async function jwtValidate(
           role: payload.role
         });
       } catch (error: any) {
-        console.warn('[JWT-AUTH] Legacy token verification failed:', error.message);
+        logger.warn('Legacy token verification failed', { message: error.message });
         res.status(401).json({
           error: 'Unauthorized',
           message: 'Invalid or expired token',
@@ -460,7 +461,7 @@ export async function jwtValidate(
     });
 
   } catch (error: any) {
-    console.error('[JWT-AUTH] jwtValidate unexpected error:', error);
+    logger.error('jwtValidate middleware encountered unexpected error', { error });
     res.status(500).json({
       error: 'Internal Server Error',
       message: 'Authentication failed'
@@ -497,7 +498,7 @@ export async function tenantResolve(
 
     // Federated token: trust the customerId embedded in the payload
     if (legacyPayload && legacyPayload.auth0Sub && legacyPayload.customerId) {
-      console.log('[JWT-AUTH] Using tenant from federated token:', legacyPayload.customerId);
+      logger.info('Using tenant from federated token', { customerId: legacyPayload.customerId });
       req.user.customerId = legacyPayload.customerId;
       next();
       return;
@@ -514,7 +515,7 @@ export async function tenantResolve(
     try {
       const { getTenantIdFromHost } = await import('../services/tenant-resolution.service');
       customerId = getTenantIdFromHost(req.hostname);
-      console.log('[JWT-AUTH] Tenant resolved from hostname:', customerId);
+      logger.info('Tenant resolved from hostname', { customerId });
     } catch (error: any) {
       // Fallback for development: X-Tenant-ID header or DEVELOPMENT_TENANT_ID env var
       const headerTenantId = req.headers['x-tenant-id'] as string | undefined;
@@ -522,9 +523,9 @@ export async function tenantResolve(
 
       if (req.hostname === 'localhost' && (headerTenantId || envTenantId)) {
         customerId = headerTenantId || envTenantId || 'customer-local';
-        console.log('[JWT-AUTH] Using dev fallback tenant:', customerId);
+        logger.info('Using development fallback tenant', { customerId });
       } else {
-        console.warn('[JWT-AUTH] Tenant resolution failed:', error.message);
+        logger.warn('Tenant resolution failed', { message: error.message });
         res.status(400).json({
           error: 'Bad Request',
           message: 'Cannot determine tenant from hostname. For localhost dev, set X-Tenant-ID header or DEVELOPMENT_TENANT_ID env var',
@@ -538,7 +539,7 @@ export async function tenantResolve(
     next();
 
   } catch (error: any) {
-    console.error('[JWT-AUTH] tenantResolve unexpected error:', error);
+    logger.error('tenantResolve middleware encountered unexpected error', { error });
     res.status(500).json({
       error: 'Internal Server Error',
       message: 'Authentication failed'

@@ -10,6 +10,7 @@
  */
 
 import { query } from '../db/connection';
+import logger from './logger';
 
 export interface MqttBrokerConfig {
   id: number;
@@ -50,11 +51,12 @@ export async function getBrokerConfigForDevice(deviceUuid: string): Promise<Mqtt
     const envProtocol = process.env.MQTT_BROKER_PROTOCOL;
     
     if (envHost && envPort && envProtocol) {
-      console.log(`[MQTT Config] Environment override for device ${deviceUuid}:`, {
+      logger.info('Environment override for broker configuration', {
+        deviceUuid,
         protocol: envProtocol,
         host: envHost,
         port: envPort,
-        use_tls: process.env.MQTT_BROKER_USE_TLS === 'true'
+        useTls: process.env.MQTT_BROKER_USE_TLS === 'true'
       });
       
       return createConfigFromEnv();
@@ -73,15 +75,19 @@ export async function getBrokerConfigForDevice(deviceUuid: string): Promise<Mqtt
       );
       
       if (typeResult.rows.length > 0) {
-        console.log(`[MQTT Config] Using ${preferredBrokerType} broker for device ${deviceUuid}:`, {
-          name: typeResult.rows[0].name,
+        logger.info('Using broker by type preference', {
+          deviceUuid,
+          brokerType: preferredBrokerType,
+          brokerName: typeResult.rows[0].name,
           protocol: typeResult.rows[0].protocol,
           host: typeResult.rows[0].host,
           port: typeResult.rows[0].port
         });
         return typeResult.rows[0];
       } else {
-        console.log(`[MQTT Config] No ${preferredBrokerType} broker found, falling back to default`);
+        logger.info('No broker found for type, falling back to default', {
+          brokerType: preferredBrokerType
+        });
       }
     }
     
@@ -94,8 +100,9 @@ export async function getBrokerConfigForDevice(deviceUuid: string): Promise<Mqtt
     );
     
     if (deviceResult.rows.length > 0) {
-      console.log(`[MQTT Config] Device-specific broker for ${deviceUuid}:`, {
-        name: deviceResult.rows[0].name,
+      logger.info('Using device-specific broker configuration', {
+        deviceUuid,
+        brokerName: deviceResult.rows[0].name,
         protocol: deviceResult.rows[0].protocol,
         host: deviceResult.rows[0].host,
         port: deviceResult.rows[0].port
@@ -111,8 +118,9 @@ export async function getBrokerConfigForDevice(deviceUuid: string): Promise<Mqtt
     );
     
     if (defaultResult.rows.length > 0) {
-      console.log(`[MQTT Config] Default broker for ${deviceUuid}:`, {
-        name: defaultResult.rows[0].name,
+      logger.info('Using default broker configuration', {
+        deviceUuid,
+        brokerName: defaultResult.rows[0].name,
         protocol: defaultResult.rows[0].protocol,
         host: defaultResult.rows[0].host,
         port: defaultResult.rows[0].port
@@ -120,10 +128,10 @@ export async function getBrokerConfigForDevice(deviceUuid: string): Promise<Mqtt
       return defaultResult.rows[0];
     }
     
-    console.warn(`[MQTT Config] No broker found for device ${deviceUuid}`);
+    logger.warn('No broker configuration found for device', { deviceUuid });
     return null;
   } catch (error) {
-    console.error(`[MQTT Config] Error fetching broker config for device ${deviceUuid}:`, error);
+    logger.error('Error fetching broker configuration for device', { deviceUuid, error });
     return null;
   }
 }
@@ -164,15 +172,18 @@ export async function getStandaloneBrokerConfig(): Promise<MqttBrokerConfig | nu
     );
     
     if (result.rows.length === 0) {
-      console.warn('[MQTT Config] No default broker found in database for standalone agent');
+      logger.warn('No default broker found in database for standalone agent');
       return null;
     }
-    
+
     const config = result.rows[0];
-    console.log(`[MQTT Config] Standalone agent database broker: ${config.protocol}://${config.host}:${config.port}`);
+    logger.info('Using standalone agent database broker', {
+      brokerUrl: `${config.protocol}://${config.host}:${config.port}`,
+      brokerName: config.name
+    });
     return config;
   } catch (error) {
-    console.error('[MQTT Config] Error fetching standalone broker config:', error);
+    logger.error('Error fetching standalone broker configuration', { error });
     return null;
   }
 }
@@ -236,10 +247,12 @@ export async function getDefaultBrokerConfig(): Promise<MqttBrokerConfig | null>
           connect_timeout: parseInt(process.env.MQTT_CONNECT_TIMEOUT || '30000', 10),
           broker_type: 'cloud'
         };
-        console.log(`[MQTT Config] Using MQTT_BROKER_URL: ${config.protocol}://${config.host}:${config.port}`);
+        logger.info('Using MQTT_BROKER_URL from environment', {
+          brokerUrl: `${config.protocol}://${config.host}:${config.port}`
+        });
         return config;
       } catch (error) {
-        console.error('[MQTT Config] Failed to parse MQTT_BROKER_URL:', error);
+        logger.error('Failed to parse MQTT_BROKER_URL', { error });
         // Fall through to other methods
       }
     }
@@ -250,7 +263,9 @@ export async function getDefaultBrokerConfig(): Promise<MqttBrokerConfig | null>
     const envProtocol = process.env.MQTT_BROKER_PROTOCOL;
     
     if (envHost && envPort && envProtocol) {
-      console.log(`[MQTT Config] Environment override: ${envProtocol}://${envHost}:${envPort}`);
+      logger.info('Using environment variable broker configuration', {
+        brokerUrl: `${envProtocol}://${envHost}:${envPort}`
+      });
       return createConfigFromEnv();
     }
     
@@ -262,15 +277,18 @@ export async function getDefaultBrokerConfig(): Promise<MqttBrokerConfig | null>
     );
     
     if (result.rows.length === 0) {
-      console.warn('[MQTT Config] No default broker found in database');
+      logger.warn('No default broker found in database');
       return null;
     }
     
     const config = result.rows[0];
-    console.log(`[MQTT Config] Database default: ${config.protocol}://${config.host}:${config.port}`);
+    logger.info('Using database default broker configuration', {
+      brokerUrl: `${config.protocol}://${config.host}:${config.port}`,
+      brokerName: config.name
+    });
     return config;
   } catch (error) {
-    console.error('[MQTT Config] Error fetching default broker:', error);
+    logger.error('Error fetching default broker configuration', { error });
     return null;
   }
 }
@@ -338,14 +356,14 @@ export function formatBrokerConfigForClient(config: any, credentials?: { usernam
 export async function assignBrokerToDevice(deviceUuid: string, brokerId: number | null): Promise<boolean> {
   try {
     await query(
-      `UPDATE devices 
+      `UPDATE devices
        SET mqtt_broker_id = $1, updated_at = CURRENT_TIMESTAMP
        WHERE uuid = $2`,
       [brokerId, deviceUuid]
     );
     return true;
   } catch (error) {
-    console.error('[MQTT Config] Error assigning broker to device:', error);
+    logger.error('Error assigning broker to device', { deviceUuid, brokerId, error });
     return false;
   }
 }

@@ -5,17 +5,17 @@
  * Separates feature orchestration from the main agent class.
  */
 
-import type { AgentLogger } from '../logging/agent-logger';
-import type { DeviceInfo } from '../device-manager/types.js';
-import { LogComponents } from '../logging/types';
-import { JobsFeature } from '../features/jobs/src/monitor.js';
-import { SensorPublishFeature } from '../features/publish/index.js';
-import { SensorsFeature, type SensorConfig } from '../features/adapters/index.js';
-import { AgentUpdater } from '../updater.js';
-import { AgentFirewall } from '../network/firewall.js';
-import { MqttManager } from '../mqtt/manager.js';
-import { StateReconciler } from '../device-manager/reconciler.js';
-import { getPackageVersion } from '../utils/api-utils.js';
+import type { AgentLogger } from './logging/agent-logger';
+import type { DeviceInfo } from './device-manager/types.js';
+import { LogComponents } from './logging/types';
+import { JobsFeature } from './features/jobs/src/monitor.js';
+import { SensorPublishFeature } from './features/publish/index.js';
+import { SensorsFeature, type SensorConfig } from './features/adapters/index.js';
+import { AgentUpdater } from './updater.js';
+import { AgentFirewall } from './network/firewall.js';
+import { MqttManager } from './mqtt/manager.js';
+import { StateReconciler } from './device-manager/reconciler.js';
+import { getPackageVersion } from './utils/api-utils.js';
 
 export interface FeatureContext {
   logger: AgentLogger;
@@ -180,8 +180,8 @@ export class FeatureInitializer {
 
     try {
       // Load sensor output configurations from database
-      const { EndpointOutputModel } = await import('../db/models/endpoint-outputs.model.js');
-      const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
+      const { EndpointOutputModel } = await import('./db/models/endpoint-outputs.model.js');
+      const { DeviceEndpointModel } = await import('./db/models/endpoint.model.js');
       
       const endpointOutputs = await EndpointOutputModel.getAll();
 
@@ -256,7 +256,7 @@ export class FeatureInitializer {
 
       // Configure edge AI anomaly detection if enabled
       if (anomalyService) {
-        const { configureAnomalyFeed } = await import('../features/publish/manager.js');
+        const { configureAnomalyFeed } = await import('./features/publish/manager.js');
         configureAnomalyFeed(anomalyService);
 
         logger.debugSync('Configured edge AI anomaly detection for device data', {
@@ -303,7 +303,7 @@ export class FeatureInitializer {
 
   
       // Check database for enabled endpoints - this enables the protocol adapter
-      const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
+      const { DeviceEndpointModel } = await import('./db/models/endpoint.model.js');
       const enabledProtocols: string[] = [];
       
       for (const protocol of ['modbus', 'opcua', 'snmp', 'can', 'mqtt']) {
@@ -338,7 +338,7 @@ export class FeatureInitializer {
       }
       
       // Make sensors feature available to device API
-      const { setSensorsFeature } = await import('../api/actions.js');
+      const { setSensorsFeature } = await import('./api/actions.js');
       setSensorsFeature(this.features.sensors);
 
       logger.debugSync('Protocol Adapters initialized (database-driven)', {
@@ -593,7 +593,7 @@ export class FeatureInitializer {
     const { logger, deviceInfo, mqttManager } = this.context;
 
     try {
-      const { ShellHandler } = await import('../shell/shell-handler.js');
+      const { ShellHandler } = await import('./shell/shell-handler.js');
       
       this.features.shellHandler = new ShellHandler(
         deviceInfo.uuid,

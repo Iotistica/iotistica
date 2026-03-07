@@ -21,14 +21,24 @@ function getAuthHeaders () {
         'Content-Type': 'application/json'
     }
     
-    // If using plugin's own auth (not nr-auth), try to get token from localStorage
+    // Get Auth0 token from sessionStorage (set by dashboard iframe parent)
+    try {
+        const auth0Token = sessionStorage.getItem('auth0_token')
+        if (auth0Token && typeof auth0Token === 'string') {
+            headers.Authorization = `Bearer ${auth0Token}`
+            return headers
+        }
+    } catch (err) {
+        console.warn('Failed to get Auth0 token from sessionStorage:', err)
+    }
+    
+    // Fallback: try localStorage for backward compatibility (legacy auth flow)
     try {
         const authTokens = localStorage.getItem('auth-tokens')
         if (authTokens) {
             const tokenObj = JSON.parse(authTokens)
             const accessToken = tokenObj?.access_token
             if (accessToken && typeof accessToken === 'string') {
-                // Token is already in JWT format, use it directly
                 headers.Authorization = `Bearer ${accessToken}`
             }
         }

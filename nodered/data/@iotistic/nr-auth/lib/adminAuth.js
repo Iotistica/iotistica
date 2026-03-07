@@ -1,4 +1,7 @@
 const fetch = require('undici').fetch
+const axios = require('axios')
+const jwt = require('jsonwebtoken')
+const crypto = require('crypto')
 
 const TOKEN_LOGIN_SENTINELS = new Set([
     '__token__',
@@ -6,6 +9,104 @@ const TOKEN_LOGIN_SENTINELS = new Set([
     'token',
     'access-token'
 ])
+
+// In-memory JWKS cache (simple for Node-RED context)
+let jwksCache = null
+let jwksCacheTimestamp = 0
+const JWKS_CACHE_TTL_MS = 3600000 // 1 hour
+
+/**
+ * Fetch Auth0 JWKS (JSON Web Key Set) with caching
+ */
+async function getAuth0JWKS(auth0Issuer) {
+    const now = Date.now()
+    if (jwksCache && (now - jwksCacheTimestamp < JWKS_CACHE_TTL_MS)) {
+        return jwksCache
+    }
+
+    try {
+        const response = await axios.get(`${auth0Issuer}.well-known/jwks.json`, {
+            timeout: 5000
+        })
+
+        if (!response.data?.keys) {
+            throw new Error('Invalid JWKS response: missing keys array')
+        }
+
+        jwksCache = response.data
+        jwksCacheTimestamp = now
+        console.log('[adminAuth] JWKS fetched and cached from Auth0')
+        return jwksCache
+    } catch (error) {
+        console.error('[adminAuth] Failed to fetch JWKS from Auth0:', error.message)
+        throw new Error(`Cannot fetch Auth0 JWKS: ${error.message}`)
+    }
+}
+
+/**
+ * Get Public Key from JWKS by Key ID (kid)
+ */
+function getPublicKeyFromJWKS(jwks, kid) {
+    const key = jwks.keys.find((k) => k.kid === kid)
+
+    if (!key) {
+        throw new Error(`Key ID ${kid} not found in Auth0 JWKS`)
+    }
+
+    // Convert JWK to PEM format
+    const publicKey = crypto.createPublicKey({ key, format: 'jwk' })
+    return publicKey.export({ format: 'pem', type: 'spki' })
+}
+
+/**
+ * Validate Auth0 JWT token (RS256)
+ */
+async function validateAuth0JWT(token, auth0Domain, auth0Audience, auth0Issuer) {
+    if (!auth0Domain || !auth0Audience || !auth0Issuer) {
+        throw new Error('Auth0 configuration missing (domain/audience/issuer required)')
+    }
+
+    // Decode without verification first to get kid
+    const decoded = jwt.decode(token, { complete: true })
+
+    if (!decoded) {
+        throw new Error('Invalid JWT format')
+    }
+
+    // Validate algorithm is RS256 (reject HS256)
+    if (decoded.header?.alg !== 'RS256') {
+        throw new Error(`Invalid algorithm: ${decoded.header?.alg} (must be RS256)`)
+    }
+
+    // Get Key ID
+    const kid = decoded.header?.kid
+    if (!kid) {
+        throw new Error('Missing Key ID (kid) in JWT header')
+    }
+
+    // Fetch JWKS and get public key
+    const jwks = await getAuth0JWKS(auth0Issuer)
+    const publicKey = getPublicKeyFromJWKS(jwks, kid)
+
+    // Verify JWT signature and claims
+    const payload = jwt.verify(token, publicKey, {
+        algorithms: ['RS256'],
+        issuer: auth0Issuer,
+        audience: auth0Audience
+    })
+
+    // Additional validation
+    if (!payload.sub || !payload.email) {
+        throw new Error('Missing required claims: sub or email')
+    }
+
+    return {
+        sub: payload.sub,
+        email: payload.email,
+        exp: payload.exp,
+        username: payload.email
+    }
+}
 
 module.exports = (options) => {
     if (!options.iotisticURL) {
@@ -282,6 +383,42 @@ module.exports = (options) => {
         },
         authenticate: async function (username, password) {
             try {
+                // Check for Auth0 token (RS256) - prioritize Auth0 before legacy
+                const candidateToken = looksLikeJwt(password) ? password : (looksLikeJwt(username) ? username : null)
+                if (candidateToken) {
+                    const decoded = jwt.decode(candidateToken, { complete: true })
+                    
+                    // If RS256 algorithm, it's an Auth0 token
+                    if (decoded?.header?.alg === 'RS256') {
+                        console.log('[adminAuth] Auth0 token detected, validating...')
+                        try {
+                            const payload = await validateAuth0JWT(
+                                candidateToken,
+                                options.auth0Domain,
+                                options.auth0Audience,
+                                options.auth0Issuer
+                            )
+                            
+                            const profile = {
+                                username: payload.email,
+                                email: payload.email,
+                                name: payload.email,
+                                image: '',
+                                permissions: ['*'],
+                                accessToken: candidateToken,
+                                refreshToken: null
+                            }
+                            
+                            addUser(profile.username, profile, candidateToken, null)
+                            console.log('[adminAuth] Auth0 token validated for user:', profile.username)
+                            return profile
+                        } catch (error) {
+                            console.error('[adminAuth] Auth0 token validation failed:', error.message)
+                            return null
+                        }
+                    }
+                }
+                
                 // Check for bridge token in request object (passed from httpAuthMiddleware)
                 if (username && username.startsWith('__bridgeToken__:')) {
                     const bridgeToken = username.substring('__bridgeToken__:'.length)

@@ -136,5 +136,26 @@ module.exports = {
             delete req.session.user
             res.redirect('/login')
         })
+
+        // Auth0 token endpoint - for dashboard iframe integration
+        app.post('/admin/auth/token', require('express').json(), async (req, res) => {
+            try {
+                const { token } = req.body
+                
+                if (!token) {
+                    return res.status(400).json({ error: 'Token required' })
+                }
+                
+                // Store the Auth0 token in the session
+                req.session.auth0Token = token
+                req.session.iotSession = true
+                
+                console.log('[httpAuthMiddleware] Auth0 token stored in session')
+                res.json({ success: true })
+            } catch (error) {
+                console.error('[httpAuthMiddleware] Auth0 token storage failed:', error)
+                res.status(500).json({ error: 'Failed to store token' })
+            }
+        })
     }
 }

@@ -1,6 +1,12 @@
-import { useMemo } from 'react';
+import { useMemo, useEffect, useState } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import axios from 'axios';
 
 export function NodeRedPage() {
+  const { user, isAuthenticated, isLoading } = useAuth();
+  const [tokenReady, setTokenReady] = useState(false);
+  const [tokenError, setTokenError] = useState<string | null>(null);
+  
   const nodeRedUrl = useMemo(() => {
     // Determine Node-RED URL based on environment
     const hostname = window.location.hostname;
@@ -29,24 +35,115 @@ export function NodeRedPage() {
     return `${protocol}//${noderedHostname}`;
   }, []);
   
+  // Get access token and pass to Node-RED
+  useEffect(() => {
+    async function setupAuth() {
+      if (!isAuthenticated || !user) {
+        console.log('[NodeRedPage] Not authenticated, skipping token setup');
+        return;
+      }
+      
+      try {
+        console.log('[NodeRedPage] Getting access token from localStorage...');
+        const token = localStorage.getItem('accessToken');
+        
+        if (!token) {
+          throw new Error('Access token not found in localStorage');
+        }
+        
+        // Store in sessionStorage for nr-devices-plugin
+        sessionStorage.setItem('auth0_token', token);
+        console.log('[NodeRedPage] Access token stored in sessionStorage');
+        
+        // Send to Node-RED backend for session storage
+        await axios.post(`${nodeRedUrl}/admin/auth/token`, 
+          { token },
+          { 
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 5000
+          }
+        );
+        
+        console.log('[NodeRedPage] Access token sent to Node-RED backend');
+        setTokenReady(true);
+      } catch (error: any) {
+        console.error('[NodeRedPage] Failed to setup access token:', error);
+        setTokenError(error.message || 'Failed to authenticate with Node-RED');
+      }
+    }
+    
+    setupAuth();
+  }, [isAuthenticated, user, nodeRedUrl]);
+  
   // Log the URL for debugging
   console.log('[NodeRedPage] Node-RED URL:', nodeRedUrl);
   console.log('[NodeRedPage] Window location:', window.location.href);
+  
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading authentication...</p>
+        </div>
+      </div>
+    );
+  }
+  
+  // Not authenticated
+  if (!isAuthenticated) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-600 text-lg mb-4">Authentication required</p>
+          <p className="text-gray-600">Please log in to access Node-RED</p>
+        </div>
+      </div>
+    );
+  }
+  
+  // Token error
+  if (tokenError) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-600 text-lg mb-4">Authentication Error</p>
+          <p className="text-gray-600">{tokenError}</p>
+          <button 
+            onClick={() => window.location.reload()} 
+            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen w-full flex flex-col">
       {/* Iframe Container */}
       <div className="flex-1 overflow-hidden">
-        <iframe
-          src={nodeRedUrl}
-          title="Node-RED"
-          className="w-full h-full border-0"
-          sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
-          onLoad={() => console.log('[NodeRedPage] iframe loaded')}
-          onError={(error) => {
-            console.error('[NodeRedPage] iframe error:', error);
-          }}
-        />
+        {tokenReady ? (
+          <iframe
+            src={nodeRedUrl}
+            title="Node-RED"
+            className="w-full h-full border-0"
+            sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
+            onLoad={() => console.log('[NodeRedPage] iframe loaded')}
+            onError={(error) => {
+              console.error('[NodeRedPage] iframe error:', error);
+            }}
+          />
+        ) : (
+          <div className="h-full w-full flex items-center justify-center">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto mb-4"></div>
+              <p className="text-gray-600">Connecting to Node-RED...</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

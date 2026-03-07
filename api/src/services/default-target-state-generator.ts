@@ -204,7 +204,7 @@ export function generateDefaultTargetStateConfig(
 
   // If no license data, return default
   if (!licenseData) {
-    logger.warn('No license data found - using default V2 config');
+    logger.warn('No license data found - using default config');
     return defaultConfig;
   }
 
@@ -295,6 +295,6 @@ export async function generateDefaultTargetState(
         //]
       //}
     },
-    config,  // V2 config with points object
+    config,  
   };
 }

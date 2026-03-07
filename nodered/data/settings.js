@@ -8,36 +8,43 @@ module.exports = {
     flowFile: 'flows.json',
     credentialSecret: process.env.NR_CREDENTIAL_SECRET || false,
 
-    // Keep UI auth optional. Storage auth r5555emains enabled via IOTISTIC_NR_TOKEN.
+    // Shared auth token storage (set by httpAdminMiddleware, read by storage plugin)
+    // This is populated from the session by middleware below
+    _auth: {
+        currentToken: null
+    },
+
+    // Keep UI auth optional. Storage auth remains enabled via Auth0 tokens.
     adminAuth: (process.env.NODE_RED_ENABLE_UI_AUTH === 'true' && process.env.IOTISTIC_BASE_URL)
         ? require('@iotistic/nr-auth')({
             iotisticURL: process.env.IOTISTIC_BASE_URL,
             provisioningURL: process.env.IOTISTIC_PROVISIONING_URL,
-            uiPort: process.env.PORT || 1880
+            uiPort: process.env.PORT || 1880,
+            auth0Domain: process.env.AUTH0_DOMAIN,
+            auth0Audience: process.env.AUTH0_AUDIENCE,
+            auth0Issuer: process.env.AUTH0_ISSUER
         })
         : null,
 
     storageModule: (() => {
         const hasBaseUrl = process.env.IOTISTIC_BASE_URL;
-        const hasToken = process.env.IOTISTIC_NR_TOKEN;
         
         if (!hasBaseUrl) {
             console.warn('[Settings] Storage: IOTISTIC_BASE_URL not set, using filesystem storage');
             return undefined;
         }
-        if (!hasToken) {
-            console.warn('[Settings] Storage: IOTISTIC_NR_TOKEN not set, using filesystem storage');
-            return undefined;
-        }
         
-        console.log('[Settings] Storage: Initializing nr-storage plugin', {
-            baseUrl: hasBaseUrl,
-            hasToken: !!hasToken
-        });
+        console.log('[Settings] Storage: Initializing nr-storage plugin with Auth0 token getter');
         
         return require('@iotistic/nr-storage')({
             iotisticURL: process.env.IOTISTIC_BASE_URL,
-            token: process.env.IOTISTIC_NR_TOKEN
+            getAuthToken: () => {
+                const token = module.exports._auth.currentToken;
+                if (!token) {
+                    throw new Error('[nr-storage] Auth0 token not available - user not authenticated');
+                }
+                return token;
+            }
         });
     })(),
 
@@ -61,9 +68,17 @@ module.exports = {
 
     functionExternalModules: true,
 
-    // Custom HTTP middleware to set CSP headers
+    // Custom HTTP middleware to set CSP headers and extract Auth0 token from session
     // CSP can be customized via environment variables
     httpAdminMiddleware: (req, res, next) => {
+        // Extract Auth0 token from session for storage module
+        if (req.session && req.session.auth0Token) {
+            module.exports._auth.currentToken = req.session.auth0Token;
+        } else if (req.session && req.session.user && req.session.user.accessToken) {
+            // Fallback: get from user object (legacy auth flow)
+            module.exports._auth.currentToken = req.session.user.accessToken;
+        }
+        
         // Frame ancestors can be set via ENV, defaults to localhost + production domains
         const frameAncestors = process.env.NODE_RED_FRAME_ANCESTORS || 
             "'self' https://*.iotistica.com https://*.iotistic.ca http://localhost:* http://*:30*"
