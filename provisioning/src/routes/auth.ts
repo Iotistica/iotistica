@@ -517,6 +517,8 @@ router.post('/direct-signup', async (req: Request, res: Response) => {
       });
     }
 
+    const directSignupName = fullName || username || email;
+
     // 2) Authenticate newly created user and return tokens.
     // Prefer password-realm (explicit DB connection), but fall back to password grant
     // when the Auth0 app doesn't allow password-realm.
@@ -540,10 +542,19 @@ router.post('/direct-signup', async (req: Request, res: Response) => {
         }
       );
     } catch (realmErr: any) {
-      const realmDetails = realmErr?.response?.data?.error_description || realmErr.message;
-      const realmErrorCode = String(realmErr?.response?.data?.error || '').toLowerCase();
-      const realmMessage = String(realmDetails || '').toLowerCase();
-      const canFallback = realmErrorCode === 'unauthorized_client' || realmMessage.includes('not allowed for the client');
+      const realmData = realmErr?.response?.data || {};
+      const realmDetails = realmData?.error_description || realmErr.message;
+      const realmErrorCode = String(realmData?.error || '').toLowerCase();
+      const realmHintText = [
+        realmData?.error_description,
+        realmData?.error,
+        realmErr?.message,
+        JSON.stringify(realmData),
+      ].filter(Boolean).join(' ').toLowerCase();
+      const canFallback =
+        realmErrorCode === 'unauthorized_client' ||
+        realmHintText.includes('not allowed for the client') ||
+        (realmHintText.includes('grant type') && realmHintText.includes('not allowed'));
 
       if (!canFallback) {
         logger.error('[Direct Signup] Password-realm grant failed', {
@@ -580,7 +591,54 @@ router.post('/direct-signup', async (req: Request, res: Response) => {
           }
         );
       } catch (passwordErr: any) {
-        const passwordDetails = passwordErr?.response?.data?.error_description || passwordErr.message;
+        const passwordData = passwordErr?.response?.data || {};
+        const passwordDetails = passwordData?.error_description || passwordErr.message;
+        const passwordErrorCode = String(passwordData?.error || '').toLowerCase();
+        const passwordHintText = [
+          passwordData?.error_description,
+          passwordData?.error,
+          passwordErr?.message,
+          JSON.stringify(passwordData),
+        ].filter(Boolean).join(' ').toLowerCase();
+        const passwordNotAllowed =
+          passwordErrorCode === 'unauthorized_client' ||
+          passwordHintText.includes('not allowed for the client') ||
+          (passwordHintText.includes('grant type') && passwordHintText.includes('not allowed'));
+
+        if (passwordNotAllowed) {
+          const directSignupSecret = process.env.DIRECT_SIGNUP_TOKEN_SECRET || process.env.AUTH0_STATE_SECRET || AUTH0_CLIENT_SECRET;
+          if (!directSignupSecret) {
+            logger.error('[Direct Signup] Cannot mint direct signup token; no signing secret configured');
+            return res.status(500).json({
+              error: 'Authentication configuration error',
+              details: 'Unable to continue signup flow',
+            });
+          }
+
+          const directSignupToken = jwt.sign(
+            {
+              type: 'direct-signup',
+              email,
+              name: directSignupName,
+            },
+            directSignupSecret,
+            {
+              expiresIn: '10m',
+              issuer: 'iotistic-provisioning',
+              audience: 'iotistic-signup',
+            }
+          );
+
+          logger.warn('[Direct Signup] Password grants not enabled; using signed direct-signup token fallback', {
+            email,
+          });
+
+          return res.json({
+            directSignupToken,
+            tokenType: 'DirectSignup',
+          });
+        }
+
         logger.error('[Direct Signup] Password grant fallback failed', {
           status: passwordErr?.response?.status,
           error: passwordDetails,
@@ -597,6 +655,7 @@ router.post('/direct-signup', async (req: Request, res: Response) => {
       auth0AccessToken: tokenResponse.data.access_token,
       idToken: tokenResponse.data.id_token,
       tokenType: tokenResponse.data.token_type || 'Bearer',
+      directSignupName,
     });
   } catch (error: any) {
     logger.error('[Direct Signup] Unexpected error', { error: error.message });
@@ -1080,56 +1139,103 @@ router.post('/token', async (req: Request, res: Response) => {
  */
 router.post('/complete-signup', async (req: Request, res: Response) => {
   try {
-    const { auth0AccessToken, companyName, planId } = req.body;
+    const { auth0AccessToken, directSignupToken, companyName, planId } = req.body;
 
-    if (!auth0AccessToken || !companyName) {
+    if ((!auth0AccessToken && !directSignupToken) || !companyName) {
       return res.status(400).json({
         error: 'Missing required fields',
-        message: 'auth0AccessToken and companyName are required',
+        message: 'companyName and one of auth0AccessToken or directSignupToken are required',
       });
     }
 
-    // Verify Auth0 token and get user info
-    const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;
-    let userInfo;
-    try {
-      const userInfoResponse = await axios.get(
-        `https://${AUTH0_DOMAIN}/userinfo`,
-        {
-          headers: {
-            Authorization: `Bearer ${auth0AccessToken}`,
-          },
-          timeout: 10000,
+    let auth0Sub: string | undefined;
+    let email: string | undefined;
+    let name: string | undefined;
+
+    if (auth0AccessToken) {
+      // Verify Auth0 token and get user info
+      const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;
+      let userInfo;
+      try {
+        const userInfoResponse = await axios.get(
+          `https://${AUTH0_DOMAIN}/userinfo`,
+          {
+            headers: {
+              Authorization: `Bearer ${auth0AccessToken}`,
+            },
+            timeout: 10000,
+          }
+        );
+        userInfo = userInfoResponse.data;
+      } catch (error: any) {
+        logger.error('[Signup] Failed to verify Auth0 token', {
+          error: error.response?.data || error.message,
+        });
+        return res.status(401).json({
+          error: 'Invalid Auth0 token',
+          message: 'Could not verify authentication',
+        });
+      }
+
+      auth0Sub = userInfo.sub;
+      email = userInfo.email;
+      name = userInfo.name || email;
+    } else {
+      const directSignupSecret = process.env.DIRECT_SIGNUP_TOKEN_SECRET || process.env.AUTH0_STATE_SECRET || process.env.AUTH0_CLIENT_SECRET;
+      if (!directSignupSecret) {
+        return res.status(500).json({
+          error: 'Authentication configuration error',
+          message: 'Direct signup token verification is not configured',
+        });
+      }
+
+      try {
+        const decoded = jwt.verify(directSignupToken, directSignupSecret, {
+          issuer: 'iotistic-provisioning',
+          audience: 'iotistic-signup',
+        }) as any;
+
+        if (decoded?.type !== 'direct-signup' || !decoded?.email) {
+          throw new Error('Invalid direct signup token payload');
         }
-      );
-      userInfo = userInfoResponse.data;
-    } catch (error: any) {
-      logger.error('[Signup] Failed to verify Auth0 token', {
-        error: error.response?.data || error.message,
-      });
-      return res.status(401).json({
-        error: 'Invalid Auth0 token',
-        message: 'Could not verify authentication',
+
+        email = decoded.email;
+        name = decoded.name || decoded.email;
+      } catch (error: any) {
+        logger.error('[Signup] Failed to verify direct signup token', {
+          error: error.message,
+        });
+        return res.status(401).json({
+          error: 'Invalid signup token',
+          message: 'Could not verify direct signup token',
+        });
+      }
+    }
+
+    if (!email) {
+      return res.status(400).json({
+        error: 'Missing user identity',
+        message: 'Could not determine user email from signup data',
       });
     }
 
-    const auth0Sub = userInfo.sub;
-    const email = userInfo.email;
-    const name = userInfo.name || email;
+    name = name || email;
 
     logger.info('[Signup] New customer signup', { auth0Sub, email, companyName });
 
     // Check if user already has a tenant
-    const existingMembership = await query(
-      `SELECT customer_id FROM user_tenant_roles WHERE auth0_sub = $1 LIMIT 1`,
-      [auth0Sub]
-    );
+    if (auth0Sub) {
+      const existingMembership = await query(
+        `SELECT customer_id FROM user_tenant_roles WHERE auth0_sub = $1 LIMIT 1`,
+        [auth0Sub]
+      );
 
-    if (existingMembership.rows.length > 0) {
-      return res.status(409).json({
-        error: 'User already has account',
-        message: 'This user is already assigned to a tenant',
-      });
+      if (existingMembership.rows.length > 0) {
+        return res.status(409).json({
+          error: 'User already has account',
+          message: 'This user is already assigned to a tenant',
+        });
+      }
     }
 
     // Check if email already used (prevent duplicate accounts)
@@ -1147,7 +1253,8 @@ router.post('/complete-signup', async (req: Request, res: Response) => {
 
     // Generate unique customer_id
     const crypto = require('crypto');
-    const hash = crypto.createHash('sha256').update(auth0Sub + Date.now()).digest('hex');
+    const signupIdentity = auth0Sub || email;
+    const hash = crypto.createHash('sha256').update(signupIdentity + Date.now()).digest('hex');
     const customerId = `customer-${hash.substring(0, 12)}`;
 
     // Create customer record
@@ -1166,17 +1273,24 @@ router.post('/complete-signup', async (req: Request, res: Response) => {
     logger.info('[Signup] Customer created', { customerId, email });
 
     // Create user-tenant role assignment (admin)
-    await query(
-      `INSERT INTO user_tenant_roles (
-        auth0_sub,
-        customer_id,
-        role,
-        created_by
-      ) VALUES ($1, $2, $3, $4)`,
-      [auth0Sub, customerId, 'admin', 'self_signup']
-    );
+    if (auth0Sub) {
+      await query(
+        `INSERT INTO user_tenant_roles (
+          auth0_sub,
+          customer_id,
+          role,
+          created_by
+        ) VALUES ($1, $2, $3, $4)`,
+        [auth0Sub, customerId, 'admin', 'self_signup']
+      );
 
-    logger.info('[Signup] User-tenant role created', { auth0Sub, customerId });
+      logger.info('[Signup] User-tenant role created', { auth0Sub, customerId });
+    } else {
+      logger.info('[Signup] Skipping immediate role mapping; will auto-link on first Auth0 login', {
+        customerId,
+        email,
+      });
+    }
 
     // IMPORTANT:
     // Do NOT queue deployment here.
@@ -1273,6 +1387,21 @@ router.post('/complete-signup', async (req: Request, res: Response) => {
         success: true,
         requiresCheckout: true,
         checkoutUrl: session.url,
+        user: {
+          email,
+          name,
+          role: 'admin',
+          customerId,
+        },
+      });
+    }
+
+    // If this signup path used directSignupToken fallback, user must still log in once via Auth0.
+    if (!auth0Sub) {
+      return res.json({
+        success: true,
+        requiresLogin: true,
+        message: 'Signup completed. Please log in to finalize account access.',
         user: {
           email,
           name,

@@ -598,8 +598,8 @@
                 }
 
                 const directSignupData = await directSignupResponse.json();
-                if (!directSignupData.auth0AccessToken) {
-                    throw new Error('Missing Auth0 access token from direct signup');
+                if (!directSignupData.auth0AccessToken && !directSignupData.directSignupToken) {
+                    throw new Error('Missing authentication payload from direct signup');
                 }
 
                 const completeSignupResponse = await fetch(`${PROVISIONING_API_URL}/api/auth/complete-signup`, {
@@ -609,6 +609,7 @@
                     },
                     body: JSON.stringify({
                         auth0AccessToken: directSignupData.auth0AccessToken,
+                        directSignupToken: directSignupData.directSignupToken,
                         companyName,
                         planId: plan
                     })
