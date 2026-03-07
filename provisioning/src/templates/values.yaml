@@ -231,6 +231,11 @@ nodered:
     # Content Security Policy configuration
     NODE_RED_FRAME_ANCESTORS: "'self' https://*.iotistica.com https://*.iotistic.ca"
     NODE_RED_FONT_SRC: "'self' data: https:"
+  # Auth0 Configuration (RS256 JWT validation for nr-auth plugin)
+  auth0:
+    domain: "dev-hmwhgxw10boqpmrw.us.auth0.com"
+    audience: "https://{{BASE_DOMAIN}}"
+    issuer: "https://dev-hmwhgxw10boqpmrw.us.auth0.com/"
   # Ingress configuration
   ingress:
     enabled: true

@@ -1,163 +1,4 @@
 {{- if .Values.nodered.enabled }}
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ include "customer-instance.fullname" . }}-nodered-settings
-  labels:
-    {{- include "customer-instance.labels" . | nindent 4 }}
-    app.kubernetes.io/component: nodered
-data:
-  settings.js: |
-    let latestAuthToken = null
-
-    // Global API base URL - referenced throughout config
-    const IOTISTIC_BASE_URL = process.env['IOTISTIC_BASE_URL'] || 'http://{{ include "customer-instance.fullname" . }}-api:{{ .Values.api.port }}'
-
-    // Global MQTT settings - referenced throughout config and plugins
-    const MQTT_BROKER_URL = process.env['MQTT_BROKER_URL'] || 'mqtt://{{ include "customer-instance.fullname" . }}-mosquitto:{{ .Values.mosquitto.ports.mqtt }}'
-    const MQTT_USERNAME = process.env['MQTT_USERNAME'] || '{{ .Values.nodered.mqtt.username }}'
-    const MQTT_PASSWORD = process.env['MQTT_PASSWORD'] || '{{ .Values.nodered.mqtt.password }}'
-
-    module.exports = {
-        iotisticURL: IOTISTIC_BASE_URL,
-        mqttBroker: MQTT_BROKER_URL,
-        mqttUsername: MQTT_USERNAME,
-        mqttPassword: MQTT_PASSWORD,
-        nodesDir: "/data/nodes",
-        minify: false,
-        flowFilePretty: true,
-        
-        uiPort: process.env.PORT || {{ .Values.nodered.port }},
-        
-        adminAuth: require("@iotistic/nr-auth")({
-            uiPort: process.env.PORT || {{ .Values.nodered.port }},
-            iotisticURL: IOTISTIC_BASE_URL
-        }),
-        
-        // Storage module for flows, credentials, settings, sessions
-        storageModule: require('@iotistic/nr-storage')({
-            iotisticURL: IOTISTIC_BASE_URL,
-            token: process.env['IOTISTIC_STORAGE_TOKEN'] // Service API key for storage access
-        }),
-
-        httpAdminMiddleware: async function(req, res, next) {
-            if (req.user && req.user.token) {
-                latestAuthToken = req.user.token
-            }
-            if (req.query.logoutSession === 'true') {
-                console.log('Logging out session');
-            }
-            next();
-        },
-        
-        diagnostics: {
-            enabled: true,
-            ui: true,
-        },
-        
-        runtimeState: {
-            enabled: true,
-            ui: true,
-        },
-        
-        logging: {
-            console: {
-                level: "{{ .Values.nodered.logLevel }}",
-                metrics: false,
-                audit: false
-            }
-        },
-        
-        contextStorage: {
-            default: {
-                module: "memory"
-            }
-        },
-        
-        exportGlobalContextKeys: false,
-        
-        externalModules: {
-            // autoInstall: false,
-            // autoInstallRetry: 30,
-        },
-        
-        functionExternalModules: true,
-        
-        functionTimeout: 0,
-        
-        functionGlobalContext: {},
-        
-        editorTheme: {
-            theme: "midnight-red",
-            
-            page: {
-                title: "{{ .Values.customer.companyName }} - Node-RED"
-            },
-            
-            header: {
-                title: "{{ .Values.customer.companyName }}<br/>",
-                image: null,
-                toolbar: false
-            },
-            
-            tours: false,
-            
-            palette: {
-                categories: ['iotistic', 'subflows', 'common', 'function', 'network', 'sequence', 'parser', 'storage'],
-            },
-            
-            logout: {
-                redirect: IOTISTIC_BASE_URL + "/logout"
-            },
-            
-            projects: {
-                enabled: false,
-                workflow: {
-                    mode: "manual"
-                }
-            },
-            
-            codeEditor: {
-                lib: "monaco",
-                options: {}
-            },
-            
-            markdownEditor: {
-                mermaid: {
-                    enabled: true
-                }
-            },
-            
-            multiplayer: {
-                enabled: false
-            }
-        },
-        
-        debugUseColors: true,
-        
-        debugMaxLength: 1000,
-        
-        mqttReconnectTime: 15000,
-        
-        serialReconnectTime: 15000,
-    }
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: {{ include "customer-instance.fullname" . }}-nodered-data
-  labels:
-    {{- include "customer-instance.labels" . | nindent 4 }}
-    app.kubernetes.io/component: nodered
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: {{ .Values.nodered.storage.size }}
-  {{- if .Values.nodered.storage.storageClass }}
-  storageClassName: {{ .Values.nodered.storage.storageClass }}
-  {{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -215,14 +56,19 @@ spec:
           value: "false"
         - name: NODE_RED_ENABLE_PROJECTS
           value: "false"
+        - name: NODE_RED_ENABLE_UI_AUTH
+          value: "true"
+        - name: NODERED_TITLE
+          value: "{{ .Values.customer.companyName }}"
         - name: TZ
           value: {{ .Values.nodered.timezone }}
-        volumeMounts:
-        - name: data
-          mountPath: /data
-        - name: settings
-          mountPath: /data/settings.js
-          subPath: settings.js
+        # Auth0 configuration
+        - name: AUTH0_DOMAIN
+          value: "{{ .Values.nodered.auth0.domain }}"
+        - name: AUTH0_AUDIENCE
+          value: "{{ .Values.nodered.auth0.audience }}"
+        - name: AUTH0_ISSUER
+          value: "{{ .Values.nodered.auth0.issuer }}"
         resources:
           {{- toYaml .Values.nodered.resources | nindent 10 }}
         livenessProbe:
@@ -239,13 +85,6 @@ spec:
           initialDelaySeconds: 10
           periodSeconds: 10
           timeoutSeconds: 5
-      volumes:
-      - name: data
-        persistentVolumeClaim:
-          claimName: {{ include "customer-instance.fullname" . }}-nodered-data
-      - name: settings
-        configMap:
-          name: {{ include "customer-instance.fullname" . }}-nodered-settings
 ---
 apiVersion: v1
 kind: Service

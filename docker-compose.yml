@@ -537,6 +537,7 @@ services:
             - AUTH0_DOMAIN=${AUTH0_DOMAIN:-dev-hmwhgxw10boqpmrw.us.auth0.com}
             - AUTH0_AUDIENCE=${AUTH0_AUDIENCE:-https://iotistica.com}
             - AUTH0_ISSUER=${AUTH0_ISSUER:-https://dev-hmwhgxw10boqpmrw.us.auth0.com/}
+            - NODE_RED_ENABLE_UI_AUTH=true
         depends_on:
             api:
                 condition: service_healthy
