@@ -295,6 +295,8 @@ export class GitOpsProvisioningService {
     const baseDomain = process.env.BASE_DOMAIN || 'api.iotistica.com';
     
     let processedContent = templateContent
+      // Keep Node-RED external URL as nr-<raw-client-id>
+      .replace(/nr-\{\{CLIENT_ID\}\}/g, `nr-${data.clientId}`)
       .replace(/\{\{CLIENT_ID\}\}/g, `client-${data.clientId}`)
       .replace(/\{\{RELEASE_VERSION\}\}/g, releaseVersion)
       .replace(/\{\{CLIENT_BASE_DOMAIN\}\}/g, clientBaseDomain)

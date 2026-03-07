@@ -68,11 +68,14 @@ spec:
 
             # Content Security Policy configuration
             - name: NODE_RED_FRAME_ANCESTORS
-              value: {{ index $noderedEnv "NODE_RED_FRAME_ANCESTORS" | default "'self' https://*.iotistica.com https://*.iotistic.ca" | quote }}
+              value: {{ index $noderedEnv "NODE_RED_FRAME_ANCESTORS" | default "'self' https://*.iotistica.com https://*.iotistic.ca http://localhost:* http://*:30*" | quote }}
             - name: NODE_RED_FONT_SRC
               value: {{ index $noderedEnv "NODE_RED_FONT_SRC" | default "'self' data: https:" | quote }}
             - name: NODE_RED_ENABLE_UI_AUTH
               value: {{ index $noderedEnv "NODE_RED_ENABLE_UI_AUTH" | default "false" | quote }}
+            # Explicit CSP header to override any middleware defaults
+            - name: NODE_RED_CSP_HEADER
+              value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https: http:; font-src 'self' data: https: http:; connect-src 'self' wss: ws: https: http:; frame-ancestors 'self' https://*.iotistica.com https://*.iotistic.ca http://localhost:* http://*:30*"
             
             # Auth0 Configuration (reuse dashboard config)
             - name: AUTH0_DOMAIN
@@ -118,7 +121,7 @@ spec:
           responseHeaderModifier:
             set:
               - name: Content-Security-Policy
-                value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' wss: ws: https: http:; frame-ancestors 'self' https://*.iotistica.com https://*.iotistic.ca"
+                value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; font-src 'self' data: https:; connect-src 'self' wss: ws: https: http:; frame-ancestors 'self' https://*.iotistica.com https://*.iotistic.ca http://localhost:* http://*:30*"
        backendRefs:
         - group: ""
           kind: Service
