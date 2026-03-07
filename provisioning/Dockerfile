@@ -46,6 +46,7 @@ RUN apk add --no-cache \
     bash \
     ca-certificates \
     curl \
+    zlib=1.3.2-r0 \
     && rm -rf /var/cache/apk/*
 
 # Copy package files
