@@ -517,8 +517,9 @@ router.post('/direct-signup', async (req: Request, res: Response) => {
       });
     }
 
-    // 2) Authenticate with password-realm grant to get access token
-    // Note: Requires Auth0 tenant to enable Password Realm grant for this app.
+    // 2) Authenticate newly created user and return tokens.
+    // Prefer password-realm (explicit DB connection), but fall back to password grant
+    // when the Auth0 app doesn't allow password-realm.
     let tokenResponse;
     try {
       tokenResponse = await axios.post(
@@ -538,17 +539,58 @@ router.post('/direct-signup', async (req: Request, res: Response) => {
           timeout: 10000,
         }
       );
-    } catch (tokenErr: any) {
-      const details = tokenErr?.response?.data?.error_description || tokenErr.message;
-      logger.error('[Direct Signup] Password grant failed', {
-        status: tokenErr?.response?.status,
-        error: details,
+    } catch (realmErr: any) {
+      const realmDetails = realmErr?.response?.data?.error_description || realmErr.message;
+      const realmErrorCode = String(realmErr?.response?.data?.error || '').toLowerCase();
+      const realmMessage = String(realmDetails || '').toLowerCase();
+      const canFallback = realmErrorCode === 'unauthorized_client' || realmMessage.includes('not allowed for the client');
+
+      if (!canFallback) {
+        logger.error('[Direct Signup] Password-realm grant failed', {
+          status: realmErr?.response?.status,
+          error: realmDetails,
+        });
+
+        return res.status(401).json({
+          error: 'Authentication failed',
+          details: realmDetails,
+        });
+      }
+
+      logger.warn('[Direct Signup] Password-realm grant not allowed; trying password grant fallback', {
+        status: realmErr?.response?.status,
+        error: realmDetails,
       });
 
-      return res.status(401).json({
-        error: 'Authentication failed',
-        details,
-      });
+      try {
+        tokenResponse = await axios.post(
+          `https://${AUTH0_DOMAIN}/oauth/token`,
+          {
+            grant_type: 'password',
+            client_id: AUTH0_CLIENT_ID,
+            client_secret: AUTH0_CLIENT_SECRET,
+            username: email,
+            password,
+            scope: 'openid profile email',
+            audience: AUTH0_AUDIENCE,
+          },
+          {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 10000,
+          }
+        );
+      } catch (passwordErr: any) {
+        const passwordDetails = passwordErr?.response?.data?.error_description || passwordErr.message;
+        logger.error('[Direct Signup] Password grant fallback failed', {
+          status: passwordErr?.response?.status,
+          error: passwordDetails,
+        });
+
+        return res.status(401).json({
+          error: 'Authentication failed',
+          details: passwordDetails,
+        });
+      }
     }
 
     return res.json({
