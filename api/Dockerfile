@@ -34,7 +34,9 @@ WORKDIR /app
 
 # Install runtime system dependencies in single layer with cleanup
 # Added ca-certificates and iptables for Tailscale support
-RUN apk add --no-cache \
+# Upgrade zlib to fix CVE-2026-22184, CVE-2026-27171
+RUN apk upgrade --no-cache zlib && \
+    apk add --no-cache \
     curl \
     tini \
     ca-certificates \
