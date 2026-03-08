@@ -42,7 +42,7 @@ services:
             timeout: 5s
             retries: 5
         networks:
-            - iotistic-net
+            - iotistica-net
 
     redis:
         image: redis:7-alpine
@@ -64,7 +64,7 @@ services:
             timeout: 3s
             retries: 5
         networks:
-            - iotistic-net
+            - iotistica-net
    
     api:
         build:
@@ -170,7 +170,7 @@ services:
                 condition: service_healthy
       
         networks:
-            - iotistic-net
+            - iotistica-net
 
     housekeeper:
         build:
@@ -208,7 +208,7 @@ services:
             retries: 3
             start_period: 40s
         networks:
-            - iotistic-net
+            - iotistica-net
 
     # ollama:
     #     image: ollama/ollama:latest
@@ -227,7 +227,7 @@ services:
     #         retries: 3
     #         start_period: 60s
     #     networks:
-    #         - iotistic-net
+    #         - iotistica-net
     #     logging:
     #         driver: "json-file"
     #         options:
@@ -255,7 +255,7 @@ services:
             retries: 3
             start_period: 10s
         networks:
-            - iotistic-net
+            - iotistica-net
 
     emqx:
         image: emqx/emqx:latest
@@ -275,7 +275,7 @@ services:
             api:
                 condition: service_healthy
         networks:
-            - iotistic-net
+            - iotistica-net
     
 
     # VPN Services - Commented out until TypeScript code is complete
@@ -315,7 +315,7 @@ services:
     #         redis:
     #             condition: service_healthy
     #     networks:
-    #         - iotistic-net
+    #         - iotistica-net
     #     healthcheck:
     #         test: ["CMD", "curl", "-f", "http://localhost:3200/health"]
     #         interval: 30s
@@ -343,7 +343,7 @@ services:
             api:
                 condition: service_healthy
         networks:
-            - iotistic-net
+            - iotistica-net
         logging:
             driver: "json-file"
             options:
@@ -366,7 +366,7 @@ services:
             - "4840:4840"     # OPC UA server
             - "5002:5002"     # Web GUI
         networks:
-            - iotistic-net
+            - iotistica-net
 
         logging:
             driver: "json-file"
@@ -390,7 +390,7 @@ services:
                 max-size: "5m"
                 max-file: "2"
         networks:
-            - iotistic-net
+            - iotistica-net
 
     mqtt-monitor:
         build:
@@ -423,7 +423,7 @@ services:
             - MQTT_TOPIC_TREE_UPDATE_INTERVAL=${MQTT_TOPIC_TREE_UPDATE_INTERVAL:-5000}
             - MQTT_MAX_PAYLOAD_BYTES=${MQTT_MAX_PAYLOAD_BYTES:-65536}
         networks:
-            - iotistic-net
+            - iotistica-net
         healthcheck:
             test: ["CMD", "node", "-e", "require('http').get('http://localhost:3500/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
             interval: 30s
@@ -472,7 +472,7 @@ services:
             redis:
                 condition: service_healthy
         networks:
-            - iotistic-net
+            - iotistica-net
         healthcheck:
             test: ["CMD", "node", "-e", "require('http').get('http://localhost:3300/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
             interval: 30s
@@ -512,7 +512,7 @@ services:
     #     - DB_PASSWORD=postgres
     #     - LOG_LEVEL=${LOG_LEVEL:-info}
     #     networks:
-    #     - iotistic-net
+    #     - iotistica-net
     #     depends_on:
     #     - postgres
 
@@ -542,7 +542,7 @@ services:
             api:
                 condition: service_healthy
         networks:
-            - iotistic-net
+            - iotistica-net
         healthcheck:
             test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:1880"]
             interval: 30s
@@ -570,7 +570,7 @@ services:
             retries: 3
             start_period: 10s
         networks:
-            - iotistic-net
+            - iotistica-net
 
     # prometheus:
     #     image: prom/prometheus:latest
@@ -591,7 +591,7 @@ services:
     #         api:
     #             condition: service_healthy
     #     networks:
-    #         - iotistic-net
+    #         - iotistica-net
     #     healthcheck:
     #         test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
     #         interval: 30s
@@ -618,7 +618,7 @@ services:
     #         prometheus:
     #             condition: service_healthy
     #     networks:
-    #         - iotistic-net
+    #         - iotistica-net
     #     healthcheck:
     #         test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
     #         interval: 30s
@@ -650,5 +650,5 @@ volumes:
         driver: local
  
 networks:
-  iotistic-net:
+  iotistica-net:
     driver: bridge

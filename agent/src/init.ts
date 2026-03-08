@@ -180,12 +180,12 @@ export class FeatureInitializer {
 
     try {
       // Load sensor output configurations from database
-      const { EndpointOutputModel } = await import('./db/models/endpoint-outputs.model.js');
+      const { EndpointOutputModel: DeviceOutputModel } = await import('./db/models/endpoint-outputs.model.js');
       const { DeviceEndpointModel } = await import('./db/models/endpoint.model.js');
       
-      const endpointOutputs = await EndpointOutputModel.getAll();
+      const deviceOutputs = await DeviceOutputModel.getAll();
 
-      if (endpointOutputs.length === 0) {
+      if (deviceOutputs.length === 0) {
         logger.warnSync('No device outputs configured in database', {
           component: LogComponents.agent,
           note: 'Run migrations to create default endpoint_outputs entries'
@@ -194,12 +194,12 @@ export class FeatureInitializer {
       }
 
       // Get all enabled protocols
-      const allEndpoints = await DeviceEndpointModel.getAll();
-      const enabledEndpoints = new Set(
-        allEndpoints.filter((s: any) => s.enabled).map((s: any) => s.protocol)
+      const allDevices = await DeviceEndpointModel.getAll();
+      const enabledDevices = new Set(
+        allDevices.filter((s: any) => s.enabled).map((s: any) => s.protocol)
       );
 
-      if (enabledEndpoints.size === 0) {
+      if (enabledDevices.size === 0) {
         logger.warnSync('No enabled devices found', {
           component: LogComponents.agent,
           note: 'Enable devices in database before starting Device Publish'
@@ -213,8 +213,8 @@ export class FeatureInitializer {
       // - Modbus: 128KB (standard register responses)
       // - CAN: 64KB (bus messages)
       // - SNMP: 128KB (trap messages)
-      const endpoints = endpointOutputs
-        .filter(output => enabledEndpoints.has(output.protocol))
+      const devices = deviceOutputs
+        .filter(output => enabledDevices.has(output.protocol))
         .map((output) => ({
           name: `${output.protocol}-pipe`,
           addr: output.socket_path,
@@ -226,17 +226,17 @@ export class FeatureInitializer {
           enabled: true,
         }));
 
-      if (endpoints.length === 0) {
+      if (devices.length === 0) {
         logger.warnSync('No pipes to read from', {
           component: LogComponents.agent,
-          enabledProtocols: Array.from(enabledEndpoints)
+          enabledProtocols: Array.from(enabledDevices)
         });
         return;
       }
 
       const sensorConfig = {
         enabled: true,
-        endpoints,
+        endpoints: devices,
       };
 
       // Read compression flags from environment (configured at agent startup)
@@ -261,21 +261,21 @@ export class FeatureInitializer {
 
         logger.debugSync('Configured edge AI anomaly detection for device data', {
           component: LogComponents.agent,
-          sensorCount: endpoints.length
+          sensorCount: devices.length
         });
       }
 
       await this.features.sensorPublish.start();
 
-      logger.debugSync('Sensor Publish Feature initialized', {
+      logger.debugSync('Device Publish Feature initialized', {
         component: LogComponents.agent,
-        pipeCount: endpoints.length,
-        enabledProtocols: Array.from(enabledEndpoints),
-        pipes: endpoints.map(s => s.addr),
+        pipeCount: devices.length,
+        enabledProtocols: Array.from(enabledDevices),
+        pipes: devices.map(s => s.addr),
         mqttTopicPattern: 'iot/device/{deviceUuid}/endpoints/{topic}'
       });
     } catch (error) {
-      logger.errorSync('Failed to initialize Sensor Publish Feature', error as Error, {
+      logger.errorSync('Failed to initialize Device Publish Feature', error as Error, {
         component: LogComponents.agent,
         note: 'Continuing without Sensor Publish'
       });
@@ -291,7 +291,7 @@ export class FeatureInitializer {
       // No more config.protocols or config.protocolAdapters - endpoints determine which protocols are enabled
       
       // Initialize base config with all protocols disabled
-      const sensorsConfig: SensorConfig = {
+      const devicesConfig: SensorConfig = {
         enabled: true,
         modbus: { enabled: false },
         opcua: { enabled: false },
@@ -311,10 +311,10 @@ export class FeatureInitializer {
         if (devices.length > 0) {
           enabledProtocols.push(protocol);
           // Enable the protocol adapter since we have enabled endpoints
-          if (!sensorsConfig[protocol]) {
-            sensorsConfig[protocol] = { enabled: true };
+          if (!devicesConfig[protocol]) {
+            devicesConfig[protocol] = { enabled: true };
           } else {
-            sensorsConfig[protocol].enabled = true;
+            devicesConfig[protocol].enabled = true;
           }
         }
       }
@@ -322,7 +322,7 @@ export class FeatureInitializer {
       // ALWAYS create SensorsFeature even if no protocols are enabled initially
       // This ensures health reporting works when endpoints are discovered later
       this.features.sensors = new SensorsFeature(
-        sensorsConfig,
+        devicesConfig,
         logger,
         deviceInfo.uuid
       );

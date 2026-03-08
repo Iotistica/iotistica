@@ -36,9 +36,9 @@ param(
     [int]$StartIndex = 1,
     [string]$OutputFile = "docker-compose.agents.yml",
     #[string]$ApiUrl = "https://api.iotistica.com",
-    #[string]$ApiUrl = "https://localhost:3443",
-    [string]$ApiUrl = "https://api-client-b07708418f4e.iotistica.com",
-    [string]$FleetUuid = "f213b44b-39b7-4adb-840c-66285054882c",
+    [string]$ApiUrl = "https://localhost:3443",
+    #[string]$ApiUrl = "https://api-client-b07708418f4e.iotistica.com",
+    [string]$FleetUuid = "9dba5910-040d-4544-862e-32d47dc18290",
     [bool]$UseDirectDb = $true,
     [string]$DbHost = "localhost",
     [int]$DbPort = 5432,
@@ -63,8 +63,8 @@ param(
     # Agent Configuration
     [string]$NodeEnv = "development",
     #[string]$CLOUD_API_ENDPOINT = "https://api.iotistica.com",
-    #[string]$CLOUD_API_ENDPOINT = "https://api:3443",
-    [string]$CLOUD_API_ENDPOINT = "https://api-client-b07708418f4e.iotistica.com",
+    [string]$CLOUD_API_ENDPOINT = "https://api:3443",
+    #[string]$CLOUD_API_ENDPOINT = "https://api-client-b07708418f4e.iotistica.com",
     [int]$ReportInterval = 20000,
     [int]$MetricsInterval = 30000,
     [string]$LogCompression = "true",
@@ -142,13 +142,32 @@ function Remove-AgentResources {
     
     # Core service networks (shared, add once)
     $networkNames += "1000_default"
+
+    # Discover existing Docker volumes once so cleanup can remove volumes regardless
+    # of compose project prefix (e.g. iotistica_, zemfyre-sensor_, etc.).
+    $allDockerVolumes = @()
+    try {
+        $allDockerVolumes = @(docker volume ls --format "{{.Name}}" 2>$null)
+    }
+    catch {
+        $allDockerVolumes = @()
+    }
     
     for ($i = $StartIndex; $i -le $endIndex; $i++) {
         # Agent container
         $containerNames += "agent-$i"
         
-        # Agent volumes
-        $volumeNames += "zemfyre-sensor_agent-$i-data"
+        # Agent data volume (match exact and prefixed compose names)
+        $baseVolumeName = "agent-$i-data"
+        $volumeNames += $baseVolumeName
+        $volumeNames += "zemfyre-sensor_$baseVolumeName"
+
+        $matchingVolumes = $allDockerVolumes | Where-Object {
+            $_ -eq $baseVolumeName -or $_ -like "*_$baseVolumeName"
+        }
+        if ($matchingVolumes) {
+            $volumeNames += $matchingVolumes
+        }
         
         # Agent images - use explicit string formatting to ensure proper expansion
         $imageName = "zemfyre-sensor-agent-{0}:latest" -f $i
@@ -178,6 +197,8 @@ function Remove-AgentResources {
         Write-Host "  ⚠️  Some containers may not exist" -ForegroundColor Yellow
     }
     
+    $volumeNames = $volumeNames | Sort-Object -Unique
+
     # Remove volumes
     Write-Host "`n💾 Removing volumes..." -ForegroundColor Cyan
     $removedCount = 0

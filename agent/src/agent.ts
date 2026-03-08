@@ -47,24 +47,6 @@ import { DiscoveryService } from "./features/discovery/discovery-service.js";
 import { FeatureInitializer, type FeatureContext } from "./init.js";
 import type { ConfigManager } from "./device-manager/config.js";
 
-/**
- * Load boot configuration from file
- * Priority: /data/iotistic/boot-config.json (Yocto) or BOOT_CONFIG_PATH env var
- */
-function loadBootConfig(): Record<string, any> | null {
-  const bootConfigPath = process.env.BOOT_CONFIG_PATH || '/data/iotistic/boot-config.json';
-  
-  try {
-    if (fs.existsSync(bootConfigPath)) {
-      const content = fs.readFileSync(bootConfigPath, 'utf-8');
-      return JSON.parse(content);
-    }
-  } catch (error) {
-    console.warn(`Failed to load boot config from ${bootConfigPath}:`, error);
-  }
-  
-  return null;
-}
 
 export default class Agent {
   private stateReconciler!: StateReconciler; // Main state manager
@@ -389,27 +371,22 @@ export default class Agent {
 
     let deviceInfo = this.deviceManager.getDeviceInfo();
 
-    // Load boot config if available (Yocto images or manual config)
-    const bootConfig = loadBootConfig();
+
+    // Get provisioning key from environment variable
+    const provisioningApiKey = process.env.PROVISIONING_KEY ;
     
-    // Get provisioning key from multiple sources (priority order):
-    // 1. Environment variable (highest priority - manual override)
-    // 2. Boot config file (Iotistic OS Yocto images)
-    const provisioningApiKey = process.env.PROVISIONING_KEY || bootConfig?.provisioningKey;
-    
-    // Get API endpoint (environment takes priority over boot config)
-    const cloudEndpoint = process.env.CLOUD_API_ENDPOINT || bootConfig?.cloudApiEndpoint || this.configManager.getCloudApiEndpoint();
+    // Get API endpoint from environment or config manager
+    const cloudEndpoint = process.env.CLOUD_API_ENDPOINT ||  this.configManager.getCloudApiEndpoint();
     
     this.agentLogger.debugSync("Checking provisioning configuration", {
       component: LogComponents.agent,
       hasProvisioningKey: !!provisioningApiKey,
       provisioningKeyLength: provisioningApiKey?.length || 0,
       provisioningKeyPrefix: provisioningApiKey ? provisioningApiKey.substring(0, 20) + '...' : 'not set',
-      keySource: process.env.PROVISIONING_KEY ? 'environment' : (bootConfig?.provisioningKey ? 'boot-config' : 'none'),
+      keySource: process.env.PROVISIONING_KEY ? 'environment' : 'none',
       isProvisioned: deviceInfo.provisioned,
       hasCloudEndpoint: !!cloudEndpoint,
       cloudEndpoint: cloudEndpoint || 'not set',
-      bootConfigLoaded: !!bootConfig,
     });
 
     if (
@@ -421,7 +398,7 @@ export default class Agent {
         "Auto-provisioning device with two-phase authentication",
         {
           component: LogComponents.agent,
-          keySource: process.env.PROVISIONING_KEY ? 'environment variable' : 'boot config file',
+          keySource: 'environment variable',
         }
       );
       try {
@@ -440,8 +417,8 @@ export default class Agent {
         await this.deviceManager.provision({
           provisioningApiKey, // Required for two-phase auth
           deviceName:
-            process.env.DEVICE_NAME || bootConfig?.deviceName || `agent-${deviceInfo.uuid.slice(0, 8)}`,
-          deviceType: process.env.DEVICE_TYPE || bootConfig?.deviceType || "standalone",
+            process.env.DEVICE_NAME || `agent-${deviceInfo.uuid.slice(0, 8)}`,
+          deviceType: process.env.DEVICE_TYPE || "standalone",
           apiEndpoint: cloudEndpoint,
           macAddress,
           osVersion,
@@ -598,10 +575,8 @@ export default class Agent {
       }
 
       // Connect to MQTT broker with provisioned credentials
-      await mqttManager.connect(mqttBrokerUrl, mqttOptions);
-
-      // Initialize message ID generator for HA deduplication
-      mqttManager.initMessageIdGenerator(this.deviceInfo.uuid);
+      // deviceUuid passed to initialize message ID generator for HA deduplication
+      await mqttManager.connect(mqttBrokerUrl, mqttOptions, this.deviceInfo.uuid);
 
       // Enable debug mode if requested
       if (process.env.MQTT_DEBUG === "true") {
@@ -611,7 +586,7 @@ export default class Agent {
       this.agentLogger.infoSync("MQTT Manager connected", {
         component: LogComponents.agent,
         brokerUrl: mqttBrokerUrl,
-        clientId: `device_${this.deviceInfo.uuid}`,
+        clientId: `agent_${this.deviceInfo.uuid}`,
         username: config.username || "(none)",
         debugMode: process.env.MQTT_DEBUG === "true",
         totalLogBackends: this.agentLogger.getBackends().length,
@@ -849,12 +824,6 @@ export default class Agent {
       return;
     }
 
-    this.agentLogger?.infoSync("Initializing device API", {
-      component: LogComponents.agent,
-    });
-
-    // Note: deviceActions.initialize deferred until all dependencies ready (see initDeviceSync)
-
     // Health checks
     const healthchecks = [
       // Container manager health
@@ -930,7 +899,7 @@ export default class Agent {
       
       // Build unified metrics array from system metrics + endpoint datapoint configs
       const systemMetrics = config.systemMetrics || [];
-      const endpointMetrics = this.buildEndpointMetrics(targetStateConfig, config.defaults);
+      const endpointMetrics = this.buildDeviceMetrics(targetStateConfig, config.defaults);
       
       // Merge system metrics with endpoint metrics
       config.metrics = [...systemMetrics, ...endpointMetrics];
@@ -976,7 +945,7 @@ export default class Agent {
    * Build endpoint metrics from datapoint anomaly configs
    * Applies inheritance: defaults → datapoint overrides
    */
-  private buildEndpointMetrics(targetStateConfig: any, defaults: any): any[] {
+  private buildDeviceMetrics(targetStateConfig: any, defaults: any): any[] {
     const metrics: any[] = [];
     const endpoints = targetStateConfig?.endpoints || [];
     

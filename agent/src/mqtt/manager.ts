@@ -251,6 +251,7 @@ export class MqttManager extends EventEmitter {
   private lastReconnectAt = 0; // Timestamp of last reconnect attempt
   private lastBrokerUrl?: string;
   private lastOptions?: IClientOptions;
+  private lastDeviceUuid?: string; // Store device UUID for reuse on reconnects
   private messageIdGenerator?: MessageIdGenerator; // For HA deduplication
   private isReconnecting: boolean = false; // Prevent overlapping reconnection chains
 
@@ -280,7 +281,7 @@ export class MqttManager extends EventEmitter {
   public initMessageIdGenerator(deviceUuid: string): void {
     if (!this.messageIdGenerator) {
       this.messageIdGenerator = new MessageIdGenerator(deviceUuid);
-      this.logger?.infoSync('Message ID generator initialized for HA deduplication', {
+      this.logger?.debugSync('Message ID generator initialized for HA deduplication', {
         component: LogComponents.mqtt,
         deviceUuid
       });
@@ -292,11 +293,24 @@ export class MqttManager extends EventEmitter {
 
   /**
    * Connect to MQTT broker (idempotent - can be called multiple times)
+   * @param brokerUrl - MQTT broker URL
+   * @param options - MQTT client options
+   * @param deviceUuid - Optional device UUID to initialize message ID generator for HA deduplication
    */
-  public async connect(brokerUrl: string, options?: IClientOptions): Promise<void> {
+  public async connect(brokerUrl: string, options?: IClientOptions, deviceUuid?: string): Promise<void> {
     // Store connection config for self-healing
     this.lastBrokerUrl = brokerUrl;
     this.lastOptions = options;
+    
+    // Store device UUID for reuse on reconnects
+    if (deviceUuid) {
+      this.lastDeviceUuid = deviceUuid;
+      // Initialize message ID generator for HA deduplication
+      this.initMessageIdGenerator(deviceUuid);
+    } else if (this.lastDeviceUuid) {
+      // Reuse device UUID from previous connection (reconnect scenario)
+      this.initMessageIdGenerator(this.lastDeviceUuid);
+    }
     
     // If already connected, return
     if (this.client && this.connected) {
