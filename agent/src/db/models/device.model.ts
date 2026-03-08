@@ -50,7 +50,6 @@ export class DeviceModel {
     try {
       MasterKeyManager.initialize(dataDir);
       this.encryptionEnabled = true;
-      console.log('[DeviceModel] Encryption initialized successfully');
     } catch (error) {
       console.error('[DeviceModel] Failed to initialize encryption:', error);
       this.encryptionEnabled = false;

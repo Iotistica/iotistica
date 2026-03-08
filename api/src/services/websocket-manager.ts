@@ -56,6 +56,7 @@ import logger from '../utils/logger';
 import fetch from 'node-fetch';
 import { sessionManager } from './session-manager';
 import { query } from '../db/connection';
+import { createHmac } from 'crypto';
 
 interface WebSocketClient {
   ws: WebSocket;
@@ -1558,6 +1559,62 @@ export class WebSocketManager {
   }
 
   /**
+   * Sign shell command with HMAC-SHA256 (matches agent verification)
+   */
+  private signShellCommand(command: any, deviceUuid: string): any {
+    const secret = process.env.AGENT_SHELL_HMAC_KEY;
+    
+    if (!secret) {
+      // No secret configured - send unsigned (agent will log warning but accept)
+      logger.warn('🐚 [SHELL] ⚠️ AGENT_SHELL_HMAC_KEY not set - sending unsigned command (INSECURE)', {
+        action: command.action
+      });
+      return command;
+    }
+    
+    // Add timestamp fields
+    const issuedAt = Date.now();
+    const expiresAt = issuedAt + (60 * 1000); // 60 second expiry window
+    
+    const signedCommand = {
+      ...command,
+      issued_at: issuedAt,
+      expires_at: expiresAt
+    };
+    
+    // Create canonical string (must match agent's verifyCommandSignature)
+    // Use JSON.stringify to avoid delimiter collision (e.g., data containing '|')
+    // Include deviceUuid to prevent cross-device replay attacks
+    const canonicalPayload = {
+      deviceUuid,
+      action: command.action,
+      sessionId: command.sessionId || '',
+      data: command.data || '',
+      cols: command.cols || null,
+      rows: command.rows || null,
+      issued_at: issuedAt,
+      expires_at: expiresAt
+    };
+    const canonicalString = JSON.stringify(canonicalPayload);
+    
+    // Compute HMAC signature
+    const signature = createHmac('sha256', secret)
+      .update(canonicalString)
+      .digest('hex');
+    
+    signedCommand.signature = signature;
+    
+    logger.debug('🐚 [SHELL] ✅ Command signed with HMAC', {
+      action: command.action,
+      issued_at: new Date(issuedAt).toISOString(),
+      expires_at: new Date(expiresAt).toISOString(),
+      deviceUuid: deviceUuid.substring(0, 8) + '...'
+    });
+    
+    return signedCommand;
+  }
+
+  /**
    * Handle shell command from WebSocket client - forward to device via MQTT
    */
   private async handleShellCommand(deviceUuid: string, data: any): Promise<void> {
@@ -1568,13 +1625,17 @@ export class WebSocketManager {
 
     try {
       const topic = `iot/device/${deviceUuid}/agent/shell`;
-      const payload = JSON.stringify(data);
+      
+      // Sign command with HMAC-SHA256 (security: prevents unauthorized device control)
+      const signedCommand = this.signShellCommand(data, deviceUuid);
+      const payload = JSON.stringify(signedCommand);
       
       logger.debug(`SHELL: Publishing command to MQTT`, {
         deviceUuid: deviceUuid.substring(0, 8) + '...',
         topic,
         action: data.action,
         sessionId: data.sessionId?.substring(0, 8),
+        signed: !!signedCommand.signature
       });
       
       await this.mqttManager.publish(topic, payload, 1);

@@ -510,20 +510,10 @@ export default class Agent {
       const config = this.deviceInfo.mqttBrokerConfig;
       const mqttBrokerUrl = `${config.protocol || 'mqtt'}://${config.host}:${config.port}`;
       
-      this.agentLogger.debugSync(`Built MQTT Broker URL from config`, {
-        component: LogComponents.agent,
-        source: "mqttBrokerConfig",
-        url: mqttBrokerUrl,
-        protocol: config.protocol,
-        host: config.host,
-        port: config.port,
-        hasUsername: !!config.username,
-      });
-      
       const mqttManager = MqttManager.getInstance();
 
       // Log MQTT broker config for troubleshooting
-      this.agentLogger.infoSync("🔍 MQTT BROKER CONFIG FROM DATABASE", {
+      this.agentLogger.infoSync("MQTT BROKER CONFIG FROM DATABASE", {
         component: LogComponents.agent,
         operation: "mqtt-init",
         configKeys: Object.keys(config),

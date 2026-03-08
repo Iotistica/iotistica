@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2026-03-07 22:44:07
+# Generated: 2026-03-08 00:02:58
 # Agents: 1 to 1
 # Ports: 48481 to 48481
 
@@ -28,7 +28,7 @@ services:
       - NODE_ENV=development
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=bccd2121afb93e708d30c8d02eb1f45488c89a114bf5c90a4a926e4ecfb2e53c
+      - PROVISIONING_KEY=4eee3ac1b7ff04b9fd7b9901f79904c24d1db4a06de96118eac4a3710265ae41
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)
@@ -39,6 +39,9 @@ services:
       - USE_KEY_COMPACTION_POC=false
       - USE_DEFLATE_COMPRESSION=true
       - ENABLE_HEAP_PROFILING=true
+      # Shell security (HMAC signature verification)
+      - AGENT_SHELL_HMAC_KEY=wcw3eFT/zyVZ7HYwP+bApLjJX2gW/e1mHW2+WPG2gBk=
+      - AGENT_SHELL_MAX_SESSION_MS=3600000
 volumes:
   agent-1-data:
     driver: local

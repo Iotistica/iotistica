@@ -122,6 +122,8 @@ services:
             - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}  # For Azure: use deployment name
             - LICENSE_PUBLIC_KEY=${LICENSE_PUBLIC_KEY}
             - IOTISTIC_LICENSE_KEY=${IOTISTIC_LICENSE_KEY}
+            # Shell security (HMAC signature verification)
+            - AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY:-wcw3eFT/zyVZ7HYwP+bApLjJX2gW/e1mHW2+WPG2gBk=}
             - REDIS_HOST=${REDIS_HOST:-redis}
             - REDIS_PORT=${REDIS_PORT:-6379}
             - REDIS_PASSWORD=${REDIS_PASSWORD}

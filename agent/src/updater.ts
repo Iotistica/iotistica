@@ -86,7 +86,7 @@ function isValidVersion(version: string): boolean {
  * This ensures we always use the real version after self-updates,
  * not stale version from injected config.
  */
-function detectBinaryVersion(): string {
+function detectBinaryVersion(logger?: AgentLogger): string {
   try {
     // Try to read package.json from agent directory
     // In production: /app/package.json or /opt/iotistic/agent/package.json
@@ -100,26 +100,42 @@ function detectBinaryVersion(): string {
       if (existsSync(pkgPath)) {
         const pkgData = JSON.parse(readFileSync(pkgPath, 'utf-8'));
         if (pkgData.version && isValidVersion(pkgData.version)) {
-          console.log('[AgentUpdater] Version detected:', { path: pkgPath, version: pkgData.version });
+          logger?.debugSync('Version detected', {
+            component: LogComponents.agentUpdater,
+            path: pkgPath,
+            version: pkgData.version
+          });
           return pkgData.version;
         } else {
-          console.warn('[AgentUpdater] Invalid version in package.json:', { path: pkgPath, version: pkgData.version });
+          logger?.warnSync('Invalid version in package.json', {
+            component: LogComponents.agentUpdater,
+            path: pkgPath,
+            version: pkgData.version
+          });
         }
       }
     }
 
     // Fallback: try to read from environment (set by launcher)
     if (process.env.AGENT_VERSION && isValidVersion(process.env.AGENT_VERSION)) {
-      console.log('[AgentUpdater] Version from env:', process.env.AGENT_VERSION);
+      logger?.debugSync('Version from env', {
+        component: LogComponents.agentUpdater,
+        version: process.env.AGENT_VERSION
+      });
       return process.env.AGENT_VERSION;
     }
 
     // Last resort: unknown version
-    console.warn('[AgentUpdater] Version detection failed, all paths checked:', possiblePaths);
+    logger?.warnSync('Version detection failed, all paths checked', {
+      component: LogComponents.agentUpdater,
+      possiblePaths
+    });
     return '0.0.0';
   } catch (error) {
     // If detection fails, return unknown version
-    console.error('[AgentUpdater] Version detection error:', error);
+    logger?.errorSync('Version detection error', error as Error, {
+      component: LogComponents.agentUpdater
+    });
     return '0.0.0';
   }
 }
@@ -195,7 +211,7 @@ export class AgentUpdater {
     
     // Detect actual binary version (critical after self-updates)
     // Using injected config would be stale after agent restart with new binary
-    this.currentVersion = detectBinaryVersion();
+    this.currentVersion = detectBinaryVersion(this.logger);
     
     this.logger.debugSync("Agent updater initialized with detected version", {
       component: LogComponents.agentUpdater,

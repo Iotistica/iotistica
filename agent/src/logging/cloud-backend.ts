@@ -273,19 +273,6 @@ export class CloudLogBackend implements LogBackend {
 	}
 	
 	async initialize(): Promise<void> {
-		console.info('[CloudLogBackend] Configuration loaded', {
-			endpoint: this.config.cloudEndpoint,
-			device: this.config.deviceUuid,
-			compression: this.config.compression,
-			spooling: this.spoolPath ? 'enabled' : 'disabled',
-			samplingRates: {
-				error: `${(this.samplingRates.error * 100).toFixed(0)}%`,
-				warn: `${(this.samplingRates.warn * 100).toFixed(0)}%`,
-				info: `${(this.samplingRates.info * 100).toFixed(0)}%`,
-				debug: `${(this.samplingRates.debug * 100).toFixed(1)}%`
-			}
-		});
-		
 		// Create spool directory if needed (async to avoid blocking)
 		if (this.spoolPath) {
 			try {

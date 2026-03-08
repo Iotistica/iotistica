@@ -530,6 +530,9 @@ $networkConfig
       - USE_KEY_COMPACTION_POC=$UseKeyCompactionPoc
       - USE_DEFLATE_COMPRESSION=$UseDeflateCompression
       - ENABLE_HEAP_PROFILING=$EnableHeapProfiling
+      # Shell security (HMAC signature verification)
+      - AGENT_SHELL_HMAC_KEY=wcw3eFT/zyVZ7HYwP+bApLjJX2gW/e1mHW2+WPG2gBk=
+      - AGENT_SHELL_MAX_SESSION_MS=3600000
 "@
     
     $services += $service

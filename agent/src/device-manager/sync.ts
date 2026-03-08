@@ -203,7 +203,7 @@ export class CloudSync extends EventEmitter {
 		
 		// Set endpoints using method (provides logging)
 		if (endpoints) {
-			this.setEndpoints(endpoints);
+			this.setDevices(endpoints);
 		}
 		
 		// Set defaults FIRST (needed by createHttpClient)
@@ -284,9 +284,9 @@ export class CloudSync extends EventEmitter {
 	 * Update endpoints service reference (for health reporting)
 	 * Called after first boot discovery completes
 	 */
-	public setEndpoints(endpoints: any): void {
+	public setDevices(endpoints: any): void {
 		this.endpoints = endpoints;
-		this.logger?.infoSync('Endpoints service updated', {
+		this.logger?.infoSync('Devices service updated', {
 			component: LogComponents.cloudSync,
 			operation: 'set-endpoints',
 			hasEndpoints: !!endpoints

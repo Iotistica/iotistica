@@ -101,12 +101,6 @@ export function startMemoryMonitoring(
 		return;
 	}
 
-	logger?.infoSync('Starting active memory monitoring', {
-		component: LogComponents.metrics,
-		intervalMs,
-		thresholdMB: bytesToMB(thresholdBytes)
-	});
-
 	monitoringInterval = setInterval(async () => {
 		try {
 			const isHealthy = await healthcheck(thresholdBytes);
