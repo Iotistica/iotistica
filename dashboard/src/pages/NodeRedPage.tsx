@@ -60,6 +60,7 @@ export function NodeRedPage() {
           { token },
           { 
             headers: { 'Content-Type': 'application/json' },
+            withCredentials: true,
             timeout: 5000
           }
         );

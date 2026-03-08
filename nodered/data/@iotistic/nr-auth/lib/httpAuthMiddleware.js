@@ -138,6 +138,18 @@ module.exports = {
         })
 
         // Auth0 token endpoint - for dashboard iframe integration
+        app.options('/admin/auth/token', (req, res) => {
+            const origin = req.headers.origin
+            if (origin) {
+                res.setHeader('Access-Control-Allow-Origin', origin)
+                res.setHeader('Vary', 'Origin')
+            }
+            res.setHeader('Access-Control-Allow-Credentials', 'true')
+            res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+            res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+            res.status(204).end()
+        })
+
         app.post('/admin/auth/token', require('express').json(), async (req, res) => {
             try {
                 const { token } = req.body
@@ -145,10 +157,36 @@ module.exports = {
                 if (!token) {
                     return res.status(400).json({ error: 'Token required' })
                 }
+
+                const origin = req.headers.origin
+                if (origin) {
+                    res.setHeader('Access-Control-Allow-Origin', origin)
+                    res.setHeader('Vary', 'Origin')
+                }
+                res.setHeader('Access-Control-Allow-Credentials', 'true')
+
+                // Authenticate token through the same passport strategy used by /_iotAuth/login
+                // so Node-RED creates a proper editor session without a second login form.
+                req.body.username = '__access_token__'
+                req.body.password = token
+
+                const user = await new Promise((resolve, reject) => {
+                    passport.authenticate('Iotistic', { session: false }, (err, authenticatedUser) => {
+                        if (err) {
+                            return reject(err)
+                        }
+                        resolve(authenticatedUser)
+                    })(req, res)
+                })
+
+                if (!user) {
+                    return res.status(401).json({ error: 'Invalid token' })
+                }
                 
                 // Store the Auth0 token in the session
                 req.session.auth0Token = token
                 req.session.iotSession = true
+                req.session.user = user
                 
                 console.log('[httpAuthMiddleware] Auth0 token stored in session')
                 res.json({ success: true })

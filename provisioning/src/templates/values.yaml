@@ -228,9 +228,7 @@ nodered:
     TZ: "UTC"
     NODE_RED_ENABLE_SAFE_MODE: "false"
     NODE_RED_ENABLE_PROJECTS: "false"
-    # Content Security Policy configuration
-    NODE_RED_FRAME_ANCESTORS: "'self' https://*.iotistica.com https://*.iotistic.ca"
-    NODE_RED_FONT_SRC: "'self' data: https:"
+    NODE_RED_ENABLE_UI_AUTH: "true"
   # Auth0 Configuration (RS256 JWT validation for nr-auth plugin)
   auth0:
     domain: "dev-hmwhgxw10boqpmrw.us.auth0.com"
