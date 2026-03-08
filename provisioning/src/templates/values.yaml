@@ -149,7 +149,7 @@ dashboard:
   
   # Auth0 Configuration (set per-customer/environment)
   auth0:
-    domain: "dev-hmwhgxw10boqpmrw.us.auth0.com"  # Auth0 tenant domain
+    domain: "auth.iotistica.com"  # Auth0 tenant domain
     clientId: "Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR"  # Auth0 Application ID
     audience: "https://{{BASE_DOMAIN}}"  # Auth0 API Identifier
     callbackUrl: "https://client-{{CLIENT_ID}}.{{CLIENT_BASE_DOMAIN}}/auth/callback"  # Redirect URI after login
@@ -231,9 +231,9 @@ nodered:
     NODE_RED_ENABLE_UI_AUTH: "true"
   # Auth0 Configuration (RS256 JWT validation for nr-auth plugin)
   auth0:
-    domain: "dev-hmwhgxw10boqpmrw.us.auth0.com"
+    domain: "auth.iotistica.com"
     audience: "https://{{BASE_DOMAIN}}"
-    issuer: "https://dev-hmwhgxw10boqpmrw.us.auth0.com/"
+    issuer: "https://auth.iotistica.com/"
   # Ingress configuration
   ingress:
     enabled: true

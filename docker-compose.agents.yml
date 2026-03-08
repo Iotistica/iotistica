@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2026-03-01 10:46:19
+# Generated: 2026-03-07 19:41:26
 # Agents: 1 to 1
 # Ports: 48481 to 48481
 
@@ -24,11 +24,11 @@ services:
       - ./certs/ca.crt:/app/certs/ca.crt:ro
     environment:
       - DEVICE_API_PORT=48481
-      - CLOUD_API_ENDPOINT=https://localhost:3443
+      - CLOUD_API_ENDPOINT=https://api-client-b07708418f4e.iotistica.com
       - NODE_ENV=development
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=0720bed50bebf249225c66a1d30b23663c1e35e2404ee6a0c65e53bec9e0b096
+      - PROVISIONING_KEY=235efde075c4168af5a0cbab40aed2303615ec9b910dae01a0613980d827e5b3
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)
