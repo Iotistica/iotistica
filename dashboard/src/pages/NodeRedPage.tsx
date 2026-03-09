@@ -11,7 +11,8 @@ export function NodeRedPage() {
     // Determine Node-RED URL based on environment
     const hostname = window.location.hostname;
     
-    // Local development
+    // Local development - use direct URL to avoid path rewriting issues
+    // Node-RED has CORS configured to allow localhost:8080 origin
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       return 'http://localhost:1880';
     }
@@ -56,16 +57,27 @@ export function NodeRedPage() {
         console.log('[NodeRedPage] Access token stored in sessionStorage');
         
         // Send to Node-RED backend for session storage
-        await axios.post(`${nodeRedUrl}/admin/auth/token`, 
-          { token },
-          { 
-            headers: { 'Content-Type': 'application/json' },
-            withCredentials: true,
-            timeout: 5000
-          }
-        );
+        // This allows Node-RED storage plugin to use the token for API calls
+        try {
+          await axios.post(`${nodeRedUrl}/admin/auth/token`, 
+            { token },
+            { 
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              withCredentials: true,
+              timeout: 5000
+            }
+          );
+          
+          console.log('[NodeRedPage] Access token sent to Node-RED backend');
+        } catch (tokenError: any) {
+          // Token endpoint may fail due to auth/CORS, but we can still load the iframe
+          // The session will be authenticated via the login form
+          console.warn('[NodeRedPage] Token endpoint failed (auth will use login form):', tokenError.message);
+        }
         
-        console.log('[NodeRedPage] Access token sent to Node-RED backend');
         setTokenReady(true);
       } catch (error: any) {
         console.error('[NodeRedPage] Failed to setup access token:', error);

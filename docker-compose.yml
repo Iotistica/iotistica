@@ -122,6 +122,8 @@ services:
             - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}  # For Azure: use deployment name
             - LICENSE_PUBLIC_KEY=${LICENSE_PUBLIC_KEY}
             - IOTISTIC_LICENSE_KEY=${IOTISTIC_LICENSE_KEY}
+            # Node-RED Storage bootstrap token (UUID for initial access before user auth)
+            - IOTISTIC_STORAGE_TOKEN=5317a772-c8dc-b8af-af76-fce09c973db0034da53b-e5e3-1d36-93a7-ec53de09c4af
             # Shell security (HMAC signature verification)
             - AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY:-wcw3eFT/zyVZ7HYwP+bApLjJX2gW/e1mHW2+WPG2gBk=}
             - REDIS_HOST=${REDIS_HOST:-redis}
@@ -533,6 +535,8 @@ services:
             - TZ=America/Toronto
             - NODE_RED_ENABLE_SAFE_MODE=false
             - NODE_RED_ENABLE_PROJECTS=false
+            - NODE_RED_REMOTE_STORAGE=${NODE_RED_REMOTE_STORAGE:-true}
+            - NODE_RED_ADMIN_CORS_ORIGIN=${NODE_RED_ADMIN_CORS_ORIGIN:-http://localhost:8080}
             - IOTISTIC_BASE_URL=${IOTISTIC_BASE_URL:-http://api:3002}
             - NODERED_BASE_URL=${NODERED_BASE_URL:-http://localhost:1880}
             - IOTISTIC_STORAGE_TOKEN=5317a772-c8dc-b8af-af76-fce09c973db0034da53b-e5e3-1d36-93a7-ec53de09c4af

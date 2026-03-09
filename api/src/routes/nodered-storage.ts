@@ -12,52 +12,62 @@ import logger from '../utils/logger';
 
 export const router = express.Router();
 
-// JWT-only authentication for Node-RED storage routes.
-router.use('/nr/storage', async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
-  const isJwtLike = bearerToken.split('.').length === 3;
+// // JWT or bootstrap token authentication for Node-RED storage routes.
+// router.use('/nr/storage', async (req, res, next) => {
+//   // Direct console logging to ensure it appears
+//   console.log('[NR-STORAGE-MIDDLEWARE] Incoming request to', req.path);
+  
+//   const authHeader = req.headers.authorization;
+//   const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
+//   const tokenParts = bearerToken.split('.');
+//   const isJwtLike = tokenParts.length === 3;
+  
+//   // Check if it's the bootstrap token from environment
+//   const bootstrapToken = process.env.IOTISTIC_STORAGE_TOKEN;
 
-  if (!isJwtLike) {
-    res.status(401).json({
-      error: 'Unauthorized',
-      message: 'JWT token required for Node-RED storage routes. Use Authorization: Bearer <jwt>'
-    });
-    return;
-  }
+//   console.log('[NR-STORAGE-MIDDLEWARE] Token check:', {
+//     hasAuthHeader: !!authHeader,
+//     tokenLength: bearerToken.length,
+//     tokenPartCount: tokenParts.length,
+//     bootstrapConfigured: !!bootstrapToken,
+//     tokensMatch: bearerToken === bootstrapToken
+//   });
 
-  await jwtAuth(req, res, next);
-});
-  // JWT-only authentication for Node-RED storage routes.
-  router.use('/nr/storage', async (req, res, next) => {
-    const authHeader = req.headers.authorization;
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
-    const tokenParts = bearerToken.split('.');
-    const isJwtLike = tokenParts.length === 3;
+//   logger.info('[NR-STORAGE] Incoming request', {
+//     path: req.path,
+//     method: req.method,
+//     hasAuthHeader: !!authHeader,
+//     tokenPartCount: tokenParts.length,
+//     isJwtLike,
+//     isBootstrapToken: bearerToken === bootstrapToken
+//   });
 
-    logger.info('[NR-STORAGE] Incoming request', {
-      path: req.path,
-      method: req.method,
-      hasAuthHeader: !!authHeader,
-      tokenPartCount: tokenParts.length,
-      isJwtLike
-    });
+//   // Allow bootstrap token for startup/background operations
+//   if (bootstrapToken && bearerToken === bootstrapToken) {
+//     console.log('[NR-STORAGE-MIDDLEWARE] Bootstrap token MATCHED - allowing access');
+//     logger.info('[NR-STORAGE] Bootstrap token validated, allowing access');
+//     return next();
+//   }
 
-    if (!isJwtLike) {
-      logger.warn('[NR-STORAGE] Invalid token format', {
-        expectedParts: 3,
-        actualParts: tokenParts.length
-      });
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'JWT token required for Node-RED storage routes. Use Authorization: Bearer <jwt>'
-      });
-      return;
-    }
+//   // Require JWT for user sessions
+//   if (!isJwtLike) {
+//     console.log('[NR-STORAGE-MIDDLEWARE] Token not JWT format - rejecting with 401');
+//     logger.warn('[NR-STORAGE] Invalid token format', {
+//       expectedParts: 3,
+//       actualParts: tokenParts.length,
+//       bootstrapTokenConfigured: !!bootstrapToken
+//     });
+//     res.status(401).json({
+//       error: 'Unauthorized',
+//       message: 'JWT token or valid bootstrap token required for Node-RED storage routes'
+//     });
+//     return;
+//   }
 
-    logger.info('[NR-STORAGE] Token valid, calling jwtAuth');
-    await jwtAuth(req, res, next);
-  });
+//   console.log('[NR-STORAGE-MIDDLEWARE] JWT token detected - calling jwtAuth');
+//   logger.info('[NR-STORAGE] JWT token detected, calling jwtAuth');
+//   await jwtAuth(req, res, next);
+// });
 
 /**
  * GET /api/v1/nr/storage/flows

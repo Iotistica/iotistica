@@ -584,24 +584,10 @@ async function showStatusEnhanced(): Promise<void> {
 			});
 		}
 	} catch (error) {
-		logger.error('Agent not running or unreachable', error as Error);
-		showStatus();
+		logger.error('Agent not running or unreachable', error as Error, {
+			hint: `Verify DEVICE_API_PORT/DEVICE_API_URL and confirm device API is listening (current target: ${DEVICE_API_BASE})`
+		});
 	}
-}
-
-function showStatus(): void {
-	logger.info('Device Status');
-	logger.warn('API Endpoint not configured');
-	
-	// Check if database exists
-	if (existsSync(DB_PATH)) {
-		const stats = statSync(DB_PATH);
-		logger.info('Database found', { size_kb: (stats.size / 1024).toFixed(2) });
-	} else {
-		logger.warn('Database not initialized');
-	}
-	
-	logger.info('Tip: Use "iotctl logs --follow" to monitor device activity');
 }
 
 // ============================================================================

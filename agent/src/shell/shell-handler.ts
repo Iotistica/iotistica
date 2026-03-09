@@ -114,31 +114,23 @@ export class ShellHandler {
   ];
 
     /**
-     * Find first available shell from allowlist (handles Alpine vs Ubuntu container images)
-     * Alpine Linux only has /bin/sh, while Ubuntu has /bin/bash
+     * Resolve shell path with explicit validation (no implicit fallback behavior).
      */
-    private getAvailableShell(preferred: string): string {
-      // First check if preferred shell exists
-      if (preferred && this.shellExists(preferred)) {
-        return preferred;
+    private resolveShell(): string {
+      const platformDefault = os.platform() === 'win32' ? 'powershell.exe' : '/bin/sh';
+      const requestedShell = process.env.AGENT_SHELL;
+
+      if (!requestedShell) {
+        return platformDefault;
       }
 
-      // For Windows, always use PowerShell
-      if (os.platform() === 'win32') {
-        return 'powershell.exe';
+      if (!this.ALLOWED_SHELLS.includes(requestedShell)) {
+        throw new Error(
+          `AGENT_SHELL '${requestedShell}' is not allowlisted. Allowed: ${this.ALLOWED_SHELLS.join(', ')}`
+        );
       }
 
-      // For non-Windows, try to find any available shell from allowlist
-      // Prefer bash, fall back to sh (which is guaranteed on Alpine)
-      const unixShells = ['/bin/bash', '/bin/sh', '/bin/zsh', '/bin/dash'];
-      for (const shell of unixShells) {
-        if (this.shellExists(shell)) {
-          return shell;
-        }
-      }
-
-      // Ultimate fallback (should rarely be reached)
-      return '/bin/sh';
+      return requestedShell;
     }
 
     /**
@@ -156,6 +148,22 @@ export class ShellHandler {
         return false;
       }
     }
+
+    /**
+     * Resolve working directory explicitly (no fallback chain).
+     */
+    private resolveWorkingDirectory(): string {
+      const configured = process.env.AGENT_SHELL_CWD || process.env.CONFIG_DIR || '/app/data';
+      try {
+        fs.accessSync(configured, fs.constants.R_OK | fs.constants.X_OK);
+        return configured;
+      } catch {
+        throw new Error(
+          `Shell working directory '${configured}' is not accessible. Set AGENT_SHELL_CWD to a readable/executable path.`
+        );
+      }
+    }
+
   constructor(deviceUuid: string, mqtt: MqttManager, logger: AgentLogger) {
     this.deviceUuid = deviceUuid;
     this.mqtt = mqtt;
@@ -358,36 +366,14 @@ export class ShellHandler {
     this.outputBuffer = '';
 
     try {
-      // SECURITY: Determine shell with allowlist validation (prevents arbitrary code execution)
-      // If AGENT_SHELL is set but not in allowlist, reject it and use platform default
-      let shell: string;
-      const requestedShell = process.env.AGENT_SHELL;
-      
-      if (requestedShell) {
-        // Validate against allowlist
-        if (this.ALLOWED_SHELLS.includes(requestedShell)) {
-            // Check if requested shell actually exists (handles container images without bash)
-            shell = this.getAvailableShell(requestedShell);
-          this.logger.debugSync('Using custom shell from AGENT_SHELL', {
-            component: LogComponents.shell,
-              shell: requestedShell,
-              resolvedTo: shell
-          });
-        } else {
-          // Reject invalid shell path - use platform default instead
-          this.logger.warnSync('AGENT_SHELL not in allowlist - using platform default', {
-            component: LogComponents.shell,
-            requested: requestedShell,
-            allowlist: this.ALLOWED_SHELLS.join(', ')
-          });
-            shell = this.getAvailableShell(os.platform() === 'win32' ? 'powershell.exe' : '/bin/bash');
-        }
-      } else {
-        // No custom shell requested - use platform default
-          shell = this.getAvailableShell(os.platform() === 'win32' ? 'powershell.exe' : '/bin/bash');
+      // SECURITY: explicit shell/cwd resolution (no implicit fallback behavior)
+      const shell = this.resolveShell();
+      const willDropPrivileges = !!(process.getuid && process.getuid() === 0 && os.platform() !== 'win32');
+      const cwd = this.resolveWorkingDirectory();
+
+      if (!this.shellExists(shell)) {
+        throw new Error(`Configured shell '${shell}' not found or not executable`);
       }
-      
-      const cwd = os.homedir();
 
       // SECURITY: Minimal environment (prevents credential leakage via 'env' command)
       // Only expose essential variables, NOT database passwords, API tokens, secrets, etc.
@@ -400,6 +386,18 @@ export class ShellHandler {
         LANG: process.env.LANG || 'en_US.UTF-8',
       };
 
+      // Preserve non-sensitive endpoint config so iotctl resolves local device API correctly.
+      // Without this, iotctl falls back to port 48484 even when agent runs on generated ports (e.g., 48481).
+      if (process.env.DEVICE_API_PORT) {
+        safeEnv.DEVICE_API_PORT = process.env.DEVICE_API_PORT;
+      }
+      if (process.env.DEVICE_API_URL) {
+        safeEnv.DEVICE_API_URL = process.env.DEVICE_API_URL;
+      }
+      if (process.env.CLOUD_API_ENDPOINT) {
+        safeEnv.CLOUD_API_ENDPOINT = process.env.CLOUD_API_ENDPOINT;
+      }
+
       const spawnOptions: any = {
         name: 'xterm-256color',
         cols: 80,
@@ -411,7 +409,7 @@ export class ShellHandler {
       // SECURITY: Drop privileges if running as root (Docker deployment)
       // Systemd: Already running as service user, this is a no-op
       // Use configurable UID/GID to support different container base images
-      if (process.getuid && process.getuid() === 0 && os.platform() !== 'win32') {
+      if (willDropPrivileges) {
         const targetUid = Number(process.env.AGENT_UID || 1000);
         const targetGid = Number(process.env.AGENT_GID || 1000);
         spawnOptions.uid = targetUid;

@@ -3,5 +3,7 @@
     "description": "Iotistic Node-RED Instance",
     "version": "0.0.1",
     "private": true,
-    "dependencies": {}
+    "dependencies": {
+        "@iotistic/nr-auth": "file:./@iotistic/nr-auth"
+    }
 }

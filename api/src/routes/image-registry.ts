@@ -15,7 +15,7 @@ import { EventPublisher } from '../services/event-sourcing';
 export const router = express.Router();
 
 // All routes require authentication
-router.use(jwtAuth);
+router.use('/images', jwtAuth);
 const pool = poolWrapper.pool;
 const eventPublisher = new EventPublisher('image-registry');
 

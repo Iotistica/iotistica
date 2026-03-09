@@ -65,6 +65,13 @@
           changeOrigin: true,
           secure: false,
         },
+        // Local dev: DEPRECATED - using direct http://localhost:1880 with CORS instead
+        // '/nodered': {
+        //   target: process.env.VITE_NODERED_URL || 'http://localhost:1880',
+        //   changeOrigin: true,
+        //   secure: false,
+        //   ws: true,
+        // },
       },
     },
     define: {
