@@ -69,7 +69,7 @@ export default function App() {
     'home',
     'fleets',
     'metrics',
-    'sensors',
+    'devices',
     'endpoints',
     'mqtt',
     'jobs',
@@ -96,7 +96,7 @@ export default function App() {
   type View = typeof viewOptions[number];
   const agentViews: View[] = [
     'metrics',
-    'sensors',
+    'devices',
     'endpoints',
     'jobs',
     'applications',
@@ -408,7 +408,6 @@ export default function App() {
   const formatViewLabel = useCallback((view: string) => {
     // Special mappings for views with different display names
     const viewLabelMap: Record<string, string> = {
-      'sensors': 'Devices',
       'metrics': 'System',
       'devices': 'Devices',
       'system': 'System',
@@ -1425,9 +1424,9 @@ export default function App() {
                       System
                     </Button>
                     <Button
-                      variant={currentView === 'sensors' ? 'default' : 'ghost'}
+                      variant={currentView === 'devices' ? 'default' : 'ghost'}
                       size="sm"
-                      onClick={() => handleAgentViewChange('sensors')}
+                      onClick={() => handleAgentViewChange('devices')}
                       className="text-sm"
                     >
                       <Activity className="w-4 h-4 mr-2" />
@@ -1550,9 +1549,9 @@ export default function App() {
               System
             </Button>
             <Button
-              variant={currentView === 'sensors' ? 'default' : 'ghost'}
+              variant={currentView === 'devices' ? 'default' : 'ghost'}
               size="sm"
-              onClick={() => handleAgentViewChange('sensors')}
+              onClick={() => handleAgentViewChange('devices')}
               className="text-sm"
             >
               <Activity className="w-4 h-4 mr-2" />
@@ -1781,7 +1780,7 @@ export default function App() {
               device={selectedDevice}
             />
           )}
-          {currentView === 'sensors' && selectedDevice && (
+          {currentView === 'devices' && selectedDevice && (
             debugMode 
               ? <SensorHealthDashboard deviceUuid={selectedDevice.deviceUuid} />
               : <SensorsPage 
