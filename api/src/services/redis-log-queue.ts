@@ -18,6 +18,7 @@ import { DeviceLogsModel } from '../db/models';
 import { logger } from '../utils/logger';
 import { query } from '../db/connection';
 import { getRedisIngestion, getRedisConsumer } from '../redis/client-factory';
+import { deviceLogsStreamKey } from '../redis/tenant-keys';
 
 interface LogEntry {
   deviceUuid: string;
@@ -48,7 +49,7 @@ class RedisLogQueue {
   private redisConsumer: Redis;  // Read-only: XREADGROUP, XACK, XINFO
   private consumerGroup = 'log-writers';
   private consumerName: string;
-  private streamKey = 'device:logs';
+  private get streamKey(): string { return deviceLogsStreamKey(); }
   private isRunning = false;
   private batchSize: number;
   private blockTimeMs: number;

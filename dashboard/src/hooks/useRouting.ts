@@ -12,13 +12,11 @@ export function useRouting() {
 
   // URL to internal view name mapping
   const urlToView: Record<string, string> = {
-    'devices': 'sensors',
     'system': 'metrics'
   };
 
   // Internal view to URL mapping
   const viewToUrl: Record<string, string> = {
-    'sensors': 'devices',
     'metrics': 'system'
   };
 

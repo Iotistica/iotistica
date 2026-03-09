@@ -582,14 +582,14 @@ async function startServer() {
     process.exit(1);
   }
 
-  // Initialize license validator
+  // Initialize license validator (mandatory - service cannot run without a valid license)
   try {
     logger.info('Initializing license validator...');
     const licenseValidator = LicenseValidator.getInstance();
     await licenseValidator.init();
   } catch (error) {
-    logger.warn('License validator initialization failed', { error });
-    // Don't exit - will run in unlicensed mode with limited features
+    logger.error('License validator initialization failed. Service cannot start without a valid license.', { error });
+    process.exit(1);
   }
 
   // Start heartbeat monitor for device connectivity
@@ -601,7 +601,6 @@ async function startServer() {
     logger.warn('Failed to start heartbeat monitor', { error });
     // Don't exit - this is not critical for API operation
   }
-
 
   // Start job scheduler for scheduled/recurring jobs
   try {
@@ -621,7 +620,7 @@ async function startServer() {
     // Don't exit - this is not critical for API operation
   }
 
-  // Initialize Redis for real-time pub/sub
+  // Initialize Redis for real-time pub/sub (must happen after license init, as keys are tenant-prefixed)
   try {
     const { redisClient } = await import('./redis/client');
     await redisClient.connect();

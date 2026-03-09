@@ -21,6 +21,7 @@
 
 import { DeviceMetricsModel } from '../db/models';
 import { redisClient } from '../redis/client';
+import { metricsStreamScanPattern, uuidFromMetricsStreamKey } from '../redis/tenant-keys';
 import logger from '../utils/logger';
 
 export class MetricsBatchWorker {
@@ -190,7 +191,7 @@ export class MetricsBatchWorker {
         const result = await client.scan(
           cursor,
           'MATCH',
-          'metrics:*',
+          metricsStreamScanPattern(),
           'COUNT',
           100
         );
@@ -205,7 +206,7 @@ export class MetricsBatchWorker {
       // Check each stream length
       const lengths = await Promise.all(
         streamKeys.map(async key => {
-          const length = await redisClient.getStreamLength(key.replace('metrics:', ''));
+          const length = await redisClient.getStreamLength(uuidFromMetricsStreamKey(key));
           return { key, length };
         })
       );
@@ -216,7 +217,7 @@ export class MetricsBatchWorker {
       if (overloaded.length > 0) {
          logger.warn(`  ${overloaded.length} device(s) have high metric backlogs:`);
         overloaded.forEach(s => {
-          const deviceUuid = s.key.replace('metrics:', '');
+          const deviceUuid = uuidFromMetricsStreamKey(s.key);
            logger.warn(`   ${deviceUuid.substring(0, 8)}: ${s.length} pending metrics`);
         });
          logger.warn('   Consider increasing batch size or frequency');
