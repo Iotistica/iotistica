@@ -10,6 +10,15 @@
 import Redis from 'ioredis';
 import logger from '../utils/logger';
 import { getRedisClient, getRedisSubscriber } from './client-factory';
+import {
+  deviceStateChannel,
+  deviceMetricsChannel,
+  deviceMetricsPattern,
+  metricsStreamKey,
+  metricsStreamScanPattern,
+  uuidFromMetricsStreamKey,
+  uuidFromMetricsChannel,
+} from './tenant-keys';
 
 class RedisClient {
   private static instance: RedisClient;
@@ -116,7 +125,7 @@ class RedisClient {
    * Returns false on error (graceful degradation)
    */
   public async publishDeviceState(deviceUuid: string, state: any): Promise<boolean> {
-    const channel = `device:${deviceUuid}:state`;
+    const channel = deviceStateChannel(deviceUuid);
     const message = JSON.stringify({
       deviceUuid,
       state,
@@ -131,7 +140,7 @@ class RedisClient {
    * Returns false on error (graceful degradation)
    */
   public async publishDeviceMetrics(deviceUuid: string, metrics: any): Promise<boolean> {
-    const channel = `device:${deviceUuid}:metrics`;
+    const channel = deviceMetricsChannel(deviceUuid);
     const message = JSON.stringify({
       deviceUuid,
       metrics,
@@ -160,7 +169,7 @@ class RedisClient {
       return null;
     }
 
-    const streamKey = `metrics:${deviceUuid}`;
+    const streamKey = metricsStreamKey(deviceUuid);
     
     try {
       // Flatten metrics object for Redis Stream fields
@@ -243,9 +252,9 @@ class RedisClient {
 
     try {
       // Build stream keys to read from
-      const streamKey = deviceUuid === '*' ? 'metrics:*' : `metrics:${deviceUuid}`;
+      const streamKey = deviceUuid === '*' ? metricsStreamScanPattern() : metricsStreamKey(deviceUuid);
       
-      // For wildcard, we need to scan all metrics:* keys first
+      // For wildcard, we need to scan all tenant metrics:* keys first
       let streamKeys: string[];
       if (deviceUuid === '*') {
         // Use SCAN instead of KEYS - non-blocking and safe for production
@@ -256,7 +265,7 @@ class RedisClient {
           const result = await this.client!.scan(
             cursor,
             'MATCH',
-            'metrics:*',
+            metricsStreamScanPattern(),
             'COUNT',
             100
           );
@@ -302,7 +311,7 @@ class RedisClient {
           }
 
           for (const [streamKeyResult, messages] of results as any[]) {
-            const uuid = streamKeyResult.replace('metrics:', '');
+            const uuid = uuidFromMetricsStreamKey(streamKeyResult);
             for (const [messageId, fields] of messages) {
               const fieldObj: Record<string, string> = {};
               for (let i = 0; i < fields.length; i += 2) {
@@ -356,7 +365,7 @@ class RedisClient {
       return 0;
     }
 
-    const streamKey = `metrics:${deviceUuid}`;
+    const streamKey = metricsStreamKey(deviceUuid);
     
     try {
       // XACK marks messages as processed in the consumer group
@@ -382,7 +391,7 @@ class RedisClient {
       return 0;
     }
 
-    const streamKey = `metrics:${deviceUuid}`;
+    const streamKey = metricsStreamKey(deviceUuid);
     
     try {
       const length = await this.client!.xlen(streamKey);
@@ -408,7 +417,8 @@ class RedisClient {
     this.subscriber.on('pmessage', (pattern: string, channel: string, message: string) => {
       try {
         const data = JSON.parse(message);
-        const uuid = channel.split(':')[1]; // Extract UUID from "device:uuid:metrics"
+        // Extract UUID from "tenant:{customerId}:device:{uuid}:metrics"
+        const uuid = uuidFromMetricsChannel(channel);
         
         // Call all registered callbacks for this pattern
         const callbacks = this.patternCallbacks.get(pattern);
@@ -424,7 +434,8 @@ class RedisClient {
     this.subscriber.on('message', (channel: string, message: string) => {
       try {
         const data = JSON.parse(message);
-        const uuid = channel.split(':')[1]; // Extract UUID from "device:uuid:metrics"
+        // Extract UUID from "tenant:{customerId}:device:{uuid}:metrics"
+        const uuid = uuidFromMetricsChannel(channel);
         
         // Call all registered callbacks for this channel
         const callbacks = this.channelCallbacks.get(channel);
@@ -468,7 +479,7 @@ class RedisClient {
     }
 
     // Determine pattern or channel
-    const pattern = deviceUuid === '*' ? 'device:*:metrics' : `device:${deviceUuid}:metrics`;
+    const pattern = deviceUuid === '*' ? deviceMetricsPattern() : deviceMetricsChannel(deviceUuid);
     
     if (deviceUuid === '*') {
       // Pattern subscription for all devices
@@ -512,7 +523,7 @@ class RedisClient {
       return;
     }
 
-    const pattern = deviceUuid === '*' ? 'device:*:metrics' : `device:${deviceUuid}:metrics`;
+    const pattern = deviceUuid === '*' ? deviceMetricsPattern() : deviceMetricsChannel(deviceUuid);
     
     if (deviceUuid === '*') {
       // Pattern unsubscription

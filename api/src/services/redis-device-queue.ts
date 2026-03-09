@@ -21,6 +21,11 @@ import { brotliDecompress, gunzip, inflate } from 'zlib';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getRedisIngestion, getRedisConsumer } from '../redis/client-factory';
+import {
+  deviceSensorsIngestionStreamKey,
+  deviceSensorsReadyStreamKey,
+  deviceSensorsDlqStreamKey,
+} from '../redis/tenant-keys';
 
 /**
  * Prometheus metrics for observability
@@ -191,9 +196,9 @@ class RedisDeviceQueue {
   private redisConsumer: Redis;  // Read-only: XREADGROUP, XACK, XAUTOCLAIM, XINFO
   private consumerGroup = 'sensor-writers';
   private consumerName: string;
-  private streamKey = 'device:sensors:ingestion';  // Short-lived ingestion queue
-  private processingStreamKey = 'device:sensors:ready';  // Processing queue
-  private dlqStreamKey = 'device:sensors:dlq';
+  private get streamKey(): string { return deviceSensorsIngestionStreamKey(); }
+  private get processingStreamKey(): string { return deviceSensorsReadyStreamKey(); }
+  private get dlqStreamKey(): string { return deviceSensorsDlqStreamKey(); }
   private maxRetries: number;
   private isRunning = false;
   private workerCount: number;

@@ -107,58 +107,34 @@ export class LicenseValidator {
   }
 
   /**
-   * Initialize license from environment variable
+   * Initialize license from environment variable.
+   * Throws if IOTISTIC_LICENSE_KEY is missing or validation fails.
+   * No fallback to unlicensed mode is permitted.
    */
   async init(): Promise<void> {
     const licenseKey = process.env.IOTISTIC_LICENSE_KEY;
     
     if (!licenseKey) {
-      logger.warn('No license key found. Running in unlicensed mode (limited features)');
-      this.licenseData = this.getDefaultUnlicensedMode();
-      return;
+      throw new Error('IOTISTIC_LICENSE_KEY environment variable is not set. Service cannot start without a valid license.');
     }
 
-    try {
-      this.licenseKey = licenseKey;
-      this.licenseData = await this.validateLicense(licenseKey);
-      
-      // Cache license data in system_config
-      await SystemConfigModel.set('license_data', this.licenseData);
-      await SystemConfigModel.set('license_last_validated', new Date().toISOString());
+    this.licenseKey = licenseKey;
+    this.licenseData = await this.validateLicense(licenseKey);
 
-      logger.info('License validated successfully', {
-        customerId: this.licenseData.customerId,
-        plan: this.licenseData.plan,
-        maxDevices: this.licenseData.features.maxDevices,
-        subscriptionStatus: this.licenseData.subscription.status,
-      });
-      
-      if (this.licenseData.trial.isTrialMode) {
-        const daysLeft = daysBetween(new Date(this.licenseData.trial.expiresAt!), new Date());
-        logger.info('Trial mode active', { daysRemaining: Math.max(0, daysLeft) });
-      }
-    } catch (error) {
-      logger.error('License validation failed', { error });
-      
-      // Try to load cached license (offline mode)
-      const cachedLicense = await SystemConfigModel.get<LicenseData>('license_data');
-      const lastValidated = await SystemConfigModel.get<string>('license_last_validated');
-      
-      if (cachedLicense && lastValidated) {
-        const daysSinceValidation = Math.floor(daysBetween(new Date(), new Date(lastValidated)));
-        
-        if (daysSinceValidation <= 30) {
-          logger.warn('Using cached license in offline mode', {
-            daysSinceValidation,
-          });
-          this.licenseData = cachedLicense;
-          return;
-        }
-      }
-      
-      // Fallback to unlicensed mode
-      logger.warn('Entering unlicensed mode (limited features)');
-      this.licenseData = this.getDefaultUnlicensedMode();
+    // Cache license data in system_config for diagnostics (not for fallback use)
+    await SystemConfigModel.set('license_data', this.licenseData);
+    await SystemConfigModel.set('license_last_validated', new Date().toISOString());
+
+    logger.info('License validated successfully', {
+      customerId: this.licenseData.customerId,
+      plan: this.licenseData.plan,
+      maxDevices: this.licenseData.features.maxDevices,
+      subscriptionStatus: this.licenseData.subscription.status,
+    });
+
+    if (this.licenseData.trial.isTrialMode) {
+      const daysLeft = daysBetween(new Date(this.licenseData.trial.expiresAt!), new Date());
+      logger.info('Trial mode active', { daysRemaining: Math.max(0, daysLeft) });
     }
   }
 
@@ -247,7 +223,8 @@ export class LicenseValidator {
   }
 
   /**
-   * Get current license data
+   * Get current license data.
+   * Throws if init() has not been called or has not completed successfully.
    */
   getLicense(): LicenseData {
     if (!this.licenseData) {
