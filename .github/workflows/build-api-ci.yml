@@ -18,7 +18,7 @@ on:
 jobs:
   test:
     name: Run Unit Tests
-    runs-on: [iotistic-lab-sc, ubuntu-latest]
+    runs-on: [ubuntu-latest]
     
     steps:
       - name: Checkout repository
@@ -48,7 +48,7 @@ jobs:
   buildx:
     name: Build & Push to Docker
     needs: test
-    runs-on: [iotistic-lab-sc, ubuntu-latest]
+    runs-on: [ubuntu-latest]
     permissions:
       contents: read
       security-events: write
@@ -148,7 +148,7 @@ jobs:
   report:
     name: Generate Reports
     needs: buildx
-    runs-on: [iotistic-lab-sc, ubuntu-latest]
+    runs-on: [ubuntu-latest]
     if: always()
     
     steps:
