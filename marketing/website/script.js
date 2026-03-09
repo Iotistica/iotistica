@@ -3,7 +3,7 @@
 // - Local development: http://localhost:3000/auth-callback.html
 // - Production: https://iotistic.com/auth-callback.html
 const AUTH0_CONFIG = {
-    domain: 'dev-hmwhgxw10boqpmrw.us.auth0.com',
+    domain: 'auth.iotistica.com',
     clientId: 'Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR',
     redirectUri: window.location.origin + '/auth-callback.html',
 };

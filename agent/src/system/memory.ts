@@ -364,6 +364,12 @@ function getAdaptiveSurvivorThreshold(): number {
 	return Math.max(baseThreshold, adaptiveThreshold);
 }
 
+// Survivor leak guardrails to reduce false positives during startup/warm-up:
+// - Require minimum retained growth above noise floor
+// - Require minimum uptime before classifying as a persistent survivor leak
+const MIN_SURVIVOR_RETAINED_MB = 5; // Must retain at least 5MB above floor
+const MIN_SURVIVOR_UPTIME_SECONDS = 15 * 60; // 15 minutes
+
 /**
  * Calculate adaptive survivor monotonic tolerance
  * Small heaps: 3% (stricter - less noise)
@@ -760,10 +766,12 @@ function detectLeakPattern(
     // --- Determine metric states ---
     const heapGrowing = heapGrowthRate !== null && heapGrowthRate > HEAP_THRESHOLD;
     const externalGrowing = externalGrowthRate !== null && externalGrowthRate > EXTERNAL_THRESHOLD;
-    const survivorGrowing =
+	const survivorGrowing =
         survivorGrowth !== null &&
         survivorGrowth.rate > SURVIVOR_THRESHOLD &&
-        survivorGrowth.isMonotonic;
+		survivorGrowth.isMonotonic &&
+		survivorGrowth.retainedGrowth >= MIN_SURVIVOR_RETAINED_MB &&
+		processUptime() >= MIN_SURVIVOR_UPTIME_SECONDS;
     const rssGrowing = (currentRSS - baselineRSS) > RSS_GROWTH_THRESHOLD;
 
     // --- Priority 1: Survivor leak ---

@@ -12,9 +12,9 @@ const axios = require('axios');
 jest.mock('axios');
 
 // Mock environment variables
-process.env.AUTH0_DOMAIN = 'dev-hmwhgxw10boqpmrw.us.auth0.com';
+process.env.AUTH0_DOMAIN = 'auth.iotistica.com';
 process.env.AUTH0_AUDIENCE = 'https://iotistica.com';
-process.env.AUTH0_ISSUER = 'https://dev-hmwhgxw10boqpmrw.us.auth0.com/';
+process.env.AUTH0_ISSUER = 'https://auth.iotistica.com/';
 
 describe('Auth0 Integration - nr-auth Plugin', () => {
   let adminAuth;

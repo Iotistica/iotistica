@@ -88,8 +88,11 @@ interface WebSocketMessage {
  * Prevents malicious payload injection, unexpected data types, and memory abuse
  */
 
-// Common schema for UUIDs (base16, 8-32 chars)
-const UuidSchema = z.string().regex(/^[a-f0-9]+$/).min(8).max(128);
+// Device UUID schema: allow canonical UUIDs and legacy lowercase hex IDs
+const UuidSchema = z.union([
+  z.string().uuid(),
+  z.string().regex(/^[a-f0-9]+$/).min(8).max(128),
+]);
 
 // Session ID schema (alphanumeric + hyphens, reasonable length)
 const SessionIdSchema = z.string().uuid();
@@ -123,7 +126,7 @@ const CreateSessionSchema = z.object({
   type: z.literal('create-session'),
   deviceUuid: UuidSchema.optional(),
   data: z.object({
-    userId: z.string().optional(),
+    userId: z.coerce.string().optional(),
   }).optional(),
 });
 
@@ -132,7 +135,7 @@ const AttachSessionSchema = z.object({
   deviceUuid: UuidSchema.optional(),
   data: z.object({
     sessionId: SessionIdSchema,
-    userId: z.string().optional(),
+    userId: z.coerce.string().optional(),
   }),
 });
 
@@ -154,7 +157,7 @@ const ClearAllSessionsSchema = z.object({
   type: z.literal('clear-all-sessions'),
   deviceUuid: UuidSchema.optional(),
   data: z.object({
-    userId: z.string().optional(),
+    userId: z.coerce.string().optional(),
   }).optional(),
 });
 
@@ -241,6 +244,12 @@ export class WebSocketManager {
   private redisClient: any = null; // Redis client for pub/sub
   private redisSubscriber: any = null; // Separate Redis subscriber client (required by ioredis)
   private redisSubscriptions: Map<string, Set<WebSocket>> = new Map(); // Track Redis subscriptions per device
+
+  // Normalize user identifier across token formats (legacy HS256, Auth0-minted, etc.)
+  private getUserIdentifier(user: JwtPayload | null | undefined): string {
+    if (!user) return 'unknown';
+    return String((user as any).id ?? (user as any).userId ?? (user as any).sub ?? 'unknown');
+  }
   
   // Metrics batching buffers (per device)
   private metricsBuffers: Map<string, Array<any>> = new Map(); // deviceUuid -> metrics array
@@ -559,7 +568,7 @@ export class WebSocketManager {
             return;
           }
           
-          logger.debug(`WebSocket JWT verified for user ${user.id}, expires in ${Math.round(expiresIn / 1000)}s`);
+          logger.debug(`WebSocket JWT verified for user ${this.getUserIdentifier(user)}, expires in ${Math.round(expiresIn / 1000)}s`);
           
           // Store token expiry for later use in connection handlers
           (request as any).tokenExpiryMs = expiresIn;
@@ -594,7 +603,7 @@ export class WebSocketManager {
   }
 
   private handleConnection(ws: WebSocket, deviceUuid: string, user: JwtPayload, tokenExpiryMs?: number): void {
-    logger.info(`Device connected: ${deviceUuid.substring(0, 8)}... (user: ${user.id})`);
+    logger.info(`Device connected: ${deviceUuid.substring(0, 8)}... (user: ${this.getUserIdentifier(user)})`);
 
     const client: WebSocketClient = {
       ws,
@@ -622,7 +631,7 @@ export class WebSocketManager {
       
       client.tokenExpiryTimeout = expiryTimeout;
     } else {
-      logger.debug(`Token expiry not set for device connection (user: ${user.id})`);
+      logger.debug(`Token expiry not set for device connection (user: ${this.getUserIdentifier(user)})`);
     }
 
     // Send welcome message
@@ -679,7 +688,7 @@ export class WebSocketManager {
   }
 
   private handleGlobalConnection(ws: WebSocket, user: JwtPayload, tokenExpiryMs?: number): void {
-    logger.info(`✅ Global client connected: ${user.id}`);
+    logger.info(`✅ Global client connected: ${this.getUserIdentifier(user)}`);
 
     const client: WebSocketClient = {
       ws,
@@ -702,7 +711,7 @@ export class WebSocketManager {
       
       client.tokenExpiryTimeout = expiryTimeout;
     } else {
-      logger.debug(`Token expiry not set for global connection (user: ${user.id})`);
+      logger.debug(`Token expiry not set for global connection (user: ${this.getUserIdentifier(user)})`);
     }
 
     // Send welcome message
@@ -933,8 +942,11 @@ export class WebSocketManager {
       this.startDataStream(client.deviceUuid, channel);
     }
 
-    // Send initial data immediately
-    this.sendChannelData(client.deviceUuid, channel);
+    // Send initial data immediately for channels with data fetchers.
+    // Shell is command/stream oriented and has no initial snapshot endpoint.
+    if (channel !== 'shell') {
+      this.sendChannelData(client.deviceUuid, channel);
+    }
 
     // Acknowledge subscription
     this.send(client.ws, {
@@ -1709,8 +1721,9 @@ export class WebSocketManager {
    */
   private async handleCreateSession(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
     try {
+      const userId = this.getUserIdentifier(client.user);
       // 🔐 Validate user is authenticated for shell access
-      if (!client.user || !client.user.id) {
+      if (userId === 'unknown') {
       logger.warn('SHELL: Rejected - unauthenticated user attempting to create session');
         this.send(client.ws, {
           type: 'error',
@@ -1728,7 +1741,7 @@ export class WebSocketManager {
         return;
       }
 
-      const session = await sessionManager.createSession(deviceUuid, client.user.id);
+      const session = await sessionManager.createSession(deviceUuid, userId);
       
       // Send start command to device
       await this.handleShellCommand(deviceUuid, {
@@ -1749,7 +1762,7 @@ export class WebSocketManager {
         data: session,
       });
 
-      logger.info(`🐚 SESSION created: ${session.sessionId.substring(0, 8)}... (user: ${client.user.id})`);
+      logger.info(`🐚 SESSION created: ${session.sessionId.substring(0, 8)}... (user: ${userId})`);
     } catch (error: any) {
       logger.error('SHELL: Failed to create session:', error);
       this.send(client.ws, {
@@ -1765,8 +1778,9 @@ export class WebSocketManager {
    * Auto-restarts PTY if it died
    */
   private async handleAttachSession(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
+    const userId = this.getUserIdentifier(client.user);
     // 🔐 Validate user is authenticated for shell access
-    if (!client.user || !client.user.id) {
+    if (userId === 'unknown') {
       logger.warn('SHELL: Rejected - unauthenticated user attempting to attach to session');
       this.send(client.ws, {
         type: 'error',
@@ -1778,7 +1792,7 @@ export class WebSocketManager {
     logger.debug(`SHELL: handleAttachSession called`, {
       hasSessionId: !!message.data?.sessionId,
       sessionId: message.data?.sessionId?.substring(0, 8) + '...',
-      userId: client.user.id,
+      userId,
       deviceUuid: client.deviceUuid?.substring(0, 8) + '...'
     });
     
@@ -1797,7 +1811,7 @@ export class WebSocketManager {
       logger.debug(`SHELL: Attaching to session`);
       
       // Pass userId for security validation - returns buffer and PTY restart flag
-      const result = await sessionManager.attachSession(sessionId, client.ws, client.user.id);
+      const result = await sessionManager.attachSession(sessionId, client.ws, userId);
 
       logger.debug(`SHELL: Attached, buffer size: ${result.buffer.length} chunks, needsPtyRestart: ${result.needsPtyRestart}`);
 
@@ -1841,8 +1855,9 @@ export class WebSocketManager {
    */
   private async handleDetachSession(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
     try {
+      const userId = this.getUserIdentifier(client.user);
       // 🔐 Validate user is authenticated for shell access
-      if (!client.user || !client.user.id) {
+      if (userId === 'unknown') {
         logger.warn('🐚 [SESSION] Rejected - unauthenticated user attempting to detach from session');
         return;
       }
@@ -1870,8 +1885,9 @@ export class WebSocketManager {
    */
   private async handleTerminateSession(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
     try {
+      const userId = this.getUserIdentifier(client.user);
       // 🔐 Validate user is authenticated for shell access
-      if (!client.user || !client.user.id) {
+      if (userId === 'unknown') {
         logger.warn('🐚 [SESSION] Rejected - unauthenticated user attempting to terminate session');
         this.send(client.ws, {
           type: 'error',
@@ -1902,8 +1918,8 @@ export class WebSocketManager {
       }
 
       // 🔐 Verify user owns this session
-      if (session.userId !== client.user.id) {
-        logger.warn(`🐚 [SESSION] Rejected - user ${client.user.id} attempting to terminate session owned by ${session.userId}`);
+      if (session.userId && session.userId !== userId) {
+        logger.warn(`🐚 [SESSION] Rejected - user ${userId} attempting to terminate session owned by ${session.userId}`);
         this.send(client.ws, {
           type: 'error',
           message: 'Unauthorized: you do not own this session',
@@ -1940,8 +1956,9 @@ export class WebSocketManager {
    */
   private async handleClearAllSessions(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
     try {
+      const userId = this.getUserIdentifier(client.user);
       // 🔐 Validate user is authenticated for shell access
-      if (!client.user || !client.user.id) {
+      if (userId === 'unknown') {
         logger.warn('🐚 [SESSION] Rejected - unauthenticated user attempting to clear sessions');
         this.send(client.ws, {
           type: 'error',
@@ -1954,7 +1971,7 @@ export class WebSocketManager {
 
       logger.debug(`SHELL: Clear all sessions requested`);
       logger.debug(`Device: ${deviceUuid?.substring(0, 8)}...`);
-      logger.debug(`User: ${client.user.id}`);
+      logger.debug(`User: ${userId}`);
 
       if (!deviceUuid) {
         logger.error(`No device UUID provided`);
@@ -1971,12 +1988,12 @@ export class WebSocketManager {
 
       logger.debug(`Terminating all sessions`);
       // Terminate all sessions owned by this user
-      await sessionManager.terminateAllSessions(deviceUuid, client.user.id);
+      await sessionManager.terminateAllSessions(deviceUuid, userId);
       logger.debug(`Terminate completed`);
 
       // Clean up command buffers for all sessions from this user
       sessionsBefore.forEach(session => {
-        if (session.userId === client.user.id) {
+        if (session.userId === userId) {
           this.commandBuffers.delete(session.sessionId);
         }
       });
@@ -2039,8 +2056,9 @@ export class WebSocketManager {
    */
   private async handleShellInput(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
     try {
+      const userId = this.getUserIdentifier(client.user);
       // 🔐 Validate user is authenticated for shell access
-      if (!client.user || !client.user.id) {
+      if (userId === 'unknown') {
         logger.warn('🐚 [SESSION] Rejected - unauthenticated user attempting to send shell input');
         this.send(client.ws, {
           type: 'error',
@@ -2073,8 +2091,8 @@ export class WebSocketManager {
       }
 
       // 🔐 Verify user owns this session
-      if (session.userId !== client.user.id) {
-        logger.warn(`🐚 [SESSION] Rejected - user ${client.user.id} attempting to access session owned by ${session.userId}`);
+      if (session.userId && session.userId !== userId) {
+        logger.warn(`🐚 [SESSION] Rejected - user ${userId} attempting to access session owned by ${session.userId}`);
         this.send(client.ws, {
           type: 'error',
           message: 'Unauthorized: you do not own this session',
@@ -2107,8 +2125,9 @@ export class WebSocketManager {
    */
   private async handleResizeSession(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
     try {
+      const userId = this.getUserIdentifier(client.user);
       // 🔐 Validate user is authenticated for shell access
-      if (!client.user || !client.user.id) {
+      if (userId === 'unknown') {
         logger.warn('🐚 [SESSION] Rejected - unauthenticated user attempting to resize session');
         return;
       }
@@ -2132,8 +2151,8 @@ export class WebSocketManager {
       }
 
       // 🔐 Verify user owns this session
-      if (session.userId !== client.user.id) {
-        logger.warn(`🐚 [SESSION] Rejected - user ${client.user.id} attempting to resize session owned by ${session.userId}`);
+      if (session.userId && session.userId !== userId) {
+        logger.warn(`🐚 [SESSION] Rejected - user ${userId} attempting to resize session owned by ${session.userId}`);
         return;
       }
 

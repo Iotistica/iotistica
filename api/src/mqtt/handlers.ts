@@ -95,26 +95,49 @@ export async function handleEndpointsData(data: SensorData): Promise<void> {
 export async function handleDeviceState(payload: StateMessage): Promise<void> {
   try {
     // Destructure new payload format
-    const { deviceUuid, data: mqttPayload } = payload;
-    
-    if (!deviceUuid || !mqttPayload) {
-      logger.error('Invalid state payload format', { hasUuid: !!deviceUuid, hasData: !!mqttPayload });
+    const { deviceUuid, data: rawMqttPayload } = payload;
+
+    if (!deviceUuid || rawMqttPayload === undefined || rawMqttPayload === null) {
+      logger.error('Invalid state payload format', { hasUuid: !!deviceUuid, hasData: rawMqttPayload !== undefined && rawMqttPayload !== null });
       return;
     }
-    
+
+    // Some publishers may send JSON-stringified state payloads.
+    // Parse string payloads so key lookups don't operate on string indices.
+    let mqttPayload: any = rawMqttPayload;
+    if (typeof mqttPayload === 'string') {
+      try {
+        mqttPayload = JSON.parse(mqttPayload);
+      } catch (parseError) {
+        logger.error('Invalid state payload JSON string', {
+          deviceUuid: deviceUuid.substring(0, 8),
+          payloadPreview: mqttPayload.substring(0, 120)
+        });
+        return;
+      }
+    }
+
+    if (!mqttPayload || typeof mqttPayload !== 'object') {
+      logger.error('Invalid state payload type after parsing', {
+        deviceUuid: deviceUuid.substring(0, 8),
+        payloadType: typeof mqttPayload
+      });
+      return;
+    }
+
     // Extract actual state from MQTT payload
-    // MQTT sends: { "full-uuid": { apps, config, version, ... }, "msgId": "..." }
-    // We need to extract just the state object under the UUID key
-    const state = mqttPayload[deviceUuid];
-    
-    if (!state) {
+    // Common format: { "full-uuid": { apps, config, version, ... }, "msgId": "..." }
+    // Compatibility fallback: already-unwrapped state object { apps, config, version, ... }
+    const state = mqttPayload[deviceUuid] || mqttPayload;
+
+    if (!state || typeof state !== 'object') {
       logger.error('State data not found under UUID key', {
         deviceUuid: deviceUuid.substring(0, 8),
         payloadKeys: Object.keys(mqttPayload)
       });
       return;
     }
-    
+
     // Reconstruct old format for processDeviceStateReport
     const stateReport = { [deviceUuid]: state };
     

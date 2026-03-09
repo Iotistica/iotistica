@@ -401,7 +401,7 @@ data:
       VITE_API_URL: 'https://api-client-673e90cc0797.iotistica.com',
       
       // Auth0 Configuration (set per-customer)
-      VITE_AUTH0_DOMAIN: 'dev-hmwhgxw10boqpmrw.us.auth0.com',
+      VITE_AUTH0_DOMAIN: 'auth.iotistica.com',
       VITE_AUTH0_CLIENT_ID: 'Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR',
       VITE_AUTH0_AUDIENCE: 'https://api.iotistica.com',
       VITE_AUTH0_CALLBACK_URL: 'https://client-673e90cc0797.iotistica.com/auth/callback',

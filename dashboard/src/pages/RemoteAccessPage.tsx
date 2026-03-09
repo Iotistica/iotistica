@@ -85,10 +85,16 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     }
     
     setIsConnecting(true);
-    
-    const wsUrl = buildApiUrl(`/ws?deviceUuid=${deviceUuid}`).replace(/^http/, 'ws');
 
-    const ws = new WebSocket(wsUrl);
+    const token = localStorage.getItem('accessToken');
+    const wsUrl = new URL(buildApiUrl('/ws'));
+    wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+    wsUrl.searchParams.set('deviceUuid', deviceUuid);
+    if (token) {
+      wsUrl.searchParams.set('token', token);
+    }
+
+    const ws = new WebSocket(wsUrl.toString());
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -110,7 +116,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           type: 'attach-session',
           data: { 
             sessionId: sessionToReconnect,
-            userId: user?.id,
+            userId: String(user.id),
           },
         }));
       }
@@ -164,7 +170,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
             type: 'attach-session',
             data: { 
               sessionId: message.sessionId,
-              userId: user?.id,
+              userId: user?.id !== undefined && user?.id !== null ? String(user.id) : undefined,
             },
           }));
         }
@@ -314,7 +320,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
                 type: 'attach-session',
                 data: { 
                   sessionId: mostRecent.sessionId,
-                  userId: user?.id,
+                  userId: String(user.id),
                 },
               }));
             }
@@ -394,7 +400,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       type: 'create-session',
       deviceUuid,
       data: {
-        userId: user?.id,
+        userId: user?.id !== undefined && user?.id !== null ? String(user.id) : undefined,
       },
     };
     wsRef.current.send(JSON.stringify(msg));

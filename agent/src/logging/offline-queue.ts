@@ -134,6 +134,36 @@ export class OfflineQueue<T> {
 	}
 	
 	/**
+	 * Dequeue (remove and return oldest item from queue)
+	 * Returns null if queue is empty
+	 */
+	public async dequeue(): Promise<T | null> {
+		if (!this.isInitialized) {
+			await this.init();
+		}
+		
+		if (this.inMemoryQueue.length === 0) {
+			return null;
+		}
+		
+		try {
+			// Remove from in-memory queue (FIFO)
+			const item = this.inMemoryQueue.shift();
+			
+			// Remove from disk
+			await this.removeOldestFromDisk();
+			
+			return item || null;
+		} catch (error) {
+			this.logger?.errorSync('Failed to dequeue item', error instanceof Error ? error : new Error(String(error)), {
+				component: LogComponents.offlineQueue,
+				queueName: this.queueName
+			});
+			throw error;
+		}
+	}
+	
+	/**
 	 * Flush queue (send all items)
 	 * Returns number of successfully sent items
 	 */

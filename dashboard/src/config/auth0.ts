@@ -6,31 +6,33 @@
  * with fallback to import.meta.env (build-time environment variables).
  */
 
-// Read from window.env (Kubernetes ConfigMap) first, then fallback to import.meta.env
-const getEnv = (key: string): string => {
+// Helper to get runtime config from window.env (K8s ConfigMap) or build-time import.meta.env
+// Vite requires static property access for import.meta.env, so we can't use dynamic keys
+const getRuntimeEnv = (key: string, buildTimeValue: string | undefined): string => {
   // @ts-ignore - window.env is set by Kubernetes ConfigMap injected config.js
   if (typeof window !== 'undefined' && window.env) {
     // @ts-ignore
     const value = window.env[key];
     // Skip placeholder values (e.g., "__VITE_AUTH0_DOMAIN__" from local config.js)
-    if (typeof value === 'string' && value.startsWith('__') && value.endsWith('__')) {
-      // Fall through to import.meta.env
-    } else if (value) {
+    const isPlaceholder = typeof value === 'string' && value.startsWith('__') && value.endsWith('__');
+    if (value && !isPlaceholder) {
       return value;
     }
   }
-  return (import.meta.env as Record<string, string | undefined>)[key] || '';
+  // Fallback to build-time value from .env file
+  return buildTimeValue || '';
 };
 
 // Auth0 configuration from environment (required)
-const AUTH0_DOMAIN = getEnv('VITE_AUTH0_DOMAIN');
-const AUTH0_CLIENT_ID = getEnv('VITE_AUTH0_CLIENT_ID');
-const AUTH0_AUDIENCE = getEnv('VITE_AUTH0_AUDIENCE');
-const AUTH0_CALLBACK_URL = getEnv('VITE_AUTH0_CALLBACK_URL');
-const AUTH0_SHOW_SOCIAL = getEnv('VITE_AUTH0_SHOW_SOCIAL_LOGIN') === 'true';
+// Must use static property access for Vite to include these in bundle
+const AUTH0_DOMAIN = getRuntimeEnv('VITE_AUTH0_DOMAIN', import.meta.env.VITE_AUTH0_DOMAIN);
+const AUTH0_CLIENT_ID = getRuntimeEnv('VITE_AUTH0_CLIENT_ID', import.meta.env.VITE_AUTH0_CLIENT_ID);
+const AUTH0_AUDIENCE = getRuntimeEnv('VITE_AUTH0_AUDIENCE', import.meta.env.VITE_AUTH0_AUDIENCE);
+const AUTH0_CALLBACK_URL = getRuntimeEnv('VITE_AUTH0_CALLBACK_URL', import.meta.env.VITE_AUTH0_CALLBACK_URL);
+const AUTH0_SHOW_SOCIAL = getRuntimeEnv('VITE_AUTH0_SHOW_SOCIAL_LOGIN', import.meta.env.VITE_AUTH0_SHOW_SOCIAL_LOGIN) === 'true';
 
 // Provisioning API URL (billing service)
-const PROVISIONING_API_URL = getEnv('VITE_PROVISIONING_API_URL') || 'http://localhost:3100';
+const PROVISIONING_API_URL = getRuntimeEnv('VITE_PROVISIONING_API_URL', import.meta.env.VITE_PROVISIONING_API_URL) || 'http://localhost:3100';
 
 export const auth0Config = {
   domain: AUTH0_DOMAIN,

@@ -67,19 +67,7 @@
         },
       },
     },
-    // Environment variables configuration
-    // See: https://vitejs.dev/guide/env-and-mode.html
     define: {
-      // Make environment variables available at build time (fallback for runtime config)
-      // These are used if window.env is not set (e.g., during build or dev)
-      'import.meta.env.VITE_API_URL': JSON.stringify(process.env.VITE_API_URL),
-      'import.meta.env.VITE_AUTH0_DOMAIN': JSON.stringify(process.env.VITE_AUTH0_DOMAIN),
-      'import.meta.env.VITE_AUTH0_CLIENT_ID': JSON.stringify(process.env.VITE_AUTH0_CLIENT_ID),
-      'import.meta.env.VITE_AUTH0_AUDIENCE': JSON.stringify(process.env.VITE_AUTH0_AUDIENCE),
-      'import.meta.env.VITE_AUTH0_CALLBACK_URL': JSON.stringify(process.env.VITE_AUTH0_CALLBACK_URL),
-      'import.meta.env.VITE_AUTH0_SHOW_SOCIAL_LOGIN': JSON.stringify(process.env.VITE_AUTH0_SHOW_SOCIAL_LOGIN),
-      'import.meta.env.VITE_PROVISIONING_API_URL': JSON.stringify(process.env.VITE_PROVISIONING_API_URL),
-      'import.meta.env.VITE_WEBSITE_URL': JSON.stringify(process.env.VITE_WEBSITE_URL),
       // Inject displayVersion from package.json at build time (user-facing release version)
       '__APP_VERSION__': JSON.stringify(pkg.displayVersion || pkg.version),
     },

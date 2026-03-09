@@ -31,6 +31,49 @@ import { RetryPolicy, CircuitBreaker, AsyncLock, isAuthError } from '../utils/re
 import { createHash } from 'crypto';
 import { MetadataModel } from '../db/models/metadata.model.js';
 
+/**
+ * Stable JSON stringify - sorts object keys recursively to ensure deterministic output
+ * Prevents false diffs due to object key order differences
+ * 
+ * Example problem:
+ *   JSON.stringify({a:1, b:2}) !== JSON.stringify({b:2, a:1})
+ * 
+ * This can cause:
+ *   - Unnecessary deployments
+ *   - Unnecessary reports to cloud
+ *   - Infinite reconciliation loops
+ * 
+ * Critical for:
+ *   - State comparisons (target vs current)
+ *   - App change detection
+ *   - Config change detection
+ *   - Hash calculations
+ */
+function stableStringify(obj: any): string {
+	if (obj === null || obj === undefined) {
+		return JSON.stringify(obj);
+	}
+	
+	// Primitives - return as-is
+	if (typeof obj !== 'object') {
+		return JSON.stringify(obj);
+	}
+	
+	// Arrays - recursively stringify elements
+	if (Array.isArray(obj)) {
+		return '[' + obj.map(item => stableStringify(item)).join(',') + ']';
+	}
+	
+	// Objects - sort keys then recursively stringify
+	const sortedKeys = Object.keys(obj).sort();
+	const pairs = sortedKeys.map(key => {
+		const value = obj[key];
+		return JSON.stringify(key) + ':' + stableStringify(value);
+	});
+	
+	return '{' + pairs.join(',') + '}';
+}
+
 interface DeviceStateReport {
 	[deviceUuid: string]: {
 		apps: { [appId: string]: any };
@@ -97,7 +140,7 @@ export class CloudSync extends EventEmitter {
 	
 	// State management
 	private targetState: DeviceState = { apps: {}, config: {} };
-	private currentVersion: number = 0; // Track which version we've applied
+	private currentVersion: number = 1; // Track which version we've applied (never report 0)
 	private lastReport: DeviceStateReport = {};
 	private lastReportTime: number = -Infinity;
 	private lastMetricsTime: number = -Infinity;
@@ -326,13 +369,17 @@ export class CloudSync extends EventEmitter {
 	 */
 	public async startPoll(): Promise<void> {
 		// Load persisted ETag from database to avoid unnecessary full polls after restart
+		// IMPORTANT: Bind ETag to deviceUuid to support future multi-device agents
 		try {
-			const persistedETag = await MetadataModel.get('target_state_etag');
+			const deviceInfo = this.deviceManager.getDeviceInfo();
+			const etagKey = `target_state_etag_${deviceInfo.uuid}`;
+			const persistedETag = await MetadataModel.get(etagKey);
 			if (persistedETag) {
 				this.targetStateETag = persistedETag;
 				this.logger?.infoSync('Loaded persisted target state ETag', {
 					component: LogComponents.cloudSync,
-					etag: persistedETag
+					etag: persistedETag,
+					etagKey
 				});
 			}
 		} catch (error) {
@@ -507,7 +554,11 @@ export class CloudSync extends EventEmitter {
 			});
 			
 			// Schedule retry after cooldown
-			this.pollTimer = setTimeout(() => this.pollLoop(), remaining + 1000);
+			// SAFETY: Check isPolling inside callback to prevent timer race if stop() called
+			this.pollTimer = setTimeout(() => {
+				if (!this.isPolling) return;
+				this.pollLoop();
+			}, remaining + 1000);
 			return;
 		}
 		
@@ -587,7 +638,11 @@ export class CloudSync extends EventEmitter {
 		}
 		
 		// Schedule next poll
-		this.pollTimer = setTimeout(() => this.pollLoop(), interval);
+		// SAFETY: Check isPolling inside callback to prevent timer race if stop() called
+		this.pollTimer = setTimeout(() => {
+			if (!this.isPolling) return;
+			this.pollLoop();
+		}, interval);
 	}
 	
 	private async pollTargetState(): Promise<void> {
@@ -642,10 +697,13 @@ export class CloudSync extends EventEmitter {
 		if (etag) {
 			this.targetStateETag = etag;
 			// Persist ETag to survive pod restarts
-			await MetadataModel.set('target_state_etag', etag).catch(err => {
+			// IMPORTANT: Bind ETag to deviceUuid to support future multi-device agents
+			const etagKey = `target_state_etag_${deviceInfo.uuid}`;
+			await MetadataModel.set(etagKey, etag).catch(err => {
 				this.logger?.warnSync('Failed to persist ETag', {
 					component: LogComponents.cloudSync,
-					error: err instanceof Error ? err.message : String(err)
+					error: err instanceof Error ? err.message : String(err),
+					etagKey
 				});
 			});
 		}
@@ -665,8 +723,12 @@ export class CloudSync extends EventEmitter {
 			return;
 		}			
 		
-		// Extract version from response  
-		const targetVersion = deviceState.version || 1;
+		// Extract version from response and normalize.
+		// Never allow version 0/negative/NaN to propagate into reports.
+		const rawVersion = Number(deviceState.version);
+		const targetVersion = Number.isFinite(rawVersion) && rawVersion >= 1
+			? Math.floor(rawVersion)
+			: 1;
 		
 		// Always update currentVersion to match target, even if state unchanged
 		// This ensures version tracking works after agent restarts
@@ -679,11 +741,13 @@ export class CloudSync extends EventEmitter {
 		};
 	
 	
-	// Compare states to detect changes
-	const currentStateStr = JSON.stringify(this.targetState);
-	const newStateStr = JSON.stringify(newTargetState);
+	// Compare states to detect changes (use hash for efficiency with large configs)
+	// Hash comparison is O(n) once vs stringify comparison which is O(n) twice + string compare
+	// Critical for large configs with many sensors/endpoints (multi-MB payloads)
+	const currentStateHash = this.calculateHash(this.targetState);
+	const newStateHash = this.calculateHash(newTargetState);
 	
-	if (currentStateStr !== newStateStr) {
+	if (currentStateHash !== newStateHash) {
 			this.logger?.infoSync('New target state received from cloud', {
 				component: LogComponents.cloudSync,
 				operation: 'poll',
@@ -755,7 +819,11 @@ export class CloudSync extends EventEmitter {
 			});
 			
 			// Schedule retry after cooldown
-			this.reportTimer = setTimeout(() => this.reportLoop(), remaining + 1000);
+			// SAFETY: Check isReporting inside callback to prevent timer race if stop() called
+			this.reportTimer = setTimeout(() => {
+				if (!this.isReporting) return;
+				this.reportLoop();
+			}, remaining + 1000);
 			return;
 		}
 		
@@ -765,7 +833,11 @@ export class CloudSync extends EventEmitter {
 				component: LogComponents.cloudSync,
 				operation: 'report-skip-locked'
 			});
-			this.reportTimer = setTimeout(() => this.reportLoop(), this.config.reportInterval);
+			// SAFETY: Check isReporting inside callback to prevent timer race if stop() called
+			this.reportTimer = setTimeout(() => {
+				if (!this.isReporting) return;
+				this.reportLoop();
+			}, this.config.reportInterval);
 			return;
 		}
 		
@@ -840,7 +912,11 @@ export class CloudSync extends EventEmitter {
 		}
 		
 		// Schedule next report
-		this.reportTimer = setTimeout(() => this.reportLoop(), interval);
+		// SAFETY: Check isReporting inside callback to prevent timer race if stop() called
+		this.reportTimer = setTimeout(() => {
+			if (!this.isReporting) return;
+			this.reportLoop();
+		}, interval);
 	}
 	
 	private scheduleReport(reason: 'state-change' | 'metrics' | 'scheduled'): void {
@@ -978,20 +1054,42 @@ export class CloudSync extends EventEmitter {
 		
 	// Hash-based endpoints change detection (bandwidth optimization)
 	// Only track endpoints, not full config (static fields like protocols, intervals, logging, etc. are not reported)
-	const endpointsHash = this.calculateHash(currentState.config?.endpoints);
-	const endpointsChanged = endpointsHash !== this.lastConfigHash || this.isFirstReport;
+	// Normalize to [] so undefined/null/empty consistently hash the same and don't cause false diffs.
+	const normalizedEndpoints = Array.isArray(currentState.config?.endpoints)
+		? currentState.config.endpoints
+		: [];
+	const endpointsHash = this.calculateHash(normalizedEndpoints);
+
+	// If no baseline exists yet, seed it immediately to avoid repeated false-positive
+	// "changed" logs while offline / before first successful report.
+	if (this.lastConfigHash === undefined) {
+		this.lastConfigHash = endpointsHash;
+	}
+
+	const endpointsChanged =
+		endpointsHash !== this.lastConfigHash ||
+		(this.isFirstReport && normalizedEndpoints.length > 0);
 	
 	// Collect endpoint health (dynamic runtime status) - now async
 	const endpointHealth = await this.collectEndpointHealth();
+	const endpointHealthCount = Object.keys(endpointHealth).length;
+	const hasEndpointHealthData = endpointHealthCount > 0;
 	const healthHash = this.calculateHash(endpointHealth);
-	const healthChanged = healthHash !== this.lastEndpointHealthHash || this.isFirstReport;
+	// Only mark as changed if there's actual data AND hash differs (don't flag empty->empty as changed)
+	const healthChanged = hasEndpointHealthData && (healthHash !== this.lastEndpointHealthHash || this.isFirstReport);
 	
+	// Normalize version for reporting. This prevents version=0 if polling
+	// hasn't yet loaded a valid target state version.
+	const effectiveVersion = Number.isFinite(this.currentVersion) && this.currentVersion >= 1
+		? Math.floor(this.currentVersion)
+		: 1;
+
 	// Build base state report
 	const stateReport: DeviceStateReport = {
 		[deviceInfo.uuid]: {
 			apps: currentState.apps,
 			is_online: this.connectionMonitor.isOnline(),
-			version: this.currentVersion,
+			version: effectiveVersion,
 		},
 	};
 	
@@ -1001,30 +1099,31 @@ export class CloudSync extends EventEmitter {
 	// Note: version is already reported at root level (stateReport.version), not in config
 	if (endpointsChanged) {
 		stateReport[deviceInfo.uuid].config = {
-			endpoints: currentState.config?.endpoints || []
+			endpoints: normalizedEndpoints
 		};
 		this.logger?.infoSync('Endpoints config changed - including in report', {
 			component: LogComponents.cloudSync,
 			operation: 'config-change-detected',
 			configHash: endpointsHash,
-			endpointCount: currentState.config?.endpoints?.length || 0
+			endpointCount: normalizedEndpoints.length
 		});
 	}
 	
-	// Only include endpoint health if changed, or always on metrics cycle
-	if (healthChanged || includeMetrics) {
+	// Only include endpoint health if non-empty and changed, or on metrics cycle
+	if (hasEndpointHealthData && (healthChanged || includeMetrics)) {
 		(stateReport[deviceInfo.uuid] as any).endpoints_health = endpointHealth;
 		this.logger?.debugSync('Including endpoint health in report', {
 			component: LogComponents.cloudSync,
 			operation: 'add-endpoint-health',
 			healthChanged,
 			includeMetrics,
-			endpointCount: Object.keys(endpointHealth).length
+			endpointCount: endpointHealthCount
 		});
 	} else {
-		this.logger?.debugSync('Skipping endpoint health (not changed and not metrics cycle)', {
+		this.logger?.debugSync('Skipping endpoint health', {
 			component: LogComponents.cloudSync,
 			operation: 'skip-endpoint-health',
+			hasEndpointHealthData,
 			healthChanged,
 			includeMetrics,
 			lastHash: this.lastEndpointHealthHash?.substring(0, 8),
@@ -1265,10 +1364,10 @@ export class CloudSync extends EventEmitter {
 				component: LogComponents.cloudSync,
 				operation: 'report',
 				includeMetrics,
-				version: this.currentVersion,
+				version: effectiveVersion,
 				reportedVersion: stateReport[deviceInfo.uuid].version,
 			configIncluded: endpointsChanged,
-			endpointHealthIncluded: healthChanged || includeMetrics,
+			endpointHealthIncluded: (reportToSend[deviceInfo.uuid] as any).endpoints_health !== undefined,
 			isFirstReport: this.isFirstReport
 		};
 		
@@ -1299,8 +1398,8 @@ export class CloudSync extends EventEmitter {
 			
 			// Strip verbose data before queueing to save storage
 			const strippedReport = this.stripReportForQueue(reportToSend);
-			const originalSize = JSON.stringify(reportToSend).length;
-			const strippedSize = JSON.stringify(strippedReport).length;
+			const originalSize = stableStringify(reportToSend).length;
+			const strippedSize = stableStringify(strippedReport).length;
 			const savings = originalSize - strippedSize;
 			const savingsPercent = ((savings / originalSize) * 100).toFixed(1);
 			
@@ -1338,7 +1437,7 @@ export class CloudSync extends EventEmitter {
 		if (mqttHealthy) {
 			try {
 				const topic = `iot/device/${deviceInfo.uuid}/state`;
-				const payload = JSON.stringify(report);
+				const payload = stableStringify(report);
 				const payloadSize = Buffer.byteLength(payload, 'utf8');
 			
 			// QoS 1 is better - will help for small network blips
@@ -1399,29 +1498,90 @@ export class CloudSync extends EventEmitter {
 	/**
 	 * Flush offline queue (send all queued reports)
 	 */
+	/**
+	 * Flush offline queue with rate limiting to prevent API flooding
+	 * 
+	 * After long offline periods, queue can contain 1000+ reports.
+	 * Sending all at once would flood the API and potentially trigger rate limits.
+	 * 
+	 * Strategy:
+	 * - Process in batches of 10 items
+	 * - 1 second delay between batches
+	 * - This gives ~100 reports/min throughput
+	 * - Prevents API overload while still clearing queue reasonably fast
+	 */
 	private async flushOfflineQueue(): Promise<void> {
 		if (this.reportQueue.isEmpty()) {
 			return;
 		}
 		
 		const queueSize = this.reportQueue.size();
-		this.logger?.infoSync('Flushing offline queue', {
+		this.logger?.infoSync('Flushing offline queue with rate limiting', {
 			component: LogComponents.cloudSync,
 			operation: 'flush-queue',
-			queueSize
+			queueSize,
+			batchSize: 10,
+			estimatedDurationSec: Math.ceil(queueSize / 10)
 		});
 		
-		const sentCount = await this.reportQueue.flush(
-			async (report) => await this.sendReport(report),
-			{ maxRetries: 3, continueOnError: false }
-		);
+		// Flush in batches with rate limiting
+		const BATCH_SIZE = 10;
+		const BATCH_DELAY_MS = 1000; // 1 second between batches
+		let totalSent = 0;
+		let batchCount = 0;
 		
-		if (sentCount > 0) {
+		while (!this.reportQueue.isEmpty()) {
+			// Process one batch
+			let sentInBatch = 0;
+			
+			for (let i = 0; i < BATCH_SIZE && !this.reportQueue.isEmpty(); i++) {
+				const report = await this.reportQueue.dequeue();
+				if (!report) break;
+				
+				try {
+					await this.sendReport(report);
+					sentInBatch++;
+					totalSent++;
+				} catch (error) {
+					// Failed to send - re-enqueue for later retry
+					this.logger?.warnSync('Failed to send queued report, re-enqueueing', {
+						component: LogComponents.cloudSync,
+						operation: 'flush-queue',
+						error: error instanceof Error ? error.message : String(error)
+					});
+					await this.reportQueue.enqueue(report);
+					// Stop processing this batch on failure
+					break;
+				}
+			}
+			
+			batchCount++;
+			
+			if (sentInBatch === 0) {
+				// Failed to send any items in this batch, stop flushing
+				this.logger?.warnSync('Queue flush stopped - send failures', {
+					component: LogComponents.cloudSync,
+					operation: 'flush-queue',
+					totalSent,
+					batchesCompleted: batchCount,
+					queueRemaining: this.reportQueue.size()
+				});
+				break;
+			}
+			
+			// Rate limiting: wait before next batch (unless queue is empty)
+			if (!this.reportQueue.isEmpty()) {
+				await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
+			}
+		}
+		
+		if (totalSent > 0) {
 			this.logger?.infoSync('Successfully flushed queued reports', {
 				component: LogComponents.cloudSync,
 				operation: 'flush-queue',
-				sentCount,
-				totalCount: queueSize
+				sentCount: totalSent,
+				totalCount: queueSize,
+				batchesCompleted: batchCount
 			});
 		}
 	}
@@ -1456,8 +1616,8 @@ export class CloudSync extends EventEmitter {
 			normalizedNew[appId] = normalizeApp(newApps[appId]);
 		}
 		
-		const oldStr = JSON.stringify(normalizedOld);
-		const newStr = JSON.stringify(normalizedNew);
+		const oldStr = stableStringify(normalizedOld);
+		const newStr = stableStringify(normalizedNew);
 		
 		if (oldStr !== newStr) {
 			return true;
@@ -1467,12 +1627,19 @@ export class CloudSync extends EventEmitter {
 	}
 
 	/**
-	 * Calculate MD5 hash of any object
+	 * Calculate SHA256 hash of any object
 	 * Used for detecting config and health changes
+	 * 
+	 * Uses SHA256 instead of MD5:
+	 * - No collision risk (MD5 collisions are possible)
+	 * - Future-proof if hash used for security
+	 * - Negligible performance difference
+	 * 
+	 * Uses stable stringify to ensure deterministic hashing regardless of key order
 	 */
 	private calculateHash(obj: any): string {
-		return createHash('md5')
-			.update(JSON.stringify(obj))
+		return createHash('sha256')
+			.update(stableStringify(obj))
 			.digest('hex');
 	}
 
@@ -1497,13 +1664,16 @@ export class CloudSync extends EventEmitter {
 			// getAllDeviceStatuses() queries database + overlays adapter runtime status
 			const health = await this.endpoints.getAllDeviceStatuses();
 			
-			this.logger?.debugSync('Collected endpoint health', {
-				component: LogComponents.cloudSync,
-				operation: 'collect-endpoint-health',
-				healthCount: Object.keys(health).length,
-				endpoints: Object.keys(health),
-				sampleHealth: Object.keys(health).length > 0 ? health[Object.keys(health)[0]] : null
-			});
+			const endpointKeys = Object.keys(health);
+			// Only log when there's actual health data to avoid noise
+			if (endpointKeys.length > 0) {
+				this.logger?.debugSync('Collected endpoint health', {
+					component: LogComponents.cloudSync,
+					operation: 'collect-endpoint-health',
+					healthCount: endpointKeys.length,
+					firstEndpointId: endpointKeys[0]
+				});
+			}
 			
 			return health;
 		} catch (error) {
@@ -1546,9 +1716,10 @@ export class CloudSync extends EventEmitter {
 				}
 				// Deep comparison for config object (sensors, features, settings)
 				// This prevents sending verbose sensor configs on every report
+				// Use stable stringify to avoid key order issues
 				else if (key === 'config') {
-					const oldConfigStr = JSON.stringify(oldValue || {});
-					const newConfigStr = JSON.stringify(newValue || {});
+					const oldConfigStr = stableStringify(oldValue || {});
+					const newConfigStr = stableStringify(newValue || {});
 					if (oldConfigStr !== newConfigStr) {
 						deviceDiff[key] = newValue;
 					}

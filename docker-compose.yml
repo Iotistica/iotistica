@@ -536,9 +536,9 @@ services:
             - IOTISTIC_BASE_URL=${IOTISTIC_BASE_URL:-http://api:3002}
             - NODERED_BASE_URL=${NODERED_BASE_URL:-http://localhost:1880}
             - IOTISTIC_STORAGE_TOKEN=5317a772-c8dc-b8af-af76-fce09c973db0034da53b-e5e3-1d36-93a7-ec53de09c4af
-            - AUTH0_DOMAIN=${AUTH0_DOMAIN:-dev-hmwhgxw10boqpmrw.us.auth0.com}
+            - AUTH0_DOMAIN=${AUTH0_DOMAIN:-auth.iotistica.com}
             - AUTH0_AUDIENCE=${AUTH0_AUDIENCE:-https://iotistica.com}
-            - AUTH0_ISSUER=${AUTH0_ISSUER:-https://dev-hmwhgxw10boqpmrw.us.auth0.com/}
+            - AUTH0_ISSUER=${AUTH0_ISSUER:-https://auth.iotistica.com/}
             - NODE_RED_ENABLE_UI_AUTH=true
         depends_on:
             api:

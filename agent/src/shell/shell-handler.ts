@@ -4,6 +4,7 @@ import { LogComponents } from '../logging/types';
 import type { MqttManager } from '../mqtt/manager';
 import * as os from 'os';
 import { createHmac, timingSafeEqual } from 'crypto';
+import * as fs from 'fs';
 
 /**
  * Shell command message structure
@@ -112,6 +113,49 @@ export class ShellHandler {
     'cmd.exe'
   ];
 
+    /**
+     * Find first available shell from allowlist (handles Alpine vs Ubuntu container images)
+     * Alpine Linux only has /bin/sh, while Ubuntu has /bin/bash
+     */
+    private getAvailableShell(preferred: string): string {
+      // First check if preferred shell exists
+      if (preferred && this.shellExists(preferred)) {
+        return preferred;
+      }
+
+      // For Windows, always use PowerShell
+      if (os.platform() === 'win32') {
+        return 'powershell.exe';
+      }
+
+      // For non-Windows, try to find any available shell from allowlist
+      // Prefer bash, fall back to sh (which is guaranteed on Alpine)
+      const unixShells = ['/bin/bash', '/bin/sh', '/bin/zsh', '/bin/dash'];
+      for (const shell of unixShells) {
+        if (this.shellExists(shell)) {
+          return shell;
+        }
+      }
+
+      // Ultimate fallback (should rarely be reached)
+      return '/bin/sh';
+    }
+
+    /**
+     * Check if a shell exists at the given path
+     */
+    private shellExists(shellPath: string): boolean {
+      if (os.platform() === 'win32') {
+        // On Windows, trust the exe names (powershell.exe, pwsh.exe, cmd.exe)
+        return true;
+      }
+      try {
+        fs.accessSync(shellPath, fs.constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    }
   constructor(deviceUuid: string, mqtt: MqttManager, logger: AgentLogger) {
     this.deviceUuid = deviceUuid;
     this.mqtt = mqtt;
@@ -322,10 +366,12 @@ export class ShellHandler {
       if (requestedShell) {
         // Validate against allowlist
         if (this.ALLOWED_SHELLS.includes(requestedShell)) {
-          shell = requestedShell;
+            // Check if requested shell actually exists (handles container images without bash)
+            shell = this.getAvailableShell(requestedShell);
           this.logger.debugSync('Using custom shell from AGENT_SHELL', {
             component: LogComponents.shell,
-            shell: requestedShell
+              shell: requestedShell,
+              resolvedTo: shell
           });
         } else {
           // Reject invalid shell path - use platform default instead
@@ -334,11 +380,11 @@ export class ShellHandler {
             requested: requestedShell,
             allowlist: this.ALLOWED_SHELLS.join(', ')
           });
-          shell = os.platform() === 'win32' ? 'powershell.exe' : '/bin/bash';
+            shell = this.getAvailableShell(os.platform() === 'win32' ? 'powershell.exe' : '/bin/bash');
         }
       } else {
         // No custom shell requested - use platform default
-        shell = os.platform() === 'win32' ? 'powershell.exe' : '/bin/bash';
+          shell = this.getAvailableShell(os.platform() === 'win32' ? 'powershell.exe' : '/bin/bash');
       }
       
       const cwd = os.homedir();

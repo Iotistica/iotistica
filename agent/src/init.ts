@@ -101,7 +101,6 @@ export class FeatureInitializer {
     await Promise.all([
       this.initAgentUpdater(),
       this.initShellHandler(),
-      this.initFirewall(),
       this.initFirewall()
     ]);
   }
@@ -483,7 +482,7 @@ export class FeatureInitializer {
           // CRITICAL: Update CloudSync's endpoints reference to new SensorsFeature instance
           // Without this, CloudSync tries to collect health from the old (stopped) instance
           if (this.cloudSync && this.features.sensors) {
-            this.cloudSync.setEndpoints(this.features.sensors);
+            this.cloudSync.setDevices(this.features.sensors);
             logger.infoSync('Updated CloudSync endpoints reference after reload', {
               component: LogComponents.agent
             });
@@ -543,7 +542,7 @@ export class FeatureInitializer {
 
           // Update CloudSync's endpoints reference
           if (this.cloudSync && this.features.sensors) {
-            this.cloudSync.setEndpoints(this.features.sensors);
+            this.cloudSync.setDevices(this.features.sensors);
             logger.infoSync('Updated CloudSync endpoints reference after reload', {
               component: LogComponents.agent
             });
