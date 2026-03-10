@@ -86,11 +86,12 @@ export function AddEditDeviceDialog({
   });
   const { selectedFleetId: contextFleetId } = useFleet();
   const [fleetOptions, setFleetOptions] = useState<Array<{ fleet_uuid: string; fleet_name: string }>>([]);
-  const [selectedFleetId, setSelectedFleetId] = useState<string>(UNASSIGNED_FLEET_ID);
+  const [selectedFleetId, setSelectedFleetId] = useState<string>("");
   const [locations, setLocations] = useState<string[]>([]);
   const [locationOpen, setLocationOpen] = useState(false);
   const [clientApiUrl, setClientApiUrl] = useState("");
   const [copiedApiUrl, setCopiedApiUrl] = useState(false);
+  const hasSelectedFleet = !!selectedFleetId && selectedFleetId !== UNASSIGNED_FLEET_ID;
 
   // Initialize client API URL with current API URL on mount
   useEffect(() => {
@@ -121,6 +122,12 @@ export function AddEditDeviceDialog({
 
   // Fetch provisioning key from API
   const fetchProvisioningKey = async (isRegenerate = false) => {
+    if (!isEditMode && !hasSelectedFleet) {
+      setProvisioningKey("");
+      setProvisioningKeyId(null);
+      return;
+    }
+
     setIsLoadingKey(true);
     try {
       const provisioningFleetUuid = selectedFleetId === UNASSIGNED_FLEET_ID ? null : selectedFleetId;
@@ -253,7 +260,7 @@ export function AddEditDeviceDialog({
         disk: 0,
       });
       setTags({});
-      setSelectedFleetId(contextFleetId || UNASSIGNED_FLEET_ID);
+      setSelectedFleetId(contextFleetId || "");
     }
 
     loadTagDefinitions();
@@ -270,6 +277,11 @@ export function AddEditDeviceDialog({
 
   const handleSave = () => {
     // Required field validation
+    if (!isEditMode && !hasSelectedFleet) {
+      toast.error("Please select a fleet");
+      return;
+    }
+
     if (formData.type === 'virtual' && !formData.name) {
       toast.error("Please enter a device name for virtual agent");
       return;
@@ -517,21 +529,15 @@ export function AddEditDeviceDialog({
 
           {!isEditMode && (
             <div className="space-y-2 text-left">
-              <Label htmlFor="fleet-select" className="text-left">Fleet</Label>
+              <Label htmlFor="fleet-select" className="text-left">Fleet *</Label>
               <Select
-                value={selectedFleetId}
+                value={selectedFleetId || undefined}
                 onValueChange={setSelectedFleetId}
               >
                 <SelectTrigger id="fleet-select" className="h-11 text-left">
                   <SelectValue placeholder="Select fleet" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={UNASSIGNED_FLEET_ID}>
-                    <div className="flex flex-col items-start">
-                      <span>Unassigned</span>
-                      <span className="text-xs text-muted-foreground">Not linked to a fleet</span>
-                    </div>
-                  </SelectItem>
                   {fleetOptions.map((fleet) => (
                     <SelectItem key={fleet.fleet_uuid} value={fleet.fleet_uuid}>
                       <div className="flex flex-col items-start">
@@ -542,7 +548,7 @@ export function AddEditDeviceDialog({
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Defaults to the current fleet filter.
+                Required. Defaults to the current fleet filter when one is selected.
               </p>
             </div>
           )}
@@ -763,7 +769,7 @@ export function AddEditDeviceDialog({
                 <Label htmlFor="provisioning-key" className="text-sm font-semibold text-foreground">Provisioning Key</Label>
                 <div className="relative bg-muted border border-border rounded-md px-3 py-2.5">
                   <code className="block font-mono text-xs text-foreground select-all break-all leading-relaxed pr-20">
-                    {isLoadingKey ? "Generating..." : (provisioningKey || "Loading...")}
+                    {!hasSelectedFleet ? "Select a fleet first" : isLoadingKey ? "Generating..." : (provisioningKey || "Loading...")}
                   </code>
                   <div className="absolute top-2 right-2 flex gap-1">
                     <Button
@@ -782,7 +788,7 @@ export function AddEditDeviceDialog({
                       variant="ghost"
                       className="h-8 w-8 hover:bg-gray-200"
                       onClick={regenerateProvisioningKey}
-                      disabled={isLoadingKey}
+                      disabled={isLoadingKey || !hasSelectedFleet}
                     >
                       <RefreshCw className={`w-4 h-4 text-gray-600 ${isLoadingKey ? 'animate-spin' : ''}`} />
                     </Button>
@@ -875,7 +881,7 @@ export function AddEditDeviceDialog({
                     <Button variant="outline" onClick={() => onOpenChange(false)}>
                       Cancel
                     </Button>
-                    <Button onClick={handleSave}>
+                    <Button onClick={handleSave} disabled={!isEditMode && !hasSelectedFleet}>
                       {isEditMode ? "Update" : "Add"}
                     </Button>
                   </div>
@@ -885,7 +891,7 @@ export function AddEditDeviceDialog({
                   <Button variant="outline" onClick={() => onOpenChange(false)}>
                     Cancel
                   </Button>
-                  <Button onClick={handleSave}>
+                  <Button onClick={handleSave} disabled={!isEditMode && !hasSelectedFleet}>
                     {isEditMode ? "Update" : "Add"}
                   </Button>
                 </div>

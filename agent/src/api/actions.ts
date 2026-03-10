@@ -3,7 +3,7 @@
  * Core actions for device management
  */
 
-import ContainerManager from '../compose/container-manager';
+import ContainerManager from '../docker/container-manager';
 import type { DeviceManager } from '../managers';
 import type { CloudSync } from '../managers/cloud';
 import type { AgentLogger } from '../logging/agent-logger';

@@ -361,7 +361,6 @@ export async function jwtValidate(
 
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
-    logger.info('Token extracted from Authorization header, determining type...');
 
     // Decode header without verification to detect algorithm
     const decoded = jwt.decode(token, { complete: true });

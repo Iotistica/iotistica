@@ -597,6 +597,11 @@ REPORT_INTERVAL_MS=60000      # How often to report current state + metrics
 docker-compose up -d postgres
 cd billing && npm run dev
 
+# IMPORTANT: For API code changes (TypeScript/Node), restart is not enough.
+# Always rebuild the API container so code is recompiled and copied into the image.
+docker compose up -d api --build
+# Avoid: docker compose restart api
+
 # Generate license keys (first-time setup)
 cd billing && npm run generate-keys
 

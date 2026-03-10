@@ -34,7 +34,7 @@ import EventSourcingConfig from '../events/event-sourcing';
 import deviceAuth, { deviceAuthFromBody } from '../middleware/device-auth';
 import { resolveAppsImages } from '../services/docker-registry';
 import { deviceSensorSync } from '../services/agent-devices';
-import { processDeviceStateReport } from '../services/agent-state';
+import { processAgentStateReport } from '../services/agent-state';
 import logger from '../utils/logger';
 
 export const router = express.Router();
@@ -186,7 +186,7 @@ router.patch('/device/state', deviceAuthFromBody, async (req, res) => {
     }
 
     // Process state report using shared service
-    await processDeviceStateReport(stateReport, {
+    await processAgentStateReport(stateReport, {
       source: 'http',
       ipAddress: req.ip,
       userAgent: req.headers['user-agent']

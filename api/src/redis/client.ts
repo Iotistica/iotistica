@@ -11,9 +11,9 @@ import Redis from 'ioredis';
 import logger from '../utils/logger';
 import { getRedisClient, getRedisSubscriber } from './client-factory';
 import {
-  deviceStateChannel,
-  deviceMetricsChannel,
-  deviceMetricsPattern,
+  agentStateChannel,
+  agentMetricsChannel,
+  agentMetricsPattern,
   metricsStreamKey,
   metricsStreamScanPattern,
   parseMetricsStreamKey,
@@ -130,8 +130,8 @@ class RedisClient {
     * @param state - State object to publish
    * Returns false on error (graceful degradation)
    */
-  public async publishDeviceState(tenantId: string, deviceUuid: string, state: any): Promise<boolean> {
-    const channel = deviceStateChannel(tenantId, deviceUuid);
+  public async publishAgentState(tenantId: string, deviceUuid: string, state: any): Promise<boolean> {
+    const channel = agentStateChannel(tenantId, deviceUuid);
     const message = JSON.stringify({
       deviceUuid,
       state,
@@ -147,8 +147,8 @@ class RedisClient {
     * @param metrics - Metrics object to publish
    * Returns false on error (graceful degradation)
    */
-  public async publishDeviceMetrics(tenantId: string, deviceUuid: string, metrics: any): Promise<boolean> {
-    const channel = deviceMetricsChannel(tenantId, deviceUuid);
+  public async publishAgentMetrics(tenantId: string, deviceUuid: string, metrics: any): Promise<boolean> {
+    const channel = agentMetricsChannel(tenantId, deviceUuid);
     const message = JSON.stringify({
       deviceUuid,
       metrics,
@@ -533,7 +533,7 @@ class RedisClient {
     }
 
     // Determine pattern or channel
-    const pattern = deviceUuid === '*' ? deviceMetricsPattern(tenantId) : deviceMetricsChannel(tenantId, deviceUuid);
+    const pattern = deviceUuid === '*' ? agentMetricsPattern(tenantId) : agentMetricsChannel(tenantId, deviceUuid);
     
     if (deviceUuid === '*') {
       // Pattern subscription for all devices
@@ -579,7 +579,7 @@ class RedisClient {
       return;
     }
 
-    const pattern = deviceUuid === '*' ? deviceMetricsPattern(tenantId) : deviceMetricsChannel(tenantId, deviceUuid);
+    const pattern = deviceUuid === '*' ? agentMetricsPattern(tenantId) : agentMetricsChannel(tenantId, deviceUuid);
     
     if (deviceUuid === '*') {
       // Pattern unsubscription

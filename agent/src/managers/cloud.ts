@@ -66,11 +66,14 @@ function stableStringify(obj: any): string {
 	}
 	
 	// Objects - sort keys then recursively stringify
+	// Skip undefined values to match JSON.stringify behaviour
 	const sortedKeys = Object.keys(obj).sort();
-	const pairs = sortedKeys.map(key => {
-		const value = obj[key];
-		return JSON.stringify(key) + ':' + stableStringify(value);
-	});
+	const pairs = sortedKeys
+		.filter(key => obj[key] !== undefined)
+		.map(key => {
+			const value = obj[key];
+			return JSON.stringify(key) + ':' + stableStringify(value);
+		});
 	
 	return '{' + pairs.join(',') + '}';
 }

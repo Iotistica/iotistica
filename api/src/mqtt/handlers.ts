@@ -6,7 +6,7 @@
 
 import { query } from '../db/connection';
 import type { SensorData, MetricsData, StateMessage } from './mqtt-manager';
-import { processDeviceStateReport } from '../services/agent-state';
+import { processAgentStateReport } from '../services/agent-state';
 import { redisSensorQueue } from '../services/redis-device-queue';
 import { getAnomalyEventHandler, type AnomalyEvent } from './anomaly-handler';
 import { getTenantId } from '../redis/tenant-keys';
@@ -17,7 +17,7 @@ import logger from '../utils/logger';
  * Queue raw parsed data to Redis Stream (FAST - no compression!)
  * Supports both single messages and batches
  */
-export async function handleEndpointsData(data: SensorData): Promise<void> {
+export async function handleDeviceData(data: SensorData): Promise<void> {
   try {
     const startTime = Date.now();
     
@@ -93,8 +93,9 @@ export async function handleEndpointsData(data: SensorData): Promise<void> {
  * Processes full device state reports including config, apps, and metrics
  * Dual-write: PostgreSQL (durable) + Redis pub/sub (real-time)
  */
-export async function handleDeviceState(payload: StateMessage): Promise<void> {
+export async function handleAgentState(payload: StateMessage): Promise<void> {
   try {
+
     // Destructure new payload format
     const { deviceUuid, data: rawMqttPayload } = payload;
 
@@ -144,7 +145,7 @@ export async function handleDeviceState(payload: StateMessage): Promise<void> {
     
     // Use shared service for consistent state processing
     const tenantId = getTenantId();
-    await processDeviceStateReport(stateReport, {
+    await processAgentStateReport(stateReport, {
       source: 'mqtt',
       topic: `iot/${tenantId}/device/+/state`
     });
@@ -153,10 +154,9 @@ export async function handleDeviceState(payload: StateMessage): Promise<void> {
     try {
       const { redisClient } = await import('../redis/client');
       
-      
       if (deviceUuid && state) {
         // Publish full state to device:{uuid}:state channel
-        await redisClient.publishDeviceState(tenantId, deviceUuid, state);
+        await redisClient.publishAgentState(tenantId, deviceUuid, state);
         
         // Publish metrics-only to device:{uuid}:metrics channel (if metrics present)
         if (
@@ -174,7 +174,7 @@ export async function handleDeviceState(payload: StateMessage): Promise<void> {
             top_processes: state.top_processes,
             network_interfaces: state.network_interfaces,
           };
-          await redisClient.publishDeviceMetrics(tenantId, deviceUuid, metrics);
+          await redisClient.publishAgentMetrics(tenantId, deviceUuid, metrics);
         }
       }
     } catch (error) {

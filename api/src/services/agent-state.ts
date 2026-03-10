@@ -63,14 +63,14 @@ export interface ProcessingOptions {
  * Process device state report
  * Can be called from both HTTP endpoint and MQTT handler
  */
-export async function processDeviceStateReport(
+export async function processAgentStateReport(
   stateReport: DeviceStateReport,
   options: ProcessingOptions
 ): Promise<void> {
   for (const uuid in stateReport) {
     const deviceState = stateReport[uuid];
 
-    logger.debug(`Device ${uuid.substring(0, 8)} state report details:`, {
+    logger.debug(`Agent ${uuid.substring(0, 8)} state report details:`, {
       appsKeys: deviceState.apps ? Object.keys(deviceState.apps) : 'empty',
       configKeys: deviceState.config ? Object.keys(deviceState.config) : 'empty',
       hasConfigEndpoints: deviceState.config?.endpoints ? deviceState.config.endpoints.length : 'missing',
@@ -78,13 +78,19 @@ export async function processDeviceStateReport(
       endpointsHealthCount: deviceState.endpoints_health ? Object.keys(deviceState.endpoints_health).length : 0,
       version: deviceState.version,
       hasVersion: deviceState.version !== undefined,
-      versionType: typeof deviceState.version
+      versionType: typeof deviceState.version,
+      ip_address: deviceState.ip_address ?? null,
+      mac_address: deviceState.mac_address ?? null,
+      os_version: deviceState.os_version ?? null,
+      architecture: deviceState.architecture ?? null,
+      agent_version: deviceState.agent_version ?? null,
+      uptime: deviceState.uptime ?? null,
     });
     
     // Ensure device exists and mark as online
     const device = await DeviceModel.getOrCreate(uuid);
     if (!device) {
-      logger.warn('Device state report from unregistered device - skipping', {
+      logger.warn('Agent state report from unregistered device - skipping', {
         deviceUuid: uuid.substring(0, 8) + '...',
       });
       continue; // Skip this device
@@ -244,7 +250,7 @@ export async function processDeviceStateReport(
         }
         
         // 2. Publish to pub/sub for real-time distribution (Phase 1)
-        await redisClient.publishDeviceMetrics(tenantId, uuid, metrics);
+        await redisClient.publishAgentMetrics(tenantId, uuid, metrics);
         
       } catch (error) {
         // Error with Redis - fallback to direct write

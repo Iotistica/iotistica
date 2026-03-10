@@ -76,10 +76,17 @@ function deserializePayload(message: Buffer | string): any {
   }
   
   // Try JSON parsing
+  const str = buffer.toString('utf-8');
   try {
-    const str = buffer.toString('utf-8');
     return JSON.parse(str);
-  } catch {
+  } catch (error) {
+    logger.warn('Failed to decode MQTT payload as JSON', {
+      payloadSize: buffer.length,
+      firstBytesHex: buffer.subarray(0, 8).toString('hex'),
+      utf8Preview: str.substring(0, 120),
+      error: error instanceof Error ? error.message : String(error),
+    });
+
     // Return raw message if both msgpack and JSON fail
     return message;
   }

@@ -88,7 +88,7 @@ export function tenantPrefixLegacy(): string {
  * @param tenantId - Tenant identifier (customerId)
  * @param deviceUuid - Device UUID
  */
-export function deviceStateChannel(tenantId: string, deviceUuid: string): string {
+export function agentStateChannel(tenantId: string, deviceUuid: string): string {
   return `${tenantPrefix(tenantId)}:device:${deviceUuid}:state`;
 }
 
@@ -97,7 +97,7 @@ export function deviceStateChannel(tenantId: string, deviceUuid: string): string
  * @param tenantId - Tenant identifier (customerId)
  * @param deviceUuid - Device UUID
  */
-export function deviceMetricsChannel(tenantId: string, deviceUuid: string): string {
+export function agentMetricsChannel(tenantId: string, deviceUuid: string): string {
   return `${tenantPrefix(tenantId)}:device:${deviceUuid}:metrics`;
 }
 
@@ -106,7 +106,7 @@ export function deviceMetricsChannel(tenantId: string, deviceUuid: string): stri
  * SECURITY: Never use global wildcard tenant:*:device:*:metrics
  * @param tenantId - Tenant identifier (customerId)
  */
-export function deviceMetricsPattern(tenantId: string): string {
+export function agentMetricsPattern(tenantId: string): string {
   return `${tenantPrefix(tenantId)}:device:*:metrics`;
 }
 

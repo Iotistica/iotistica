@@ -61,7 +61,7 @@ import licenseRoutes from './routes/license';
 import jwtAuth from './middleware/jwt-auth';
 import billingRoutes from './routes/billing';
 import fleetRoutes from './routes/fleets';
-import { websocketManager } from './services/websocket-manager';
+import { websocketManager } from './services/websocket/manager';
 import { createHttpsServer } from './https-server';
 
 // API Version Configuration - Change here to update all routesggg
