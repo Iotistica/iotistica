@@ -37,8 +37,7 @@ class ProfileConfigModel {
     const result = await query(
       `INSERT INTO profile_configs (profile_name, protocol, data_points, metadata)
        VALUES ($1, $2, $3, $4)
-       ON CONFLICT (profile_name) DO UPDATE SET
-         protocol = $2,
+       ON CONFLICT (profile_name, protocol) DO UPDATE SET
          data_points = $3,
          metadata = $4,
          updated_at = CURRENT_TIMESTAMP
@@ -48,8 +47,11 @@ class ProfileConfigModel {
     return result.rows[0];
   }
 
-  static async delete(profileName: string) {
-    await query('DELETE FROM profile_configs WHERE profile_name = $1', [profileName]);
+  static async delete(profileName: string, protocol: string) {
+    await query(
+      'DELETE FROM profile_configs WHERE profile_name = $1 AND protocol = $2',
+      [profileName, protocol]
+    );
   }
 }
 
@@ -270,6 +272,60 @@ router.post('/', jwtAuth, async (req, res) => {
 });
 
 /**
+ * Update existing profile configuration
+ * PUT /api/v1/profiles/:name?protocol=modbus
+ *
+ * REQUIRES AUTHENTICATION - Protected endpoint
+ * Used by dashboard when editing an existing profile
+ */
+router.put('/:name', jwtAuth, async (req, res) => {
+  try {
+    const { name } = req.params;
+    const protocol = (req.query.protocol as string) || req.body.protocol;
+
+    if (!protocol) {
+      return res.status(400).json({
+        error: 'Bad request',
+        message: 'protocol is required (query param or body)'
+      });
+    }
+
+    const { data_points, metadata } = req.body;
+
+    if (!data_points || !Array.isArray(data_points)) {
+      return res.status(400).json({
+        error: 'Invalid request',
+        message: 'data_points is required and must be an array'
+      });
+    }
+
+    const existing = await ProfileConfigModel.get(name, protocol);
+    if (!existing) {
+      return res.status(404).json({
+        error: 'Not found',
+        message: `Profile '${name}' not found for protocol '${protocol}'`
+      });
+    }
+
+    const profile = await ProfileConfigModel.upsert(name, protocol, data_points, metadata);
+
+    logger.info('Profile config updated via PUT', { profile: name, protocol, dataPointsCount: data_points.length, userId: req.user?.id });
+
+    res.json({
+      status: 'ok',
+      message: `Profile '${name}' updated`,
+      profile
+    });
+  } catch (error: any) {
+    logger.error('Error updating profile config', { error: error.message, profile: req.params.name });
+    res.status(500).json({
+      error: 'Internal server error',
+      requestId: req.id || 'unknown'
+    });
+  }
+});
+
+/**
  * List all profile configurations for a protocol
  * GET /api/v1/profiles?protocol=modbus
  * 
@@ -323,17 +379,25 @@ router.get('/:name', jwtAuth, async (req, res) => {
 
 /**
  * Delete profile configuration
- * DELETE /api/v1/profiles/:name
+ * DELETE /api/v1/profiles/:name?protocol=modbus
  * 
  * REQUIRES AUTHENTICATION - Protected endpoint
  */
 router.delete('/:name', jwtAuth, async (req, res) => {
   try {
     const { name } = req.params;
+    const protocol = req.query.protocol as string;
 
-    await ProfileConfigModel.delete(name);
+    if (!protocol) {
+      return res.status(400).json({
+        error: 'Bad request',
+        message: 'protocol query parameter is required'
+      });
+    }
 
-    logger.info('Profile config deleted', { profile: name, userId: req.user?.id });
+    await ProfileConfigModel.delete(name, protocol);
+
+    logger.info('Profile config deleted', { profile: name, protocol, userId: req.user?.id });
 
     res.json({
       status: 'ok',

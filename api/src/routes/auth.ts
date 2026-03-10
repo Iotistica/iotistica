@@ -5,6 +5,7 @@
  */
 
 import express, { Request, Response } from 'express';
+import crypto from 'crypto';
 import * as authService from '../services/auth.service';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import rateLimit from 'express-rate-limit';
@@ -933,6 +934,147 @@ router.delete('/mqtt-acls/:id', jwtAuth, requireRole('admin'), async (req: Reque
     res.status(500).json({
       error: 'Internal Server Error',
       message: 'Failed to delete ACL rule'
+    });
+  }
+});
+
+/**
+ * GET /auth/api-keys
+ *
+ * List service API keys
+ * Requires admin role
+ */
+router.get('/api-keys', jwtAuth, requireRole('admin'), async (_req: Request, res: Response) => {
+  try {
+    const { query } = await import('../db/connection');
+
+    const result = await query(
+      `SELECT id, name, key, description, is_active, created_at, expires_at, last_used_at
+       FROM api_keys
+       ORDER BY created_at DESC`
+    );
+
+    const keys = result.rows.map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      key: row.key,
+      key_prefix: row.key ? row.key.substring(0, 8) : '',
+      description: row.description,
+      is_active: row.is_active,
+      created_at: row.created_at,
+      expires_at: row.expires_at,
+      last_used_at: row.last_used_at,
+    }));
+
+    res.status(200).json({ success: true, keys });
+  } catch (error: any) {
+    console.error('List API keys error:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to fetch API keys'
+    });
+  }
+});
+
+/**
+ * POST /auth/api-keys
+ *
+ * Create a new service API key
+ * Requires admin role
+ */
+router.post('/api-keys', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const { name, description = null, expires_at = null } = req.body;
+
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      res.status(400).json({
+        error: 'Bad Request',
+        message: 'Name is required'
+      });
+      return;
+    }
+
+    const key = crypto.randomBytes(32).toString('hex');
+    const { query } = await import('../db/connection');
+
+    const result = await query(
+      `INSERT INTO api_keys (name, key, description, is_active, expires_at)
+       VALUES ($1, $2, $3, true, $4)
+       RETURNING id, name, key, description, is_active, created_at, expires_at, last_used_at`,
+      [name.trim(), key, description, expires_at || null]
+    );
+
+    const created = result.rows[0];
+
+    res.status(201).json({
+      success: true,
+      message: 'API key created successfully',
+      key: {
+        id: created.id,
+        name: created.name,
+        key: created.key,
+        key_prefix: created.key.substring(0, 8),
+        description: created.description,
+        is_active: created.is_active,
+        created_at: created.created_at,
+        expires_at: created.expires_at,
+        last_used_at: created.last_used_at,
+      }
+    });
+  } catch (error: any) {
+    console.error('Create API key error:', error);
+
+    if (error.code === '23505') {
+      res.status(400).json({
+        error: 'Bad Request',
+        message: 'API key name already exists'
+      });
+      return;
+    }
+
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to create API key'
+    });
+  }
+});
+
+/**
+ * DELETE /auth/api-keys/:id
+ *
+ * Revoke (deactivate) an API key
+ * Requires admin role
+ */
+router.delete('/api-keys/:id', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { query } = await import('../db/connection');
+
+    const result = await query(
+      `UPDATE api_keys
+       SET is_active = false
+       WHERE id = $1
+       RETURNING id`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({
+        error: 'Not Found',
+        message: 'API key not found'
+      });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'API key revoked successfully'
+    });
+  } catch (error: any) {
+    console.error('Revoke API key error:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to revoke API key'
     });
   }
 });

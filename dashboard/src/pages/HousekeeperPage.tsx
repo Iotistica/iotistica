@@ -343,7 +343,7 @@ export default function HousekeeperPage() {
                           Duration
                         </th>
                         <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Started At</th>
-                        <th className="text-right py-3 px-4 font-semibold text-sm text-foreground">Actions</th>
+                        <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -371,7 +371,7 @@ export default function HousekeeperPage() {
                             {formatDate(run.started_at)}
                           </td>
                           <td className="py-3 px-4">
-                            <div className="flex items-center justify-end gap-2">
+                            <div className="flex items-center justify-start gap-2">
                               <Button
                                 variant="outline"
                                 size="sm"

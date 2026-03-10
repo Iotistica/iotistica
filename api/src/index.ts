@@ -420,7 +420,7 @@ app.use(API_BASE, fleetRoutes); // MUST be before profileRoutes (/:name catches 
 app.use(API_BASE, anomalyRoutes); // MUST be before profileRoutes (/:name catches everything)
 app.use(API_BASE, anomalyIncidentsRoutes); // MUST be before profileRoutes (/:name catches everything)
 app.use(API_BASE, anomalyAlertsRoutes); // MUST be before profileRoutes (/:name catches everything)
-app.use(API_BASE, profileRoutes);
+app.use(`${API_BASE}/profiles`, profileRoutes);
 app.use(API_BASE, digitalTwinGraphRoutes);
 app.use(API_BASE, mqttMetricsRoutes); // MQTT metrics from database
 app.use(API_BASE, eventsRoutes);

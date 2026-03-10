@@ -328,16 +328,16 @@ services:
     #         start_period: 60s
     
     # Protocol Simulators for Testing
-    modbus-sim:
+    sim-modbus:
         build:
-            context: ./sensors/modbus-simulator
+            context: ./simulators/modbus-simulator
             dockerfile: Dockerfile
-        container_name: modbus-sim
+        container_name: sim-modbus
         restart: unless-stopped
         environment:
           - PROFILE=${MODBUS_PROFILE:-Generic}
           - API_URL=http://api:3002
-          - API_KEY=${SIMULATOR_API_KEY}  # Required: API key from api_keys table
+          - API_KEY=${MODBUS_API_KEY}  # Required: API key from api_keys table
           - GUI_PORT=5000
           - GUI_HOST=0.0.0.0
         ports:
@@ -354,17 +354,17 @@ services:
                 max-size: "5m"
                 max-file: "2"
  
-    opcua-sim:
+    sim-opcua:
         build:
-            context: ./sensors/opcua-simulator
+            context: ./simulators/opcua-simulator
             dockerfile: Dockerfile
-        container_name: iotistic-opcua-sim
+        container_name: sim-opcua
         restart: unless-stopped
         command: sh -c "python web_gui.py & python opcua_simulator.py"
         environment:
             - PROFILE=${OPCUA_PROFILE:-testfactory}
             - API_URL=http://api:3002
-            - API_KEY=${SIMULATOR_API_KEY}  # Required: API key from api_keys table
+            - API_KEY=${OPCUA_API_KEY}  # Required: API key from api_keys table
             - WEB_PORT=5002
         ports:
             - "4840:4840"     # OPC UA server
@@ -377,11 +377,11 @@ services:
             options:
                 max-size: "5m"
                 max-file: "2"
-    bacnet-sim:
+    sim-bacnet:
         build:
-            context: ./sensors/bacnet-simulator
+            context: ./simulators/bacnet-simulator
             dockerfile: Dockerfile
-        container_name: bacnet-sim
+        container_name: sim-bacnet
         restart: unless-stopped
         # Bridge network with port mapping - accessible from Windows host IP
         ports:
@@ -395,6 +395,37 @@ services:
                 max-file: "2"
         networks:
             - iotistica-net
+
+    sim-mqtt:
+        build:
+            context: ./simulators/mqtt-simulator
+            dockerfile: Dockerfile
+        container_name: sim-mqtt
+        restart: unless-stopped
+        environment:
+            - PROFILE=${MQTT_PROFILE:-Generic}
+            - API_URL=http://api:3002
+            - API_KEY=${MQTT_API_KEY}
+            - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto:1883}
+            - MQTT_USERNAME=${MQTT_SIM_USERNAME}
+            - MQTT_PASSWORD=${MQTT_SIM_PASSWORD}
+            - MQTT_AUTH_USERNAME=${MQTT_SIM_USERNAME}
+            - MQTT_AUTH_PASSWORD=${MQTT_SIM_PASSWORD}
+            - MQTT_CLIENT_ID=${MQTT_SIM_CLIENT_ID:-iotistic-mqtt-sim}
+            - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
+            - LOG_LEVEL=${MQTT_SIM_LOG_LEVEL:-INFO}
+        depends_on:
+            api:
+                condition: service_healthy
+            mosquitto:
+                condition: service_started
+        networks:
+            - iotistica-net
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "5m"
+                max-file: "2"
 
     mqtt-monitor:
         build:
