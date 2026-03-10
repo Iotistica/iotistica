@@ -1,6 +1,5 @@
 import { useMemo, useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import axios from 'axios';
 
 export function NodeRedPage() {
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -56,27 +55,8 @@ export function NodeRedPage() {
         sessionStorage.setItem('auth0_token', token);
         console.log('[NodeRedPage] Access token stored in sessionStorage');
         
-        // Send to Node-RED backend for session storage
-        // This allows Node-RED storage plugin to use the token for API calls
-        try {
-          await axios.post(`${nodeRedUrl}/admin/auth/token`, 
-            { token },
-            { 
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-              },
-              withCredentials: true,
-              timeout: 5000
-            }
-          );
-          
-          console.log('[NodeRedPage] Access token sent to Node-RED backend');
-        } catch (tokenError: any) {
-          // Token endpoint may fail due to auth/CORS, but we can still load the iframe
-          // The session will be authenticated via the login form
-          console.warn('[NodeRedPage] Token endpoint failed (auth will use login form):', tokenError.message);
-        }
+        // Auth bridge disabled: load Node-RED directly without admin token post.
+        // This avoids CORS/preflight failures when UI auth is disabled.
         
         setTokenReady(true);
       } catch (error: any) {

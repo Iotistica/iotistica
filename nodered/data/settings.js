@@ -1,27 +1,8 @@
 module.exports = {
     uiPort: process.env.PORT || 1880,
 
-    // CORS for dashboard -> Node-RED admin auth bridge.
-    // Credentialed requests cannot use wildcard origin.
-    httpAdminCors: {
-        origin: (origin, callback) => {
-            const allowed = (process.env.NODE_RED_ADMIN_CORS_ORIGIN || 'http://localhost:8080')
-                .split(',')
-                .map((o) => o.trim())
-                .filter(Boolean);
-
-            // Allow non-browser requests (no Origin) and explicit allowlist entries.
-            if (!origin || allowed.includes(origin)) {
-                callback(null, true);
-                return;
-            }
-
-            callback(new Error(`CORS origin not allowed: ${origin}`));
-        },
-        credentials: true,
-        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization']
-    },
+    // Disable built-in CORS - handled by custom auth middleware
+    httpAdminCors: false,
 
     mqttReconnectTime: 15000,
     serialReconnectTime: 15000,
@@ -64,23 +45,43 @@ module.exports = {
         }
 
         console.log('[Settings] Storage: Initializing nr-storage plugin with Auth0 token getter');
+        const storageAuthMode = (process.env.NODE_RED_STORAGE_AUTH_MODE || 'auto').toLowerCase();
+        const isJwtLike = (value) => typeof value === 'string' && value.split('.').length === 3;
         
         return require('@iotistic/nr-storage')({
             iotisticURL: process.env.IOTISTIC_BASE_URL,
             getAuthToken: () => {
+                if (storageAuthMode === 'off' || storageAuthMode === 'none' || storageAuthMode === 'disabled') {
+                    // Explicit no-auth mode: do not send Authorization header.
+                    return null;
+                }
+
                 const token = module.exports._auth.currentToken;
                 if (token) {
-                    return token;
+                    if (storageAuthMode === 'bootstrap' || isJwtLike(token)) {
+                        return token;
+                    }
+                    // Prevent opaque/non-JWT session tokens from triggering 401 "Invalid token format"
+                    return null;
                 }
 
                 // Bootstrap token for startup/background storage calls before user session exists.
                 // In interactive flows, middleware will replace this with per-user Auth0 token.
                 const bootstrapToken = process.env.IOTISTIC_STORAGE_TOKEN;
                 if (bootstrapToken) {
-                    return bootstrapToken;
+                    if (storageAuthMode === 'bootstrap') {
+                        return bootstrapToken;
+                    }
+                    // auto mode: only send JWT-like bearer tokens
+                    if (isJwtLike(bootstrapToken)) {
+                        return bootstrapToken;
+                    }
+                    return null;
                 }
 
-                throw new Error('[nr-storage] No Auth0 session token and no IOTISTIC_STORAGE_TOKEN configured');
+                // In auto mode, allow unauthenticated startup calls.
+                // If backend requires auth it will return 401 and logs will indicate missing token.
+                return null;
             }
         });
     })(),
@@ -105,79 +106,9 @@ module.exports = {
 
     functionExternalModules: true,
 
-    // Custom HTTP middleware to set CSP headers and extract Auth0 token from session
+    // Custom HTTP middleware to extract Auth0 token from session and set CSP headers
     // CSP can be customized via environment variables
     httpAdminMiddleware: (req, res, next) => {
-        // Local/dev token bridge endpoint (kept in middleware so it always exists)
-        if (req.path === '/admin/auth/token') {
-            // Let httpAdminCors handle CORS headers - don't set them manually here
-            
-            if (req.method === 'OPTIONS') {
-                res.status(204).end();
-                return;
-            }
-
-            if (req.method === 'POST') {
-                const authHeader = req.headers.authorization || '';
-                const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-                const bodyToken = req.body && typeof req.body.token === 'string' ? req.body.token : null;
-
-                const finalize = (resolvedBodyToken) => {
-                    const token = resolvedBodyToken || bearer;
-                    if (!token) {
-                        res.status(400).json({ error: 'Token required' });
-                        return;
-                    }
-
-                    // Ensure session exists (raw request listener fires before session middleware)
-                    if (!req.session) {
-                        req.session = {};
-                    }
-
-                    req.session.auth0Token = token;
-                    req.session.iotSession = true;
-                    req.session.user = req.session.user || { accessToken: token };
-
-                    // Save session if save() method exists (express-session middleware)
-                    // If session was manually created, just respond (session will be set by express middleware later)
-                    if (typeof req.session.save === 'function') {
-                        req.session.save((err) => {
-                            if (err) {
-                                res.status(500).json({ error: 'Failed to save session', details: err.message });
-                                return;
-                            }
-                            res.json({ success: true });
-                        });
-                    } else {
-                        // Session exists but no save() method - just respond
-                        // Express will handle session persistence
-                        res.json({ success: true });
-                    }
-                };
-
-                if (bodyToken) {
-                    finalize(bodyToken);
-                    return;
-                }
-
-                // Fallback: parse raw JSON body when body parser has not executed yet.
-                let raw = '';
-                req.on('data', (chunk) => {
-                    raw += chunk;
-                });
-                req.on('end', () => {
-                    try {
-                        const parsed = raw ? JSON.parse(raw) : {};
-                        const parsedToken = typeof parsed.token === 'string' ? parsed.token : null;
-                        finalize(parsedToken);
-                    } catch {
-                        finalize(null);
-                    }
-                });
-                return;
-            }
-        }
-
         // Extract Auth0 token from session for storage module
         if (req.session && req.session.auth0Token) {
             module.exports._auth.currentToken = req.session.auth0Token;

@@ -12,7 +12,8 @@ import { jwtAuth } from '../middleware/jwt-auth';
 
 const router = Router();
 
-router.use(jwtAuth);
+// Apply JWT auth only to /anomaly-alerts routes (path-specific to avoid intercepting other routes)
+router.use('/anomaly-alerts', jwtAuth);
 
 /**
  * GET /api/v1/anomaly-alerts

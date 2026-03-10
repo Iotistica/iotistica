@@ -19,8 +19,8 @@ import { logger } from '../utils/logger';
 import { jwtAuth } from '../middleware/jwt-auth';
 
 const router: Router = express.Router();
-// All routes require authentication
-router.use(jwtAuth);
+// NOTE: JWT auth is applied to each individual route below since paths are mixed
+//       and we want to avoid intercepting unrelated routes when mounted at API_BASE
 
 // Detect Kubernetes environment
 const isKubernetes = !!process.env.KUBERNETES_SERVICE_HOST;
@@ -47,7 +47,7 @@ const upload = multer({
  * POST /api/digital-twin/graph/upload-ifc
  * Upload and parse IFC file, load into Neo4j
  */
-router.post('/upload-ifc', upload.single('file'), async (req: Request, res: Response) => {
+router.post('/upload-ifc', jwtAuth, upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -117,7 +117,7 @@ router.post('/upload-ifc', upload.single('file'), async (req: Request, res: Resp
  * GET /api/digital-twin/graph
  * Get full graph visualization data from Neo4j
  */
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', jwtAuth, async (req: Request, res: Response) => {
   try {
     const graphData = await neo4jService.getGraphVisualizationData();
     
@@ -153,7 +153,7 @@ router.get('/', async (req: Request, res: Response) => {
  * 
  * Body: { deviceUuid: string, spaceExpressId: number }
  */
-router.post('/map-device', async (req: Request, res: Response) => {
+router.post('/map-device', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { deviceUuid, spaceExpressId } = req.body;
 
@@ -193,7 +193,7 @@ router.post('/map-device', async (req: Request, res: Response) => {
  * DELETE /api/digital-twin/graph/map-device/:deviceUuid
  * Remove device mapping from space
  */
-router.delete('/map-device/:deviceUuid', async (req: Request, res: Response) => {
+router.delete('/map-device/:deviceUuid', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { deviceUuid } = req.params;
 
@@ -216,7 +216,7 @@ router.delete('/map-device/:deviceUuid', async (req: Request, res: Response) => 
  * DELETE /api/digital-twin/graph/node/:nodeId
  * Delete an unmapped EdgeDevice node
  */
-router.delete('/node/:nodeId', async (req: Request, res: Response) => {
+router.delete('/node/:nodeId', jwtAuth, async (req: Request, res: Response) => {
   try {
     const { nodeId } = req.params;
     const { uuid } = req.query;
@@ -253,7 +253,7 @@ router.delete('/node/:nodeId', async (req: Request, res: Response) => {
  * GET /api/digital-twin/graph/device-mappings
  * Get all device-to-space mappings
  */
-router.get('/device-mappings', async (req: Request, res: Response) => {
+router.get('/device-mappings', jwtAuth, async (req: Request, res: Response) => {
   try {
     const mappings = await neo4jService.getDeviceMappings();
 

@@ -11,7 +11,9 @@ import { jwtAuth } from '../middleware/jwt-auth';
 
 const router = Router();
 
-router.use(jwtAuth);
+// NOTE: JWT auth is applied to each individual route below since paths are mixed
+//       (some start with /, others with /:deviceUuid) and we want to avoid
+//       intercepting unrelated routes when mounted at API_BASE
 
 /**
  * GET /api/anomaly/summary
@@ -21,7 +23,7 @@ router.use(jwtAuth);
  * - edgeUuid: Filter by edge gateway UUID
  * - deviceName: Filter by monitored device name (e.g., 'COMAP-Main-Controller')
  */
-router.get('/summary', async (req, res) => {
+router.get('/summary', jwtAuth, async (req, res) => {
   try {
     const { edgeUuid, deviceName } = req.query;
 
@@ -48,7 +50,7 @@ router.get('/summary', async (req, res) => {
  * GET /api/anomaly/:deviceUuid/summary (legacy - edge gateway UUID)
  * Get anomaly summary for a specific edge gateway
  */
-router.get('/:deviceUuid/summary', async (req, res) => {
+router.get('/:deviceUuid/summary', jwtAuth, async (req, res) => {
   try {
     const { deviceUuid } = req.params;
 
@@ -86,7 +88,7 @@ router.get('/:deviceUuid/summary', async (req, res) => {
  * - end: End time (ISO 8601)
  * - limit: Max records (default 24)
  */
-router.get('/hourly', async (req, res) => {
+router.get('/hourly', jwtAuth, async (req, res) => {
   try {
     const { edgeUuid, deviceName, metric, start, end, limit } = req.query;
 
@@ -127,7 +129,7 @@ router.get('/hourly', async (req, res) => {
  * - end: End time (ISO 8601)
  * - limit: Max records (default 24)
  */
-router.get('/:deviceUuid/hourly', async (req, res) => {
+router.get('/:deviceUuid/hourly', jwtAuth, async (req, res) => {
   try {
     const { deviceUuid } = req.params;
     const { metric, start, end, limit } = req.query;
@@ -171,7 +173,7 @@ router.get('/:deviceUuid/hourly', async (req, res) => {
  * - end: End time (ISO 8601)
  * - limit: Max records (default 30)
  */
-router.get('/daily', async (req, res) => {
+router.get('/daily', jwtAuth, async (req, res) => {
   try {
     const { edgeUuid, deviceName, metric, start, end, limit } = req.query;
 
@@ -212,7 +214,7 @@ router.get('/daily', async (req, res) => {
  * - hours: Time window in hours (default 24)
  * - limit: Max metrics to return (default 10)
  */
-router.get('/top-metrics', async (req, res) => {
+router.get('/top-metrics', jwtAuth, async (req, res) => {
   try {
     const { edgeUuid, deviceName, hours, limit } = req.query;
 

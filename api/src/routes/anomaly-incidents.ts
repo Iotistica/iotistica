@@ -12,7 +12,8 @@ import { jwtAuth } from '../middleware/jwt-auth';
 
 const router = Router();
 
-router.use(jwtAuth);
+// Apply JWT auth only to /anomaly-incidents routes (path-specific to avoid intercepting other routes)
+router.use('/anomaly-incidents', jwtAuth);
 
 interface IncidentFilters {
   status?: 'open' | 'active' | 'resolved';

@@ -5,7 +5,9 @@ import { jwtAuth } from '../middleware/jwt-auth';
 const router = Router();
 
 // All routes require authentication
-router.use(jwtAuth);
+// NOTE: This router is mounted at ${API_BASE}/dashboard-layouts in index.ts,
+//       so '/' here means /dashboard-layouts/* - this is path-specific and safe
+router.use('/', jwtAuth);
 
 /**
  * GET /api/v1/dashboard-layouts/:deviceUuid

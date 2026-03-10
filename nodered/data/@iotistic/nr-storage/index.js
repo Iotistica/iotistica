@@ -15,9 +15,50 @@ function getToken() {
         return null
     }
     
-    const token = getAuthToken()
-    console.log('[nr-storage] Token retrieved:', token ? `${token.substring(0, 20)}...` : 'null')
-    return token || null
+    try {
+        const token = getAuthToken()
+        console.log('[nr-storage] Token retrieved:', token ? `${String(token).substring(0, 20)}...` : 'null')
+        return token || null
+    } catch (error) {
+        console.log('[nr-storage] getAuthToken threw error:', error?.message || String(error))
+        return null
+    }
+}
+
+function createClient() {
+    const token = getToken()
+    const headers = {
+        'user-agent': 'Iotistic HTTP Storage v0.1'
+    }
+
+    // Optional auth: send bearer token when available, otherwise no-auth request.
+    if (token) {
+        headers.authorization = 'Bearer ' + token
+    }
+
+    const client = axios.create({
+        baseURL: settings.baseURL + '/api/v1/nr/storage/',
+        headers,
+        timeout: 20000
+    })
+
+    client.interceptors.response.use(
+        (response) => response,
+        (error) => {
+            const status = error?.response?.status
+            const data = error?.response?.data
+            const url = error?.config?.baseURL + (error?.config?.url || '')
+            console.log('[nr-storage] HTTP request failed', {
+                url,
+                status,
+                hasAuthHeader: !!headers.authorization,
+                response: data
+            })
+            return Promise.reject(error)
+        }
+    )
+
+    return client
 }
 
 module.exports = (options) => {
@@ -87,180 +128,62 @@ function createStorageModule() {
         },
         getFlows: async () => {
             console.log('[nr-storage] getFlows() called')
-            // const token = getToken()
-            
-            // // On startup, before user logs in, return empty flows
-            // if (!token) {
-            //     console.log('[nr-storage] No token available, returning empty flows')
-            //     return []
-            // }
             
             console.log('[nr-storage] Fetching flows from:', settings.baseURL + '/api/v1/nr/storage/flows')
-            const client = axios.create({
-                baseURL: settings.baseURL + '/api/v1/nr/storage/',
-                headers: {
-                    'user-agent': 'Iotistic HTTP Storage v0.1'
-                    // authorization: 'Bearer ' + token
-                },
-                timeout: 20000
-            })
+            const client = createClient()
             const response = await client.get('flows')
             console.log('[nr-storage] Flows fetched successfully')
             return response.data.flows
         },
         saveFlows: async (flow) => {
-            // const token = getToken()
-            
-            const client = axios.create({
-                baseURL: settings.baseURL + '/api/v1/nr/storage/',
-                headers: {
-                    'user-agent': 'Iotistic HTTP Storage v0.1'
-                    // authorization: 'Bearer ' + token
-                },
-                timeout: 20000
-            })
+            const client = createClient()
             const response = await client.post('flows', flow)
             return response.data
         },
         getCredentials: async () => {
             console.log('[nr-storage] getCredentials() called')
-            // const token = getToken()
-            
-            // // On startup, before user logs in, return empty credentials
-            // if (!token) {
-            //     console.log('[nr-storage] No token available, returning empty credentials')
-            //     return {}
-            // }
             
             console.log('[nr-storage] Fetching credentials from:', settings.baseURL + '/api/v1/nr/storage/credentials')
             
-            const client = axios.create({
-                baseURL: settings.baseURL + '/api/v1/nr/storage/',
-                headers: {
-                    'user-agent': 'Iotistic HTTP Storage v0.1'
-                    // authorization: 'Bearer ' + token
-                },
-                timeout: 20000
-            })
+            const client = createClient()
             const response = await client.get('credentials')
             console.log('[nr-storage] Credentials fetched successfully')
             return response.data
         },
         saveCredentials: async (credentials) => {
-            // const token = getToken()
-            
-            // // On startup, before user logs in, skip saving
-            // if (!token) {
-            //     console.log('[nr-storage] No token available, skipping saveCredentials')
-            //     return {}
-            // }
-            
-            const client = axios.create({
-                baseURL: settings.baseURL + '/api/v1/nr/storage/',
-                headers: {
-                    'user-agent': 'Iotistic HTTP Storage v0.1'
-                    // authorization: 'Bearer ' + token
-                },
-                timeout: 20000
-            })
+            const client = createClient()
             const response = await client.post('credentials', credentials)
             return response.data
         },
         getSettings: () => {
             console.log('[nr-storage] getSettings() called')
-            // const token = getToken()
-            
-            // // On startup, before user logs in, return default empty settings
-            // if (!token) {
-            //     console.log('[nr-storage] No token available, returning default settings')
-            //     return Promise.resolve({})
-            // }
             
             console.log('[nr-storage] Fetching settings from:', settings.baseURL + '/api/v1/nr/storage/settings')
             
-            const client = axios.create({
-                baseURL: settings.baseURL + '/api/v1/nr/storage/',
-                headers: {
-                    'user-agent': 'Iotistic HTTP Storage v0.1'
-                    // authorization: 'Bearer ' + token
-                },
-                timeout: 20000
-            })
+            const client = createClient()
             return client.get('settings').then(r => {
                 console.log('[nr-storage] Settings fetched successfully')
                 return r.data
             })
         },
-        saveSettings: (settings) => {
-            // const token = getToken()
-            
-            // // On startup, before user logs in, skip saving
-            // if (!token) {
-            //     console.log('[nr-storage] No token available, skipping saveSettings')
-            //     return Promise.resolve({})
-            // }
-            
-            const client = axios.create({
-                baseURL: settings.baseURL + '/api/v1/nr/storage/',
-                headers: {
-                    'user-agent': 'Iotistic HTTP Storage v0.1'
-                    // authorization: 'Bearer ' + token
-                },
-                timeout: 20000
-            })
-            return client.post('settings', settings).then(r => r.data)
+        saveSettings: (newSettings) => {
+            const client = createClient()
+            return client.post('settings', newSettings).then(r => r.data)
         },
         getSessions: () => {
             console.log('[nr-storage] getSessions() called')
-            // const token = getToken()
-            
-            // // On startup, before user logs in, return empty sessions
-            // if (!token) {
-            //     console.log('[nr-storage] No token available, returning empty sessions')
-            //     return Promise.resolve({})
-            // }
             
             console.log('[nr-storage] Fetching sessions from:', settings.baseURL + '/api/v1/nr/storage/sessions')
             
-            const client = axios.create({
-                baseURL: settings.baseURL + '/api/v1/nr/storage/',
-                headers: {
-                    'user-agent': 'Iotistic HTTP Storage v0.1'
-                    // authorization: 'Bearer ' + token
-                },
-                timeout: 20000
-            })
+            const client = createClient()
             return client.get('sessions').then(r => r.data)
         },
         saveSessions: (sessions) => {
-            // const token = getToken()
-            
-            // // On startup, before user logs in, skip saving
-            // if (!token) {
-            //     console.log('[nr-storage] No token available, skipping saveSessions')
-            //     return Promise.resolve({})
-            // }
-            
-            const client = axios.create({
-                baseURL: settings.baseURL + '/api/v1/nr/storage/',
-                headers: {
-                    'user-agent': 'Iotistic HTTP Storage v0.1'
-                    // authorization: 'Bearer ' + token
-                },
-                timeout: 20000
-            })
+            const client = createClient()
             return client.post('sessions', sessions).then(r => r.data)
         },
         getLibraryEntry: (type, name) => {
-            // const token = getToken()
-            const client = axios.create({
-                baseURL: settings.baseURL + '/api/v1/nr/storage/',
-                headers: {
-                    'user-agent': 'Iotistic HTTP Storage v0.1'
-                    // authorization: 'Bearer ' + token
-                },
-                timeout: 20000
-            })
+            const client = createClient()
             return client.get('library/' + type + '?name=' + encodeURIComponent(name)).then(entry => {
                 if (entry.headers['content-type'] && entry.headers['content-type'].startsWith('application/json')) {
                     return typeof entry.data === 'object' ? entry.data : JSON.parse(entry.data)
@@ -270,22 +193,7 @@ function createStorageModule() {
             })
         },
         saveLibraryEntry: (type, name, meta, body) => {
-            // const token = getToken()
-            
-            // // On startup, before user logs in, skip saving
-            // if (!token) {
-            //     console.log('[nr-storage] No token available, skipping saveLibraryEntry')
-            //     return Promise.resolve({})
-            // }
-            
-            const client = axios.create({
-                baseURL: settings.baseURL + '/api/v1/nr/storage/',
-                headers: {
-                    'user-agent': 'Iotistic HTTP Storage v0.1'
-                    // authorization: 'Bearer ' + token
-                },
-                timeout: 20000
-            })
+            const client = createClient()
             return client.post('library/' + type, { name, meta, body }).then(r => r.data)
         }
     }

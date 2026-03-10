@@ -7,7 +7,6 @@ import cors from 'cors';
 import https from 'https';
 import helmet from 'helmet';
 import { createProxyMiddleware } from 'http-proxy-middleware';
-import { createBrotliDecompress } from 'zlib';
 import { brotliDecompressionMiddleware } from './middleware/brotli-decompression';
 import { requestIdMiddleware } from './middleware/request-id';
 import logger from './utils/logger';
@@ -415,6 +414,8 @@ app.use(API_BASE, deviceStateRoutes);
 app.use(API_BASE, imageRegistryRoutes);
 app.use(API_BASE, deviceJobsRoutes);
 app.use(API_BASE, rotationRoutes);
+// IMPORTANT: Mount Node-RED storage before routers that apply pathless jwtAuth middleware
+app.use(API_BASE, noderedStorageRoutes);
 app.use(API_BASE, fleetRoutes); // MUST be before profileRoutes (/:name catches everything)
 app.use(API_BASE, anomalyRoutes); // MUST be before profileRoutes (/:name catches everything)
 app.use(API_BASE, anomalyIncidentsRoutes); // MUST be before profileRoutes (/:name catches everything)
@@ -427,7 +428,6 @@ app.use(API_BASE, mqttBrokerRoutes);
 app.use(API_BASE, trafficRoutes);
 app.use(API_BASE, deviceTagsRoutes);
 app.use(`${API_BASE}/dashboard-layouts`, dashboardLayoutsRoutes);
-app.use(API_BASE, noderedStorageRoutes);
 app.use(`${API_BASE}/metrics`, metricsCatalogRoutes);
 app.use(API_BASE, aiChatRoutes); // AI assistant chat endpoint
 

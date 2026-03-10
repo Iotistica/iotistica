@@ -11,7 +11,8 @@ import { jwtAuth } from '../middleware/jwt-auth';
 
 const router = Router();
 
-router.use(jwtAuth);
+// Apply JWT auth only to /ai/* routes (path-specific to avoid intercepting other routes)
+router.use('/ai', jwtAuth);
 
 // SECURITY: Rate limit for AI chat (expensive operation)
 const aiChatRateLimit = rateLimit({

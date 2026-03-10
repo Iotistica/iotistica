@@ -10,7 +10,8 @@ import logger from '../utils/logger';
 export const router = express.Router();
 
 // Apply admin-only protection to all admin routes
-router.use(jwtAuth);
+// NOTE: JWT auth is already applied at mount level in index.ts
+//       This router is mounted with: app.use(`${API_BASE}/admin`, jwtAuth, adminRateLimit, adminRoutes)
 router.use(requireRole('admin'));
 
 // ============================================================================
