@@ -2,7 +2,16 @@ import { Fragment, useState, useEffect } from "react";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import {
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   XCircle,
   Circle,
   Clock,
@@ -58,6 +67,8 @@ export function TimelineCard({
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
 
   const parseMaybeJson = (value: unknown) => {
     if (!value) return value;
@@ -399,6 +410,7 @@ export function TimelineCard({
   }, {} as Record<string, TimelineEvent[]>);
 
   const dateGroups = Object.keys(groupedEvents);
+  const categoryBadgeBaseClass = "h-6 min-w-[96px] inline-flex items-center justify-center px-2 rounded-md border text-xs font-semibold leading-none capitalize";
 
   return (
     <>
@@ -515,7 +527,7 @@ export function TimelineCard({
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border">
-                  <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Timestamp</th>
+                  <th className="text-left py-3 px-4 font-semibold text-sm text-foreground" aria-label="Timestamp" />
                   <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Category</th>
                   <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Event</th>
                   <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Description</th>
@@ -526,28 +538,47 @@ export function TimelineCard({
               <tbody>
                 {dateGroups.map((groupKey) => (
                   <Fragment key={`group-fragment-${groupKey}`}>
-                    <tr key={`group-${groupKey}`} className="bg-muted/70 border-y border-border">
-                      <td colSpan={6} className="py-2 px-4 text-xs font-semibold text-foreground uppercase tracking-wide">
-                        {getDateGroupLabel(groupKey)}
-                        <span className="ml-2 text-muted-foreground normal-case font-medium">
-                          ({groupedEvents[groupKey].length} {groupedEvents[groupKey].length === 1 ? 'event' : 'events'})
-                        </span>
+                    <tr
+                      key={`group-${groupKey}`}
+                      className="bg-muted/80 border-y border-border cursor-pointer"
+                      onClick={() =>
+                        setCollapsedGroups((prev) => ({
+                          ...prev,
+                          [groupKey]: !(prev[groupKey] ?? false),
+                        }))
+                      }
+                    >
+                      <td colSpan={6} className="py-2 px-4">
+                        <div className="inline-flex items-center gap-3 text-5xl font-bold text-foreground uppercase tracking-wide leading-none">
+                          {collapsedGroups[groupKey] ? (
+                            <ChevronRight className="h-5 w-5" />
+                          ) : (
+                            <ChevronDown className="h-5 w-5" />
+                          )}
+                          <span className="h-2 w-2 rounded-full bg-foreground/70" />
+                          <span>{getDateGroupLabel(groupKey)}</span>
+                          <span className="text-2xl text-muted-foreground normal-case font-medium leading-none">
+                            ({groupedEvents[groupKey].length} {groupedEvents[groupKey].length === 1 ? 'event' : 'events'})
+                          </span>
+                        </div>
                       </td>
                     </tr>
-                    {groupedEvents[groupKey].map((event) => {
+                    {!collapsedGroups[groupKey] && groupedEvents[groupKey].map((event) => {
                       const colors = getEventColor(event.type, event.category);
                       const timestamp = getEventTimestamp(event);
                       const details = renderEventDetails(event);
 
                       return (
-                        <tr key={event.id} className="border-b border-border last:border-0 hover:bg-muted">
-                          <td className="py-3 px-4 text-muted-foreground whitespace-nowrap">
+                        <tr key={event.id} className="border-b border-border last:border-0 hover:bg-muted/60">
+                          <td className="py-3 pl-10 pr-4 text-muted-foreground whitespace-nowrap relative">
+                            <span className="absolute left-4 top-0 bottom-0 w-px bg-border/60" aria-hidden="true" />
+                            <span className="absolute left-[13px] top-1/2 -translate-y-1/2 h-2 w-2 rounded-full bg-muted-foreground/50" aria-hidden="true" />
                             {timestamp ? formatDate(timestamp) : '-'}
                           </td>
                           <td className="py-3 px-4">
                             <Badge
                               variant="outline"
-                              className={`${colors.badgeBg} ${colors.badgeText} ${colors.badgeBorder}`}
+                              className={`${categoryBadgeBaseClass} ${colors.badgeBg} ${colors.badgeText} ${colors.badgeBorder}`}
                             >
                               {event.category}
                             </Badge>
@@ -564,23 +595,14 @@ export function TimelineCard({
                             {event.description || '-'}
                           </td>
                           <td className="py-3 px-4 hidden lg:table-cell">
-                            {details.length > 0 ? (
-                              <div className="space-y-1">
-                                {details.slice(0, 3).map((detail, idx) => (
-                                  <div key={idx} className="text-xs">
-                                    <span className="text-muted-foreground">{detail.label}:</span>{' '}
-                                    <span className="text-foreground">{detail.value}</span>
-                                  </div>
-                                ))}
-                                {details.length > 3 && (
-                                  <div className="text-xs text-muted-foreground">
-                                    +{details.length - 3} more
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-muted-foreground">-</span>
-                            )}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 text-xs"
+                              onClick={() => setSelectedEvent(event)}
+                            >
+                              Details
+                            </Button>
                           </td>
                           <td className="py-3 px-4 hidden xl:table-cell">
                             <code className="text-xs font-mono text-muted-foreground">
@@ -599,6 +621,86 @@ export function TimelineCard({
         </div>
       </div>
       </Card>
+
+      <Dialog open={selectedEvent !== null} onOpenChange={(open) => !open && setSelectedEvent(null)}>
+        <DialogContent
+          className="w-[min(96vw,980px)] max-w-[96vw] !p-0 overflow-hidden flex flex-col"
+          style={{ height: "66vh", maxHeight: "66vh" }}
+        >
+          {selectedEvent && (
+            <>
+              <DialogHeader className="px-6 py-4 border-b border-border">
+                <DialogTitle>{selectedEvent.title || "Event Details"}</DialogTitle>
+                <DialogDescription>
+                  {formatDate(getEventTimestamp(selectedEvent) || selectedEvent.timestamp)}
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+                <div className="space-y-4 text-sm">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Category</p>
+                      <p className="font-medium text-foreground">{selectedEvent.category || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Type</p>
+                      <p className="font-medium text-foreground">{selectedEvent.type || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Event ID</p>
+                      <p className="font-mono text-xs text-foreground break-all">{selectedEvent.event_id || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Source</p>
+                      <p className="font-medium text-foreground">{selectedEvent.source || "-"}</p>
+                    </div>
+                  </div>
+
+                  {selectedEvent.description ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Description</p>
+                      <p className="text-foreground">{selectedEvent.description}</p>
+                    </div>
+                  ) : null}
+
+                  {renderEventDetails(selectedEvent).length > 0 ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-2">Details</p>
+                      <div className="space-y-1">
+                        {renderEventDetails(selectedEvent).map((detail, idx) => (
+                          <div key={idx} className="text-sm">
+                            <span className="text-muted-foreground">{detail.label}:</span>{" "}
+                            <span className="text-foreground">{detail.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {selectedEvent.data && typeof selectedEvent.data === "object" ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Raw Data</p>
+                      <pre className="text-xs bg-muted p-3 rounded-md max-h-64 overflow-auto text-foreground">
+                        {JSON.stringify(selectedEvent.data, null, 2)}
+                      </pre>
+                    </div>
+                  ) : null}
+
+                  {selectedEvent.metadata && typeof selectedEvent.metadata === "object" ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Metadata</p>
+                      <pre className="text-xs bg-muted p-3 rounded-md max-h-64 overflow-auto text-foreground">
+                        {JSON.stringify(selectedEvent.metadata, null, 2)}
+                      </pre>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

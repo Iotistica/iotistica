@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { 
   Dialog, 
   DialogContent, 
@@ -423,64 +423,35 @@ export function SecurityPage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="bg-transparent w-fit h-auto p-0 rounded-none justify-start gap-12 border-0">
-          <TabsTrigger
-            value="mqtt"
-            className="!flex-none !border-0 bg-transparent rounded-none hover:bg-transparent px-4 pb-3 text-base"
-            style={
-              activeTab === 'mqtt'
-                ? {
-                    color: 'hsl(var(--foreground))',
-                    fontWeight: 700,
-                    textDecoration: 'underline',
-                    textUnderlineOffset: '8px',
-                    textDecorationThickness: '2px',
-                    textDecorationColor: 'hsl(var(--foreground))',
-                  }
-                : {
-                    color: 'hsl(var(--muted-foreground))',
-                    fontWeight: 400,
-                    textDecoration: 'none',
-                    opacity: 0.8,
-                  }
-            }
-          >
-            MQTT Users
-          </TabsTrigger>
-          <TabsTrigger
-            value="api-keys"
-            className="!flex-none !border-0 bg-transparent rounded-none hover:bg-transparent px-4 pb-3 text-base"
-            style={
-              activeTab === 'api-keys'
-                ? {
-                    color: 'hsl(var(--foreground))',
-                    fontWeight: 700,
-                    textDecoration: 'underline',
-                    textUnderlineOffset: '8px',
-                    textDecorationThickness: '2px',
-                    textDecorationColor: 'hsl(var(--foreground))',
-                  }
-                : {
-                    color: 'hsl(var(--muted-foreground))',
-                    fontWeight: 400,
-                    textDecoration: 'none',
-                    opacity: 0.8,
-                  }
-            }
-          >
-            API Keys
-          </TabsTrigger>
-        </TabsList>
+        <div className="flex flex-wrap items-center justify-between gap-4 mt-4">
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-foreground">Category:</label>
+            <Select value={activeTab} onValueChange={setActiveTab}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="mqtt">MQTT Users</SelectItem>
+                <SelectItem value="api-keys">API Keys</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-        {/* MQTT Users Tab */}
-        <TabsContent value="mqtt" className="space-y-4">
-          <div className="flex justify-end mb-4">
-            <Button onClick={handleAddUser} className="ml-auto" aria-label="Add MQTT User" title="Add MQTT User">
+          {activeTab === 'mqtt' ? (
+            <Button onClick={handleAddUser} aria-label="Add MQTT User" title="Add MQTT User">
               <Plus className="w-4 h-4 mr-2" />
               Add MQTT User
             </Button>
-          </div>
+          ) : (
+            <Button onClick={handleOpenApiKeyDialog}>
+              <Plus className="w-4 h-4 mr-2" />
+              Add API Key
+            </Button>
+          )}
+        </div>
 
+        {/* MQTT Users Tab */}
+        <TabsContent value="mqtt" className="space-y-4">
           {loadingMqtt ? (
             <div className="flex items-center justify-center h-64">
               <p className="text-muted-foreground">Loading MQTT users...</p>
@@ -607,13 +578,6 @@ export function SecurityPage() {
 
         {/* API Keys Tab */}
         <TabsContent value="api-keys" className="space-y-4">
-          <div className="flex justify-end mb-4">
-            <Button onClick={handleOpenApiKeyDialog} className="ml-auto">
-              <Plus className="w-4 h-4 mr-2" />
-              Generate API Key
-            </Button>
-          </div>
-
           {loadingApiKeys ? (
             <div className="flex items-center justify-center h-64">
               <p className="text-muted-foreground">Loading API keys...</p>
@@ -625,7 +589,7 @@ export function SecurityPage() {
                 <p className="text-muted-foreground mb-4">No API keys configured</p>
                 <Button onClick={handleOpenApiKeyDialog}>
                   <Plus className="w-4 h-4 mr-2" />
-                  Generate Your First API Key
+                  Add Your First API Key
                 </Button>
               </CardContent>
             </Card>
@@ -717,7 +681,7 @@ export function SecurityPage() {
       <Dialog open={apiKeyDialogOpen} onOpenChange={setApiKeyDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Generate API Key</DialogTitle>
+            <DialogTitle>Add API Key</DialogTitle>
             <DialogDescription>
               Create a new service API key for internal integrations.
             </DialogDescription>

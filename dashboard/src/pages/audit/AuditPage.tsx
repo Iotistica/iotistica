@@ -18,7 +18,7 @@ export const AuditPage: React.FC = () => {
 
         {/* Timeline Card - Global View (all devices) */}
         <TimelineCard
-          limit={100}
+          limit={500}
           autoRefresh={true}
           refreshInterval={30000}
           showHeaderDetails={false}
