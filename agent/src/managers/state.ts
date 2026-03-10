@@ -19,7 +19,7 @@ import crypto from 'crypto';
 import { models as db } from '../db/connection.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents } from '../logging/types.js';
-import { ContainerManager } from '../compose/container-manager.js';
+import { ContainerManager } from '../docker/container-manager.js';
 import { ConfigManager } from './config.js';
 import type { DeviceConfig } from '../drivers/types.js';
 import semver from 'semver';

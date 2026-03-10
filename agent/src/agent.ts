@@ -9,28 +9,19 @@
  * - Logging
  */
 
-import { StateManager, DeviceState } from "./managers/state.js";
-import ContainerManager from "./compose/container-manager.js";
+import { StateManager } from "./managers/state.js";
+import ContainerManager from "./docker/container-manager.js";
 import { DeviceManager } from "./managers/index.js";
 import type { DeviceInfo } from "./managers/types.js";
 import { DeviceAPI } from "./api/index.js";
-import { router as v1Router } from "./api/v1.js";
 import * as deviceActions from "./api/actions.js";
 import { CloudSync } from "./managers/cloud.js";
-import { CloudLogBackend } from "./logging/cloud-backend.js";
 import { ContainerLogMonitor } from "./logging/docker-monitor.js";
 import { AgentLogger } from "./logging/agent-logger.js";
 import { LogComponents } from "./logging/types.js";
-
 import { MqttManager } from "./mqtt";
-import { setTenantId, resetTenantIdCache } from "./mqtt/topics.js";
-import { getPackageVersion } from "./utils/api-utils";
-import { FetchHttpClient } from "./lib/http-client.js";
-
 import { AgentFirewall } from "./network/firewall.js";
 import { AgentUpdater } from "./updater.js";
-import { getMacAddress, getOsVersion } from "./system/metrics.js";
-import * as fs from 'fs';
 import { 
   healthcheck as memoryHealthcheck, 
   setMemoryLogger,
@@ -82,7 +73,6 @@ export default class Agent {
   private deviceInfo!: DeviceInfo; // Cache device info after initialization
   private deviceAPI!: DeviceAPI;
   private cloudSync?: CloudSync;
-  private logMonitor?: ContainerLogMonitor;
   public agentLogger!: AgentLogger; // Structured logging for agent-level events (public for external access)
   private firewall?: AgentFirewall; // Network firewall protection
   private updater?: AgentUpdater; // Agent self-update handler
