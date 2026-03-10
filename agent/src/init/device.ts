@@ -71,7 +71,7 @@ export async function initializeCloudLogging(agent: any): Promise<void> {
 
 export async function initializeDeviceManager(agent: any): Promise<void> {
 	const cloudApiEndpoint = agent.configManager.getCloudApiEndpoint();
-	agent.deviceManager = new (await import('../device-manager/index.js')).DeviceManager(
+	agent.deviceManager = new (await import('../managers/index.js')).DeviceManager(
 		agent.agentLogger,
 		agent.sharedHttpClient,
 		undefined,

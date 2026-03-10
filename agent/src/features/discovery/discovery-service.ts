@@ -38,7 +38,7 @@ import { SNMPDiscoveryPlugin } from './snmp.discovery';
 import { MqttDiscoveryPlugin, MqttDiscoveryOptions } from './mqtt.discovery';
 import { BACnetDiscoveryPlugin } from './bacnet.discovery';
 import { autoDetectLocalSubnets } from '../../utils/network';
-import type { ConfigManager } from '../../device-manager/config.js';
+import type { ConfigManager } from '../../managers/config.js';
 
 export type DiscoveryTrigger = 'first_boot' | 'manual' | 'scheduled' | 'config-change';
 export type DiscoveryProtocol = 'modbus' | 'opcua' | 'can' | 'snmp' | 'mqtt' | 'bacnet';

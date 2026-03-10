@@ -23,13 +23,11 @@ import type {
 } from './types';
 import { DeviceModel } from '../db/models/device.model';
 import { buildApiEndpoint, getPackageVersion } from '../utils/api-utils';
-import * as path from 'path';
 import { 
 	DefaultUuidGenerator, 
 	generateAPIKey, 
 	getAPIKeyFingerprint, 
 	parseAPIKey,
-	computeKeyExchangeProof,
 	type UuidGenerator 
 } from '../utils/crypto';
 import type { AgentLogger } from '../logging/agent-logger';

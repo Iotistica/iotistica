@@ -6,7 +6,7 @@
  */
 
 import type { AgentLogger } from '../logging/agent-logger';
-import type { DeviceInfo } from '../device-manager/types.js';
+import type { DeviceInfo } from '../managers/types.js';
 import type { AgentInitContext } from './core.js';
 import { LogComponents } from '../logging/types';
 import { JobsFeature } from '../features/jobs/src/monitor.js';
@@ -17,7 +17,7 @@ import { SensorsFeature, type SensorConfig } from '../features/adapters/index.js
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
 import { MqttManager } from '../mqtt/manager.js';
-import { StateReconciler } from '../device-manager/reconciler.js';
+import { StateReconciler } from '../managers/reconciler.js';
 import { getPackageVersion } from '../utils/api-utils.js';
 
 export interface FeatureContext {

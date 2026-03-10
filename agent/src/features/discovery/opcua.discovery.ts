@@ -9,7 +9,7 @@ import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, DiscoveredDevice } from './base.discovery';
 import { generateOPCUAFingerprint } from './fingerprint';
-import type { ConfigManager } from '../../device-manager/config.js';
+import type { ConfigManager } from '../../managers/config.js';
 
 export interface OPCUADiscoveryOptions {
   discoveryUrls?: string[]; // e.g., ['opc.tcp://localhost:4840']

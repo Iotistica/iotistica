@@ -2,7 +2,7 @@ import type { AgentInitContext } from './core.js';
 import * as deviceActions from '../api/actions.js';
 import { LogComponents } from '../logging/types.js';
 import { MqttManager } from '../mqtt/manager.js';
-import { CloudSync } from '../device-manager/sync.js';
+import { CloudSync } from '../managers/sync.js';
 
 export async function initSync(ctx: AgentInitContext): Promise<void> {
 	await initDeviceSync(ctx.self);

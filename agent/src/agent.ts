@@ -9,14 +9,14 @@
  * - Logging
  */
 
-import { StateReconciler, DeviceState } from "./device-manager/reconciler.js";
+import { StateReconciler, DeviceState } from "./managers/reconciler.js";
 import ContainerManager from "./compose/container-manager.js";
-import { DeviceManager } from "./device-manager/index.js";
-import type { DeviceInfo } from "./device-manager/types.js";
+import { DeviceManager } from "./managers/index.js";
+import type { DeviceInfo } from "./managers/types.js";
 import { DeviceAPI } from "./api/index.js";
 import { router as v1Router } from "./api/v1.js";
 import * as deviceActions from "./api/actions.js";
-import { CloudSync } from "./device-manager/sync.js";
+import { CloudSync } from "./managers/sync.js";
 import { CloudLogBackend } from "./logging/cloud-backend.js";
 import { ContainerLogMonitor } from "./logging/docker-monitor.js";
 import { AgentLogger } from "./logging/agent-logger.js";
@@ -43,7 +43,7 @@ import { AnomalyDetectionService } from "./ai/anomaly/index.js";
 import { SimulationOrchestrator} from "./simulation/index.js";
 import { DiscoveryService } from "./features/discovery/discovery-service.js";
 import { FeatureInitializer } from "./init/features.js";
-import type { ConfigManager } from "./device-manager/config.js";
+import type { ConfigManager } from "./managers/config.js";
 import {
   initCore as runInitCore,
   initializeStateReconciler as runInitializeStateReconciler,
@@ -71,8 +71,6 @@ import {
 import { initializeSimulationMode as runInitializeSimulationMode } from './init/simulation.js';
 import {
   initAnomalyDetection as runInitAnomalyDetection,
-  buildDeviceMetrics as runBuildDeviceMetrics,
-  configureAnomalyFeed as runConfigureAnomalyFeed,
 } from './init/ai.js';
 import { initSync as runInitSync, initDeviceSync as runInitDeviceSync } from './init/sync.js';
 
@@ -212,7 +210,7 @@ export default class Agent {
     const mode = this.deviceInfo.provisioned ? "Cloud-connected" : "Standalone";
     const intervals = this.configManager.getIntervalConfig();
 
-    this.agentLogger.debugSync("Device Agent initialized", {
+    this.agentLogger.infoSync("Device Agent initialized", {
       component: LogComponents.agent,
       mode,
       deviceApiPort: this.configManager.getDeviceApiPort(),
@@ -244,8 +242,6 @@ export default class Agent {
 
   /**
    * Setup configuration event listeners
-   * CRITICAL: Must be called early (before CloudSync/auto-reconciliation)
-   * to ensure hot-reload events are captured from first reconciliation
    */
   private setupConfigEventListeners(): void {
     runSetupConfigEventListeners(this as any);
@@ -262,21 +258,6 @@ export default class Agent {
 
   private async initAnomalyDetection(): Promise<void> {
     await runInitAnomalyDetection(this as any);
-  }
-  
-  /**
-   * Build endpoint metrics from datapoint anomaly configs
-   * Applies inheritance: defaults → datapoint overrides
-   */
-  private buildDeviceMetrics(targetStateConfig: any, defaults: any): any[] {
-    return runBuildDeviceMetrics(this as any, targetStateConfig, defaults);
-  }
-  
-  /**
-   * Configure anomaly detection feed for system metrics and sensors
-   */
-  private async configureAnomalyFeed(): Promise<void> {
-    await runConfigureAnomalyFeed(this as any);
   }
 
   private async initDiscoveryService (): Promise<void> {

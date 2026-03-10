@@ -5,4 +5,4 @@
  * Exports security-related utilities and managers.
  */
 
-export { CredentialManager, type CredentialManagerConfig, type ApiKeyRotatedEvent } from './credential-manager';
+export { CredentialManager, type CredentialManagerConfig, type ApiKeyRotatedEvent } from './credentials';

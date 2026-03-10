@@ -2,5 +2,5 @@
  * Provisioning module exports
  */
 
-export { DeviceManager } from './manager';
+export { DeviceManager } from './device';
 export type { DeviceInfo, ProvisioningConfig, ProvisionRequest, ProvisionResponse } from './types';
