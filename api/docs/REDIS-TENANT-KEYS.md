@@ -2,11 +2,15 @@
 
 ## Overview
 
-All Redis keys are tenant-scoped using the **`customerId`** from the validated license JWT
-(`IOTISTIC_LICENSE_KEY`). No fallback mechanism is permitted. If the license is missing or
-invalid the API refuses to start (exit code 1).
+All Redis keys are tenant-scoped using the **`customerId`** from the validated license JWT.
 
-The tenant identifier is obtained exclusively via:
+**SECURITY UPDATE**: All public functions now require explicit `tenantId` parameter to prevent 
+cross-tenant data leaks. Never rely on implicit global context.
+
+**CLUSTER OPTIMIZATION**: All keys use hash tags `{tenantId}` to force tenant data into the 
+same Redis Cluster slot, preventing CROSSSLOT errors.
+
+The tenant identifier can be obtained via (but always pass explicitly):
 
 ```typescript
 LicenseValidator.getInstance().getLicense().customerId
@@ -16,6 +20,13 @@ LicenseValidator.getInstance().getLicense().customerId
 
 ```
 tenant:{customerId}:<type>:<...>
+**Hash Tag Format** (for Redis Cluster):
+```
+tenant:{customerId}:...
+```
+The curly braces `{customerId}` force Redis Cluster to hash only that portion,
+ensuring all keys for a tenant map to the same slot.
+
 ```
 
 | Purpose | Key pattern |
@@ -29,25 +40,42 @@ tenant:{customerId}:<type>:<...>
 | Sensor data ingestion stream | `tenant:{customerId}:device:sensors:ingestion` |
 | Sensor data processing stream | `tenant:{customerId}:device:sensors:ready` |
 | Sensor data dead-letter queue | `tenant:{customerId}:device:sensors:dlq` |
+| Consumer group (metrics) | `{customerId}:metrics-writers` |
+| Consumer group (logs) | `{customerId}:log-writers` |
+| Consumer name | `{customerId}:worker-{pid}-{timestamp}` |
 
 ## Key Builder Module
 
 All key construction is centralised in `api/src/redis/tenant-keys.ts`. No other file
 should interpolate Redis key strings directly.
 
-Exported helpers:
+**BREAKING CHANGE**: All functions now require explicit `tenantId` parameter.
+
+Exported helpers (updated signatures):
 
 | Helper | Returns |
 |--------|---------|
-| `tenantPrefix()` | `tenant:{customerId}` |
-| `deviceStateChannel(uuid)` | State pub/sub channel |
-| `deviceMetricsChannel(uuid)` | Metrics pub/sub channel |
-| `deviceMetricsPattern()` | Wildcard psubscribe pattern |
-| `metricsStreamKey(uuid)` | Metrics stream key |
-| `metricsStreamScanPattern()` | SCAN MATCH pattern |
-| `uuidFromMetricsStreamKey(key)` | Extract UUID from stream key |
-| `uuidFromMetricsChannel(channel)` | Extract UUID from channel |
-| `deviceLogsStreamKey()` | Log queue stream key |
+| `tenantPrefix(tenantId)` | `tenant:{tenantId}` with hash tag |
+| `deviceStateChannel(tenantId, uuid)` | State pub/sub channel |
+| `deviceMetricsChannel(tenantId, uuid)` | Metrics pub/sub channel |
+| `deviceMetricsPattern(tenantId)` | Wildcard psubscribe pattern (tenant-scoped) |
+| `metricsStreamKey(tenantId, uuid)` | Metrics stream key |
+| `metricsStreamScanPattern(tenantId)` | SCAN MATCH pattern (tenant-scoped) |
+| `parseMetricsStreamKey(key)` | Parse and validate: `{ tenantId, uuid }` |
+| `parseMetricsChannel(channel)` | Parse and validate: `{ tenantId, uuid }` |
+| `deviceLogsStreamKey(tenantId)` | Log queue stream key |
+| `consumerGroupName(tenantId, group)` | Tenant-scoped consumer group |
+| `consumerName(tenantId, worker)` | Tenant-scoped consumer name |
+
+**Security Helpers** (new):
+- `parseMetricsStreamKey(key)` - Parses and validates tenant ownership
+- `parseMetricsChannel(channel)` - Parses and validates tenant ownership
+
+**Legacy Helpers** (deprecated, do not use for new code):
+- `uuidFromMetricsStreamKey(key)` - Use `parseMetricsStreamKey()` instead
+- `uuidFromMetricsChannel(channel)` - Use `parseMetricsChannel()` instead
+- `getCustomerId()` - Use explicit tenantId parameters instead
+- `tenantPrefixLegacy()` - Use `tenantPrefix(tenantId)` instead
 | `deviceSensorsIngestionStreamKey()` | Sensor ingestion stream key |
 | `deviceSensorsReadyStreamKey()` | Sensor processing stream key |
 | `deviceSensorsDlqStreamKey()` | Sensor dead-letter queue key |

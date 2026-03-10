@@ -25,6 +25,9 @@ import {
   deviceSensorsIngestionStreamKey,
   deviceSensorsReadyStreamKey,
   deviceSensorsDlqStreamKey,
+  getCustomerId,
+  consumerGroupName,
+  consumerName as makeConsumerName,
 } from '../redis/tenant-keys';
 
 /**
@@ -194,11 +197,12 @@ interface RedisSensorEntry {
 class RedisDeviceQueue {
   private redisIngestion: Redis; // Write-only: XADD
   private redisConsumer: Redis;  // Read-only: XREADGROUP, XACK, XAUTOCLAIM, XINFO
-  private consumerGroup = 'sensor-writers';
+  private tenantId: string;
+  private consumerGroup: string;
   private consumerName: string;
-  private get streamKey(): string { return deviceSensorsIngestionStreamKey(); }
-  private get processingStreamKey(): string { return deviceSensorsReadyStreamKey(); }
-  private get dlqStreamKey(): string { return deviceSensorsDlqStreamKey(); }
+  private get streamKey(): string { return deviceSensorsIngestionStreamKey(this.resolveTenantId()); }
+  private get processingStreamKey(): string { return deviceSensorsReadyStreamKey(this.resolveTenantId()); }
+  private get dlqStreamKey(): string { return deviceSensorsDlqStreamKey(this.resolveTenantId()); }
   private maxRetries: number;
   private isRunning = false;
   private workerCount: number;
@@ -224,12 +228,25 @@ class RedisDeviceQueue {
   private diskSpoolFileIndex = 0;
   private diskSpoolReplayInterval: NodeJS.Timeout | null = null;
 
-  constructor() {
+  private resolveTenantId(): string {
+    return this.tenantId || getCustomerId();
+  }
+
+  constructor(tenantId?: string) {
     // Get clients from factory (handles all cluster/auth/TLS configuration)
     this.redisIngestion = getRedisIngestion(); // Fail-fast for writes
     this.redisConsumer = getRedisConsumer(); // Resilient for reads
 
-    this.consumerName = `worker-${process.pid}-${Date.now()}`;
+    this.tenantId = tenantId || '';
+    const baseWorkerName = `worker-${process.pid}-${Date.now()}`;
+    if (this.tenantId) {
+      this.consumerGroup = consumerGroupName(this.tenantId, 'sensor-writers');
+      this.consumerName = makeConsumerName(this.tenantId, baseWorkerName);
+    } else {
+      // Defer tenant resolution until first runtime access after license initialization.
+      this.consumerGroup = 'sensor-writers';
+      this.consumerName = baseWorkerName;
+    }
     this.workerCount = parseInt(process.env.SENSOR_WORKER_COUNT || '2', 10);
     this.maxRetries = parseInt(process.env.SENSOR_MAX_RETRIES || '3', 10);
     this.batchSize = parseInt(process.env.SENSOR_BATCH_SIZE || '100', 10);
@@ -277,6 +294,13 @@ class RedisDeviceQueue {
    * Retries on failure to handle Redis not being ready
    */
   async initialize(): Promise<void> {
+    if (!this.tenantId) {
+      const resolvedTenantId = this.resolveTenantId();
+      this.tenantId = resolvedTenantId;
+      this.consumerGroup = consumerGroupName(resolvedTenantId, 'sensor-writers');
+      this.consumerName = makeConsumerName(resolvedTenantId, `worker-${process.pid}-${Date.now()}`);
+    }
+
     const maxRetries = 5;
     let lastError: Error | null = null;
 

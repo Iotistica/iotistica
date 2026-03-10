@@ -9,6 +9,7 @@ import type { SensorData, MetricsData, StateMessage } from './mqtt-manager';
 import { processDeviceStateReport } from '../services/agent-state';
 import { redisSensorQueue } from '../services/redis-device-queue';
 import { getAnomalyEventHandler, type AnomalyEvent } from './anomaly-handler';
+import { getCustomerId } from '../redis/tenant-keys';
 import logger from '../utils/logger';
 
 /**
@@ -150,10 +151,11 @@ export async function handleDeviceState(payload: StateMessage): Promise<void> {
     // Publish to Redis for real-time distribution (MQTT-specific, non-blocking)
     try {
       const { redisClient } = await import('../redis/client');
+      const tenantId = getCustomerId();
       
       if (deviceUuid && state) {
         // Publish full state to device:{uuid}:state channel
-        await redisClient.publishDeviceState(deviceUuid, state);
+        await redisClient.publishDeviceState(tenantId, deviceUuid, state);
         
         // Publish metrics-only to device:{uuid}:metrics channel (if metrics present)
         if (
@@ -171,7 +173,7 @@ export async function handleDeviceState(payload: StateMessage): Promise<void> {
             top_processes: state.top_processes,
             network_interfaces: state.network_interfaces,
           };
-          await redisClient.publishDeviceMetrics(deviceUuid, metrics);
+          await redisClient.publishDeviceMetrics(tenantId, deviceUuid, metrics);
         }
       }
     } catch (error) {

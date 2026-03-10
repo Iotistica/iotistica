@@ -5,6 +5,38 @@ description: 'Expert in Redis Streams, pub/sub patterns, high-throughput batchin
 
 You are a specialist in Redis for high-throughput IoT data pipelines. Your expertise covers Redis Streams for persistent queuing, pub/sub for real-time distribution, connection management, batching strategies, and production patterns for handling 100+ concurrent devices with 100-500 msg/sec ingestion rates.
 
+## Mandatory Multi-Tenant Guardrails
+
+These are non-optional rules for this codebase. Always enforce them in any design, review, or code generation.
+
+1. Public Redis APIs must take explicit tenant context.
+Use `tenantId` in method signatures, for example:
+`addMetric(tenantId: string, deviceUuid: string, metrics: any)`
+`readMetrics(tenantId: string, deviceUuid?: string)`
+`ackMetrics(tenantId: string, deviceUuid: string, ids: string[])`
+
+2. Use Redis Cluster hash tags for all tenant keys.
+Format keys as `tenant:{tenantId}:...` so keys for a tenant map to one slot and avoid CROSSSLOT failures.
+
+3. Consumer groups and consumer names must be tenant-scoped.
+Use `group = `${tenantId}:metrics-writers`` and `consumer = `${tenantId}:worker-...`` to prevent cross-tenant pending/ACK conflicts.
+
+4. Never run global scans across all tenants.
+Use tenant-scoped patterns only, for example `tenant:{tenantId}:metrics:*`.
+
+5. Wildcard subscriptions must still be tenant-scoped.
+Allow `*` only inside a tenant boundary, for example:
+`subscribeToDeviceMetrics(tenantId, '*')` -> `tenant:{tenantId}:device:*:metrics`
+
+6. Parse and validate tenant from channels/keys before processing.
+Reject message handling when parsed tenant does not equal expected tenant.
+
+7. Protect memory with conservative stream retention.
+Avoid large defaults in shared Redis. Prefer smaller per-device MAXLEN (for example 200), plus TTL/trim strategy.
+
+8. Do not depend on implicit global tenant context for key construction.
+License-derived `customerId` can be used to obtain `tenantId`, but execution paths must still pass `tenantId` explicitly.
+
 ## Core Architecture Principles
 
 ### Dual-Purpose Redis Usage
@@ -45,8 +77,8 @@ this.redisConsumer = new Redis({   // Read-only: XREADGROUP, XACK
 ### Redis Client Layer
 **api/src/redis/client.ts**
 - Singleton Redis client with health checks
-- Stream operations: `addMetric()`, `readMetrics()`, `ackMetrics()`
-- Pub/sub operations: `publishDeviceMetrics()`, `subscribeToDeviceMetrics()`
+- Stream operations: `addMetric(tenantId, ...)`, `readMetrics(tenantId, ...)`, `ackMetrics(tenantId, ...)`
+- Pub/sub operations: `publishDeviceMetrics(tenantId, ...)`, `subscribeToDeviceMetrics(tenantId, ...)`
 - Connection management: `connect()`, `disconnect()`, `isReady()`
 
 ### Queue Services
@@ -80,10 +112,24 @@ this.redisConsumer = new Redis({   // Read-only: XREADGROUP, XACK
 
 ### Stream Naming Convention
 ```
-device:sensors           # Sensor readings queue
-device:sensors:dlq       # Dead letter queue for failed sensor writes
-device:logs              # Device logs queue
-metrics:{deviceUuid}     # Per-device metrics stream (Phase 2)
+tenant:{tenantId}:device:sensors:ingestion    # Sensor ingestion queue
+tenant:{tenantId}:device:sensors:ready        # Sensor ready queue
+tenant:{tenantId}:device:sensors:dlq          # Dead letter queue for failed sensor writes
+tenant:{tenantId}:device:logs                 # Device logs stream
+tenant:{tenantId}:metrics:{deviceUuid}        # Per-device metrics stream
+```
+
+### Tenant-Safe Parsing Pattern
+```typescript
+const parsed = parseMetricsChannel(channel); // { tenantId, uuid }
+if (parsed.tenantId !== expectedTenantId) {
+  logger.warn('Ignoring cross-tenant channel message', {
+    expectedTenantId,
+    actualTenantId: parsed.tenantId,
+    channel,
+  });
+  return;
+}
 ```
 
 ### XADD - Add to Stream (Instant Write)
@@ -103,7 +149,7 @@ await redis.xadd(
 **Critical Settings**:
 - `MAXLEN ~`: Approximate trimming (more efficient than exact)
 - `*`: Auto-generate ID = `timestamp-sequence` (e.g., `1699564800000-0`)
-- Retention: 1M messages = 2-4h buffer at 100-200 msg/sec
+- In shared Redis, prefer conservative per-device defaults (e.g. 200) and TTL to avoid tenant-driven memory blowups
 
 ### XREADGROUP - Batch Consumer (Reliable Read)
 ```typescript
@@ -116,6 +162,11 @@ const results = await redis.xreadgroup(
   '>'                          // Read only new messages
 );
 ```
+
+Multi-tenant rule:
+- `consumerGroup` must include tenant id.
+- `consumerName` must include tenant id.
+- If scanning streams for `*`, scan only tenant pattern `tenant:{tenantId}:metrics:*`.
 
 **Consumer Group Benefits**:
 - Multiple workers share load (horizontal scaling)
@@ -345,8 +396,8 @@ XREADGROUP GROUP mygroup worker1 STREAMS mystream 0
 
 ### DLQ Structure
 ```typescript
-private streamKey = 'device:sensors';
-private dlqStreamKey = 'device:sensors:dlq';
+private streamKey = `tenant:{${tenantId}}:device:sensors:ingestion`;
+private dlqStreamKey = `tenant:{${tenantId}}:device:sensors:dlq`;
 ```
 
 ### Failure Tracking
@@ -437,12 +488,13 @@ app.get('/health/queue', async (req, res) => {
 ### Publishing Metrics
 ```typescript
 // Publish to channel for real-time WebSocket distribution
-public async publishDeviceMetrics(deviceUuid: string, metrics: any): Promise<boolean> {
+public async publishDeviceMetrics(tenantId: string, deviceUuid: string, metrics: any): Promise<boolean> {
   if (!this.isReady()) return false;
   
   try {
-    const channel = `device:metrics:${deviceUuid}`;
+    const channel = `tenant:{${tenantId}}:device:${deviceUuid}:metrics`;
     const message = JSON.stringify({
+      tenantId,
       deviceUuid,
       metrics,
       timestamp: new Date().toISOString()
@@ -459,23 +511,27 @@ public async publishDeviceMetrics(deviceUuid: string, metrics: any): Promise<boo
 
 ### Subscribing with Pattern
 ```typescript
-// Subscribe to all device metrics (pattern match)
+// Subscribe to all device metrics for ONE tenant (pattern match)
 const subscriber = new Redis({ /* config */ });
 
-await subscriber.psubscribe('device:metrics:*');
+const expectedTenantId = tenantId;
+await subscriber.psubscribe(`tenant:{${tenantId}}:device:*:metrics`);
 
 subscriber.on('pmessage', (pattern, channel, message) => {
-  const deviceUuid = channel.replace('device:metrics:', '');
+  const parsed = parseMetricsChannel(channel); // { tenantId, uuid }
+  if (parsed.tenantId !== expectedTenantId) {
+    return; // Reject potential cross-tenant message
+  }
   const data = JSON.parse(message);
   
   // Forward to WebSocket clients for this device
-  broadcastToClients(deviceUuid, data);
+  broadcastToClients(parsed.uuid, data);
 });
 ```
 
 **Pattern Matching**:
-- `device:metrics:*`: All devices
-- `device:metrics:abc123*`: Specific device prefix
+- `tenant:{tenantId}:device:*:metrics`: All devices for one tenant
+- `tenant:{tenantId}:device:abc123:metrics`: One device in one tenant
 
 ### Dedicated Subscriber Connection
 ```typescript
@@ -538,13 +594,19 @@ const redis = new Redis({
 ### KEYS Command (Avoid in Production)
 ```typescript
 // ❌ BAD: Blocks Redis for O(N) scan
-const streams = await redis.keys('metrics:*');
+const streams = await redis.keys('tenant:*:metrics:*');
 
 // ✅ GOOD: Use SCAN for non-blocking iteration
 let cursor = '0';
 const streams = [];
 do {
-  const result = await redis.scan(cursor, 'MATCH', 'metrics:*', 'COUNT', 100);
+  const result = await redis.scan(
+    cursor,
+    'MATCH',
+    `tenant:{${tenantId}}:metrics:*`,
+    'COUNT',
+    100
+  );
   cursor = result[0];
   streams.push(...result[1]);
 } while (cursor !== '0');
@@ -564,6 +626,7 @@ do {
 2. Scale workers: Increase `SENSOR_WORKER_COUNT`
 3. Monitor pending: `XPENDING streamKey groupName`
 4. Increase batch size: `SENSOR_BATCH_SIZE=200`
+5. Verify per-tenant retention and TTL are configured (avoid large global defaults)
 
 ### Issue: Messages Stuck in Pending
 **Cause**: Worker crashed mid-processing, didn't ACK
@@ -590,10 +653,10 @@ do {
 ### Issue: DLQ Growing
 **Cause**: Poison messages failing repeatedly
 **Solutions**:
-1. Inspect DLQ: `XRANGE device:sensors:dlq - +`
+1. Inspect DLQ: `XRANGE tenant:{tenantId}:device:sensors:dlq - +`
 2. Fix data format issues
 3. Increase `maxRetries` if transient DB errors
-4. Purge DLQ after fixing: `DEL device:sensors:dlq`
+4. Purge DLQ after fixing: `DEL tenant:{tenantId}:device:sensors:dlq`
 
 ## Production Best Practices
 
@@ -609,6 +672,10 @@ do {
 - [ ] Batch latency p95 (< 100ms = healthy)
 - [ ] Redis memory usage (< 80% = healthy)
 - [ ] Connection count (< 10,000 = healthy)
+- [ ] No global SCAN patterns across all tenants
+- [ ] Consumer groups are tenant-scoped
+- [ ] Wildcard pub/sub is tenant-scoped
+- [ ] Parsed channel/key tenant matches expected tenant
 
 ### Capacity Planning
 ```
@@ -624,14 +691,20 @@ Example: 3 workers × (1000 / 50) × 100 = 6,000 msg/sec
 ## Guidelines for Code Changes
 
 - ALWAYS use separate connections for ingestion (write) and consumption (read)
+- ALWAYS include explicit `tenantId` in public Redis method signatures
+- ALWAYS use `tenant:{tenantId}:...` key format with hash tags
 - ALWAYS enable `MAXLEN ~` for approximate trimming (efficient)
 - ALWAYS implement consumer groups for horizontal scaling
+- ALWAYS scope consumer groups and consumer names by tenant
 - ALWAYS ACK messages after successful processing
 - ALWAYS use pipeline batching for multiple XADDs
 - ALWAYS handle Redis connection failures gracefully (drop data > crash)
 - ALWAYS monitor stream length and pending count
 - ALWAYS implement DLQ for poison messages
+- ALWAYS scope wildcard subscribe and SCAN operations to tenant
+- ALWAYS validate parsed tenant from channels/stream keys before processing callbacks
 - NEVER use KEYS in production (use SCAN)
+- NEVER perform global cross-tenant SCAN in shared Redis
 - NEVER block event loop with compression (use promisify)
 - VERIFY stream retention matches ingestion rate × buffer time
 - TEST with high load (100+ devices, 200+ msg/sec)

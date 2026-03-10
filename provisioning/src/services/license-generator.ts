@@ -6,11 +6,13 @@
 import jwt from 'jsonwebtoken';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { Subscription } from '../db/subscription-model';
 import { Customer } from '../db/customer-model';
 
 export interface LicenseData {
-  customerId: string;
+  tenantId: string;
+  clientId: string;
   customerName: string;
   plan: 'trial' | 'starter' | 'professional' | 'enterprise';
   features: {
@@ -46,6 +48,7 @@ export interface LicenseData {
   trial: {
     isTrialMode: boolean;
     expiresAt?: string;
+    gracePeriodDays: number; // Days of full access after trial expires
   };
   subscription: {
     status: 'active' | 'past_due' | 'canceled' | 'trialing';
@@ -86,6 +89,9 @@ const PLAN_CONFIG = {
     maxJobTemplates: 10,
     maxAlertRules: 25,
     maxUsers: 2,
+    
+    // Grace period
+    gracePeriodDays: 7,
   },
   professional: {
     // Core device management
@@ -116,6 +122,9 @@ const PLAN_CONFIG = {
     maxJobTemplates: 100,
     maxAlertRules: 100,
     maxUsers: 10,
+    
+    // Grace period
+    gracePeriodDays: 14,
   },
   enterprise: {
     // Core device management
@@ -147,12 +156,27 @@ const PLAN_CONFIG = {
     maxJobTemplates: undefined, // Unlimited
     maxAlertRules: undefined, // Unlimited
     maxUsers: undefined, // Unlimited
+    
+    // Grace period
+    gracePeriodDays: 30,
   },
 };
 
 export class LicenseGenerator {
   private static privateKey: string | null = null;
   private static publicKey: string | null = null;
+
+  /**
+   * Deterministic client ID used by K8s namespace/domain patterns.
+   * Matches deployment worker convention (12-char SHA256 prefix).
+   */
+  private static toClientId(customerId: string): string {
+    return crypto
+      .createHash('sha256')
+      .update(customerId)
+      .digest('hex')
+      .substring(0, 12);
+  }
 
   /**
    * Load RSA keys
@@ -184,9 +208,12 @@ export class LicenseGenerator {
     }
 
     const planConfig = PLAN_CONFIG[subscription.plan] || PLAN_CONFIG.starter;
+    const clientId = this.toClientId(customer.customer_id);
+    const tenantId = clientId;
 
     const licenseData: LicenseData = {
-      customerId: customer.customer_id,
+      tenantId,
+      clientId,
       customerName: customer.company_name || customer.email,
       plan: subscription.plan as any,
       features: {
@@ -211,6 +238,7 @@ export class LicenseGenerator {
       trial: {
         isTrialMode: subscription.status === 'trialing',
         expiresAt: subscription.trial_ends_at?.toISOString(),
+        gracePeriodDays: planConfig.gracePeriodDays,
       },
       subscription: {
         status: subscription.status as any,

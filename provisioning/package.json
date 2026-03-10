@@ -14,7 +14,9 @@
     "migrate": "psql $DATABASE_URL -f migrations/001_initial_schema.sql",
     "create-template-db": "node dist/scripts/create-template-db.js",
     "dev:create-template-db": "ts-node src/scripts/create-template-db.ts",
-    "create-template": "ts-node scripts/create-template.ts"
+    "create-template": "ts-node scripts/create-template.ts",
+    "dev:generate-license": "ts-node src/scripts/generate-license.ts",
+    "generate-license": "node dist/scripts/generate-license.js"
   },
   "keywords": [
     "billing",

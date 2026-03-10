@@ -21,7 +21,7 @@
 
 import { DeviceMetricsModel } from '../db/models';
 import { redisClient } from '../redis/client';
-import { metricsStreamScanPattern, uuidFromMetricsStreamKey } from '../redis/tenant-keys';
+import { metricsStreamScanPattern, uuidFromMetricsStreamKey, getCustomerId } from '../redis/tenant-keys';
 import logger from '../utils/logger';
 
 export class MetricsBatchWorker {
@@ -100,9 +100,11 @@ export class MetricsBatchWorker {
    */
   private async processBatch(): Promise<void> {
     try {
+      const tenantId = getCustomerId();
       // Read metrics from all device streams using consumer groups
       // Consumer groups track position automatically - no lastId needed
       const entries = await redisClient.readMetrics(
+        tenantId,
         '*', // All devices
         this.batchSize, // Max count
         0 // Don't block (return immediately)
@@ -156,7 +158,7 @@ export class MetricsBatchWorker {
 
       let totalAcked = 0;
       for (const [deviceUuid, messageIds] of toAck.entries()) {
-        const acked = await redisClient.ackMetrics(deviceUuid, messageIds);
+        const acked = await redisClient.ackMetrics(tenantId, deviceUuid, messageIds);
         totalAcked += acked;
       }
 
@@ -179,6 +181,7 @@ export class MetricsBatchWorker {
    */
   private async checkStreamLengths(): Promise<void> {
     try {
+      const tenantId = getCustomerId();
       // Get all metrics streams
       const client = redisClient.getClient();
       if (!client) return;
@@ -191,7 +194,7 @@ export class MetricsBatchWorker {
         const result = await client.scan(
           cursor,
           'MATCH',
-          metricsStreamScanPattern(),
+          metricsStreamScanPattern(tenantId),
           'COUNT',
           100
         );
@@ -206,7 +209,7 @@ export class MetricsBatchWorker {
       // Check each stream length
       const lengths = await Promise.all(
         streamKeys.map(async key => {
-          const length = await redisClient.getStreamLength(uuidFromMetricsStreamKey(key));
+          const length = await redisClient.getStreamLength(tenantId, uuidFromMetricsStreamKey(key));
           return { key, length };
         })
       );

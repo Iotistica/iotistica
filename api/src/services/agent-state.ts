@@ -20,6 +20,7 @@ import {
 import { EventPublisher, objectsAreEqual } from './event-sourcing';
 import EventSourcingConfig from '../events/event-sourcing';
 import { deviceSensorSync } from './agent-devices';
+import { getCustomerId } from '../redis/tenant-keys';
 import logger from '../utils/logger';
 
 const eventPublisher = new EventPublisher();
@@ -220,6 +221,7 @@ export async function processDeviceStateReport(
       // Import Redis client once for both operations
       try {
         const { redisClient } = await import('../redis/client');
+        const tenantId = getCustomerId();
         
         const metrics = {
           cpu_usage: deviceState.cpu_usage,
@@ -233,7 +235,7 @@ export async function processDeviceStateReport(
         };
         
         // 1. Add to Redis Stream for batch processing (Phase 2)
-        const streamId = await redisClient.addMetric(uuid, metrics);
+        const streamId = await redisClient.addMetric(tenantId, uuid, metrics);
         
         if (!streamId) {
           // Redis Stream unavailable - fallback to direct write
@@ -242,7 +244,7 @@ export async function processDeviceStateReport(
         }
         
         // 2. Publish to pub/sub for real-time distribution (Phase 1)
-        await redisClient.publishDeviceMetrics(uuid, metrics);
+        await redisClient.publishDeviceMetrics(tenantId, uuid, metrics);
         
       } catch (error) {
         // Error with Redis - fallback to direct write

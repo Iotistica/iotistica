@@ -18,7 +18,12 @@ import { DeviceLogsModel } from '../db/models';
 import { logger } from '../utils/logger';
 import { query } from '../db/connection';
 import { getRedisIngestion, getRedisConsumer } from '../redis/client-factory';
-import { deviceLogsStreamKey } from '../redis/tenant-keys';
+import {
+  deviceLogsStreamKey,
+  getCustomerId,
+  consumerGroupName,
+  consumerName as makeConsumerName,
+} from '../redis/tenant-keys';
 
 interface LogEntry {
   deviceUuid: string;
@@ -47,9 +52,10 @@ interface RedisLogEntry {
 class RedisLogQueue {
   private redisIngestion: Redis; // Write-only: XADD
   private redisConsumer: Redis;  // Read-only: XREADGROUP, XACK, XINFO
-  private consumerGroup = 'log-writers';
+  private tenantId: string;
+  private consumerGroup: string;
   private consumerName: string;
-  private get streamKey(): string { return deviceLogsStreamKey(); }
+  private get streamKey(): string { return deviceLogsStreamKey(this.resolveTenantId()); }
   private isRunning = false;
   private batchSize: number;
   private blockTimeMs: number;
@@ -61,12 +67,25 @@ class RedisLogQueue {
   private readonly pipelineBatchSize = 10; // Flush after 10 XADDs
   private pipelineFlushTimer: NodeJS.Timeout | null = null;
 
-  constructor() {
+  private resolveTenantId(): string {
+    return this.tenantId || getCustomerId();
+  }
+
+  constructor(tenantId?: string) {
     // Get clients from factory (handles all cluster/auth/TLS configuration)
     this.redisIngestion = getRedisIngestion(); // Fail-fast for writes
     this.redisConsumer = getRedisConsumer(); // Resilient for reads
 
-    this.consumerName = `worker-${process.pid}-${Date.now()}`;
+    this.tenantId = tenantId || '';
+    const baseWorkerName = `worker-${process.pid}-${Date.now()}`;
+    if (this.tenantId) {
+      this.consumerGroup = consumerGroupName(this.tenantId, 'log-writers');
+      this.consumerName = makeConsumerName(this.tenantId, baseWorkerName);
+    } else {
+      // Defer tenant resolution until first runtime access after license initialization.
+      this.consumerGroup = 'log-writers';
+      this.consumerName = baseWorkerName;
+    }
     this.batchSize = parseInt(process.env.LOG_BATCH_SIZE || '50', 10);
     this.blockTimeMs = parseInt(process.env.LOG_FLUSH_INTERVAL_MS || '5000', 10);
     // Stream retention: ~500K messages = ~2-4h of logs at high volume
@@ -95,6 +114,13 @@ class RedisLogQueue {
    * Retries on failure to handle Redis not being ready
    */
   async initialize(): Promise<void> {
+    if (!this.tenantId) {
+      const resolvedTenantId = this.resolveTenantId();
+      this.tenantId = resolvedTenantId;
+      this.consumerGroup = consumerGroupName(resolvedTenantId, 'log-writers');
+      this.consumerName = makeConsumerName(resolvedTenantId, `worker-${process.pid}-${Date.now()}`);
+    }
+
     const maxRetries = 5;
     let lastError: Error | null = null;
 
