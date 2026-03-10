@@ -1,7 +1,7 @@
 import { initDatabase } from './database.js';
 import type { DeviceState } from '../device-manager/reconciler.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
-import type { FeatureContext, FeatureInitializer } from './features.js';
+import type { FeatureInitializer } from './features.js';
 import type { DiscoveryService } from '../features/discovery/discovery-service.js';
 import type { AgentUpdater } from '../updater.js';
 import type { AgentFirewall } from '../network/firewall.js';
