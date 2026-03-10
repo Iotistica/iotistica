@@ -202,8 +202,7 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
     const subscribeToAll = process.env.MQTT_SUBSCRIBE_ALL !== 'false';
     
     if (subscribeToAll) {
-      logger.info('Subscribing to all device topics...');
-      
+  
       const topics = ['endpoints', 'state', 'agent', 'events', 'jobs'];
       
       // Add meta topic if dictionary manager enabled

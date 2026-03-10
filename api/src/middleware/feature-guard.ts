@@ -21,7 +21,7 @@ export function requireFeature(feature: BooleanFeatureKey) {
         error: 'Feature not available',
         message: `This feature requires a higher plan. Current plan: ${license.getLicense().plan}`,
         feature,
-        upgradeUrl: process.env.BILLING_UPGRADE_URL || 'https://iotistic.ca/upgrade',
+        upgradeUrl: process.env.BILLING_UPGRADE_URL || 'https://iotistica.com/upgrade',
       });
     }
     
@@ -46,7 +46,7 @@ export async function checkDeviceLimit(req: Request, res: Response, next: NextFu
       message: `Maximum devices (${maxDevices}) reached. Upgrade your plan to add more devices.`,
       currentDevices: devices.length,
       maxDevices,
-      upgradeUrl: process.env.BILLING_UPGRADE_URL || 'https://iotistic.ca/upgrade',
+      upgradeUrl: process.env.BILLING_UPGRADE_URL || 'https://iotistica.com/upgrade',
     });
   }
   
@@ -64,7 +64,7 @@ export function requireActiveSubscription(req: Request, res: Response, next: Nex
       error: 'Subscription inactive',
       message: 'Your subscription is not active. Please update your payment method.',
       status: license.getLicense().subscription.status,
-      billingUrl: process.env.BILLING_PORTAL_URL || 'https://iotistic.ca/billing',
+      billingUrl: process.env.BILLING_PORTAL_URL || 'https://iotistica.com/billing',
     });
   }
   
@@ -129,8 +129,8 @@ export function requireValidSubscription(mode: 'strict' | 'read-only' | 'gracefu
         state,
         plan: licenseData.plan,
         trialExpiresAt: licenseData.trial.expiresAt,
-        upgradeUrl: process.env.BILLING_UPGRADE_URL || 'https://iotistic.ca/upgrade',
-        billingUrl: process.env.BILLING_PORTAL_URL || 'https://iotistic.ca/billing',
+        upgradeUrl: process.env.BILLING_UPGRADE_URL || 'https://iotistica.com/upgrade',
+        billingUrl: process.env.BILLING_PORTAL_URL || 'https://iotistica.com/billing',
       });
     }
     

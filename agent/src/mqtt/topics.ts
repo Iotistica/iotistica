@@ -3,60 +3,32 @@
  * Topic convention: iot/{tenantId}/device/{deviceUuid}/...
  */
 
-import { DeviceModel } from '../db/models/device.model';
-
 let cachedTenantId: string | null = null;
 
 /**
- * Initialize tenant ID cache from database.
- * Should be called once during agent startup after database is ready.
- */
-export async function initializeTenantId(): Promise<void> {
-  try {
-    const device = await DeviceModel.get();
-    if (device?.tenantId) {
-      cachedTenantId = device.tenantId;
-    }
-  } catch (error) {
-    // Database not available yet, will use fallback
-  }
-}
-
-/**
  * Get tenant ID for MQTT topic construction.
- * Priority:
- * 1. Cached value from previous database lookup or initialization
- * 2. Environment variables (for local dev/testing)
- * 3. Default value 'default' (fallback only)
- * 
- * Note: Database lookup happens during agent startup via initializeTenantId().
- * After provisioning, the cache is automatically populated.
+ * No fallback is allowed. Tenant ID must be set from provisioning response
+ * and loaded into cache during agent initialization.
  */
 export function getTenantId(): string {
-  // Return cached value if available
   if (cachedTenantId) {
     return cachedTenantId;
   }
 
-  // Fallback to environment variables (local dev/testing)
-  const envTenantId = 
-    process.env.AGENT_TENANT_ID ||
-    process.env.IOTISTIC_TENANT_ID ||
-    process.env.TENANT_ID;
-
-  if (envTenantId) {
-    return envTenantId;
-  }
-
-  // Final fallback for local development (agent not provisioned yet)
-  return 'default';
+  throw new Error(
+    'Tenant ID is not initialized. Agent must be provisioned with tenantId before using MQTT topics.'
+  );
 }
 
 /**
  * Update cached tenant ID (called automatically after provisioning)
  */
 export function setTenantId(tenantId: string): void {
-  cachedTenantId = tenantId;
+  const normalized = tenantId?.trim();
+  if (!normalized) {
+    throw new Error('Cannot set empty tenant ID');
+  }
+  cachedTenantId = normalized;
 }
 
 /**

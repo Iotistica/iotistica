@@ -25,6 +25,7 @@ import type { LogLevel } from "./logging/types.js";
 import { LogComponents } from "./logging/types.js";
 
 import { MqttManager } from "./mqtt/manager.js";
+import { setTenantId, resetTenantIdCache } from "./mqtt/topics.js";
 import { getPackageVersion } from "./utils/api-utils";
 import { FetchHttpClient, createHttpClient } from "./lib/http-client.js";
 
@@ -467,6 +468,20 @@ export default class Agent {
 
     // Cache device info for reuse across all methods
     this.deviceInfo = deviceInfo;
+
+    // Enforce strict tenant context for provisioned devices (no topic fallback)
+    if (this.deviceInfo.provisioned) {
+      const tenantId = this.deviceInfo.tenantId?.trim();
+      if (!tenantId) {
+        throw new Error(
+          'Provisioned device is missing tenantId. Re-provision device to receive tenant-aware configuration.'
+        );
+      }
+      setTenantId(tenantId);
+    } else {
+      // Ensure stale tenant cache is cleared for unprovisioned/local mode
+      resetTenantIdCache();
+    }
     
     // Always update agent version on startup (in case of upgrades)
     const currentVersion = process.env.AGENT_VERSION || getPackageVersion();
@@ -488,6 +503,7 @@ export default class Agent {
       uuid: this.deviceInfo.uuid,
       name: this.deviceInfo.deviceName || "Not set",
       provisioned: this.deviceInfo.provisioned,
+      tenantId: this.deviceInfo.tenantId,
       hasApiKey: !!this.deviceInfo.deviceApiKey,
       agentVersion: this.deviceInfo.agentVersion,
       mqtt: this.deviceInfo.mqttBrokerConfig
