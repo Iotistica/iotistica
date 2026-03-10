@@ -83,7 +83,7 @@ interface IncidentDetails extends Incident {
 const API_BASE = '/api/v1';
 
 export function AlertsPage() {
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   
   // State
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -120,8 +120,17 @@ export function AlertsPage() {
    * Fetch statistics
    */
   const fetchStats = async () => {
+    const token = localStorage.getItem('accessToken');
+    if (!isAuthenticated || !token) {
+      return;
+    }
+
     try {
-      const response = await fetch(`${API_BASE}/anomaly-incidents/stats?hours=24`);
+      const response = await fetch(`${API_BASE}/anomaly-incidents/stats?hours=24`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
       const data = await response.json();
       if (data.success) {
         setStats(data.stats);
@@ -141,6 +150,14 @@ export function AlertsPage() {
    * Fetch incidents with filters
    */
   const fetchIncidents = async (off: number = 0, silent: boolean = false) => {
+    const token = localStorage.getItem('accessToken');
+    if (!isAuthenticated || !token) {
+      if (!silent) {
+        setLoading(false);
+      }
+      return;
+    }
+
     if (!silent) {
       setLoading(true);
     }
@@ -155,7 +172,11 @@ export function AlertsPage() {
       if (deviceTypeFilter !== 'all') params.append('deviceType', deviceTypeFilter);
       if (metricFilter) params.append('metric', metricFilter);
 
-      const response = await fetch(`${API_BASE}/anomaly-incidents?${params}`);
+      const response = await fetch(`${API_BASE}/anomaly-incidents?${params}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
       const data = await response.json();
 
       if (data.success) {
@@ -180,9 +201,18 @@ export function AlertsPage() {
    * Fetch and show incident details
    */
   const openDetailsModal = async (incidentId: string) => {
+    const token = localStorage.getItem('accessToken');
+    if (!isAuthenticated || !token) {
+      return;
+    }
+
     setDetailsLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/anomaly-incidents/${incidentId}`);
+      const response = await fetch(`${API_BASE}/anomaly-incidents/${incidentId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
       const data = await response.json();
 
       if (data.success) {
@@ -200,9 +230,18 @@ export function AlertsPage() {
    * Open resolve dialog
    */
   const openResolveDialog = async (incidentId: string) => {
+    const token = localStorage.getItem('accessToken');
+    if (!isAuthenticated || !token) {
+      return;
+    }
+
     setDetailsLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/anomaly-incidents/${incidentId}`);
+      const response = await fetch(`${API_BASE}/anomaly-incidents/${incidentId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
       const data = await response.json();
 
       if (data.success) {
@@ -220,11 +259,19 @@ export function AlertsPage() {
   const resolveIncident = async () => {
     if (!selectedIncident) return;
 
+    const token = localStorage.getItem('accessToken');
+    if (!isAuthenticated || !token) {
+      return;
+    }
+
     setResolving(true);
     try {
       const response = await fetch(`${API_BASE}/anomaly-incidents/${selectedIncident.incident_id}/resolve`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           resolvedBy: user?.email || user?.username || 'anonymous',
           notes: resolutionNotes,

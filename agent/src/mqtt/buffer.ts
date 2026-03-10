@@ -13,11 +13,12 @@
  * - Statistics tracking
  */
 
-import { MqttManager } from '../mqtt';
-import { createJsonPayload, serializePayload } from '../mqtt/manager';
+import type { MqttManager } from './manager';
+import { createJsonPayload, serializePayload } from './manager';
 import { MessageBufferModel } from '../db/models';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
+import type { IClientPublishOptions } from 'mqtt';
 
 export interface BufferSyncConfig {
   enabled: boolean;
@@ -26,6 +27,8 @@ export interface BufferSyncConfig {
   maxRetries: number; // Max retries per message before dropping
   cleanupIntervalMs: number; // How often to cleanup expired records
 }
+
+export type MessageBufferSyncOptions = BufferSyncConfig;
 
 export class MessageBufferSync {
   private config: BufferSyncConfig;
@@ -36,6 +39,10 @@ export class MessageBufferSync {
   private cleanupIntervalHandle?: NodeJS.Timeout;
   private isFlushRequested = false;
   private isFlushing = false;
+  private started = false;
+  private readonly connectListener = () => {
+    this.flushNow();
+  };
 
   constructor(
     mqttManager: MqttManager,
@@ -59,6 +66,10 @@ export class MessageBufferSync {
    * Start buffer sync service
    */
   async start(): Promise<void> {
+    if (this.started) {
+      return;
+    }
+
     if (!this.config.enabled) {
       this.logger?.infoSync('Message buffer sync disabled', {
         component: LogComponents.agent
@@ -72,9 +83,8 @@ export class MessageBufferSync {
       batchSize: this.config.flushBatchSize
     });
 
-    // Listen for MQTT connection events
-    this.mqttManager.on('connect', () => this.onMqttConnect());
-    this.mqttManager.on('reconnect', () => this.onMqttReconnect());
+    // Flush immediately whenever MQTT connection is re-established.
+    this.mqttManager.on('connect', this.connectListener);
 
     // Start periodic flush timer
     this.flushIntervalHandle = setInterval(
@@ -95,15 +105,23 @@ export class MessageBufferSync {
 
     // Initial cleanup
     await this.cleanupExpired();
+
+    this.started = true;
   }
 
   /**
    * Stop buffer sync service
    */
   stop(): void {
+    if (!this.started) {
+      return;
+    }
+
     this.logger?.infoSync('Stopping message buffer sync service', {
       component: LogComponents.agent
     });
+
+    this.mqttManager.off('connect', this.connectListener);
 
     if (this.flushIntervalHandle) {
       clearInterval(this.flushIntervalHandle);
@@ -114,6 +132,50 @@ export class MessageBufferSync {
       clearInterval(this.cleanupIntervalHandle);
       this.cleanupIntervalHandle = undefined;
     }
+
+    this.started = false;
+  }
+
+  /**
+   * Return whether this buffer sync instance is enabled by config.
+   */
+  isEnabled(): boolean {
+    return this.config.enabled;
+  }
+
+  /**
+   * Intercept publish calls so offline payloads are persisted to SQLite.
+   * Returns true when publish was fully handled by buffer storage.
+   */
+  async handlePublish(
+    topic: string,
+    payload: Buffer,
+    options?: IClientPublishOptions
+  ): Promise<boolean> {
+    if (!this.config.enabled) {
+      return false;
+    }
+
+    if (this.mqttManager.isConnected()) {
+      return false;
+    }
+
+    await MessageBufferModel.enqueue({
+      endpoint_name: this.extractEndpointName(topic),
+      topic,
+      qos: options?.qos ?? 0,
+      payload: payload.toString('utf-8'),
+      payload_bytes: payload.length,
+    });
+
+    this.logger?.debugSync('Buffered MQTT publish while offline', {
+      component: LogComponents.agent,
+      topic,
+      payloadBytes: payload.length,
+      qos: options?.qos ?? 0
+    });
+
+    return true;
   }
 
   /**
@@ -130,23 +192,8 @@ export class MessageBufferSync {
     return await MessageBufferModel.getStats();
   }
 
-  /**
-   * Handler for MQTT connect event
-   */
-  private onMqttConnect(): void {
+  private flushNow(): void {
     this.logger?.infoSync('MQTT connected - initiating buffer flush', {
-      component: LogComponents.agent
-    });
-    
-    // Trigger immediate flush
-    this.requestFlush();
-  }
-
-  /**
-   * Handler for MQTT reconnect event
-   */
-  private onMqttReconnect(): void {
-    this.logger?.infoSync('MQTT reconnected - initiating buffer flush', {
       component: LogComponents.agent
     });
     
@@ -312,5 +359,10 @@ export class MessageBufferSync {
         }
       );
     }
+  }
+
+  private extractEndpointName(topic: string): string {
+    const parts = topic.split('/').filter(Boolean);
+    return parts.length > 0 ? parts[parts.length - 1] : 'unknown';
   }
 }

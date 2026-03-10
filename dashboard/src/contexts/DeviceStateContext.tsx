@@ -165,7 +165,16 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
   // Fetch device state from API
   const fetchDeviceState = useCallback(async (deviceUuid: string) => {
     try {
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}`));
+      const accessToken = localStorage.getItem('accessToken');
+      if (!accessToken || accessToken.split('.').length !== 3) {
+        return;
+      }
+
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}`), {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
       if (!response.ok) {
         throw new Error(`Failed to fetch device: ${response.statusText}`);
       }

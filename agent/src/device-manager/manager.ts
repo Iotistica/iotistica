@@ -284,6 +284,7 @@ export class DeviceManager {
 				registeredAt: record.registeredAt || undefined,
 				provisioned: !!record.provisioned,
 				provisioningState: (record.provisioningState as any) || (record.provisioned ? 'provisioned' : 'new'),
+				tenantId: record.tenantId || undefined,
 			applicationId: record.applicationId || undefined,
 			macAddress: record.macAddress || undefined,
 			osVersion: record.osVersion || undefined,
@@ -328,6 +329,7 @@ export class DeviceManager {
 			registeredAt: this.deviceInfo.registeredAt || null,
 			provisioned: this.deviceInfo.provisioned,
 			provisioningState: this.deviceInfo.provisioningState || 'new',
+			tenantId: this.deviceInfo.tenantId || null,
 			applicationId: this.deviceInfo.applicationId || null,
 			macAddress: this.deviceInfo.macAddress || null,
 			osVersion: this.deviceInfo.osVersion || null,
@@ -338,6 +340,18 @@ export class DeviceManager {
 		};
 		
 		await this.dbClient.saveDevice(data);
+	}
+
+	/**
+	 * Persist tenantId for already provisioned devices (migration/repair path)
+	 */
+	async setTenantId(tenantId: string): Promise<void> {
+		if (!this.deviceInfo) {
+			throw new Error('Device manager not initialized');
+		}
+
+		this.deviceInfo.tenantId = tenantId;
+		await this.saveDeviceInfo();
 	}
 
 	/**

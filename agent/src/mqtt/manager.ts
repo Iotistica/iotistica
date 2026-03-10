@@ -5,6 +5,13 @@ import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import { MessageIdGenerator } from './message-id';
 import type { DictionaryManager } from '../dictionary/manager';
+import { MessageBufferSync } from './buffer';
+import type { BufferSyncConfig } from './buffer';
+
+export interface MqttConnectOptions {
+  bufferSync?: boolean;
+  bufferSyncOptions?: Partial<BufferSyncConfig>;
+}
 
 /**
  * Explicit payload contract - callers must specify format
@@ -215,6 +222,7 @@ export class MqttManager extends EventEmitter {
   private connectionPromise: Promise<void> | null = null;
   private debug = false;
   private logger?: AgentLogger;
+  private bufferSync?: MessageBufferSync;
   
   // TODO (FUTURE): Store format metadata in pending queue for better observability
   // 
@@ -274,6 +282,69 @@ export class MqttManager extends EventEmitter {
   }
 
   /**
+   * Enable local message buffer sync service (idempotent)
+   */
+  public async enableBufferSync(
+    logger?: AgentLogger,
+    options?: Partial<BufferSyncConfig>
+  ): Promise<void> {
+    if (this.bufferSync) {
+      return;
+    }
+
+    const syncLogger = logger || this.logger;
+
+    this.bufferSync = new MessageBufferSync(this, syncLogger, {
+      flushBatchSize: 100,
+      flushIntervalMs: 30000,
+      maxRetries: 3,
+      cleanupIntervalMs: 3600000,
+      enabled: options?.enabled ?? true,
+      ...options,
+    });
+
+    if (this.isConnected()) {
+      await this.bufferSync.start();
+      syncLogger?.infoSync('Message buffer sync started', {
+        component: LogComponents.mqtt,
+      });
+    } else {
+      this.once('connect', () => {
+        this.bufferSync
+          ?.start()
+          .then(() => {
+            this.logger?.infoSync('Message buffer sync started', {
+              component: LogComponents.mqtt,
+            });
+          })
+          .catch((error) => {
+            this.logger?.errorSync(
+              'Failed to start message buffer sync after MQTT connect',
+              error instanceof Error ? error : new Error(String(error)),
+              { component: LogComponents.mqtt }
+            );
+          });
+      });
+    }
+  }
+
+  /**
+   * Disable local message buffer sync service
+   */
+  public disableBufferSync(): void {
+    if (!this.bufferSync) {
+      return;
+    }
+
+    this.bufferSync.stop();
+    this.bufferSync = undefined;
+
+    this.logger?.infoSync('Message buffer sync stopped', {
+      component: LogComponents.mqtt,
+    });
+  }
+
+  /**
    * Initialize message ID generator for HA deduplication
    * 
    * @param deviceUuid - Device UUID
@@ -296,11 +367,21 @@ export class MqttManager extends EventEmitter {
    * @param brokerUrl - MQTT broker URL
    * @param options - MQTT client options
    * @param deviceUuid - Optional device UUID to initialize message ID generator for HA deduplication
+   * @param extra - Optional manager-level connection options
    */
-  public async connect(brokerUrl: string, options?: IClientOptions, deviceUuid?: string): Promise<void> {
+  public async connect(
+    brokerUrl: string,
+    options?: IClientOptions,
+    deviceUuid?: string,
+    extra?: MqttConnectOptions
+  ): Promise<void> {
     // Store connection config for self-healing
     this.lastBrokerUrl = brokerUrl;
     this.lastOptions = options;
+
+    if (extra?.bufferSync && !this.bufferSync) {
+      await this.enableBufferSync(this.logger, extra.bufferSyncOptions);
+    }
     
     // Store device UUID for reuse on reconnects
     if (deviceUuid) {
@@ -468,6 +549,13 @@ export class MqttManager extends EventEmitter {
     // Serialize payload if needed (MqttPayload → Buffer)
     const buffer = this.toBuffer(payload);
 
+    if (this.bufferSync?.isEnabled()) {
+      const handled = await this.bufferSync.handlePublish(topic, buffer, options);
+      if (handled) {
+        return;
+      }
+    }
+
     if (!this.client || !this.connected) {
       // Trigger reconnection if we have broker config (self-healing)
       if (this.lastBrokerUrl && !this.connectionPromise) {
@@ -545,6 +633,13 @@ export class MqttManager extends EventEmitter {
   ): Promise<void> {
     // Serialize payload if needed (MqttPayload → Buffer)
     const buffer = this.toBuffer(payload);
+
+    if (this.bufferSync?.isEnabled()) {
+      const handled = await this.bufferSync.handlePublish(topic, buffer, options);
+      if (handled) {
+        return;
+      }
+    }
 
     if (!this.client || !this.connected) {
       throw new Error(`MQTT not connected - cannot publish to ${topic}`);
@@ -670,6 +765,9 @@ export class MqttManager extends EventEmitter {
    */
   public async disconnect(): Promise<void> {
     if (!this.client) return;
+
+    // Stop background flush/cleanup timers before disconnecting transport
+    this.disableBufferSync();
 
     return new Promise((resolve) => {
       this.client!.end(false, {}, () => {

@@ -5,17 +5,20 @@
  * Separates feature orchestration from the main agent class.
  */
 
-import type { AgentLogger } from './logging/agent-logger';
-import type { DeviceInfo } from './device-manager/types.js';
-import { LogComponents } from './logging/types';
-import { JobsFeature } from './features/jobs/src/monitor.js';
-import { SensorPublishFeature } from './features/publish/index.js';
-import { SensorsFeature, type SensorConfig } from './features/adapters/index.js';
-import { AgentUpdater } from './updater.js';
-import { AgentFirewall } from './network/firewall.js';
-import { MqttManager } from './mqtt/manager.js';
-import { StateReconciler } from './device-manager/reconciler.js';
-import { getPackageVersion } from './utils/api-utils.js';
+import type { AgentLogger } from '../logging/agent-logger';
+import type { DeviceInfo } from '../device-manager/types.js';
+import type { AgentInitContext } from './core.js';
+import { LogComponents } from '../logging/types';
+import { JobsFeature } from '../features/jobs/src/monitor.js';
+import { DiscoveryService } from '../features/discovery/discovery-service.js';
+
+import { SensorPublishFeature } from '../features/publish/index.js';
+import { SensorsFeature, type SensorConfig } from '../features/adapters/index.js';
+import { AgentUpdater } from '../updater.js';
+import { AgentFirewall } from '../network/firewall.js';
+import { MqttManager } from '../mqtt/manager.js';
+import { StateReconciler } from '../device-manager/reconciler.js';
+import { getPackageVersion } from '../utils/api-utils.js';
 
 export interface FeatureContext {
   logger: AgentLogger;
@@ -179,8 +182,8 @@ export class FeatureInitializer {
 
     try {
       // Load sensor output configurations from database
-      const { EndpointOutputModel: DeviceOutputModel } = await import('./db/models/endpoint-outputs.model.js');
-      const { DeviceEndpointModel } = await import('./db/models/endpoint.model.js');
+      const { EndpointOutputModel: DeviceOutputModel } = await import('../db/models/endpoint-outputs.model.js');
+      const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
       
       const deviceOutputs = await DeviceOutputModel.getAll();
 
@@ -255,7 +258,7 @@ export class FeatureInitializer {
 
       // Configure edge AI anomaly detection if enabled
       if (anomalyService) {
-        const { configureAnomalyFeed } = await import('./features/publish/manager.js');
+        const { configureAnomalyFeed } = await import('../features/publish/manager.js');
         configureAnomalyFeed(anomalyService);
 
         logger.debugSync('Configured edge AI anomaly detection for device data', {
@@ -302,7 +305,7 @@ export class FeatureInitializer {
 
   
       // Check database for enabled endpoints - this enables the protocol adapter
-      const { DeviceEndpointModel } = await import('./db/models/endpoint.model.js');
+      const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
       const enabledProtocols: string[] = [];
       
       for (const protocol of ['modbus', 'opcua', 'snmp', 'can', 'mqtt']) {
@@ -337,7 +340,7 @@ export class FeatureInitializer {
       }
       
       // Make sensors feature available to device API
-      const { setSensorsFeature } = await import('./api/actions.js');
+      const { setSensorsFeature } = await import('../api/actions.js');
       setSensorsFeature(this.features.sensors);
 
       logger.debugSync('Protocol Adapters initialized (database-driven)', {
@@ -592,7 +595,7 @@ export class FeatureInitializer {
     const { logger, deviceInfo, mqttManager } = this.context;
 
     try {
-      const { ShellHandler } = await import('./shell/shell-handler.js');
+      const { ShellHandler } = await import('../shell/shell-handler.js');
       
       this.features.shellHandler = new ShellHandler(
         deviceInfo.uuid,
@@ -739,3 +742,109 @@ export class FeatureInitializer {
     }
   }
 }
+
+// ============================================================================
+// BOOTSTRAP PHASE HELPERS
+// ============================================================================
+
+export async function initFeatures(ctx: AgentInitContext): Promise<void> {
+	const agentLogger = ctx.features.getAgentLogger();
+
+	const memBefore = process.memoryUsage();
+	agentLogger.debugSync('Memory before loading target state', {
+		component: 'Agent' as any,
+		heapUsed: `${Math.round(memBefore.heapUsed / 1024 / 1024)}MB`
+	});
+
+	const targetState = ctx.features.getTargetState();
+	const targetStateSize = targetState ? JSON.stringify(targetState).length : 0;
+
+	const memAfterState = process.memoryUsage();
+	agentLogger.debugSync('Memory after loading target state', {
+		component: 'Agent' as any,
+		heapUsed: `${Math.round(memAfterState.heapUsed / 1024 / 1024)}MB`,
+		targetStateSize,
+		targetStateSizeMB: (targetStateSize / 1024 / 1024).toFixed(2),
+		hasConfig: !!targetState?.config,
+		hasProtocols: !!targetState?.config?.protocols,
+		hasSettings: !!targetState?.config?.settings
+	});
+
+	const featureContext: FeatureContext = {
+		logger: agentLogger,
+		deviceInfo: ctx.features.getDeviceInfo(),
+		deviceManager: ctx.features.getDeviceManager(),
+		stateReconciler: ctx.features.getStateReconciler(),
+		mqttManager: (await import('../mqtt/manager.js')).MqttManager.getInstance(),
+		httpClient: ctx.features.getSharedHttpClient(),
+		containerManager: ctx.features.getContainerManager(),
+		configSettings: targetState?.config?.settings || {},
+		configFeatures: ctx.features.getConfigManagerFeatures(),
+		configProtocols: targetState?.config?.protocols || {},
+		cloudApiEndpoint: ctx.features.getCloudApiEndpoint(),
+		deviceApiPort: ctx.features.getDeviceApiPort(),
+		anomalyService: ctx.features.getAnomalyService(),
+		dictionaryManager: ctx.features.getDictionaryManager()
+	};
+
+	const memAfterContext = process.memoryUsage();
+	agentLogger.debugSync('Memory after creating featureContext', {
+		component: 'Agent' as any,
+		heapUsed: `${Math.round(memAfterContext.heapUsed / 1024 / 1024)}MB`
+	});
+
+	const initializer = new FeatureInitializer(featureContext);
+	ctx.features.setFeatureInitializer(initializer);
+
+	await ctx.features.initDiscoveryService();
+	featureContext.discoveryService = ctx.features.getDiscoveryService();
+
+	await initializer.initSensorFeatures();
+	await initializer.initJobsFeature();
+	await ctx.features.initializeSimulationMode();
+
+	agentLogger?.infoSync('About to initialize supporting features', {
+		component: LogComponents.agent
+	});
+	await initializer.initSupportingFeatures();
+
+	const initializedFeatures = initializer.getFeatures();
+	agentLogger?.infoSync('Supporting features initialized', {
+		component: LogComponents.agent,
+		hasUpdater: !!initializedFeatures.updater,
+		hasFirewall: !!initializedFeatures.firewall
+	});
+
+	ctx.features.setUpdater(initializedFeatures.updater);
+	ctx.features.setFirewall(initializedFeatures.firewall);
+
+	if (initializedFeatures.updater) {
+		agentLogger?.infoSync('Setting AgentUpdater on StateReconciler', {
+			component: LogComponents.agent,
+			hasUpdater: true
+		});
+		ctx.features.setStateReconcilerUpdater(initializedFeatures.updater);
+	} else {
+		agentLogger?.warnSync('AgentUpdater not initialized, version reconciliation unavailable', {
+			component: LogComponents.agent
+		});
+	}
+}
+
+export async function initDiscoveryService(agent: any): Promise<void> {
+	agent.agentLogger?.infoSync('Initializing Discovery Service', {
+		component: LogComponents.agent,
+	});
+
+	try {
+		agent.discoveryService = new DiscoveryService(agent.agentLogger, agent.configManager);
+		await agent.discoveryService.init();
+	} catch (error) {
+		agent.agentLogger?.errorSync('Failed to initialize Discovery Service', error as Error, {
+			component: LogComponents.agent,
+		});
+		agent.discoveryService = undefined;
+	}
+}
+
+

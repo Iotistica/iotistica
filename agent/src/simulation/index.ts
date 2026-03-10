@@ -25,7 +25,7 @@ import {
 } from './types';
 import { MemoryLeakSimulation } from './scenarios/memory-leak';
 import { AnomalyInjectionSimulation } from './scenarios/anomaly';
-import { SensorDataSimulation } from './scenarios/sensor-data';
+import { SensorDataSimulation } from './scenarios/publish-data';
 
 /**
  * Simulation orchestrator
