@@ -892,13 +892,47 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           <TabsList className="bg-transparent w-fit h-auto p-0 rounded-none justify-start gap-12 border-0">
             <TabsTrigger 
               value="devices"
-              className="!flex-none !border-0 !border-b-2 !border-b-transparent px-4 pb-3 text-base font-medium data-[state=active]:!border-b-foreground bg-transparent data-[state=active]:bg-transparent rounded-none hover:bg-transparent"
+              className="!flex-none !border-0 bg-transparent rounded-none hover:bg-transparent px-4 pb-3 text-base"
+              style={
+                activeTab === 'devices'
+                  ? {
+                      color: 'hsl(var(--foreground))',
+                      fontWeight: 700,
+                      textDecoration: 'underline',
+                      textUnderlineOffset: '8px',
+                      textDecorationThickness: '2px',
+                      textDecorationColor: 'hsl(var(--foreground))',
+                    }
+                  : {
+                      color: 'hsl(var(--muted-foreground))',
+                      fontWeight: 400,
+                      textDecoration: 'none',
+                      opacity: 0.8,
+                    }
+              }
             >
               Configured Devices
             </TabsTrigger>
             <TabsTrigger 
               value="profiles"
-              className="!flex-none !border-0 !border-b-2 !border-b-transparent px-4 pb-3 text-base font-medium data-[state=active]:!border-b-foreground bg-transparent data-[state=active]:bg-transparent rounded-none hover:bg-transparent"
+              className="!flex-none !border-0 bg-transparent rounded-none hover:bg-transparent px-4 pb-3 text-base"
+              style={
+                activeTab === 'profiles'
+                  ? {
+                      color: 'hsl(var(--foreground))',
+                      fontWeight: 700,
+                      textDecoration: 'underline',
+                      textUnderlineOffset: '8px',
+                      textDecorationThickness: '2px',
+                      textDecorationColor: 'hsl(var(--foreground))',
+                    }
+                  : {
+                      color: 'hsl(var(--muted-foreground))',
+                      fontWeight: 400,
+                      textDecoration: 'none',
+                      opacity: 0.8,
+                    }
+              }
             >
               Profiles
             </TabsTrigger>
@@ -1405,8 +1439,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
         {/* Add Virtual Device Dialog */}
         <Dialog open={addVirtualDeviceDialogOpen} onOpenChange={setAddVirtualDeviceDialogOpen}>
-          <DialogContent className="max-w-4xl w-full">
-            <DialogHeader>
+          <DialogContent
+            className="w-[min(96vw,1100px)] max-w-[96vw] !p-0 overflow-hidden flex flex-col"
+            style={{ height: '66vh', maxHeight: '66vh' }}
+          >
+            <DialogHeader className="px-6 py-4">
               <DialogTitle>Add Device</DialogTitle>
               <DialogDescription>
                 Virtual devices are protocol simulators that run as sidecar containers.
@@ -1414,7 +1451,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-4 py-4">
+            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="virtual-name">Device Name</Label>
                 <Input
@@ -1495,7 +1532,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
             </div>
 
-            <DialogFooter>
+            <DialogFooter className="px-6 py-4">
               <Button 
                 variant="outline" 
                 onClick={() => setAddVirtualDeviceDialogOpen(false)} 

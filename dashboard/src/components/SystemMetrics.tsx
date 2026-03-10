@@ -77,6 +77,7 @@ export function SystemMetrics({
   // Local state initialized from context
   const [selectedMetric, setSelectedMetric] = useState<'cpu' | 'memory' | 'network'>(persistedMetric);
   const [timePeriod, setTimePeriod] = useState<'30min' | '6h' | '12h' | '24h'>(persistedTimePeriod);
+  const [insightsTab, setInsightsTab] = useState<'telemetry' | 'processes'>('telemetry');
   
   // Refresh interval state with localStorage persistence
   const [refreshInterval, setRefreshInterval] = useState<number>(() => {
@@ -691,20 +692,64 @@ export function SystemMetrics({
         {/* Main Cards Layout */}
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Telemetry / Top Processes Tabs Card */}
-          <Card className="p-4 md:p-6">
-            <Tabs defaultValue="telemetry" className="w-full">
+          <Card className="p-4 md:p-6 min-w-0">
+            <Tabs value={insightsTab} onValueChange={(value) => setInsightsTab(value as 'telemetry' | 'processes')} className="w-full min-w-0">
               <div className="flex items-center justify-between gap-3 mb-4">
                 <div>
                   <h3 className="text-lg text-foreground font-medium mb-1">System Insights</h3>
                   <p className="text-sm text-muted-foreground">Telemetry and process activity</p>
                 </div>
-                <TabsList>
-                  <TabsTrigger value="telemetry">Telemetry</TabsTrigger>
-                  <TabsTrigger value="processes">Top Processes</TabsTrigger>
+                <TabsList className="bg-transparent rounded-none p-0 h-auto gap-0">
+                  <TabsTrigger
+                    value="telemetry"
+                    className="rounded-none border-0 bg-transparent px-3 pb-2 text-sm shadow-none"
+                    style={
+                      insightsTab === 'telemetry'
+                        ? {
+                            color: 'hsl(var(--foreground))',
+                            fontWeight: 700,
+                            textDecoration: 'underline',
+                            textUnderlineOffset: '6px',
+                            textDecorationThickness: '2px',
+                            textDecorationColor: 'hsl(var(--foreground))',
+                          }
+                        : {
+                            color: 'hsl(var(--muted-foreground))',
+                            fontWeight: 400,
+                            textDecoration: 'none',
+                            opacity: 0.8,
+                          }
+                    }
+                  >
+                    Telemetry
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="processes"
+                    className="rounded-none border-0 bg-transparent px-3 pb-2 text-sm shadow-none"
+                    style={
+                      insightsTab === 'processes'
+                        ? {
+                            color: 'hsl(var(--foreground))',
+                            fontWeight: 700,
+                            textDecoration: 'underline',
+                            textUnderlineOffset: '6px',
+                            textDecorationThickness: '2px',
+                            textDecorationColor: 'hsl(var(--foreground))',
+                          }
+                        : {
+                            color: 'hsl(var(--muted-foreground))',
+                            fontWeight: 400,
+                            textDecoration: 'none',
+                            opacity: 0.8,
+                          }
+                    }
+                  >
+                    Top Processes
+                  </TabsTrigger>
                 </TabsList>
               </div>
 
-              <TabsContent value="telemetry" className="mt-0">
+              <TabsContent value="telemetry" className="mt-0 min-w-0 overflow-y-auto" style={{ height: '350px' }}>
                 <div className="mb-4 space-y-3">
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -929,12 +974,8 @@ export function SystemMetrics({
                 )}
               </TabsContent>
 
-              <TabsContent value="processes" className="mt-0">
-                <div className="mb-4 flex items-start justify-between gap-4">
-                  <div>
-                    <h3 className="text-lg text-foreground font-medium mb-1">Top Processes</h3>
-                    <p className="text-sm text-muted-foreground">Most resource-intensive processes</p>
-                  </div>
+              <TabsContent value="processes" className="mt-0 min-w-0 overflow-hidden" style={{ height: '350px' }}>
+                <div className="mb-4 flex justify-end">
                   <Button
                     variant="ghost"
                     size="sm"
@@ -956,8 +997,8 @@ export function SystemMetrics({
                 ) : processes.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">No process data available</div>
                 ) : (
-                  <div className="overflow-x-auto h-[320px] overflow-y-auto">
-                    <table className="w-full">
+                  <div className="overflow-y-auto overflow-x-auto" style={{maxHeight: '300px'}}>
+                    <table className="w-full table-fixed">
                       <thead>
                         <tr className="border-b border-border">
                           <th className="text-left py-3 px-0 text-sm font-medium text-muted-foreground">Process</th>

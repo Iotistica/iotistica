@@ -2,7 +2,7 @@
  * Add Sensor Dialog
  * 
  * Tabbed interface for protocol-specific device configuration.
- * Supports: Modbus TCP/RTU, OPC-UA
+ * Supports: Modbus TCP/RTU, OPC-UA, MQTT (coming soon)
  * Uses React Hook Form with validation.
  */
 
@@ -48,7 +48,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedProtocol, setSelectedProtocol] = useState<'modbus' | 'opcua'>('modbus');
+  const [selectedProtocol, setSelectedProtocol] = useState<'modbus' | 'opcua' | 'mqtt'>('modbus');
   const [location, setLocation] = useState<string>('');
   const [locations, setLocations] = useState<string[]>([]);
   const [locationOpen, setLocationOpen] = useState(false);
@@ -140,6 +140,9 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
       } finally {
         setLoading(false);
       }
+    } else if (selectedProtocol === 'mqtt') {
+      setError('MQTT device onboarding in this dialog is coming soon.');
+      return;
     }
   };
 
@@ -161,13 +164,18 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
     } else if (selectedProtocol === 'opcua') {
       // OPC UA uses auto-discovery, nodes are optional
       return opcuaFormValid;
+    } else if (selectedProtocol === 'mqtt') {
+      return false;
     }
     return false;
   };
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="!grid !grid-rows-[auto,1fr,auto] !gap-0 !h-[85vh] !max-h-[85vh] w-[720px] max-w-[95vw] sm:max-w-[95vw] !p-0 overflow-hidden">
+      <DialogContent
+        className="w-[min(96vw,980px)] max-w-[96vw] !p-0 overflow-hidden flex flex-col"
+        style={{ height: '66vh', maxHeight: '66vh' }}
+      >
         <DialogHeader className="px-6 py-4">
           <DialogTitle>Add Device</DialogTitle>
           <DialogDescription>
@@ -239,7 +247,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
             </label>
             <Select
               value={selectedProtocol}
-              onValueChange={(value) => setSelectedProtocol(value as 'modbus' | 'opcua')}
+              onValueChange={(value) => setSelectedProtocol(value as 'modbus' | 'opcua' | 'mqtt')}
             >
               <SelectTrigger id="protocol-select" className="h-11 text-left">
                 <SelectValue placeholder="Select protocol" />
@@ -247,6 +255,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
               <SelectContent>
                 <SelectItem value="modbus">Modbus TCP/RTU</SelectItem>
                 <SelectItem value="opcua">OPC-UA</SelectItem>
+                <SelectItem value="mqtt">MQTT</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -282,6 +291,15 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
               />
               */}
             </div>
+          )}
+
+          {selectedProtocol === 'mqtt' && (
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                MQTT protocol appears in the selector now, but configuration flow in this modal is not implemented yet.
+              </AlertDescription>
+            </Alert>
           )}
         </div>
 
