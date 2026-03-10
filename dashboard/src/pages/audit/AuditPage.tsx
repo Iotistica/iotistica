@@ -21,6 +21,9 @@ export const AuditPage: React.FC = () => {
           limit={100}
           autoRefresh={true}
           refreshInterval={30000}
+          showHeaderDetails={false}
+          showToolbar={false}
+          showCategoryFilter={true}
         />
       </div>
     </div>
