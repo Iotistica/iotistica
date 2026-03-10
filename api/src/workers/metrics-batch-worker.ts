@@ -21,7 +21,7 @@
 
 import { DeviceMetricsModel } from '../db/models';
 import { redisClient } from '../redis/client';
-import { metricsStreamScanPattern, uuidFromMetricsStreamKey, getCustomerId } from '../redis/tenant-keys';
+import { metricsStreamScanPattern, uuidFromMetricsStreamKey, getTenantId } from '../redis/tenant-keys';
 import logger from '../utils/logger';
 
 export class MetricsBatchWorker {
@@ -100,7 +100,7 @@ export class MetricsBatchWorker {
    */
   private async processBatch(): Promise<void> {
     try {
-      const tenantId = getCustomerId();
+      const tenantId = getTenantId();
       // Read metrics from all device streams using consumer groups
       // Consumer groups track position automatically - no lastId needed
       const entries = await redisClient.readMetrics(
@@ -181,7 +181,7 @@ export class MetricsBatchWorker {
    */
   private async checkStreamLengths(): Promise<void> {
     try {
-      const tenantId = getCustomerId();
+      const tenantId = getTenantId();
       // Get all metrics streams
       const client = redisClient.getClient();
       if (!client) return;

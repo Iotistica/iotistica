@@ -7,6 +7,8 @@ import * as crypto from 'crypto';
 import { query } from '../db/connection';
 import logger from '../utils/logger';
 import { getMqttManager } from '../mqtt';
+import { mqttDeviceTopic } from '../mqtt/topics';
+import { getTenantId } from '../redis/tenant-keys';
 
 interface SubflowNode {
   id: string;
@@ -253,7 +255,9 @@ export class DeviceFlowExtractionService {
         return;
       }
 
-      const topic = `iot/device/${deviceSubflow.deviceUuid}/subflow/snapshot`;
+      // Follow standard IoT topic pattern: iot/{tenantId}/device/{uuid}/subflow/snapshot
+      const tenantId = getTenantId();
+      const topic = mqttDeviceTopic(tenantId, deviceSubflow.deviceUuid, 'subflow', 'snapshot');
       const payload = {
         name: 'Auto snapshot',
         description: `Auto snapshot for device ${deviceName}`,

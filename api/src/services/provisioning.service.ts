@@ -43,6 +43,7 @@ import { generateDefaultTargetState } from './default-target-state-generator';
 import logger from '../utils/logger';
 import { configService }  from './config.service';
 import { virtualAgentDeployer } from './virtual-agent-deployer';
+import { getTenantId } from '../redis/tenant-keys';
 
 // Initialize event publisher for audit trail
 const eventPublisher = new EventPublisher();
@@ -74,7 +75,7 @@ export interface ProvisioningResponse {
   uuid: string;
   deviceName: string;
   deviceType: string;
-  applicationId?: number;
+  tenantId: string; // Tenant identifier for MQTT topic construction
   fleetUuid?: string | null; // Changed from fleetId to fleetUuid (UUID)
   challenge?: string; // PoP challenge (if public key provided)
   createdAt: string;
@@ -748,7 +749,8 @@ export class ProvisioningService {
         `INSERT INTO mqtt_acls (clientid, username, topic, access, priority)
            VALUES ($1, $2, $3, 7, 0)
            ON CONFLICT DO NOTHING`,
-        [username, username, `iot/device/${deviceUuid}/#`]
+        // Tenant-aware ACL pattern: iot/{tenantId}/device/${deviceUuid}/#
+        [username, username, `iot/${getTenantId()}/device/${deviceUuid}/#`]
       )
     ]);
 
@@ -985,7 +987,7 @@ export class ProvisioningService {
       uuid: device.uuid,
       deviceName,
       deviceType,
-      applicationId: undefined, // Deprecated - use fleetUuid instead
+      tenantId: getTenantId(), // Pass tenant ID to agent for topic construction
       fleetUuid: device.fleet_uuid, // Use the resolved UUID from device
       ...(challenge && { challenge }), // Include challenge if PoP enabled
       createdAt: device.created_at.toISOString(),
@@ -996,9 +998,10 @@ export class ProvisioningService {
         broker: brokerUrl,
         // New consolidated config (includes credentials)
         brokerConfig: finalBrokerConfig,
+        // Tenant-aware topic patterns
         topics: {
-          publish: [`iot/device/${device.uuid}/#`],
-          subscribe: [`iot/device/${device.uuid}/#`]
+          publish: [`iot/${getTenantId()}/device/${device.uuid}/#`],
+          subscribe: [`iot/${getTenantId()}/device/${device.uuid}/#`]
         }
       },
       ...(apiTlsConfig?.caCert && {

@@ -18,6 +18,8 @@ import pLimit from 'p-limit';
 import logger, { logOperation } from '../utils/logger';
 import { isDuplicateMessage } from '../utils/mqtt-deduplication';
 import { CloudDictionaryManager } from './dictionary-manager';
+import { mqttDevicePattern, parseMqttTopic } from './topics';
+import { getTenantId } from '../redis/tenant-keys';
 
 /**
  * Deserialize MQTT payload - auto-detects DEFLATE, msgpack, or JSON format
@@ -95,6 +97,7 @@ export interface MqttConfig {
 }
 
 export interface SensorData {
+  tenantId?: string;
   deviceUuid: string;
   sensorName: string;
   timestamp: string;
@@ -103,6 +106,7 @@ export interface SensorData {
 }
 
 export interface LogMessage {
+  tenantId?: string;
   deviceUuid: string;
   containerId: string;
   containerName: string;
@@ -113,6 +117,7 @@ export interface LogMessage {
 }
 
 export interface MetricsData {
+  tenantId?: string;
   deviceUuid: string;
   timestamp: string;
   cpu_usage?: number;
@@ -125,6 +130,7 @@ export interface MetricsData {
 }
 
 export interface ParsedTopic {
+  tenantId: string;
   deviceUuid: string;
   messageType: string;
   subTopic?: string;
@@ -132,11 +138,13 @@ export interface ParsedTopic {
 }
 
 export interface StateMessage {
+  tenantId?: string;
   deviceUuid: string;
   data: any; // Full device state payload
 }
 
 export interface AgentMessage {
+  tenantId?: string;
   deviceUuid: string;
   subTopic: string;
   message: any;
@@ -144,6 +152,7 @@ export interface AgentMessage {
 
 export interface UnknownMessage {
   topic: string;
+  tenantId?: string;
   deviceUuid: string;
   messageType: string;
   data: any;
@@ -679,31 +688,34 @@ export class MqttManager extends EventEmitter {
 
     // Convert '*' to MQTT wildcard '+'
     // MQTT wildcards: + (single level), # (multi-level)
-    const mqttDevicePattern = deviceUuid === '*' ? '+' : deviceUuid;
+    const devicePattern = deviceUuid === '*' ? '+' : deviceUuid;
 
+    // Get tenant ID for this API instance
+    const tenantId = getTenantId();
+    
     const topicPatterns = topics.map(type => {
       switch (type) {
         case 'endpoints':
-          return `iot/device/${mqttDevicePattern}/endpoints/+`;
+          return mqttDevicePattern(tenantId, devicePattern, 'endpoints', '+');
         case 'state':
-          return `iot/device/${mqttDevicePattern}/state`;
+          return mqttDevicePattern(tenantId, devicePattern, 'state');
         case 'agent':
-          return `iot/device/${mqttDevicePattern}/agent/+`;
+          return mqttDevicePattern(tenantId, devicePattern, 'agent', '+');
         case 'logs':
-          return `iot/device/${mqttDevicePattern}/logs/+`;
+          return mqttDevicePattern(tenantId, devicePattern, 'logs', '+');
         case 'metrics':
-          return `iot/device/${mqttDevicePattern}/metrics`;
+          return mqttDevicePattern(tenantId, devicePattern, 'metrics');
         case 'status':
-          return `iot/device/${mqttDevicePattern}/status`;
+          return mqttDevicePattern(tenantId, devicePattern, 'status');
         case 'events':
-          return `iot/device/${mqttDevicePattern}/events/+`;
+          return mqttDevicePattern(tenantId, devicePattern, 'events', '+');
         case 'meta':
-          return `iot/device/${mqttDevicePattern}/meta/+`;
+          return mqttDevicePattern(tenantId, devicePattern, 'meta', '+');
         case 'jobs':
           // Jobs topic has two patterns, return both
           return [
-            `iot/device/${mqttDevicePattern}/jobs/+/update`,
-            `iot/device/${mqttDevicePattern}/jobs/start-next`
+            mqttDevicePattern(tenantId, devicePattern, 'jobs', '+', 'update'),
+            mqttDevicePattern(tenantId, devicePattern, 'jobs', 'start-next')
           ];
         default:
           logger.warn(`Unknown topic type: ${type}`);
@@ -711,10 +723,6 @@ export class MqttManager extends EventEmitter {
       }
     }).flat().filter(Boolean);  // Flatten arrays and remove null values
 
-    logger.info('Subscribing to MQTT topic patterns', { 
-      count: topicPatterns.length, 
-      patterns: topicPatterns 
-    });
     
     // Use Promise.all to track all subscriptions
     const subscriptionPromises = topicPatterns.map(pattern => {
@@ -936,48 +944,26 @@ export class MqttManager extends EventEmitter {
 
   /**
    * Parse MQTT topic into structured components
-   * Expected format: iot/device/{uuid}/{type}/[subTopic]
+   * Expected format: iot/{tenantId}/device/{uuid}/{type}/[subTopic]
    * 
    * @returns Parsed topic structure or null if invalid
    */
   private parseTopic(topic: string): ParsedTopic | null {
-    const parts = topic.split('/');
-    
-    // Validate minimum topic length: iot/device/{uuid}/{type}
-    if (parts.length < 4) {
-      logger.warn('Topic too short - expected at least iot/device/{uuid}/{type}', { 
-        topic, 
-        partCount: parts.length 
-      });
+    const parsed = parseMqttTopic(topic);
+    if (!parsed) {
+      logger.warn('Invalid MQTT topic format', { topic });
       return null;
     }
     
-    // Validate topic starts with iot/device
-    if (parts[0] !== 'iot' || parts[1] !== 'device') {
-      logger.warn('Invalid topic format - must start with iot/device', { topic });
-      return null;
-    }
+    // Add subTopic field for backward compatibility
+    const subTopic = parsed.rest.length > 0 ? parsed.rest[0] : undefined;
     
-    const deviceUuid = parts[2];
-    const messageType = parts[3].toLowerCase(); // Normalize to lowercase for case-insensitive matching
-    const rest = parts.slice(4);
-    const subTopic = rest.length > 0 ? rest[0] : undefined;
-    
-    // Validate required fields are non-empty
-    if (!deviceUuid || deviceUuid.trim() === '' || !messageType || messageType.trim() === '') {
-      logger.warn('Invalid topic structure - missing deviceUuid or messageType', { 
-        topic, 
-        deviceUuid: deviceUuid || '(empty)', 
-        messageType: messageType || '(empty)' 
-      });
-      return null;
-    }
-
     return {
-      deviceUuid,
-      messageType,
+      tenantId: parsed.tenantId,
+      deviceUuid: parsed.deviceUuid,
+      messageType: parsed.messageType,
       subTopic,
-      rest
+      rest: parsed.rest
     };
   }
 

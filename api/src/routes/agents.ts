@@ -31,6 +31,8 @@ import deviceAuth from '../middleware/device-auth';
 import { jwtAuth } from '../middleware/jwt-auth';
 import { virtualAgentDeployer } from '../services/virtual-agent-deployer';
 import { provisioningService } from '../services/provisioning.service';
+import { mqttDeviceTopic } from '../mqtt/topics';
+import { getTenantId } from '../redis/tenant-keys';
 
 console.log('[DEVICES-ROUTES] jwtAuth imported:', typeof jwtAuth, jwtAuth.name);
 
@@ -1530,8 +1532,11 @@ router.put('/devices/:uuid/broker', async (req, res) => {
       const mqttManager = getMqttManager();
       
       if (mqttManager && mqttManager.isConnected()) {
+        // Follow standard IoT topic pattern for device shadow
+        const tenantId = getTenantId();
+        const shadowTopic = mqttDeviceTopic(tenantId, uuid, 'shadow', 'name', 'device-state', 'update', 'delta');
         await mqttManager.publish(
-          `iot/device/${uuid}/shadow/name/device-state/update/delta`,
+          shadowTopic,
           JSON.stringify({
             state: {
               mqtt: brokerConfig
@@ -1710,8 +1715,9 @@ router.post('/devices/:uuid/update-agent', async (req, res) => {
     });
 
     // Publish update command
-    // Follow standard IoT topic pattern: iot/device/{uuid}/agent/update
-    const updateTopic = `iot/device/${uuid}/agent/update`;
+    // Follow standard IoT topic pattern: iot/{tenantId}/device/{uuid}/agent/update
+    const tenantId = getTenantId();
+    const updateTopic = mqttDeviceTopic(tenantId, uuid, 'agent', 'update');
     const updateCommand = {
       action: 'update',
       version: version || 'latest',

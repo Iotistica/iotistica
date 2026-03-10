@@ -9,6 +9,8 @@ import type { MqttManager } from './mqtt-manager';
 import { pool } from '../db/connection';
 import { EventPublisher } from '../services/event-sourcing';
 import logger from '../utils/logger';
+import { mqttDeviceTopic } from './topics';
+import { getTenantId } from '../redis/tenant-keys';
 
 export class JobsHandler {
   private eventPublisher = new EventPublisher('mqtt-jobs-handler');
@@ -100,9 +102,9 @@ export class JobsHandler {
       throw new Error('MQTT manager not initialized');
     }
     
-    const topic = job
-      ? `iot/device/${deviceUuid}/jobs/start-next/accepted`
-      : `iot/device/${deviceUuid}/jobs/start-next/rejected`;
+    const tenantId = getTenantId();
+    const topicSuffix = job ? 'accepted' : 'rejected';
+    const topic = mqttDeviceTopic(tenantId, deviceUuid, 'jobs', 'start-next', topicSuffix);
 
     const payload = job ? {
       execution: {
@@ -132,7 +134,8 @@ export class JobsHandler {
       throw new Error('MQTT manager not initialized');
     }
     
-    const topic = `iot/device/${deviceUuid}/jobs/notify`;
+    const tenantId = getTenantId();
+    const topic = mqttDeviceTopic(tenantId, deviceUuid, 'jobs', 'notify');
     const payload = JSON.stringify({
       execution: {
         jobId,

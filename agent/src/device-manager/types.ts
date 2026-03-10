@@ -33,7 +33,8 @@ export interface DeviceInfo {
 	vpnEnabled?: boolean;         // True if device was provisioned with VPN credentials
 	
 	// Additional metadata
-	applicationId?: number;
+	tenantId?: string;            // Tenant ID for MQTT topic construction
+	applicationId?: number;       // Deprecated: for backward compatibility
 	macAddress?: string;
 	osVersion?: string;
 	agentVersion?: string;
@@ -100,7 +101,8 @@ export interface ProvisionResponse {
 	uuid: string;
 	deviceName: string;
 	deviceType: string;
-	applicationId?: number;
+	tenantId?: string;             // Tenant ID for MQTT topic construction
+	applicationId?: number;        // Deprecated: for backward compatibility only
 	challenge?: string;            // Server nonce for proof-of-possession
 	mqtt: {
 		username: string,

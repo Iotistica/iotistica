@@ -12,6 +12,8 @@
 import msgpack from 'msgpack-lite';
 import { createHash } from 'crypto';
 import { DeviceDictionaryService } from '../services/agent-dictionary.service';
+import { mqttDeviceTopic as deviceTopic } from './topics';
+import { getTenantId } from '../redis/tenant-keys';
 
 // Domain types from agent (must match agent's DictionaryDomain type)
 type DictionaryDomain = 'key' | 'metric' | 'unit' | 'quality' | 'device';
@@ -847,7 +849,9 @@ export class CloudDictionaryManager {
     // Publish MQTT request to agent to resend full dictionary
     if (this.mqttPublish) {
       try {
-        const topic = `iot/device/${deviceUuid}/agent/dictionary/resync`;
+        // Follow standard IoT topic pattern: iot/{tenantId}/device/{uuid}/agent/dictionary/resync
+        const tenantId = getTenantId();
+        const topic = deviceTopic(tenantId, deviceUuid, 'agent', 'dictionary', 'resync');
         const payload = {
           action: 'resync',
           reason: 'dictionary_missing',

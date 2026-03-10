@@ -2,6 +2,7 @@ import * as pty from 'node-pty';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import type { MqttManager } from '../mqtt/manager';
+import { deviceTopic } from '../mqtt/topics.js';
 import * as os from 'os';
 import { createHmac, timingSafeEqual } from 'crypto';
 import * as fs from 'fs';
@@ -168,8 +169,8 @@ export class ShellHandler {
     this.deviceUuid = deviceUuid;
     this.mqtt = mqtt;
     this.logger = logger;
-    this.commandTopic = `iot/device/${deviceUuid}/agent/shell`;
-    this.outputTopic = `iot/device/${deviceUuid}/agent/shell-output`;
+    this.commandTopic = deviceTopic(deviceUuid, 'agent', 'shell');
+    this.outputTopic = deviceTopic(deviceUuid, 'agent', 'shell-output');
     
     // SECURITY: Load HMAC secret from environment (REQUIRED for production)
     // Without this, shell is completely disabled to prevent misconfigured deployments

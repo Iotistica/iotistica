@@ -11,6 +11,7 @@ import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import type { MqttManager } from '../../mqtt/manager';
 import { createJsonPayload } from '../../mqtt/manager';
+import { deviceTopic } from '../../mqtt/topics.js';
 import type {
 	DataPoint,
 	AnomalyConfig,
@@ -502,11 +503,11 @@ export class AnomalyDetectionService {
 			suppressed: event.suppressed,
 		});
 		
-		// Publish to MQTT (iot/device/{uuid}/events/anomaly)
+		// Publish to MQTT (iot/{tenantId}/device/{uuid}/events/anomaly)
 		const mqttConnected = this.mqttManager?.isConnected();
 		const hasDeviceUuid = !!this.deviceUuid;
 		
-		if (!mqttConnected || !hasDeviceUuid || !this.mqttManager) {
+		if (!mqttConnected || !hasDeviceUuid || !this.mqttManager || !this.deviceUuid) {
 			this.logger?.infoSync('Cannot publish anomaly event to MQTT', {
 				component: LogComponents.metrics,
 				metric: event.metric,
@@ -518,7 +519,8 @@ export class AnomalyDetectionService {
 			return;
 		}
 		
-		const topic = `iot/device/${this.deviceUuid}/events/anomaly`;
+		// TypeScript now knows this.deviceUuid is definitely a string
+		const topic = deviceTopic(this.deviceUuid, 'events', 'anomaly');
 		const msgIdGen = this.mqttManager.getMessageIdGenerator();
 		const payload = createJsonPayload(event, msgIdGen);
 		

@@ -20,7 +20,7 @@ import {
 import { EventPublisher, objectsAreEqual } from './event-sourcing';
 import EventSourcingConfig from '../events/event-sourcing';
 import { deviceSensorSync } from './agent-devices';
-import { getCustomerId } from '../redis/tenant-keys';
+import { getTenantId } from '../redis/tenant-keys';
 import logger from '../utils/logger';
 
 const eventPublisher = new EventPublisher();
@@ -221,7 +221,7 @@ export async function processDeviceStateReport(
       // Import Redis client once for both operations
       try {
         const { redisClient } = await import('../redis/client');
-        const tenantId = getCustomerId();
+        const tenantId = getTenantId();
         
         const metrics = {
           cpu_usage: deviceState.cpu_usage,

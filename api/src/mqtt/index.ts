@@ -14,6 +14,7 @@ import {
   handleJobMessage
 } from './handlers';
 import { getDefaultBrokerConfig, buildBrokerUrl } from '../utils/mqtt-broker-config';
+import { getTenantId } from '../redis/tenant-keys';
 
 let mqttManager: MqttManager | null = null;
 
@@ -207,9 +208,10 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
       
       // Add meta topic if dictionary manager enabled
       if (useKeyCompaction) {
+        const tenantId = getTenantId();
         topics.push('meta');
         logger.info('✅ Dictionary sync enabled - subscribing to meta topic', {
-          topic: 'iot/device/+/meta/#',
+          topic: `iot/${tenantId}/device/+/meta/#`,
           useKeyCompaction,
           timestamp: new Date().toISOString()
         });
@@ -220,7 +222,7 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
       
       logger.info('✅ All MQTT subscriptions active', {
         topics,
-        wildcardPattern: 'iot/device/+/{topic}/#',
+        wildcardPattern: `iot/${getTenantId()}/device/+/{topic}/#`,
         timestamp: new Date().toISOString()
       });
     } else {

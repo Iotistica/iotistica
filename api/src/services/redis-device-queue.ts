@@ -25,7 +25,7 @@ import {
   deviceSensorsIngestionStreamKey,
   deviceSensorsReadyStreamKey,
   deviceSensorsDlqStreamKey,
-  getCustomerId,
+  getTenantId,
   consumerGroupName,
   consumerName as makeConsumerName,
 } from '../redis/tenant-keys';
@@ -229,7 +229,7 @@ class RedisDeviceQueue {
   private diskSpoolReplayInterval: NodeJS.Timeout | null = null;
 
   private resolveTenantId(): string {
-    return this.tenantId || getCustomerId();
+    return this.tenantId || getTenantId();
   }
 
   constructor(tenantId?: string) {

@@ -20,7 +20,7 @@ import { query } from '../db/connection';
 import { getRedisIngestion, getRedisConsumer } from '../redis/client-factory';
 import {
   deviceLogsStreamKey,
-  getCustomerId,
+  getTenantId,
   consumerGroupName,
   consumerName as makeConsumerName,
 } from '../redis/tenant-keys';
@@ -68,7 +68,7 @@ class RedisLogQueue {
   private pipelineFlushTimer: NodeJS.Timeout | null = null;
 
   private resolveTenantId(): string {
-    return this.tenantId || getCustomerId();
+    return this.tenantId || getTenantId();
   }
 
   constructor(tenantId?: string) {

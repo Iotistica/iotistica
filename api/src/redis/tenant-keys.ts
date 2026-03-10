@@ -30,12 +30,14 @@
 import { LicenseValidator } from '../services/license-validator';
 
 /**
- * Return the validated customerId or throw.
+ * Return the validated tenantId or throw.
  * This is the single authoritative source for the tenant identifier.
  * 
- * @deprecated Use explicit tenantId parameters instead for better security
+ * In single-tenant-per-pod architecture, this extracts the tenantId from the 
+ * license JWT validated at startup. Safe to use since namespace isolation ensures
+ * each API instance only handles its own tenant.
  */
-export function getCustomerId(): string {
+export function getTenantId(): string {
   const license = LicenseValidator.getInstance().getLicense();
   const { tenantId, customerId } = license as { tenantId?: string; customerId?: string };
   const rawTenantId = tenantId || customerId;
@@ -76,7 +78,7 @@ export function tenantPrefix(tenantId: string): string {
  * @deprecated Use tenantPrefix(tenantId) with explicit parameter
  */
 export function tenantPrefixLegacy(): string {
-  return tenantPrefix(getCustomerId());
+  return tenantPrefix(getTenantId());
 }
 
 // ─── Pub/Sub channels ────────────────────────────────────────────────────────

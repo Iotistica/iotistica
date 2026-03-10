@@ -25,7 +25,8 @@ export interface Device {
   registeredAt?: number | null;
   provisioned: boolean;
   provisioningState?: string | null;  // Provisioning state machine
-  applicationId?: number | null;
+  tenantId?: string | null;           // Tenant ID from provisioning response
+  applicationId?: number | null;      // Deprecated: for backward compatibility
   macAddress?: string | null;
   osVersion?: string | null;
   agentVersion?: string | null;

@@ -57,6 +57,8 @@ import fetch from 'node-fetch';
 import { sessionManager } from './session-manager';
 import { query } from '../db/connection';
 import { createHmac } from 'crypto';
+import { mqttDeviceTopic } from '../mqtt/topics';
+import { getTenantId } from '../redis/tenant-keys';
 
 interface WebSocketClient {
   ws: WebSocket;
@@ -278,8 +280,9 @@ export class WebSocketManager {
     if (!this.shellListenersRegistered && manager) {
       this.shellListenersRegistered = true;
       
-      // Subscribe to shell-output topic
-      manager.subscribeTopic('iot/device/+/agent/shell-output', 1);
+      // Subscribe to shell-output topic - scoped to this tenant only
+      const shellOutputTopic = mqttDeviceTopic(getTenantId(), '+', 'agent', 'shell-output');
+      manager.subscribeTopic(shellOutputTopic, 1);
       
       // Register ONE event listener for agent messages (shell-output)
       manager.on('agent', (payload: any) => {
@@ -1636,7 +1639,9 @@ export class WebSocketManager {
     }
 
     try {
-      const topic = `iot/device/${deviceUuid}/agent/shell`;
+      // Follow standard IoT topic pattern: iot/{tenantId}/device/{uuid}/agent/shell
+      const tenantId = getTenantId();
+      const topic = mqttDeviceTopic(tenantId, deviceUuid, 'agent', 'shell');
       
       // Sign command with HMAC-SHA256 (security: prevents unauthorized device control)
       const signedCommand = this.signShellCommand(data, deviceUuid);

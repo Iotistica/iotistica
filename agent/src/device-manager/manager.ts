@@ -549,10 +549,17 @@ export class DeviceManager {
 					'Device Registration'
 				);
 
-				// Save server-assigned device ID and credentials
+				// Save server-assigned device ID, tenant ID, and credentials
 				this.deviceInfo.deviceId = response.id.toString();
+				this.deviceInfo.tenantId = response.tenantId; // Save tenant ID for MQTT topic construction
 				this.deviceInfo.mqttBrokerConfig = response.mqtt.brokerConfig;
 				this.deviceInfo.apiTlsConfig = response.api?.tlsConfig;
+				
+				// Cache tenant ID immediately for MQTT topic construction
+				if (response.tenantId) {
+					const { setTenantId } = await import('../mqtt/topics.js');
+					setTenantId(response.tenantId);
+				}
 				
 				// Update device name/type from server response (critical for virtual agents)
 				// Virtual agents have pre-assigned names in the database that must be preserved
@@ -568,6 +575,7 @@ export class DeviceManager {
 					component: LogComponents.deviceManager,
 					operation: 'provision',
 					responseKeys: Object.keys(response),
+					tenantId: response.tenantId,
 					mqttKeys: Object.keys(response.mqtt || {}),
 					brokerConfigKeys: Object.keys(response.mqtt?.brokerConfig || {}),
 					brokerConfig: response.mqtt?.brokerConfig,

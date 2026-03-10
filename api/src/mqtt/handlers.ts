@@ -9,7 +9,7 @@ import type { SensorData, MetricsData, StateMessage } from './mqtt-manager';
 import { processDeviceStateReport } from '../services/agent-state';
 import { redisSensorQueue } from '../services/redis-device-queue';
 import { getAnomalyEventHandler, type AnomalyEvent } from './anomaly-handler';
-import { getCustomerId } from '../redis/tenant-keys';
+import { getTenantId } from '../redis/tenant-keys';
 import logger from '../utils/logger';
 
 /**
@@ -143,15 +143,16 @@ export async function handleDeviceState(payload: StateMessage): Promise<void> {
     const stateReport = { [deviceUuid]: state };
     
     // Use shared service for consistent state processing
+    const tenantId = getTenantId();
     await processDeviceStateReport(stateReport, {
       source: 'mqtt',
-      topic: 'iot/device/+/state'
+      topic: `iot/${tenantId}/device/+/state`
     });
 
     // Publish to Redis for real-time distribution (MQTT-specific, non-blocking)
     try {
       const { redisClient } = await import('../redis/client');
-      const tenantId = getCustomerId();
+      
       
       if (deviceUuid && state) {
         // Publish full state to device:{uuid}:state channel

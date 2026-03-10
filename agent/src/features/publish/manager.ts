@@ -5,6 +5,7 @@ import { deflate as zlibDeflate } from 'zlib';
 import { getHeapStatistics } from 'v8';
 import * as msgpack from 'msgpack-lite';
 import { createJsonPayload, createMsgpackPayload, serializePayload, logCompressionStats, MqttManager } from '../../mqtt/manager.js';
+import { deviceTopic } from '../../mqtt/topics.js';
 import type { AnomalyDetectionService } from '../../ai/anomaly/index.js';
 import { getCpuUsage } from '../../system/metrics.js';
 import {
@@ -952,7 +953,8 @@ export class PublishManager extends EventEmitter {
       return;
     }
     
-    const topic = `iot/device/${this.deviceUuid}/endpoints/${this.config.mqttTopic}`;
+    // Follow standard IoT topic pattern: iot/{tenantId}/device/{uuid}/endpoints/{topic}
+    const topic = deviceTopic(this.deviceUuid, 'endpoints', this.config.mqttTopic);
     const messageCount = this.messageBatch.messages.length;
     const batchBytes = this.messageBatch.totalBytes;
     
@@ -1580,7 +1582,8 @@ export class PublishManager extends EventEmitter {
     }
     
     try {
-      const topic = `iot/device/${this.deviceUuid}/endpoints/${this.config.mqttHeartbeatTopic}`;
+      // Follow standard IoT topic pattern: iot/{tenantId}/device/{uuid}/endpoints/{topic}
+      const topic = deviceTopic(this.deviceUuid, 'endpoints', this.config.mqttHeartbeatTopic);
       const data = {
         endpoint: this.getSensorName(),
         timestamp: new Date().toISOString(),

@@ -14,6 +14,7 @@ import { AgentLogger } from './logging/agent-logger.js';
 import { LogComponents } from './logging/types.js';
 import { MqttManager, createJsonPayload } from './mqtt/manager.js';
 import { notifySystemd } from './system/watchdog.js';
+import { deviceTopic } from './mqtt/topics.js';
 
 const execAsync = promisify(exec);
 
@@ -219,9 +220,9 @@ export class AgentUpdater {
       note: "Version detected from binary, not injected config (prevents staleness after self-update)"
     });
     
-    // Follow standard IoT topic pattern: iot/device/{uuid}/agent/{action}
-    this.updateTopic = `iot/device/${this.deviceUuid}/agent/update`;
-    this.statusTopic = `iot/device/${this.deviceUuid}/agent/status`;
+    // Follow standard IoT topic pattern: iot/{tenantId}/device/{uuid}/agent/{action}
+    this.updateTopic = deviceTopic(this.deviceUuid, 'agent', 'update');
+    this.statusTopic = deviceTopic(this.deviceUuid, 'agent', 'status');
   }
 
   /**
