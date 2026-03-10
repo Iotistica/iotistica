@@ -16,7 +16,8 @@
     "dev:create-template-db": "ts-node src/scripts/create-template-db.ts",
     "create-template": "ts-node scripts/create-template.ts",
     "dev:generate-license": "ts-node src/scripts/generate-license.ts",
-    "generate-license": "node dist/scripts/generate-license.js"
+    "generate-license": "node dist/scripts/generate-license.js",
+    "cleanup:old-vault": "ts-node tools/1password-cleanup-old-vault.ts"
   },
   "keywords": [
     "billing",
