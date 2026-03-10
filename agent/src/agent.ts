@@ -9,14 +9,14 @@
  * - Logging
  */
 
-import { StateReconciler, DeviceState } from "./managers/reconciler.js";
+import { StateManager, DeviceState } from "./managers/state.js";
 import ContainerManager from "./compose/container-manager.js";
 import { DeviceManager } from "./managers/index.js";
 import type { DeviceInfo } from "./managers/types.js";
 import { DeviceAPI } from "./api/index.js";
 import { router as v1Router } from "./api/v1.js";
 import * as deviceActions from "./api/actions.js";
-import { CloudSync } from "./managers/sync.js";
+import { CloudSync } from "./managers/cloud.js";
 import { CloudLogBackend } from "./logging/cloud-backend.js";
 import { ContainerLogMonitor } from "./logging/docker-monitor.js";
 import { AgentLogger } from "./logging/agent-logger.js";
@@ -76,7 +76,7 @@ import { initSync as runInitSync, initDeviceSync as runInitDeviceSync } from './
 
 
 export default class Agent {
-  private stateReconciler!: StateReconciler; // Main state manager
+  private stateReconciler!: StateManager; // Main state manager
   private containerManager!: ContainerManager; // Keep for backward compatibility with DeviceAPI
   private deviceManager!: DeviceManager;
   private deviceInfo!: DeviceInfo; // Cache device info after initialization

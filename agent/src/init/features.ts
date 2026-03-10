@@ -17,7 +17,7 @@ import { SensorsFeature, type SensorConfig } from '../features/adapters/index.js
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
 import { MqttManager } from '../mqtt/manager.js';
-import { StateReconciler } from '../managers/reconciler.js';
+import { StateManager } from '../managers/state.js';
 import { getPackageVersion } from '../utils/api-utils.js';
 
 export interface FeatureContext {
@@ -27,7 +27,7 @@ export interface FeatureContext {
   httpClient: any; // Shared HTTP client with connection pooling (singleton pattern)
   containerManager: any;
   deviceManager: any;
-  stateReconciler: StateReconciler;
+  stateReconciler: StateManager;
   configSettings: Record<string, any>;
   configFeatures: Record<string, any>;
   configProtocols?: Record<string, any>; // New: protocols section from target state

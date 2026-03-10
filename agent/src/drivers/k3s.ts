@@ -60,7 +60,7 @@ export class K3sDriver extends BaseOrchestratorDriver {
 		super(logger);
 		
 		this.kubeconfigPath = config?.kubeconfigPath || '/etc/rancher/k3s/k3s.yaml';
-		this.namespace = config?.namespace || 'iotistic';
+		this.namespace = config?.namespace || 'iotistica';
 		this.inCluster = config?.inCluster || false;
 	}
 
@@ -130,8 +130,8 @@ export class K3sDriver extends BaseOrchestratorDriver {
 					metadata: {
 						name: this.namespace,
 						labels: {
-							'managed-by': 'iotistic-agent',
-							'iotistic.io/managed': 'true'
+							'managed-by': 'iotistica-agent',
+							'iotistica.io/managed': 'true'
 						}
 					}
 				});

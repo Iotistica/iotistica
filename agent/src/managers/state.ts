@@ -46,7 +46,7 @@ interface StateReconcilerEvents {
 	'anomaly-config-changed': (change: { old: any; new: any }) => void;
 }
 
-export class StateReconciler extends EventEmitter {
+export class StateManager extends EventEmitter {
 	private targetState: DeviceState = { apps: {}, config: {} };
 	private previousState: DeviceState = { apps: {}, config: {} };
 	private containerManager: ContainerManager;

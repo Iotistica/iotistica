@@ -1,5 +1,5 @@
 import { initDatabase } from './database.js';
-import type { DeviceState } from '../managers/reconciler.js';
+import type { DeviceState } from '../managers/state.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import type { FeatureInitializer } from './features.js';
 import type { DiscoveryService } from '../features/discovery/discovery-service.js';
@@ -84,8 +84,8 @@ export async function initCore(ctx: AgentInitContext): Promise<void> {
 }
 
 export async function initializeStateReconciler(agent: any): Promise<void> {
-	const { StateReconciler } = await import('../managers/reconciler.js');
-	agent.stateReconciler = new StateReconciler();
+	const { StateManager: StateManager } = await import('../managers/state.js');
+	agent.stateReconciler = new StateManager();
 	await agent.stateReconciler.init();
 	agent.configManager = agent.stateReconciler.getConfigManager();
 }

@@ -17,7 +17,7 @@
  */
 
 import { EventEmitter } from 'events';
-import type { StateReconciler, DeviceState } from './reconciler';
+import type { StateManager, DeviceState } from './state';
 import type { DeviceManager } from '.';
 import * as systemMetrics from '../system/metrics';
 import { ConnectionMonitor } from '../network/connection-monitor';
@@ -30,6 +30,7 @@ import { createHttpClient, FetchHttpClient } from '../lib/http-client.js';
 import { RetryPolicy, CircuitBreaker, AsyncLock, isAuthError } from '../utils/retry-policy';
 import { createHash } from 'crypto';
 import { MetadataModel } from '../db/models/metadata.model.js';
+import { deviceTopic } from '../mqtt/topics.js';
 
 /**
  * Stable JSON stringify - sorts object keys recursively to ensure deterministic output
@@ -132,7 +133,7 @@ interface TargetStateResponse {
 }
 
 export class CloudSync extends EventEmitter {
-	private stateReconciler: StateReconciler;
+	private stateManager: StateManager;
 	private deviceManager: DeviceManager;
 	private config: Required<CloudSyncConfig>;
 	private httpClient: HttpClient;
@@ -179,7 +180,7 @@ export class CloudSync extends EventEmitter {
 	private connectionMonitor: ConnectionMonitor;
 	private reportQueue: OfflineQueue<DeviceStateReport>;
 	private logger?: AgentLogger;
-	private sensorPublish?: any; // Optional sensor-publish feature for health reporting
+	private devicePublish?: any; // Optional sensor-publish feature for health reporting
 	private endpoints?: any; // Optional endpoints feature for health reporting
 	private mqttManager?: any; // Optional MQTT manager for state reporting
 	
@@ -226,21 +227,21 @@ export class CloudSync extends EventEmitter {
 	};
 	
 	constructor(
-		stateReconciler: StateReconciler,
+		stateManager: StateManager,
 		deviceManager: DeviceManager,
 		config: CloudSyncConfig,
 		logger?: AgentLogger,
-		sensorPublish?: any,
+		devicePublish?: any,
 		endpoints?: any,
 		mqttManager?: any,
 		httpClient?: HttpClient,
 		agentUpdater?: any
 	) {
 		super();
-		this.stateReconciler = stateReconciler;
+		this.stateManager = stateManager;
 		this.deviceManager = deviceManager;
 		this.logger = logger;
-		this.sensorPublish = sensorPublish;
+		this.devicePublish = devicePublish;
 		this.mqttManager = mqttManager;
 		this.agentUpdater = agentUpdater;
 		
@@ -420,15 +421,18 @@ export class CloudSync extends EventEmitter {
 		}
 		
 		this.isReporting = true;
-		this.logger?.infoSync('Starting state reporting', {
+		this.logger?.infoSync('State reporting loop started', {
 			component: LogComponents.cloudSync,
-			endpoint: this.config.cloudApiEndpoint,
+			httpFallbackEndpoint: this.config.cloudApiEndpoint,
+			transportStrategy: 'mqtt-primary-http-fallback',
+			mqttConnected: this.mqttManager?.isConnected?.() ?? false,
+			eventType: 'reporting-startup',
 			intervalMs: this.config.reportInterval
 		});
 		
 		// Listen for state changes from reconciler (remove old listener first)
-		this.stateReconciler.removeListener('reconciliation-complete', this.reconciliationCompleteHandler);
-		this.stateReconciler.on('reconciliation-complete', this.reconciliationCompleteHandler);
+		this.stateManager.removeListener('reconciliation-complete', this.reconciliationCompleteHandler);
+		this.stateManager.on('reconciliation-complete', this.reconciliationCompleteHandler);
 		
 		// Start reporting loop
 		await this.reportLoop();
@@ -462,7 +466,7 @@ export class CloudSync extends EventEmitter {
 			this.connectionMonitor.removeListener('online', this.onlineHandler);
 			this.connectionMonitor.removeListener('offline', this.offlineHandler);
 			this.connectionMonitor.removeListener('degraded', this.degradedHandler);
-			this.stateReconciler.removeListener('reconciliation-complete', this.reconciliationCompleteHandler);
+			this.stateManager.removeListener('reconciliation-complete', this.reconciliationCompleteHandler);
 			
 			if (this.mqttManager && typeof this.mqttManager.removeListener === 'function') {
 				this.mqttManager.removeListener('connect', this.mqttReconnectHandler);
@@ -764,7 +768,7 @@ export class CloudSync extends EventEmitter {
 			this.targetState = newTargetState;
 			
 			// Apply target state to state reconciler (handles both containers and config)
-			await this.stateReconciler.setTarget(this.targetState);
+			await this.stateManager.setTarget(this.targetState);
 			
 			// // Trigger reconciliation
 			// this.emit('target-state-changed', this.targetState);
@@ -1041,7 +1045,7 @@ export class CloudSync extends EventEmitter {
 		
 		// Build current state report
 		
-		const currentState = await this.stateReconciler.getCurrentState();
+		const currentState = await this.stateManager.getCurrentState();
 	
 		// Get metrics if interval elapsed
 		const includeMetrics = timeSinceLastMetrics >= this.config.metricsInterval;
@@ -1186,9 +1190,9 @@ export class CloudSync extends EventEmitter {
 		});
 	}		// Add publish pipeline health stats (if sensor-publish is enabled)
 
-	if (this.sensorPublish) {
+	if (this.devicePublish) {
 			try {
-				const sensorStats = this.sensorPublish.getStats();
+				const sensorStats = this.devicePublish.getStats();
 				(stateReport[deviceInfo.uuid] as any).publish_health = sensorStats;
 			} catch (error) {
 				this.logger?.warnSync('Failed to collect publish pipeline stats', {
@@ -1344,7 +1348,7 @@ export class CloudSync extends EventEmitter {
 		
 		// Send report to cloud
 		try {
-			await this.sendReport(reportToSend);
+			const transport = await this.sendReport(reportToSend);
 
 			// Update hashes after successful send (ALWAYS, even if unchanged)
 			this.lastConfigHash = endpointsHash;
@@ -1379,6 +1383,7 @@ export class CloudSync extends EventEmitter {
 			// Log what was actually sent
 			this.logger?.infoSync('Reported current state', {
 				...optimizationDetails,
+				transport,
 				reportKeys: Object.keys(reportToSend[deviceInfo.uuid] || {}),
 				endpointCount: reportToSend[deviceInfo.uuid]?.config?.endpoints?.length || 0,
 				endpointHealthCount: Object.keys(endpointHealth).length
@@ -1427,8 +1432,22 @@ export class CloudSync extends EventEmitter {
 	 * Send report to cloud API
 	 * Uses MQTT as primary path with HTTP as fallback
 	 */
-	private async sendReport(report: DeviceStateReport): Promise<void> {
+	private async sendReport(report: DeviceStateReport): Promise<'mqtt' | 'http'> {
 		const deviceInfo = this.deviceManager.getDeviceInfo();
+		const legacyTopic = `iot/device/${deviceInfo.uuid}/state`;
+		let topic = legacyTopic;
+
+		// Prefer tenant-scoped topic to match API subscriptions: iot/{tenantId}/device/{uuid}/state
+		try {
+			topic = deviceTopic(deviceInfo.uuid, 'state');
+		} catch (error) {
+			this.logger?.warnSync('Tenant ID missing for MQTT topic, using legacy topic format', {
+				component: LogComponents.cloudSync,
+				operation: 'mqtt-topic-fallback',
+				error: error instanceof Error ? error.message : String(error),
+				legacyTopic,
+			});
+		}
 		
 		// Check MQTT health FIRST - skip if disconnected to avoid wasted attempts
 		const mqttHealthy = this.mqttManager?.isConnected() ?? false;
@@ -1436,19 +1455,20 @@ export class CloudSync extends EventEmitter {
 		// Try MQTT first if manager is available AND healthy
 		if (mqttHealthy) {
 			try {
-				const topic = `iot/device/${deviceInfo.uuid}/state`;
 				const payload = stableStringify(report);
 				const payloadSize = Buffer.byteLength(payload, 'utf8');
 			
 			// QoS 1 is better - will help for small network blips
 			await this.mqttManager!.publishNoQueue(topic, payload, { qos: 1 });
 			
-			this.logger?.debugSync('State report sent via MQTT', {
+			this.logger?.infoSync('State report delivered via MQTT', {
 				component: LogComponents.cloudSync,
 				operation: 'mqtt-success',
+				topic,
 				bytes: payloadSize,
 				transport: 'mqtt'
-			});				return; // Success - no need for HTTP fallback
+			});
+			return 'mqtt'; // Success - no need for HTTP fallback
 				
 			} catch (mqttError) {
 				// MQTT failed (timeout or publish error) - log and fall through to HTTP
@@ -1488,11 +1508,12 @@ export class CloudSync extends EventEmitter {
 			throw new Error(`${protocol.toUpperCase()} ${response.status}: ${response.statusText}`);
 		}
 		
-		this.logger?.debugSync(`State report sent via ${protocol.toUpperCase()}`, {
+		this.logger?.infoSync(`State report sent via ${protocol.toUpperCase()}`, {
 			component: LogComponents.cloudSync,
 			operation: 'http-success',
 			transport: protocol
 		});
+		return 'http';
 	}
 	
 	/**

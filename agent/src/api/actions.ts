@@ -5,7 +5,7 @@
 
 import ContainerManager from '../compose/container-manager';
 import type { DeviceManager } from '../managers';
-import type { CloudSync } from '../managers/sync';
+import type { CloudSync } from '../managers/cloud';
 import type { AgentLogger } from '../logging/agent-logger';
 import type { AnomalyDetectionService } from '../ai/anomaly';
 import type { SimulationOrchestrator } from '../simulation';
