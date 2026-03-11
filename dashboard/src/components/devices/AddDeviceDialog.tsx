@@ -2,7 +2,7 @@
  * Add Sensor Dialog
  * 
  * Tabbed interface for protocol-specific device configuration.
- * Supports: Modbus TCP/RTU, OPC-UA, MQTT (coming soon)
+ * Supports: Modbus TCP/RTU, OPC-UA, MQTT
  * Uses React Hook Form with validation.
  */
 
@@ -32,7 +32,8 @@ import { ModbusConfigForm } from './ModbusConfigForm';
 import { DataPointsTable } from './DataPointsTable';
 import { OPCUAConfigForm } from './OPCUAConfigForm';
 import { OPCUADataPointsTable } from './OPCUADataPointsTable';
-import type { ModbusDeviceConfig, ModbusDataPoint, OPCUADeviceConfig, OPCUADataPoint } from '@/schemas/sensor-schemas';
+import { MqttConfigForm } from './MqttConfigForm';
+import type { ModbusDeviceConfig, ModbusDataPoint, OPCUADeviceConfig, OPCUADataPoint, MQTTDeviceConfig } from '@/schemas/sensor-schemas';
 
 interface AddSensorDialogProps {
   open: boolean;
@@ -62,6 +63,10 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
   const [opcuaConfig, setOpcuaConfig] = useState<OPCUADeviceConfig | null>(null);
   const [opcuaFormValid, setOpcuaFormValid] = useState(false);
   const [opcuaDataPoints, setOpcuaDataPoints] = useState<OPCUADataPoint[]>([]);
+
+  // MQTT form state
+  const [mqttConfig, setMqttConfig] = useState<MQTTDeviceConfig | null>(null);
+  const [mqttFormValid, setMqttFormValid] = useState(false);
 
   const loadLocations = async () => {
     try {
@@ -141,8 +146,32 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
         setLoading(false);
       }
     } else if (selectedProtocol === 'mqtt') {
-      setError('MQTT device onboarding in this dialog is coming soon.');
-      return;
+      if (!mqttConfig || !mqttFormValid) {
+        setError('Please complete all required fields');
+        return;
+      }
+
+      const finalConfig: MQTTDeviceConfig = {
+        ...mqttConfig,
+        protocol: 'mqtt',
+        dataPoints: [],
+        connection: {
+          ...mqttConfig.connection,
+          topic: mqttConfig.connection.topic?.trim(),
+          topics: mqttConfig.connection.topic?.trim() ? [mqttConfig.connection.topic.trim()] : [],
+          discoveryRoots: mqttConfig.connection.topic?.trim() ? [mqttConfig.connection.topic.trim()] : [],
+        }
+      };
+
+      try {
+        setLoading(true);
+        await onSaveDevice({ ...finalConfig, location });
+        handleClose();
+      } catch (err: any) {
+        setError(err.message || 'Failed to save device');
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -152,7 +181,9 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
     setModbusDataPoints([]);
     setOpcuaConfig(null);
     setOpcuaDataPoints([]);
+    setMqttConfig(null);
     setSelectedProtocol('modbus');
+    setMqttFormValid(false);
     setLocation('');
     onOpenChange(false);
   };
@@ -165,7 +196,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
       // OPC UA uses auto-discovery, nodes are optional
       return opcuaFormValid;
     } else if (selectedProtocol === 'mqtt') {
-      return false;
+      return mqttFormValid;
     }
     return false;
   };
@@ -173,8 +204,8 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent
-        className="w-[min(96vw,980px)] max-w-[96vw] !p-0 overflow-hidden flex flex-col"
-        style={{ height: '66vh', maxHeight: '66vh' }}
+        className="!p-0 overflow-hidden flex flex-col"
+        style={{ width: '66vh', maxWidth: '66vh', height: '66vh', maxHeight: '66vh' }}
       >
         <DialogHeader className="px-6 py-4">
           <DialogTitle>Add Device</DialogTitle>
@@ -294,12 +325,13 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
           )}
 
           {selectedProtocol === 'mqtt' && (
-            <Alert>
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                MQTT protocol appears in the selector now, but configuration flow in this modal is not implemented yet.
-              </AlertDescription>
-            </Alert>
+            <div className="space-y-6">
+              <MqttConfigForm
+                value={mqttConfig || undefined}
+                onChange={setMqttConfig}
+                onValidationChange={setMqttFormValid}
+              />
+            </div>
           )}
         </div>
 

@@ -489,7 +489,18 @@ export class SensorsFeature extends BaseFeature {
             dataType: d.connection.dataType || 'float32',
             unit: d.connection.unit,
             metric: d.connection.metric,
-            deviceId: d.connection.deviceId
+            deviceId: d.connection.deviceId,
+            timestampField: d.connection.timestampField,
+            metrics: Array.isArray((d.connection as any).metrics)
+              ? (d.connection as any).metrics.map((metric: any) => ({
+                  field: metric.field,
+                  metric: metric.metric,
+                  unit: metric.unit,
+                  type: metric.type,
+                }))
+              : undefined,
+            autoMetrics: Boolean((d.connection as any).autoMetrics),
+            allowArrayMetrics: Boolean((d.connection as any).allowArrayMetrics)
           })),
 
           logging: {

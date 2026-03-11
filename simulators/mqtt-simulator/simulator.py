@@ -7,6 +7,7 @@ import random
 import signal
 import sys
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -74,12 +75,22 @@ class MqttSimulator:
         self.password = os.environ.get("MQTT_PASSWORD") or os.environ.get("MQTT_AUTH_PASSWORD")
         self.client_id = os.environ.get("MQTT_CLIENT_ID", "iotistic-mqtt-simulator")
         self.publish_interval_ms = int(os.environ.get("PUBLISH_INTERVAL_MS", "1000"))
+        self.payload_mode = os.environ.get("MQTT_PAYLOAD_MODE", "multi").lower()
+        self.timestamp_field = os.environ.get("MQTT_TIMESTAMP_FIELD", "ts")
+        self.timestamp_format = os.environ.get("MQTT_TIMESTAMP_FORMAT", "epoch_ms").lower()
+        self.log_publish_events = os.environ.get("LOG_PUBLISH_EVENTS", "true").lower() == "true"
 
         if not self.username or not self.password:
             raise ValueError("MQTT auth is required: set MQTT_USERNAME and MQTT_PASSWORD")
 
         if self.publish_interval_ms < 100:
             raise ValueError("PUBLISH_INTERVAL_MS must be >= 100")
+
+        if self.payload_mode not in ("single", "multi"):
+            raise ValueError("MQTT_PAYLOAD_MODE must be one of: single, multi")
+
+        if self.timestamp_format not in ("epoch_ms", "iso"):
+            raise ValueError("MQTT_TIMESTAMP_FORMAT must be one of: epoch_ms, iso")
 
         parsed = urlparse(self.broker_url)
         if parsed.scheme not in ("mqtt", "tcp"):
@@ -101,13 +112,21 @@ class MqttSimulator:
             raise ValueError(f"Profile '{self.profile_name}' has no dataPoints")
 
         self.publishers = [DataPointPublisher(dp) for dp in datapoints]
+        self.publishers_by_topic = defaultdict(list)
+        for publisher in self.publishers:
+            self.publishers_by_topic[publisher.topic].append(publisher)
 
         self.client = mqtt.Client(client_id=self.client_id)
         self.client.username_pw_set(self.username, self.password)
+        self.client.enable_logger(logger)
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
+        self.client.on_publish = self._on_publish
 
         self.running = True
+        self._publish_count = 0
+        self._log_every = int(os.environ.get("LOG_PUBLISH_EVERY", "60"))
+        self._pending_publish = {}
 
     def _on_connect(self, client, userdata, flags, rc):
         if rc != 0:
@@ -118,24 +137,96 @@ class MqttSimulator:
     def _on_disconnect(self, client, userdata, rc):
         logger.warning("Disconnected from MQTT broker rc=%s", rc)
 
+    def _on_publish(self, client, userdata, mid):
+        queued = self._pending_publish.pop(mid, None)
+        if not queued:
+            return
+
+        topic, queued_at = queued
+        if self.log_publish_events:
+            elapsed_ms = int((time.time() - queued_at) * 1000)
+            logger.info("Publish confirmed topic=%s mid=%s latency_ms=%s", topic, mid, elapsed_ms)
+
     def stop(self, *_):
         self.running = False
 
+    def _build_multi_metric_payload(self, publishers, now: float):
+        if self.timestamp_format == "iso":
+            timestamp_value = datetime.now(timezone.utc).isoformat()
+        else:
+            timestamp_value = int(now * 1000)
+
+        payload = {
+            self.timestamp_field: timestamp_value,
+        }
+
+        for pub in publishers:
+            payload[pub.name] = pub.next_value(now)
+
+        return payload
+
+    def _publish_single_mode(self, now: float):
+        for pub in self.publishers:
+            value = pub.next_value(now)
+            payload = pub.build_payload(value)
+            msg = json.dumps(payload, separators=(",", ":"))
+            info = self.client.publish(pub.topic, msg, qos=pub.qos, retain=pub.retain)
+            if info.rc != mqtt.MQTT_ERR_SUCCESS:
+                logger.error("Publish failed topic=%s rc=%s", pub.topic, info.rc)
+            else:
+                self._pending_publish[info.mid] = (pub.topic, time.time())
+                if self.log_publish_events:
+                    logger.info("Publish queued topic=%s mid=%s qos=%s retain=%s", pub.topic, info.mid, pub.qos, pub.retain)
+
+    def _publish_multi_mode(self, now: float):
+        for topic, publishers in self.publishers_by_topic.items():
+            payload = self._build_multi_metric_payload(publishers, now)
+            msg = json.dumps(payload, separators=(",", ":"))
+
+            qos = max(pub.qos for pub in publishers)
+            retain = any(pub.retain for pub in publishers)
+            info = self.client.publish(topic, msg, qos=qos, retain=retain)
+            if info.rc != mqtt.MQTT_ERR_SUCCESS:
+                logger.error("Publish failed topic=%s rc=%s", topic, info.rc)
+            else:
+                self._pending_publish[info.mid] = (topic, time.time())
+                if self.log_publish_events:
+                    metric_count = sum(1 for k in payload.keys() if k != self.timestamp_field)
+                    logger.info(
+                        "Publish queued topic=%s mid=%s qos=%s retain=%s metrics=%s",
+                        topic,
+                        info.mid,
+                        qos,
+                        retain,
+                        metric_count,
+                    )
+
     def run(self):
-        logger.info("Starting MQTT simulator profile=%s datapoints=%d", self.profile_name, len(self.publishers))
+        logger.info(
+            "Starting MQTT simulator profile=%s datapoints=%d mode=%s topics=%d",
+            self.profile_name,
+            len(self.publishers),
+            self.payload_mode,
+            len(self.publishers_by_topic),
+        )
         self.client.connect(self.host, self.port, keepalive=60)
         self.client.loop_start()
 
         try:
             while self.running:
                 now = time.time()
-                for pub in self.publishers:
-                    value = pub.next_value(now)
-                    payload = pub.build_payload(value)
-                    msg = json.dumps(payload, separators=(",", ":"))
-                    info = self.client.publish(pub.topic, msg, qos=pub.qos, retain=pub.retain)
-                    if info.rc != mqtt.MQTT_ERR_SUCCESS:
-                        logger.error("Publish failed topic=%s rc=%s", pub.topic, info.rc)
+                if self.payload_mode == "single":
+                    self._publish_single_mode(now)
+                else:
+                    self._publish_multi_mode(now)
+                self._publish_count += 1
+                if self._log_every > 0 and self._publish_count % self._log_every == 0:
+                    logger.info(
+                        "Publish summary count=%d topics=%d interval_ms=%d",
+                        self._publish_count,
+                        len(self.publishers_by_topic),
+                        self.publish_interval_ms,
+                    )
                 time.sleep(self.publish_interval_ms / 1000.0)
         finally:
             self.client.loop_stop()

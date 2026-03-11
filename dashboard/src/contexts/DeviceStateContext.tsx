@@ -465,12 +465,9 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
   
   // Update sensor in config (local only)
   const updatePendingSensor = useCallback((deviceUuid: string, sensorName: string, updates: any) => {
-    console.log(`[DeviceStateContext] updatePendingSensor called: ${sensorName}`, updates);
-    
     setDeviceStates(prev => {
       const deviceState = prev[deviceUuid];
       if (!deviceState) {
-        console.log('[DeviceStateContext] No device state found for', deviceUuid);
         return prev;
       }
       
@@ -479,8 +476,6 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
         apps: { ...deviceState.targetState?.apps },
         config: { ...deviceState.targetState?.config }
       };
-      
-      console.log('[DeviceStateContext] Current pending config.endpoints:', (currentPending.config as any)?.endpoints?.map((e: any) => ({ id: e.id, uuid: e.uuid, name: e.name, enabled: e.enabled })));
       
       // Update sensor in endpoints array
       const updatedConfig = { ...currentPending.config };
@@ -491,8 +486,6 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
           ? { ...device, ...updates }
           : device
       );
-      
-      console.log('[DeviceStateContext] Updated config.endpoints:', updatedConfig.endpoints.map((e: any) => ({ id: e.id, uuid: e.uuid, name: e.name, enabled: e.enabled })));
       
       return {
         ...prev,
@@ -551,12 +544,6 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
     
     try {
       // Save to API (device_target_state table) - sets needs_deployment = true
-      console.log('[saveTargetState] Sending to API:', {
-        deviceUuid,
-        apps: deviceState.pendingChanges.apps,
-        configEndpoints: (deviceState.pendingChanges.config as any)?.endpoints?.map((e: any) => ({ id: e.id, uuid: e.uuid, name: e.name, enabled: e.enabled }))
-      });
-      
       const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/target-state`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },

@@ -85,8 +85,6 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
   // Initialize form with existing device data
   useEffect(() => {
     if (device && open) {
-      console.log('[EditSensorDialog] Initializing with device:', device);
-      
       // Load location autocomplete options
       loadLocations();
       
@@ -103,8 +101,7 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
           connection: device.connection,
           dataPoints: device.dataPoints || [],
         };
-        
-        console.log('[EditSensorDialog] Modbus config:', config);
+
         setModbusConfig(config);
         setModbusDataPoints(device.dataPoints || []);
         setModbusFormValid(true); // Assume valid since it was saved before
@@ -118,8 +115,7 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
           connection: device.connection,
           dataPoints: device.dataPoints || [],
         };
-        
-        console.log('[EditSensorDialog] OPC-UA config:', config);
+
         setOpcuaConfig(config);
         setOpcuaDataPoints(device.dataPoints || []);
         setOpcuaFormValid(true); // Assume valid since it was saved before
@@ -158,12 +154,6 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
 
       try {
         setLoading(true);
-        console.log('[EditSensorDialog] Saving Modbus device update', {
-          originalName: device.name,
-          originalUuid: device.uuid,
-          nextName: finalConfig.name,
-          payload: { ...finalConfig, uuid: device.uuid, location }
-        });
         await onUpdateDevice(device.name, { ...finalConfig, uuid: device.uuid, location });
         handleClose();
       } catch (err: any) {
@@ -188,12 +178,6 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
 
       try {
         setLoading(true);
-        console.log('[EditSensorDialog] Saving OPCUA device update', {
-          originalName: device.name,
-          originalUuid: device.uuid,
-          nextName: finalConfig.name,
-          payload: { ...finalConfig, uuid: device.uuid, location }
-        });
         await onUpdateDevice(device.name, { ...finalConfig, uuid: device.uuid, location });
         handleClose();
       } catch (err: any) {

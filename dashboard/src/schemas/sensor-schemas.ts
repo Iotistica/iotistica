@@ -209,13 +209,48 @@ export interface OPCUADeviceConfig {
 }
 
 // ============================================================================
+// MQTT Types
+// ============================================================================
+
+export type MQTTDataType = 'number' | 'boolean' | 'string' | 'json' | 'float32' | 'int32' | 'uint32';
+
+export interface MQTTMetricConfig {
+  field: string;
+  metric: string;
+  unit?: string;
+  type?: MQTTDataType;
+}
+
+export interface MQTTConnection {
+  topic: string;
+  qos?: 0 | 1 | 2;
+  dataType: MQTTDataType;
+  unit?: string;
+  metric?: string;
+  deviceId?: string;
+  topics?: string[];
+  discoveryRoots?: string[];
+  metrics?: MQTTMetricConfig[];
+  autoMetrics?: boolean;
+}
+
+export interface MQTTDeviceConfig {
+  name: string;
+  protocol: 'mqtt';
+  enabled: boolean;
+  pollInterval: number;
+  connection: MQTTConnection;
+  dataPoints: any[];
+}
+
+// ============================================================================
 // Protocol Adapter Device (Union Type)
 // ============================================================================
 
 /**
  * Union type for all protocol device configurations
  */
-export type ProtocolDeviceConfig = ModbusDeviceConfig | OPCUADeviceConfig;
+export type ProtocolDeviceConfig = ModbusDeviceConfig | OPCUADeviceConfig | MQTTDeviceConfig;
 
 // ============================================================================
 // Helper Functions

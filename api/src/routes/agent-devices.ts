@@ -96,9 +96,9 @@ router.post('/devices/:uuid/sensors', jwtAuth, async (req, res) => {
       });
     }
 
-    // OPC UA uses auto-discovery, dataPoints can be empty
+    // OPC UA and MQTT use connection-driven ingestion, dataPoints can be empty
     // Other protocols (e.g., Modbus) require at least one data point
-    if (sensorConfig.protocol !== 'opcua') {
+    if (!['opcua', 'mqtt'].includes(sensorConfig.protocol)) {
       if (!sensorConfig.dataPoints || sensorConfig.dataPoints.length === 0) {
         return res.status(400).json({
           error: 'Validation failed',
@@ -210,8 +210,8 @@ router.put('/devices/:uuid/sensors/:name', jwtAuth, async (req, res) => {
         });
       }
       
-      // Only enforce non-empty dataPoints for non-OPC UA protocols
-      if (updates.protocol && updates.protocol !== 'opcua' && updates.dataPoints && updates.dataPoints.length === 0) {
+      // Only enforce non-empty dataPoints for protocols that require explicit point maps
+      if (updates.protocol && !['opcua', 'mqtt'].includes(updates.protocol) && updates.dataPoints && updates.dataPoints.length === 0) {
         return res.status(400).json({
           error: 'Validation failed',
           message: 'Data points must be a non-empty array'

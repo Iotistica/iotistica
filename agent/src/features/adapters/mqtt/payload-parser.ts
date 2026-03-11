@@ -12,30 +12,21 @@
  * 
  * Strategy:
  * 1. Try JSON parse first
- * 2. If JSON object with 'value' key, extract it
- * 3. Otherwise, parse as plain text
+ * 2. If valid JSON, return parsed object/primitive
+ * 3. Otherwise, return plain text
  * 
  * @param payload - Raw MQTT message buffer
- * @param dataType - Expected data type (number, boolean, string, json, etc.)
- * @returns Parsed and coerced value
- * @throws Error if parsing or coercion fails
+ * @returns Parsed raw value (object, array, primitive, or string)
  */
-export function parsePayload(payload: Buffer, dataType: string): number | boolean | string {
+export function parsePayload(payload: Buffer): unknown {
   const str = payload.toString();
 
   // Try JSON first
   try {
-    const json = JSON.parse(str);
-    
-    // If JSON object with 'value' key, extract it
-    if (typeof json === 'object' && json.value !== undefined) {
-      return coerceType(json.value, dataType);
-    }
-    
-    return coerceType(json, dataType);
+    return JSON.parse(str);
   } catch {
-    // Not JSON, parse as plain text
-    return coerceType(str, dataType);
+    // Not JSON, return as plain text
+    return str;
   }
 }
 
@@ -94,6 +85,6 @@ export function coerceType(value: any, dataType: string): number | boolean | str
     case 'string':
       return String(value);
     default:
-      return value;
+      return String(value);
   }
 }

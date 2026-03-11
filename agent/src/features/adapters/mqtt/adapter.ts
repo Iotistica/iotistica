@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import * as mqtt from 'mqtt';
 import * as mqttPattern from 'mqtt-pattern';
 import { SensorDataPoint, DeviceStatus, Logger } from '../types.js';
-import { MqttAdapterConfig, MqttDevice } from './types.js';
+import { MqttAdapterConfig, MqttDevice, MqttMetricConfig } from './types.js';
 import { parsePayload, coerceType } from './payload-parser.js';
 
 /**
@@ -38,13 +38,47 @@ export class MqttAdapter extends EventEmitter {
   private emitQueueDepth = 0;
   private droppedMessageCount = 0;
   private firstConnect = true; // Track first connection for subscription logic
+  private compiledMetrics = new Map<string, Array<MqttMetricConfig & { path: string[] }>>();
+  private compiledTimestampFields = new Map<string, string[]>();
 
   constructor(config: MqttAdapterConfig, logger: Logger) {
     super();
     this.config = config;
     this.logger = logger;
+
+    for (const device of this.config.devices) {
+      if (device.timestampField) {
+        this.compiledTimestampFields.set(
+          device.name,
+          this.compileMetricPath(device.timestampField, Boolean(device.allowArrayMetrics))
+        );
+      }
+
+      if (device.metrics && device.metrics.length > 0) {
+        this.compiledMetrics.set(
+          device.name,
+          device.metrics.map(metric => ({
+            ...metric,
+            path: this.compileMetricPath(metric.field, Boolean(device.allowArrayMetrics))
+          }))
+        );
+      }
+    }
     
     this.initializeDeviceStatuses();
+  }
+
+  private compileMetricPath(field: string, allowArrayMetrics: boolean): string[] {
+    if (!field) {
+      return [];
+    }
+
+    const normalized = allowArrayMetrics
+      // Convert bracket numeric indexing only: values[0] -> values.0
+      ? field.replace(/\[(\d+)\]/g, '.$1')
+      : field;
+
+    return normalized.split('.').filter(Boolean);
   }
 
   /**
@@ -274,6 +308,73 @@ export class MqttAdapter extends EventEmitter {
     return undefined;
   }
 
+  private getFieldFast(payload: any, path: string[]): any {
+    let value = payload;
+    for (const segment of path) {
+      if (value == null) {
+        return undefined;
+      }
+      value = value[segment];
+    }
+    return value;
+  }
+
+  private resolveTimestamp(rawTimestamp: any, fallback: string): string {
+    if (rawTimestamp === undefined || rawTimestamp === null) {
+      return fallback;
+    }
+
+    // Numeric epoch support: seconds or milliseconds
+    if (typeof rawTimestamp === 'number' && Number.isFinite(rawTimestamp)) {
+      const epochMs = rawTimestamp < 1_000_000_000_000 ? rawTimestamp * 1000 : rawTimestamp;
+      const date = new Date(epochMs);
+      return Number.isNaN(date.getTime()) ? fallback : date.toISOString();
+    }
+
+    // String support: ISO date or numeric epoch string
+    if (typeof rawTimestamp === 'string') {
+      const trimmed = rawTimestamp.trim();
+      if (!trimmed) {
+        return fallback;
+      }
+
+      const numeric = Number(trimmed);
+      if (Number.isFinite(numeric)) {
+        const epochMs = numeric < 1_000_000_000_000 ? numeric * 1000 : numeric;
+        const date = new Date(epochMs);
+        return Number.isNaN(date.getTime()) ? fallback : date.toISOString();
+      }
+
+      const date = new Date(trimmed);
+      return Number.isNaN(date.getTime()) ? fallback : date.toISOString();
+    }
+
+    return fallback;
+  }
+
+  private buildMetricPoint(
+    device: MqttDevice,
+    metric: string,
+    rawValue: any,
+    unit: string,
+    type: string | undefined,
+    topic: string,
+    now: string,
+    retain: boolean
+  ): SensorDataPoint {
+    const value = coerceType(rawValue, type || device.dataType || 'string');
+
+    return {
+      deviceName: device.name,
+      metric: metric || topic,
+      value,
+      unit,
+      timestamp: now,
+      quality: retain ? 'UNCERTAIN' : 'GOOD',
+      ...(retain && { qualityCode: 'RETAINED_MESSAGE' })
+    };
+  }
+
   /**
    * Handle incoming MQTT message
    * 
@@ -282,8 +383,6 @@ export class MqttAdapter extends EventEmitter {
    * @param retain - Retained message flag (true = stale/historical data)
    */
   private handleMessage(topic: string, payload: Buffer, retain: boolean = false): void {
-    const payloadString = payload.toString();
-    
     this.logger.debug(`[MQTT] handleMessage: topic=${topic}, retain=${retain}, payloadSize=${payload.length}`);
     
     // Production fix #8: Max payload size guard
@@ -326,24 +425,107 @@ export class MqttAdapter extends EventEmitter {
     }
 
     try {
-      const value = parsePayload(payload, device.dataType);
+      const parsed = parsePayload(payload);
       const now = new Date().toISOString();
-      
-      // Create sensor data point
-      const dataPoint: SensorDataPoint = {
-        deviceName: device.name,
-        metric: device.metric || topic,
-        value,
-        unit: device.unit || '',
-        timestamp: now,
-        // Retained messages are stale - mark as UNCERTAIN (age unknown)
-        quality: retain ? 'UNCERTAIN' : 'GOOD',
-        ...(retain && { qualityCode: 'RETAINED_MESSAGE' })
-      };
+      const timestampPath = this.compiledTimestampFields.get(device.name);
+      const payloadTimestamp = timestampPath && typeof parsed === 'object' && parsed !== null
+        ? this.resolveTimestamp(this.getFieldFast(parsed, timestampPath), now)
+        : now;
+      const points: SensorDataPoint[] = [];
 
+      const compiledDeviceMetrics = this.compiledMetrics.get(device.name);
+      if (compiledDeviceMetrics && compiledDeviceMetrics.length > 0) {
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          for (const metricConfig of compiledDeviceMetrics) {
+            const rawValue = this.getFieldFast(parsed, metricConfig.path);
+
+            if (rawValue === undefined) {
+              this.logger.debug(`MQTT metric field not found in payload`, {
+                topic,
+                deviceName: device.name,
+                field: metricConfig.field,
+              });
+              continue;
+            }
+
+            try {
+              points.push(this.buildMetricPoint(
+                device,
+                metricConfig.metric,
+                rawValue,
+                metricConfig.unit || '',
+                metricConfig.type,
+                topic,
+                payloadTimestamp,
+                retain
+              ));
+            } catch (fieldError) {
+              this.logger.warn(`Failed to coerce MQTT metric field '${metricConfig.field}'`, {
+                topic,
+                deviceName: device.name,
+                metric: metricConfig.metric,
+                error: fieldError instanceof Error ? fieldError.message : String(fieldError)
+              });
+            }
+          }
+        } else {
+          this.logger.warn('MQTT multi-metric config requires JSON object payload', {
+            topic,
+            deviceName: device.name
+          });
+        }
+      }
+
+      if (device.autoMetrics && typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        for (const [key, rawValue] of Object.entries(parsed)) {
+          // Skip nested objects/arrays in auto mode to avoid emitting ambiguous metrics.
+          if (rawValue !== null && typeof rawValue === 'object') {
+            continue;
+          }
+
+          try {
+            points.push(this.buildMetricPoint(
+              device,
+              key,
+              rawValue,
+              '',
+              undefined,
+              topic,
+              payloadTimestamp,
+              retain
+            ));
+          } catch (fieldError) {
+            this.logger.warn(`Failed to coerce MQTT auto metric field '${key}'`, {
+              topic,
+              deviceName: device.name,
+              error: fieldError instanceof Error ? fieldError.message : String(fieldError)
+            });
+          }
+        }
+      }
+
+      // Backward-compatible fallback: single metric per message.
+      if (points.length === 0) {
+        const singleSource =
+          typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) && (parsed as any).value !== undefined
+            ? (parsed as any).value
+            : parsed;
+
+        points.push(this.buildMetricPoint(
+          device,
+          device.metric || topic,
+          singleSource,
+          device.unit || '',
+          device.dataType,
+          topic,
+          payloadTimestamp,
+          retain
+        ));
+      }
+      
       // Emit data event with backpressure tracking
       this.emitQueueDepth++;
-      this.emit('data', [dataPoint]);
+      this.emit('data', points);
       setImmediate(() => this.emitQueueDepth--);
 
       // Only track message activity for fresh (non-retained) messages
