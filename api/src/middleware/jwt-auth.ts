@@ -411,15 +411,6 @@ export async function jwtValidate(
       let payload: JWTPayload;
       try {
         payload = verifyToken(token);
-        logger.info('Legacy token verified successfully', { username: payload.username });
-        logger.info('Token payload claims', {
-          type: payload.type,
-          username: payload.username,
-          auth0Sub: payload.auth0Sub,
-          customerId: payload.customerId,
-          userId: payload.userId,
-          role: payload.role
-        });
       } catch (error: any) {
         logger.warn('Legacy token verification failed', { message: error.message });
         res.status(401).json({

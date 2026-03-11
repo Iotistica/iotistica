@@ -192,6 +192,17 @@ export default function App() {
   // URL routing integration (no UI changes, just URL sync)
   const { currentPath, navigateToAgent, navigateToGlobal, navigateToFleet } = useRouting();
 
+  // If an agent is selected but view is a non-global non-agent view (e.g. "home"),
+  // restore to metrics so right panels render correctly after refresh.
+  useEffect(() => {
+    if (!selectedDevice || isGlobalView) return;
+    if (agentViews.includes(currentView)) return;
+
+    const fleetUuid = selectedDevice.fleet_uuid || undefined;
+    setCurrentView('metrics');
+    navigateToAgent(selectedDevice.deviceUuid, fleetUuid, 'metrics');
+  }, [selectedDevice, isGlobalView, agentViews, currentView, navigateToAgent]);
+
   // Sync URL with current view and selected device
   useEffect(() => {
     if (currentPath.type === 'agent' && currentPath.agentId) {

@@ -27,6 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const handleTokensCleared = () => {
+      localStorage.removeItem('user');
       setUser(null);
       setIsLoading(false);
     };
@@ -44,6 +45,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const initAuth = async () => {
       const accessToken = localStorage.getItem('accessToken');
       const refreshTokenValue = localStorage.getItem('refreshToken');
+      const storedUserJson = localStorage.getItem('user');
+
+      if (storedUserJson) {
+        try {
+          const parsedUser = JSON.parse(storedUserJson) as User;
+          if (isMounted) {
+            setUser(parsedUser);
+          }
+        } catch {
+          localStorage.removeItem('user');
+        }
+      }
 
       if (!accessToken || !refreshTokenValue) {
         if (isMounted) setIsLoading(false);
@@ -63,6 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (response.ok) {
           const data = await response.json();
           setUser(data.data.user);
+          localStorage.setItem('user', JSON.stringify(data.data.user));
         } else if (response.status === 401) {
           // Try to refresh token inline (avoid circular dependency)
           try {
@@ -92,39 +106,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               if (userResponse.ok) {
                 const userData = await userResponse.json();
                 setUser(userData.data.user);
+                localStorage.setItem('user', JSON.stringify(userData.data.user));
               } else {
-                // Failed to get user, clear tokens
-                console.warn('Failed to fetch user after token refresh, clearing tokens');
-                localStorage.removeItem('accessToken');
-                localStorage.removeItem('refreshToken');
+                // Keep tokens on transient/server errors; clear only on explicit unauthorized.
+                if (userResponse.status === 401 || userResponse.status === 403) {
+                  console.warn('User fetch unauthorized after token refresh, clearing tokens');
+                  localStorage.removeItem('accessToken');
+                  localStorage.removeItem('refreshToken');
+                  localStorage.removeItem('user');
+                  setUser(null);
+                } else {
+                  console.warn(`User fetch after refresh returned ${userResponse.status}; preserving auth state`);
+                }
               }
             } else {
-              // Refresh failed, clear tokens
-              console.warn('Token refresh failed during auth init, clearing tokens');
-              localStorage.removeItem('accessToken');
-              localStorage.removeItem('refreshToken');
+              // Clear only on explicit unauthorized/forbidden; preserve on transient errors.
+              if (refreshResponse.status === 401 || refreshResponse.status === 403) {
+                console.warn('Token refresh unauthorized during auth init, clearing tokens');
+                localStorage.removeItem('accessToken');
+                localStorage.removeItem('refreshToken');
+                localStorage.removeItem('user');
+                setUser(null);
+              } else {
+                console.warn(`Token refresh returned ${refreshResponse.status}; preserving auth state`);
+              }
             }
           } catch (refreshError) {
             console.error('Token refresh error:', refreshError);
-            if (isMounted) {
-              console.warn('Exception during token refresh, clearing tokens');
-              localStorage.removeItem('accessToken');
-              localStorage.removeItem('refreshToken');
-            }
+            console.warn('Exception during token refresh, preserving auth state for retry');
           }
         } else {
-          // Other error status, clear tokens
-          console.warn(`Auth verification failed with status ${response.status}, clearing tokens`);
-          localStorage.removeItem('accessToken');
-          localStorage.removeItem('refreshToken');
+          // Preserve tokens on non-401 errors (e.g., deploy restart, 5xx)
+          console.warn(`Auth verification returned status ${response.status}, preserving auth state`);
         }
       } catch (error) {
         console.error('Auth initialization error:', error);
-        if (isMounted) {
-          console.warn('Exception during auth init, clearing tokens');
-          localStorage.removeItem('accessToken');
-          localStorage.removeItem('refreshToken');
-        }
+        console.warn('Exception during auth init, preserving auth state for retry');
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -140,6 +157,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = (accessToken: string, refreshTokenValue: string, userData: User) => {
     localStorage.setItem('accessToken', accessToken);
     localStorage.setItem('refreshToken', refreshTokenValue);
+    localStorage.setItem('user', JSON.stringify(userData));
     setUser(userData);
   };
 
@@ -166,6 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Clear local state
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
+    localStorage.removeItem('user');
     localStorage.removeItem('selectedDeviceId');
     setUser(null);
 

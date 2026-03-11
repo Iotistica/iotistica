@@ -549,7 +549,7 @@ export function TimelineCard({
                       }
                     >
                       <td colSpan={6} className="py-2 px-4">
-                        <div className="inline-flex items-center gap-3 text-5xl font-bold text-foreground uppercase tracking-wide leading-none">
+                        <div className="inline-flex items-center gap-3 text-[72px] font-bold text-foreground uppercase tracking-wide leading-none">
                           {collapsedGroups[groupKey] ? (
                             <ChevronRight className="h-5 w-5" />
                           ) : (
@@ -557,7 +557,7 @@ export function TimelineCard({
                           )}
                           <span className="h-2 w-2 rounded-full bg-foreground/70" />
                           <span>{getDateGroupLabel(groupKey)}</span>
-                          <span className="text-2xl text-muted-foreground normal-case font-medium leading-none">
+                          <span className="text-[44px] text-muted-foreground normal-case font-medium leading-none">
                             ({groupedEvents[groupKey].length} {groupedEvents[groupKey].length === 1 ? 'event' : 'events'})
                           </span>
                         </div>

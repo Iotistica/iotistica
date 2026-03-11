@@ -158,7 +158,13 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
 
       try {
         setLoading(true);
-        await onUpdateDevice(device.name, { ...finalConfig, location });
+        console.log('[EditSensorDialog] Saving Modbus device update', {
+          originalName: device.name,
+          originalUuid: device.uuid,
+          nextName: finalConfig.name,
+          payload: { ...finalConfig, uuid: device.uuid, location }
+        });
+        await onUpdateDevice(device.name, { ...finalConfig, uuid: device.uuid, location });
         handleClose();
       } catch (err: any) {
         setError(err.message || 'Failed to update device');
@@ -182,7 +188,13 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
 
       try {
         setLoading(true);
-        await onUpdateDevice(device.name, { ...finalConfig, location });
+        console.log('[EditSensorDialog] Saving OPCUA device update', {
+          originalName: device.name,
+          originalUuid: device.uuid,
+          nextName: finalConfig.name,
+          payload: { ...finalConfig, uuid: device.uuid, location }
+        });
+        await onUpdateDevice(device.name, { ...finalConfig, uuid: device.uuid, location });
         handleClose();
       } catch (err: any) {
         setError(err.message || 'Failed to update device');

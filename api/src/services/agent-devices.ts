@@ -176,10 +176,11 @@ export class DeviceSensorSyncService {
     try {
       // Get existing sensors from table (fetch full records to compare changes AND health status)
       const existingResult = await query(
-        'SELECT name, uuid, enabled, poll_interval, connection, data_points, metadata, deployment_status, health_connected, location FROM device_sensors WHERE device_uuid = $1',
+        'SELECT id, name, uuid, config_id, enabled, poll_interval, connection, data_points, metadata, deployment_status, health_connected, location FROM device_sensors WHERE device_uuid = $1',
         [deviceUuid]
       );
       const existingByUuid = new Map(existingResult.rows.map((r: any) => [r.uuid, r]));
+      const existingByConfigId = new Map(existingResult.rows.map((r: any) => [r.config_id, r]));
       const existingByName = new Map(existingResult.rows.map((r: any) => [r.name, r]));
       const existingUuids = new Set(existingResult.rows.map((r: any) => r.uuid).filter(Boolean));
       const configUuids = new Set(configDevices.map(d => d.uuid).filter(Boolean));
@@ -188,8 +189,13 @@ export class DeviceSensorSyncService {
       for (const endpoint of configDevices) {
         const enrichedEndpointMetadata = endpoint.metadata || {};
         
-        if (endpoint.uuid && existingUuids.has(endpoint.uuid)) {
-          const existing = existingByUuid.get(endpoint.uuid);
+        const endpointStableId = endpoint.uuid || endpoint.id;
+        const existingByStableId = endpointStableId
+          ? (existingByUuid.get(endpointStableId) || existingByConfigId.get(endpointStableId))
+          : undefined;
+
+        if (existingByStableId) {
+          const existing = existingByStableId;
           
           // Update existing sensor by UUID (stable identifier)
           // Keep the existing deployment_status during deploy to avoid flipping all to pending.
@@ -231,25 +237,29 @@ export class DeviceSensorSyncService {
             });
           }
           
+          const stableSensorUuid = existing.uuid || endpoint.uuid || endpoint.id || uuidv4();
+
           await query(
             `UPDATE device_sensors SET
               name = $1,
-              protocol = $2,
-              enabled = $3,
-              poll_interval = $4,
-              connection = $5,
-              data_points = $6,
-              metadata = $7,
-              location = $8,
-              updated_by = $9,
-              config_version = $10,
+              uuid = $2,
+              protocol = $3,
+              enabled = $4,
+              poll_interval = $5,
+              connection = $6,
+              data_points = $7,
+              metadata = $8,
+              location = $9,
+              updated_by = $10,
+              config_version = $11,
               synced_to_config = true,
-              deployment_status = $11,
-              config_id = $12
+              deployment_status = $12,
+              config_id = $13
               -- CRITICAL: DO NOT update health_* fields here - they come from updateEndpointHealth()
-            WHERE device_uuid = $13 AND uuid = $14`,
+            WHERE id = $14`,
             [
               endpoint.name,
+              stableSensorUuid,
               endpoint.protocol,
               endpoint.enabled,
               endpoint.pollInterval,
@@ -260,9 +270,8 @@ export class DeviceSensorSyncService {
               userId || 'system',
               configVersion,
               deploymentStatus,
-              endpoint.uuid || null, // Use UUID (not numeric id) for config_id
-              deviceUuid,
-              endpoint.uuid
+              endpointStableId || stableSensorUuid,
+              existing.id
             ]
           );
           logger.info(`Updated: ${endpoint.name} (${endpoint.protocol}) - ${deploymentStatus}`);

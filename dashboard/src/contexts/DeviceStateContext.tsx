@@ -480,16 +480,19 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
         config: { ...deviceState.targetState?.config }
       };
       
-      console.log('[DeviceStateContext] Current pending config.endpoints:', (currentPending.config as any)?.endpoints?.map((e: any) => ({ name: e.name, enabled: e.enabled })));
+      console.log('[DeviceStateContext] Current pending config.endpoints:', (currentPending.config as any)?.endpoints?.map((e: any) => ({ id: e.id, uuid: e.uuid, name: e.name, enabled: e.enabled })));
       
       // Update sensor in endpoints array
       const updatedConfig = { ...currentPending.config };
       const existingDevices = updatedConfig.endpoints || [];
+      const updateIdentity = updates?.uuid || updates?.id;
       updatedConfig.endpoints = existingDevices.map((device: any) =>
-        device.name === sensorName ? { ...device, ...updates } : device
+        ((updateIdentity && (device.uuid === updateIdentity || device.id === updateIdentity)) || device.name === sensorName)
+          ? { ...device, ...updates }
+          : device
       );
       
-      console.log('[DeviceStateContext] Updated config.endpoints:', updatedConfig.endpoints.map((e: any) => ({ name: e.name, enabled: e.enabled })));
+      console.log('[DeviceStateContext] Updated config.endpoints:', updatedConfig.endpoints.map((e: any) => ({ id: e.id, uuid: e.uuid, name: e.name, enabled: e.enabled })));
       
       return {
         ...prev,
@@ -551,7 +554,7 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
       console.log('[saveTargetState] Sending to API:', {
         deviceUuid,
         apps: deviceState.pendingChanges.apps,
-        configEndpoints: (deviceState.pendingChanges.config as any)?.endpoints?.map((e: any) => ({ name: e.name, enabled: e.enabled }))
+        configEndpoints: (deviceState.pendingChanges.config as any)?.endpoints?.map((e: any) => ({ id: e.id, uuid: e.uuid, name: e.name, enabled: e.enabled }))
       });
       
       const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/target-state`), {

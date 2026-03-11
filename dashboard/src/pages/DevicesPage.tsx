@@ -244,6 +244,19 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         throw new Error(errorMessage);
       }
       const data = await response.json();
+
+      const getSensorIdentity = (sensor: any) => sensor?.uuid || sensor?.configId || sensor?.id || sensor?.name;
+      const hasPendingChanges = (pendingSensor: any, deployedSensor: any) => {
+        const pendingEnabled = pendingSensor.enabled !== undefined ? pendingSensor.enabled : true;
+        const deployedEnabled = deployedSensor.enabled !== undefined ? deployedSensor.enabled : true;
+
+        return pendingSensor.name !== deployedSensor.name ||
+          pendingSensor.protocol !== deployedSensor.protocol ||
+          pendingEnabled !== deployedEnabled ||
+          (pendingSensor.pollInterval ?? null) !== (deployedSensor.pollInterval ?? null) ||
+          JSON.stringify(pendingSensor.connection || {}) !== JSON.stringify(deployedSensor.connection || {}) ||
+          JSON.stringify(pendingSensor.dataPoints || []) !== JSON.stringify(deployedSensor.dataPoints || []);
+      };
       
       
       // Merge pipelines and protocol adapter devices
@@ -260,6 +273,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         
         return {
           uuid: d.uuid || d.configId, // Use uuid from table, fallback to configId
+          configId: d.configId,
           name: d.name,
           state: isConnected ? 'CONNECTED' : 'DISCONNECTED',
           healthy: health ? (health.status === 'healthy' || health.connected) : d.connected,
@@ -295,6 +309,13 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           } : null,
         };
       });
+
+      console.log('[DevicesPage] fetchSensors:api devices', devices.map((device: any) => ({
+        uuid: device.uuid,
+        name: device.name,
+        protocol: device.protocol,
+        deploymentStatus: device.deploymentStatus,
+      })));
       
       // Get pending devices from config (devices not yet deployed)
       const pendingConfig = getPendingConfig(deviceUuid);
@@ -306,12 +327,18 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
       const pendingSensors = pendingEndpoints
         .filter((s: any) => {
-          // Only include sensors that are NOT in the database yet
-          return !devices.find((d: any) => d.name === s.name);
+          const matchingDevice = devices.find((d: any) => getSensorIdentity(d) === getSensorIdentity(s));
+
+          if (!matchingDevice) {
+            return true;
+          }
+
+          return hasPendingChanges(s, matchingDevice);
         })
         .map((s: any) => {
           return {
             uuid: s.id || s.uuid, // Use generated ID from addPendingSensor
+            configId: s.id || s.configId,
             name: s.name,
             state: 'DRAFT', // Use DRAFT to distinguish from deployed sensors waiting for agent
             healthy: false,
@@ -333,6 +360,13 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           };
         });
 
+      console.log('[DevicesPage] fetchSensors:pending sensors', pendingSensors.map((sensor: any) => ({
+        uuid: sensor.uuid,
+        name: sensor.name,
+        protocol: sensor.protocol,
+        deploymentStatus: sensor.deploymentStatus,
+      })));
+
       // All deployed devices are shown (no filtering needed since API handles removal of discovery parents)
       const sortedDevices = [...devices].sort((a, b) => {
         const statusOrder = { 'pending': 0, 'deployed': 1, 'failed': 2 };
@@ -340,12 +374,23 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         const bOrder = statusOrder[b.deploymentStatus as keyof typeof statusOrder] ?? 3;
         return aOrder - bOrder;
       });
+
+      const pendingSensorIds = new Set(pendingSensors.map((sensor: any) => getSensorIdentity(sensor)));
+      const mergedDevices = sortedDevices.filter((sensor: any) => !pendingSensorIds.has(getSensorIdentity(sensor)));
       
       // Virtual devices now come through regular devices endpoint (no separate fetch needed)
       // They have metadata.sidecar === true
 
       // Show newly added devices (DRAFT) at the top, then sorted devices (includes virtual devices now)
-      setSensors([...pendingSensors, ...pipelines, ...sortedDevices]);
+      console.log('[DevicesPage] fetchSensors:final merged list', [...pendingSensors, ...pipelines, ...mergedDevices].map((sensor: any) => ({
+        uuid: sensor.uuid,
+        configId: sensor.configId,
+        name: sensor.name,
+        protocol: sensor.protocol,
+        deploymentStatus: sensor.deploymentStatus,
+        type: sensor.type,
+      })));
+      setSensors([...pendingSensors, ...pipelines, ...mergedDevices]);
       setError(null);
     } catch (err: any) {
       setError(err.message);
@@ -422,6 +467,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
   const handleUpdateProtocolDevice = async (deviceName: string, updates: any) => {
     try {
+      console.log('[DevicesPage] handleUpdateProtocolDevice:start', {
+        deviceUuid,
+        originalName: deviceName,
+        updates,
+      });
       
       // Call PUT /api/v1/devices/:uuid/sensors/:name?validateOnly=true
       // This validates updates without persisting to DB
@@ -439,6 +489,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       }
 
       const result = await response.json();
+  console.log('[DevicesPage] handleUpdateProtocolDevice:validateOnly response', result);
 
       // Check if API returned validated updates (validateOnly mode)
       if (!result.updates) {
@@ -447,6 +498,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
       // Update pending state (React only - not in DB yet)
       await updatePendingSensor(deviceUuid, deviceName, result.updates);
+      console.log('[DevicesPage] handleUpdateProtocolDevice:pending updated', {
+        originalName: deviceName,
+        updatedName: result.updates?.name,
+        updatedUuid: result.updates?.uuid,
+      });
 
       // Refresh sensor list
       await fetchSensors();

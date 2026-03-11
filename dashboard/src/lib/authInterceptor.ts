@@ -40,8 +40,10 @@ async function refreshAccessToken(): Promise<boolean> {
     });
 
     if (!response.ok) {
-      // Refresh failed, clear tokens
-      clearAuthTokens('refresh_failed');
+      // Only clear on definitive auth failure. Preserve state on transient/server errors.
+      if (response.status === 401 || response.status === 403) {
+        clearAuthTokens('refresh_failed_unauthorized');
+      }
       return false;
     }
 
@@ -50,7 +52,7 @@ async function refreshAccessToken(): Promise<boolean> {
     return true;
   } catch (error) {
     console.error('Token refresh error:', error);
-    clearAuthTokens('refresh_exception');
+    // Network errors can occur during deploy/startup; do not force logout.
     return false;
   }
 }
