@@ -262,7 +262,24 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       }
       const data = await response.json();
 
-      const getSensorIdentity = (sensor: any) => sensor?.uuid || sensor?.configId || sensor?.id || sensor?.name;
+      const getSensorIdentity = (sensor: any) => {
+        const explicitId = sensor?.uuid || sensor?.configId || sensor?.id;
+        if (explicitId) {
+          return String(explicitId);
+        }
+
+        // Fallback identity for pending vs deployed reconciliation when IDs differ.
+        // Example: validateOnly/pending may have a temp ID while deployed has DB UUID.
+        const protocol = String(sensor?.protocol || '').trim().toLowerCase();
+        const name = String(sensor?.name || '').trim().toLowerCase();
+        return `${protocol}:${name}`;
+      };
+
+      const getSensorLogicalKey = (sensor: any) => {
+        const protocol = String(sensor?.protocol || '').trim().toLowerCase();
+        const name = String(sensor?.name || '').trim().toLowerCase();
+        return `${protocol}:${name}`;
+      };
       const hasPendingChanges = (pendingSensor: any, deployedSensor: any) => {
         const pendingEnabled = pendingSensor.enabled !== undefined ? pendingSensor.enabled : true;
         const deployedEnabled = deployedSensor.enabled !== undefined ? deployedSensor.enabled : true;
@@ -379,7 +396,12 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       });
 
       const pendingSensorIds = new Set(pendingSensors.map((sensor: any) => getSensorIdentity(sensor)));
-      const mergedDevices = sortedDevices.filter((sensor: any) => !pendingSensorIds.has(getSensorIdentity(sensor)));
+      const pendingSensorLogicalKeys = new Set(pendingSensors.map((sensor: any) => getSensorLogicalKey(sensor)));
+      const mergedDevices = sortedDevices.filter((sensor: any) => {
+        const byId = pendingSensorIds.has(getSensorIdentity(sensor));
+        const byLogicalKey = pendingSensorLogicalKeys.has(getSensorLogicalKey(sensor));
+        return !(byId || byLogicalKey);
+      });
       
       // Virtual devices now come through regular devices endpoint (no separate fetch needed)
       // They have metadata.sidecar === true

@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2026-03-10 22:00:31
+# Generated: 2026-03-10 23:19:20
 # Agents: 1 to 1
 # Ports: 48481 to 48481
 
@@ -26,9 +26,12 @@ services:
       - DEVICE_API_PORT=48481
       - CLOUD_API_ENDPOINT=https://localhost:3443
       - NODE_ENV=development
+      - MQTT_BROKER_URL=mqtt://localhost:5883
+      - MQTT_USERNAME=admin
+      - MQTT_PASSWORD=iotistic42!
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=2699e2f76f2131b186563204f441d0877ba4167c3861ad7495ae7cfaceb28f90
+      - PROVISIONING_KEY=50dc64d140472d352484d2ee1de3b4e4cca4b45a3604cf36cbc1232e60d03597
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)

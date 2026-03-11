@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db/connection';
 import { jwtAuth } from '../middleware/jwt-auth';
+import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 
 const router = Router();
 
@@ -9,6 +11,56 @@ const router = Router();
 //       so '/' here means /dashboard-layouts/* - this is path-specific and safe
 router.use('/', jwtAuth);
 
+async function resolveLayoutUserId(req: Request): Promise<number | null> {
+  if (!req.user) {
+    return null;
+  }
+
+  // Legacy/local auth users already carry DB-backed integer IDs
+  if (typeof req.user.id === 'number' && req.user.id > 0) {
+    return req.user.id;
+  }
+
+  // Auth0 path: req.user.id is 0, use identity fields to map/create local user row
+  const email = req.user.email?.trim().toLowerCase();
+  const username = req.user.username?.trim(); // Auth0 sub (e.g., google-oauth2|...)
+
+  if (!email && !username) {
+    return null;
+  }
+
+  const existing = await query(
+    `SELECT id
+     FROM users
+     WHERE ($1::text IS NOT NULL AND LOWER(email) = $1)
+        OR ($2::text IS NOT NULL AND username = $2)
+     ORDER BY id ASC
+     LIMIT 1`,
+    [email || null, username || null]
+  );
+
+  if (existing.rows.length > 0) {
+    return existing.rows[0].id;
+  }
+
+  // Create minimal local user record for FK-backed tables (dashboard_layouts, etc.)
+  const generatedPassword = crypto.randomBytes(32).toString('hex');
+  const passwordHash = await bcrypt.hash(generatedPassword, 10);
+
+  // Keep username length within users.username varchar(255)
+  const baseUsername = (username || email || `auth0-${Date.now()}`).slice(0, 255);
+  const role = req.user.role && req.user.role.trim() ? req.user.role : 'user';
+
+  const inserted = await query(
+    `INSERT INTO users (username, email, password_hash, role, is_active, email_verified)
+     VALUES ($1, $2, $3, $4, true, true)
+     RETURNING id`,
+    [baseUsername, email || `${baseUsername}@auth.local`, passwordHash, role]
+  );
+
+  return inserted.rows[0]?.id ?? null;
+}
+
 /**
  * GET /api/v1/dashboard-layouts/:deviceUuid
  * Get dashboard layout for a device or 'global' for multi-device dashboard
@@ -16,7 +68,7 @@ router.use('/', jwtAuth);
 router.get('/:deviceUuid', async (req: Request, res: Response) => {
   try {
     const { deviceUuid } = req.params;
-    const userId = req.user.id;
+    const userId = await resolveLayoutUserId(req);
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -84,7 +136,7 @@ router.get('/:deviceUuid', async (req: Request, res: Response) => {
 router.get('/:deviceUuid/all', async (req: Request, res: Response) => {
   try {
     const { deviceUuid } = req.params;
-    const userId = req.user.id;
+    const userId = await resolveLayoutUserId(req);
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -125,7 +177,7 @@ router.post('/:deviceUuid', async (req: Request, res: Response) => {
   try {
     const { deviceUuid } = req.params;
     const { layoutName = 'Default', widgets, isDefault = false } = req.body;
-    const userId = req.user.id;
+    const userId = await resolveLayoutUserId(req);
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -225,7 +277,7 @@ router.post('/:deviceUuid', async (req: Request, res: Response) => {
 router.get('/by-share-token/:shareToken', async (req: Request, res: Response) => {
   try {
     const { shareToken } = req.params;
-    const userId = req.user.id;
+    const userId = await resolveLayoutUserId(req);
 
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });

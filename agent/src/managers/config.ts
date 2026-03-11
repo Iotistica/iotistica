@@ -927,13 +927,17 @@ export class ConfigManager extends EventEmitter {
 							});
 						}
 					} else {
-						this.logger?.warnSync('⚠️ Cannot check discovery cache', {
+						const protocol = String(normalizedDevice.protocol || '').toLowerCase();
+						const logFn = endpointUrl ? this.logger?.warnSync.bind(this.logger) : this.logger?.debugSync.bind(this.logger);
+
+						logFn?.('⚠️ Cannot check discovery cache', {
 							component: LogComponents.configManager,
 							deviceUuid: normalizedDevice.uuid,
 							deviceName: normalizedDevice.name,
+							protocol,
 							hasEndpointUrl: !!endpointUrl,
 							hasDiscoveryService: !!this.discoveryService,
-							reason: endpointUrl ? 'No discoveryService' : 'No endpointUrl'
+							reason: endpointUrl ? 'No discoveryService' : 'No endpointUrl (expected for some protocols like mqtt)'
 						});
 					}
 					

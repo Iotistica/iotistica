@@ -88,6 +88,9 @@ param(
     [string]$EnableProtocolAdapters = "true",
     [string]$EnableSensorPublish = "true",
     [string]$EnableFirstBootDiscovery = "true",
+    [string]$MqttBrokerUrl = "mqtt://localhost:5883",
+    [string]$MqttUsername = "admin",
+    [string]$MqttPassword = "iotistic42!",
     [string]$ModbusTcpHost = "iotistic-modbus-sim",
     [int]$ModbusTcpPort = 502,
     [int]$ModbusSlaveRangeStart = 1,
@@ -517,6 +520,9 @@ $networkConfig
       - DEVICE_API_PORT=$port
       - CLOUD_API_ENDPOINT=$cloudApiEndpoint
       - NODE_ENV=$NodeEnv
+      - MQTT_BROKER_URL=$MqttBrokerUrl
+      - MQTT_USERNAME=$MqttUsername
+      - MQTT_PASSWORD=$MqttPassword
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=$RequireProvisioning
       - PROVISIONING_KEY=$apiKey

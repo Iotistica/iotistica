@@ -450,21 +450,24 @@ export class SensorsFeature extends BaseFeature {
           this.logger.info(`MQTT ADAPTER: Found ${dbDevices.length} MQTT devices in database`);
         }
         
-        // Parse broker URL from target state config (e.g., "mqtt://10.0.0.60:1883")
-        if (!this.config.mqtt!.connection?.brokerUrl) {
-          throw new Error('MQTT brokerUrl not found in target state configuration');
+        // MQTT broker is infrastructure-level config (not per-endpoint target-state config).
+        // Require explicit environment configuration to avoid implicit fallbacks.
+        const mqttRootConfig = (this.config.mqtt as any) || {};
+        const brokerUrl = process.env.MQTT_BROKER_URL;
+        if (!brokerUrl) {
+          throw new Error('MQTT_BROKER_URL is required for MQTT adapter startup');
         }
-        
+
         let brokerHost: string;
         let brokerPort: number;
         
         try {
-          const url = new URL(this.config.mqtt!.connection.brokerUrl);
+          const url = new URL(brokerUrl);
           brokerHost = url.hostname;
           brokerPort = parseInt(url.port) || 1883;
-          this.logger.info(`MQTT ADAPTER: Using broker from target state: ${brokerHost}:${brokerPort}`);
+          this.logger.info(`MQTT ADAPTER: Using broker ${brokerHost}:${brokerPort} from MQTT_BROKER_URL`);
         } catch (error) {
-          throw new Error(`Failed to parse MQTT brokerUrl: ${error}`);
+          throw new Error(`Failed to parse MQTT broker URL '${brokerUrl}': ${error}`);
         }
         
         // Convert database format to MqttAdapterConfig
@@ -472,11 +475,11 @@ export class SensorsFeature extends BaseFeature {
           broker: {
             host: brokerHost,
             port: brokerPort,
-            username: (this.config.mqtt as any)?.connection?.username,
-            password: (this.config.mqtt as any)?.connection?.password,
-            clientId: (this.config.mqtt as any)?.connection?.clientId
+            username: process.env.MQTT_USERNAME,
+            password: process.env.MQTT_PASSWORD,
+            clientId: mqttRootConfig?.connection?.clientId
           },
-          qos: (this.config.mqtt as any)?.qos || 1,
+          qos: mqttRootConfig?.qos || 1,
           reconnect: {
             period: 1000,
             maxAttempts: 10
@@ -514,7 +517,7 @@ export class SensorsFeature extends BaseFeature {
       // Load output config from database
       const dbOutput = await EndpointOutputModel.getOutput('mqtt');
       if (!dbOutput) {
-        throw new Error('Modbus output configuration not found in database');
+        throw new Error('MQTT output configuration not found in database');
       }
       outputConfig = {
         socketPath: dbOutput.socket_path,
