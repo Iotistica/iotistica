@@ -42,6 +42,7 @@ export class MqttAdapter extends EventEmitter {
   private firstConnect = true; // Track first connection for subscription logic
   private compiledMetrics = new Map<string, Array<MqttMetricConfig & { path: string[] }>>();
   private compiledTimestampFields = new Map<string, string[]>();
+  private lwtDeviceIdToName = new Map<string, string>();
   private brokerStatusTopic: string | null = null;
   private deviceUuid: string | null = null;
 
@@ -52,6 +53,15 @@ export class MqttAdapter extends EventEmitter {
     this.deviceUuid = deviceUuid?.trim() || null;
 
     for (const device of this.config.devices) {
+      if (device.enabled) {
+        this.subscriptions.set(device.topic, device);
+      }
+
+      const lwtDeviceId = device.deviceId?.trim();
+      if (lwtDeviceId) {
+        this.lwtDeviceIdToName.set(lwtDeviceId, device.name);
+      }
+
       if (device.timestampField) {
         this.compiledTimestampFields.set(
           device.name,
@@ -248,19 +258,18 @@ export class MqttAdapter extends EventEmitter {
         this.logger.warn(`Failed to subscribe to broker status topic: ${err.message}`);
       });
       
-      // Persistent session subscription logic
-      // With clean: false, subscriptions persist on broker
-      // Re-subscribe whenever broker reports no session (e.g. broker restart).
+      // Refresh configured subscriptions on every connect.
       if (!connack.sessionPresent) {
-        this.logger.warn('MQTT session not present, resubscribing all configured topics');
-        this.subscribeAllConfiguredDevices().catch(err => {
-          this.logger.error(`Failed to resubscribe topics after connect: ${err.message}`);
-        });
+        this.logger.warn('MQTT session not present, subscribing all configured topics');
       } else if (this.firstConnect) {
         this.logger.debug('Connected with existing persistent session (sessionPresent=true)');
       } else {
-        this.logger.debug('Reconnected - subscriptions persisted on broker (clean: false)');
+        this.logger.debug('Reconnected - refreshing subscriptions');
       }
+
+      this.subscribeAllConfiguredDevices().catch(err => {
+        this.logger.error(`Failed to subscribe configured topics after connect: ${err.message}`);
+      });
 
       this.firstConnect = false;
     });
@@ -290,7 +299,7 @@ export class MqttAdapter extends EventEmitter {
     // Note: MQTT callback signature includes packet metadata (retain flag, qos, etc.)
     this.client.on('message', (topic, payload, packet) => {
       if (topic.startsWith('device/') && topic.endsWith('/status')) {
-        this.handleLwtStatus(topic, payload);
+        this.handleLwtStatus(topic, payload, packet.retain);
         return;
       }
       this.handleMessage(topic, payload, packet.retain);
@@ -298,33 +307,14 @@ export class MqttAdapter extends EventEmitter {
   }
 
   private resolveStableClientId(): string {
-    const configured = this.config.broker.clientId?.trim();
-    if (configured) {
-      return configured;
-    }
-
-    const candidate = (
-      process.env.DEVICE_UUID ||
-      process.env.AGENT_UUID ||
-      process.env.DEVICE_ID ||
-      process.env.IOTISTIC_DEVICE_UUID ||
-      process.env.HOSTNAME ||
-      process.env.COMPUTERNAME ||
-      ''
-    ).trim();
-
-    if (candidate && candidate.toLowerCase() !== 'unknown') {
-      return `iotistica-agent-${this.sanitizeClientIdPart(candidate)}`;
+    const deviceUuid = this.deviceUuid?.trim();
+    if (deviceUuid && deviceUuid.toLowerCase() !== 'unknown') {
+      return `agent-${deviceUuid}`;
     }
 
     throw new Error(
-      'MQTT clientId is required. Set config.broker.clientId or one of DEVICE_UUID, AGENT_UUID, DEVICE_ID, IOTISTIC_DEVICE_UUID, HOSTNAME, COMPUTERNAME.'
+      'MQTT clientId requires a valid device UUID to derive agent-<deviceUuid>.'
     );
-  }
-
-  private sanitizeClientIdPart(value: string): string {
-    const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
-    return sanitized.slice(0, 64);
   }
 
   private resolveBrokerStatusTopic(): string | null {
@@ -468,14 +458,24 @@ export class MqttAdapter extends EventEmitter {
     return undefined;
   }
 
-  private handleLwtStatus(topic: string, payload: Buffer): void {
+  private handleLwtStatus(topic: string, payload: Buffer, retain: boolean): void {
+    if (retain) {
+      return;
+    }
+
     const deviceId = topic.split('/')[1];
     if (!deviceId) {
       return;
     }
 
+    const deviceName = this.lwtDeviceIdToName.get(deviceId);
+    if (!deviceName) {
+      this.logger.debug(`Ignoring LWT status for unmapped deviceId: ${deviceId}`, { topic });
+      return;
+    }
+
     const statusText = payload.toString('utf8').trim().toLowerCase();
-    const status = this.deviceStatuses.get(deviceId);
+    const status = this.deviceStatuses.get(deviceName);
     if (!status) {
       return;
     }
@@ -486,10 +486,11 @@ export class MqttAdapter extends EventEmitter {
       status.communicationQuality = 'good';
       status.lastSeen = now;
       status.lastPoll = now;
+      this.logger.info(`LWT: device online`, { deviceId, deviceName });
     } else if (statusText === 'offline') {
       status.connected = false;
       status.communicationQuality = 'offline';
-      status.lastSeen = now;
+      this.logger.info(`LWT: device offline`, { deviceId, deviceName });
     }
   }
 
@@ -641,6 +642,11 @@ export class MqttAdapter extends EventEmitter {
       return;
     }
 
+    // Liveness is based on message receipt, not parse success.
+    if (!retain) {
+      this.trackMessageActivity(device.name);
+    }
+
     try {
       const parsed = parsePayload(payload);
       const now = new Date().toISOString();
@@ -743,10 +749,7 @@ export class MqttAdapter extends EventEmitter {
       // Emit data through bounded queue for real backpressure handling.
       this.enqueueData(points, topic);
 
-      // Only track message activity for fresh (non-retained) messages
-      if (!retain) {
-        this.trackMessageActivity(device.name);
-      } else {
+      if (retain) {
         this.logger.debug(`Retained message ignored for device health tracking`, {
           topic,
           deviceName: device.name
@@ -756,7 +759,7 @@ export class MqttAdapter extends EventEmitter {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       this.logger.error(`Failed to parse MQTT message from topic ${topic}: ${errorMessage}`);
-      
+
       // Emit BAD quality data point
       const dataPoint: SensorDataPoint = {
         deviceName: device.name,
@@ -769,7 +772,6 @@ export class MqttAdapter extends EventEmitter {
       };
       
       this.enqueueData([dataPoint], topic);
-      // Note: Don't mark as "disconnected" - parsing errors don't mean device is offline
     }
   }
 

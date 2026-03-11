@@ -452,7 +452,6 @@ export class SensorsFeature extends BaseFeature {
         
         // MQTT broker is infrastructure-level config (not per-endpoint target-state config).
         // Require explicit environment configuration to avoid implicit fallbacks.
-        const mqttRootConfig = (this.config.mqtt as any) || {};
         const brokerUrl = process.env.MQTT_BROKER_URL;
         if (!brokerUrl) {
           throw new Error('MQTT_BROKER_URL is required for MQTT adapter startup');
@@ -476,10 +475,9 @@ export class SensorsFeature extends BaseFeature {
             host: brokerHost,
             port: brokerPort,
             username: process.env.MQTT_USERNAME,
-            password: process.env.MQTT_PASSWORD,
-            clientId: mqttRootConfig?.connection?.clientId
+            password: process.env.MQTT_PASSWORD
           },
-          qos: mqttRootConfig?.qos || 1,
+          qos: 1,
           reconnect: {
             period: 1000,
             maxAttempts: 10
@@ -666,7 +664,11 @@ export class SensorsFeature extends BaseFeature {
                   );
 
                   const isEnabled = health[device.deviceName].status !== 'disabled';
-                  const runtimeOnline = Boolean(device.connected || hasFreshRuntimeSignal);
+                  const explicitlyOffline = device.communicationQuality === 'offline';
+                  // Derive connectivity from fresh activity, not adapter connected flag.
+                  // Some adapters (e.g., MQTT) intentionally do not toggle `connected`
+                  // on every message and rely on staleness/LWT semantics.
+                  const runtimeOnline = Boolean(hasFreshRuntimeSignal && !explicitlyOffline);
                   const effectiveStatus = !isEnabled
                     ? 'disabled'
                     : (runtimeOnline ? 'online' : health[device.deviceName].status);

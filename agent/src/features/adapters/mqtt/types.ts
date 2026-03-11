@@ -7,7 +7,6 @@ export interface MqttBrokerConfig {
   port: number;
   username?: string;
   password?: string;
-  clientId?: string;
 }
 
 export interface MqttReconnectConfig {

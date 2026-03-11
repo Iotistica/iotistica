@@ -412,6 +412,7 @@ services:
             - MQTT_AUTH_USERNAME=${MQTT_SIM_USERNAME}
             - MQTT_AUTH_PASSWORD=${MQTT_SIM_PASSWORD}
             - MQTT_CLIENT_ID=${MQTT_SIM_CLIENT_ID:-iotistic-mqtt-sim}
+            - MQTT_DEVICE_ID=${MQTT_SIM_DEVICE_ID:-iotistic-mqtt-sim}
             - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
             - LOG_LEVEL=${MQTT_SIM_LOG_LEVEL:-INFO}
         depends_on:

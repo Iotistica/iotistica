@@ -74,6 +74,7 @@ class MqttSimulator:
         self.username = os.environ.get("MQTT_USERNAME") or os.environ.get("MQTT_AUTH_USERNAME")
         self.password = os.environ.get("MQTT_PASSWORD") or os.environ.get("MQTT_AUTH_PASSWORD")
         self.client_id = os.environ.get("MQTT_CLIENT_ID", "iotistic-mqtt-simulator")
+        self.device_id = os.environ.get("MQTT_DEVICE_ID", self.client_id)
         self.publish_interval_ms = int(os.environ.get("PUBLISH_INTERVAL_MS", "1000"))
         self.payload_mode = os.environ.get("MQTT_PAYLOAD_MODE", "multi").lower()
         self.timestamp_field = os.environ.get("MQTT_TIMESTAMP_FIELD", "ts")
@@ -118,6 +119,7 @@ class MqttSimulator:
 
         self.client = mqtt.Client(client_id=self.client_id)
         self.client.username_pw_set(self.username, self.password)
+        self.client.will_set(f"device/{self.device_id}/status", payload="offline", qos=1, retain=True)
         self.client.enable_logger(logger)
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
@@ -133,6 +135,8 @@ class MqttSimulator:
             logger.error("MQTT connect failed with code %s", rc)
         else:
             logger.info("Connected to MQTT broker %s:%s", self.host, self.port)
+            client.publish(f"device/{self.device_id}/status", "online", qos=1, retain=True)
+            logger.info("Published LWT online status topic=device/%s/status", self.device_id)
 
     def _on_disconnect(self, client, userdata, rc):
         logger.warning("Disconnected from MQTT broker rc=%s", rc)
