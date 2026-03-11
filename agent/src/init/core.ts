@@ -2,7 +2,7 @@ import { initDatabase } from './database.js';
 import type { DeviceState } from '../managers/state.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import type { FeatureInitializer } from './features.js';
-import type { DiscoveryService } from '../features/discovery/discovery-service.js';
+import type { DiscoveryService } from '../features/adapters/discovery-service.js';
 import type { AgentUpdater } from '../updater.js';
 import type { AgentFirewall } from '../network/firewall.js';
 import type { ConfigManager } from '../managers/config.js';

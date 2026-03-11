@@ -19,7 +19,7 @@ let logger: AgentLogger | undefined;
 let anomalyService: AnomalyDetectionService | undefined;
 let simulationOrchestrator: SimulationOrchestrator | undefined;
 let sensorsFeature: SensorsFeature | undefined;
-let discoveryService: import('../features/discovery/discovery-service').DiscoveryService | undefined;
+let discoveryService: import('../features/adapters/discovery-service').DiscoveryService | undefined;
 let agentInstance: any | undefined;
 
 export function setAgent(agent: any): void {
@@ -80,14 +80,14 @@ export function getSimulationOrchestrator(): SimulationOrchestrator | undefined 
 /**
  * Set discovery service (called by agent after initialization)
  */
-export function setDiscoveryService(service: import('../features/discovery/discovery-service').DiscoveryService | undefined) {
+export function setDiscoveryService(service: import('../features/adapters/discovery-service').DiscoveryService | undefined) {
 	discoveryService = service;
 }
 
 /**
  * Get discovery service (for accessing discovery functionality)
  */
-export function getDiscoveryService(): import('../features/discovery/discovery-service').DiscoveryService | undefined {
+export function getDiscoveryService(): import('../features/adapters/discovery-service').DiscoveryService | undefined {
 	return discoveryService;
 }
 

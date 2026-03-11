@@ -15,10 +15,10 @@
  * - Discover all objects (analog, binary, multi-state)
  */
 
-import type { AgentLogger } from '../../logging/agent-logger';
-import { LogComponents } from '../../logging/types';
-import { BaseDiscoveryPlugin, DiscoveredDevice, ValidationResult } from './base.discovery';
-import { generateBACnetFingerprint } from './fingerprint';
+import type { AgentLogger } from '../../../logging/agent-logger';
+import { LogComponents } from '../../../logging/types';
+import { BaseDiscoveryPlugin, DiscoveredDevice, ValidationResult } from '../base.discovery';
+import { generateBACnetFingerprint } from '../fingerprint';
 
 export interface BACnetDiscoveryOptions {
   /**

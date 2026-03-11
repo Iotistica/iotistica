@@ -32,7 +32,7 @@ import {
 } from "./system/memory.js";
 import { AnomalyDetectionService } from "./ai/anomaly/index.js";
 import { SimulationOrchestrator} from "./simulation/index.js";
-import { DiscoveryService } from "./features/discovery/discovery-service.js";
+import { DiscoveryService } from "./features/adapters/discovery-service.js";
 import { FeatureInitializer } from "./init/features.js";
 import type { ConfigManager } from "./managers/config.js";
 import {
@@ -704,8 +704,9 @@ export default class Agent {
       containerManager: !!this.containerManager,
       // MQTT is critical only if device is provisioned (skip in CI mode)
       mqtt: isCiMode || !this.deviceInfo?.provisioned || !!MqttManager.getInstance()?.isConnected(),
-      // CloudSync is critical only if device is provisioned (skip in CI mode)
-      cloudSync: isCiMode || !this.deviceInfo?.provisioned || !!this.cloudSync
+      // CloudSync is critical only if device is provisioned (skip in CI mode).
+      // For provisioned devices, mere initialization is not enough: it must be operational.
+      cloudSync: isCiMode || !this.deviceInfo?.provisioned || this.cloudSync?.isOperational() === true
     };
 
     // Check all critical components

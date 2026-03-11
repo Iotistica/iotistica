@@ -31,12 +31,12 @@ import { LogComponents } from '../../logging/types';
 import { DeviceEndpointModel, DeviceEndpoint } from '../../db/models/endpoint.model';
 import { MetadataModel } from '../../db/models';
 import type { BaseDiscoveryPlugin, DiscoveredDevice } from './base.discovery';
-import { ModbusDiscoveryPlugin } from './modbus.discovery';
-import { OPCUADiscoveryPlugin } from './opcua.discovery';
-import { CANDiscoveryPlugin } from './can.discovery';
-import { SNMPDiscoveryPlugin } from './snmp.discovery';
-import { MqttDiscoveryPlugin, MqttDiscoveryOptions } from './mqtt.discovery';
-import { BACnetDiscoveryPlugin } from './bacnet.discovery';
+import { ModbusDiscoveryPlugin } from './modbus/discovery';
+import { OPCUADiscoveryPlugin } from './opcua/discovery';
+import { CANDiscoveryPlugin } from './can/discovery';
+import { SNMPDiscoveryPlugin } from './snmp/discovery';
+import { MqttDiscoveryPlugin, MqttDiscoveryOptions } from './mqtt/discovery';
+import { BACnetDiscoveryPlugin } from './bacnet/discovery';
 import { autoDetectLocalSubnets } from '../../utils/network';
 import type { ConfigManager } from '../../managers/config.js';
 

@@ -533,7 +533,7 @@ export class SensorsFeature extends BaseFeature {
       this.socketServers.set('mqtt', mqttSocket);
    
       // Create MQTT adapter (socket-agnostic)
-      const mqttAdapter = new MqttAdapter(mqttConfig, this.logger);
+      const mqttAdapter = new MqttAdapter(mqttConfig, this.logger, this.deviceUuid);
       this.adapters.set('mqtt', mqttAdapter);
 
       // Wire up event handlers
@@ -609,6 +609,7 @@ export class SensorsFeature extends BaseFeature {
     // Get all sensors directly from database (includes discovered devices)
     try {
       const allSensors = await DeviceEndpointModel.getAll();
+      const stalenessThresholdMs = 24 * 60 * 60 * 1000; // 24 hours
       
       this.logger.debug(`Found ${allSensors.length} sensors in database`);
       
@@ -620,8 +621,7 @@ export class SensorsFeature extends BaseFeature {
         // Adapter overlay will provide real-time status for actively polled devices
         const lastSeen = sensor.lastSeenAt ? new Date(sensor.lastSeenAt) : null;
         const now = Date.now();
-        const threshold = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-        const isOnline = lastSeen && (now - lastSeen.getTime()) < threshold;
+        const isOnline = lastSeen && (now - lastSeen.getTime()) < stalenessThresholdMs;
         
         // Disabled endpoints show as 'disabled' regardless of lastSeen
         // SQLite stores booleans as 0/1, convert to boolean
@@ -654,12 +654,27 @@ export class SensorsFeature extends BaseFeature {
             if (Array.isArray(statuses)) {
               for (const device of statuses) {
                 if (health[device.deviceName]) {
-                  // Overlay runtime status (preserve status field from database)
-                  const currentStatus = health[device.deviceName].status;
+                  // Overlay runtime status and derive effective status from fresh runtime timestamps.
+                  // This prevents stale DB status from forcing MQTT endpoints to appear offline
+                  // when messages are actively arriving.
+                  const now = Date.now();
+                  const runtimeLastSeenMs = device.lastSeen ? new Date(device.lastSeen).getTime() : null;
+                  const runtimeLastPollMs = device.lastPoll ? new Date(device.lastPoll).getTime() : null;
+                  const hasFreshRuntimeSignal = Boolean(
+                    (runtimeLastSeenMs && (now - runtimeLastSeenMs) < stalenessThresholdMs) ||
+                    (runtimeLastPollMs && (now - runtimeLastPollMs) < stalenessThresholdMs)
+                  );
+
+                  const isEnabled = health[device.deviceName].status !== 'disabled';
+                  const runtimeOnline = Boolean(device.connected || hasFreshRuntimeSignal);
+                  const effectiveStatus = !isEnabled
+                    ? 'disabled'
+                    : (runtimeOnline ? 'online' : health[device.deviceName].status);
+
                   health[device.deviceName] = {
                     protocol,
-                    status: currentStatus, // Preserve status from database
-                    connected: device.connected,
+                    status: effectiveStatus,
+                    connected: isEnabled && runtimeOnline,
                     lastPoll: device.lastPoll?.toISOString() || null,
                     lastSeen: device.lastSeen?.toISOString() || null,
                     errorCount: device.errorCount,

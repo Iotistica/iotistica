@@ -10,7 +10,7 @@ import type { DeviceInfo } from '../managers/types.js';
 import type { AgentInitContext } from './core.js';
 import { LogComponents } from '../logging/types';
 import { JobsFeature } from '../features/jobs/src/monitor.js';
-import { DiscoveryService } from '../features/discovery/discovery-service.js';
+import { DiscoveryService } from '../features/adapters/discovery-service.js';
 
 import { SensorPublishFeature } from '../features/publish/index.js';
 import { SensorsFeature, type SensorConfig } from '../features/adapters/index.js';

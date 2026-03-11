@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../db/connection';
 import { jwtAuth } from '../middleware/jwt-auth';
-import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 
 const router = Router();
@@ -11,54 +10,27 @@ const router = Router();
 //       so '/' here means /dashboard-layouts/* - this is path-specific and safe
 router.use('/', jwtAuth);
 
-async function resolveLayoutUserId(req: Request): Promise<number | null> {
+async function resolveLayoutOwnerKey(req: Request): Promise<string | null> {
   if (!req.user) {
     return null;
   }
 
-  // Legacy/local auth users already carry DB-backed integer IDs
+  // Legacy local-user fallback to keep old layouts reachable when present.
   if (typeof req.user.id === 'number' && req.user.id > 0) {
-    return req.user.id;
+    return `legacy:${req.user.id}`;
   }
 
-  // Auth0 path: req.user.id is 0, use identity fields to map/create local user row
-  const email = req.user.email?.trim().toLowerCase();
-  const username = req.user.username?.trim(); // Auth0 sub (e.g., google-oauth2|...)
+  // Auth0/federated path: derive stable owner key from tenant + subject identity.
+  const customerId = req.user.customerId?.trim() || 'customer-local';
+  const subject = req._auth0Payload?.sub?.trim() || req.user.username?.trim() || req.user.email?.trim().toLowerCase();
 
-  if (!email && !username) {
+  if (!subject) {
     return null;
   }
 
-  const existing = await query(
-    `SELECT id
-     FROM users
-     WHERE ($1::text IS NOT NULL AND LOWER(email) = $1)
-        OR ($2::text IS NOT NULL AND username = $2)
-     ORDER BY id ASC
-     LIMIT 1`,
-    [email || null, username || null]
-  );
-
-  if (existing.rows.length > 0) {
-    return existing.rows[0].id;
-  }
-
-  // Create minimal local user record for FK-backed tables (dashboard_layouts, etc.)
-  const generatedPassword = crypto.randomBytes(32).toString('hex');
-  const passwordHash = await bcrypt.hash(generatedPassword, 10);
-
-  // Keep username length within users.username varchar(255)
-  const baseUsername = (username || email || `auth0-${Date.now()}`).slice(0, 255);
-  const role = req.user.role && req.user.role.trim() ? req.user.role : 'user';
-
-  const inserted = await query(
-    `INSERT INTO users (username, email, password_hash, role, is_active, email_verified)
-     VALUES ($1, $2, $3, $4, true, true)
-     RETURNING id`,
-    [baseUsername, email || `${baseUsername}@auth.local`, passwordHash, role]
-  );
-
-  return inserted.rows[0]?.id ?? null;
+  const rawIdentity = `${customerId}|${subject}`;
+  const digest = crypto.createHash('sha256').update(rawIdentity).digest('hex').slice(0, 48);
+  return `auth0:${digest}`;
 }
 
 /**
@@ -68,9 +40,9 @@ async function resolveLayoutUserId(req: Request): Promise<number | null> {
 router.get('/:deviceUuid', async (req: Request, res: Response) => {
   try {
     const { deviceUuid } = req.params;
-    const userId = await resolveLayoutUserId(req);
+    const ownerKey = await resolveLayoutOwnerKey(req);
 
-    if (!userId) {
+    if (!ownerKey) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -82,9 +54,9 @@ router.get('/:deviceUuid', async (req: Request, res: Response) => {
     const defaultResult = await query(`
       SELECT id, layout_name, widgets, is_default, share_token, created_at, updated_at
       FROM dashboard_layouts
-      WHERE user_id = $1 AND ${isGlobal ? 'device_uuid IS NULL' : 'device_uuid = $2'} AND is_default = true
+      WHERE owner_key = $1 AND ${isGlobal ? 'device_uuid IS NULL' : 'device_uuid = $2'} AND is_default = true
       LIMIT 1
-    `, isGlobal ? [userId] : [userId, deviceUuidValue]);
+    `, isGlobal ? [ownerKey] : [ownerKey, deviceUuidValue]);
 
     if (defaultResult.rows.length > 0) {
       const layout = defaultResult.rows[0];
@@ -103,10 +75,10 @@ router.get('/:deviceUuid', async (req: Request, res: Response) => {
     const latestResult = await query(`
       SELECT id, layout_name, widgets, is_default, share_token, created_at, updated_at
       FROM dashboard_layouts
-      WHERE user_id = $1 AND ${isGlobal ? 'device_uuid IS NULL' : 'device_uuid = $2'}
+      WHERE owner_key = $1 AND ${isGlobal ? 'device_uuid IS NULL' : 'device_uuid = $2'}
       ORDER BY updated_at DESC
       LIMIT 1
-    `, isGlobal ? [userId] : [userId, deviceUuidValue]);
+    `, isGlobal ? [ownerKey] : [ownerKey, deviceUuidValue]);
 
     if (latestResult.rows.length > 0) {
       const layout = latestResult.rows[0];
@@ -136,9 +108,9 @@ router.get('/:deviceUuid', async (req: Request, res: Response) => {
 router.get('/:deviceUuid/all', async (req: Request, res: Response) => {
   try {
     const { deviceUuid } = req.params;
-    const userId = await resolveLayoutUserId(req);
+    const ownerKey = await resolveLayoutOwnerKey(req);
 
-    if (!userId) {
+    if (!ownerKey) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -148,9 +120,9 @@ router.get('/:deviceUuid/all', async (req: Request, res: Response) => {
     const result = await query(`
       SELECT id, layout_name, widgets, is_default, share_token, created_at, updated_at
       FROM dashboard_layouts
-      WHERE user_id = $1 AND ${isGlobal ? 'device_uuid IS NULL' : 'device_uuid = $2'}
+      WHERE owner_key = $1 AND ${isGlobal ? 'device_uuid IS NULL' : 'device_uuid = $2'}
       ORDER BY is_default DESC, layout_name ASC
-    `, isGlobal ? [userId] : [userId, deviceUuidValue]);
+    `, isGlobal ? [ownerKey] : [ownerKey, deviceUuidValue]);
 
     const layouts = result.rows.map(layout => ({
       id: layout.id,
@@ -177,9 +149,9 @@ router.post('/:deviceUuid', async (req: Request, res: Response) => {
   try {
     const { deviceUuid } = req.params;
     const { layoutName = 'Default', widgets, isDefault = false } = req.body;
-    const userId = await resolveLayoutUserId(req);
+    const ownerKey = await resolveLayoutOwnerKey(req);
 
-    if (!userId) {
+    if (!ownerKey) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -204,14 +176,14 @@ router.post('/:deviceUuid', async (req: Request, res: Response) => {
         await query(`
           UPDATE dashboard_layouts
           SET is_default = false
-          WHERE user_id = $1 AND device_uuid IS NULL
-        `, [userId]);
+          WHERE owner_key = $1 AND device_uuid IS NULL
+        `, [ownerKey]);
       } else {
         await query(`
           UPDATE dashboard_layouts
           SET is_default = false
-          WHERE user_id = $1 AND device_uuid = $2
-        `, [userId, deviceUuidValue]);
+          WHERE owner_key = $1 AND device_uuid = $2
+        `, [ownerKey, deviceUuidValue]);
       }
     }
 
@@ -220,13 +192,13 @@ router.post('/:deviceUuid', async (req: Request, res: Response) => {
     if (isGlobal) {
       existingResult = await query(`
         SELECT id FROM dashboard_layouts
-        WHERE user_id = $1 AND device_uuid IS NULL AND layout_name = $2
-      `, [userId, layoutName]);
+        WHERE owner_key = $1 AND device_uuid IS NULL AND layout_name = $2
+      `, [ownerKey, layoutName]);
     } else {
       existingResult = await query(`
         SELECT id FROM dashboard_layouts
-        WHERE user_id = $1 AND device_uuid = $2 AND layout_name = $3
-      `, [userId, deviceUuidValue, layoutName]);
+        WHERE owner_key = $1 AND device_uuid = $2 AND layout_name = $3
+      `, [ownerKey, deviceUuidValue, layoutName]);
     }
 
     let layout;
@@ -243,15 +215,15 @@ router.post('/:deviceUuid', async (req: Request, res: Response) => {
     } else {
       // Create new layout
       const result = await query(`
-        INSERT INTO dashboard_layouts (user_id, device_uuid, layout_name, widgets, is_default)
+        INSERT INTO dashboard_layouts (owner_key, device_uuid, layout_name, widgets, is_default)
         VALUES ($1, $2, $3, $4, $5)
         RETURNING id, layout_name, widgets, is_default, created_at, updated_at
-      `, [userId, deviceUuidValue, layoutName, JSON.stringify(widgets), isDefault]);
+      `, [ownerKey, deviceUuidValue, layoutName, JSON.stringify(widgets), isDefault]);
 
       layout = result.rows[0];
     }
 
-    console.log(`Dashboard layout saved for user ${userId}, ${isGlobal ? 'global' : 'device ' + deviceUuid}: ${layoutName} (${widgets.length} widgets)`);
+    console.log(`Dashboard layout saved for owner ${ownerKey}, ${isGlobal ? 'global' : 'device ' + deviceUuid}: ${layoutName} (${widgets.length} widgets)`);
 
     res.json({
       id: layout.id,
@@ -277,9 +249,9 @@ router.post('/:deviceUuid', async (req: Request, res: Response) => {
 router.get('/by-share-token/:shareToken', async (req: Request, res: Response) => {
   try {
     const { shareToken } = req.params;
-    const userId = await resolveLayoutUserId(req);
+    const ownerKey = await resolveLayoutOwnerKey(req);
 
-    if (!userId) {
+    if (!ownerKey) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -316,17 +288,17 @@ router.get('/by-share-token/:shareToken', async (req: Request, res: Response) =>
 router.get('/by-id/:layoutId', async (req: Request, res: Response) => {
   try {
     const { layoutId } = req.params;
-    const userId = req.user.id;
+    const ownerKey = await resolveLayoutOwnerKey(req);
 
-    if (!userId) {
+    if (!ownerKey) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
     const result = await query(`
       SELECT id, layout_name, widgets, is_default, share_token, created_at, updated_at
       FROM dashboard_layouts
-      WHERE id = $1 AND user_id = $2
-    `, [layoutId, userId]);
+      WHERE id = $1 AND owner_key = $2
+    `, [layoutId, ownerKey]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Layout not found' });
@@ -356,17 +328,17 @@ router.put('/:layoutId', async (req: Request, res: Response) => {
   try {
     const { layoutId } = req.params;
     const { layoutName, widgets, isDefault } = req.body;
-    const userId = req.user.id;
+    const ownerKey = await resolveLayoutOwnerKey(req);
 
-    if (!userId) {
+    if (!ownerKey) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
     // Verify layout belongs to user
     const layoutResult = await query(`
       SELECT id, device_uuid FROM dashboard_layouts
-      WHERE id = $1 AND user_id = $2
-    `, [layoutId, userId]);
+      WHERE id = $1 AND owner_key = $2
+    `, [layoutId, ownerKey]);
 
     if (layoutResult.rows.length === 0) {
       return res.status(404).json({ error: 'Layout not found' });
@@ -379,8 +351,8 @@ router.put('/:layoutId', async (req: Request, res: Response) => {
       await query(`
         UPDATE dashboard_layouts
         SET is_default = false
-        WHERE user_id = $1 AND device_uuid = $2 AND id != $3
-      `, [userId, layout.device_uuid, layoutId]);
+        WHERE owner_key = $1 AND device_uuid = $2 AND id != $3
+      `, [ownerKey, layout.device_uuid, layoutId]);
     }
 
     // Build dynamic update query
@@ -457,17 +429,17 @@ router.put('/:layoutId', async (req: Request, res: Response) => {
 router.delete('/:layoutId', async (req: Request, res: Response) => {
   try {
     const { layoutId } = req.params;
-    const userId = req.user.id;
+    const ownerKey = await resolveLayoutOwnerKey(req);
 
-    if (!userId) {
+    if (!ownerKey) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
     // Verify layout belongs to user
     const layoutResult = await query(`
       SELECT id FROM dashboard_layouts
-      WHERE id = $1 AND user_id = $2
-    `, [layoutId, userId]);
+      WHERE id = $1 AND owner_key = $2
+    `, [layoutId, ownerKey]);
 
     if (layoutResult.rows.length === 0) {
       return res.status(404).json({ error: 'Layout not found' });
@@ -475,7 +447,7 @@ router.delete('/:layoutId', async (req: Request, res: Response) => {
 
     await query(`DELETE FROM dashboard_layouts WHERE id = $1`, [layoutId]);
 
-    console.log(`Dashboard layout deleted: ${layoutId} by user ${userId}`);
+    console.log(`Dashboard layout deleted: ${layoutId} by owner ${ownerKey}`);
 
     res.json({ message: 'Layout deleted successfully' });
   } catch (error) {

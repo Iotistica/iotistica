@@ -512,6 +512,25 @@ export class CloudSync extends EventEmitter {
 	public isOnline(): boolean {
 		return this.connectionMonitor.isOnline();
 	}
+
+	/**
+	 * Strict operational readiness for cloud sync.
+	 *
+	 * Requires:
+	 * - Poll/report loops started
+	 * - At least one successful poll and report
+	 * - Current connection state online
+	 */
+	public isOperational(): boolean {
+		const state = this.connectionMonitor.getState();
+		return (
+			this.isPolling &&
+			this.isReporting &&
+			state.successfulPolls > 0 &&
+			state.successfulReports > 0 &&
+			this.connectionMonitor.isOnline()
+		);
+	}
 	
 	/**
 	 * Update polling, reporting, and metrics intervals dynamically
@@ -1388,8 +1407,14 @@ export class CloudSync extends EventEmitter {
 				...optimizationDetails,
 				transport,
 				reportKeys: Object.keys(reportToSend[deviceInfo.uuid] || {}),
+				// Count of endpoints included in THIS payload under config.endpoints.
+				// This can be 0 when config is unchanged and omitted for bandwidth optimization.
 				endpointCount: reportToSend[deviceInfo.uuid]?.config?.endpoints?.length || 0,
-				endpointHealthCount: Object.keys(endpointHealth).length
+				// Count of endpoints with runtime health included in this report.
+				endpointHealthCount,
+				// Extra diagnostics to avoid ambiguity between config payload and runtime health inventory.
+				configuredEndpointCount: normalizedEndpoints.length,
+				runtimeHealthEndpointCount: endpointHealthCount
 			});
 			
 		} catch (error) {
