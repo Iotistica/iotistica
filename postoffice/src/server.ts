@@ -43,7 +43,7 @@ app.use(express.json());
 // Email configuration
 const emailConfig: EmailConfig = {
   enabled: process.env.EMAIL_ENABLED !== 'false',
-  from: process.env.EMAIL_FROM || '"Iotistic Platform" <noreply@iotistic.cloud>',
+  from: process.env.EMAIL_FROM || '"Iotistica Platform" <noreply@iotistica.com>',
   debug: process.env.EMAIL_DEBUG === 'true',
 };
 
@@ -67,7 +67,7 @@ if (process.env.SMTP_HOST) {
 }
 
 // Initialize PostOffice
-const baseUrl = process.env.BASE_URL || 'https://iotistic.ca';
+const baseUrl = process.env.BASE_URL || 'https://iotistica.com';
 const postOffice = new PostOffice(emailConfig, logger, baseUrl);
 
 // Initialize Redis for Bull queue
