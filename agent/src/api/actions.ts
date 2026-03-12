@@ -33,6 +33,36 @@ export function getAgent(): any {
 	return agentInstance;
 }
 
+function getLifecycleStateSafe(): string {
+	return agentInstance?.getLifecycleState?.() ?? 'UNKNOWN';
+}
+
+function getReadinessSafe(): boolean {
+	return agentInstance?.isFullyOperational?.() ?? false;
+}
+
+export function getHealthPayload(isHealthy: boolean): {
+	status: 'healthy' | 'unhealthy';
+	ready: boolean;
+	lifecycleState: string;
+} {
+	return {
+		status: isHealthy ? 'healthy' : 'unhealthy',
+		ready: getReadinessSafe(),
+		lifecycleState: getLifecycleStateSafe(),
+	};
+}
+
+export function getReadinessPayload(): {
+	ready: boolean;
+	lifecycleState: string;
+} {
+	return {
+		ready: getReadinessSafe(),
+		lifecycleState: getLifecycleStateSafe(),
+	};
+}
+
 export function initialize(
 	cm: ContainerManager, 
 	dm: DeviceManager, 

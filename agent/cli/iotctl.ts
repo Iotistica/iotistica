@@ -189,6 +189,45 @@ async function apiRequest(endpoint: string, options: RequestInit = {}): Promise<
 	}
 }
 
+async function apiProbe(endpoint: string, options: RequestInit = {}): Promise<{
+	ok: boolean;
+	status?: number;
+	data?: any;
+	error?: string;
+}> {
+	try {
+		const response = await fetch(endpoint, {
+			...options,
+			headers: {
+				'Content-Type': 'application/json',
+				...options.headers,
+			},
+			signal: options.signal ?? AbortSignal.timeout(5000),
+		});
+
+		const text = await response.text();
+		let parsed: any = undefined;
+		if (text && text !== 'OK') {
+			try {
+				parsed = JSON.parse(text);
+			} catch {
+				parsed = text;
+			}
+		}
+
+		return {
+			ok: response.ok,
+			status: response.status,
+			data: parsed,
+		};
+	} catch (error: any) {
+		return {
+			ok: false,
+			error: error.message,
+		};
+	}
+}
+
 // ============================================================================
 // Utility Functions
 // ============================================================================
@@ -277,7 +316,7 @@ CONFIGURATION COMMANDS:
 
 DEVICE MANAGEMENT:
 
-  status                            Show device status and health
+	status                            Show device status, lifecycle state, and health
 
   restart                           Restart agent services (API and MQTT stay running)
 
@@ -317,7 +356,7 @@ CONTAINER/APPLICATION MANAGEMENT:
 
 SYSTEM:
 
-  diagnostics, diag                 Run system diagnostics (API, database, MQTT, cloud)
+	diagnostics, diag                 Run system diagnostics (API, lifecycle, database, MQTT, cloud)
 
   help                              Show this help message
 
@@ -424,7 +463,7 @@ async function configSetApi(url: string): Promise<void> {
 		
 		logger.info('Cloud API endpoint updated', { endpoint: url });
 		logger.warn('Restart required', {
-			hint: 'Run: iotctl system restart'
+			hint: 'Run: iotctl restart'
 		});
 	} catch (error) {
 		throw new CLIError('Failed to update API endpoint', 1);
@@ -545,11 +584,25 @@ async function showStatusEnhanced(): Promise<void> {
 	logger.info('Checking device health...');
 	
 	try {
+		// Read lifecycle/readiness from dedicated health endpoints
+		const [healthyProbe, readinessProbe] = await Promise.all([
+			apiProbe(`${DEVICE_API_V1}/healthy`),
+			apiProbe(`${DEVICE_API_V1}/readiness`),
+		]);
+		const healthyPayload = healthyProbe.data || {};
+		const readinessPayload = readinessProbe.data || {};
+
 		// Check agent API connectivity (cached)
 		const deviceState = await apiCached(`${DEVICE_API_V1}/device`);
 		logger.info('Agent running', {
 			uuid: redact(deviceState.uuid),
 			online: deviceState.is_online
+		});
+
+		logger.info('Lifecycle', {
+			state: healthyPayload.lifecycleState || readinessPayload.lifecycleState || 'UNKNOWN',
+			ready: readinessPayload.ready === true,
+			health: healthyPayload.status || 'unknown'
 		});
 		
 		// Environment info
@@ -1014,14 +1067,22 @@ async function servicesInfo(serviceId: string): Promise<void> {
 
 async function restart(): Promise<void> {
 	try {
-		logger.info('Restarting agent services...');
+		const readiness = await apiProbe(`${DEVICE_API_V1}/readiness`);
+		const readinessState = readiness.data?.lifecycleState || 'UNKNOWN';
+		const readinessFlag = readiness.data?.ready === true;
+
+		logger.info('Restarting agent services...', {
+			lifecycleState: readinessState,
+			ready: readinessFlag
+		});
 		
-		await apiRequest(`${DEVICE_API_V1}/reboot`, {
+		const response = await apiRequest(`${DEVICE_API_V1}/reboot`, {
 			method: 'POST'
 		});
 		
 		logger.info('Agent services restarting', {
-			note: 'All services will reinitialize (API and MQTT stay running)'
+			note: 'All services will reinitialize (API and MQTT stay running)',
+			lifecycleState: response.lifecycleState || readinessState
 		});
 	} catch (error) {
 		logger.error('Failed to restart agent services', error as Error);
@@ -1436,10 +1497,46 @@ async function runDiagnostics(): Promise<void> {
 			details: envVars
 		};
 	};
+
+	const checkLifecycle = async () => {
+		try {
+			const [healthyProbe, readinessProbe] = await Promise.all([
+				apiProbe(`${DEVICE_API_V1}/healthy`),
+				apiProbe(`${DEVICE_API_V1}/readiness`),
+			]);
+			const healthy = healthyProbe.data || {};
+			const readiness = readinessProbe.data || {};
+
+			const lifecycleState = readiness.lifecycleState || healthy.lifecycleState || 'UNKNOWN';
+			const ready = readiness.ready === true;
+			const healthStatus = healthy.status || (healthyProbe.ok ? 'healthy' : 'unhealthy');
+
+			results['Lifecycle'] = {
+				status: ready ? '✓ OK' : '⚠ WARN',
+				message: `State=${lifecycleState}, Ready=${ready}, Health=${healthStatus}`,
+				details: {
+					lifecycleState,
+					ready,
+					health: healthStatus,
+					healthHttpStatus: healthyProbe.status,
+					readinessHttpStatus: readinessProbe.status
+				}
+			};
+		} catch (error: any) {
+			results['Lifecycle'] = {
+				status: '✗ FAIL',
+				message: error.message,
+				details: {
+					hint: 'Unable to query /v1/healthy or /v1/readiness'
+				}
+			};
+		}
+	};
 	
 	// Run core checks concurrently
 	await Promise.allSettled([
 		checkDeviceApi(),
+		checkLifecycle(),
 		checkDatabase(),
 		checkProvisioning(),
 		checkInternet(),

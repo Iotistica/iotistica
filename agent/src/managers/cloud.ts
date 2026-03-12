@@ -477,7 +477,6 @@ export class CloudSync extends EventEmitter {
 			
 			this.removeAllListeners();
 			
-			this.logger?.infoSync('CloudSync stopped successfully', { component: LogComponents.cloudSync });
 		} catch (error) {
 			// Always clear timers even if error occurs
 			if (this.pollTimer) clearTimeout(this.pollTimer);
@@ -1047,7 +1046,7 @@ export class CloudSync extends EventEmitter {
 		const deviceInfo = this.deviceManager.getDeviceInfo();
 		
 		if (!deviceInfo.provisioned) {
-			this.logger?.debugSync('Device not provisioned, skipping state report', {
+			this.logger?.debugSync('Agent not provisioned, skipping state report', {
 				component: LogComponents.cloudSync,
 				operation: 'report'
 			});
@@ -1127,7 +1126,7 @@ export class CloudSync extends EventEmitter {
 		stateReport[deviceInfo.uuid].config = {
 			endpoints: normalizedEndpoints
 		};
-		this.logger?.infoSync('Endpoints config changed - including in report', {
+		this.logger?.infoSync('Devices config changed - including in report', {
 			component: LogComponents.cloudSync,
 			operation: 'config-change-detected',
 			configHash: endpointsHash,
@@ -1138,7 +1137,7 @@ export class CloudSync extends EventEmitter {
 	// Only include endpoint health if non-empty and changed, or on metrics cycle
 	if (hasEndpointHealthData && (healthChanged || includeMetrics)) {
 		(stateReport[deviceInfo.uuid] as any).endpoints_health = endpointHealth;
-		this.logger?.debugSync('Including endpoint health in report', {
+		this.logger?.debugSync('Including device health in report', {
 			component: LogComponents.cloudSync,
 			operation: 'add-endpoint-health',
 			healthChanged,
@@ -1146,7 +1145,7 @@ export class CloudSync extends EventEmitter {
 			endpointCount: endpointHealthCount
 		});
 	} else {
-		this.logger?.debugSync('Skipping endpoint health', {
+		this.logger?.debugSync('Skipping device health', {
 			component: LogComponents.cloudSync,
 			operation: 'skip-endpoint-health',
 			hasEndpointHealthData,

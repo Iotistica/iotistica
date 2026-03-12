@@ -48,11 +48,21 @@ export class DeviceAPI {
 		// Health check endpoint
 		this.api.get('/v1/healthy', async (_req, res) => {
 			const isHealthy = await actions.runHealthchecks(this.healthchecks);
+			const payload = actions.getHealthPayload(isHealthy);
 			if (isHealthy) {
-				return res.sendStatus(200);
+				return res.status(200).json(payload);
 			} else {
-				return res.status(500).send('Unhealthy');
+				return res.status(500).json(payload);
 			}
+		});
+
+		// Readiness endpoint
+		this.api.get('/v1/readiness', (_req, res) => {
+			const payload = actions.getReadinessPayload();
+			if (payload.ready) {
+				return res.status(200).json(payload);
+			}
+			return res.status(503).json(payload);
 		});
 
 		// Ping endpoint

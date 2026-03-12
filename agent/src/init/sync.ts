@@ -74,4 +74,8 @@ export async function initDeviceSync(ctx: AgentInitContext): Promise<void> {
 
 	ctx.featureInitializer?.setCloudSync(ctx.cloudSync);
 	await ctx.cloudSync.startPoll();
+
+	ctx.agentLogger?.infoSync('Cloud sync initialized', {
+		component: LogComponents.agent,
+	});
 }

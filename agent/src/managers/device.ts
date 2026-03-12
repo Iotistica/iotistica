@@ -583,7 +583,7 @@ export class DeviceManager {
 				}
 
 				// Log full provisioning response for troubleshooting
-				this.logger?.infoSync('🔍 PROVISIONING RESPONSE RECEIVED', {
+				this.logger?.infoSync('Provisioning response received', {
 					component: LogComponents.deviceManager,
 					operation: 'provision',
 					responseKeys: Object.keys(response),

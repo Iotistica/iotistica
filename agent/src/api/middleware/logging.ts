@@ -27,7 +27,7 @@ export default function logging(req: Request, res: Response, next: NextFunction)
 		};
 		
 		// Skip logging for health check endpoints
-		const isHealthCheck = req.path === '/ping' || req.path === '/health' || req.path === '/healthz';
+		const isHealthCheck = req.path === '/ping' || req.path === '/health' || req.path === '/healthz' || req.path === '/v1/healthy' || req.path === '/v1/readiness';
 		
 		if (logger && !isHealthCheck) {
 			if (res.statusCode >= 500) {

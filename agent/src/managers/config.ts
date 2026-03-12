@@ -557,32 +557,6 @@ export class ConfigManager extends EventEmitter {
 			operation: 'reconcile',
 		});
 
-		// DETAILED DEBUG: Log target and current state before reconciliation
-		this.logger?.debugSync('=== RECONCILIATION: TARGET STATE ===', {
-			component: LogComponents.configManager,
-			operation: 'reconcile',
-			targetEndpointsCount: this.targetConfig.endpoints?.length || 0,
-			targetEndpoints: this.targetConfig.endpoints?.map((e: any) => ({
-				uuid: e.uuid,
-				name: e.name,
-				protocol: e.protocol,
-				connection: e.connection,
-				dataPointsCount: e.dataPoints?.length || 0
-			}))
-		});
-
-		this.logger?.debugSync('=== RECONCILIATION: CURRENT STATE ===', {
-			component: LogComponents.configManager,
-			operation: 'reconcile',
-			currentEndpointsCount: this.currentConfig.endpoints?.length || 0,
-			currentEndpoints: this.currentConfig.endpoints?.map((e: any) => ({
-				uuid: e.uuid,
-				name: e.name,
-				protocol: e.protocol,
-				connection: e.connection,
-				dataPointsCount: e.dataPoints?.length || 0
-			}))
-		});
 
 		const result: ConfigReconciliationResult = {
 			success: true,
@@ -641,7 +615,7 @@ export class ConfigManager extends EventEmitter {
 			
 			// Sync endpoints to SQLite using UUID-based operations
 			// This replaces the separate ProtocolAdaptersHandler logic
-			await this.syncEndpointsToDatabase();
+			await this.syncDevicesToDatabase();
 			
 			// Calculate steps for sensor reconciliation
 			const steps = this.calculateSteps();
@@ -731,29 +705,13 @@ export class ConfigManager extends EventEmitter {
 	 * Sync endpoints to SQLite database using UUID-based operations
 	 * Integrated from ProtocolAdaptersHandler for unified config management
 	 */
-	private async syncEndpointsToDatabase(): Promise<void> {
+	private async syncDevicesToDatabase(): Promise<void> {
 		const devices = this.targetConfig.endpoints || [];
 
 		if (!devices || !Array.isArray(devices) || devices.length === 0) {
 			await this.syncMqttAuthToDatabase([]);
-			this.logger?.warnSync('=== SYNC TO DB: NO ENDPOINTS TO SYNC ===', {
-				component: LogComponents.configManager,
-				operation: 'syncEndpointsToDatabase',
-			});
 			return;
 		}
-
-		this.logger?.debugSync('=== SYNCING ENDPOINTS TO DATABASE ===', {
-			component: LogComponents.configManager,
-			totalEndpoints: devices.length,
-			endpoints: devices.map((d: any) => ({
-				uuid: d.uuid,
-				name: d.name,
-				protocol: d.protocol,
-				connection: d.connection,
-				dataPointsCount: d.dataPoints?.length || 0
-			}))
-		});
 
 		try {
 			// Get current devices from SQLite to detect deletions

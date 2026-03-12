@@ -162,11 +162,21 @@ router.post('/v1/purge', async (req: Request, res: Response, next: NextFunction)
 router.post('/v1/reboot', async (req: Request, res: Response, next: NextFunction) => {
 	try {
 		const agent = actions.getAgent();
+		const lifecycleState = agent.getLifecycleState?.() ?? 'UNKNOWN';
+
+		if (lifecycleState !== 'RUNNING') {
+			return res.status(409).json({
+				error: 'Restart not allowed in current lifecycle state',
+				lifecycleState,
+				hint: 'Wait for RUNNING state before requesting restart',
+			});
+		}
 		
 		// Send response immediately (don't wait for restart)
 		res.status(202).json({ 
 			Data: 'Agent services restarting', 
-			Error: null 
+			Error: null,
+			lifecycleState,
 		});
 		
 		// Restart services asynchronously (keeps API running)

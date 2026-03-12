@@ -14,10 +14,6 @@ export async function initInfrastructure(ctx: AgentInitContext): Promise<void> {
 export async function initializeMqttManager(ctx: AgentInitContext): Promise<void> {
 	try {
 		if (!ctx.deviceInfo?.mqttBrokerConfig) {
-			ctx.agentLogger?.debugSync('MQTT disabled - device not provisioned with broker config', {
-				component: LogComponents.agent,
-				note: 'Provision device to enable MQTT',
-			});
 			return;
 		}
 
@@ -26,20 +22,6 @@ export async function initializeMqttManager(ctx: AgentInitContext): Promise<void
 		const mqttManager = MqttManager.getInstance();
 
 		mqttManager.setLogger(ctx.agentLogger!);
-
-		ctx.agentLogger?.debugSync('Mqtt broker config', {
-			component: LogComponents.agent,
-			operation: 'mqtt-init',
-			configKeys: Object.keys(config),
-			protocol: config.protocol,
-			host: config.host,
-			port: config.port,
-			useTls: config.useTls,
-			verifyCertificate: config.verifyCertificate,
-			hasCaCert: !!config.caCert,
-			hasUsername: !!config.username,
-			hasPassword: !!config.password
-		});
 
 		const mqttOptions: any = {
 			clientId: config.clientIdPrefix ? `${config.clientIdPrefix}_${ctx.deviceInfo.uuid}` : `device_${ctx.deviceInfo.uuid}`,
@@ -60,14 +42,6 @@ export async function initializeMqttManager(ctx: AgentInitContext): Promise<void
 				const caCert = config.caCert.replace(/\\n/g, '\n');
 				mqttOptions.ca = caCert;
 			}
-
-			ctx.agentLogger?.infoSync('MQTT TLS enabled', {
-				component: LogComponents.agent,
-				protocol: config.protocol,
-				verifyCertificate: config.verifyCertificate,
-				hasCaCert,
-				rejectUnauthorized,
-			});
 		}
 
 		await mqttManager.connect(mqttBrokerUrl, mqttOptions, ctx.deviceInfo.uuid, {
@@ -78,13 +52,9 @@ export async function initializeMqttManager(ctx: AgentInitContext): Promise<void
 			mqttManager.setDebug(true);
 		}
 
-		ctx.agentLogger?.infoSync('MQTT Manager connected', {
+		ctx.agentLogger?.infoSync('MQTT manager initialized', {
 			component: LogComponents.agent,
-			brokerUrl: mqttBrokerUrl,
-			clientId: `agent_${ctx.deviceInfo.uuid}`,
-			username: config.username || '(none)',
-			debugMode: process.env.MQTT_DEBUG === 'true',
-			totalLogBackends: ctx.agentLogger?.getBackends().length,
+			broker: mqttBrokerUrl,
 		});
 
 		await initializeDictionaryManager(ctx);
@@ -102,9 +72,6 @@ export async function initializeMqttManager(ctx: AgentInitContext): Promise<void
 
 export async function initializeDictionaryManager(ctx: AgentInitContext): Promise<void> {
 	if (process.env.USE_KEY_COMPACTION_POC !== 'true') {
-		ctx.agentLogger?.debugSync('Dictionary compaction disabled (USE_KEY_COMPACTION_POC != true)', {
-			component: LogComponents.mqtt,
-		});
 		return;
 	}
 
@@ -115,9 +82,8 @@ export async function initializeDictionaryManager(ctx: AgentInitContext): Promis
 		ctx.dictionaryManager = new DictionaryManager(mqttManager, ctx.agentLogger, ctx.deviceInfo.uuid);
 		await ctx.dictionaryManager.initialize();
 
-		ctx.agentLogger?.infoSync('Dictionary Manager initialized', {
+		ctx.agentLogger?.infoSync('Dictionary manager initialized', {
 			component: LogComponents.mqtt,
-			deviceUuid: ctx.deviceInfo.uuid,
 		});
 	} catch (error) {
 		ctx.agentLogger?.errorSync(
@@ -139,22 +105,15 @@ export async function initContainerManager(ctx: AgentInitContext): Promise<void>
 		ctx.logMonitor = new (await import('../logging/docker-monitor.js')).ContainerLogMonitor(docker, ctx.agentLogger);
 		ctx.containerManager.setLogMonitor(ctx.logMonitor);
 		await ctx.containerManager.attachLogsToAllContainers();
-		ctx.agentLogger?.debugSync('Log monitor attached to container manager', {
-			component: LogComponents.agent,
-			backendCount: ctx.agentLogger?.getBackends().length,
-		});
 	}
 
-	ctx.agentLogger?.infoSync('Container manager setup complete', {
+	ctx.agentLogger?.infoSync('Container manager initialized', {
 		component: LogComponents.agent,
 	});
 }
 
 export async function initDeviceAPI(ctx: AgentInitContext): Promise<void> {
 	if (ctx.deviceAPI) {
-		ctx.agentLogger?.infoSync('Device API already running, skipping initialization', {
-			component: LogComponents.agent,
-		});
 		return;
 	}
 
@@ -184,7 +143,7 @@ export async function initDeviceAPI(ctx: AgentInitContext): Promise<void> {
 	});
 
 	await ctx.deviceAPI.listen(ctx.configManager!.getDeviceApiPort());
-	ctx.agentLogger?.infoSync('Device API started', {
+	ctx.agentLogger?.infoSync('Device API initialized', {
 		component: LogComponents.agent,
 		port: ctx.configManager!.getDeviceApiPort(),
 	});

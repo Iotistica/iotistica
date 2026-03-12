@@ -22,15 +22,6 @@ export async function initializeCloudLogging(ctx: AgentInitContext): Promise<voi
 		!ctx.deviceInfo?.provisioned ||
 		!ctx.deviceInfo?.deviceApiKey
 	) {
-		if (cloudApiEndpoint && !ctx.deviceInfo?.provisioned) {
-			ctx.agentLogger?.warnSync(
-				'Cloud logging disabled - device not provisioned',
-				{
-					component: LogComponents.agent,
-					note: 'Device must be provisioned before enabling cloud log streaming',
-				}
-			);
-		}
 		return;
 	}
 
@@ -52,9 +43,8 @@ export async function initializeCloudLogging(ctx: AgentInitContext): Promise<voi
 		await cloudLogBackend.initialize();
 		ctx.agentLogger?.addBackend(cloudLogBackend);
 
-		ctx.agentLogger?.debugSync('Cloud log backend initialized', {
+		ctx.agentLogger?.infoSync('Cloud logging initialized', {
 			component: LogComponents.agent,
-			cloudEndpoint: cloudApiEndpoint,
 		});
 	} catch (error) {
 		ctx.agentLogger?.errorSync(
@@ -82,31 +72,10 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 	const provisioningApiKey = process.env.PROVISIONING_KEY;
 	const cloudEndpoint = process.env.CLOUD_API_ENDPOINT || ctx.configManager!.getCloudApiEndpoint();
 
-	ctx.agentLogger?.debugSync('Checking provisioning configuration', {
-		component: LogComponents.agent,
-		hasProvisioningKey: !!provisioningApiKey,
-		provisioningKeyLength: provisioningApiKey?.length || 0,
-		provisioningKeyPrefix: provisioningApiKey ? provisioningApiKey.substring(0, 20) + '...' : 'not set',
-		keySource: process.env.PROVISIONING_KEY ? 'environment' : 'none',
-		isProvisioned: deviceInfo.provisioned,
-		hasCloudEndpoint: !!cloudEndpoint,
-		cloudEndpoint: cloudEndpoint || 'not set',
-	});
-
 	if (!deviceInfo.provisioned && provisioningApiKey && cloudEndpoint) {
-		ctx.agentLogger?.infoSync('Auto-provisioning device with two-phase authentication', {
-			component: LogComponents.agent,
-			keySource: 'environment variable',
-		});
 		try {
 			const macAddress = process.env.MAC_ADDRESS || (await getMacAddress());
 			const osVersion = process.env.OS_VERSION || (await getOsVersion());
-
-			ctx.agentLogger?.infoSync('System information detected', {
-				component: LogComponents.agent,
-				macAddress: macAddress ? `${macAddress.substring(0, 8)}...` : 'unknown',
-				osVersion: osVersion || 'unknown',
-			});
 
 			await ctx.deviceManager.provision({
 				provisioningApiKey,
@@ -119,9 +88,6 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 			});
 			deviceInfo = ctx.deviceManager.getDeviceInfo();
 			ctx.deviceInfo = deviceInfo;
-			ctx.agentLogger?.infoSync('Device auto-provisioned successfully', {
-				component: LogComponents.agent,
-			});
 		} catch (error: any) {
 			ctx.agentLogger?.errorSync(
 				'Auto-provisioning failed',
@@ -167,42 +133,21 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 
 	const currentVersion = process.env.AGENT_VERSION || getPackageVersion();
 	if (ctx.deviceInfo.agentVersion !== currentVersion) {
-		ctx.agentLogger?.debugSync('Updating agent version', {
-			component: LogComponents.agent,
-			oldVersion: ctx.deviceInfo.agentVersion || 'unknown',
-			newVersion: currentVersion,
-		});
 		await ctx.deviceManager.updateAgentVersion(currentVersion);
 		ctx.deviceInfo = ctx.deviceManager.getDeviceInfo();
 	}
 
 	ctx.agentLogger?.setDeviceId(ctx.deviceInfo.uuid);
 
-	ctx.agentLogger?.debugSync('Device manager initialized', {
+	ctx.agentLogger?.infoSync('Device manager initialized', {
 		component: LogComponents.agent,
-		uuid: ctx.deviceInfo.uuid,
-		name: ctx.deviceInfo.deviceName || 'Not set',
 		provisioned: ctx.deviceInfo.provisioned,
-		tenantId: ctx.deviceInfo.tenantId,
-		hasApiKey: !!ctx.deviceInfo.deviceApiKey,
-		agentVersion: ctx.deviceInfo.agentVersion,
-		mqtt: ctx.deviceInfo.mqttBrokerConfig
+		mode: ctx.deviceInfo.provisioned ? 'cloud' : 'local',
 	});
 }
 
 export async function initializeVpnReconnection(ctx: AgentInitContext): Promise<void> {
-	ctx.agentLogger?.infoSync('Checking VPN auto-reconnection status', {
-		component: LogComponents.agent,
-		provisioned: ctx.deviceInfo?.provisioned,
-		vpnEnabled: ctx.deviceInfo?.vpnEnabled,
-	});
-
 	if (!ctx.deviceInfo?.provisioned || !ctx.deviceInfo?.vpnEnabled) {
-		ctx.agentLogger?.infoSync('VPN auto-reconnection skipped (device not provisioned with VPN)', {
-			component: LogComponents.agent,
-			provisioned: ctx.deviceInfo?.provisioned,
-			vpnEnabled: ctx.deviceInfo?.vpnEnabled,
-		});
 		return;
 	}
 
@@ -212,31 +157,21 @@ export async function initializeVpnReconnection(ctx: AgentInitContext): Promise<
 
 		const isInstalled = await tailscale.checkInstallation();
 		if (!isInstalled) {
-			ctx.agentLogger?.infoSync('VPN auto-reconnection skipped (Tailscale not installed)', {
-				component: LogComponents.agent,
-			});
 			return;
 		}
-
-		ctx.agentLogger?.infoSync('Starting Tailscale daemon for auto-reconnection', {
-			component: LogComponents.agent,
-		});
 		await tailscale.ensureDaemonRunning();
 
 		const status = await tailscale.getStatus();
 
 		if (status.connected) {
-			ctx.agentLogger?.infoSync('Tailscale VPN reconnected on startup', {
+			ctx.agentLogger?.infoSync('VPN reconnection initialized', {
 				component: LogComponents.agent,
 				tailnetIP: status.tailnetIP,
-				hostname: status.hostname,
-				online: status.online,
 			});
 		} else {
-			ctx.agentLogger?.infoSync('Tailscale daemon started but not authenticated', {
+			ctx.agentLogger?.infoSync('VPN daemon initialized', {
 				component: LogComponents.agent,
-				backendState: status.backendState,
-				note: 'Device needs to be provisioned with VPN auth key',
+				state: status.backendState,
 			});
 		}
 	} catch (error) {
