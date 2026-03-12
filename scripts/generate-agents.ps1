@@ -88,7 +88,7 @@ param(
     [string]$EnableProtocolAdapters = "true",
     [string]$EnableSensorPublish = "true",
     [string]$EnableFirstBootDiscovery = "true",
-    [string]$MqttBrokerUrl = "mqtt://localhost:5883",
+    [string]$MqttBrokerUrl = "mqtt://localhost:5884",
     [string]$MqttUsername = "admin",
     [string]$MqttPassword = "iotistic42!",
     [string]$ModbusTcpHost = "iotistic-modbus-sim",

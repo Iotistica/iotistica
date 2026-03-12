@@ -7,8 +7,12 @@ import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import * as actions from './actions';
 import * as vpnActions from './vpn-actions';
+import { router as mqttAuthRouter } from './mqtt-auth';
 
 export const router = express.Router();
+
+// Mount MQTT authentication endpoints
+router.use(mqttAuthRouter);
 
 /**
  * POST /v1/restart

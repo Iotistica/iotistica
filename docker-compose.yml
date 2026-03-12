@@ -261,6 +261,31 @@ services:
         networks:
             - iotistica-net
 
+    mosquitto-agent:
+        image: iegomez/mosquitto-go-auth
+        restart: unless-stopped
+        container_name: iotistic-mosquitto-agent
+        ports:
+          - "${AGENT_MOSQUITTO_PORT_EXT:-5884}:1883"     # Dedicated MQTT for agent traffic
+          - "${AGENT_MOSQUITTO_WS_PORT_EXT:-59003}:9001" # Dedicated MQTT WebSocket for agent traffic
+        environment:
+            - AGENT_API_HOST=${AGENT_API_HOST:-host.docker.internal}
+        volumes:
+          - ./mosquitto/mosquitto-agent.conf:/etc/mosquitto/mosquitto.conf:ro
+        healthcheck:
+            test: ["CMD-SHELL", "timeout 5 mosquitto_sub -h localhost -p 1883 -u ${MQTT_USERNAME:-nodered} -P ${MQTT_PASSWORD:-secret} -t '$$SYS/#' -C 1 || exit 1"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 10s
+        depends_on:
+            api:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        networks:
+            - iotistica-net
+
     emqx:
         image: emqx/emqx:latest
         container_name: iotistic-emqx

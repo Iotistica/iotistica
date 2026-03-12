@@ -373,6 +373,16 @@ DEVICES (SENSORS):
                                       iotctl discover --validate         # All with validation
                                       iotctl discover --protocol=snmp    # SNMP only
 
+
+MQTT MANAGEMENT:
+
+  mqtt users                        List all MQTT users from device database
+                                    Shows: username, superuser status, active status
+                                    Example: iotctl mqtt users
+
+
+EXAMPLES:
+
   # Manage individual service container
   iotctl services start myapp-web-1
   iotctl services restart myapp-api-2
@@ -383,6 +393,9 @@ DEVICES (SENSORS):
 
   # Set custom poll interval (60 seconds)
   iotctl config set pollInterval 60000
+
+  # List MQTT users synced from target endpoints
+  iotctl mqtt users
 
 `);
 }
@@ -1649,6 +1662,49 @@ async function deprovision(): Promise<void> {
 	}
 }
 
+/**
+ * List all MQTT users from local device SQLite
+ * These users are synced from target endpoints and used by mosquitto broker
+ */
+async function mqttListUsers(): Promise<void> {
+	clearApiCache();
+	try {
+		const result = await apiRequest(`${DEVICE_API_V1}/mqtt/users`);
+		
+		const users = result.users || [];
+		const count = result.count || 0;
+
+		if (count === 0) {
+			logger.info('No MQTT users configured');
+			return;
+		}
+
+		console.log(`\n📊 MQTT Users (${count} total)\n`);
+		console.log('┌─────────────────────────────────┬──────────────┬──────────┐');
+		console.log('│ Username                          │ Superuser    │ Active   │');
+		console.log('├─────────────────────────────────┼──────────────┼──────────┤');
+
+		for (const user of users) {
+			const username = (user.username || '').padEnd(32, ' ');
+			const superuser = user.is_superuser ? 'Yes' : 'No';
+			const active = user.is_active ? 'Yes' : 'No';
+			console.log(`│ ${username} │ ${superuser.padEnd(12, ' ')} │ ${active.padEnd(8, ' ')} │`);
+		}
+
+		console.log('└─────────────────────────────────┴──────────────┴──────────┘\n');
+	} catch (error) {
+		if ((error as any).code === 'ECONNREFUSED') {
+			logger.error('Cannot connect to agent API', undefined, {
+				endpoint: DEVICE_API_BASE,
+				hint: 'Make sure the agent is running'
+			});
+		} else {
+			logger.error('Failed to retrieve MQTT users', error as Error);
+		}
+		process.exit(1);
+	}
+}
+
 async function factoryReset(): Promise<void> {
 	try {
 		logger.warn('WARNING: Factory reset will DELETE ALL DATA');
@@ -1752,6 +1808,10 @@ async function main(): Promise<void> {
 			list: endpointsList,
 			show: endpointsShow,
 			_default: endpointsList
+		},
+		mqtt: {
+			users: mqttListUsers,
+			_default: mqttListUsers
 		},
 		diagnostics: {
 			_default: runDiagnostics
