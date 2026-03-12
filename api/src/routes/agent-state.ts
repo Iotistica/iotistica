@@ -20,7 +20,7 @@
  */
 
 import express from 'express';
-import { query } from '../db/connection';
+import bcrypt from 'bcrypt';
 import {
   DeviceModel,
   DeviceTargetStateModel,
@@ -41,6 +41,87 @@ export const router = express.Router();
 
 // Initialize event publisher for audit trail
 const eventPublisher = new EventPublisher();
+
+async function applyPendingMqttAuth(config: any): Promise<any> {
+  if (!config || typeof config !== 'object') {
+    return config;
+  }
+
+  const nextConfig = JSON.parse(JSON.stringify(config));
+  const endpoints = Array.isArray(nextConfig.endpoints) ? nextConfig.endpoints : [];
+
+  for (const endpoint of endpoints) {
+    if (endpoint?.protocol !== 'mqtt') {
+      continue;
+    }
+
+    const mqttAuth = endpoint?.auth?.mqtt || endpoint?.metadata?.mqttAuth;
+    if (!mqttAuth) {
+      continue;
+    }
+
+    const username = typeof mqttAuth.username === 'string' ? mqttAuth.username.trim() : '';
+    const password = typeof mqttAuth.password === 'string' ? mqttAuth.password : '';
+    const existingHash = typeof mqttAuth.passwordHash === 'string' ? mqttAuth.passwordHash : '';
+    const existingAlgo = typeof mqttAuth.hashAlgo === 'string' ? mqttAuth.hashAlgo : '';
+    const access = Number.isInteger(mqttAuth.access) ? mqttAuth.access : 2;
+    const topic = endpoint?.connection?.topic;
+
+    if (!username) {
+      throw new Error(`MQTT auth is missing username for endpoint ${endpoint?.name || 'unknown'}`);
+    }
+
+    if (!topic || typeof topic !== 'string') {
+      throw new Error(`MQTT topic is missing for endpoint ${endpoint?.name || 'unknown'}`);
+    }
+
+    if (![1, 2, 3].includes(access)) {
+      throw new Error(`MQTT access must be 1, 2, or 3 for endpoint ${endpoint?.name || 'unknown'}`);
+    }
+
+    let passwordHash = existingHash;
+    let hashAlgo = existingAlgo;
+    let hashParams: any = mqttAuth.hashParams && typeof mqttAuth.hashParams === 'object'
+      ? mqttAuth.hashParams
+      : undefined;
+
+    if (password) {
+      const bcryptCost = 12;
+      passwordHash = await bcrypt.hash(password, bcryptCost);
+      hashAlgo = 'bcrypt';
+      hashParams = { cost: bcryptCost };
+    }
+
+    if (!passwordHash || !hashAlgo) {
+      throw new Error(`MQTT auth is missing password or passwordHash for endpoint ${endpoint?.name || 'unknown'}`);
+    }
+
+    endpoint.connection = {
+      ...(endpoint.connection || {}),
+      username,
+    };
+
+    endpoint.auth = {
+      ...(endpoint.auth || {}),
+      mqtt: {
+        username,
+        passwordHash,
+        hashAlgo,
+        hashParams,
+        access,
+      },
+    };
+
+    if (endpoint.metadata && typeof endpoint.metadata === 'object' && endpoint.metadata.mqttAuth) {
+      delete endpoint.metadata.mqttAuth;
+      if (Object.keys(endpoint.metadata).length === 0) {
+        delete endpoint.metadata;
+      }
+    }
+  }
+
+  return nextConfig;
+}
 
 // ============================================================================
 // Device State Endpoints (Device-Side - Used by devices themselves)
@@ -274,6 +355,8 @@ router.post('/devices/:uuid/target-state', deviceAuth, validateTargetStateConfig
       });
     }
 
+    config = await applyPendingMqttAuth(config || {});
+
     // 🎯 RESOLVE IMAGE DIGESTS
     // Convert all :latest and floating tags to @sha256:... digests
     // This enables automatic updates when new images are pushed
@@ -384,6 +467,8 @@ router.put('/devices/:uuid/target-state', validateTargetStateConfigMiddleware, a
         message: error.message
       });
     }
+
+    config = await applyPendingMqttAuth(config || {});
 
     // 🎯 RESOLVE IMAGE DIGESTS
     // Convert all :latest and floating tags to @sha256:... digests

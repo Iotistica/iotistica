@@ -757,7 +757,7 @@ export function AddEditDeviceDialog({
               </PopoverContent>
             </Popover>
             <p className="text-xs text-muted-foreground">
-              Specify the physical location for Digital Twins integration
+              Specify the physical location
             </p>
           </div>
           )}

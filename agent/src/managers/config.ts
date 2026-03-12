@@ -13,6 +13,7 @@ import { EventEmitter } from 'events';
 import _ from 'lodash';
 import { models as db } from '../db/connection.js';
 import { DeviceEndpointModel, type DeviceEndpoint } from '../db/models/endpoint.model.js';
+import { MqttAuthModel } from '../db/models/mqtt-auth.model.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents, type LogLevel } from '../logging/types.js';
 import type {
@@ -734,6 +735,7 @@ export class ConfigManager extends EventEmitter {
 		const devices = this.targetConfig.endpoints || [];
 
 		if (!devices || !Array.isArray(devices) || devices.length === 0) {
+			await this.syncMqttAuthToDatabase([]);
 			this.logger?.warnSync('=== SYNC TO DB: NO ENDPOINTS TO SYNC ===', {
 				component: LogComponents.configManager,
 				operation: 'syncEndpointsToDatabase',
@@ -998,6 +1000,8 @@ export class ConfigManager extends EventEmitter {
 				}
 			}
 
+			await this.syncMqttAuthToDatabase(devices);
+
 		} catch (error) {
 			this.logger?.errorSync(
 				'Failed to sync endpoints to database',
@@ -1005,6 +1009,28 @@ export class ConfigManager extends EventEmitter {
 				{
 					component: LogComponents.configManager,
 					operation: 'syncEndpointsToDatabase'
+				}
+			);
+		}
+	}
+
+	private async syncMqttAuthToDatabase(devices: any[]): Promise<void> {
+		try {
+			const result = await MqttAuthModel.syncFromTargetEndpoints(devices);
+
+			this.logger?.infoSync('Reconciled MQTT auth manifests to local database', {
+				component: LogComponents.configManager,
+				operation: 'syncMqttAuthToDatabase',
+				users: result.users,
+				acls: result.acls,
+			});
+		} catch (error) {
+			this.logger?.errorSync(
+				'Failed to reconcile MQTT auth manifests',
+				error instanceof Error ? error : new Error(String(error)),
+				{
+					component: LogComponents.configManager,
+					operation: 'syncMqttAuthToDatabase',
 				}
 			);
 		}

@@ -222,9 +222,9 @@ export interface MQTTMetricConfig {
 }
 
 export interface MQTTConnection {
-  topic: string;
+  topic?: string;
   qos?: 0 | 1 | 2;
-  dataType: MQTTDataType;
+  dataType?: MQTTDataType;
   unit?: string;
   metric?: string;
   deviceId?: string;
@@ -240,7 +240,7 @@ export interface MQTTDeviceConfig {
   enabled: boolean;
   pollInterval: number;
   connection: MQTTConnection;
-  dataPoints: any[];
+  dataPoints?: any[];
 }
 
 // ============================================================================

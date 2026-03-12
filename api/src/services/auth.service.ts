@@ -223,15 +223,15 @@ export async function refreshAccessToken(
       return { accessToken };
     }
 
-    // Check if refresh token exists and is not revoked
-    const tokenHash = await bcrypt.hash(refreshToken, 10);
+    // Check if refresh token exists and is not revoked.
+    // Token hashes are salted, so we must compare with bcrypt.compare against candidates.
     const result = await query(
-      `SELECT rt.id, rt.user_id, rt.revoked, u.username, u.email, u.role, u.is_active
+      `SELECT rt.id, rt.user_id, rt.token_hash, rt.revoked, u.username, u.email, u.role, u.is_active
        FROM refresh_tokens rt
        JOIN users u ON rt.user_id = u.id
        WHERE rt.user_id = $1 AND rt.revoked = false AND rt.expires_at > CURRENT_TIMESTAMP
        ORDER BY rt.created_at DESC
-       LIMIT 1`,
+       LIMIT 20`,
       [payload.userId]
     );
 
@@ -239,7 +239,18 @@ export async function refreshAccessToken(
       throw new Error('Invalid or expired refresh token');
     }
 
-    const tokenData = result.rows[0];
+    let tokenData: any = null;
+    for (const row of result.rows) {
+      const matches = await bcrypt.compare(refreshToken, row.token_hash);
+      if (matches) {
+        tokenData = row;
+        break;
+      }
+    }
+
+    if (!tokenData) {
+      throw new Error('Invalid or expired refresh token');
+    }
 
     if (!tokenData.is_active) {
       throw new Error('User account is inactive');

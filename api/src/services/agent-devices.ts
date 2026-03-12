@@ -17,6 +17,8 @@ import logger from '../utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { DeviceTargetStateModel } from '../db/models';
 import type { ModbusDataPoint, OPCUADataPoint, AnomalyDetectionDataPointConfig, AnomalyMetric } from '../types/target-state';
+import { mqttDeviceTopic } from '../mqtt/topics';
+import { getTenantId } from '../redis/tenant-keys';
 
 const eventPublisher = new EventPublisher();
 
@@ -26,11 +28,52 @@ export interface EndpointDeviceConfig {
   name: string;
   protocol: 'modbus' | 'can' | 'opcua' | 'mqtt' | 'snmp';
   enabled: boolean;
-  pollInterval: number;
+  pollInterval?: number;
   connection: any;
   dataPoints: (ModbusDataPoint | OPCUADataPoint | any)[];  // Typed for Modbus/OPC-UA, any for other protocols
   metadata?: any;
   location?: string; // Physical location for Azure Digital Twins
+}
+
+export function prepareEndpointForCreate(
+  deviceUuid: string,
+  sensorConfig: EndpointDeviceConfig
+): EndpointDeviceConfig {
+  const { id: _ignoredId, ...configWithoutId } = sensorConfig;
+  const preparedConfig: EndpointDeviceConfig = {
+    ...configWithoutId,
+    uuid: configWithoutId.uuid || uuidv4(),
+  };
+
+  if (preparedConfig.protocol === 'mqtt') {
+    const topic = mqttDeviceTopic(getTenantId(), deviceUuid, 'mqtt', preparedConfig.uuid!);
+    const { pollInterval, ...mqttConfig } = preparedConfig;
+
+    return {
+      ...mqttConfig,
+      connection: {
+        ...(preparedConfig.connection || {}),
+        topic,
+        qos: preparedConfig.connection?.qos ?? 1,
+      },
+    };
+  }
+
+  return preparedConfig;
+}
+
+function resolvePollIntervalForPersistence(endpoint: EndpointDeviceConfig, existingPollInterval?: number | null): number {
+  const configured = endpoint.pollInterval;
+  if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
+    return configured;
+  }
+
+  if (typeof existingPollInterval === 'number' && Number.isFinite(existingPollInterval) && existingPollInterval > 0) {
+    return existingPollInterval;
+  }
+
+  // Keep DB constraint satisfied even when protocol payload omits pollInterval (e.g. MQTT).
+  return 5000;
 }
 
 export class DeviceSensorSyncService {
@@ -262,7 +305,7 @@ export class DeviceSensorSyncService {
               stableSensorUuid,
               endpoint.protocol,
               endpoint.enabled,
-              endpoint.pollInterval,
+              resolvePollIntervalForPersistence(endpoint, existing?.poll_interval),
               JSON.stringify(endpoint.connection),
               JSON.stringify(endpoint.dataPoints),
               JSON.stringify(mergedMetadata),
@@ -336,7 +379,7 @@ export class DeviceSensorSyncService {
               endpoint.name,
               endpoint.protocol,
               endpoint.enabled,
-              endpoint.pollInterval,
+              resolvePollIntervalForPersistence(endpoint, existingByNameMatch?.poll_interval),
               JSON.stringify(endpoint.connection),
               JSON.stringify(endpoint.dataPoints),
               JSON.stringify(mergedMetadata),
@@ -480,16 +523,20 @@ export class DeviceSensorSyncService {
         }
         
         return {
-          id: row.id.toString(), // Convert database id to string for consistency
           uuid: endpointUuid, // Include UUID for stable identifier (always valid UUID)
           name: row.name,
           protocol: row.protocol,
           enabled: row.enabled,
-          pollInterval: row.poll_interval,
           connection: typeof row.connection === 'string' ? JSON.parse(row.connection) : row.connection,
           dataPoints: typeof row.data_points === 'string' ? JSON.parse(row.data_points) : row.data_points,
           metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata
         };
+      });
+
+      configDevices.forEach((device: any, index: number) => {
+        if (result.rows[index]?.protocol !== 'mqtt') {
+          device.pollInterval = result.rows[index]?.poll_interval;
+        }
       });
 
       // Get current target state
@@ -1055,11 +1102,19 @@ export class DeviceSensorSyncService {
 
       // 2. Apply updates to table record
       // Always stringify JSON columns (they might be objects from pg driver)
+      const nextProtocol = updates.protocol ?? existingEndpoint.protocol;
       const updatedEndpoint = {
         name: updates.name ?? existingEndpoint.name,
-        protocol: updates.protocol ?? existingEndpoint.protocol,
+        protocol: nextProtocol,
         enabled: updates.enabled ?? existingEndpoint.enabled,
-        poll_interval: updates.pollInterval ?? existingEndpoint.poll_interval,
+        poll_interval: resolvePollIntervalForPersistence(
+          {
+            ...(updates as EndpointDeviceConfig),
+            protocol: nextProtocol,
+            pollInterval: updates.pollInterval,
+          } as EndpointDeviceConfig,
+          existingEndpoint.poll_interval
+        ),
         location: updates.location ?? existingEndpoint.location,
         connection: updates.connection 
           ? JSON.stringify(updates.connection) 
@@ -1135,7 +1190,6 @@ export class DeviceSensorSyncService {
           name: updatedEndpoint.name,
           protocol: updatedEndpoint.protocol,
           enabled: updatedEndpoint.enabled,
-          pollInterval: updatedEndpoint.poll_interval,
           connection: typeof updatedEndpoint.connection === 'string' 
             ? JSON.parse(updatedEndpoint.connection) 
             : updatedEndpoint.connection,
@@ -1166,10 +1220,7 @@ export class DeviceSensorSyncService {
     logger.info(`Adding endpoint "${sensorConfig.name}" for device ${deviceUuid.substring(0, 8)}...`);
 
     try {
-      // 1. Generate UUID if not provided
-      if (!sensorConfig.uuid) {
-        sensorConfig.uuid = uuidv4();
-      }
+      const preparedSensorConfig = prepareEndpointForCreate(deviceUuid, sensorConfig);
 
       // 2. Get current target state
       const stateResult = await query(
@@ -1210,18 +1261,18 @@ export class DeviceSensorSyncService {
       });
 
       // 3. Check for duplicate name
-      const duplicate = validExistingDevices.find(d => d.name === sensorConfig.name);
+      const duplicate = validExistingDevices.find(d => d.name === preparedSensorConfig.name);
       if (duplicate) {
-        throw new Error(`Sensor with name "${sensorConfig.name}" already exists`);
+        throw new Error(`Sensor with name "${preparedSensorConfig.name}" already exists`);
       }
 
       // 4. Add sensor to config (SOURCE OF TRUTH)
       // For OPC UA: Remove dataPoints - agent discovers nodes from OPC UA server
       // For Modbus: Keep dataPoints with register mappings (required)
-      let configForTargetState: any = sensorConfig;
+      let configForTargetState: any = preparedSensorConfig;
       
-      if (sensorConfig.protocol === 'opcua') {
-        const { dataPoints, ...opcuaConfig } = sensorConfig as any;
+      if (preparedSensorConfig.protocol === 'opcua') {
+        const { dataPoints, ...opcuaConfig } = preparedSensorConfig as any;
         configForTargetState = opcuaConfig; // Remove dataPoints field entirely
       }
       
@@ -1246,8 +1297,8 @@ export class DeviceSensorSyncService {
       // 6. Insert ONLY the new sensor into table (with full dataPoints and deployment metadata)
       // Database gets complete record with dataPoints (even for OPC UA) and deployment metadata
       const sensorWithMetadata = deploymentMetadata 
-        ? { ...sensorConfig, metadata: deploymentMetadata }
-        : sensorConfig;
+        ? { ...preparedSensorConfig, metadata: deploymentMetadata }
+        : preparedSensorConfig;
       
       await this.syncConfigToTable(deviceUuid, [sensorWithMetadata], newVersion, userId);
 
@@ -1257,17 +1308,17 @@ export class DeviceSensorSyncService {
         'agent',
         deviceUuid,
         {
-          sensor_name: sensorConfig.name,
-          sensor_uuid: sensorConfig.uuid,
-          protocol: sensorConfig.protocol,
+          sensor_name: preparedSensorConfig.name,
+          sensor_uuid: preparedSensorConfig.uuid,
+          protocol: preparedSensorConfig.protocol,
           version: newVersion
         }
       );
 
-      logger.info(`Added sensor "${sensorConfig.name}" to config (version: ${newVersion})`);
+      logger.info(`Added sensor "${preparedSensorConfig.name}" to config (version: ${newVersion})`);
 
       return {
-        sensor: sensorConfig,
+        sensor: preparedSensorConfig,
         version: newVersion
       };
     } catch (error) {

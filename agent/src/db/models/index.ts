@@ -24,6 +24,9 @@ export { MetadataModel } from './metadata.model';
 export { MessageBufferModel } from './message-buffer.model';
 export type { MessageBufferRecord, BufferStats } from './message-buffer.model';
 
+// MQTT auth tables (agent-local broker auth reconciliation)
+export { MqttAuthModel } from './mqtt-auth.model';
+
 // Dictionary persistence (MQTT key compression)
 export { DictionaryModel } from './dictionary.model';
 export type { DictionaryEntry, DictionaryDelta, DictionaryMetadata } from './dictionary.model';

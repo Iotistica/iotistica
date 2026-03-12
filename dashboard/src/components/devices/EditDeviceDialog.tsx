@@ -2,7 +2,7 @@
  * Edit Sensor Dialog
  * 
  * Tabbed interface for editing existing protocol devices.
- * Supports: Modbus TCP/RTU, OPC-UA
+ * Supports: Modbus TCP/RTU, OPC-UA, MQTT
  * Pre-populates form with existing configuration and allows updates.
  */
 
@@ -28,11 +28,10 @@ import {
 import { cn } from '@/components/ui/utils';
 import { buildApiUrl } from '@/config/api';
 import { ModbusConfigForm } from './ModbusConfigForm';
-import { DataPointsTable } from './DataPointsTable';
 import { OPCUAConfigForm } from './OPCUAConfigForm';
-import { OPCUADataPointsTable } from './OPCUADataPointsTable';
+import { MqttConfigForm } from './MqttConfigForm';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import type { ModbusDeviceConfig, ModbusDataPoint, OPCUADeviceConfig, OPCUADataPoint } from '@/schemas/sensor-schemas';
+import type { ModbusDeviceConfig, ModbusDataPoint, OPCUADeviceConfig, OPCUADataPoint, MQTTDeviceConfig } from '@/schemas/sensor-schemas';
 
 interface EditSensorDialogProps {
   open: boolean;
@@ -66,6 +65,10 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
   const [opcuaConfig, setOpcuaConfig] = useState<OPCUADeviceConfig | null>(null);
   const [opcuaFormValid, setOpcuaFormValid] = useState(false);
   const [opcuaDataPoints, setOpcuaDataPoints] = useState<OPCUADataPoint[]>([]);
+
+  // MQTT form state
+  const [mqttConfig, setMqttConfig] = useState<MQTTDeviceConfig | null>(null);
+  const [mqttFormValid, setMqttFormValid] = useState(false);
 
   const loadLocations = async () => {
     try {
@@ -119,6 +122,21 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
         setOpcuaConfig(config);
         setOpcuaDataPoints(device.dataPoints || []);
         setOpcuaFormValid(true); // Assume valid since it was saved before
+      } else if (device.protocol === 'mqtt') {
+        const config: MQTTDeviceConfig = {
+          name: device.name,
+          protocol: 'mqtt',
+          enabled: device.enabled ?? true,
+          pollInterval: device.pollInterval,
+          connection: {
+            ...(device.connection || {}),
+            qos: device.connection?.qos ?? 1,
+          },
+          dataPoints: device.dataPoints || [],
+        };
+
+        setMqttConfig(config);
+        setMqttFormValid(true); // Assume valid since it was saved before
       }
     }
   }, [device, open]);
@@ -185,6 +203,30 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
       } finally {
         setLoading(false);
       }
+    } else if (protocol === 'mqtt') {
+      if (!mqttConfig || !mqttFormValid) {
+        setError('Please complete all required fields');
+        return;
+      }
+
+      const finalConfig: MQTTDeviceConfig = {
+        ...mqttConfig,
+        protocol: 'mqtt',
+        connection: {
+          ...(mqttConfig.connection || {}),
+          qos: mqttConfig.connection?.qos ?? 1,
+        },
+      };
+
+      try {
+        setLoading(true);
+        await onUpdateDevice(device.name, { ...finalConfig, uuid: device.uuid, location });
+        handleClose();
+      } catch (err: any) {
+        setError(err.message || 'Failed to update device');
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -220,6 +262,8 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
     } else if (device.protocol === 'opcua') {
       // OPC UA uses auto-discovery, nodes are optional
       return opcuaFormValid;
+    } else if (device.protocol === 'mqtt') {
+      return mqttFormValid;
     }
     return false;
   };
@@ -295,7 +339,7 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
               </PopoverContent>
             </Popover>
             <p className="text-xs text-muted-foreground">
-              Specify the physical location for Digital Twins integration
+              Specify the physical location
             </p>
           </div>
 
@@ -330,6 +374,17 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
                 onChange={setOpcuaDataPoints}
               />
               */}
+            </div>
+          )}
+
+          {device.protocol === 'mqtt' && (
+            <div className="flex-1 overflow-y-auto space-y-6 mt-4">
+              <MqttConfigForm
+                value={mqttConfig || undefined}
+                onChange={setMqttConfig}
+                onValidationChange={setMqttFormValid}
+                readOnlyTopic={device.connection?.topic}
+              />
             </div>
           )}
 

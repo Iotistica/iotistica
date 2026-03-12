@@ -48,24 +48,17 @@ import {
 } from "lucide-react";
 import { buildApiUrl } from "@/config/api";
 import { toast } from "sonner";
-
-interface MqttAcl {
-  id: number;
-  topic: string;
-  access: number; // 1=read, 2=write, 3=read+write
-  priority: number;
-  created_at: string;
-}
-
-interface MqttUser {
-  id: number;
-  username: string;
-  is_superuser: boolean;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-  acls: MqttAcl[];
-}
+import {
+  createMqttAcl,
+  createMqttUser,
+  deleteMqttAcl,
+  deleteMqttUser,
+  listMqttUsers,
+  updateMqttAcl,
+  updateMqttUser,
+  type MqttAcl,
+  type MqttUser,
+} from "@/services/mqttSecurity";
 
 interface ApiKey {
   id: number;
@@ -128,20 +121,11 @@ export function SecurityPage() {
 
   const fetchMqttUsers = async () => {
     try {
-      const response = await fetch(buildApiUrl('/api/v1/auth/mqtt-users'), {
-        credentials: 'include'
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setMqttUsers(data.users || []);
-      } else {
-        console.error('Failed to fetch MQTT users:', response.status);
-        toast.error("Failed to fetch MQTT users");
-      }
+      const users = await listMqttUsers();
+      setMqttUsers(users);
     } catch (error) {
       console.error('Failed to fetch MQTT users:', error);
-      toast.error("Network error while fetching users");
+      toast.error(error instanceof Error ? error.message : "Network error while fetching users");
     } finally {
       setLoadingMqtt(false);
     }
@@ -273,12 +257,6 @@ export function SecurityPage() {
 
   const handleSaveUser = async () => {
     try {
-      const url = editingUser 
-        ? buildApiUrl(`/api/v1/auth/mqtt-users/${editingUser.id}`)
-        : buildApiUrl('/api/v1/auth/mqtt-users');
-      
-      const method = editingUser ? 'PUT' : 'POST';
-      
       const body: any = {
         is_superuser: userFormData.is_superuser,
         is_active: userFormData.is_active
@@ -291,25 +269,19 @@ export function SecurityPage() {
         // Only include password if it was changed
         body.password = userFormData.password;
       }
-      
-      const response = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(body)
-      });
-      
-      if (response.ok) {
-        toast.success(`MQTT user ${editingUser ? 'updated' : 'created'} successfully`);
-        setUserDialogOpen(false);
-        fetchMqttUsers();
+
+      if (editingUser) {
+        await updateMqttUser(editingUser.id, body);
       } else {
-        const data = await response.json();
-        toast.error(data.message || `Failed to ${editingUser ? 'update' : 'create'} user`);
+        await createMqttUser(body);
       }
+
+      toast.success(`MQTT user ${editingUser ? 'updated' : 'created'} successfully`);
+      setUserDialogOpen(false);
+      fetchMqttUsers();
     } catch (error) {
       console.error('Save user error:', error);
-      toast.error("Network error while saving user");
+      toast.error(error instanceof Error ? error.message : "Network error while saving user");
     }
   };
 
@@ -317,23 +289,12 @@ export function SecurityPage() {
     if (!deleteTarget || deleteTarget.type !== 'user') return;
     
     try {
-      const response = await fetch(
-        buildApiUrl(`/api/v1/auth/mqtt-users/${deleteTarget.id}`),
-        {
-          method: 'DELETE',
-          credentials: 'include'
-        }
-      );
-      
-      if (response.ok) {
-        toast.success("MQTT user deleted successfully");
-        fetchMqttUsers();
-      } else {
-        toast.error("Failed to delete user");
-      }
+      await deleteMqttUser(deleteTarget.id);
+      toast.success("MQTT user deleted successfully");
+      fetchMqttUsers();
     } catch (error) {
       console.error('Delete user error:', error);
-      toast.error("Network error while deleting user");
+      toast.error(error instanceof Error ? error.message : "Network error while deleting user");
     } finally {
       setDeleteDialogOpen(false);
       setDeleteTarget(null);
@@ -355,30 +316,19 @@ export function SecurityPage() {
     if (!selectedUserId) return;
     
     try {
-      const url = editingAcl
-        ? buildApiUrl(`/api/v1/auth/mqtt-acls/${editingAcl.id}`)
-        : buildApiUrl(`/api/v1/auth/mqtt-users/${selectedUserId}/acls`);
-      
-      const method = editingAcl ? 'PUT' : 'POST';
-      
-      const response = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(aclFormData)
-      });
-      
-      if (response.ok) {
-        toast.success(`ACL rule ${editingAcl ? 'updated' : 'created'} successfully`);
-        setAclDialogOpen(false);
-        fetchMqttUsers();
+
+      if (editingAcl) {
+        await updateMqttAcl(editingAcl.id, aclFormData);
       } else {
-        const data = await response.json();
-        toast.error(data.message || `Failed to ${editingAcl ? 'update' : 'create'} ACL rule`);
+        await createMqttAcl(selectedUserId, aclFormData);
       }
+
+      toast.success(`ACL rule ${editingAcl ? 'updated' : 'created'} successfully`);
+      setAclDialogOpen(false);
+      fetchMqttUsers();
     } catch (error) {
       console.error('Save ACL error:', error);
-      toast.error("Network error while saving ACL rule");
+      toast.error(error instanceof Error ? error.message : "Network error while saving ACL rule");
     }
   };
 
@@ -386,23 +336,12 @@ export function SecurityPage() {
     if (!deleteTarget || deleteTarget.type !== 'acl') return;
     
     try {
-      const response = await fetch(
-        buildApiUrl(`/api/v1/auth/mqtt-acls/${deleteTarget.id}`),
-        {
-          method: 'DELETE',
-          credentials: 'include'
-        }
-      );
-      
-      if (response.ok) {
-        toast.success("ACL rule deleted successfully");
-        fetchMqttUsers();
-      } else {
-        toast.error("Failed to delete ACL rule");
-      }
+      await deleteMqttAcl(deleteTarget.id);
+      toast.success("ACL rule deleted successfully");
+      fetchMqttUsers();
     } catch (error) {
       console.error('Delete ACL error:', error);
-      toast.error("Network error while deleting ACL rule");
+      toast.error(error instanceof Error ? error.message : "Network error while deleting ACL rule");
     } finally {
       setDeleteDialogOpen(false);
       setDeleteTarget(null);

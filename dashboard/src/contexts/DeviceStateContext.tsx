@@ -437,12 +437,12 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
         config: { ...deviceState.targetState?.config }
       };
       
-      // Generate unique ID for sensor (UUID v4)
-      // This ID persists through: draft → saved → deployed states
+      // Endpoints use a single stable identifier (uuid) across draft/saved/deployed.
       const sensorWithId = {
         ...sensor,
-        id: sensor.id || crypto.randomUUID() // Use existing ID or generate new one
+        uuid: sensor.uuid || sensor.id || crypto.randomUUID()
       };
+      delete (sensorWithId as any).id;
       
       // Add sensor to endpoints array
       const updatedConfig = { ...currentPending.config };

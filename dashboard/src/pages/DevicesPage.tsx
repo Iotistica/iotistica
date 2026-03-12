@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Activity, Pencil, Plus, AlertCircle, FileText } from 'lucide-react';
+import { Activity, Pencil, Plus, FileText } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AddSensorDialog } from '@/components/devices/AddDeviceDialog';
 import { EditSensorDialog } from '@/components/devices/EditDeviceDialog';
@@ -152,7 +151,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     slaveCount: 40,
   });
   const [virtualDeviceLoading, setVirtualDeviceLoading] = useState(false);
-  const selectedVirtualProfile = profiles.find(profile => profile.profile_name === virtualFormData.profile);
 
   // Profile management states
   const [addProfileDialogOpen, setAddProfileDialogOpen] = useState(false);
@@ -364,8 +362,8 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         })
         .map((s: any) => {
           return {
-            uuid: s.id || s.uuid, // Use generated ID from addPendingSensor
-            configId: s.id || s.configId,
+            uuid: s.uuid || s.configId || s.id,
+            configId: s.configId || s.uuid || s.id,
             name: s.name,
             state: 'DRAFT', // Use DRAFT to distinguish from deployed sensors waiting for agent
             healthy: false,
@@ -418,7 +416,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
   useEffect(() => {
     fetchSensors();
-    fetchAllProfiles(); // Fetch all profiles for the Profiles tab
     
     // Auto-refresh every 10 seconds to pick up agent status updates
     const interval = setInterval(fetchSensors, 10000);
@@ -442,7 +439,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     };
   }, [deviceUuid, fetchSensors]);
 
-  const handleAddProtocolDevice = async (device: any) => {
+  const handleAddProtocolDevice = async (device: any, options?: any) => {
     try {
       
       // Call POST /api/v1/devices/:uuid/sensors?validateOnly=true
@@ -465,6 +462,26 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       // Check if API returned validated sensor (validateOnly mode)
       if (!result.sensor) {
         throw new Error('API did not return validated sensor. Please rebuild the API service.');
+      }
+
+      if (device.protocol === 'mqtt' && options?.mqttCredentials) {
+        result.sensor.connection = {
+          ...(result.sensor.connection || {}),
+          username: options.mqttCredentials.username,
+        };
+
+        result.sensor.metadata = {
+          ...(result.sensor.metadata || {}),
+        };
+
+        result.sensor.auth = {
+          ...(result.sensor.auth || {}),
+          mqtt: {
+            username: options.mqttCredentials.username,
+            password: options.mqttCredentials.password,
+            access: options.mqttCredentials.access,
+          },
+        };
       }
 
       // Add to pending state (React only - not in DB yet)
@@ -559,31 +576,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     }
   };
 
-  const handleToggleSensorEnabled = async (sensor: Sensor, currentEnabled: boolean) => {
-    try {
-      const newEnabled = !currentEnabled;
-      
-      // Build the update payload
-      const updates = {
-        uuid: sensor.uuid,
-        name: sensor.name,
-        enabled: newEnabled
-      };
-      
-      // Update pending changes (React state only - not saved to DB yet)
-      await updatePendingSensor(deviceUuid, sensor.name, updates);
-      
-      // Refresh sensor list to show updated state from pending changes
-      await fetchSensors();
-
-      toast.success(`Device "${sensor.name}" ${newEnabled ? 'enabled' : 'disabled'} - Click "Save Draft" or "Deploy"`, {
-        duration: 4000
-      });
-    } catch (error: any) {
-      toast.error(`Failed to toggle device: ${error.message}`);
-    }
-  };
-
   // Virtual Device Management Functions
   const fetchProfiles = async (protocol: string) => {
     try {
@@ -620,6 +612,13 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       toast.error('Failed to fetch profiles');
     }
   };
+
+  // Lazy-load profiles only when Profiles tab is active.
+  useEffect(() => {
+    if (activeTab === 'profiles') {
+      fetchAllProfiles();
+    }
+  }, [activeTab]);
 
   const handleOpenVirtualDeviceDialog = () => {
     const virtualCount = sensors.filter(s => s.type === 'virtual').length;
@@ -717,16 +716,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     });
     setDataPointsError('');
     setAddProfileDialogOpen(true);
-  };
-
-  const handleCancelEditProfile = () => {
-    setEditingProfileName(null);
-    setProfileFormData({
-      profile_name: '',
-      protocol: 'modbus',
-      description: '',
-      data_points: '[]'
-    });
   };
 
   const handleLoadTemplate = () => {
@@ -1318,19 +1307,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                       
                       {/* Action Buttons */}
                       <div className="flex items-center gap-3 ml-4">
-                        {/* Enable/Disable Select - only show for deployed sensors */}
-                        {sensor.type === 'device' && 
-                         sensor.deploymentStatus !== 'draft' && (
-                          <select
-                            value={sensor.enabled !== undefined ? (sensor.enabled ? 'enabled' : 'disabled') : 'enabled'}
-                            onChange={(e) => handleToggleSensorEnabled(sensor, e.target.value === 'enabled')}
-                            className="h-8 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                          >
-                            <option value="enabled">Enabled</option>
-                            <option value="disabled">Disabled</option>
-                          </select>
-                        )}
-                        
                         {/* Edit Button */}
                         <Button
                           variant="outline"

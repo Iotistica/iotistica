@@ -10,6 +10,7 @@ import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle, ChevronsUpDown, Check } from 'lucide-react';
@@ -38,14 +39,15 @@ import type { ModbusDeviceConfig, ModbusDataPoint, OPCUADeviceConfig, OPCUADataP
 interface AddSensorDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaveDevice: (device: any) => Promise<void>;
+  onSaveDevice: (device: any, options?: any) => Promise<void>;
   deviceUuid: string;
 }
 
 export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({ 
   open, 
   onOpenChange, 
-  onSaveDevice
+  onSaveDevice,
+  deviceUuid
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +69,9 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
   // MQTT form state
   const [mqttConfig, setMqttConfig] = useState<MQTTDeviceConfig | null>(null);
   const [mqttFormValid, setMqttFormValid] = useState(false);
+  const [mqttUsername, setMqttUsername] = useState('');
+  const [mqttPassword, setMqttPassword] = useState('');
+  const [mqttAclAccess, setMqttAclAccess] = useState<number>(2);
 
   const loadLocations = async () => {
     try {
@@ -151,21 +156,32 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
         return;
       }
 
+      if (!mqttUsername.trim() || !mqttPassword.trim()) {
+        setError('Please provide username and password');
+        return;
+      }
+
       const finalConfig: MQTTDeviceConfig = {
         ...mqttConfig,
         protocol: 'mqtt',
-        dataPoints: [],
         connection: {
-          ...mqttConfig.connection,
-          topic: mqttConfig.connection.topic?.trim(),
-          topics: mqttConfig.connection.topic?.trim() ? [mqttConfig.connection.topic.trim()] : [],
-          discoveryRoots: mqttConfig.connection.topic?.trim() ? [mqttConfig.connection.topic.trim()] : [],
-        }
+          qos: mqttConfig.connection.qos,
+          username: mqttUsername.trim(),
+        } as any,
       };
 
       try {
         setLoading(true);
-        await onSaveDevice({ ...finalConfig, location });
+        await onSaveDevice(
+          { ...finalConfig, location },
+          {
+            mqttCredentials: {
+              username: mqttUsername.trim(),
+              password: mqttPassword,
+              access: mqttAclAccess,
+            },
+          }
+        );
         handleClose();
       } catch (err: any) {
         setError(err.message || 'Failed to save device');
@@ -184,6 +200,9 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
     setMqttConfig(null);
     setSelectedProtocol('modbus');
     setMqttFormValid(false);
+    setMqttUsername('');
+    setMqttPassword('');
+    setMqttAclAccess(2);
     setLocation('');
     onOpenChange(false);
   };
@@ -196,7 +215,15 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
       // OPC UA uses auto-discovery, nodes are optional
       return opcuaFormValid;
     } else if (selectedProtocol === 'mqtt') {
-      return mqttFormValid;
+      if (!mqttFormValid) {
+        return false;
+      }
+
+      if (!mqttUsername.trim() || !mqttPassword.trim()) {
+        return false;
+      }
+
+      return true;
     }
     return false;
   };
@@ -331,6 +358,54 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
                 onChange={setMqttConfig}
                 onValidationChange={setMqttFormValid}
               />
+
+              <div className="space-y-4 rounded-lg border p-4">
+                <div className="space-y-1">
+                  <h4 className="text-sm font-medium">MQTT Access</h4>
+                  <p className="text-xs text-muted-foreground">
+                    Set the login details and permission for this device.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="mqtt-user-name">Username</Label>
+                    <Input
+                      id="mqtt-user-name"
+                      value={mqttUsername}
+                      onChange={(e) => setMqttUsername(e.target.value)}
+                      placeholder="device_mqtt_user"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="mqtt-user-password">Password</Label>
+                    <Input
+                      id="mqtt-user-password"
+                      type="password"
+                      value={mqttPassword}
+                      onChange={(e) => setMqttPassword(e.target.value)}
+                      placeholder="Strong password"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Permission</Label>
+                  <Select
+                    value={String(mqttAclAccess)}
+                    onValueChange={(value) => setMqttAclAccess(Number(value))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">Read</SelectItem>
+                      <SelectItem value="2">Write</SelectItem>
+                      <SelectItem value="3">Read + Write</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
             </div>
           )}
         </div>

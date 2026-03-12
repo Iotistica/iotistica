@@ -19,7 +19,7 @@
 
 import express from 'express';
 import { query } from '../db/connection';
-import { deviceSensorSync } from '../services/agent-devices';
+import { deviceSensorSync, prepareEndpointForCreate } from '../services/agent-devices';
 import { logger } from '../utils/logger';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import { VirtualDeviceManager } from '../services/virtual-device-manager';
@@ -109,23 +109,29 @@ router.post('/devices/:uuid/sensors', jwtAuth, async (req, res) => {
 
     // If validation-only mode, return validated config without persisting
     if (validateOnly) {
+      const preparedSensorConfig = prepareEndpointForCreate(uuid, sensorConfig);
+
       // Normalize the sensor config
       // For OPC UA: omit dataPoints if empty (auto-discovery will populate)
       const validatedSensor: any = {
-        name: sensorConfig.name,
-        protocol: sensorConfig.protocol,
-        enabled: sensorConfig.enabled !== undefined ? sensorConfig.enabled : true,
-        connection: sensorConfig.connection,
-        pollInterval: sensorConfig.pollInterval || 5000,
+        name: preparedSensorConfig.name,
+        uuid: preparedSensorConfig.uuid,
+        protocol: preparedSensorConfig.protocol,
+        enabled: preparedSensorConfig.enabled !== undefined ? preparedSensorConfig.enabled : true,
+        connection: preparedSensorConfig.connection,
         metadata: {
           createdAt: new Date().toISOString(),
           createdBy: (req as any).user?.username || (req as any).user?.email || 'dashboard'
         }
       };
+
+      if (preparedSensorConfig.protocol !== 'mqtt' && sensorConfig.pollInterval !== undefined) {
+        validatedSensor.pollInterval = sensorConfig.pollInterval;
+      }
       
       // Only include dataPoints if present and not empty (or if not OPC UA)
-      if (sensorConfig.dataPoints && (sensorConfig.dataPoints.length > 0 || sensorConfig.protocol !== 'opcua')) {
-        validatedSensor.dataPoints = sensorConfig.dataPoints;
+      if (preparedSensorConfig.dataPoints && (preparedSensorConfig.dataPoints.length > 0 || preparedSensorConfig.protocol !== 'opcua')) {
+        validatedSensor.dataPoints = preparedSensorConfig.dataPoints;
       }
 
       logger.info('Returning validated sensor (not persisting):', validatedSensor.name);
