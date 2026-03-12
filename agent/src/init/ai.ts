@@ -1,48 +1,49 @@
 import { LogComponents } from '../logging/types.js';
 import { loadConfigFromTargetState } from '../ai/anomaly/utils.js';
 import { MqttManager } from '../mqtt/manager.js';
+import type { AgentInitContext } from './context.js';
 
-export async function initAnomalyDetection(agent: any): Promise<void> {
-	const features = agent.configManager.getFeatures();
+export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void> {
+	const features = ctx.configManager!.getFeatures();
 
-	agent.agentLogger?.debugSync('Checking anomaly detection configuration', {
+	ctx.agentLogger?.debugSync('Checking anomaly detection configuration', {
 		component: LogComponents.agent,
 		enableAnomalyDetection: features.enableAnomalyDetection,
-		targetConfigFeatures: agent.configManager.getTargetConfig().features
+		targetConfigFeatures: ctx.configManager!.getTargetConfig().features
 	});
 
 	if (!features.enableAnomalyDetection) {
-		agent.agentLogger?.infoSync('Anomaly Detection disabled by configuration', {
+		ctx.agentLogger?.infoSync('Anomaly Detection disabled by configuration', {
 			component: LogComponents.agent,
 			features
 		});
 		return;
 	}
 
-	if (agent.anomalyService) {
-		agent.agentLogger?.infoSync('Cleaning up existing Anomaly Detection Service before reinitializing', {
+	if (ctx.anomalyService) {
+		ctx.agentLogger?.infoSync('Cleaning up existing Anomaly Detection Service before reinitializing', {
 			component: LogComponents.agent,
 		});
-		agent.anomalyService.stop();
-		agent.anomalyService = undefined;
+		ctx.anomalyService.stop();
+		ctx.anomalyService = undefined;
 	}
 
-	agent.agentLogger?.infoSync('Initializing Anomaly Detection Service', {
+	ctx.agentLogger?.infoSync('Initializing Anomaly Detection Service', {
 		component: LogComponents.agent,
 	});
 
 	try {
-		const targetStateConfig = agent.stateReconciler.getTargetState()?.config;
+		const targetStateConfig = ctx.stateReconciler.getTargetState()?.config;
 		const config = loadConfigFromTargetState(targetStateConfig);
 
 		const { getKnex } = await import('../db/connection.js');
 		const dbInstance = getKnex();
 
 		const systemMetrics = config.systemMetrics || [];
-		const endpointMetrics = buildDeviceMetrics(agent, targetStateConfig, config.defaults);
+		const endpointMetrics = buildDeviceMetrics(ctx, targetStateConfig, config.defaults);
 		config.metrics = [...systemMetrics, ...endpointMetrics];
 
-		agent.agentLogger?.infoSync('Anomaly metrics configured (two-level inheritance)', {
+		ctx.agentLogger?.infoSync('Anomaly metrics configured (two-level inheritance)', {
 			component: LogComponents.agent,
 			systemMetrics: systemMetrics.length,
 			endpointMetrics: endpointMetrics.length,
@@ -51,33 +52,33 @@ export async function initAnomalyDetection(agent: any): Promise<void> {
 		});
 
 		const { AnomalyDetectionService } = await import('../ai/anomaly/index.js');
-		agent.anomalyService = new AnomalyDetectionService(
+		ctx.anomalyService = new AnomalyDetectionService(
 			config,
 			dbInstance,
-			agent.agentLogger,
+			ctx.agentLogger,
 			MqttManager.getInstance(),
-			agent.deviceInfo.uuid,
-			agent.deviceInfo.deviceName,
+			ctx.deviceInfo.uuid,
+			ctx.deviceInfo.deviceName,
 			'system'
 		);
 
-		agent.agentLogger?.infoSync('Anomaly detection initialized with inheritance support', {
+		ctx.agentLogger?.infoSync('Anomaly detection initialized with inheritance support', {
 			component: LogComponents.agent,
 			enabledMetrics: config.metrics.filter((m: any) => m.enabled).length,
 		});
 
-		await configureAnomalyFeed(agent);
+		await configureAnomalyFeed(ctx);
 	} catch (error) {
-		agent.agentLogger?.errorSync(
+		ctx.agentLogger?.errorSync(
 			'Failed to initialize Anomaly Detection Service',
 			error as Error,
 			{ component: LogComponents.agent }
 		);
-		agent.anomalyService = undefined;
+		ctx.anomalyService = undefined;
 	}
 }
 
-export function buildDeviceMetrics(agent: any, targetStateConfig: any, defaults: any): any[] {
+export function buildDeviceMetrics(ctx: AgentInitContext, targetStateConfig: any, defaults: any): any[] {
 	const metrics: any[] = [];
 	const endpoints = targetStateConfig?.endpoints || [];
 
@@ -88,7 +89,7 @@ export function buildDeviceMetrics(agent: any, targetStateConfig: any, defaults:
 			const anomalyConfig = dp.anomalyDetection;
 			if (!anomalyConfig?.enabled) continue;
 
-			const metricName = `${agent.deviceInfo.uuid}_${endpoint.name}_${dp.name}`;
+			const metricName = `${ctx.deviceInfo.uuid}_${endpoint.name}_${dp.name}`;
 			const metric: any = {
 				name: metricName,
 				enabled: true,
@@ -112,24 +113,24 @@ export function buildDeviceMetrics(agent: any, targetStateConfig: any, defaults:
 	return metrics;
 }
 
-export async function configureAnomalyFeed(agent: any): Promise<void> {
-	if (!agent.anomalyService) return;
+export async function configureAnomalyFeed(ctx: AgentInitContext): Promise<void> {
+	if (!ctx.anomalyService) return;
 
-	agent.agentLogger?.infoSync('Configuring edge anomaly detection', {
+	ctx.agentLogger?.infoSync('Configuring edge anomaly detection', {
 		component: LogComponents.agent,
 	});
 
 	const { configureAnomalyFeed: configureSystemMetrics, getSystemMetrics } = await import('../system/metrics.js');
-	configureSystemMetrics(agent.anomalyService);
+	configureSystemMetrics(ctx.anomalyService);
 
 	const { configureAnomalyFeed: configureSensorAnomaly } = await import('../features/publish/manager.js');
-	configureSensorAnomaly(agent.anomalyService);
+	configureSensorAnomaly(ctx.anomalyService);
 
-	agent.agentLogger?.infoSync('Anomaly detection configured for system metrics and endpoints', {
+	ctx.agentLogger?.infoSync('Anomaly detection configured for system metrics and endpoints', {
 		component: LogComponents.agent,
 	});
 
-	agent.agentLogger?.debugSync('Collecting initial metrics for anomaly detection', {
+	ctx.agentLogger?.debugSync('Collecting initial metrics for anomaly detection', {
 		component: LogComponents.agent,
 	});
 	await getSystemMetrics();

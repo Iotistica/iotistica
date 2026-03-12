@@ -288,6 +288,24 @@ class MqttNode {
  */
 let instance = null
 
+function hasBrokerConfigChanged (manager, brokerConfig = {}) {
+    if (!manager || !brokerConfig) {
+        return false
+    }
+
+    const nextUrl = brokerConfig.url || manager.brokerUrl
+    const nextUsername = Object.prototype.hasOwnProperty.call(brokerConfig, 'username')
+        ? brokerConfig.username
+        : manager.brokerUsername
+    const nextPassword = Object.prototype.hasOwnProperty.call(brokerConfig, 'password')
+        ? brokerConfig.password
+        : manager.brokerPassword
+
+    return nextUrl !== manager.brokerUrl ||
+        nextUsername !== manager.brokerUsername ||
+        nextPassword !== manager.brokerPassword
+}
+
 /**
  * Get or create the shared MQTT connection manager
  * @param {Object} RED - Node-RED runtime
@@ -298,6 +316,10 @@ function getManager (RED, brokerConfig) {
     if (!instance) {
         instance = new MqttConnectionManager(RED, brokerConfig)
         console.log('[MqttConnectionManager] Created new singleton instance')
+    } else if (hasBrokerConfigChanged(instance, brokerConfig)) {
+        console.log('[MqttConnectionManager] Broker config changed, recreating singleton instance')
+        instance.disconnect()
+        instance = new MqttConnectionManager(RED, brokerConfig)
     }
     return instance
 }

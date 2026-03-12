@@ -4,6 +4,65 @@ import * as events from './events.js'
 
 let settings = { connected: false }
 
+function getTokenFromBrowserStorage () {
+    let token = null
+
+    try {
+        token = localStorage.getItem('accessToken')
+    } catch (err) {
+        console.warn('[nr-tools][ui] Failed to read accessToken from localStorage:', err)
+    }
+
+    if (!token) {
+        try {
+            token = sessionStorage.getItem('auth0_token')
+        } catch (err) {
+            console.warn('[nr-tools][ui] Failed to read auth0_token from sessionStorage:', err)
+        }
+    }
+
+    return (typeof token === 'string' && token.length > 0) ? token : null
+}
+
+async function getAccessToken () {
+    // Primary source: backend session extraction
+    try {
+        const response = await fetch('nr-tools/auth/token', {
+            method: 'GET'
+        })
+
+        if (response.ok) {
+            const body = await response.json()
+            const accessToken = body && body.accessToken ? body.accessToken : null
+            if (accessToken && typeof accessToken === 'string') {
+                console.log('[nr-tools][ui] accessToken fetched from /nr-tools/auth/token', {
+                    tokenSegments: accessToken.split('.').length,
+                    tokenLength: accessToken.length
+                })
+                return accessToken
+            }
+        } else {
+            console.warn('[nr-tools][ui] /nr-tools/auth/token returned non-OK response', {
+                status: response.status
+            })
+        }
+    } catch (err) {
+        console.warn('[nr-tools][ui] Failed calling /nr-tools/auth/token, trying browser storage fallback', err)
+    }
+
+    // Fallback source: dashboard-provided browser storage token
+    const fallbackToken = getTokenFromBrowserStorage()
+    if (fallbackToken) {
+        console.log('[nr-tools][ui] Using fallback token from browser storage', {
+            tokenSegments: fallbackToken.split('.').length,
+            tokenLength: fallbackToken.length
+        })
+        return fallbackToken
+    }
+
+    return null
+}
+
 // function hasLocalStorage () {
 //     try {
 //         return 'localStorage' in window && window.localStorage !== null
@@ -12,40 +71,23 @@ let settings = { connected: false }
 //     }
 // };
 
-function getAuthHeaders () {
+async function getAuthHeaders () {
     // Headers for API calls
-    // Note: When authenticated via nr-auth, the token is passed via session cookies
-    // and handled by the backend needsIotToken middleware
+    // Strict mode: always attach explicit bearer JWT from /nr-tools/auth/token.
     const headers = {
         Accept: 'application/json',
         'Content-Type': 'application/json'
     }
-    
-    // Get Auth0 token from sessionStorage (set by dashboard iframe parent)
-    try {
-        const auth0Token = sessionStorage.getItem('auth0_token')
-        if (auth0Token && typeof auth0Token === 'string') {
-            headers.Authorization = `Bearer ${auth0Token}`
-            return headers
-        }
-    } catch (err) {
-        console.warn('Failed to get Auth0 token from sessionStorage:', err)
+
+    const accessToken = await getAccessToken()
+    if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`
     }
-    
-    // Fallback: try localStorage for backward compatibility (legacy auth flow)
-    try {
-        const authTokens = localStorage.getItem('auth-tokens')
-        if (authTokens) {
-            const tokenObj = JSON.parse(authTokens)
-            const accessToken = tokenObj?.access_token
-            if (accessToken && typeof accessToken === 'string') {
-                headers.Authorization = `Bearer ${accessToken}`
-            }
-        }
-    } catch (err) {
-        console.warn('Failed to get token from localStorage:', err)
-        // Continue without Authorization header - will use session token
-    }
+
+    console.log('[nr-tools][ui] Built auth headers', {
+        hasAuthorizationHeader: !!headers.Authorization,
+        tokenSegments: accessToken ? accessToken.split('.').length : 0
+    })
 
     return headers
 }
@@ -63,64 +105,43 @@ function checkResponse (response) {
 export async function refreshSettings () {
     console.log('refreshing settings')
     try {
-        settings = await $.ajax({
-            url: 'nr-tools/settings/',
-            type: 'GET'
+        const headers = await getAuthHeaders()
+        const response = await fetch('nr-tools/settings/', {
+            method: 'GET',
+            headers
+        })
+
+        if (!response.ok) {
+            const errText = await response.text()
+            throw new Error(`HTTP ${response.status} - ${errText}`)
+        }
+
+        settings = await response.json()
+
+        console.log('[nr-tools][ui] /nr-tools/settings response', {
+            connected: !!settings.connected,
+            authSource: settings.authSource || null,
+            hasUser: !!settings.user
         })
 
         if (settings.connected) {
             events.emit('connection-state', true)
-        } else {
-            events.emit('connection-state', false)
+            return
         }
+
+        events.emit('connection-state', false)
     } catch (err) {
-        console.log(err)
+        console.warn('[nr-tools][ui] refreshSettings failed; setting disconnected state', err)
         settings = { connected: false }
         events.emit('connection-state', false)
     }
 }
 
 export function connect (iotisticURL, username, password, done) {
-    iotisticURL = iotisticURL || settings.iotisticURL
-    if (!iotisticURL) {
-        RED.notify('Please provide Iotistic Server URL', 'error')
-        return
+    RED.notify('Legacy plugin login removed. Use dashboard Auth0 flow.', { type: 'warning' })
+    if (done) {
+        done()
     }
-    if (!username || !password) {
-        RED.notify('Please provide username and password', 'error')
-        return
-    }
-    
-    $.ajax({
-        contentType: 'application/json',
-        url: 'nr-tools/auth/login',
-        method: 'POST',
-        data: JSON.stringify({
-            iotisticURL,
-            username,
-            password
-        })
-    }).then(data => {
-        if (data && data.success) {
-            refreshSettings()
-            RED.notify('Successfully connected to Iotistic', 'success')
-            if (done) {
-                done()
-            }
-        } else if (data && data.error) {
-            RED.notify(`Failed to connect: ${data.error}`, { type: 'error' })
-            if (done) {
-                done()
-            }
-        }
-    }).catch(err => {
-        console.error('Login error:', err)
-        const errorMsg = err.responseJSON?.error || err.statusText || 'Connection failed'
-        RED.notify(`Failed to connect to server: ${errorMsg}`, { type: 'error' })
-        if (done) {
-            done()
-        }
-    })
 }
 
 export function disconnect (done) {
@@ -144,50 +165,10 @@ export function getSettings () {
     return settings
 }
 
-export async function getUserTeams () {
-    const teamList = {
-        teams: [
-            { id: 'team1', name: 'Team Alpha', avatar: 'https://example.com/avatar1.png' },
-            { id: 'team2', name: 'Team Beta', avatar: 'https://example.com/avatar2.png' }
-        ]
-    }
-    return teamList
-    // return checkResponse(await $.getJSON('flowfuse-nr-tools/teams'))
+export function hasDashboardToken () {
+    return !!getTokenFromBrowserStorage()
 }
 
-export async function getTeamProjects (teamId) {
-    const projectList = {
-        projects: teamId === 'team1'
-            ? [
-                { id: 'project1', name: 'Project Alpha' },
-                { id: 'project2', name: 'Project Beta' }
-            ]
-            : teamId === 'team2'
-                ? [
-                    { id: 'project3', name: 'Project Gamma' },
-                    { id: 'project4', name: 'Project Delta' }
-                ]
-                : []
-    }
-    return projectList
-    // return checkResponse(await $.getJSON(`flowfuse-nr-tools/teams/${teamId}/projects`))
-}
-export async function getProject (projectId) {
-    const projectInfo = projectId === 'project1'
-        ? [
-            { id: 'project1', name: 'Project Alpha', description: 'Description for Project Alpha', status: 'active' },
-            { id: 'project2', name: 'Project Beta', description: 'Description for Project Beta', status: 'active' }
-        ]
-        : projectId === 'project2'
-            ? [
-                { id: 'project3', name: 'Project Gamma', description: 'Description for Project Gamma', status: 'active' },
-                { id: 'project4', name: 'Project Delta', description: 'Description for Project Delta', status: 'active' }
-            ]
-            : []
-
-    return projectInfo
-    // return checkResponse(await $.getJSON(`flowfuse-nr-tools/projects/${projectId}`))
-}
 
 export async function getDevices (page = 1, limit = 10, filter = 'all') {
     console.log('getDevices', page, limit, filter)
@@ -197,12 +178,27 @@ export async function getDevices (page = 1, limit = 10, filter = 'all') {
     url.searchParams.append('filter', filter)
 
     console.log('Fetching devices from URL:', url.toString())
-    const headers = getAuthHeaders()
+    const headers = await getAuthHeaders()
+    const bearer = headers.Authorization || ''
+    const rawToken = bearer.startsWith('Bearer ') ? bearer.slice(7) : null
+    console.log('[nr-tools][ui] Calling /nr-tools/devices', {
+        page,
+        limit,
+        filter,
+        hasAuthorizationHeader: !!headers.Authorization,
+        tokenSegments: rawToken ? rawToken.split('.').length : 0,
+        tokenLength: rawToken ? rawToken.length : 0
+    })
     console.log('Request headers:', headers)
 
     const response = await fetch(url.toString(), {
         method: 'GET',
         headers: headers
+    })
+
+    console.log('[nr-tools][ui] /nr-tools/devices response status', {
+        status: response.status,
+        ok: response.ok
     })
 
     const data = await response.json()
@@ -211,49 +207,59 @@ export async function getDevices (page = 1, limit = 10, filter = 'all') {
 }
 
 export async function getDeviceOTC (deviceId) {
+    const headers = await getAuthHeaders()
     const response = await fetch(`nr-tools/devices/${deviceId}/otc`, {
         method: 'GET',
-        headers: getAuthHeaders()
+        headers
     })
 
     return checkResponse(await response.json())
 }
 
 export async function addDevice (options) {
-    return checkResponse(await $.ajax({
-        type: 'POST',
-        url: 'nr-tools/devices',
-        contentType: 'application/json; charset=utf-8',
-        data: JSON.stringify(options)
-    }))
+    const headers = await getAuthHeaders()
+    const response = await fetch('/nr-tools/devices', {
+        method: 'POST',
+        headers: {
+            ...headers,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(options)
+    })
+
+    if (!response.ok) {
+        const errText = await response.text()
+        throw new Error(`HTTP ${response.status} - ${errText}`)
+    }
+
+    return checkResponse(await response.json())
 }
 
 export async function publishDeviceCommand (options) {
-    return checkResponse(await $.ajax({
-        type: 'POST',
-        url: 'nr-tools/device-publish-command',
-        contentType: 'application/json; charset=utf-8',
-        data: JSON.stringify(options)
-    }))
+    const headers = await getAuthHeaders()
+    const response = await fetch('/nr-tools/device-publish-command', {
+        method: 'POST',
+        headers: {
+            ...headers,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(options)
+    })
+
+    if (!response.ok) {
+        const errText = await response.text()
+        throw new Error(`HTTP ${response.status} - ${errText}`)
+    }
+
+    return checkResponse(await response.json())
 }
 
-export async function getProjectSnapshots (projectId) {
-    return checkResponse(await $.getJSON(`nr-tools/projects/${projectId}/snapshots`))
-}
-
-export async function createProjectSnapshot (projectId, options) {
-    return checkResponse(await $.ajax({
-        type: 'POST',
-        url: `nr-tools/projects/${projectId}/snapshots`,
-        contentType: 'application/json; charset=utf-8',
-        data: JSON.stringify(options)
-    }))
-}
 
 export async function getDeviceLogCreds (deviceId) {
+    const headers = await getAuthHeaders()
     const response = await fetch(`nr-tools/devices/${deviceId}/logs`, {
         method: 'GET',
-        headers: getAuthHeaders()
+        headers
     })
     checkResponse(response)
 }

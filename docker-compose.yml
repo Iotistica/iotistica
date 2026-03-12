@@ -86,6 +86,11 @@ services:
             - JWT_SECRET=${JWT_SECRET:-your-secret-change-this-in-production}
             - JWT_ACCESS_TOKEN_EXPIRY=${JWT_ACCESS_TOKEN_EXPIRY:-15m}
             - JWT_REFRESH_TOKEN_EXPIRY=${JWT_REFRESH_TOKEN_EXPIRY:-7d}
+            # Auth0 JWT validation (for Node-RED plugin and direct Auth0 token flows)
+            - AUTH0_ENABLED=true
+            - AUTH0_DOMAIN=${AUTH0_DOMAIN:-auth.iotistica.com}
+            - AUTH0_AUDIENCE=${AUTH0_AUDIENCE:-https://iotistica.com}
+            - AUTH0_ISSUER=${AUTH0_ISSUER:-https://auth.iotistica.com/}
             - HTTPS_ENABLED=true
             - HTTPS_PORT=3443
             - HTTPS_CERT_PATH=/app/certs/tls.crt
@@ -597,10 +602,17 @@ services:
             - IOTISTIC_BASE_URL=${IOTISTIC_BASE_URL:-http://api:3002}
             - NODERED_BASE_URL=${NODERED_BASE_URL:-http://localhost:1880}
             - IOTISTIC_STORAGE_TOKEN=5317a772-c8dc-b8af-af76-fce09c973db0034da53b-e5e3-1d36-93a7-ec53de09c4af
+            - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtt://mosquitto:1883}
+            - MQTT_USERNAME=${MQTT_USERNAME:-nodered}
+            - MQTT_PASSWORD=${MQTT_PASSWORD:-secret}
+            - NODE_RED_AUTH_PROVIDER=auth0-strategy
             - AUTH0_DOMAIN=${AUTH0_DOMAIN:-auth.iotistica.com}
-            - AUTH0_AUDIENCE=${AUTH0_AUDIENCE:-https://iotistica.com}
+            - AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID}
+            - AUTH0_CLIENT_SECRET=${AUTH0_CLIENT_SECRET}
+            - AUTH0_AUDIENCE=${NODE_RED_AUTH0_AUDIENCE}
             - AUTH0_ISSUER=${AUTH0_ISSUER:-https://auth.iotistica.com/}
-            - NODE_RED_ENABLE_UI_AUTH=false
+            - NODE_RED_AUTH0_CALLBACK_URL=${NODE_RED_AUTH0_CALLBACK_URL:-http://localhost:1880/auth/strategy/callback}
+            - NODE_RED_ENABLE_UI_AUTH=true
         depends_on:
             api:
                 condition: service_healthy

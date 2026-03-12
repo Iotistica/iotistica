@@ -7,7 +7,7 @@
 
 import type { AgentLogger } from '../logging/agent-logger';
 import type { DeviceInfo } from '../managers/types.js';
-import type { AgentInitContext } from './core.js';
+import type { AgentInitContext } from './context.js';
 import { LogComponents } from '../logging/types';
 import { JobsFeature } from '../features/jobs/src/monitor.js';
 import { DiscoveryService } from '../features/adapters/discovery-service.js';
@@ -748,7 +748,7 @@ export class FeatureInitializer {
 // ============================================================================
 
 export async function initFeatures(ctx: AgentInitContext): Promise<void> {
-	const agentLogger = ctx.features.getAgentLogger();
+  const agentLogger = ctx.agentLogger!;
 
 	const memBefore = process.memoryUsage();
 	agentLogger.debugSync('Memory before loading target state', {
@@ -756,7 +756,7 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 		heapUsed: `${Math.round(memBefore.heapUsed / 1024 / 1024)}MB`
 	});
 
-	const targetState = ctx.features.getTargetState();
+  const targetState = ctx.stateReconciler!.getTargetState();
 	const targetStateSize = targetState ? JSON.stringify(targetState).length : 0;
 
 	const memAfterState = process.memoryUsage();
@@ -772,19 +772,19 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 
 	const featureContext: FeatureContext = {
 		logger: agentLogger,
-		deviceInfo: ctx.features.getDeviceInfo(),
-		deviceManager: ctx.features.getDeviceManager(),
-		stateReconciler: ctx.features.getStateReconciler(),
+    deviceInfo: ctx.deviceInfo,
+    deviceManager: ctx.deviceManager,
+    stateReconciler: ctx.stateReconciler,
 		mqttManager: (await import('../mqtt/manager.js')).MqttManager.getInstance(),
-		httpClient: ctx.features.getSharedHttpClient(),
-		containerManager: ctx.features.getContainerManager(),
+    httpClient: ctx.sharedHttpClient,
+    containerManager: ctx.containerManager,
 		configSettings: targetState?.config?.settings || {},
-		configFeatures: ctx.features.getConfigManagerFeatures(),
+    configFeatures: ctx.configManager!.getFeatures(),
 		configProtocols: targetState?.config?.protocols || {},
-		cloudApiEndpoint: ctx.features.getCloudApiEndpoint(),
-		deviceApiPort: ctx.features.getDeviceApiPort(),
-		anomalyService: ctx.features.getAnomalyService(),
-		dictionaryManager: ctx.features.getDictionaryManager()
+    cloudApiEndpoint: ctx.configManager!.getCloudApiEndpoint(),
+    deviceApiPort: ctx.configManager!.getDeviceApiPort(),
+    anomalyService: ctx.anomalyService,
+    dictionaryManager: ctx.dictionaryManager
 	};
 
 	const memAfterContext = process.memoryUsage();
@@ -794,14 +794,15 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 	});
 
 	const initializer = new FeatureInitializer(featureContext);
-	ctx.features.setFeatureInitializer(initializer);
+  ctx.featureInitializer = initializer;
 
-	await ctx.features.initDiscoveryService();
-	featureContext.discoveryService = ctx.features.getDiscoveryService();
+  await initDiscoveryService(ctx);
+  featureContext.discoveryService = ctx.discoveryService;
 
 	await initializer.initSensorFeatures();
 	await initializer.initJobsFeature();
-	await ctx.features.initializeSimulationMode();
+  const { initializeSimulationMode } = await import('./simulation.js');
+  await initializeSimulationMode(ctx);
 
 	agentLogger?.infoSync('About to initialize supporting features', {
 		component: LogComponents.agent
@@ -815,15 +816,15 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 		hasFirewall: !!initializedFeatures.firewall
 	});
 
-	ctx.features.setUpdater(initializedFeatures.updater);
-	ctx.features.setFirewall(initializedFeatures.firewall);
+  ctx.updater = initializedFeatures.updater;
+  ctx.firewall = initializedFeatures.firewall;
 
 	if (initializedFeatures.updater) {
 		agentLogger?.infoSync('Setting AgentUpdater on StateReconciler', {
 			component: LogComponents.agent,
 			hasUpdater: true
 		});
-		ctx.features.setStateReconcilerUpdater(initializedFeatures.updater);
+    ctx.stateReconciler?.setAgentUpdater(initializedFeatures.updater);
 	} else {
 		agentLogger?.warnSync('AgentUpdater not initialized, version reconciliation unavailable', {
 			component: LogComponents.agent
@@ -831,19 +832,19 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 	}
 }
 
-export async function initDiscoveryService(agent: any): Promise<void> {
-	agent.agentLogger?.infoSync('Initializing Discovery Service', {
+export async function initDiscoveryService(ctx: AgentInitContext): Promise<void> {
+  ctx.agentLogger?.infoSync('Initializing Discovery Service', {
 		component: LogComponents.agent,
 	});
 
 	try {
-		agent.discoveryService = new DiscoveryService(agent.agentLogger, agent.configManager);
-		await agent.discoveryService.init();
+    ctx.discoveryService = new DiscoveryService(ctx.agentLogger!, ctx.configManager!);
+    await ctx.discoveryService.init();
 	} catch (error) {
-		agent.agentLogger?.errorSync('Failed to initialize Discovery Service', error as Error, {
+    ctx.agentLogger?.errorSync('Failed to initialize Discovery Service', error as Error, {
 			component: LogComponents.agent,
 		});
-		agent.discoveryService = undefined;
+    ctx.discoveryService = undefined;
 	}
 }
 

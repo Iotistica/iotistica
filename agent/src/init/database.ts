@@ -1,10 +1,10 @@
-import type { AgentInitContext } from './core.js';
+import type { AgentInitContext } from './context.js';
 
 export async function initDatabase(ctx: AgentInitContext): Promise<void> {
-	await initializeDatabase(ctx.self);
+	await initializeDatabase(ctx);
 }
 
-export async function initializeDatabase(agent: any): Promise<void> {
+export async function initializeDatabase(ctx: AgentInitContext): Promise<void> {
 	const { initialized } = await import('../db/connection.js');
-	await initialized(agent.agentLogger);
+	await initialized(ctx.agentLogger);
 }

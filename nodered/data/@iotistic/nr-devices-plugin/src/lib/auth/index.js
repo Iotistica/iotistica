@@ -1,7 +1,5 @@
 const settings = require('../settings')
-const { ffGet, ffPost } = require('../client')
-
-const activeTokens = { }
+const { ffPost } = require('../client')
 
 function getUserForRequest (request) {
     let sessionUsername = '_'
@@ -13,76 +11,50 @@ function getUserForRequest (request) {
     return sessionUsername
 }
 
-function setUserToken (user, token) {
-    activeTokens[user] = token
-    // JWT tokens expire in 1 hour by default, refresh at 50 minutes
-    const refreshInterval = 50 * 60 * 1000 // 50 minutes
-    token.refreshTimeout = setTimeout(async () => {
-        try {
-            const newTokens = await refreshToken(token)
-            setUserToken(user, newTokens)
-        } catch (err) {
-            console.error('Failed to refresh token:', err)
-            delete activeTokens[user]
-        }
-    }, refreshInterval)
-}
-
-function getUserTokenForRequest (request) {
-    const token = activeTokens[getUserForRequest(request)]
-    return token
-}
-
 function deleteUserTokenForRequest (request) {
-    const token = activeTokens[getUserForRequest(request)]
-    if (token) {
-        clearTimeout(token.refreshTimeout)
-    }
-    delete activeTokens[getUserForRequest(request)]
+    // Legacy plugin-token cache removed (Auth0-only mode).
+    // Keep exported function as no-op for compatibility with existing callers.
+    return request
 }
 
 function needsIotToken (request, response, next) {
-    // Priority 1: Check if user is authenticated via nr-auth (request.user from adminAuth)
-    if (request.user && request.user.accessToken) {
-        // User authenticated via nr-auth plugin - use their token
-        request.iotToken = request.user.accessToken
-        return next()
-    }
-    
-    // Priority 2: Check for Bearer token in Authorization header
-    if (request.user) {
-        const authHeader = request.headers.authorization
-        if (authHeader && authHeader.startsWith('Bearer ')) {
-            const token = authHeader.split(' ')[1]
+    // Bearer-only mode: no fallback to session token.
+    const authHeader = request.headers.authorization
+    const authHeaderPresent = !!authHeader
+    const path = request.originalUrl || request.url
+    const method = request.method || 'UNKNOWN'
+
+    console.log('[nr-tools][auth] Incoming request', {
+        method,
+        path,
+        hasAuthorizationHeader: authHeaderPresent
+    })
+
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.split(' ')[1]
+        console.log('[nr-tools][auth] Bearer token received', {
+            method,
+            path,
+            tokenSegments: typeof token === 'string' ? token.split('.').length : 0,
+            tokenLength: typeof token === 'string' ? token.length : 0
+        })
+
+        if (typeof token === 'string' && token.length > 0) {
             request.iotToken = token
+            console.log('[nr-tools][auth] Accepted bearer token', { method, path })
             return next()
         }
-    }
-    
-    // Priority 3: Get JWT token from plugin's own memory storage (fallback)
-    const token = getUserTokenForRequest(request)
-    if (token && token.accessToken) {
-        request.iotToken = token.accessToken
-        return next()
+
+        console.warn('[nr-tools][auth] Rejected bearer token: empty token', { method, path })
     }
     
     // No valid token found
+    console.warn('[nr-tools][auth] Request rejected: missing bearer token', {
+        method,
+        path,
+        hasAuthorizationHeader: authHeaderPresent
+    })
     return response.status(401).end()
-}
-
-async function refreshToken (token) {
-    try {
-        const response = await ffPost('/api/v1/auth/refresh', null, {
-            refreshToken: token.refreshToken
-        })
-        return {
-            accessToken: response.data.accessToken,
-            refreshToken: response.data.refreshToken
-        }
-    } catch (err) {
-        console.error('Token refresh failed:', err)
-        throw err
-    }
 }
 
 function setupRoutes (RED) {
@@ -90,50 +62,16 @@ function setupRoutes (RED) {
     RED.httpAdmin.use('/nr-tools/*', RED.auth.needsPermission('flowfuse.write'))
 
     RED.httpAdmin.post('/nr-tools/auth/login', async (request, response) => {
-        try {
-            const { iotisticURL, username, password } = request.body
-            
-            if (iotisticURL) {
-                settings.set('iotisticURL', iotisticURL.replace(/\/$/, ''))
-            }
-            
-            if (!username || !password) {
-                return response.status(400).send({ 
-                    error: 'Username and password required',
-                    code: 'missing_credentials' 
-                })
-            }
-
-            // Login via JWT
-            const result = await ffPost('/api/v1/auth/login', null, {
-                username,
-                password
-            })
-
-            if (result.data && result.data.accessToken) {
-                const tokens = {
-                    accessToken: result.data.accessToken,
-                    refreshToken: result.data.refreshToken
-                }
-                setUserToken(getUserForRequest(request), tokens)
-                response.send({ 
-                    success: true,
-                    user: result.data.user 
-                })
-            } else {
-                throw new Error('Invalid login response')
-            }
-        } catch (err) {
-            RED.log.error(`[nr-tools] Login failed: ${err.toString()}`)
-            response.status(401).send({ 
-                error: err.message || err.toString(), 
-                code: 'login_failed' 
-            })
-        }
+        return response.status(410).send({
+            error: 'Legacy plugin login removed. Use dashboard Auth0 flow.',
+            code: 'legacy_login_removed'
+        })
     })
     RED.httpAdmin.post('/nr-tools/auth/logout', async (request, response) => {
         try {
-            const token = getUserTokenForRequest(request)
+            const token = request.user && request.user.accessToken
+                ? { accessToken: request.user.accessToken }
+                : null
             if (token && token.accessToken) {
                 await ffPost('/api/v1/auth/logout', token.accessToken)
             }
@@ -150,7 +88,6 @@ function setupRoutes (RED) {
 
 module.exports = {
     setupRoutes,
-    getUserTokenForRequest,
     deleteUserTokenForRequest,
     needsIotToken
 }

@@ -26,6 +26,11 @@ export interface BufferSyncConfig {
   flushIntervalMs: number; // How often to attempt flush when online
   maxRetries: number; // Max retries per message before dropping
   cleanupIntervalMs: number; // How often to cleanup expired records
+  maxBufferRecords: number; // Hard cap on buffered message count
+  dropPolicy: 'oldest' | 'newest' | 'error';
+  flushTriggerThreshold: number; // Trigger immediate flush request above this threshold
+  maxFlushPerCycle: number; // Hard cap of records handled in a single flush run
+  bufferEvenWhenOnline: boolean; // Store-and-forward mode even while connected
 }
 
 export type MessageBufferSyncOptions = BufferSyncConfig;
@@ -58,6 +63,11 @@ export class MessageBufferSync {
       flushIntervalMs: 30000, // 30 seconds
       maxRetries: 3,
       cleanupIntervalMs: 3600000, // 1 hour
+      maxBufferRecords: 10000,
+      dropPolicy: 'oldest',
+      flushTriggerThreshold: 1000,
+      maxFlushPerCycle: 1000,
+      bufferEvenWhenOnline: false,
       ...config
     };
   }
@@ -156,17 +166,34 @@ export class MessageBufferSync {
       return false;
     }
 
-    if (this.mqttManager.isConnected()) {
+    if (this.mqttManager.isConnected() && !this.config.bufferEvenWhenOnline) {
       return false;
     }
+
+    const stats = await MessageBufferModel.getStats();
+    if (stats.current_count >= this.config.maxBufferRecords) {
+      const spaceFreed = await this.applyBackpressurePolicy(topic, stats.current_count);
+      if (!spaceFreed) {
+        return true;
+      }
+    }
+
+    const payloadText = payload.toString('utf-8');
 
     await MessageBufferModel.enqueue({
       endpoint_name: this.extractEndpointName(topic),
       topic,
       qos: options?.qos ?? 0,
-      payload: payload.toString('utf-8'),
+      payload: payloadText,
+      msg_id: this.extractMsgId(payloadText),
+      is_critical: this.isCriticalTopic(topic) ? 1 : 0,
       payload_bytes: payload.length,
     });
+
+    const newStats = await MessageBufferModel.getStats();
+    if (!this.isFlushing && newStats.current_count >= this.config.flushTriggerThreshold) {
+      this.requestFlush();
+    }
 
     this.logger?.debugSync('Buffered MQTT publish while offline', {
       component: LogComponents.agent,
@@ -240,10 +267,20 @@ export class MessageBufferSync {
     try {
       let totalFlushed = 0;
       let hasMore = true;
-
+      let totalHandled = 0;
       // Process in batches until queue is empty
       while (hasMore && this.mqttManager.isConnected()) {
-        const records = await MessageBufferModel.dequeueOldest(this.config.flushBatchSize);
+        if (totalHandled >= this.config.maxFlushPerCycle) {
+          this.logger?.debugSync('Max flush per cycle reached, scheduling next cycle', {
+            component: LogComponents.agent,
+            totalHandled,
+            maxFlushPerCycle: this.config.maxFlushPerCycle
+          });
+          this.requestFlush();
+          break;
+        }
+
+        const records = await MessageBufferModel.dequeueReady(this.config.flushBatchSize, new Date());
         
         if (records.length === 0) {
           hasMore = false;
@@ -251,7 +288,9 @@ export class MessageBufferSync {
         }
 
         const successfulIds: number[] = [];
+        const droppedIds: number[] = [];
         const failedRecords: Array<{ id: number; error: string }> = [];
+        const retryCountById = new Map<number, number>();
 
         // Publish each message
         for (const record of records) {
@@ -261,7 +300,14 @@ export class MessageBufferSync {
             try {
               const json = JSON.parse(record.payload);
               const msgIdGen = this.mqttManager.getMessageIdGenerator();
-              const mqttPayload = createJsonPayload(json, msgIdGen);
+              let mqttPayload;
+              if (record.msg_id) {
+                mqttPayload = createJsonPayload({ ...json, msgId: record.msg_id });
+              } else if (typeof json?.msgId === 'string' && json.msgId.length > 0) {
+                mqttPayload = createJsonPayload(json);
+              } else {
+                mqttPayload = createJsonPayload(json, msgIdGen);
+              }
               payload = serializePayload(mqttPayload);
             } catch {
               // Not JSON - use as-is (Buffer or string)
@@ -276,6 +322,7 @@ export class MessageBufferSync {
             successfulIds.push(record.id!);
           } catch (error: any) {
             const errorMsg = error?.message || String(error);
+            retryCountById.set(record.id!, record.retry_count);
             
             // Check if message should be retried or dropped
             if (record.retry_count >= this.config.maxRetries) {
@@ -287,7 +334,7 @@ export class MessageBufferSync {
                 error: errorMsg
               });
               
-              successfulIds.push(record.id!); // Delete it
+              droppedIds.push(record.id!);
             } else {
               failedRecords.push({ id: record.id!, error: errorMsg });
             }
@@ -300,21 +347,34 @@ export class MessageBufferSync {
           totalFlushed += successfulIds.length;
         }
 
+        if (droppedIds.length > 0) {
+          await MessageBufferModel.dropByIds(droppedIds);
+        }
+
         // Mark failed records for retry
         for (const failed of failedRecords) {
-          await MessageBufferModel.markRetryFailed(failed.id, failed.error);
+          await MessageBufferModel.markRetryFailed(
+            failed.id,
+            failed.error,
+            this.calculateNextRetryAt(retryCountById.get(failed.id) ?? 0)
+          );
         }
 
         // Log batch progress
         if (records.length > 0) {
+          totalHandled += records.length;
           this.logger?.infoSync('Buffer flush batch completed', {
             component: LogComponents.agent,
             processed: records.length,
             successful: successfulIds.length,
+            dropped: droppedIds.length,
             failed: failedRecords.length,
             totalFlushed
           });
         }
+
+        // Yield so long flushes do not starve the event loop.
+        await new Promise<void>((resolve) => setImmediate(resolve));
       }
 
       if (totalFlushed > 0) {
@@ -341,8 +401,12 @@ export class MessageBufferSync {
    * Cleanup expired records
    */
   private async cleanupExpired(): Promise<void> {
+    if (this.isFlushing) {
+      return;
+    }
+
     try {
-      const deleted = await MessageBufferModel.cleanupExpired();
+      const deleted = await MessageBufferModel.cleanupExpired(this.config.maxRetries);
       
       if (deleted > 0) {
         this.logger?.infoSync('Cleaned up expired buffer records', {
@@ -364,5 +428,75 @@ export class MessageBufferSync {
   private extractEndpointName(topic: string): string {
     const parts = topic.split('/').filter(Boolean);
     return parts.length > 0 ? parts[parts.length - 1] : 'unknown';
+  }
+
+  private isCriticalTopic(topic: string): boolean {
+    return topic.startsWith('alerts/') || topic.startsWith('events/');
+  }
+
+  private async applyBackpressurePolicy(topic: string, currentCount: number): Promise<boolean> {
+    switch (this.config.dropPolicy) {
+      case 'oldest': {
+        const needed = (currentCount - this.config.maxBufferRecords) + 1;
+        const deleted = await MessageBufferModel.deleteOldest(Math.max(needed, 100), true);
+
+        if (deleted > 0) {
+          this.logger?.warnSync('Buffer full, dropped oldest buffered records', {
+            component: LogComponents.agent,
+            deleted,
+            maxBufferRecords: this.config.maxBufferRecords
+          });
+          return true;
+        }
+
+        await MessageBufferModel.incrementDropped(1);
+        this.logger?.warnSync('Buffer full and only critical topics buffered, dropping newest message', {
+          component: LogComponents.agent,
+          topic,
+          maxBufferRecords: this.config.maxBufferRecords
+        });
+        return false;
+      }
+      case 'newest':
+        await MessageBufferModel.incrementDropped(1);
+        this.logger?.warnSync('Buffer full, dropping newest message by policy', {
+          component: LogComponents.agent,
+          topic,
+          maxBufferRecords: this.config.maxBufferRecords
+        });
+        return false;
+      case 'error': {
+        await MessageBufferModel.incrementDropped(1);
+        throw new Error(`Message buffer is full (${currentCount}/${this.config.maxBufferRecords})`);
+      }
+      default:
+        return false;
+    }
+  }
+
+  private extractMsgId(payload: string): string | undefined {
+    try {
+      const parsed = JSON.parse(payload);
+      const msgId = parsed?.msgId;
+      return typeof msgId === 'string' && msgId.length > 0 ? msgId : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private calculateNextRetryAt(currentRetryCount: number): Date | undefined {
+    const nextAttempt = currentRetryCount + 1;
+    let delayMs: number;
+
+    if (nextAttempt <= 1) {
+      delayMs = 5000;
+    } else if (nextAttempt === 2) {
+      delayMs = 30000;
+    } else {
+      delayMs = 300000;
+    }
+
+    const nextRetryAt = new Date(Date.now() + delayMs);
+    return nextRetryAt;
   }
 }

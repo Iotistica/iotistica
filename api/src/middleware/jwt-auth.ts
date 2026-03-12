@@ -37,6 +37,7 @@ const JWT_REFRESH_TOKEN_EXPIRY = (process.env.JWT_REFRESH_TOKEN_EXPIRY || '7d') 
 // Auth0 Configuration
 const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN || '';
 const AUTH0_AUDIENCE = process.env.AUTH0_AUDIENCE || '';
+const AUTH0_CLIENT_ID = process.env.AUTH0_CLIENT_ID || '';
 const AUTH0_ISSUER = process.env.AUTH0_ISSUER || `https://${AUTH0_DOMAIN}/`;
 const AUTH0_ENABLED = process.env.AUTH0_ENABLED === 'true' && AUTH0_DOMAIN && AUTH0_AUDIENCE;
 
@@ -210,15 +211,20 @@ export async function validateAuth0JWT(token: string): Promise<{
   const publicKey = getPublicKeyFromJWKS(jwks, kid);
 
   // Verify JWT signature and claims
+  const audienceCandidates = [AUTH0_AUDIENCE, AUTH0_CLIENT_ID].filter(Boolean);
+  const audience = audienceCandidates.length > 1
+    ? (audienceCandidates as [string, ...string[]])
+    : audienceCandidates[0];
+
   const payload = jwt.verify(token, publicKey, {
     algorithms: ['RS256'],
     issuer: AUTH0_ISSUER,
-    audience: AUTH0_AUDIENCE
+    audience
   }) as any;
 
-  // Additional validation
-  if (!payload.sub || !payload.email) {
-    throw new Error('Missing required claims: sub or email');
+  // Additional validation — email is not guaranteed in access JWTs (only in id_token)
+  if (!payload.sub) {
+    throw new Error('Missing required claim: sub');
   }
 
   const exp = Math.floor(Date.now() / 1000);
@@ -230,6 +236,46 @@ export async function validateAuth0JWT(token: string): Promise<{
     sub: payload.sub,
     email: payload.email,
     exp: payload.exp
+  };
+}
+
+/**
+ * Validate Auth0 opaque/JWE access token via /userinfo endpoint.
+ * Used as fallback when token is not a decodable JWT.
+ */
+async function validateAuth0OpaqueToken(token: string): Promise<{
+  sub: string;
+  email: string;
+  exp: number;
+}> {
+  if (!AUTH0_ENABLED) {
+    throw new Error('Auth0 not enabled (AUTH0_ENABLED must be "true" and AUTH0_DOMAIN/AUTH0_AUDIENCE set)');
+  }
+
+  const userInfoUrl = `https://${AUTH0_DOMAIN}/userinfo`;
+
+  let data: any;
+  try {
+    const response = await axios.get(userInfoUrl, {
+      headers: {
+        Authorization: `Bearer ${token}`
+      },
+      timeout: 5000
+    });
+    data = response.data;
+  } catch (error: any) {
+    throw new Error(`Opaque token validation failed: ${error.response?.data?.error || error.message}`);
+  }
+
+  if (!data || !data.sub) {
+    throw new Error('Opaque token missing required claim: sub');
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    sub: data.sub,
+    email: data.email,
+    exp: now + 300
   };
 }
 
@@ -361,10 +407,38 @@ export async function jwtValidate(
 
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
-
     // Decode header without verification to detect algorithm
     const decoded = jwt.decode(token, { complete: true });
     if (!decoded) {
+      // Fallback for Auth0 opaque/JWE access tokens.
+      if (AUTH0_ENABLED) {
+        logger.info('Token is not decodable JWT; trying Auth0 /userinfo fallback');
+        let auth0Payload: { sub: string; email: string; exp: number };
+        try {
+          auth0Payload = await validateAuth0OpaqueToken(token);
+          logger.info('Opaque Auth0 token validated successfully', { sub: auth0Payload.sub });
+        } catch (error: any) {
+          logger.warn('Opaque token fallback failed', { message: error.message });
+          res.status(401).json({
+            error: 'Unauthorized',
+            message: 'Invalid token format',
+            details: error.message
+          });
+          return;
+        }
+
+        req.user = {
+          id: 0,
+          username: auth0Payload.sub,
+          email: auth0Payload.email,
+          role: '',
+          isActive: false
+        };
+        req._auth0Payload = auth0Payload;
+        next();
+        return;
+      }
+
       res.status(401).json({
         error: 'Unauthorized',
         message: 'Invalid token format'
@@ -511,14 +585,14 @@ export async function tenantResolve(
       const headerTenantId = req.headers['x-tenant-id'] as string | undefined;
       const envTenantId = process.env.DEVELOPMENT_TENANT_ID;
 
-      if (req.hostname === 'localhost' && (headerTenantId || envTenantId)) {
+      if (headerTenantId || envTenantId) {
         customerId = headerTenantId || envTenantId || 'customer-local';
-        logger.info('Using development fallback tenant', { customerId });
+        logger.info('Using development fallback tenant', { customerId, hostname: req.hostname });
       } else {
         logger.warn('Tenant resolution failed', { message: error.message });
         res.status(400).json({
           error: 'Bad Request',
-          message: 'Cannot determine tenant from hostname. For localhost dev, set X-Tenant-ID header or DEVELOPMENT_TENANT_ID env var',
+          message: 'Cannot determine tenant from hostname. Set X-Tenant-ID header or DEVELOPMENT_TENANT_ID env var',
           details: error.message
         });
         return;
@@ -592,12 +666,19 @@ export async function rbacLookup(
         console.log('[JWT-AUTH] Role fetched:', roleData.role, 'Status:', roleData.customer_status);
       } catch (error: any) {
         console.warn('[JWT-AUTH] Role fetch failed:', error.message);
-        res.status(403).json({
-          error: 'Forbidden',
-          message: 'Cannot determine user role in tenant',
-          details: error.message
-        });
-        return;
+        // Dev-mode fallback: if provisioning is unreachable and DEVELOPMENT_TENANT_ID is set,
+        // grant admin access rather than blocking all API calls.
+        if (process.env.NODE_ENV !== 'production' && process.env.DEVELOPMENT_TENANT_ID) {
+          console.warn('[JWT-AUTH] Dev fallback: granting admin role (provisioning unreachable)');
+          roleData = { role: 'admin', customer_status: 'active' };
+        } else {
+          res.status(403).json({
+            error: 'Forbidden',
+            message: 'Cannot determine user role in tenant',
+            details: error.message
+          });
+          return;
+        }
       }
 
       req.user.role = roleData.role;

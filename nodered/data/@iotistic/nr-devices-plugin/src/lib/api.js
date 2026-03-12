@@ -10,88 +10,132 @@ function setupRoutes (RED) {
     auth.setupRoutes(RED)
     comms.setupRoutes(RED)
 
+    RED.httpAdmin.get('/nr-tools/auth/token', async (request, response) => {
+        const user = request.user || {}
+        const sess = request.session || {}
+
+        // 1. Try RED.settings._auth.currentToken (set by httpAdminMiddleware from session)
+        const settingsToken = RED.settings && RED.settings._auth && RED.settings._auth.currentToken
+            ? RED.settings._auth.currentToken : null
+
+        // 2. Try all request.user fields
+        const userToken = user.idToken || user.id_token || user.accessToken || null
+
+        // 3. Try session fields
+        const sessToken = sess.auth0IdToken
+            || (sess.user && (sess.user.idToken || sess.user.id_token))
+            || sess.auth0Token
+            || (sess.user && sess.user.accessToken)
+            || (sess.passport && sess.passport.user && sess.passport.user.accessToken)
+            || null
+
+        const isJwtLike = (value) => typeof value === 'string' && value.split('.').length === 3
+        const candidates = [settingsToken, user.idToken, user.id_token, userToken, sessToken]
+        const jwtCandidate = candidates.find(isJwtLike) || null
+        const token = jwtCandidate || settingsToken || userToken || sessToken || null
+
+        console.log('[nr-tools][auth-token] token probe', {
+            userKeys: Object.keys(user),
+            sessKeys: Object.keys(sess).filter(k => k !== 'cookie'),
+            settingsToken: settingsToken ? `${settingsToken.split('.').length}seg` : 'null',
+            selectedToken: token ? `${token.split('.').length}seg` : 'null',
+            userToken: userToken ? `${userToken.split('.').length}seg` : 'null',
+            sessToken: sessToken ? `${sessToken.split('.').length}seg` : 'null',
+            passportUser: sess.passport ? JSON.stringify(sess.passport.user).substring(0, 120) : 'none'
+        })
+
+        if (!token || typeof token !== 'string' || token.length === 0) {
+            return response.status(401).send({ error: 'unauthorized', message: 'No access token found in session' })
+        }
+
+        return response.send({ accessToken: token })
+    })
+
     RED.httpAdmin.get('/nr-tools/settings', async (request, response) => {
         const body = settings.exportPublicSettings()
         
-        // Check if user is authenticated via nr-auth (adminAuth)
-        let accessToken = null
-        let authSource = null
-        
-        if (request.user && request.user.accessToken) {
-            // User authenticated via nr-auth - use their token
-            accessToken = request.user.accessToken
-            authSource = 'nr-auth'
-        } else {
-            // Check plugin's own token storage
-            const token = auth.getUserTokenForRequest(request)
-            if (token && token.accessToken) {
-                accessToken = token.accessToken
-                authSource = 'plugin'
-            }
-        }
-        
-        if (!accessToken) {
-            body.connected = false
-            body.authSource = null
-        } else {
-            try {
-                const response = await ffGet('/api/v1/auth/me', accessToken)
-                if (response.code === 'unauthorized') {
-                    if (authSource === 'plugin') {
-                        auth.deleteUserTokenForRequest(request)
-                    }
-                    body.connected = false
-                } else {
-                    // API returns { data: { user: {...} } }
-                    const userProfile = response.data?.user || response
-                    body.connected = true
-                    body.authSource = authSource
-                    body.user = {
-                        id: userProfile.id,
-                        username: userProfile.username,
-                        email: userProfile.email,
-                        role: userProfile.role,
-                        fullName: userProfile.fullName || userProfile.full_name,
-                        name: userProfile.name || userProfile.fullName || userProfile.full_name,
-                        avatar: userProfile.avatar || ''
-                    }
-                    if (userProfile.brokerClient && !mqttInitialized) {
-                        // Setup shared MQTT connection pool
-                        console.log('[nr-devices-plugin] Initializing MQTT connection pool')
-                        const mqttManager = getMqttManager(RED, userProfile.brokerClient)
-                        
-                        // Register this plugin instance
-                        const nodeId = 'nr-devices-plugin-main'
-                        mqttManager.register(nodeId, { id: nodeId })
-                        
-                        // Subscribe to device state updates
-                        const deviceStateTopic = 'iot/device/+/state/current'
-                        mqttManager.subscribe(deviceStateTopic, (topic, message, packet) => {
-                            try {
-                                const payload = JSON.parse(message.toString())
-                                console.log(`[nr-devices-plugin] Device state update on ${topic}:`, payload)
-                                
-                                // Publish to Node-RED comms for UI updates
-                                const deviceId = topic.split('/')[2]
-                                RED.comms.publish('notification/device-state-update', {
-                                    device: deviceId,
-                                    payload: payload
-                                })
-                            } catch (err) {
-                                console.error('[nr-devices-plugin] Error parsing device state:', err)
-                            }
-                        }, nodeId, { qos: 1 })
+        // Bearer-only mode: no fallback
+        const authHeader = request.headers.authorization
+        const bearerToken = (authHeader && authHeader.startsWith('Bearer '))
+            ? authHeader.split(' ')[1]
+            : null
 
-                        mqttInitialized = true
-                        console.log('[nr-devices-plugin] MQTT connection pool initialized')
-                    }
-                }
-            } catch (err) {
-                // Failed to get user profile
-                console.error('Failed to get user profile:', err)
-                body.connected = false
-            }
+        console.log('[nr-tools][settings] Evaluating connection state', {
+            hasAuthorizationHeader: !!authHeader,
+            hasBearerToken: !!bearerToken,
+            bearerSegments: bearerToken ? bearerToken.split('.').length : 0,
+            iotisticURL: body.iotisticURL || null
+        })
+        
+        if (!bearerToken || typeof bearerToken !== 'string' || bearerToken.length === 0) {
+            return response.status(401).send({ error: 'unauthorized', message: 'Bearer token required' })
         }
+
+        let meResponse
+        try {
+            console.log('[nr-tools][settings] Using bearer token for /api/v1/auth/me')
+            meResponse = await ffGet('/api/v1/auth/me', bearerToken)
+            if (meResponse.code === 'unauthorized') {
+                console.warn('[nr-tools][settings] auth/me returned unauthorized')
+                body.connected = false
+                body.authSource = 'bearer'
+                body.authError = 'unauthorized'
+                return response.send(body)
+            }
+        } catch (err) {
+            console.warn('[nr-tools][settings] auth/me request failed', {
+                message: err?.message || String(err)
+            })
+            body.connected = false
+            body.authSource = 'bearer'
+            body.authError = err?.message || String(err)
+            return response.send(body)
+        }
+
+        // API returns { data: { user: {...} } }
+        const userProfile = meResponse.data?.user || meResponse
+        body.connected = true
+        body.authSource = 'bearer'
+        body.user = {
+            id: userProfile.id,
+            username: userProfile.username,
+            email: userProfile.email,
+            role: userProfile.role,
+            fullName: userProfile.fullName || userProfile.full_name,
+            name: userProfile.name || userProfile.fullName || userProfile.full_name,
+            avatar: userProfile.avatar || ''
+        }
+        if (userProfile.brokerClient && !mqttInitialized) {
+            // Setup shared MQTT connection pool
+            console.log('[nr-devices-plugin] Initializing MQTT connection pool')
+            const mqttManager = getMqttManager(RED, userProfile.brokerClient)
+            
+            // Register this plugin instance
+            const nodeId = 'nr-devices-plugin-main'
+            mqttManager.register(nodeId, { id: nodeId })
+            
+            // Subscribe to device state updates
+            const deviceStateTopic = 'iot/device/+/state/current'
+            mqttManager.subscribe(deviceStateTopic, (topic, message, packet) => {
+                const payload = JSON.parse(message.toString())
+                console.log(`[nr-devices-plugin] Device state update on ${topic}:`, payload)
+                
+                // Publish to Node-RED comms for UI updates
+                const deviceId = topic.split('/')[2]
+                RED.comms.publish('notification/device-state-update', {
+                    device: deviceId,
+                    payload: payload
+                })
+            }, nodeId, { qos: 1 })
+
+            mqttInitialized = true
+            console.log('[nr-devices-plugin] MQTT connection pool initialized')
+        }
+        console.log('[nr-tools][settings] Connected: user profile resolved', {
+            username: body.user?.username || null,
+            role: body.user?.role || null
+        })
+
         response.send(body)
     })
 
@@ -164,9 +208,39 @@ function setupRoutes (RED) {
             const limit = request.query.limit || 10
             const filter = request.query.filter || 'all'
             const url = `/api/v1/devices?page=${page}&limit=${limit}&filter=${filter}`
+
+            const token = request.iotToken
+            const tokenSegments = typeof token === 'string' ? token.split('.').length : 0
+            const tokenLength = typeof token === 'string' ? token.length : 0
+
+            console.log('[nr-tools][devices] Forwarding request', {
+                method: request.method,
+                path: request.originalUrl || request.url,
+                page,
+                limit,
+                filter,
+                upstreamUrl: url,
+                hasIotToken: !!token,
+                tokenSegments,
+                tokenLength
+            })
+
             const devices = await ffGet(url, request.iotToken)
+
+            const rows = Array.isArray(devices?.devices)
+                ? devices.devices.length
+                : (Array.isArray(devices?.data) ? devices.data.length : null)
+
+            console.log('[nr-tools][devices] Upstream response received', {
+                hasCode: !!devices?.code,
+                code: devices?.code || null,
+                rows
+            })
             response.send(devices)
         } catch (err) {
+            console.error('[nr-tools][devices] Upstream request failed', {
+                message: err?.message || String(err)
+            })
             response.send({ error: err.toString(), code: 'request_failed' })
         }
     })

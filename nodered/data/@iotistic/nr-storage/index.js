@@ -2,25 +2,36 @@ const axios = require('axios')
 
 let settings
 let getAuthToken
+let lastTokenState = 'unknown'
 
 /**
  * Get authentication token (Auth0 from session)
  * Returns null if token unavailable (graceful initialization)
  */
 function getToken() {
-    console.log('[nr-storage] getToken() called, getAuthToken function exists:', !!getAuthToken)
-    
     if (!getAuthToken) {
-        console.log('[nr-storage] No getAuthToken function configured')
+        if (lastTokenState !== 'no-getter') {
+            console.log('[nr-storage] Auth token getter is not configured; proceeding without Authorization header')
+            lastTokenState = 'no-getter'
+        }
         return null
     }
     
     try {
         const token = getAuthToken()
-        console.log('[nr-storage] Token retrieved:', token ? `${String(token).substring(0, 20)}...` : 'null')
+        const nextState = token ? 'present' : 'null'
+        if (lastTokenState !== nextState) {
+            if (token) {
+                console.log('[nr-storage] Auth token became available for storage requests')
+            } else {
+                console.log('[nr-storage] Auth token not available; using no-auth storage requests')
+            }
+            lastTokenState = nextState
+        }
         return token || null
     } catch (error) {
         console.log('[nr-storage] getAuthToken threw error:', error?.message || String(error))
+        lastTokenState = 'error'
         return null
     }
 }

@@ -40,7 +40,7 @@ async function ffPost (url, token, payload) {
         const response = await fetch(`${settings.get('iotisticURL')}${url}`, {
             method: 'POST',
             headers: {
-                authorization: `Bearer ${token}`,
+                authorization: token ? `Bearer ${token}` : undefined,
                 'content-type': 'application/json'
             },
             body: JSON.stringify(payload),

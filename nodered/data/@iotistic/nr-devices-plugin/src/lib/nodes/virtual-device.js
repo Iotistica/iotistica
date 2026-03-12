@@ -11,10 +11,22 @@ module.exports = function (RED) {
         node.mqttManager = null
         node.topics = []
 
-        // Get MQTT broker credentials from plugin settings
-        const mqttBroker = RED.settings.mqttBroker || 'mqtt://mosquitto:1883'
-        const mqttUsername = RED.settings.mqttUsername
-        const mqttPassword = RED.settings.mqttPassword
+        // Get MQTT broker credentials from plugin settings, with env fallbacks
+        const mqttBroker = RED.settings.mqttBroker || process.env.MQTT_BROKER_URL || 'mqtt://mosquitto:1883'
+        const mqttUsername = RED.settings.mqttUsername || process.env.MQTT_USERNAME
+        const mqttPassword = RED.settings.mqttPassword || process.env.MQTT_PASSWORD
+
+        if (!node.deviceUuid) {
+            node.status({ fill: 'red', shape: 'ring', text: 'no device UUID' })
+            node.error('Device UUID not configured')
+            return
+        }
+
+        if (!mqttUsername || !mqttPassword) {
+            node.status({ fill: 'yellow', shape: 'ring', text: 'mqtt creds missing' })
+            node.warn('MQTT credentials not configured. Set MQTT_USERNAME and MQTT_PASSWORD or login via dashboard to hydrate broker credentials.')
+            return
+        }
 
         node.status({ fill: 'yellow', shape: 'ring', text: 'connecting...' })
 
@@ -85,9 +97,6 @@ module.exports = function (RED) {
 
                 node.status({ fill: 'green', shape: 'dot', text: 'subscribed' })
                 node.log(`Subscribed to topics for device: ${node.deviceUuid}`)
-            } else {
-                node.status({ fill: 'red', shape: 'ring', text: 'no device UUID' })
-                node.error('Device UUID not configured')
             }
         } catch (err) {
             node.error(`Failed to initialize virtual device node: ${err.message}`)

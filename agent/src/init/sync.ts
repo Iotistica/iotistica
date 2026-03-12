@@ -1,37 +1,38 @@
-import type { AgentInitContext } from './core.js';
+import type { AgentInitContext } from './context.js';
 import * as deviceActions from '../api/actions.js';
 import { LogComponents } from '../logging/types.js';
 import { MqttManager } from '../mqtt/manager.js';
 import { CloudSync } from '../managers/cloud.js';
+import { initAnomalyDetection } from './ai.js';
 
 export async function initSync(ctx: AgentInitContext): Promise<void> {
-	await initDeviceSync(ctx.self);
-	await ctx.sync.initAnomalyDetection();
+	await initDeviceSync(ctx);
+	await initAnomalyDetection(ctx);
 
 	deviceActions.initialize(
-		ctx.sync.getContainerManager(),
-		ctx.sync.getDeviceManager(),
-		ctx.sync.getCloudSync(),
-		ctx.sync.getAgentLogger(),
-		ctx.sync.getAnomalyService(),
-		ctx.sync.getSimulationOrchestrator()
+		ctx.containerManager,
+		ctx.deviceManager,
+		ctx.cloudSync,
+		ctx.agentLogger,
+		ctx.anomalyService,
+		ctx.simulationOrchestrator
 	);
 
-	ctx.sync.setAgent(ctx.self);
-	deviceActions.setDiscoveryService(ctx.sync.getDiscoveryService());
+	deviceActions.setAgent(ctx.agent);
+	deviceActions.setDiscoveryService(ctx.discoveryService);
 
-	ctx.sync.setReactiveHandlers({
-		containerManager: ctx.sync.getContainerManager(),
-		cloudSync: ctx.sync.getCloudSync(),
-		discoveryService: ctx.sync.getDiscoveryService(),
+	ctx.configManager?.setReactiveHandlers({
+		containerManager: ctx.containerManager,
+		cloudSync: ctx.cloudSync,
+		discoveryService: ctx.discoveryService,
 	});
 }
 
-export async function initDeviceSync(agent: any): Promise<void> {
-	const cloudApiEndpoint = agent.configManager.getCloudApiEndpoint();
+export async function initDeviceSync(ctx: AgentInitContext): Promise<void> {
+	const cloudApiEndpoint = ctx.configManager!.getCloudApiEndpoint();
 
 	if (!cloudApiEndpoint) {
-		agent.agentLogger?.warnSync(
+		ctx.agentLogger?.warnSync(
 			'Cloud API endpoint not configured - running in standalone mode',
 			{
 				component: LogComponents.agent,
@@ -41,36 +42,36 @@ export async function initDeviceSync(agent: any): Promise<void> {
 		return;
 	}
 
-	if (!agent.deviceInfo.provisioned || !agent.deviceInfo.deviceApiKey) {
-		agent.agentLogger?.warnSync('Device not provisioned - cloud sync disabled', {
+	if (!ctx.deviceInfo?.provisioned || !ctx.deviceInfo?.deviceApiKey) {
+		ctx.agentLogger?.warnSync('Device not provisioned - cloud sync disabled', {
 			component: LogComponents.agent,
 			note: 'Device must be provisioned with valid API key before enabling cloud features',
-			provisioned: agent.deviceInfo.provisioned,
-			hasApiKey: !!agent.deviceInfo.deviceApiKey,
+			provisioned: ctx.deviceInfo?.provisioned,
+			hasApiKey: !!ctx.deviceInfo?.deviceApiKey,
 		});
 		return;
 	}
 
-	const intervals = agent.configManager.getIntervalConfig();
-	const features = agent.featureInitializer?.getFeatures() || {};
+	const intervals = ctx.configManager!.getIntervalConfig();
+	const features = ctx.featureInitializer?.getFeatures() || {};
 
-	agent.cloudSync = new CloudSync(
-		agent.stateReconciler,
-		agent.deviceManager,
+	ctx.cloudSync = new CloudSync(
+		ctx.stateReconciler,
+		ctx.deviceManager,
 		{
 			cloudApiEndpoint,
 			pollInterval: intervals.targetStatePollIntervalMs!,
 			reportInterval: intervals.deviceReportIntervalMs!,
 			metricsInterval: intervals.metricsIntervalMs!,
 		},
-		agent.agentLogger,
+		ctx.agentLogger,
 		undefined,
 		features.sensors,
 		MqttManager.getInstance(),
-		agent.sharedHttpClient,
-		agent.updater
+		ctx.sharedHttpClient,
+		ctx.updater
 	);
 
-	agent.featureInitializer?.setCloudSync(agent.cloudSync);
-	await agent.cloudSync.startPoll();
+	ctx.featureInitializer?.setCloudSync(ctx.cloudSync);
+	await ctx.cloudSync.startPoll();
 }

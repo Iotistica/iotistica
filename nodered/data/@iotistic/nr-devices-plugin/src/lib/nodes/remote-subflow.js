@@ -37,9 +37,15 @@ module.exports = function (RED) {
     // Only connect if deviceUuid is provided
     if (node.deviceUuid) {
       // Get shared MQTT connection manager
-      const mqttBroker = RED.settings.mqttBroker || 'mqtt://mosquitto:1883';
-      const mqttUsername = RED.settings.mqttUsername;
-      const mqttPassword = RED.settings.mqttPassword;
+      const mqttBroker = RED.settings.mqttBroker || process.env.MQTT_BROKER_URL || 'mqtt://mosquitto:1883';
+      const mqttUsername = RED.settings.mqttUsername || process.env.MQTT_USERNAME;
+      const mqttPassword = RED.settings.mqttPassword || process.env.MQTT_PASSWORD;
+
+      if (!mqttUsername || !mqttPassword) {
+        node.warn('MQTT credentials missing. Configure MQTT_USERNAME and MQTT_PASSWORD before enabling remote subflow MQTT bridge.');
+        node.status({ fill: 'yellow', shape: 'ring', text: 'mqtt creds missing' });
+        return;
+      }
 
       node.mqttManager = getMqttManager(RED, {
         url: mqttBroker,

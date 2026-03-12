@@ -27,6 +27,9 @@ WORKDIR /usr/src/node-red
 # Install theme
 RUN npm install --no-fund --no-update-notifier --save @node-red-contrib-themes/theme-collection
 
+# Install native auth strategy dependencies for adminAuth type: "strategy"
+RUN npm install --no-fund --no-update-notifier --save passport passport-auth0
+
 # Install plugin dependencies directly in /data
 WORKDIR /data/@iotistic/nr-auth
 RUN npm install --no-fund --no-update-notifier --production

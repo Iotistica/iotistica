@@ -14,16 +14,13 @@ import ContainerManager from "./docker/container-manager.js";
 import { DeviceManager } from "./managers/index.js";
 import type { DeviceInfo } from "./managers/types.js";
 import { DeviceAPI } from "./api/index.js";
-import * as deviceActions from "./api/actions.js";
 import { CloudSync } from "./managers/cloud.js";
-import { ContainerLogMonitor } from "./logging/docker-monitor.js";
 import { AgentLogger } from "./logging/agent-logger.js";
 import { LogComponents } from "./logging/types.js";
 import { MqttManager } from "./mqtt";
 import { AgentFirewall } from "./network/firewall.js";
 import { AgentUpdater } from "./updater.js";
 import { 
-  healthcheck as memoryHealthcheck, 
   setMemoryLogger,
   startMemoryMonitoring,
   stopMemoryMonitoring,
@@ -37,33 +34,17 @@ import { FeatureInitializer } from "./init/features.js";
 import type { ConfigManager } from "./managers/config.js";
 import {
   initCore as runInitCore,
-  initializeStateReconciler as runInitializeStateReconciler,
-  setupConfigEventListeners as runSetupConfigEventListeners,
-  type AgentInitContext,
 } from './init/core.js';
-import { initializeDatabase as runInitializeDatabase } from './init/database.js';
+import type { AgentInitContext } from './init/context.js';
 import { initLogging as runInitLogging } from './init/logging.js';
-import {
-  initDevice as runInitDevice,
-  initializeCloudLogging as runInitializeCloudLogging,
-  initializeDeviceManager as runInitializeDeviceManager,
-  initializeVpnReconnection as runInitializeVpnReconnection,
-} from './init/device.js';
+import { initDevice as runInitDevice } from './init/device.js';
 import {
   initInfrastructure as runInitInfrastructure,
-  initializeMqttManager as runInitializeMqttManager,
-  initContainerManager as runInitContainerManager,
-  initDeviceAPI as runInitDeviceAPI,
 } from './init/infra.js';
 import {
   initFeatures as runInitFeatures,
-  initDiscoveryService as runInitDiscoveryService,
 } from './init/features.js';
-import { initializeSimulationMode as runInitializeSimulationMode } from './init/simulation.js';
-import {
-  initAnomalyDetection as runInitAnomalyDetection,
-} from './init/ai.js';
-import { initSync as runInitSync, initDeviceSync as runInitDeviceSync } from './init/sync.js';
+import { initSync as runInitSync } from './init/sync.js';
 
 
 export default class Agent {
@@ -81,7 +62,7 @@ export default class Agent {
   private simulationOrchestrator?: SimulationOrchestrator; // Simulation framework for testing
   private discoveryService?: DiscoveryService; // Protocol discovery (Modbus, OPC-UA, CAN, etc.)
   private configManager!: ConfigManager; // Configuration manager (centralized config access)
-  private dictionaryManager?: import('./dictionary/manager').DictionaryManager; // MQTT message key compaction (top-level service)
+  private dictionaryManager?: import('./managers/dictionary.js').DictionaryManager; // MQTT message key compaction (top-level service)
   private sharedHttpClient?: import('./lib/http-client').HttpClient; // Shared HTTP client for connection pooling
 
   // System settings (config-driven with env var defaults)
@@ -99,86 +80,25 @@ export default class Agent {
 
   public async init(): Promise<void> {
       const ctx: AgentInitContext = {
-        self: this,
-        core: {
-          initDatabase: () => this.initDatabase(),
-          initializeStateReconciler: () => this.initializeStateReconciler(),
-          setupConfigEventListeners: () => this.setupConfigEventListeners(),
-        },
-        logging: {
-          getLoggingConfig: () => this.configManager.getLoggingConfig(),
-          setAgentLogger: (logger) => {
-            this.agentLogger = logger;
-          },
-          setStateReconcilerLogger: (logger) => {
-            this.stateReconciler.setLogger(logger);
-          },
-        },
-        device: {
-          getCloudApiEndpoint: () => this.configManager.getCloudApiEndpoint(),
-          setSharedHttpClient: (httpClient) => {
-            this.sharedHttpClient = httpClient;
-          },
-          initializeDeviceManager: () => this.initializeDeviceManager(),
-          initializeVpnReconnection: () => this.initializeVpnReconnection(),
-          initializeCloudLogging: () => this.initializeCloudLogging(),
-        },
-        runtime: {
-          initializeMqttManager: () => this.initializeMqttManager(),
-          initContainerManager: () => this.initContainerManager(),
-          initDeviceAPI: () => this.initDeviceAPI(),
-        },
-        features: {
-          getAgentLogger: () => this.agentLogger,
-          getStateReconciler: () => this.stateReconciler,
-          getTargetState: () => this.stateReconciler.getTargetState(),
-          getConfigManagerFeatures: () => this.configManager.getFeatures(),
-          getDeviceInfo: () => this.deviceInfo,
-          getDeviceManager: () => this.deviceManager,
-          getContainerManager: () => this.containerManager,
-          getSharedHttpClient: () => this.sharedHttpClient,
-          getCloudApiEndpoint: () => this.configManager.getCloudApiEndpoint(),
-          getDeviceApiPort: () => this.configManager.getDeviceApiPort(),
-          getAnomalyService: () => this.anomalyService,
-          getDictionaryManager: () => this.dictionaryManager,
-          setFeatureInitializer: (initializer) => {
-            this.featureInitializer = initializer;
-          },
-          getFeatureInitializer: () => this.featureInitializer,
-          initDiscoveryService: () => this.initDiscoveryService(),
-          getDiscoveryService: () => this.discoveryService,
-          initializeSimulationMode: () => this.initializeSimulationMode(),
-          setUpdater: (updater) => {
-            this.updater = updater;
-          },
-          setFirewall: (firewall) => {
-            this.firewall = firewall;
-          },
-          setStateReconcilerUpdater: (updater) => {
-            this.stateReconciler.setAgentUpdater(updater);
-          },
-        },
-        sync: {
-          initDeviceSync: () => this.initDeviceSync(),
-          initAnomalyDetection: () => this.initAnomalyDetection(),
-          getContainerManager: () => this.containerManager,
-          getDeviceManager: () => this.deviceManager,
-          getCloudSync: () => this.cloudSync,
-          getAgentLogger: () => this.agentLogger,
-          getAnomalyService: () => this.anomalyService,
-          getSimulationOrchestrator: () => this.simulationOrchestrator,
-          getDiscoveryService: () => this.discoveryService,
-          setAgent: (agent) => {
-            deviceActions.setAgent(agent);
-          },
-          setReactiveHandlers: (args) => {
-            this.configManager.setReactiveHandlers(args);
-          },
-        },
-        services: {
-          start: () => this.startServices(),
-          logStartupSummary: () => this.logStartupSummary(),
-        },
+        agent: this,
+        stateReconciler: this.stateReconciler,
+        configManager: this.configManager,
+        agentLogger: this.agentLogger,
+        sharedHttpClient: this.sharedHttpClient,
+        deviceManager: this.deviceManager,
+        deviceInfo: this.deviceInfo,
+        containerManager: this.containerManager,
+        logMonitor: (this as any).logMonitor,
+        deviceAPI: this.deviceAPI,
+        cloudSync: this.cloudSync,
+        firewall: this.firewall,
+        updater: this.updater,
+        featureInitializer: this.featureInitializer,
+        anomalyService: this.anomalyService,
+        simulationOrchestrator: this.simulationOrchestrator,
+        discoveryService: this.discoveryService,
+        dictionaryManager: this.dictionaryManager,
+        scheduledRestartTimer: this.scheduledRestartTimer,
       };
 
       await runInitCore(ctx);
@@ -187,8 +107,31 @@ export default class Agent {
       await runInitInfrastructure(ctx);
       await runInitFeatures(ctx);
       await runInitSync(ctx);
-      await ctx.services.start();
-      ctx.services.logStartupSummary();
+
+      this.applyInitContext(ctx);
+      await this.startServices();
+      this.logStartupSummary();
+  }
+
+  private applyInitContext(ctx: AgentInitContext): void {
+    this.stateReconciler = ctx.stateReconciler!;
+    this.configManager = ctx.configManager!;
+    this.agentLogger = ctx.agentLogger!;
+    this.sharedHttpClient = ctx.sharedHttpClient;
+    this.deviceManager = ctx.deviceManager;
+    this.deviceInfo = ctx.deviceInfo;
+    this.containerManager = ctx.containerManager;
+    (this as any).logMonitor = ctx.logMonitor;
+    this.deviceAPI = ctx.deviceAPI;
+    this.cloudSync = ctx.cloudSync;
+    this.firewall = ctx.firewall;
+    this.updater = ctx.updater;
+    this.featureInitializer = ctx.featureInitializer;
+    this.anomalyService = ctx.anomalyService;
+    this.simulationOrchestrator = ctx.simulationOrchestrator;
+    this.discoveryService = ctx.discoveryService;
+    this.dictionaryManager = ctx.dictionaryManager;
+    this.scheduledRestartTimer = ctx.scheduledRestartTimer;
   }
 
   private async startServices(): Promise<void> {
@@ -208,59 +151,6 @@ export default class Agent {
       cloudApiEndpoint: this.configManager.getCloudApiEndpoint(),
       cloudFeaturesEnabled: this.deviceInfo.provisioned && !!this.cloudSync,
     });
-  }
-
-  private async initializeCloudLogging(): Promise<void> {
-    await runInitializeCloudLogging(this as any);
-  }
-
-  private async initDatabase(): Promise<void> {
-    await runInitializeDatabase(this as any);
-  }
-
-  private async initializeDeviceManager(): Promise<void> {
-    await runInitializeDeviceManager(this as any);
-  }
-
-  private async initializeMqttManager(): Promise<void> {
-    await runInitializeMqttManager(this as any);
-  }
-
-  private async initializeStateReconciler(): Promise<void> {
-    await runInitializeStateReconciler(this as any);
-  }
-
-  /**
-   * Setup configuration event listeners
-   */
-  private setupConfigEventListeners(): void {
-    runSetupConfigEventListeners(this as any);
-  }
-
-  private async initContainerManager(): Promise<void> {
-    await runInitContainerManager(this as any);
-  }
-
-
-  private async initDeviceAPI(): Promise<void> {
-    await runInitDeviceAPI(this as any);
-  }
-
-  private async initAnomalyDetection(): Promise<void> {
-    await runInitAnomalyDetection(this as any);
-  }
-
-  private async initDiscoveryService (): Promise<void> {
-    await runInitDiscoveryService(this as any);
-  }
-  
-
-  private async initializeSimulationMode(): Promise<void> {
-    await runInitializeSimulationMode(this as any);
-  }
-
-  private async initDeviceSync(): Promise<void> {
-    await runInitDeviceSync(this as any);
   }
 
   private startAutoReconciliation(): void {
@@ -657,14 +547,6 @@ export default class Agent {
       );
       throw error;
     }
-  }
-
-  /**
-   * Initialize VPN auto-reconnection
-   * Ensures Tailscale daemon is running and reconnects if device was previously connected
-   */
-  private async initializeVpnReconnection(): Promise<void> {
-    await runInitializeVpnReconnection(this as any);
   }
 
   // Getters for external access (if needed)

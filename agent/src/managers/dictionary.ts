@@ -89,9 +89,9 @@ import { deviceTopic } from '../mqtt/topics.js';
  * See: docs/MQTT-KEY-COMPACTION-STRATEGY.md (Alternative 6)
  */
 
-import type { MqttManager } from '../mqtt/manager';
-import type { AgentLogger } from '../logging/agent-logger';
-import { LogComponents } from '../logging/types';
+import type { MqttManager } from '../mqtt/manager.js';
+import type { AgentLogger } from '../logging/agent-logger.js';
+import { LogComponents } from '../logging/types.js';
 
 /**
  * Domain types for semantic field partitioning

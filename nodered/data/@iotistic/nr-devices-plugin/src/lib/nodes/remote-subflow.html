@@ -287,18 +287,24 @@ function getAuthHeaders () {
         Accept: 'application/json',
         'Content-Type': 'application/json'
     }
-    
+
+  let accessToken = null
+  try {
+    accessToken = localStorage.getItem('accessToken')
+  } catch (err) {
+    console.warn('Failed to get accessToken from localStorage:', err)
+  }
+
     try {
-        const authTokens = localStorage.getItem('auth-tokens')
-        if (authTokens) {
-            const tokenObj = JSON.parse(authTokens)
-            const accessToken = tokenObj?.access_token
-            if (accessToken && typeof accessToken === 'string') {
-                headers.Authorization = `Bearer ${accessToken}`
-            }
+    if (!accessToken) {
+      accessToken = sessionStorage.getItem('auth0_token')
         }
     } catch (err) {
-        console.warn('Failed to get token from localStorage:', err)
+    console.warn('Failed to get auth0_token from sessionStorage:', err)
+  }
+
+  if (accessToken && typeof accessToken === 'string') {
+    headers.Authorization = `Bearer ${accessToken}`
     }
 
     return headers

@@ -54,9 +54,23 @@ export function NodeRedPage() {
         // Store in sessionStorage for nr-devices-plugin
         sessionStorage.setItem('auth0_token', token);
         console.log('[NodeRedPage] Access token stored in sessionStorage');
-        
-        // Auth bridge disabled: load Node-RED directly without admin token post.
-        // This avoids CORS/preflight failures when UI auth is disabled.
+
+        // Bridge token into Node-RED session so editor loads without login prompt.
+        const bridgeResponse = await fetch(`${nodeRedUrl}/admin/auth/token`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ token }),
+        });
+
+        if (!bridgeResponse.ok) {
+          const errorText = await bridgeResponse.text();
+          throw new Error(`Node-RED auth bridge failed (${bridgeResponse.status}): ${errorText}`);
+        }
+
+        console.log('[NodeRedPage] Node-RED session established via auth bridge');
         
         setTokenReady(true);
       } catch (error: any) {

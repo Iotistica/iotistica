@@ -5,13 +5,15 @@ const settings = {
 }
 
 function init (RED) {
-    // Use user-configured URL if available, otherwise fall back to RED.settings
+    // Use user-configured URL if available, otherwise fall back to env var, then RED.settings
     if (!settings.iotisticURL) {
-        if (RED.settings && RED.settings.iotisticURL) {
+        if (process.env.IOTISTIC_BASE_URL) {
+            settings.iotisticURL = process.env.IOTISTIC_BASE_URL.replace(/\/$/, '')
+            console.log('[nr-devices-plugin] Using iotisticURL from IOTISTIC_BASE_URL env:', settings.iotisticURL)
+        } else if (RED.settings && RED.settings.iotisticURL) {
             settings.iotisticURL = RED.settings.iotisticURL
             console.log('[nr-devices-plugin] Using iotisticURL from Node-RED settings:', settings.iotisticURL)
         } else {
-            // Default for standalone installations
             settings.iotisticURL = 'https://api.iotistic.ca'
             console.log('[nr-devices-plugin] Using default iotisticURL:', settings.iotisticURL)
         }
@@ -33,7 +35,11 @@ const set = (key, value) => {
     }
     settings[key] = value
 }
-const exportPublicSettings = () => { return { ...settings } }
+const exportPublicSettings = () => {
+    return {
+        ...settings
+    }
+}
 module.exports = {
     init,
     get,

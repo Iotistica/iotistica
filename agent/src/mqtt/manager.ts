@@ -3,8 +3,8 @@ import { EventEmitter } from 'events';
 import msgpack from 'msgpack-lite';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
-import { MessageIdGenerator } from './message-id';
-import type { DictionaryManager } from '../dictionary/manager';
+import { MessageIdGenerator } from './utils';
+import type { DictionaryManager } from '../managers/dictionary';
 import { MessageBufferSync } from './buffer';
 import type { BufferSyncConfig } from './buffer';
 
@@ -299,6 +299,11 @@ export class MqttManager extends EventEmitter {
       flushIntervalMs: 30000,
       maxRetries: 3,
       cleanupIntervalMs: 3600000,
+      maxBufferRecords: 10000,
+      dropPolicy: 'oldest',
+      flushTriggerThreshold: 1000,
+      maxFlushPerCycle: 1000,
+      bufferEvenWhenOnline: false,
       enabled: options?.enabled ?? true,
       ...options,
     });

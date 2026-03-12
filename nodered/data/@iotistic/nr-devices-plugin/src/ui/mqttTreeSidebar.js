@@ -189,21 +189,28 @@ function init() {
             Accept: 'application/json',
             'Content-Type': 'application/json'
         }
+
+        let token = null
         
-        // Get token from localStorage if available
+        // Canonical dashboard token storage
         try {
-            const authTokens = localStorage.getItem('auth-tokens')
-            if (authTokens) {
-                const tokenObj = JSON.parse(authTokens)
-                const accessToken = tokenObj?.access_token
-                if (accessToken && typeof accessToken === 'string') {
-                    headers.Authorization = `Bearer ${accessToken}`
-                    console.log('[MQTT Tree] Using Bearer token authentication')
-                }
-            }
+            token = localStorage.getItem('accessToken')
         } catch (err) {
-            console.warn('[MQTT Tree] Failed to get auth token:', err)
-            // Falls back to session cookies
+            console.warn('[MQTT Tree] Failed to get accessToken from localStorage:', err)
+        }
+
+        // Fallback set by NodeRedPage bridge
+        if (!token) {
+            try {
+                token = sessionStorage.getItem('auth0_token')
+            } catch (err) {
+                console.warn('[MQTT Tree] Failed to get auth0_token from sessionStorage:', err)
+            }
+        }
+
+        if (token && typeof token === 'string') {
+            headers.Authorization = `Bearer ${token}`
+            console.log('[MQTT Tree] Using Bearer token authentication')
         }
         
         return headers

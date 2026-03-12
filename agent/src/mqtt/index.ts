@@ -24,8 +24,8 @@
  */
 
 export { MqttManager } from './manager';
-export { DictionaryManager} from '../dictionary/manager';
-export type { DictionaryMetrics } from '../dictionary/manager';
+export { DictionaryManager} from '../managers/dictionary';
+export type { DictionaryMetrics } from '../managers/dictionary';
 export { MessageBufferSync } from './buffer';
 export type { BufferSyncConfig } from './buffer';
 export type { MessageBufferSyncOptions } from './buffer';
