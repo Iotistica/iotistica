@@ -289,9 +289,67 @@ jobs:
             exit 1
           fi
 
+  generate-sbom:
+    name: Generate SBOM
+    needs: [version, build-x86, build-arm64, prepare-install-script]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download x86_64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-tarballs-x86_64
+          path: /tmp/iotistic-artifacts
+
+      - name: Download ARM64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-tarballs-arm64
+          path: /tmp/iotistic-artifacts
+
+      - name: Download install script bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: install-script-latest
+          path: /tmp/iotistic-scripts
+
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          syft version
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          mkdir -p /tmp/sbom
+
+          syft dir:/tmp/iotistic-artifacts -o cyclonedx-json=/tmp/sbom/agent-artifacts.cyclonedx.json
+          syft dir:/tmp/iotistic-scripts -o cyclonedx-json=/tmp/sbom/install-script.cyclonedx.json
+          syft dir:./agent -o cyclonedx-json=/tmp/sbom/agent-source.cyclonedx.json
+
+      - name: Upload SBOM bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-sbom
+          path: /tmp/sbom/*
+          if-no-files-found: error
+
+      - name: Append SBOM summary
+        run: |
+          echo "# SBOM Generated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Artifacts:" >> $GITHUB_STEP_SUMMARY
+          echo "- agent-artifacts.cyclonedx.json" >> $GITHUB_STEP_SUMMARY
+          echo "- install-script.cyclonedx.json" >> $GITHUB_STEP_SUMMARY
+          echo "- agent-source.cyclonedx.json" >> $GITHUB_STEP_SUMMARY
+
   upload-artifacts:
     name: Upload to Azure (gated)
-    needs: [version, build-x86, build-arm64, verify-systemd-install-x86, verify-systemd-install-arm64, prepare-install-script]
+    needs: [version, build-x86, build-arm64, verify-systemd-install-x86, verify-systemd-install-arm64, prepare-install-script, generate-sbom]
     runs-on: ubuntu-latest
     if: success()
 
