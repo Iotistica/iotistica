@@ -295,6 +295,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      security-events: write
 
     steps:
       - name: Checkout repository
@@ -330,6 +331,40 @@ jobs:
           syft dir:/tmp/iotistic-artifacts -o cyclonedx-json=/tmp/sbom/agent-artifacts.cyclonedx.json
           syft dir:/tmp/iotistic-scripts -o cyclonedx-json=/tmp/sbom/install-script.cyclonedx.json
           syft dir:./agent -o cyclonedx-json=/tmp/sbom/agent-source.cyclonedx.json
+
+      - name: Install Grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+          grype version
+
+      - name: Scan SBOMs and generate SARIF reports
+        # continue-on-error so SARIF upload always runs even when CVEs are found
+        continue-on-error: true
+        run: |
+          mkdir -p /tmp/grype-sarif
+
+          grype sbom:/tmp/sbom/agent-source.cyclonedx.json \
+            --output sarif > /tmp/grype-sarif/agent-source.sarif
+
+          grype sbom:/tmp/sbom/agent-artifacts.cyclonedx.json \
+            --output sarif > /tmp/grype-sarif/agent-artifacts.sarif
+
+          grype sbom:/tmp/sbom/install-script.cyclonedx.json \
+            --output sarif > /tmp/grype-sarif/install-script.sarif
+
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: /tmp/grype-sarif/
+          category: grype-sbom-scan
+
+      - name: Enforce CVE policy threshold
+        # Blocks upload if any Critical severity vulnerabilities are found.
+        # Change --fail-on to "high" for a stricter gate.
+        run: |
+          grype sbom:/tmp/sbom/agent-source.cyclonedx.json --fail-on critical
+          grype sbom:/tmp/sbom/agent-artifacts.cyclonedx.json --fail-on critical
 
       - name: Upload SBOM bundle
         uses: actions/upload-artifact@v4
@@ -372,6 +407,12 @@ jobs:
           name: install-script-latest
           path: /tmp/iotistic-scripts
 
+      - name: Download SBOM bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-sbom
+          path: /tmp/sbom
+
       - name: Azure login
         uses: azure/login@v2
         with:
@@ -402,6 +443,30 @@ jobs:
 
           az storage blob upload --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} --container-name scripts --name agent/versions/install-${{ needs.version.outputs.package_version }}.sh --file /tmp/iotistic-scripts/install.sh --overwrite true --content-type application/x-sh --content-disposition "attachment; filename=install-${{ needs.version.outputs.package_version }}.sh"
           az storage blob upload --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} --container-name scripts --name agent/versions/install-${{ needs.version.outputs.package_version }}.sh.sha256 --file /tmp/iotistic-scripts/install.sh.sha256 --overwrite true --content-type text/plain --content-disposition "inline; filename=install-${{ needs.version.outputs.package_version }}.sh.sha256"
+
+      - name: Upload SBOM files to Azure
+        run: |
+          VERSION=${{ needs.version.outputs.package_version }}
+
+          for f in agent-artifacts install-script agent-source; do
+            # Versioned copy alongside release tarballs
+            az storage blob upload \
+              --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+              --container-name scripts \
+              --name "agent/versions/${VERSION}/sbom/${f}.cyclonedx.json" \
+              --file "/tmp/sbom/${f}.cyclonedx.json" \
+              --overwrite true \
+              --content-type application/json
+
+            # Latest pointer
+            az storage blob upload \
+              --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+              --container-name scripts \
+              --name "agent/sbom/${f}.cyclonedx.json" \
+              --file "/tmp/sbom/${f}.cyclonedx.json" \
+              --overwrite true \
+              --content-type application/json
+          done
 
   report:
     name: Generate Changelog
