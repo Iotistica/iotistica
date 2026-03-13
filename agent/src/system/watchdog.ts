@@ -125,6 +125,14 @@ function sendNativeNotification(message: string, socketPath: string, logger?: Ag
  * @param logger - Optional logger
  */
 async function sendNotification(message: string, logger?: AgentLogger): Promise<void> {
+  const socketPath = process.env.NOTIFY_SOCKET;
+
+  if (socketPath) {
+    sendNativeNotification(message, socketPath, logger);
+    await new Promise(resolve => setTimeout(resolve, 25));
+    return;
+  }
+
   try {
     await execFileAsync('systemd-notify', ['--pid=parent', message]);
     logger?.debugSync(`Sent notification: ${message}`, {
@@ -384,5 +392,5 @@ export function notifySystemd(status: string, logger?: AgentLogger): void {
     return; // Silently skip if not running under systemd
   }
 
-  sendNotification(status, logger);
+  void sendNotification(status, logger);
 }

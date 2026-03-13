@@ -137,12 +137,12 @@ export default class Agent {
       };
 
       await this.lifecycle.transition(AgentState.INIT, async () => {
-        await runInitCore(ctx);
-        await runInitLogging(ctx);
-        await runInitDevice(ctx);
-        await runInitInfrastructure(ctx);
-        await runInitFeatures(ctx);
-        await runInitSync(ctx);
+        await this.runInitPhase('core', () => runInitCore(ctx));
+        await this.runInitPhase('logging', () => runInitLogging(ctx));
+        await this.runInitPhase('device', () => runInitDevice(ctx));
+        await this.runInitPhase('infrastructure', () => runInitInfrastructure(ctx));
+        await this.runInitPhase('features', () => runInitFeatures(ctx));
+        await this.runInitPhase('sync', () => runInitSync(ctx));
       });
 
       await this.lifecycle.transition(AgentState.READY, async () => {
@@ -153,6 +153,35 @@ export default class Agent {
         await this.startServices();
         this.logStartupSummary();
       });
+  }
+
+  private async runInitPhase(name: string, operation: () => Promise<void>): Promise<void> {
+    const startedAt = Date.now();
+    console.log(`[INIT] ${name} start`);
+
+    try {
+      await operation();
+      const durationMs = Date.now() - startedAt;
+      console.log(`[INIT] ${name} complete (${durationMs}ms)`);
+      this.agentLogger?.infoSync('Agent init phase completed', {
+        component: LogComponents.agent,
+        phase: name,
+        durationMs,
+      });
+    } catch (error) {
+      const durationMs = Date.now() - startedAt;
+      console.error(`[INIT] ${name} failed after ${durationMs}ms`, error);
+      this.agentLogger?.errorSync(
+        'Agent init phase failed',
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          component: LogComponents.agent,
+          phase: name,
+          durationMs,
+        }
+      );
+      throw error;
+    }
   }
 
   private applyInitContext(ctx: AgentInitContext): void {

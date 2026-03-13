@@ -606,8 +606,24 @@ jobs:
           sudo -E bash agent/bin/install.sh
   
       - name: Check systemd service status
+        if: always()
         run: |
           echo "Checking systemd service status..."
+          echo "systemd-notify path: $(command -v systemd-notify || echo 'not found')"
+          echo ""
+          echo "========================================="
+          echo "Systemd Unit Details:"
+          echo "========================================="
+          sudo systemctl show iotistic-agent \
+            -p Type \
+            -p NotifyAccess \
+            -p TimeoutStartUSec \
+            -p ExecMainPID \
+            -p MainPID \
+            -p ActiveState \
+            -p SubState \
+            -p Result \
+            -p Environment || true
           sudo systemctl status iotistic-agent --no-pager || true
           
           echo ""
@@ -615,6 +631,12 @@ jobs:
           echo "Agent Startup Logs (last 100 lines):"
           echo "========================================="
           sudo journalctl -u iotistic-agent -n 100 --no-pager
+
+          echo ""
+          echo "========================================="
+          echo "Agent Init Phase Logs:"
+          echo "========================================="
+          sudo journalctl -u iotistic-agent --no-pager | grep '\[INIT\]' || true
           
           echo ""
           echo "========================================="
@@ -640,6 +662,7 @@ jobs:
           fi
   
       - name: Check agent logs
+        if: always()
         run: |
           echo "Agent Logs (journald):"
           sudo journalctl -u iotistic-agent -n 100 --no-pager
@@ -653,6 +676,7 @@ jobs:
           fi
   
       - name: Test agent API
+        if: always()
         run: |
           echo "Testing agent API..."
           
