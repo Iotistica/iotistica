@@ -4,7 +4,60 @@
  */
 
 import os from 'os';
-import ip from 'ip';
+
+function ipv4ToInt(ipv4: string): number | null {
+	const parts = ipv4.split('.');
+	if (parts.length !== 4) {
+		return null;
+	}
+
+	let value = 0;
+	for (const part of parts) {
+		const octet = Number(part);
+		if (!Number.isInteger(octet) || octet < 0 || octet > 255) {
+			return null;
+		}
+		value = (value << 8) | octet;
+	}
+
+	return value >>> 0;
+}
+
+function intToIpv4(value: number): string {
+	return [
+		(value >>> 24) & 255,
+		(value >>> 16) & 255,
+		(value >>> 8) & 255,
+		value & 255,
+	].join('.');
+}
+
+function subnetFromAddressAndMask(address: string, netmask: string): {
+	networkAddress: string;
+	subnetMaskLength: number;
+	numHosts: number;
+} | null {
+	const ipInt = ipv4ToInt(address);
+	const maskInt = ipv4ToInt(netmask);
+	if (ipInt === null || maskInt === null) {
+		return null;
+	}
+
+	const invertedMask = (~maskInt) >>> 0;
+	if (((invertedMask + 1) & invertedMask) !== 0) {
+		return null;
+	}
+
+	const subnetMaskLength = maskInt.toString(2).replace(/0/g, '').length;
+	const networkAddressInt = ipInt & maskInt;
+	const numHosts = invertedMask > 1 ? invertedMask - 1 : 0;
+
+	return {
+		networkAddress: intToIpv4(networkAddressInt >>> 0),
+		subnetMaskLength,
+		numHosts,
+	};
+}
 
 /**
  * DNS resolution errors
@@ -113,7 +166,10 @@ export function autoDetectLocalSubnets(): string[] {
   for (const name of Object.keys(ifaces)) {
     for (const iface of ifaces[name] || []) {
       if (iface.family === 'IPv4' && !iface.internal) {
-        const subnet = ip.subnet(iface.address, iface.netmask);
+				const subnet = subnetFromAddressAndMask(iface.address, iface.netmask);
+				if (!subnet) {
+					continue;
+				}
         // avoid host-only / docker internal
         if (subnet.numHosts > 10) {
           ranges.push(`${subnet.networkAddress}/${subnet.subnetMaskLength}`);

@@ -7,6 +7,9 @@ WORKDIR /app
 # py3-setuptools provides distutils replacement for Python 3.12+
 RUN apk add --no-cache python3 py3-setuptools make g++ sqlite-dev linux-headers
 
+# Upgrade zlib to patched release from Alpine edge main.
+RUN apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main zlib=1.3.2-r0
+
 # Copy package files
 COPY agent/package*.json ./
 
@@ -27,6 +30,9 @@ WORKDIR /app
 # Install build tools for native deps (sqlite3, node-pty)
 # py3-setuptools provides distutils replacement for Python 3.12+
 RUN apk add --no-cache python3 py3-setuptools make g++ sqlite-dev linux-headers
+
+# Upgrade zlib to patched release from Alpine edge main.
+RUN apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main zlib=1.3.2-r0
 
 # Copy package files
 COPY agent/package*.json agent/tsconfig.json agent/tsconfig.build.json ./
@@ -66,6 +72,9 @@ RUN apk add --no-cache \
     tailscale \
     ca-certificates && \
     rm -rf /var/cache/apk/* 
+
+# Upgrade zlib to patched release from Alpine edge main.
+RUN apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main zlib=1.3.2-r0
   
 
 # Required for Tailscale state
@@ -98,6 +107,10 @@ RUN chmod +x /app/dist/cli/iotctl.js && \
     chmod +x /app/bin/*.sh && \
     chmod +x /app/docker-entrypoint.sh && \
     ln -s /app/dist/cli/iotctl.js /usr/local/bin/iotctl
+
+# Remove npm/npx from runtime image to reduce attack surface and npm-bundled CVEs.
+RUN rm -rf /usr/local/lib/node_modules/npm && \
+    rm -f /usr/local/bin/npm /usr/local/bin/npx
 
 # Data volume for persistent storage
 VOLUME ["/app/data"]
