@@ -1,4 +1,4 @@
-name: CI Build, Test & Push Agent
+name: Build, Test & Deploy Agent
 
 on:
   workflow_dispatch:
