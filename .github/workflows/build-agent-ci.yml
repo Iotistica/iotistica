@@ -576,7 +576,7 @@ jobs:
   test-agent-systemd:
     name: Test Systemd Installation (x86_64)
     needs: [version, build-x86]
-    runs-on: [iotistic-lab-sc]
+    runs-on: [ubuntu-latest]
     
     steps:
       - name: Checkout repository
