@@ -879,7 +879,33 @@ export class MqttManager extends EventEmitter {
     console.log(`[MQTT] Scheduling reconnect attempt ${this.reconnectAttempts} in ${delay}ms`);
     
     setTimeout(() => {
-      if (!this.connected && !this.connectionPromise) {
+      if (this.connected) {
+        // Connection recovered while waiting for backoff delay.
+        this.isReconnecting = false;
+        return;
+      }
+
+      if (this.connectionPromise) {
+        // Another connect attempt is already in flight. Wait for it to settle,
+        // then continue the reconnect chain if we're still offline.
+        this.connectionPromise
+          .catch(() => {
+            // Ignore here; follow-up scheduling is handled below.
+          })
+          .finally(() => {
+            if (this.connected) {
+              this.isReconnecting = false;
+              return;
+            }
+
+            this.isReconnecting = false;
+            this.connectionPromise = null;
+            this.scheduleReconnect(brokerUrl, options);
+          });
+        return;
+      }
+
+      if (!this.connected) {
         // Force close stale client before reconnecting (critical for stuck connections)
         if (this.client) {
           console.warn(`[MQTT] Forcefully closing stale client before reconnect (attempt ${this.reconnectAttempts})`);

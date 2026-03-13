@@ -1,4 +1,4 @@
-name: CI Build, Test & Push Device Agent
+name: CI Build, Test & Push Agent
 
 on: 
   push:
