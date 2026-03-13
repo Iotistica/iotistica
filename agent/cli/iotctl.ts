@@ -23,12 +23,19 @@
  *   iotctl apps start <appId>         - Start an application
  *   iotctl apps stop <appId>          - Stop an application
  *   iotctl apps restart <appId>       - Restart an application
+ *   iotctl db backup                  - Create SQLite backup
+ *   iotctl db list                    - List SQLite backups
+ *   iotctl db verify latest           - Verify backup integrity/checksum
+ *   iotctl db restore <file> --yes    - Restore from backup
+ *   iotctl db prune --keep 24         - Prune old backups
+ *   iotctl buffer status              - Show offline buffer summary
  *   iotctl help                       - Show this help
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { spawn, execSync } from 'child_process';
+import { Agent as UndiciAgent, fetch as undiciFetch } from 'undici';
 
 
 // Configuration paths
@@ -122,6 +129,241 @@ interface DeviceConfig {
 	enableRemoteAccess?: boolean;
 	deviceName?: string;
 	[key: string]: any;
+}
+
+type DbBackupServiceModule = {
+	getDefaultBackupDir: (dbPath: string) => string;
+	createDbBackup: (params: { dbPath: string; backupDir?: string; name?: string }) => Promise<any>;
+	listDbBackups: (params: { backupDir: string }) => Array<any>;
+	verifyDbBackup: (params: { backupPath: string; requireMetadata?: boolean }) => Promise<any>;
+	restoreDbFromBackup: (params: {
+		dbPath: string;
+		backupPath: string;
+		backupDir?: string;
+		createPreRestoreBackup?: boolean;
+	}) => Promise<any>;
+	pruneDbBackups: (params: { backupDir: string; keep: number }) => { deleted: string[]; kept: number };
+};
+
+let dbBackupServiceCache: DbBackupServiceModule | null = null;
+
+async function loadDbBackupService(): Promise<DbBackupServiceModule> {
+	if (dbBackupServiceCache) {
+		return dbBackupServiceCache;
+	}
+
+	const candidates = [
+		join(__dirname, '..', 'db', 'backup-service.js'),
+		join(__dirname, '..', 'src', 'db', 'backup-service.js'),
+		join(process.cwd(), 'dist', 'db', 'backup-service.js'),
+		join(process.cwd(), 'dist', 'src', 'db', 'backup-service.js'),
+		join(process.cwd(), 'src', 'db', 'backup-service.js'),
+	];
+
+	for (const candidatePath of candidates) {
+		if (!existsSync(candidatePath)) {
+			continue;
+		}
+
+		const loaded = require(candidatePath);
+		const service = loaded as DbBackupServiceModule;
+
+		if (
+			typeof service.createDbBackup === 'function' &&
+			typeof service.listDbBackups === 'function' &&
+			typeof service.verifyDbBackup === 'function' &&
+			typeof service.restoreDbFromBackup === 'function' &&
+			typeof service.pruneDbBackups === 'function'
+		) {
+			dbBackupServiceCache = service;
+			return service;
+		}
+	}
+
+	throw new CLIError('DB backup service module not found', 1, {
+		hint: 'Run npm run build so dist/db/backup-service.js is available',
+	});
+}
+
+function getFlagValue(flag: string): string | undefined {
+	const args = process.argv.slice(2);
+	const byEquals = args.find((arg) => arg.startsWith(`${flag}=`));
+	if (byEquals) {
+		return byEquals.split('=')[1];
+	}
+
+	const index = args.indexOf(flag);
+	if (index === -1 || !args[index + 1]) {
+		return undefined;
+	}
+
+	return args[index + 1];
+}
+
+function normalizePositionalArg(arg?: string): string | undefined {
+	if (!arg || arg.startsWith('--')) {
+		return undefined;
+	}
+
+	return arg;
+}
+
+function resolveBackupPathFromTarget(
+	backups: Array<{ fileName: string; backupPath: string }>,
+	target?: string,
+): string {
+	if (backups.length === 0) {
+		throw new CLIError('No backups found', 1, {
+			hint: 'Run iotctl db backup first',
+		});
+	}
+
+	if (!target || target === 'latest') {
+		return backups[0].backupPath;
+	}
+
+	if (existsSync(target)) {
+		return target;
+	}
+
+	const byName = backups.find((item) => item.fileName === target);
+	if (byName) {
+		return byName.backupPath;
+	}
+
+	throw new CLIError('Backup target not found', 1, {
+		target,
+		hint: 'Use iotctl db list to see available backups',
+	});
+}
+
+async function dbBackup(nameArg?: string): Promise<void> {
+	const service = await loadDbBackupService();
+	const backupDir = service.getDefaultBackupDir(DB_PATH);
+	const name = normalizePositionalArg(nameArg) || getFlagValue('--name');
+
+	const result = await service.createDbBackup({
+		dbPath: DB_PATH,
+		backupDir,
+		name,
+	});
+
+	logger.info('Database backup created', {
+		file: result.fileName,
+		path: result.backupPath,
+		sizeBytes: result.sizeBytes,
+		checksumSha256: result.checksumSha256,
+	});
+}
+
+async function dbList(): Promise<void> {
+	const service = await loadDbBackupService();
+	const backupDir = service.getDefaultBackupDir(DB_PATH);
+	const backups = service.listDbBackups({ backupDir });
+
+	if (backups.length === 0) {
+		logger.info('No database backups found', { backupDir });
+		return;
+	}
+
+	logger.info('Database backups', {
+		backupDir,
+		count: backups.length,
+	});
+
+	for (const backup of backups) {
+		logger.info(backup.fileName, {
+			createdAt: backup.createdAt,
+			sizeBytes: backup.sizeBytes,
+			checksumSha256: backup.checksumSha256 || 'metadata-missing',
+		});
+	}
+}
+
+async function dbVerify(targetArg?: string): Promise<void> {
+	const service = await loadDbBackupService();
+	const backupDir = service.getDefaultBackupDir(DB_PATH);
+	const backups = service.listDbBackups({ backupDir });
+	const targetPath = resolveBackupPathFromTarget(
+		backups,
+		normalizePositionalArg(targetArg) || getFlagValue('--target')
+	);
+
+	const result = await service.verifyDbBackup({
+		backupPath: targetPath,
+		requireMetadata: true,
+	});
+
+	if (!result.ok) {
+		throw new CLIError('Backup verification failed', 1, {
+			backupPath: targetPath,
+			integrity: result.integrity,
+			checksumMatch: result.checksumMatch,
+		});
+	}
+
+	logger.info('Backup verified', {
+		backupPath: targetPath,
+		integrity: result.integrity,
+		checksumSha256: result.checksumCurrent,
+	});
+}
+
+async function dbRestore(targetArg?: string): Promise<void> {
+	requireConfirmation('Database restore will overwrite current SQLite data.');
+
+	const liveAllowed = process.argv.includes('--force-live');
+	if (!liveAllowed) {
+		const probe = await apiProbe(`${DEVICE_API_V1}/healthy`);
+		if (probe.ok) {
+			throw new CLIError('Refusing restore while agent API is reachable', 1, {
+				hint: 'Stop the agent first or pass --force-live to override',
+			});
+		}
+	}
+
+	const service = await loadDbBackupService();
+	const backupDir = service.getDefaultBackupDir(DB_PATH);
+	const backups = service.listDbBackups({ backupDir });
+	const targetPath = resolveBackupPathFromTarget(
+		backups,
+		normalizePositionalArg(targetArg) || getFlagValue('--target')
+	);
+
+	const result = await service.restoreDbFromBackup({
+		dbPath: DB_PATH,
+		backupPath: targetPath,
+		backupDir,
+		createPreRestoreBackup: true,
+	});
+
+	logger.info('Database restore completed', {
+		restoredPath: result.restoredPath,
+		preRestoreBackupPath: result.preRestoreBackupPath,
+		checksumSha256: result.checksumSha256,
+	});
+}
+
+async function dbPrune(keepArg?: string): Promise<void> {
+	const service = await loadDbBackupService();
+	const backupDir = service.getDefaultBackupDir(DB_PATH);
+	const keepValue = normalizePositionalArg(keepArg) || getFlagValue('--keep') || '24';
+	const keep = Number.parseInt(keepValue, 10);
+
+	if (!Number.isFinite(keep) || keep < 1) {
+		throw new CLIError('Invalid --keep value', 1, {
+			keep: keepValue,
+			hint: 'Use an integer >= 1',
+		});
+	}
+
+	const result = service.pruneDbBackups({ backupDir, keep });
+	logger.info('Database backup prune complete', {
+		backupDir,
+		kept: result.kept,
+		deletedCount: result.deleted.length,
+		deleted: result.deleted,
+	});
 }
 
 // ============================================================================
@@ -358,6 +600,19 @@ SYSTEM:
 
 	diagnostics, diag                 Run system diagnostics (API, lifecycle, database, MQTT, cloud)
 
+	buffer status                     Show offline buffer summary
+
+	db backup [--name <name>]         Create SQLite backup with integrity and checksum gates
+
+	db list                           List available SQLite backups
+
+	db verify [<file>|latest]         Verify backup integrity and checksum metadata
+
+	db restore <file|latest> [--yes]  Restore SQLite backup with pre-restore safety backup
+																		Use --force-live to override API-running safety gate
+
+	db prune [--keep <count>]         Prune old backups (default keep: 24)
+
   help                              Show this help message
 
   version                           Show CLI version
@@ -585,12 +840,17 @@ async function showStatusEnhanced(): Promise<void> {
 	
 	try {
 		// Read lifecycle/readiness from dedicated health endpoints
-		const [healthyProbe, readinessProbe] = await Promise.all([
+		const [healthyProbe, readinessProbe, healthReportProbe] = await Promise.all([
 			apiProbe(`${DEVICE_API_V1}/healthy`),
 			apiProbe(`${DEVICE_API_V1}/readiness`),
+			apiProbe(`${DEVICE_API_V1}/health/report`),
 		]);
 		const healthyPayload = healthyProbe.data || {};
 		const readinessPayload = readinessProbe.data || {};
+		const healthReportPayload = healthReportProbe.data || {};
+		const report = healthReportPayload.report || {};
+		const criticalFailures = Array.isArray(report.criticalFailures) ? report.criticalFailures : [];
+		const unhealthySubsystems = Array.isArray(report.unhealthySubsystems) ? report.unhealthySubsystems : [];
 
 		// Check agent API connectivity (cached)
 		const deviceState = await apiCached(`${DEVICE_API_V1}/device`);
@@ -600,9 +860,11 @@ async function showStatusEnhanced(): Promise<void> {
 		});
 
 		logger.info('Lifecycle', {
-			state: healthyPayload.lifecycleState || readinessPayload.lifecycleState || 'UNKNOWN',
+			state: healthyPayload.state || readinessPayload.state || healthyPayload.lifecycleState || readinessPayload.lifecycleState || 'UNKNOWN',
 			ready: readinessPayload.ready === true,
-			health: healthyPayload.status || 'unknown'
+			health: healthyPayload.status || 'unknown',
+			criticalFailures,
+			unhealthySubsystems,
 		});
 		
 		// Environment info
@@ -653,6 +915,62 @@ async function showStatusEnhanced(): Promise<void> {
 		logger.error('Agent not running or unreachable', error as Error, {
 			hint: `Verify DEVICE_API_PORT/DEVICE_API_URL and confirm device API is listening (current target: ${DEVICE_API_BASE})`
 		});
+	}
+}
+
+function formatMaybeAge(hours?: number): string {
+	if (hours === undefined || hours === null) {
+		return 'n/a';
+	}
+	return `${hours}h`;
+}
+
+function formatMaybeTime(value?: string): string {
+	if (!value) {
+		return 'never';
+	}
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) {
+		return value;
+	}
+	return date.toLocaleString();
+}
+
+async function bufferStatus(): Promise<void> {
+	clearApiCache();
+	logger.info('Checking offline buffer status...');
+
+	try {
+		const result = await apiRequest(`${DEVICE_API_V1}/buffer/status`);
+
+		logger.info('Buffer mode', { mode: result.mode });
+		logger.info('Cloud report buffer', {
+			cloudReportQueueCount: result.cloudReportQueueCount,
+			cloudReportOldestAge: formatMaybeAge(result.cloudReportOldestAge),
+			lastFlushAttempt: formatMaybeTime(result.lastFlushAttempt),
+			lastFlushSuccess: formatMaybeTime(result.lastFlushSuccess),
+		});
+		logger.info('MQTT message buffer', {
+			mqttMessageBufferCount: result.mqttMessageBufferCount,
+			mqttBufferBytes: result.mqttBufferBytes,
+			mqttBufferOldestAge: formatMaybeAge(result.mqttBufferOldestAge),
+		});
+
+		if (result.agentLogBufferEnabled) {
+			logger.info('Agent log buffer', {
+				agentLogBufferLogs: result.agentLogBufferLogs,
+				agentLogBufferBytes: result.agentLogBufferBytes,
+				agentLogPendingBatches: result.agentLogPendingBatches,
+				agentLogDroppedTotal: result.agentLogDroppedTotal,
+				agentLogCircuitOpen: result.agentLogCircuitOpen,
+			});
+		} else {
+			logger.info('Agent log buffer', {
+				status: 'not-enabled'
+			});
+		}
+	} catch (error) {
+		logger.error('Failed to read buffer status', error as Error);
 	}
 }
 
@@ -1068,11 +1386,11 @@ async function servicesInfo(serviceId: string): Promise<void> {
 async function restart(): Promise<void> {
 	try {
 		const readiness = await apiProbe(`${DEVICE_API_V1}/readiness`);
-		const readinessState = readiness.data?.lifecycleState || 'UNKNOWN';
+		const readinessState = readiness.data?.state || readiness.data?.lifecycleState || 'UNKNOWN';
 		const readinessFlag = readiness.data?.ready === true;
 
 		logger.info('Restarting agent services...', {
-			lifecycleState: readinessState,
+			state: readinessState,
 			ready: readinessFlag
 		});
 		
@@ -1082,7 +1400,7 @@ async function restart(): Promise<void> {
 		
 		logger.info('Agent services restarting', {
 			note: 'All services will reinitialize (API and MQTT stay running)',
-			lifecycleState: response.lifecycleState || readinessState
+			state: response.state || response.lifecycleState || readinessState
 		});
 	} catch (error) {
 		logger.error('Failed to restart agent services', error as Error);
@@ -1346,6 +1664,23 @@ async function endpointsShow(endpointName?: string): Promise<void> {
 	}
 }
 
+function describeCloudFetchError(error: any): string {
+	if (error.message?.includes('timeout')) return 'Connection timeout (5s)';
+	const cause = error.cause;
+	if (cause) {
+		const code: string | undefined = cause.code;
+		if (code === 'ECONNREFUSED') return 'Connection refused - is the cloud API running?';
+		if (code === 'ECONNRESET') return 'Connection reset by remote host';
+		if (code === 'ENOTFOUND') return `DNS lookup failed for host`;
+		if (code === 'CERT_HAS_EXPIRED') return 'TLS certificate has expired';
+		if (code === 'SELF_SIGNED_CERT_IN_CHAIN' || code === 'DEPTH_ZERO_SELF_SIGNED_CERT')
+			return 'TLS: self-signed certificate not trusted';
+		if (code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE') return 'TLS: unable to verify certificate';
+		if (cause.message) return cause.message;
+	}
+	return error.message || 'Unknown fetch error';
+}
+
 async function runDiagnostics(): Promise<void> {
 	logger.info('Running system diagnostics...');
 	
@@ -1500,26 +1835,35 @@ async function runDiagnostics(): Promise<void> {
 
 	const checkLifecycle = async () => {
 		try {
-			const [healthyProbe, readinessProbe] = await Promise.all([
+			const [healthyProbe, readinessProbe, healthReportProbe] = await Promise.all([
 				apiProbe(`${DEVICE_API_V1}/healthy`),
 				apiProbe(`${DEVICE_API_V1}/readiness`),
+				apiProbe(`${DEVICE_API_V1}/health/report`),
 			]);
 			const healthy = healthyProbe.data || {};
 			const readiness = readinessProbe.data || {};
+			const healthReport = healthReportProbe.data || {};
+			const report = healthReport.report || {};
+			const criticalFailures = Array.isArray(report.criticalFailures) ? report.criticalFailures : [];
+			const unhealthySubsystems = Array.isArray(report.unhealthySubsystems) ? report.unhealthySubsystems : [];
 
-			const lifecycleState = readiness.lifecycleState || healthy.lifecycleState || 'UNKNOWN';
+			const state = readiness.state || healthy.state || readiness.lifecycleState || healthy.lifecycleState || 'UNKNOWN';
 			const ready = readiness.ready === true;
 			const healthStatus = healthy.status || (healthyProbe.ok ? 'healthy' : 'unhealthy');
+			const hasCriticalFailures = criticalFailures.length > 0;
 
 			results['Lifecycle'] = {
-				status: ready ? '✓ OK' : '⚠ WARN',
-				message: `State=${lifecycleState}, Ready=${ready}, Health=${healthStatus}`,
+				status: hasCriticalFailures ? '✗ FAIL' : (ready ? '✓ OK' : '⚠ WARN'),
+				message: `State=${state}, Ready=${ready}, Health=${healthStatus}`,
 				details: {
-					lifecycleState,
+					state,
 					ready,
 					health: healthStatus,
 					healthHttpStatus: healthyProbe.status,
-					readinessHttpStatus: readinessProbe.status
+					readinessHttpStatus: readinessProbe.status,
+					healthReportHttpStatus: healthReportProbe.status,
+					criticalFailures,
+					unhealthySubsystems,
 				}
 			};
 		} catch (error: any) {
@@ -1547,9 +1891,19 @@ async function runDiagnostics(): Promise<void> {
 	if (results['Provisioning']?.details?.apiEndpoint) {
 		const cloudEndpoint = results['Provisioning'].details.apiEndpoint;
 		try {
-			const response = await fetch(`${cloudEndpoint}/health`, {
+			// For localhost HTTPS endpoints (local dev / VPN), skip TLS verification
+			// because self-signed certs are common in that setup.
+			const isLocalhost = /^https:\/\/(localhost|127\.0\.0\.1)(:|\/)/.test(cloudEndpoint);
+			const fetchFn = isLocalhost
+				? (url: string, init?: RequestInit) =>
+						undiciFetch(url, {
+							...(init as object),
+							dispatcher: new UndiciAgent({ connect: { rejectUnauthorized: false } }),
+						} as Parameters<typeof undiciFetch>[1])
+				: fetch;
+			const response = await fetchFn(`${cloudEndpoint}/health`, {
 				signal: AbortSignal.timeout(5000)
-			});
+			} as RequestInit);
 			if (response.ok) {
 				results['Cloud API'] = {
 					status: '✓ OK',
@@ -1566,7 +1920,7 @@ async function runDiagnostics(): Promise<void> {
 		} catch (error: any) {
 			results['Cloud API'] = {
 				status: '✗ FAIL',
-				message: error.message.includes('timeout') ? 'Connection timeout (5s)' : error.message,
+				message: describeCloudFetchError(error),
 				details: { endpoint: cloudEndpoint }
 			};
 		}
@@ -1912,6 +2266,18 @@ async function main(): Promise<void> {
 		},
 		diagnostics: {
 			_default: runDiagnostics
+		},
+		db: {
+			backup: dbBackup,
+			list: dbList,
+			verify: dbVerify,
+			restore: dbRestore,
+			prune: dbPrune,
+			_default: dbList,
+		},
+		buffer: {
+			status: bufferStatus,
+			_default: bufferStatus,
 		},
 		diag: {
 			_default: runDiagnostics

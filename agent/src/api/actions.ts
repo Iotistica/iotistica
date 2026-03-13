@@ -11,6 +11,9 @@ import type { AnomalyDetectionService } from '../ai/anomaly';
 import type { SimulationOrchestrator } from '../simulation';
 import type { SensorsFeature } from '../features/adapters';
 import { LogComponents } from '../logging/types';
+import type { HealthReport } from '../health/health-arbiter';
+import { MessageBufferModel } from '../db/models/message-buffer.model';
+import { MqttManager } from '../mqtt/manager';
 
 let containerManager: ContainerManager;
 let deviceManager: DeviceManager;
@@ -21,6 +24,7 @@ let simulationOrchestrator: SimulationOrchestrator | undefined;
 let sensorsFeature: SensorsFeature | undefined;
 let discoveryService: import('../features/adapters/discovery-service').DiscoveryService | undefined;
 let agentInstance: any | undefined;
+let healthReporter: (() => HealthReport) | undefined;
 
 export function setAgent(agent: any): void {
 	agentInstance = agent;
@@ -41,25 +45,130 @@ function getReadinessSafe(): boolean {
 	return agentInstance?.isFullyOperational?.() ?? false;
 }
 
+function getHealthReportSafe(): HealthReport | undefined {
+	try {
+		return healthReporter?.();
+	} catch {
+		return undefined;
+	}
+}
+
+export function setHealthReporter(reporter?: () => HealthReport): void {
+	healthReporter = reporter;
+}
+
 export function getHealthPayload(isHealthy: boolean): {
 	status: 'healthy' | 'unhealthy';
 	ready: boolean;
-	lifecycleState: string;
+	state: string;
+	criticalFailures?: string[];
+	unhealthySubsystems?: string[];
 } {
+	const report = getHealthReportSafe();
+	const unhealthySubsystems = report?.unhealthySubsystems || [];
+	const criticalFailures = report?.criticalFailures || [];
+
 	return {
 		status: isHealthy ? 'healthy' : 'unhealthy',
 		ready: getReadinessSafe(),
-		lifecycleState: getLifecycleStateSafe(),
+		state: getLifecycleStateSafe(),
+		...(criticalFailures.length > 0 ? { criticalFailures } : {}),
+		...(unhealthySubsystems.length > 0 ? { unhealthySubsystems } : {}),
 	};
 }
 
 export function getReadinessPayload(): {
 	ready: boolean;
-	lifecycleState: string;
+	state: string;
+	criticalFailures?: string[];
 } {
+	const report = getHealthReportSafe();
+	const criticalFailures = report?.criticalFailures || [];
+
 	return {
 		ready: getReadinessSafe(),
-		lifecycleState: getLifecycleStateSafe(),
+		state: getLifecycleStateSafe(),
+		...(criticalFailures.length > 0 ? { criticalFailures } : {}),
+	};
+}
+
+export function getHealthReportPayload(): {
+	overall: 'healthy' | 'unhealthy';
+	ready: boolean;
+	state: string;
+	report: HealthReport;
+} {
+	const report =
+		getHealthReportSafe() ||
+		({
+			overall: false,
+			subsystems: [],
+			unhealthySubsystems: [],
+			criticalFailures: [],
+		} as HealthReport);
+
+	return {
+		overall: report.overall ? 'healthy' : 'unhealthy',
+		ready: getReadinessSafe(),
+		state: getLifecycleStateSafe(),
+		report,
+	};
+}
+
+export async function getBufferStatusPayload(): Promise<{
+	mode: 'standalone' | 'provisioned-online' | 'provisioned-degraded-offline';
+	cloudReportQueueCount: number;
+	cloudReportOldestAge?: number;
+	mqttMessageBufferCount: number;
+	mqttBufferBytes: number;
+	mqttBufferOldestAge?: number;
+	lastFlushAttempt?: string;
+	lastFlushSuccess?: string;
+	agentLogBufferEnabled: boolean;
+	agentLogBufferLogs?: number;
+	agentLogBufferBytes?: number;
+	agentLogPendingBatches?: number;
+	agentLogDroppedTotal?: number;
+	agentLogCircuitOpen?: boolean;
+}> {
+	const info = deviceManager.getDeviceInfo();
+	const mqttConnected = MqttManager.getInstance().isConnected();
+	const cloudOnline = cloudSync?.isOnline() === true;
+	const mqttStats = await MessageBufferModel.getStats();
+	const cloudStats = cloudSync
+		? await cloudSync.getBufferStatus()
+		: { cloudReportQueueCount: 0 };
+
+	const mode = !info.provisioned
+		? 'standalone'
+		: (mqttConnected || cloudOnline ? 'provisioned-online' : 'provisioned-degraded-offline');
+
+	const cloudLogBackend = (logger?.getBackends?.() || []).find((backend: any) => {
+		if (!backend || typeof backend.getMetrics !== 'function') {
+			return false;
+		}
+		return backend?.constructor?.name === 'CloudLogBackend' || 'pendingBatches' in (backend.getMetrics() || {});
+	}) as any;
+
+	const cloudLogMetrics = cloudLogBackend?.getMetrics?.();
+
+	return {
+		mode,
+		cloudReportQueueCount: cloudStats.cloudReportQueueCount,
+		...(cloudStats.cloudReportOldestAge !== undefined ? { cloudReportOldestAge: cloudStats.cloudReportOldestAge } : {}),
+		mqttMessageBufferCount: mqttStats.current_count,
+		mqttBufferBytes: mqttStats.current_bytes,
+		...(mqttStats.oldest_record_age_hours !== undefined ? { mqttBufferOldestAge: mqttStats.oldest_record_age_hours } : {}),
+		...(cloudStats.lastFlushAttempt ? { lastFlushAttempt: cloudStats.lastFlushAttempt } : {}),
+		...(cloudStats.lastFlushSuccess ? { lastFlushSuccess: cloudStats.lastFlushSuccess } : {}),
+		agentLogBufferEnabled: !!cloudLogMetrics,
+		...(cloudLogMetrics ? {
+			agentLogBufferLogs: cloudLogMetrics.bufferLogs,
+			agentLogBufferBytes: cloudLogMetrics.bufferBytes,
+			agentLogPendingBatches: cloudLogMetrics.pendingBatches,
+			agentLogDroppedTotal: cloudLogMetrics.droppedTotal,
+			agentLogCircuitOpen: cloudLogMetrics.circuitOpen === 1,
+		} : {}),
 	};
 }
 

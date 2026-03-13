@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "createdAt": "2026-03-13T00:43:46.258Z",
+  "sourceDbPath": "C:\\Users\\Dan\\iotistica\\agent\\data\\device.sqlite",
+  "backupFile": "--name.sqlite",
+  "checksumSha256": "e291cf4a7fee91d432cedfc30a09c3e736b04ff4efc1e33b797d264e2be80f8e",
+  "sizeBytes": 380928,
+  "integrity": "ok"
+}

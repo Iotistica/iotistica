@@ -17,7 +17,9 @@ import Agent from './agent';
 import { startWatchdog, notifySystemd, notifyReady } from './system/watchdog';
 import { HealthArbiter } from './health/health-arbiter';
 import { healthcheck } from './system/memory';
-import { version as packageVersion } from '../package.json';
+import { MqttManager } from './mqtt';
+import { getKnex } from './db/connection';
+import { setHealthReporter } from './api/actions';
 
 // Heap profiling for memory leak investigation
 // Enable with: ENABLE_HEAP_PROFILING=true HEAP_SNAPSHOT_INTERVAL_MIN=5
@@ -73,11 +75,85 @@ health.registerSubsystem('memory', async () => {
 	description: 'V8 heap memory health - detects leaks via growth rate analysis'
 });
 
-// TODO: Add other subsystems as they're integrated:
-// health.registerSubsystem('mqtt', () => mqttClient?.connected ?? false, { critical: true });
-// health.registerSubsystem('vpn', () => vpnTunnel?.isConnected() ?? false, { critical: true });
-// health.registerSubsystem('cloudSync', () => cloudSync?.isHealthy() ?? false, { critical: true });
-// health.registerSubsystem('discovery', () => discoveryService?.isResponsive() ?? false, { critical: false });
+function registerRuntimeHealthSubsystems(): void {
+	const isProvisioned = agent.isProvisioned();
+
+	health.registerSubsystem('lifecycle', async () => {
+		// Only checks lifecycle state — individual subsystem checks (mqtt, cloud-sync, database,
+		// etc.) already cover their respective components. Calling isFullyOperational() here
+		// creates a circular runtime re-check that triggers spurious restarts.
+		return agent.getLifecycleState() === 'RUNNING';
+	}, {
+		critical: true,
+		description: 'Agent lifecycle state (must be RUNNING)',
+	});
+
+	health.registerSubsystem('container-manager', async () => {
+		try {
+			agent.getContainerManager().getStatus();
+			return true;
+		} catch {
+			return false;
+		}
+	}, {
+		critical: true,
+		description: 'Container manager status query',
+	});
+
+	health.registerSubsystem('database', async () => {
+		try {
+			await getKnex().raw('SELECT 1 as ok');
+			return true;
+		} catch {
+			return false;
+		}
+	}, {
+		critical: true,
+		description: 'SQLite query check',
+	});
+
+	health.registerSubsystem('device-api', async () => {
+		try {
+			const port = process.env.DEVICE_API_PORT || '48484';
+			const response = await fetch(`http://127.0.0.1:${port}/ping`, {
+				signal: AbortSignal.timeout(2000),
+			});
+			return response.ok;
+		} catch {
+			return false;
+		}
+	}, {
+		// For provisioned devices (state loaded from SQLite), local API loss is degraded mode only:
+		// the agent must keep running local orchestration and buffering. For unprovisioned devices,
+		// keep this critical so setup/provisioning remains restartable.
+		critical: !isProvisioned,
+		description: 'Local Device API ping check',
+	});
+
+	health.registerSubsystem('mqtt', async () => {
+		if (!isProvisioned) {
+			return true;
+		}
+		return MqttManager.getInstance().isConnected();
+	}, {
+		// Non-critical: temporary broker restarts must not force agent restarts.
+		// MQTT has built-in reconnect; restarting the agent won't fix a downed broker.
+		critical: false,
+		description: 'MQTT broker connectivity',
+	});
+
+	health.registerSubsystem('cloud-sync', async () => {
+		if (!isProvisioned) {
+			return true;
+		}
+		return agent.getCloudSync()?.isOperational() === true;
+	}, {
+		// Non-critical: cloud outages must NOT trigger systemd restarts — the device must
+		// operate standalone when the cloud is temporarily unreachable.
+		critical: false,
+		description: 'Cloud synchronization loop health',
+	});
+}
 
 // Ready flag - prevents watchdog pings until agent fully initialized
 // This ensures systemd startup timeout (not watchdog timeout) governs agent.init() duration
@@ -191,8 +267,10 @@ agent.init()
     
     // Set logger after agent initialization
     health.setLogger(agent.agentLogger);
+		setHealthReporter(() => health.getHealthReport());
+		registerRuntimeHealthSubsystems();
 		// Start periodic health checks (includes memory) on fixed cadence
-		health.startPeriodicChecks();
+		health.startPeriodicChecks(parseInt(process.env.HEALTH_CHECK_INTERVAL_MS || '30000', 10));
     
     // Mark agent as ready - enables watchdog pings
     // IMPORTANT: Set this BEFORE notifyReady() to ensure health checks work
@@ -202,10 +280,7 @@ agent.init()
     // Only after: database, logging, device API, MQTT (if provisioned), CloudSync (if provisioned)
     // From this point, watchdog timeout (WatchdogSec) applies, not startup timeout
     notifyReady();
-    agent.agentLogger?.infoSync('Agent fully operational, systemd notified READY=1', { 
-      component: 'main',
-      provisioned: agent.getDeviceManager().isProvisioned()
-    });
+
   })
   .catch((error) => {
     console.error('Failed to initialize device agent:', error);

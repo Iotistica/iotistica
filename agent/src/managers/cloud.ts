@@ -182,6 +182,8 @@ export class CloudSync extends EventEmitter {
 	// Connection monitoring & offline queue
 	private connectionMonitor: ConnectionMonitor;
 	private reportQueue: OfflineQueue<DeviceStateReport>;
+	private lastQueueFlushAttemptAt?: number;
+	private lastQueueFlushSuccessAt?: number;
 	private logger?: AgentLogger;
 	private devicePublish?: any; // Optional sensor-publish feature for health reporting
 	private endpoints?: any; // Optional endpoints feature for health reporting
@@ -529,6 +531,21 @@ export class CloudSync extends EventEmitter {
 			state.successfulReports > 0 &&
 			this.connectionMonitor.isOnline()
 		);
+	}
+
+	public async getBufferStatus(): Promise<{
+		cloudReportQueueCount: number;
+		cloudReportOldestAge?: number;
+		lastFlushAttempt?: string;
+		lastFlushSuccess?: string;
+	}> {
+		const stats = await this.reportQueue.getStats();
+		return {
+			cloudReportQueueCount: stats.currentCount,
+			...(stats.oldestAgeHours !== undefined ? { cloudReportOldestAge: stats.oldestAgeHours } : {}),
+			...(this.lastQueueFlushAttemptAt ? { lastFlushAttempt: new Date(this.lastQueueFlushAttemptAt).toISOString() } : {}),
+			...(this.lastQueueFlushSuccessAt ? { lastFlushSuccess: new Date(this.lastQueueFlushSuccessAt).toISOString() } : {}),
+		};
 	}
 	
 	/**
@@ -1435,7 +1452,7 @@ export class CloudSync extends EventEmitter {
 			const savings = originalSize - strippedSize;
 			const savingsPercent = ((savings / originalSize) * 100).toFixed(1);
 			
-			this.logger?.infoSync('Queueing report for later', {
+			this.logger?.infoSync('Queueing report for later - cloud transport unavailable', {
 				component: LogComponents.cloudSync,
 				operation: 'queue-report',
 				originalBytes: originalSize,
@@ -1508,11 +1525,12 @@ export class CloudSync extends EventEmitter {
 			}
 		} else if (this.mqttManager) {
 			// MQTT manager exists but is unhealthy - skip MQTT attempt
-			this.logger?.warnSync('MQTT disconnected, using HTTP fallback', {
+			this.logger?.warnSync('MQTT disconnected, attempting HTTP fallback', {
 				component: LogComponents.cloudSync,
 				operation: 'mqtt-skip',
-				transport: 'http',
-				reason: 'mqtt-unavailable'
+				transport: 'mqtt→http',
+				reason: 'mqtt-unavailable',
+				note: 'If HTTP is also unavailable, the report will be queued for retry'
 			});
 		}
 		
@@ -1562,6 +1580,7 @@ export class CloudSync extends EventEmitter {
 		if (this.reportQueue.isEmpty()) {
 			return;
 		}
+		this.lastQueueFlushAttemptAt = Date.now();
 		
 		const queueSize = this.reportQueue.size();
 		this.logger?.infoSync('Flushing offline queue with rate limiting', {
@@ -1624,6 +1643,7 @@ export class CloudSync extends EventEmitter {
 		}
 		
 		if (totalSent > 0) {
+			this.lastQueueFlushSuccessAt = Date.now();
 			this.logger?.infoSync('Successfully flushed queued reports', {
 				component: LogComponents.cloudSync,
 				operation: 'flush-queue',

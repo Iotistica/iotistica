@@ -17,28 +17,6 @@ import {
   MessageBatch
 } from './types.js';
 
-// ============================================================================
-// MESSAGEPACK POC CONFIGURATION
-// ============================================================================
-
-/**
- * Enable MessagePack POC mode via environment variable
- * Set USE_MSGPACK_POC=true to test msgpack compression with logging
- */
-const USE_MSGPACK_POC = process.env.USE_MSGPACK_POC === 'true';
-
-/**
- * Enable DEFLATE compression as final compression layer
- * Set USE_DEFLATE_COMPRESSION=true to enable zlib deflate compression
- */
-const USE_DEFLATE_POC = process.env.USE_DEFLATE_COMPRESSION === 'true';
-
-/**
- * Enable detailed CPU usage tracking for compression layers
- * Set HEAP_METRICS=true to enable process.cpuUsage() calls (adds syscall overhead)
- * When disabled, CPU usage tracking is sampled (every 100th publish)
- */
-const HEAP_METRICS_ENABLED = process.env.HEAP_METRICS === 'true';
 
 /**
  * Async deflate (non-blocking, uses thread pool)
@@ -65,10 +43,7 @@ const MAX_BATCH_BYTES = (() => {
   const fivePercent = Math.floor(heapLimit * 0.05);
   const tenMB = 10 * 1024 * 1024;
   const limit = Math.min(tenMB, fivePercent);
-  
-  // Log calculated limit for visibility
-  console.log(`[Sensor] Adaptive batch limit: ${(limit / (1024 * 1024)).toFixed(2)}MB (heap: ${(heapLimit / (1024 * 1024)).toFixed(0)}MB)`);
-  
+
   return limit;
 })();
 

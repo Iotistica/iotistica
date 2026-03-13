@@ -24,6 +24,12 @@ export interface QueueItem<T> {
 	attempts: number;
 }
 
+export interface QueueStats {
+	queueName: string;
+	currentCount: number;
+	oldestAgeHours?: number;
+}
+
 export class OfflineQueue<T> {
 	private queueName: string;
 	private maxSize: number;
@@ -266,6 +272,41 @@ export class OfflineQueue<T> {
 	 */
 	public isEmpty(): boolean {
 		return this.inMemoryQueue.length === 0;
+	}
+
+	/**
+	 * Get queue statistics from persisted storage.
+	 */
+	public async getStats(): Promise<QueueStats> {
+		if (!this.isInitialized) {
+			await this.init();
+		}
+
+		const knex = db.getKnex();
+		const countRow = await knex('offline_queue')
+			.where({ queueName: this.queueName })
+			.count('* as count')
+			.first();
+
+		const oldestRow = await knex('offline_queue')
+			.where({ queueName: this.queueName })
+			.orderBy('createdAt', 'asc')
+			.first('createdAt');
+
+		let oldestAgeHours: number | undefined;
+		const oldestCreatedAt = oldestRow?.createdAt;
+		if (oldestCreatedAt !== undefined && oldestCreatedAt !== null) {
+			const createdAtMs = Number(oldestCreatedAt);
+			if (!Number.isNaN(createdAtMs)) {
+				oldestAgeHours = Math.floor((Date.now() - createdAtMs) / (1000 * 60 * 60));
+			}
+		}
+
+		return {
+			queueName: this.queueName,
+			currentCount: parseInt(String(countRow?.count || '0'), 10),
+			oldestAgeHours,
+		};
 	}
 	
 	/**

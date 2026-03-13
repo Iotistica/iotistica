@@ -162,7 +162,7 @@ export class HealthArbiter {
       latched: false
     });
     
-    this.logger?.infoSync('Subsystem registered', {
+    this.logger?.debugSync('Subsystem registered', {
       component: LogComponents.agent,
       operation: 'registerSubsystem',
       subsystem: name,
@@ -181,7 +181,7 @@ export class HealthArbiter {
    */
   unregisterSubsystem(name: string): void {
     if (this.subsystems.delete(name)) {
-      this.logger?.infoSync('Subsystem unregistered', {
+      this.logger?.debugSync('Subsystem unregistered', {
         component: LogComponents.agent,
         operation: 'unregisterSubsystem',
         subsystem: name
@@ -228,6 +228,8 @@ export class HealthArbiter {
       
       // State transition: unhealthy → healthy
       if (healthy && !subsystem.healthy) {
+        const previousFailures = subsystem.consecutiveFailures;
+
         // Enforce cooldown period for critical subsystems (prevents flapping)
         if (subsystem.critical && subsystem.lastFailureTime > 0) {
           const timeSinceFailure = now - subsystem.lastFailureTime;
@@ -245,14 +247,17 @@ export class HealthArbiter {
             return false;
           }
         }
-        
-        this.logger?.infoSync('Subsystem recovered', {
-          component: LogComponents.agent,
-          operation: 'checkSubsystem',
-          subsystem: name,
-          critical: subsystem.critical,
-          previousFailures: subsystem.consecutiveFailures
-        });
+
+        // Suppress noisy initial transition logs at startup (0 prior failures).
+        if (previousFailures > 0) {
+          this.logger?.infoSync('Subsystem recovered', {
+            component: LogComponents.agent,
+            operation: 'checkSubsystem',
+            subsystem: name,
+            critical: subsystem.critical,
+            previousFailures
+          });
+        }
       }
       
       // State transition: healthy → unhealthy
@@ -420,7 +425,7 @@ export class HealthArbiter {
       return;
     }
     
-    this.logger?.infoSync('Starting periodic health checks', {
+    this.logger?.debugSync('Starting periodic health checks', {
       component: LogComponents.agent,
       operation: 'startPeriodicChecks',
       intervalMs,

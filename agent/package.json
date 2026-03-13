@@ -6,7 +6,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.build.json && npm run copy:migrations",
-    "copy:migrations": "node -e \"require('fs').cpSync('src/db/migrations', 'dist/db/migrations', {recursive: true})\"",
+    "copy:migrations": "node -e \"const fs=require('fs'); fs.cpSync('src/db/migrations','dist/db/migrations',{recursive:true}); fs.mkdirSync('dist/db',{recursive:true}); fs.copyFileSync('src/db/template.sqlite.sql','dist/db/template.sqlite.sql');\"",
     "watch": "tsc --watch",
     "clean": "rimraf dist && rimraf protocol-adapters/dist",
     "dev": "tsx watch src/app.ts",

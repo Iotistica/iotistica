@@ -185,7 +185,7 @@ export class FeatureInitializer {
       const deviceOutputs = await DeviceOutputModel.getAll();
 
       if (deviceOutputs.length === 0) {
-        logger.warnSync('No device outputs configured in database', {
+        logger.infoSync('No device outputs configured in database', {
           component: LogComponents.agent,
           note: 'Run migrations to create default endpoint_outputs entries'
         });
@@ -199,7 +199,7 @@ export class FeatureInitializer {
       );
 
       if (enabledDevices.size === 0) {
-        logger.warnSync('No enabled devices found', {
+        logger.infoSync('No enabled devices found', {
           component: LogComponents.agent,
           note: 'Enable devices in database before starting Device Publish'
         });
@@ -226,7 +226,7 @@ export class FeatureInitializer {
         }));
 
       if (devices.length === 0) {
-        logger.warnSync('No pipes to read from', {
+        logger.infoSync('No pipes to read from', {
           component: LogComponents.agent,
           enabledProtocols: Array.from(enabledDevices)
         });

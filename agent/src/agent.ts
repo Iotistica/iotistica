@@ -95,7 +95,7 @@ export default class Agent {
         error instanceof Error ? error : new Error(String(error)),
         {
           component: LogComponents.agent,
-          lifecycleState: state,
+          state,
         }
       );
     });
@@ -109,7 +109,7 @@ export default class Agent {
       if (currentState === AgentState.RUNNING || currentState === AgentState.READY) {
         this.agentLogger?.warnSync('Agent init skipped - already initialized', {
           component: LogComponents.agent,
-          lifecycleState: currentState,
+          state: currentState,
         });
         return;
       }
@@ -346,7 +346,7 @@ export default class Agent {
     if (currentState === AgentState.STOPPING) {
       this.agentLogger?.warnSync('Stop skipped - agent is already stopping', {
         component: LogComponents.agent,
-        lifecycleState: currentState,
+        state: currentState,
       });
       return;
     }
@@ -624,6 +624,14 @@ export default class Agent {
     return this.deviceAPI;
   }
 
+  public getCloudSync(): CloudSync | undefined {
+    return this.cloudSync;
+  }
+
+  public isProvisioned(): boolean {
+    return this.deviceInfo?.provisioned === true;
+  }
+
   /**
    * Check if agent is fully operational and ready for systemd READY=1
    * 
@@ -644,13 +652,19 @@ export default class Agent {
       database: !!this.stateReconciler,
       logging: !!this.agentLogger,
       deviceInfo: !!this.deviceInfo,
-      deviceAPI: !!this.deviceAPI,
+      // For already-provisioned devices (state loaded from SQLite), the agent must continue
+      // running even if the local API is unavailable. For unprovisioned devices, keep the API
+      // startup-critical so provisioning/setup flows still require it.
+      deviceAPI: !!this.deviceInfo?.provisioned || !!this.deviceAPI,
       containerManager: !!this.containerManager,
-      // MQTT is critical only if device is provisioned (skip in CI mode)
-      mqtt: isCiMode || !this.deviceInfo?.provisioned || !!MqttManager.getInstance()?.isConnected(),
+      // MQTT connectivity is not startup-critical. A provisioned device must continue running
+      // and buffering local state/data when broker auth or the API backing auth is unavailable.
+      mqtt: true,
       // CloudSync is critical only if device is provisioned (skip in CI mode).
-      // For provisioned devices, mere initialization is not enough: it must be operational.
-      cloudSync: isCiMode || !this.deviceInfo?.provisioned || this.cloudSync?.isOperational() === true
+      // Only require the instance to exist (provisioning config was valid + service was wired).
+      // Whether it is currently connected is a runtime/health concern - a cloud outage must not
+      // prevent the agent from sending READY=1 or operating as a standalone device.
+      cloudSync: isCiMode || !this.deviceInfo?.provisioned || !!this.cloudSync
     };
 
     const now = Date.now();

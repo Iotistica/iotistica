@@ -124,6 +124,7 @@ export const initialized = async (logger?: AgentLogger): Promise<void> => {
 	// If lock is held by another process, this will fail (safer than corruption)
 	await db.migrate.latest({
 		directory: path.join(__dirname, 'migrations'),
+		disableMigrationsListValidation: true,
 	});
 	
 	// CRITICAL: Check database integrity after migrations

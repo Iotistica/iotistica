@@ -293,8 +293,6 @@ export class CloudLogBackend implements LogBackend {
 		// Start streaming
 		await this.connect();
 		
-		// this.logger?.infoSync - REMOVED to prevent infinite recursion
-		console.log('[CloudSync] Cloud Log Backend initialized');
 	
 	}
 	
@@ -477,8 +475,6 @@ export class CloudLogBackend implements LogBackend {
 		}
 		
 		this.isStreaming = true;
-		// this.logger?.infoSync - REMOVED to prevent infinite recursion
-		console.log('[CloudSync] Connecting to cloud log stream...');
 	}
 	
 	private async flush(): Promise<void> {

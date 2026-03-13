@@ -75,7 +75,7 @@ export default function networkSecurity(req: Request, res: Response, next: NextF
 	const path = req.path;
 	
 	// Skip security for health check endpoints
-	if (path === '/ping' || path === '/v1/healthy' || path === '/v1/readiness') {
+	if (path === '/ping' || path === '/v1/healthy' || path === '/v1/readiness' || path === '/v1/health/report') {
 		return next();
 	}
 	

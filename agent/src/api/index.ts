@@ -65,6 +65,25 @@ export class DeviceAPI {
 			return res.status(503).json(payload);
 		});
 
+		// Detailed health report endpoint
+		this.api.get('/v1/health/report', (_req, res) => {
+			const payload = actions.getHealthReportPayload();
+			if (payload.overall === 'healthy') {
+				return res.status(200).json(payload);
+			}
+			return res.status(500).json(payload);
+		});
+
+		// Buffer status summary endpoint
+		this.api.get('/v1/buffer/status', async (_req, res, next) => {
+			try {
+				const payload = await actions.getBufferStatusPayload();
+				return res.status(200).json(payload);
+			} catch (error) {
+				return next(error);
+			}
+		});
+
 		// Ping endpoint
 		this.api.get('/ping', (_req, res) => res.send('OK'));
 

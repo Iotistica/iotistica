@@ -55,12 +55,10 @@ export class MasterKeyManager {
 
 		// Check if key file exists
 		const keyExists = fs.existsSync(this.keyPath);
-		console.log(`[MasterKeyManager] Key path: ${this.keyPath}, exists: ${keyExists}`);
-		
+	
 		if (keyExists) {
 			// Load existing key
 			this.masterKey = fs.readFileSync(this.keyPath);
-			console.log(`[MasterKeyManager] Loaded existing key (${this.masterKey.length} bytes)`);
 			
 			if (this.masterKey.length !== KEY_LENGTH) {
 				throw new Error(`Invalid master key length: ${this.masterKey.length} (expected ${KEY_LENGTH})`);
