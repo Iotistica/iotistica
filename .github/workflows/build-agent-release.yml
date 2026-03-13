@@ -1,4 +1,4 @@
-name: Agent Integration & Release
+name: Agent Build & Release
 
 on:
   workflow_dispatch:
@@ -352,12 +352,26 @@ jobs:
           grype sbom:/tmp/sbom/install-script.cyclonedx.json \
             --output sarif > /tmp/grype-sarif/install-script.sarif
 
-      - name: Upload SARIF to GitHub Security tab
+      - name: Upload SARIF - agent source
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: /tmp/grype-sarif/
-          category: grype-sbom-scan
+          sarif_file: /tmp/grype-sarif/agent-source.sarif
+          category: grype-agent-source
+
+      - name: Upload SARIF - agent artifacts
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: /tmp/grype-sarif/agent-artifacts.sarif
+          category: grype-agent-artifacts
+
+      - name: Upload SARIF - install script
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: /tmp/grype-sarif/install-script.sarif
+          category: grype-install-script
 
       - name: Enforce CVE policy threshold
         # Blocks upload if any Critical severity vulnerabilities are found.
