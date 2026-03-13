@@ -474,7 +474,6 @@ jobs:
     needs: [version, build-x86, build-arm64]
     runs-on: [ubuntu-latest]
     if: github.ref == 'refs/heads/master'  # Only deploy from master branch
-    continue-on-error: true  # Don't fail workflow if Pi is unavailable
     
     steps:
       - name: Check Pi availability
@@ -722,7 +721,7 @@ jobs:
 
   upload-artifacts:
     name: Upload install scripts to Azure
-    needs: [version, buildx, build-x86, build-arm64]
+    needs: [version, buildx, build-x86, build-arm64, deploy-to-pi]
     runs-on: ubuntu-latest
     if: success()
     
