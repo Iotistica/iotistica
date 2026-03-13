@@ -963,6 +963,9 @@ async function bufferStatus(): Promise<void> {
 				agentLogPendingBatches: result.agentLogPendingBatches,
 				agentLogDroppedTotal: result.agentLogDroppedTotal,
 				agentLogCircuitOpen: result.agentLogCircuitOpen,
+				agentLogLastFlushAttempt: formatMaybeTime(result.agentLogLastFlushAttempt),
+				agentLogLastFlushSuccess: formatMaybeTime(result.agentLogLastFlushSuccess),
+				agentLogLastFlushError: result.agentLogLastFlushError || 'none',
 			});
 		} else {
 			logger.info('Agent log buffer', {

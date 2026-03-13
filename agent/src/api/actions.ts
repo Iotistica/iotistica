@@ -130,6 +130,9 @@ export async function getBufferStatusPayload(): Promise<{
 	agentLogPendingBatches?: number;
 	agentLogDroppedTotal?: number;
 	agentLogCircuitOpen?: boolean;
+	agentLogLastFlushAttempt?: string;
+	agentLogLastFlushSuccess?: string;
+	agentLogLastFlushError?: string;
 }> {
 	const info = deviceManager.getDeviceInfo();
 	const mqttConnected = MqttManager.getInstance().isConnected();
@@ -168,6 +171,9 @@ export async function getBufferStatusPayload(): Promise<{
 			agentLogPendingBatches: cloudLogMetrics.pendingBatches,
 			agentLogDroppedTotal: cloudLogMetrics.droppedTotal,
 			agentLogCircuitOpen: cloudLogMetrics.circuitOpen === 1,
+			...(cloudLogMetrics.lastFlushAttemptAt ? { agentLogLastFlushAttempt: cloudLogMetrics.lastFlushAttemptAt } : {}),
+			...(cloudLogMetrics.lastFlushSuccessAt ? { agentLogLastFlushSuccess: cloudLogMetrics.lastFlushSuccessAt } : {}),
+			...(cloudLogMetrics.lastFlushError ? { agentLogLastFlushError: cloudLogMetrics.lastFlushError } : {}),
 		} : {}),
 	};
 }

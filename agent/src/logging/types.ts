@@ -49,8 +49,8 @@ export const LogComponents = {
   
   // Logging System
   logMonitor: 'LogMonitor',
-  localLogBackend: 'LocalLogBackend',
-  cloudLogBackend: 'CloudLogBackend',
+  localLogBackend: 'LocalLog',
+  cloudLogBackend: 'CloudLog',
   logs: 'Logs',
   offlineQueue: 'OfflineQueue',
   

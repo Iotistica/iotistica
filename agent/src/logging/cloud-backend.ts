@@ -177,6 +177,9 @@ export class CloudLogBackend implements LogBackend {
 	private totalBatchesAttempted: number = 0; // Counter: cloudlog_batches_attempted_total
 	private totalBatchesAcked: number = 0; // Counter: cloudlog_batches_acked_total
 	private totalBatchesFailed: number = 0; // Counter: cloudlog_batches_failed_total
+	private lastFlushAttemptAt?: number;
+	private lastFlushSuccessAt?: number;
+	private lastFlushError?: string;
 	
 	constructor(config: CloudLogBackendConfig, logger?: AgentLogger) {
 		// this.logger = logger; // REMOVED - causes infinite recursion
@@ -242,7 +245,7 @@ export class CloudLogBackend implements LogBackend {
 					const now = Date.now();
 					if (now - this.lastWarningLog > this.warningLogThrottle) {
 						const errorType = getNetworkErrorType(error);
-						process.stderr.write(`[CloudLogBackend] Temporary network error (attempt ${attempt}/${attempt + remaining}): ${errorType}\n`);
+						process.stderr.write(`[CloudLog] Temporary network error (attempt ${attempt}/${attempt + remaining}): ${errorType}\n`);
 						this.lastWarningLog = now;
 					}
 				},
@@ -256,14 +259,14 @@ export class CloudLogBackend implements LogBackend {
 						this.circuitBreakerOpen = true;
 						this.circuitBreakerOpenedAt = Date.now();
 						// CRITICAL: Use process.stderr.write for hot-path performance (no async formatting, safer during memory pressure)
-						process.stderr.write(`[CloudLogBackend] Circuit breaker OPEN - too many failures (${this.consecutiveFailures}). Will retry in ${this.CIRCUIT_BREAKER_RESET_MS / 1000}s\n`);
+						process.stderr.write(`[CloudLog] Circuit breaker OPEN - too many failures (${this.consecutiveFailures}). Will retry in ${this.CIRCUIT_BREAKER_RESET_MS / 1000}s\n`);
 					}
 					
 					const now = Date.now();
 					if (now - this.lastErrorLog > this.errorLogThrottle) {
 						const errorType = getNetworkErrorType(error);
 						// CRITICAL: Use process.stderr.write for hot-path performance (no async formatting, safer during memory pressure)
-						process.stderr.write(`[CloudLogBackend] Persistent network error: ${errorType} (failures: ${this.consecutiveFailures})\n`);
+						process.stderr.write(`[CloudLog] Persistent network error: ${errorType} (failures: ${this.consecutiveFailures})\n`);
 						this.lastErrorLog = now;
 					}
 				}
@@ -278,7 +281,7 @@ export class CloudLogBackend implements LogBackend {
 			try {
 				await fsp.mkdir(this.spoolPath, { recursive: true });
 			} catch (error) {
-				console.error(`[CloudLogBackend] Failed to create spool directory: ${error}`);
+				console.error(`[CloudLog] Failed to create spool directory: ${error}`);
 				this.spoolPath = undefined;
 				this.spoolFilePath = undefined;
 				this.spoolCursorPath = undefined;
@@ -294,6 +297,25 @@ export class CloudLogBackend implements LogBackend {
 		await this.connect();
 		
 	
+	}
+
+	/**
+	 * Trigger an immediate flush attempt.
+	 * Used when another subsystem has concrete evidence that connectivity recovered.
+	 */
+	public triggerFlush(reason: string = 'manual'): void {
+		if (this.buffer.length === 0 && this.pendingBatches.size === 0) {
+			return;
+		}
+
+		console.log(`[CloudLogBackend] Triggering flush (${reason})`);
+		void this.flush().catch((error) => {
+			this.lastFlushError = error instanceof Error ? error.message : String(error);
+			process.stderr.write(`[CloudLogBackend] Triggered flush failed: ${this.lastFlushError}\n`);
+			if (this.buffer.length > 0 || this.pendingBatches.size > 0) {
+				this.scheduleReconnect();
+			}
+		});
 	}
 	
 	async log(logMessage: LogMessage): Promise<void> {
@@ -312,7 +334,7 @@ export class CloudLogBackend implements LogBackend {
 			// Warn operators once (throttled to prevent spam)
 			const now = Date.now();
 			if (now - this.lastWarningLog > this.warningLogThrottle) {
-				process.stderr.write('[CloudLogBackend] Offline buffer cap reached – dropping info/debug logs\n');
+				process.stderr.write('[CloudLog] Offline buffer cap reached – dropping info/debug logs\n');
 				this.lastWarningLog = now;
 			}
 			
@@ -344,7 +366,14 @@ export class CloudLogBackend implements LogBackend {
 		// Schedule flush if not already scheduled
 		if (!this.flushTimer) {
 			this.flushTimer = setTimeout(() => {
-				this.flush();
+				void this.flush().catch((error) => {
+					this.lastFlushError = error instanceof Error ? error.message : String(error);
+					process.stderr.write(`[CloudLog] Flush timer execution failed: ${this.lastFlushError}\n`);
+					// Ensure we don't get stuck if a timer-triggered flush throws.
+					if (this.buffer.length > 0 || this.pendingBatches.size > 0) {
+						this.scheduleReconnect();
+					}
+				});
 			}, this.config.flushInterval);
 		}
 		
@@ -353,7 +382,7 @@ export class CloudLogBackend implements LogBackend {
 			// Throttle warnings to prevent log spam (max 1 per 10 seconds)
 			const now = Date.now();
 			if (now - this.lastBufferFullWarning > this.BUFFER_WARNING_THROTTLE_MS) {
-				process.stderr.write(`[CloudLogBackend] Log buffer full, forcing flush (${Math.round(this.bufferBytes / 1024)} KB)\n`);
+				process.stderr.write(`[CloudLog] Log buffer full, forcing flush (${Math.round(this.bufferBytes / 1024)} KB)\n`);
 				this.lastBufferFullWarning = now;
 			}
 			await this.flush();
@@ -416,6 +445,9 @@ export class CloudLogBackend implements LogBackend {
 		batchesAttemptedTotal: number;
 		batchesAckedTotal: number;
 		batchesFailedTotal: number;
+		lastFlushAttemptAt?: string;
+		lastFlushSuccessAt?: string;
+		lastFlushError?: string;
 		// Metadata
 		deviceUuid: string;
 	} {
@@ -433,6 +465,9 @@ export class CloudLogBackend implements LogBackend {
 			batchesAttemptedTotal: this.totalBatchesAttempted,
 			batchesAckedTotal: this.totalBatchesAcked,
 			batchesFailedTotal: this.totalBatchesFailed,
+			...(this.lastFlushAttemptAt ? { lastFlushAttemptAt: new Date(this.lastFlushAttemptAt).toISOString() } : {}),
+			...(this.lastFlushSuccessAt ? { lastFlushSuccessAt: new Date(this.lastFlushSuccessAt).toISOString() } : {}),
+			...(this.lastFlushError ? { lastFlushError: this.lastFlushError } : {}),
 			// Metadata
 			deviceUuid: this.config.deviceUuid
 		};
@@ -486,6 +521,7 @@ export class CloudLogBackend implements LogBackend {
 		this.flushing = true;
 		
 		try {
+			this.lastFlushAttemptAt = Date.now();
 			// Clear flush timer
 			if (this.flushTimer) {
 				clearTimeout(this.flushTimer);
@@ -493,7 +529,7 @@ export class CloudLogBackend implements LogBackend {
 			}
 			
 			// Nothing to flush
-			if (this.buffer.length === 0) {
+			if (this.buffer.length === 0 && this.pendingBatches.size === 0) {
 				return;
 			}
 		
@@ -518,13 +554,13 @@ export class CloudLogBackend implements LogBackend {
 			} else {
 				// Try to close circuit breaker
 				// CRITICAL: Use console.log to prevent recursive logging
-				console.log('[CloudLogBackend] Circuit breaker attempting reset...');
+				console.log('[CloudLog] Circuit breaker attempting reset...');
 				this.circuitBreakerOpen = false;
 				this.consecutiveFailures = 0;
 			}
 		}
 		
-		// Split buffer into smaller batches if too large
+		// Split new buffer into smaller batches if too large
 		// Use ADAPTIVE sizing that learns from failures (TCP congestion control style)
 		// - On error: Cut batch size by 50% (multiplicative decrease)
 		// - On success: Grow batch size by 10% (additive increase)
@@ -573,25 +609,31 @@ export class CloudLogBackend implements LogBackend {
 			});
 		}
 		
-		// CRITICAL: Don't clear buffer until ACK received
-		// Move logs to pending batches for tracking
-		for (const logBatch of logBatches) {
-			this.pendingBatches.set(logBatch.batchId, logBatch);
+		if (logBatches.length > 0) {
+			// CRITICAL: Don't clear buffer until ACK received
+			// Move logs to pending batches for tracking
+			for (const logBatch of logBatches) {
+				this.pendingBatches.set(logBatch.batchId, logBatch);
+			}
+
+			// Clear in-memory buffer (now tracked in pendingBatches)
+			this.buffer = [];
+			this.bufferBytes = 0;
+
+			// Write to disk spool before sending (survives crashes/power loss)
+			if (this.spoolFilePath) {
+				await this.writeToSpool(logBatches);
+			}
 		}
-		
-		// Clear in-memory buffer (now tracked in pendingBatches)
-		this.buffer = [];
-		this.bufferBytes = 0;
-		
-		// Write to disk spool before sending (survives crashes/power loss)
-		if (this.spoolFilePath) {
-			await this.writeToSpool(logBatches);
-		}
-		
+
+		const batchesToSend = logBatches.length > 0
+			? logBatches
+			: Array.from(this.pendingBatches.values());
+
 		// Send batches sequentially with ACK tracking
 		const batchesWithRetry: string[] = []; // Track batches that need retry
 		
-		for (const logBatch of logBatches) {
+		for (const logBatch of batchesToSend) {
 			logBatch.attempts++;
 			
 			try {
@@ -600,7 +642,7 @@ export class CloudLogBackend implements LogBackend {
 				
 				// Verify ACK matches batch ID (idempotency check)
 				if (ack.batchId !== logBatch.batchId) {
-					process.stderr.write(`[CloudLogBackend] ACK mismatch: sent ${logBatch.batchId}, received ${ack.batchId}\n`);
+					process.stderr.write(`[CloudLog] ACK mismatch: sent ${logBatch.batchId}, received ${ack.batchId}\n`);
 					batchesWithRetry.push(logBatch.batchId);
 					continue;
 				}
@@ -631,11 +673,13 @@ export class CloudLogBackend implements LogBackend {
 					
 					this.consecutiveSuccesses = 0;
 					
-					// console.log(`[CloudLogBackend] Adaptive growth: ${Math.floor(oldSize)}→${Math.floor(this.adaptiveBatchSize)} logs, ${(oldBytes/1024/1024).toFixed(1)}→${(this.adaptiveMaxBytes/1024/1024).toFixed(1)}MB`);
+					// console.log(`[CloudLog] Adaptive growth: ${Math.floor(oldSize)}→${Math.floor(this.adaptiveBatchSize)} logs, ${(oldBytes/1024/1024).toFixed(1)}→${(this.adaptiveMaxBytes/1024/1024).toFixed(1)}MB`);
 				}
 				
 				// Reset retry counters on success
 				this.retryCount = 0;
+				this.lastFlushError = undefined;
+				this.lastFlushSuccessAt = Date.now();
 				const wasCircuitOpen = this.circuitBreakerOpen;
 				this.consecutiveFailures = 0;
 				this.circuitBreakerOpen = false;
@@ -643,7 +687,7 @@ export class CloudLogBackend implements LogBackend {
 				
 				// Log only circuit breaker state transitions (not every batch in steady state)
 				if (wasCircuitOpen) {
-					console.log(`[CloudLogBackend] Circuit breaker CLOSED - connection restored (ACKed batch ${logBatch.batchId})`);
+					console.log(`[CloudLog] Circuit breaker CLOSED - connection restored (ACKed batch ${logBatch.batchId})`);
 				}
 			} catch (error) {
 				// FAILURE: Cut batch size in half (multiplicative decrease)
@@ -661,7 +705,7 @@ export class CloudLogBackend implements LogBackend {
 				
 				this.consecutiveSuccesses = 0; // Reset growth counter
 				
-				process.stderr.write(`[CloudLogBackend] Adaptive decrease due to error: ${Math.floor(oldSize)}→${Math.floor(this.adaptiveBatchSize)} logs, ${(oldBytes/1024/1024).toFixed(1)}→${(this.adaptiveMaxBytes/1024/1024).toFixed(1)}MB\n`);
+				process.stderr.write(`[CloudLog] Adaptive decrease due to error: ${Math.floor(oldSize)}→${Math.floor(this.adaptiveBatchSize)} logs, ${(oldBytes/1024/1024).toFixed(1)}→${(this.adaptiveMaxBytes/1024/1024).toFixed(1)}MB\n`);
 				
 				// Drop batch if retries exhausted or too many attempts
 				if (this.retryPolicy.hasExhaustedRetries() || logBatch.attempts >= 10) {
@@ -673,13 +717,14 @@ export class CloudLogBackend implements LogBackend {
 					// Remove from pending (give up)
 					this.pendingBatches.delete(logBatch.batchId);
 					
-					process.stderr.write(`[CloudLogBackend] Dropping batch ${logBatch.batchId} (${logBatch.logs.length} logs) after ${logBatch.attempts} attempts (retry exhaustion)\n`);
+					process.stderr.write(`[CloudLog] Dropping batch ${logBatch.batchId} (${logBatch.logs.length} logs) after ${logBatch.attempts} attempts (retry exhaustion)\n`);
 					continue;
 				}
 				
 				// Keep batch for retry (still in pendingBatches)
 				batchesWithRetry.push(logBatch.batchId);
 				this.retryCount++;
+				this.lastFlushError = error instanceof Error ? error.message : String(error);
 			}
 		}
 		
@@ -694,9 +739,17 @@ export class CloudLogBackend implements LogBackend {
 		
 		// Schedule retry for failed batches
 		if (batchesWithRetry.length > 0) {
-			console.log(`[CloudLogBackend] Scheduling retry for ${batchesWithRetry.length} batches`);
+			console.log(`[CloudLog] Scheduling retry for ${batchesWithRetry.length} batches`);
 			this.scheduleReconnect();
 		}
+		} catch (error) {
+			this.lastFlushError = error instanceof Error ? error.message : String(error);
+			process.stderr.write(`[CloudLog] Flush failed: ${this.lastFlushError}\n`);
+
+			// If there is still buffered or pending data, ensure retry gets scheduled.
+			if (this.buffer.length > 0 || this.pendingBatches.size > 0) {
+				this.scheduleReconnect();
+			}
 		} finally {
 			// Always reset flushing flag (even if errors occur)
 			this.flushing = false;
@@ -729,7 +782,7 @@ export class CloudLogBackend implements LogBackend {
 			// Use process.stderr.write for hot-path performance (no async formatting)
 			const now = Date.now();
 			if (now - this.lastErrorLog > this.errorLogThrottle) {
-				process.stderr.write(`[CloudLogBackend] HTTP ${response.status}: ${response.statusText}\n`);
+				process.stderr.write(`[CloudLog] HTTP ${response.status}: ${response.statusText}\n`);
 				this.lastErrorLog = now;
 			}
 			throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -751,14 +804,20 @@ export class CloudLogBackend implements LogBackend {
 			this.config.maxReconnectInterval
 		);
 		
-		console.info('[CloudLogBackend] Retrying log upload', {
+		console.info('[CloudLog] Retrying log upload', {
 			retryInSeconds: Math.round(delay / 1000),
 			retryCount: this.retryCount
 		});
 		
 		this.reconnectTimer = setTimeout(() => {
 			this.reconnectTimer = undefined;
-			this.flush();
+			void this.flush().catch((error) => {
+				this.lastFlushError = error instanceof Error ? error.message : String(error);
+				process.stderr.write(`[CloudLog] Reconnect flush failed: ${this.lastFlushError}\n`);
+				if (this.buffer.length > 0 || this.pendingBatches.size > 0) {
+					this.scheduleReconnect();
+				}
+			});
 		}, delay);
 	}
 	
@@ -946,7 +1005,7 @@ export class CloudLogBackend implements LogBackend {
 		// Use process.stderr.write for hot-path performance (throttled)
 		const now = Date.now();
 		if (now - this.lastWarningLog > this.warningLogThrottle) {
-			process.stderr.write(`[CloudLogBackend] Dropped ${summary.totalCount} logs (${summary.reason}): ${summary.levelCounts.error} errors, ${summary.levelCounts.warn} warnings, ~${Math.round(summary.estimatedBytes / 1024)}KB\n`);
+			process.stderr.write(`[CloudLog] Dropped ${summary.totalCount} logs (${summary.reason}): ${summary.levelCounts.error} errors, ${summary.levelCounts.warn} warnings, ~${Math.round(summary.estimatedBytes / 1024)}KB\n`);
 			this.lastWarningLog = now;
 		}
 	}
@@ -961,7 +1020,7 @@ export class CloudLogBackend implements LogBackend {
 		// TODO: Implement /device/{uuid}/logs/dropped-summaries endpoint in API
 		// For now, just clear summaries to avoid memory buildup
 		if (this.droppedLogSummaries.length > 0) {
-			console.debug('[CloudLogBackend] Dropped log summaries tracked (endpoint not implemented)', {
+			console.debug('[CloudLog] Dropped log summaries tracked (endpoint not implemented)', {
 				summaryCount: this.droppedLogSummaries.length,
 				totalDroppedLogs: this.droppedLogSummaries.reduce((sum, s) => sum + s.totalCount, 0)
 			});
@@ -987,7 +1046,7 @@ export class CloudLogBackend implements LogBackend {
 			});
 			
 			if (response.ok) {
-				console.info('[CloudLogBackend] Sent dropped log summaries to cloud', {
+				console.info('[CloudLog] Sent dropped log summaries to cloud', {
 					summaryCount: this.droppedLogSummaries.length,
 					totalDroppedLogs: this.droppedLogSummaries.reduce((sum, s) => sum + s.totalCount, 0)
 				});
@@ -996,7 +1055,7 @@ export class CloudLogBackend implements LogBackend {
 			}
 		} catch (error) {
 			// Silently fail - summaries will be sent on next recovery
-			console.debug('[CloudLogBackend] Failed to send dropped log summaries (will retry)', {
+			console.debug('[CloudLog] Failed to send dropped log summaries (will retry)', {
 				error: error instanceof Error ? error.message : String(error)
 			});
 		}
@@ -1027,7 +1086,7 @@ export class CloudLogBackend implements LogBackend {
 				await this.rotateSpool();
 			}
 		} catch (error) {
-			console.error(`[CloudLogBackend] Failed to write to spool: ${error}`);
+			console.error(`[CloudLog] Failed to write to spool: ${error}`);
 		}
 	}
 	
@@ -1041,11 +1100,11 @@ export class CloudLogBackend implements LogBackend {
 		
 		try {
 			await fsp.unlink(this.spoolFilePath);
-			console.log('[CloudLogBackend] Spool cleared after successful upload');
+			console.log('[CloudLog] Spool cleared after successful upload');
 		} catch (error) {
 			// Ignore ENOENT (file already deleted)
 			if ((error as any).code !== 'ENOENT') {
-				console.error(`[CloudLogBackend] Failed to clear spool: ${error}`);
+				console.error(`[CloudLog] Failed to clear spool: ${error}`);
 			}
 		}
 	}
@@ -1063,17 +1122,17 @@ export class CloudLogBackend implements LogBackend {
 		if (!this.spoolFilePath) return;
 		
 		try {
-			process.stderr.write(`[CloudLogBackend] Spool file exceeds ${this.maxSpoolSize / 1024 / 1024}MB, clearing (logs already in retry queue)\n`);
+			process.stderr.write(`[CloudLog] Spool file exceeds ${this.maxSpoolSize / 1024 / 1024}MB, clearing (logs already in retry queue)\n`);
 			
 			// Simply clear the spool - batches are already in pendingBatches for retry
 			// If we crashed, pendingBatches are lost anyway, so complex rotation doesn't help
 			await fsp.unlink(this.spoolFilePath);
 			
-			console.log('[CloudLogBackend] Spool cleared to prevent disk overflow');
+			console.log('[CloudLog] Spool cleared to prevent disk overflow');
 		} catch (error) {
 			// Ignore ENOENT (already deleted)
 			if ((error as any).code !== 'ENOENT') {
-				console.error(`[CloudLogBackend] Failed to rotate spool: ${error}`);
+				console.error(`[CloudLog] Failed to rotate spool: ${error}`);
 			}
 		}
 	}
@@ -1105,7 +1164,7 @@ export class CloudLogBackend implements LogBackend {
 			// Load ACK cursor (skip already-sent batches)
 			const ackedBatchIds = new Set(await this.loadAckCursor());
 			
-			console.log(`[CloudLogBackend] Replaying spooled batches (ACKed: ${ackedBatchIds.size})`);
+			console.log(`[CloudLog] Replaying spooled batches (ACKed: ${ackedBatchIds.size})`);
 			
 			let replayedCount = 0;
 			let skippedCount = 0;
@@ -1126,18 +1185,18 @@ export class CloudLogBackend implements LogBackend {
 					replayedCount++;
 				} catch (parseError) {
 					// Skip corrupted batch entries
-					process.stderr.write(`[CloudLogBackend] Skipping corrupted spool entry: ${parseError}\n`);
+					process.stderr.write(`[CloudLog] Skipping corrupted spool entry: ${parseError}\n`);
 				}
 			}
 			
-			console.log(`[CloudLogBackend] Replayed ${replayedCount} batches, skipped ${skippedCount} ACKed batches`);
+			console.log(`[CloudLog] Replayed ${replayedCount} batches, skipped ${skippedCount} ACKed batches`);
 			
 			// Trigger flush to retry pending batches
 			if (replayedCount > 0) {
 				setTimeout(() => this.flush(), 2000); // Delay to allow connection to establish
 			}
 		} catch (error) {
-			console.error(`[CloudLogBackend] Failed to replay spooled logs: ${error}`);
+			console.error(`[CloudLog] Failed to replay spooled logs: ${error}`);
 		}
 	}
 	
@@ -1184,7 +1243,7 @@ export class CloudLogBackend implements LogBackend {
 			await fsp.writeFile(tmpPath, JSON.stringify(cursor), 'utf8');
 			await fsp.rename(tmpPath, this.spoolCursorPath);
 		} catch (error) {
-			console.error(`[CloudLogBackend] Failed to update ACK cursor: ${error}`);
+			console.error(`[CloudLog] Failed to update ACK cursor: ${error}`);
 		}
 	}
 	
@@ -1204,7 +1263,7 @@ export class CloudLogBackend implements LogBackend {
 		} catch (error) {
 			// File doesn't exist or parse error
 			if ((error as any).code !== 'ENOENT') {
-				console.error(`[CloudLogBackend] Failed to load ACK cursor: ${error}`);
+				console.error(`[CloudLog] Failed to load ACK cursor: ${error}`);
 			}
 			return [];
 		}
@@ -1264,9 +1323,9 @@ export class CloudLogBackend implements LogBackend {
 			await fsp.writeFile(tmpPath, remainingLines.join('\n') + '\n', 'utf8');
 			await fsp.rename(tmpPath, this.spoolFilePath);
 			
-			console.log(`[CloudLogBackend] Pruned ${prunedCount} ACKed batches from spool (${remainingLines.length} remaining)`);
+			console.log(`[CloudLog] Pruned ${prunedCount} ACKed batches from spool (${remainingLines.length} remaining)`);
 		} catch (error) {
-			console.error(`[CloudLogBackend] Failed to prune spool: ${error}`);
+			console.error(`[CloudLog] Failed to prune spool: ${error}`);
 		}
 	}
 }

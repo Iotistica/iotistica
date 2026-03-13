@@ -195,6 +195,7 @@ export class CloudSync extends EventEmitter {
 			component: LogComponents.cloudSync,
 			queueSize: this.reportQueue.size()
 		});
+		this.emit('online');
 		this.flushOfflineQueue().catch(error => {
 			this.logger?.errorSync('Failed to flush offline queue', error instanceof Error ? error : new Error(String(error)), {
 				component: LogComponents.cloudSync
@@ -204,6 +205,7 @@ export class CloudSync extends EventEmitter {
 	
 	private offlineHandler = () => {
 		const health = this.connectionMonitor.getHealth();
+		this.emit('offline');
 		this.logger?.errorSync('Connection lost', undefined, {
 			component: LogComponents.cloudSync,
 			offlineDurationSeconds: Math.floor(health.offlineDuration / 1000),
@@ -215,6 +217,7 @@ export class CloudSync extends EventEmitter {
 	};
 	
 	private degradedHandler = () => {
+		this.emit('degraded');
 		this.logger?.warnSync('Connection degraded (experiencing failures)', {
 			component: LogComponents.cloudSync
 		});
