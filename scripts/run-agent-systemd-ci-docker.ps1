@@ -7,6 +7,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Avoid terminating on non-zero exit from native commands we explicitly handle.
+$PSNativeCommandUseErrorActionPreference = $false
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $tempDir = Join-Path $env:TEMP ("iotistic-systemd-" + [guid]::NewGuid().ToString('N'))
 
@@ -35,7 +38,10 @@ try {
     docker build -t $ImageName $tempDir
 
     Write-Host "Removing any previous test container..."
-    docker rm -f $ContainerName 2>$null | Out-Null
+    $existingContainerId = (docker ps -aq -f "name=^/${ContainerName}$" | Select-Object -First 1)
+    if ($existingContainerId) {
+        docker rm -f $ContainerName *> $null
+    }
 
     Write-Host "Starting privileged systemd container..."
     docker run --privileged --cgroupns=host -d `
@@ -101,7 +107,10 @@ systemctl start docker
 }
 finally {
     if (-not $KeepContainer) {
-        docker rm -f $ContainerName 2>$null | Out-Null
+        $existingContainerId = (docker ps -aq -f "name=^/${ContainerName}$" | Select-Object -First 1)
+        if ($existingContainerId) {
+            docker rm -f $ContainerName *> $null
+        }
     }
 
     if (Test-Path $tempDir) {

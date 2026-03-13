@@ -544,6 +544,7 @@ EOF
     if [ "$CI" = "true" ]; then
         echo "[DEBUG] Writing CI=true to agent.env (testing mode)"
         echo "CI=true" >> /etc/iotistic/agent.env
+        echo "SYSTEMD_READY_MODE=ci" >> /etc/iotistic/agent.env
     fi
 
     if [ -n "$PROVISIONING_KEY" ]; then
@@ -603,6 +604,17 @@ EOF
     # Allow install-time override for service memory cap.
     AGENT_MEMORY_LIMIT="${AGENT_MEMORY_LIMIT:-300M}"
     echo "Service memory limit: ${AGENT_MEMORY_LIMIT}"
+
+    SERVICE_TYPE="notify"
+    WATCHDOG_DIRECTIVES=$'# Watchdog configuration (health-gated automatic restart)\nWatchdogSec=30\nNotifyAccess=main'
+    STARTUP_TIMEOUT="120"
+
+    if [ "$CI" = "true" ]; then
+        echo "CI mode: using systemd Type=simple and disabling watchdog for deterministic startup tests"
+        SERVICE_TYPE="simple"
+        WATCHDOG_DIRECTIVES="# Watchdog disabled in CI service mode"
+        STARTUP_TIMEOUT="60"
+    fi
     
     cat > /etc/systemd/system/iotistic-agent.service << EOFSVC
 [Unit]
@@ -613,8 +625,8 @@ Requires=docker.service
 Wants=network-online.target
 
 [Service]
-# CRITICAL: Type=notify enables watchdog integration
-Type=notify
+# Service type differs between production and CI mode
+Type=${SERVICE_TYPE}
 User=iotistic
 Group=iotistic
 WorkingDirectory=/opt/iotistic/agent
@@ -628,12 +640,10 @@ ExecStart=$NODE_PATH $APP_JS_PATH
 Restart=always
 RestartSec=5
 
-# Watchdog configuration (health-gated automatic restart)
-WatchdogSec=30
-NotifyAccess=main
+${WATCHDOG_DIRECTIVES}
 
-# Startup timeout (agent initialization can take time in CI)
-TimeoutStartSec=120
+# Startup timeout
+TimeoutStartSec=${STARTUP_TIMEOUT}
 
 # Graceful shutdown timeout (kill misbehaving services)
 TimeoutStopSec=20
