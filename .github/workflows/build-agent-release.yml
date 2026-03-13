@@ -5,7 +5,6 @@ on:
 
 permissions:
   contents: write
-  security-events: write
   actions: read
 
 jobs:
@@ -295,8 +294,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
-      actions: read
 
     steps:
       - name: Checkout repository
@@ -333,53 +330,38 @@ jobs:
           syft dir:/tmp/iotistic-scripts -o cyclonedx-json=/tmp/sbom/install-script.cyclonedx.json
           syft dir:./agent -o cyclonedx-json=/tmp/sbom/agent-source.cyclonedx.json
 
-      - name: Install Grype
+      - name: Install Trivy
         run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
-          grype version
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          trivy --version
 
-      - name: Scan SBOMs and generate SARIF reports
-        # continue-on-error so SARIF upload always runs even when CVEs are found
-        continue-on-error: true
+      - name: Generate Trivy reports from SBOM
         run: |
-          mkdir -p /tmp/grype-sarif
+          mkdir -p /tmp/trivy-reports
 
-          grype sbom:/tmp/sbom/agent-source.cyclonedx.json \
-            --output sarif > /tmp/grype-sarif/agent-source.sarif
+          trivy sbom --format table --output /tmp/trivy-reports/agent-source.txt /tmp/sbom/agent-source.cyclonedx.json
+          trivy sbom --format json --output /tmp/trivy-reports/agent-source.json /tmp/sbom/agent-source.cyclonedx.json
 
-          grype sbom:/tmp/sbom/agent-artifacts.cyclonedx.json \
-            --output sarif > /tmp/grype-sarif/agent-artifacts.sarif
+          trivy sbom --format table --output /tmp/trivy-reports/agent-artifacts.txt /tmp/sbom/agent-artifacts.cyclonedx.json
+          trivy sbom --format json --output /tmp/trivy-reports/agent-artifacts.json /tmp/sbom/agent-artifacts.cyclonedx.json
 
-          grype sbom:/tmp/sbom/install-script.cyclonedx.json \
-            --output sarif > /tmp/grype-sarif/install-script.sarif
+          trivy sbom --format table --output /tmp/trivy-reports/install-script.txt /tmp/sbom/install-script.cyclonedx.json
+          trivy sbom --format json --output /tmp/trivy-reports/install-script.json /tmp/sbom/install-script.cyclonedx.json
 
-      - name: Upload SARIF - agent source
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: /tmp/grype-sarif/agent-source.sarif
-          category: grype-agent-source
-
-      - name: Upload SARIF - agent artifacts
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: /tmp/grype-sarif/agent-artifacts.sarif
-          category: grype-agent-artifacts
-
-      - name: Upload SARIF - install script
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: /tmp/grype-sarif/install-script.sarif
-          category: grype-install-script
-
-      - name: Enforce CVE policy threshold
-        # Blocks upload if any Critical severity vulnerabilities are found.
-        # Change --fail-on to "high" for a stricter gate.
+      - name: Enforce CVE policy threshold with Trivy
+        # Blocks release if any CRITICAL vulnerability is found.
+        # Change severity to HIGH,CRITICAL for a stricter policy.
         run: |
-          grype sbom:/tmp/sbom/agent-source.cyclonedx.json --fail-on critical
-          grype sbom:/tmp/sbom/agent-artifacts.cyclonedx.json --fail-on critical
+          trivy sbom --exit-code 1 --severity CRITICAL /tmp/sbom/agent-source.cyclonedx.json
+          trivy sbom --exit-code 1 --severity CRITICAL /tmp/sbom/agent-artifacts.cyclonedx.json
+          trivy sbom --exit-code 1 --severity CRITICAL /tmp/sbom/install-script.cyclonedx.json
+
+      - name: Upload Trivy report bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-sbom-reports
+          path: /tmp/trivy-reports/*
+          if-no-files-found: error
 
       - name: Upload SBOM bundle
         uses: actions/upload-artifact@v4
