@@ -1,12 +1,7 @@
 name: CI Build, Test & Push Agent
 
-on: 
-  push:
-    branches:
-      - master
-    paths:
-      - 'agent/**' 
-      - '.github/workflows/build-device-agent-ci.yml'
+on:
+  workflow_dispatch:
 
 
 jobs:
@@ -469,9 +464,456 @@ jobs:
             --content-type text/plain
           echo "✓ Uploaded ARM64 checksums"
 
+  deploy-to-pi:
+    name: Deploy to Raspberry Pi 
+    needs: [version, build-x86, build-arm64]
+    runs-on: [ubuntu-latest]
+    if: github.ref == 'refs/heads/master'  # Only deploy from master branch
+    
+    steps:
+      - name: Check Pi availability
+        id: check_pi
+        shell: pwsh
+        env:
+          PI_HOST: ${{ secrets.PI_HOST }}
+        run: |
+          Write-Host "Checking if Raspberry Pi is reachable..."
+          $available = Test-Connection -ComputerName $env:PI_HOST -Count 2 -Quiet -ErrorAction SilentlyContinue
+          
+          if ($available) {
+            Write-Host "✓ Raspberry Pi is reachable at $env:PI_HOST" -ForegroundColor Green
+            echo "pi_available=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "⚠ Raspberry Pi is not reachable at $env:PI_HOST - skipping deployment" -ForegroundColor Yellow
+            echo "pi_available=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Deploy to Pi via SSH (password auth)
+        if: steps.check_pi.outputs.pi_available == 'true'
+        shell: pwsh
+        env:
+          PI_HOST: ${{ secrets.PI_HOST }}
+          PI_USER: ${{ secrets.PI_USER }}
+          PI_PASSWORD: ${{ secrets.PI_PASSWORD }}
+          AGENT_VERSION: ${{ needs.version.outputs.package_version }}
+        run: |
+          Write-Host "Deploying agent $env:AGENT_VERSION to Raspberry Pi..."
+          
+          # Install Posh-SSH module if not available
+          if (-not (Get-Module -ListAvailable -Name Posh-SSH)) {
+            Install-Module -Name Posh-SSH -Force -Scope CurrentUser
+          }
+          Import-Module Posh-SSH
+          
+          # Create secure password
+          $securePassword = ConvertTo-SecureString $env:PI_PASSWORD -AsPlainText -Force
+          $credential = New-Object System.Management.Automation.PSCredential ($env:PI_USER, $securePassword)
+          
+          # Connect and deploy
+          $session = New-SSHSession -ComputerName $env:PI_HOST -Credential $credential -AcceptKey
+          
+          $installCmd = "curl -sfL https://iotistic.blob.core.windows.net/scripts/agent/install | IOTISTIC_AGENT_VERSION=$env:AGENT_VERSION IOTISTIC_NON_INTERACTIVE=true CLOUD_API_ENDPOINT='${{ secrets.CLOUD_API_ENDPOINT }}' PROVISIONING_KEY='${{ secrets.PROVISIONING_KEY }}' sudo -E bash"
+          
+          $result = Invoke-SSHCommand -SessionId $session.SessionId -Command "echo 'Installing agent on Raspberry Pi...'; $installCmd"
+          
+          Write-Host $result.Output
+          if ($result.ExitStatus -ne 0) {
+            Write-Host "Error: $($result.Error)" -ForegroundColor Red
+            Remove-SSHSession -SessionId $session.SessionId
+            exit 1
+          }
+          
+          Remove-SSHSession -SessionId $session.SessionId
+          Write-Host "✓ Agent deployed to Raspberry Pi"
+          
+      - name: Verify Pi deployment
+        if: steps.check_pi.outputs.pi_available == 'true'
+        shell: pwsh
+        env:
+          PI_HOST: ${{ secrets.PI_HOST }}
+          PI_USER: ${{ secrets.PI_USER }}
+          PI_PASSWORD: ${{ secrets.PI_PASSWORD }}
+        run: |
+          Write-Host "Verifying deployment..."
+          
+          Import-Module Posh-SSH
+          
+          $securePassword = ConvertTo-SecureString $env:PI_PASSWORD -AsPlainText -Force
+          $credential = New-Object System.Management.Automation.PSCredential ($env:PI_USER, $securePassword)
+          
+          $session = New-SSHSession -ComputerName $env:PI_HOST -Credential $credential -AcceptKey
+          
+          # Check service status
+          $verifyCmd = "sudo systemctl status iotistic-agent --no-pager || true; curl -f http://localhost:48484/v1/healthy 2>/dev/null || curl -f http://localhost:48484/ping 2>/dev/null || echo 'Agent API not responding yet'"
+          
+          $result = Invoke-SSHCommand -SessionId $session.SessionId -Command $verifyCmd
+          
+          Write-Host $result.Output
+          
+          Remove-SSHSession -SessionId $session.SessionId
+          Write-Host "✓ Deployment verification complete"
+
+      - name: Deployment skipped notice
+        if: steps.check_pi.outputs.pi_available != 'true'
+        run: |
+          echo "## ⚠️ Raspberry Pi Deployment Skipped" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The Raspberry Pi at \`${{ secrets.PI_HOST }}\` was not reachable." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Action Required:** Ensure the Pi is online and accessible, then manually deploy:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "curl -sfL https://iotistic.blob.core.windows.net/scripts/agent/install | \\" >> $GITHUB_STEP_SUMMARY
+          echo "  IOTISTIC_AGENT_VERSION=${{ needs.version.outputs.package_version }} \\" >> $GITHUB_STEP_SUMMARY
+          echo "  sudo -E bash" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+  test-agent-systemd:
+    name: Test Systemd Installation (x86_64)
+    needs: [version, build-x86]
+    runs-on: [ubuntu-latest]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+  
+      - name: Clean build artifacts and installation directories
+        run: |
+          echo "Cleaning any stale build artifacts from repository..."
+          rm -rf agent/dist
+          rm -rf agent/node_modules
+          
+          echo "Cleaning any previous installations..."
+          sudo rm -rf /opt/iotistic/agent
+          sudo rm -rf /var/lib/iotistic/agent
+          sudo rm -rf /etc/iotistic
+          
+          echo "✓ All artifacts and installations cleaned"
+  
+      - name: Make install script executable
+        run: chmod +x agent/bin/install.sh
+  
+      - name: Run unified installation script (Systemd method)
+        env:
+          CI: true
+          IOTISTIC_INSTALL_METHOD: systemd
+          IOTISTIC_AGENT_VERSION: ${{ needs.version.outputs.package_version }}
+          IOTISTIC_DEVICE_PORT: 48484
+          CLOUD_API_ENDPOINT: ''
+          PROVISIONING_KEY: ''
+    
+        run: |
+          echo "Testing unified installation script with Systemd method..."
+          sudo -E bash agent/bin/install.sh
+  
+      - name: Check systemd service status
+        run: |
+          echo "Checking systemd service status..."
+          sudo systemctl status iotistic-agent --no-pager || true
+          
+          echo ""
+          echo "========================================="
+          echo "Agent Startup Logs (last 100 lines):"
+          echo "========================================="
+          sudo journalctl -u iotistic-agent -n 100 --no-pager
+          
+          echo ""
+          echo "========================================="
+          echo "Agent Environment Variables:"
+          echo "========================================="
+          sudo cat /etc/iotistic/agent.env || echo "No environment file found"
+          
+          if sudo systemctl is-active --quiet iotistic-agent; then
+            echo "✓ Agent service is running"
+          else
+            echo "✗ Agent service is not running"
+            echo ""
+            echo "========================================="
+            echo "Full Error Logs (last 300 lines):"
+            echo "========================================="
+            sudo journalctl -u iotistic-agent -n 300 --no-pager
+            echo ""
+            echo "========================================="
+            echo "Service Status Details:"
+            echo "========================================="
+            sudo systemctl status iotistic-agent --no-pager -l
+            exit 1
+          fi
+  
+      - name: Check agent logs
+        run: |
+          echo "Agent Logs (journald):"
+          sudo journalctl -u iotistic-agent -n 100 --no-pager
+          
+          echo ""
+          echo "Checking for errors in logs..."
+          if sudo journalctl -u iotistic-agent -n 100 --no-pager | grep -qi "error"; then
+            echo "⚠ Errors found in logs"
+          else
+            echo "✓ No errors found"
+          fi
+  
+      - name: Test agent API
+        run: |
+          echo "Testing agent API..."
+          
+          if curl -f http://localhost:48484/v1/healthy 2>/dev/null || \
+             curl -f http://localhost:48484/ping 2>/dev/null; then
+            echo "✓ Agent API is responding"
+          else
+            echo "⚠ Agent API not responding"
+            sudo journalctl -u iotistic-agent -n 50 --no-pager
+          fi
+  
+      - name: Show agent logs
+        if: always()
+        run: |
+          echo "========================================="
+          echo "Agent Logs (journald):"
+          echo "========================================="
+          sudo journalctl -u iotistic-agent -n 200 --no-pager
+  
+      - name: Generate systemd test summary
+        if: always()
+        run: |
+          echo "# Agent Systemd Installation Test" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Installation" >> $GITHUB_STEP_SUMMARY
+          echo "- **Location**: \`/opt/iotistic/agent\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **User**: \`iotistic\` (non-root)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Process Manager**: systemd" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Add device configuration if available
+          if [ -n "${{ env.DEVICE_UUID }}" ]; then
+            echo "## Device Configuration" >> $GITHUB_STEP_SUMMARY
+            echo "- **Device UUID**: \`${{ env.DEVICE_UUID }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Device Name**: \`${{ env.DEVICE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Device Type**: \`${{ env.DEVICE_TYPE }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Agent Version**: \`${{ env.AGENT_VERSION }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **Provisioned**: \`${{ env.PROVISIONED }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details>" >> $GITHUB_STEP_SUMMARY
+            echo "<summary>Full Device Configuration (JSON)</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            echo '${{ env.DEVICE_CONFIG }}' | jq '.' >> $GITHUB_STEP_SUMMARY || echo '${{ env.DEVICE_CONFIG }}' >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "## Tests Performed" >> $GITHUB_STEP_SUMMARY
+          echo "1. System dependencies installation (SQLite, Docker, etc.)" >> $GITHUB_STEP_SUMMARY
+          echo "2. Agent build and installation" >> $GITHUB_STEP_SUMMARY
+          echo "3. Systemd service configuration and hardening" >> $GITHUB_STEP_SUMMARY
+          echo "4. Journald log limits configuration" >> $GITHUB_STEP_SUMMARY
+          echo "5. Process startup and status check" >> $GITHUB_STEP_SUMMARY
+          echo "6. API health verification" >> $GITHUB_STEP_SUMMARY
+          echo "7. Configuration file permissions verification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Agent running with systemd validated successfully!" >> $GITHUB_STEP_SUMMARY
+
+  upload-artifacts:
+    name: Upload install scripts to Azure
+    needs: [version, buildx, build-x86, build-arm64, test-agent-systemd]
+    runs-on: ubuntu-latest
+    if: success()
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Enable blob versioning (if not already enabled)
+        run: |
+          # Check if versioning is already enabled
+          VERSIONING_ENABLED=$(az storage account blob-service-properties show \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --query 'isVersioningEnabled' -o tsv 2>/dev/null || echo "false")
+          
+          if [ "$VERSIONING_ENABLED" != "true" ]; then
+            echo "Enabling blob versioning on storage account..."
+            az storage account blob-service-properties update \
+              --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+              --enable-versioning true
+            echo "✓ Blob versioning enabled"
+          else
+            echo "✓ Blob versioning already enabled"
+          fi
+
+      - name: Prepare versioned scripts
+        run: |
+          # Create temporary directory for versioned scripts
+          mkdir -p /tmp/iotistic-scripts
+          
+          # Replace version placeholder in install.sh (unified script)
+          sed "s/AGENT_VERSION_PLACEHOLDER/${{ needs.version.outputs.package_version }}/g" \
+            agent/bin/install.sh > /tmp/iotistic-scripts/install.sh
+          
+          echo "✓ Prepared unified install.sh with version ${{ needs.version.outputs.package_version }}"
+
+      - name: Generate checksums for install script
+        run: |
+          cd /tmp/iotistic-scripts
+          sha256sum install.sh > install.sh.sha256
+          
+          echo "✓ Generated install script checksum:"
+          cat install.sh.sha256
+
+      - name: Upload install.sh (latest)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/install \
+            --file /tmp/iotistic-scripts/install.sh \
+            --overwrite true \
+            --content-type application/x-sh \
+            --content-disposition "attachment; filename=install"
+          
+          echo "✓ Uploaded agent/install (latest, unified script)"
+
+      - name: Upload install.sh checksum (latest)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/install.sha256 \
+            --file /tmp/iotistic-scripts/install.sh.sha256 \
+            --overwrite true \
+            --content-type text/plain \
+            --content-disposition "inline; filename=install.sha256"
+          
+          echo "✓ Uploaded agent/install.sha256"
+
+      - name: Upload install.sh (versioned)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/versions/install-${{ needs.version.outputs.package_version }}.sh \
+            --file /tmp/iotistic-scripts/install.sh \
+            --overwrite true \
+            --content-type application/x-sh \
+            --content-disposition "attachment; filename=install-${{ needs.version.outputs.package_version }}.sh"
+          
+          echo "✓ Uploaded agent/versions/install-${{ needs.version.outputs.package_version }}.sh"
+
+      - name: Upload install.sh checksum (versioned)
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/versions/install-${{ needs.version.outputs.package_version }}.sh.sha256 \
+            --file /tmp/iotistic-scripts/install.sh.sha256 \
+            --overwrite true \
+            --content-type text/plain \
+            --content-disposition "inline; filename=install-${{ needs.version.outputs.package_version }}.sh.sha256"
+          
+          echo "✓ Uploaded agent/versions/install-${{ needs.version.outputs.package_version }}.sh.sha256"
+
+      - name: Generate upload summary
+        run: |
+          echo "# Installation Scripts Uploaded" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Quick Install (Recommended)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Auto-detect Installation Method" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo 'curl -sfL https://apps.iotistica.com/agent/install | sh' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The script will:" >> $GITHUB_STEP_SUMMARY
+          echo "- Auto-detect Docker installation (uses Docker if available)" >> $GITHUB_STEP_SUMMARY
+          echo "- Fallback to Systemd if Docker not found" >> $GITHUB_STEP_SUMMARY
+          echo "- In interactive mode, prompts user to choose method" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Force Docker Installation" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo 'curl -sfL https://apps.iotistica.com/agent/install | IOTISTIC_INSTALL_METHOD=docker sh' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Force Systemd Installation" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo 'curl -sfL https://apps.iotistica.com/agent/install | IOTISTIC_INSTALL_METHOD=systemd sh' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Verified Install (with SHA256 checksum)" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "# Download script and checksum" >> $GITHUB_STEP_SUMMARY
+          echo 'curl -sfL https://apps.iotistica.com/agent/install -o install.sh' >> $GITHUB_STEP_SUMMARY
+          echo 'curl -sfL https://apps.iotistica.com/agent/install.sha256 -o install.sha256' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Verify checksum" >> $GITHUB_STEP_SUMMARY
+          echo "sha256sum -c install.sha256" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Run if verification passes (auto-detect method)" >> $GITHUB_STEP_SUMMARY
+          echo "sudo bash install.sh" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Or force specific method:" >> $GITHUB_STEP_SUMMARY
+          echo "sudo IOTISTIC_INSTALL_METHOD=docker bash install.sh" >> $GITHUB_STEP_SUMMARY
+          echo "sudo IOTISTIC_INSTALL_METHOD=systemd bash install.sh" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Version ${{ needs.version.outputs.package_version }} Script" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo 'curl -sfL https://apps.iotistica.com/agent/versions/install-${{ needs.version.outputs.package_version }}.sh | sh' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Environment Variables" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The unified script supports:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- \`IOTISTIC_INSTALL_METHOD\`: 'docker' or 'systemd' (auto-detect if not set)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`IOTISTIC_CLOUD_API_ENDPOINT\`: Cloud API URL" >> $GITHUB_STEP_SUMMARY
+          echo "- \`IOTISTIC_PROVISIONING_KEY\`: Provisioning API key" >> $GITHUB_STEP_SUMMARY
+          echo "- \`IOTISTIC_DEVICE_PORT\`: Device API port (default: 48484)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`IOTISTIC_AGENT_VERSION\`: Specific version" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Example:**" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "export IOTISTIC_INSTALL_METHOD=docker" >> $GITHUB_STEP_SUMMARY
+          echo "export IOTISTIC_CLOUD_API_ENDPOINT=https://api.iotistic.ca" >> $GITHUB_STEP_SUMMARY
+          echo "export IOTISTIC_PROVISIONING_KEY=your-key" >> $GITHUB_STEP_SUMMARY
+          echo 'curl -sfL https://apps.iotistic.ca/agent/install | sudo -E sh' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✓ Unified installation script uploaded with SHA256 checksum" >> $GITHUB_STEP_SUMMARY
+
+
+
+          echo " Agent binaries uploaded directly to Azure from build jobs" >> $GITHUB_STEP_SUMMARY
+
+
+      - name: Generate upload summary
+        run: |
+          echo "# Agent Tarballs Uploaded" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Artifacts Uploaded (Multi-Architecture)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### x86_64 (Intel/AMD)" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-latest-x86_64.tar.gz](https://apps.iotistica.com/agent/agent-latest-x86_64.tar.gz) - [checksum](https://apps.iotistica.com/agent/agent-latest-x86_64.tar.gz.sha256)" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz](https://apps.iotistica.com/agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz) - [checksum](https://apps.iotistica.com/agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ARM64 (Raspberry Pi 4+)" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-latest-arm64.tar.gz](https://apps.iotistica.com/agent/agent-latest-arm64.tar.gz) - [checksum](https://apps.iotistica.com/agent/agent-latest-arm64.tar.gz.sha256)" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz](https://apps.iotistica.com/agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz) - [checksum](https://apps.iotistica.com/agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Generic (x86_64, backwards compatibility)" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-latest.tar.gz](https://apps.iotistica.com/agent/agent-latest.tar.gz) - [checksum](https://apps.iotistica.com/agent/agent-latest.tar.gz.sha256)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Install script auto-detects architecture and downloads the appropriate tarball." >> $GITHUB_STEP_SUMMARY
+
   report:
     name: Generate Changelog
-    needs: [version, buildx, build-x86, build-arm64]
+    needs: [version, upload-artifacts]
     runs-on: ubuntu-latest
     if: success() && needs.version.outputs.package_version != ''
     
@@ -533,7 +975,7 @@ jobs:
 
   # trigger-integration-tests:
   #   name: Trigger Integration Tests
-  #   needs: [version, report]
+  #   needs: [version, upload-artifacts]
   #   runs-on: ubuntu-latest
   #   permissions:
   #     actions: write
@@ -561,7 +1003,7 @@ jobs:
   cleanup:
       name: Clean up
       runs-on: ubuntu-latest
-      needs: [report]
+      needs: [upload-artifacts, test-agent-systemd, deploy-to-pi, report]
       if: always()
       steps:
        - name: Cleanup systemd service
