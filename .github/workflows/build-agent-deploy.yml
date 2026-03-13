@@ -202,6 +202,11 @@ jobs:
           name: install-script-latest
           path: /tmp/iotistic-scripts
 
+      - name: Place generated install.sh in repo path
+        run: |
+          cp /tmp/iotistic-scripts/install.sh ./agent/bin/install.generated.sh
+          chmod +x ./agent/bin/install.generated.sh
+
       - name: Clean previous installation
         run: |
           sudo rm -rf /opt/iotistic/agent /var/lib/iotistic/agent /etc/iotistic /var/log/iotistic
@@ -215,7 +220,7 @@ jobs:
           CLOUD_API_ENDPOINT: ''
           PROVISIONING_KEY: ''
         run: |
-          sudo -E bash /tmp/iotistic-scripts/install.sh
+          sudo -E bash ./agent/bin/install.generated.sh
 
       - name: Validate service health
         run: |
@@ -248,6 +253,11 @@ jobs:
           name: install-script-latest
           path: /tmp/iotistic-scripts
 
+      - name: Place generated install.sh in repo path
+        run: |
+          cp /tmp/iotistic-scripts/install.sh ./agent/bin/install.generated.sh
+          chmod +x ./agent/bin/install.generated.sh
+
       - name: Clean previous installation
         run: |
           sudo rm -rf /opt/iotistic/agent /var/lib/iotistic/agent /etc/iotistic /var/log/iotistic
@@ -261,7 +271,7 @@ jobs:
           CLOUD_API_ENDPOINT: ''
           PROVISIONING_KEY: ''
         run: |
-          sudo -E bash /tmp/iotistic-scripts/install.sh
+          sudo -E bash ./agent/bin/install.generated.sh
 
       - name: Validate service health
         run: |
