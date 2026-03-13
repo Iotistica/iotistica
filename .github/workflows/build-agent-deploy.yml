@@ -187,18 +187,56 @@ jobs:
           path: /tmp/iotistic-scripts/*
           if-no-files-found: error
 
-  verify-systemd-install:
-    name: Verify install.sh on ${{ matrix.arch }}
+  verify-systemd-install-x86:
+    name: Verify install.sh on x86_64
     needs: [version, build-x86, build-arm64, prepare-install-script]
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            runner: ubuntu-latest
-          - arch: arm64
-            runner: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download install script artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: install-script-latest
+          path: /tmp/iotistic-scripts
+
+      - name: Clean previous installation
+        run: |
+          sudo rm -rf /opt/iotistic/agent /var/lib/iotistic/agent /etc/iotistic /var/log/iotistic
+
+      - name: Run latest install.sh in CI systemd mode
+        env:
+          CI: true
+          IOTISTIC_INSTALL_METHOD: systemd
+          IOTISTIC_AGENT_VERSION: ${{ needs.version.outputs.package_version }}
+          IOTISTIC_DEVICE_PORT: 48484
+          CLOUD_API_ENDPOINT: ''
+          PROVISIONING_KEY: ''
+        run: |
+          sudo -E bash /tmp/iotistic-scripts/install.sh
+
+      - name: Validate service health
+        run: |
+          sudo systemctl status iotistic-agent --no-pager || true
+          sudo journalctl -u iotistic-agent -n 200 --no-pager || true
+
+          if ! sudo systemctl is-active --quiet iotistic-agent; then
+            echo "Service is not active"
+            exit 1
+          fi
+
+          if ! curl -f http://localhost:48484/v1/healthy 2>/dev/null && \
+             ! curl -f http://localhost:48484/ping 2>/dev/null; then
+            echo "Agent API is not healthy"
+            exit 1
+          fi
+
+  verify-systemd-install-arm64:
+    name: Verify install.sh on arm64
+    needs: [version, build-x86, build-arm64, prepare-install-script]
+    runs-on: ubuntu-24.04-arm
 
     steps:
       - name: Checkout repository
@@ -243,7 +281,7 @@ jobs:
 
   upload-artifacts:
     name: Upload to Azure (gated)
-    needs: [version, build-x86, build-arm64, verify-systemd-install, prepare-install-script]
+    needs: [version, build-x86, build-arm64, verify-systemd-install-x86, verify-systemd-install-arm64, prepare-install-script]
     runs-on: ubuntu-latest
     if: success()
 
