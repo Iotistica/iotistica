@@ -53,11 +53,13 @@ const db = knex({
 		idleTimeoutMillis: 30000,
 		// Critical for concurrent writes: enable WAL mode and busy timeout
 		afterCreate: (conn: any, done: any) => {
+			const busyTimeoutMs = Number.parseInt(process.env.SQLITE_BUSY_TIMEOUT_MS || '15000', 10);
+			const safeBusyTimeoutMs = Number.isFinite(busyTimeoutMs) && busyTimeoutMs > 0 ? busyTimeoutMs : 15000;
 			// Enable WAL mode for concurrent read/write
 			conn.run('PRAGMA journal_mode = WAL;', (err: any) => {
 				if (err) return done(err, conn);
-				// Set busy timeout to 5 seconds (SQLite will retry locks)
-				conn.run('PRAGMA busy_timeout = 5000;', (err2: any) => {
+				// Set busy timeout (SQLite waits and retries lock acquisition)
+				conn.run(`PRAGMA busy_timeout = ${safeBusyTimeoutMs};`, (err2: any) => {
 					if (err2) return done(err2, conn);
 					
 					// Optional: Enable readonly mode for diagnostics or fail-safe degraded operation

@@ -470,6 +470,86 @@ async function apiProbe(endpoint: string, options: RequestInit = {}): Promise<{
 	}
 }
 
+const RESTART_POLL_INTERVAL_MS = 1000;
+const RESTART_WAIT_TIMEOUT_MS = 60000;
+
+function sleep(ms: number): Promise<void> {
+	return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function summarizeRestartState(state: string, ready: boolean): string {
+	switch (state) {
+		case 'STOPPING':
+			return 'Stopping runtime services';
+		case 'STOPPED':
+			return 'Runtime services stopped, waiting to reinitialize';
+		case 'INIT':
+			return 'Initializing core services';
+		case 'READY':
+			return 'Core initialization complete';
+		case 'RUNNING':
+			return ready ? 'Restart complete' : 'Final readiness checks still running';
+		case 'ERROR':
+			return 'Restart entered error state';
+		default:
+			return ready ? 'Restart in progress, agent reports ready' : 'Restart in progress';
+	}
+}
+
+async function waitForRestartCompletion(initialState: string): Promise<void> {
+	const startedAt = Date.now();
+	let lastState = initialState;
+	let lastReady: boolean | undefined;
+	let sawTransition = false;
+
+	while (Date.now() - startedAt < RESTART_WAIT_TIMEOUT_MS) {
+		const readiness = await apiProbe(`${DEVICE_API_V1}/readiness`);
+		const state = readiness.data?.state || readiness.data?.lifecycleState || (readiness.ok ? 'UNKNOWN' : 'UNREACHABLE');
+		const ready = readiness.data?.ready === true;
+		const criticalFailures = Array.isArray(readiness.data?.criticalFailures)
+			? readiness.data.criticalFailures
+			: undefined;
+
+		if (state !== lastState || ready !== lastReady) {
+			sawTransition = true;
+			logger.info('Restart progress', {
+				state,
+				ready,
+				phase: summarizeRestartState(state, ready),
+				...(criticalFailures && criticalFailures.length > 0 ? { criticalFailures } : {})
+			});
+			lastState = state;
+			lastReady = ready;
+		}
+
+		if (state === 'RUNNING' && ready) {
+			logger.info('Agent services restarted', {
+				state,
+				ready,
+				elapsedMs: Date.now() - startedAt
+			});
+			return;
+		}
+
+		if (state === 'ERROR') {
+			throw new CLIError('Agent entered ERROR state during restart', 1, {
+				criticalFailures,
+				elapsedMs: Date.now() - startedAt
+			});
+		}
+
+		await sleep(RESTART_POLL_INTERVAL_MS);
+	}
+
+	throw new CLIError('Timed out waiting for agent restart to complete', 1, {
+		lastState,
+		lastReady,
+		sawTransition,
+		timeoutMs: RESTART_WAIT_TIMEOUT_MS,
+		hint: 'Check agent logs or run iotctl status for current lifecycle state'
+	});
+}
+
 // ============================================================================
 // Utility Functions
 // ============================================================================
@@ -1405,6 +1485,8 @@ async function restart(): Promise<void> {
 			note: 'All services will reinitialize (API and MQTT stay running)',
 			state: response.state || response.lifecycleState || readinessState
 		});
+
+		await waitForRestartCompletion(response.state || response.lifecycleState || readinessState);
 	} catch (error) {
 		logger.error('Failed to restart agent services', error as Error);
 		process.exit(1);

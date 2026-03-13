@@ -36,6 +36,7 @@ export interface BufferSyncConfig {
 export type MessageBufferSyncOptions = BufferSyncConfig;
 
 export class MessageBufferSync {
+  private static readonly SQLITE_BUSY_PATTERN = /SQLITE_BUSY|database is locked/i;
   private config: BufferSyncConfig;
   private mqttManager: MqttManager;
   private logger?: AgentLogger;
@@ -170,7 +171,10 @@ export class MessageBufferSync {
       return false;
     }
 
-    const stats = await MessageBufferModel.getStats();
+    const stats = await this.withSqliteBusyRetry(
+      'buffer-stats-before-enqueue',
+      () => MessageBufferModel.getStats()
+    );
     if (stats.current_count >= this.config.maxBufferRecords) {
       const spaceFreed = await this.applyBackpressurePolicy(topic, stats.current_count);
       if (!spaceFreed) {
@@ -180,7 +184,7 @@ export class MessageBufferSync {
 
     const payloadText = payload.toString('utf-8');
 
-    await MessageBufferModel.enqueue({
+    await this.withSqliteBusyRetry('buffer-enqueue', () => MessageBufferModel.enqueue({
       endpoint_name: this.extractEndpointName(topic),
       topic,
       qos: options?.qos ?? 0,
@@ -188,9 +192,12 @@ export class MessageBufferSync {
       msg_id: this.extractMsgId(payloadText),
       is_critical: this.isCriticalTopic(topic) ? 1 : 0,
       payload_bytes: payload.length,
-    });
+    }));
 
-    const newStats = await MessageBufferModel.getStats();
+    const newStats = await this.withSqliteBusyRetry(
+      'buffer-stats-after-enqueue',
+      () => MessageBufferModel.getStats()
+    );
     if (!this.isFlushing && newStats.current_count >= this.config.flushTriggerThreshold) {
       this.requestFlush();
     }
@@ -280,7 +287,10 @@ export class MessageBufferSync {
           break;
         }
 
-        const records = await MessageBufferModel.dequeueReady(this.config.flushBatchSize, new Date());
+        const records = await this.withSqliteBusyRetry(
+          'buffer-dequeue-ready',
+          () => MessageBufferModel.dequeueReady(this.config.flushBatchSize, new Date())
+        );
         
         if (records.length === 0) {
           hasMore = false;
@@ -343,20 +353,29 @@ export class MessageBufferSync {
 
         // Delete successfully published records
         if (successfulIds.length > 0) {
-          await MessageBufferModel.deleteByIds(successfulIds);
+          await this.withSqliteBusyRetry(
+            'buffer-delete-flushed',
+            () => MessageBufferModel.deleteByIds(successfulIds)
+          );
           totalFlushed += successfulIds.length;
         }
 
         if (droppedIds.length > 0) {
-          await MessageBufferModel.dropByIds(droppedIds);
+          await this.withSqliteBusyRetry(
+            'buffer-drop-failed',
+            () => MessageBufferModel.dropByIds(droppedIds)
+          );
         }
 
         // Mark failed records for retry
         for (const failed of failedRecords) {
-          await MessageBufferModel.markRetryFailed(
-            failed.id,
-            failed.error,
-            this.calculateNextRetryAt(retryCountById.get(failed.id) ?? 0)
+          await this.withSqliteBusyRetry(
+            'buffer-mark-retry-failed',
+            () => MessageBufferModel.markRetryFailed(
+              failed.id,
+              failed.error,
+              this.calculateNextRetryAt(retryCountById.get(failed.id) ?? 0)
+            )
           );
         }
 
@@ -406,7 +425,10 @@ export class MessageBufferSync {
     }
 
     try {
-      const deleted = await MessageBufferModel.cleanupExpired(this.config.maxRetries);
+      const deleted = await this.withSqliteBusyRetry(
+        'buffer-cleanup-expired',
+        () => MessageBufferModel.cleanupExpired(this.config.maxRetries)
+      );
       
       if (deleted > 0) {
         this.logger?.infoSync('Cleaned up expired buffer records', {
@@ -498,5 +520,41 @@ export class MessageBufferSync {
 
     const nextRetryAt = new Date(Date.now() + delayMs);
     return nextRetryAt;
+  }
+
+  private isSqliteBusyError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return MessageBufferSync.SQLITE_BUSY_PATTERN.test(message);
+  }
+
+  private async withSqliteBusyRetry<T>(
+    operation: string,
+    work: () => Promise<T>,
+    maxAttempts = 4
+  ): Promise<T> {
+    let attempt = 0;
+
+    while (true) {
+      attempt += 1;
+      try {
+        return await work();
+      } catch (error) {
+        if (!this.isSqliteBusyError(error) || attempt >= maxAttempts) {
+          throw error;
+        }
+
+        const delayMs = Math.min(1000, 100 * Math.pow(2, attempt - 1));
+        this.logger?.warnSync('SQLite busy during buffer operation, retrying', {
+          component: LogComponents.agent,
+          operation,
+          attempt,
+          maxAttempts,
+          delayMs,
+          error: error instanceof Error ? error.message : String(error)
+        });
+
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
   }
 }
