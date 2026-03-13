@@ -11,6 +11,8 @@ set -e
 #   IOTISTIC_DEVICE_PORT          - Device API port (default: 48484)
 #   IOTISTIC_CLOUD_API_ENDPOINT   - Cloud API endpoint (e.g., https://api.iotistica.com)
 #   IOTISTIC_PROVISIONING_KEY     - Provisioning API key (leave empty for local mode)
+#   IOTISTIC_INSTALL_DOCKER       - Set to yes/true/1 to allow automatic Docker installation
+#   FORCE_INSTALL                 - Legacy opt-in flag; set to 1 to allow automatic Docker installation
 
 # Note: This script is POSIX-compliant and works with both sh and bash
 # No re-exec needed - works when piped to sh
@@ -60,9 +62,25 @@ esac
 
 echo "Detected OS: $OS $OS_VERSION ($ARCH_NAME)"
 
+# This installer currently relies on apt-get/dpkg for package setup.
+# Detect Debian family explicitly so unsupported distros fail fast with a clear error.
+is_debian_family() {
+    case "$OS" in
+        debian|ubuntu|raspbian)
+            return 0
+            ;;
+    esac
+
+    if [ -n "$ID_LIKE" ] && echo "$ID_LIKE" | grep -qi "debian"; then
+        return 0
+    fi
+
+    return 1
+}
+
 # Helper function to install Docker if needed
 install_docker_if_needed() {
-    REQUIRE_INSTALL="${1:-no}"  # 'yes' = install without asking, 'no' = ask in interactive mode
+    REQUIRE_INSTALL="${1:-no}"  # Internal override only; prefer explicit env var opt-in
     
     if command -v docker >/dev/null 2>&1; then
         echo "✓ Docker is already installed ($(docker --version))"
@@ -72,16 +90,24 @@ install_docker_if_needed() {
     echo "⚠️  Docker is not installed on this system."
     echo ""
     
-    # Determine if we should install
-    SHOULD_INSTALL="$REQUIRE_INSTALL"
-    if [ "$SHOULD_INSTALL" != "yes" ]; then
-        if [ -n "$CI" ] || [ ! -t 0 ]; then
-            echo "Running in non-interactive mode - Docker will be installed automatically."
-            SHOULD_INSTALL="yes"
-        else
-            echo -n "Would you like to install Docker now? (yes/no): "
-            read SHOULD_INSTALL
-        fi
+    # Determine if we should install.
+    # Safety default: do NOT auto-install on non-interactive systems unless explicitly opted in.
+    SHOULD_INSTALL="no"
+    if [ "$REQUIRE_INSTALL" = "yes" ] || [ "$REQUIRE_INSTALL" = "y" ]; then
+        SHOULD_INSTALL="yes"
+    fi
+
+    if [ "$IOTISTIC_INSTALL_DOCKER" = "yes" ] || [ "$IOTISTIC_INSTALL_DOCKER" = "true" ] || [ "$IOTISTIC_INSTALL_DOCKER" = "1" ]; then
+        SHOULD_INSTALL="yes"
+    fi
+
+    if [ "$FORCE_INSTALL" = "1" ]; then
+        SHOULD_INSTALL="yes"
+    fi
+
+    if [ "$SHOULD_INSTALL" != "yes" ] && [ "$SHOULD_INSTALL" != "y" ] && [ -t 0 ]; then
+        echo -n "Would you like to install Docker now? (yes/no): "
+        read SHOULD_INSTALL
     fi
     
     if [ "$SHOULD_INSTALL" = "yes" ] || [ "$SHOULD_INSTALL" = "y" ]; then
@@ -98,10 +124,12 @@ install_docker_if_needed() {
     else
         echo ""
         echo "Error: Docker is required for this installation method."
-        echo "Please install Docker manually or choose Systemd installation."
+        echo "Automatic Docker installation is disabled by default for safety."
         echo ""
-        echo "To install Docker, run:"
-        echo "  curl -fsSL https://get.docker.com | sh"
+        echo "Option 1: Install Docker manually, then rerun this script."
+        echo "Option 2: Explicitly allow installer-managed Docker installation by setting:"
+        echo "  IOTISTIC_INSTALL_DOCKER=yes"
+        echo "  (or FORCE_INSTALL=1)"
         return 1
     fi
 }
@@ -119,33 +147,36 @@ echo ""
     echo ""
 
     # Check if systemd is available
-    if ! command -v systemctl &> /dev/null && ! [ -x /usr/bin/systemctl ] && ! [ -x /bin/systemctl ]; then
+    if ! command -v systemctl >/dev/null 2>&1; then
         echo "Error: systemd is not available on this system"
         echo "Please use the Docker installation method instead"
+        exit 1
+    fi
+
+    # Fail fast on unsupported OS families before running apt-get/dpkg commands.
+    if ! is_debian_family; then
+        echo "Error: Unsupported OS family for this installer: $OS${OS_VERSION:+ $OS_VERSION}"
+        echo ""
+        echo "This install path currently supports Debian-family distributions only"
+        echo "(debian, ubuntu, raspbian, or ID_LIKE containing 'debian')."
+        echo ""
+        echo "Detected ID_LIKE: ${ID_LIKE:-<not-set>}"
+        echo ""
+        echo "Please use a Debian-based OS or add package-manager support for your distro"
+        echo "(dnf/yum/apk/opkg) before running this script."
         exit 1
     fi
 
     # Install system dependencies
     echo "Installing system dependencies..."
     
-    # Fix multiarch configuration issues on Raspberry Pi
-    # Remove foreign architectures that may cause conflicts
-    if [ "$ARCH_NAME" = "arm64" ]; then
-        echo "Cleaning up multiarch configuration for arm64..."
-        # Remove armhf architecture if present
-        if dpkg --print-foreign-architectures | grep -q armhf; then
-            # First try to remove conflicting packages
-            apt-get remove --purge -y '*:armhf' 2>/dev/null || true
-            dpkg --remove-architecture armhf 2>/dev/null || true
-        fi
-        dpkg --remove-architecture i386 2>/dev/null || true
-    elif [ "$ARCH_NAME" = "armhf" ]; then
-        echo "Cleaning up multiarch configuration for armhf..."
-        if dpkg --print-foreign-architectures | grep -q arm64; then
-            apt-get remove --purge -y '*:arm64' 2>/dev/null || true
-            dpkg --remove-architecture arm64 2>/dev/null || true
-        fi
-        dpkg --remove-architecture i386 2>/dev/null || true
+    # Detect multiarch and warn only.
+    # Do not auto-remove foreign architectures or packages because that can
+    # remove valid system packages and destabilize the host.
+    FOREIGN_ARCHES="$(dpkg --print-foreign-architectures 2>/dev/null || true)"
+    if [ -n "$FOREIGN_ARCHES" ]; then
+        echo "Warning: multiarch detected: $FOREIGN_ARCHES"
+        echo "Warning: installer will not modify foreign architectures automatically."
     fi
     
     # Clean up package cache and fix broken dependencies
@@ -182,7 +213,7 @@ echo ""
 
     # Install Docker (required for agent functionality)
     echo ""
-    install_docker_if_needed "yes"
+    install_docker_if_needed "no"
 
     # Install Node.js 20 (or accept existing Node 18+)
     if ! command -v node &> /dev/null; then
@@ -238,11 +269,11 @@ echo ""
     echo "-------------"
 
     # Detect if we're running from a checked-out repository FIRST
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
     AGENT_DIR="$(dirname "$SCRIPT_DIR")"
     
     echo "[DEBUG] Script location:"
-    echo "[DEBUG]   BASH_SOURCE[0]=${BASH_SOURCE[0]}"
+    echo "[DEBUG]   script path ($0)=$0"
     echo "[DEBUG]   SCRIPT_DIR=$SCRIPT_DIR"
     echo "[DEBUG]   AGENT_DIR=$AGENT_DIR"
     echo "[DEBUG]   Current directory: $(pwd)"
@@ -552,7 +583,7 @@ EOF
     echo ""
     echo "Creating systemd service..."
 
-    NODE_PATH=$(which node)
+    NODE_PATH=$(command -v node)
     
     # Auto-detect correct app.js path (handles both old and new build structures)
     if [ -f /opt/iotistic/agent/dist/app.js ]; then
@@ -568,6 +599,10 @@ EOF
 
     echo "Node path: ${NODE_PATH}"
     echo "App path: ${APP_JS_PATH}"
+
+    # Allow install-time override for service memory cap.
+    AGENT_MEMORY_LIMIT="${AGENT_MEMORY_LIMIT:-300M}"
+    echo "Service memory limit: ${AGENT_MEMORY_LIMIT}"
     
     cat > /etc/systemd/system/iotistic-agent.service << EOFSVC
 [Unit]
@@ -621,7 +656,7 @@ CPUAccounting=true
 # Resource limits (prevent memory leaks from killing device)
 LimitNOFILE=65536
 LimitNPROC=65536
-MemoryMax=300M
+MemoryMax=${AGENT_MEMORY_LIMIT}
 TasksMax=512
 CPUQuota=80%
 
