@@ -56,10 +56,11 @@ class PostOffice {
         this.logger = logger;
         this.baseUrl = baseUrl;
         this.mailDefaults = {
-            from: config.from || '"Iotistic Platform" <donotreply@iotistic.ca>'
+            from: config.from || '"Iotistica Platform" <donotreply@iotistic.ca>'
         };
         this.registerTemplate('VerifyEmail', templates.VerifyEmail);
         this.registerTemplate('UserSuspended', templates.UserSuspended);
+        this.registerTemplate('InviteUser', templates.InviteUser);
         if (this.isConfigured()) {
             this.init();
         }

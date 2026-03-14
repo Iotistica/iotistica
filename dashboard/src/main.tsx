@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import App from "./App.tsx";
 import { CallbackPage } from "./pages/CallbackPage.tsx";
+import { InviteAcceptPage } from "./pages/InviteAcceptPage.tsx";
 import "./styles/globals.css";
 import "./index.css";
 import { ThemeProvider } from "./components/theme-provider";
@@ -24,6 +25,7 @@ createRoot(document.getElementById("root")!).render(
                 <BrowserRouter>
                   <Routes>
                     <Route path="/auth/callback" element={<CallbackPage />} />
+                    <Route path="/invite/accept" element={<InviteAcceptPage />} />
                     <Route path="/fleets/:fleetId/agents/:agentId/:view" element={<App />} />
                     <Route path="/fleets/:fleetId/agents/:agentId" element={<App />} />
                     <Route path="/fleets/:fleetId" element={<App />} />

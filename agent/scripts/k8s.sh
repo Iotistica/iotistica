@@ -1,3 +1,0 @@
-kubectl exec -n virtual-agents va-001-560ede92-c65f46d68-746 
--- node -e "const sqlite3 = require('better-sqlite3'); const db = new sqlite3('/app/data/device.sqlite'); const rows = db.prepare('SELECT name, protocol, data_points FROM endpoints ORDER BY name').all(); rows.forEach(r => { console.log('\n' + r.name + ' (' + r.protocol + '):'); const dp 
-= JSON.parse(r.data_points); console.log('  Total nodes:', dp.length); dp.slice(0, 3).forEach((n, i) => console.log('  ' + (i+1) + '.', n.nodeId, '-', n.name)); if (dp.length > 3) console.log('  ... and', dp.length - 3, 'more'); }); db.close(); 

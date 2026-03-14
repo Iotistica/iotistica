@@ -74,15 +74,6 @@ export default function App() {
     'mqtt',
     'jobs',
     'applications',
-    'audit',
-    'usage',
-    'analytics',
-    'security',
-    'maintenance',
-    'logs',
-    'remote-access',
-    'settings',
-    'tags',
     'tag-definitions',
     'account',
     'users',
@@ -91,7 +82,9 @@ export default function App() {
     'digital-twin',
     'event-debugger',
     'monitoring',
-    'nodered'
+    'nodered',
+    'audit',
+    'security'
   ] as const;
   type View = typeof viewOptions[number];
   const agentViews: View[] = [
@@ -194,9 +187,12 @@ export default function App() {
 
   // If an agent is selected but view is a non-global non-agent view (e.g. "home"),
   // restore to metrics so right panels render correctly after refresh.
+  // Exception: device-independent pages (users, account, profile, etc.) should not redirect.
+  const deviceIndependentViews: View[] = ['users', 'account', 'profile', 'tag-definitions', 'digital-twin'];
   useEffect(() => {
     if (!selectedDevice || isGlobalView) return;
     if (agentViews.includes(currentView)) return;
+    if (deviceIndependentViews.includes(currentView)) return;
 
     const fleetUuid = selectedDevice.fleet_uuid || undefined;
     setCurrentView('metrics');
@@ -280,11 +276,8 @@ export default function App() {
 
     const loadFleetName = async () => {
       try {
-        const token = localStorage.getItem('accessToken');
         const response = await fetch(buildApiUrl(`/api/v1/fleets/${fleetId}`), {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
+          credentials: 'include',
         });
 
         if (!response.ok) {
@@ -307,7 +300,7 @@ export default function App() {
       }
     };
 
-    loadFleetName();
+    void loadFleetName();
   }, [currentPath, fleetNameById]);
 
   // Track previous fleet ID to detect when fleet selection changes
@@ -319,15 +312,12 @@ export default function App() {
     if (prevFleetIdRef.current === selectedFleetId) {
       return;
     }
+
     prevFleetIdRef.current = selectedFleetId;
-    
+
     if (selectedFleetId) {
-      // Check if there are any devices in the selected fleet
-      const devicesInFleet = devices.filter(d => {
-        const deviceFleetId = (d as any).fleet_uuid;
-        return deviceFleetId === selectedFleetId;
-      });
-      
+      const devicesInFleet = devices.filter((d: any) => d.fleet_uuid === selectedFleetId);
+
       // Clear selection if fleet is empty OR if currently selected device doesn't belong to this fleet
       if (devicesInFleet.length === 0) {
         console.log('[FLEET FILTER] Fleet has no agents, clearing device selection');
@@ -1256,7 +1246,7 @@ export default function App() {
                 <Shield className="w-5 h-5 mr-2" />
                 Security
               </Button>
-              <Button
+              {/* <Button
                 variant={currentView === 'nodered' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => handleGlobalViewChange('nodered')}
@@ -1264,7 +1254,7 @@ export default function App() {
               >
                 <AlertOctagon className="w-5 h-5 mr-2" />
                 Node-RED
-              </Button>
+              </Button> */}
               <Button
                 variant={currentView === 'monitoring' ? 'default' : 'outline'}
                 size="sm"
@@ -1443,7 +1433,7 @@ export default function App() {
                       <Activity className="w-4 h-4 mr-2" />
                       Devices
                     </Button>
-                    <Button
+                    {/* <Button
                       variant={currentView === 'jobs' ? 'default' : 'ghost'}
                       size="sm"
                       onClick={() => handleAgentViewChange('jobs')}
@@ -1451,7 +1441,7 @@ export default function App() {
                     >
                       <CalendarClock className="w-4 h-4 mr-2" />
                       Jobs
-                    </Button>
+                    </Button> */}
                     <Button
                       variant={currentView === 'applications' ? 'default' : 'ghost'}
                       size="sm"
@@ -1575,7 +1565,7 @@ export default function App() {
               <BarChart3 className="w-4 h-4 mr-2" />
               Endpoints Viz
             </Button> */}
-            <Button
+            {/* <Button
               variant={currentView === 'jobs' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => handleAgentViewChange('jobs')}
@@ -1583,7 +1573,7 @@ export default function App() {
             >
               <CalendarClock className="w-4 h-4 mr-2" />
               Jobs
-            </Button>
+            </Button> */}
             <Button
               variant={currentView === 'applications' ? 'default' : 'ghost'}
               size="sm"

@@ -33,3 +33,27 @@ Please contact support for more information.
 <p>Please contact support for more information.</p>
 `
 };
+
+export const InviteUser: EmailTemplate = {
+  subject: `You've been invited to join {{companyName}} on Iotistica`,
+  text: `Hello,
+
+{{inviterName}} has invited you to join {{companyName}} on the Iotistica IoT Platform as a {{role}}.
+
+Accept your invitation by clicking the link below:
+
+{{inviteUrl}}
+
+This invitation will expire in 7 days.
+
+If you were not expecting this invitation, you can safely ignore this email.
+`,
+  html: `<p>Hello,</p>
+<p><b>{{inviterName}}</b> has invited you to join <b>{{companyName}}</b> on the Iotistica IoT Platform.</p>
+<p>Your role will be: <b>{{role}}</b></p>
+<p><a href="{{inviteUrl}}" style="display:inline-block;padding:12px 24px;background-color:#2563eb;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:bold;">Accept Invitation</a></p>
+<p>Or copy this link into your browser:</p>
+<p style="word-break:break-all;">{{inviteUrl}}</p>
+<p style="color:#6b7280;font-size:14px;">This invitation expires in 7 days. If you were not expecting this, you can safely ignore this email.</p>
+`
+};

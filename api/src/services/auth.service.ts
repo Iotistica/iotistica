@@ -212,7 +212,9 @@ export async function refreshAccessToken(
         id: payload.userId,
         username: payload.username || payload.auth0Sub,
         email: payload.email,
-        role: payload.role
+        role: payload.role,
+        auth0Sub: payload.auth0Sub,
+        customerId: payload.customerId
       });
 
       logAuditEvent('token_refreshed', payload.userId, ipAddress, {

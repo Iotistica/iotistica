@@ -25,6 +25,7 @@ import upgradesRouter from './routes/upgrades';
 import adminRouter from './routes/admin';
 import authRouter from './routes/auth';
 import internalRbacRouter from './routes/internal-rbac';
+import internalInvitesRouter from './routes/internal-invites';
 
 // Middleware
 import { authenticateAdmin } from './middleware/auth';
@@ -126,7 +127,8 @@ app.use('/api/admin', authenticateAdmin, adminRouter);
 app.use('/api/queue', authenticateAdmin, queueRouter);
 
 // Internal routes (protected by internal token)
-app.use('/api/internal', internalRbacRouter);  // Has its own verifyInternalToken middleware
+app.use('/api/internal', internalRbacRouter);      // Has its own verifyInternalToken middleware
+app.use('/api/internal', internalInvitesRouter);   // Invite management (same protection)
 
 // 404 handler
 app.use((req, res) => {

@@ -14,6 +14,7 @@ import logger from './utils/logger';
 // Import route modules
 import authRoutes from './routes/auth';
 import usersRoutes from './routes/users';
+import invitesRoutes from './routes/invites';
 import deviceStateRoutes from './routes/agent-state';
 import deviceLogsRoutes from './routes/agent-logs';
 import deviceMetricsRoutes from './routes/agent-metrics';
@@ -396,6 +397,9 @@ app.use(API_BASE, devicesRoutes);
 // User management and admin - moderate rate limiting + JWT auth
 app.use(`${API_BASE}/users`, jwtAuth, adminRateLimit, usersRoutes);
 app.use(`${API_BASE}/admin`, jwtAuth, adminRateLimit, adminRoutes);
+// Invites: accept is public (jwtValidate only), all other routes require jwtAuth
+// Global rate limit already applied at API_BASE above
+app.use(`${API_BASE}`, invitesRoutes);
 
 // Device data ingestion - high rate limits (supports 16Hz sensor data)
 app.use(API_BASE, deviceDataRateLimit, deviceLogsRoutes);

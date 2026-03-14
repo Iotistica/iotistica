@@ -43,6 +43,8 @@ import {
   AlertCircle,
   CheckCircle,
   Loader2,
+  Mail,
+  RotateCcw,
 } from 'lucide-react';
 import { buildApiUrl } from '../config/api';
 import { toast } from 'sonner';
@@ -55,6 +57,15 @@ interface User {
   isActive: boolean;
   createdAt: string;
   lastLoginAt?: string;
+}
+
+interface Invite {
+  id: number;
+  email: string;
+  role: string;
+  status: 'pending' | 'accepted' | 'revoked' | 'expired';
+  expires_at: string;
+  created_at: string;
 }
 
 const ROLES = {
@@ -81,6 +92,16 @@ export function UserManagementPage() {
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [deletingUser, setDeletingUser] = useState<User | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Invites state
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [isLoadingInvites, setIsLoadingInvites] = useState(true);
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+  const [isSendingInvite, setIsSendingInvite] = useState(false);
+  const [inviteFormData, setInviteFormData] = useState({
+    email: '',
+    role: 'viewer' as keyof typeof ROLES,
+  });
 
   // Form state
   const [formData, setFormData] = useState({
@@ -159,7 +180,145 @@ export function UserManagementPage() {
 
   useEffect(() => {
     fetchUsers();
+    fetchInvites();
   }, []);
+
+  // Fetch pending invites
+  const fetchInvites = async () => {
+    setIsLoadingInvites(true);
+    try {
+      const response = await withAuthRetry((token) =>
+        fetch(buildApiUrl('/api/v1/invites'), {
+          credentials: 'include',
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        })
+      );
+
+      if (!response.ok) return;
+
+      const data = await response.json();
+      setInvites(data.data || []);
+    } catch (error: any) {
+      console.error('Error fetching invites:', error);
+    } finally {
+      setIsLoadingInvites(false);
+    }
+  };
+
+  const handleInvite = () => {
+    setInviteFormData({ email: '', role: 'viewer' });
+    setInviteDialogOpen(true);
+  };
+
+  const handleSendInvite = async () => {
+    setIsSendingInvite(true);
+    try {
+      const response = await withAuthRetry((token) =>
+        fetch(buildApiUrl('/api/v1/invites'), {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(inviteFormData),
+        })
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to send invitation');
+      }
+
+      toast.success(`Invitation sent to ${inviteFormData.email}`);
+      setInviteDialogOpen(false);
+      fetchInvites();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to send invitation');
+    } finally {
+      setIsSendingInvite(false);
+    }
+  };
+
+  const handleResendInvite = async (invite: Invite) => {
+    try {
+      const response = await withAuthRetry((token) =>
+        fetch(buildApiUrl(`/api/v1/invites/${invite.id}/resend`), {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        })
+      );
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.message || 'Failed to resend invitation');
+      }
+
+      toast.success(`Invitation resent to ${invite.email}`);
+      fetchInvites();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to resend invitation');
+    }
+  };
+
+  const handleRevokeInvite = async (invite: Invite) => {
+    try {
+      const response = await withAuthRetry((token) =>
+        fetch(buildApiUrl(`/api/v1/invites/${invite.id}`), {
+          method: 'DELETE',
+          credentials: 'include',
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        })
+      );
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.message || 'Failed to revoke invitation');
+      }
+
+      toast.success(`Invitation for ${invite.email} revoked`);
+      fetchInvites();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to revoke invitation');
+    }
+  };
+
+  const getInviteStatusBadge = (status: Invite['status']) => {
+    switch (status) {
+      case 'pending':
+        return (
+          <Badge variant="outline" className="bg-yellow-100 text-yellow-700 border-yellow-200">
+            Pending
+          </Badge>
+        );
+      case 'accepted':
+        return (
+          <Badge variant="outline" className="bg-green-100 text-green-700 border-green-200">
+            Accepted
+          </Badge>
+        );
+      case 'revoked':
+        return (
+          <Badge variant="outline" className="bg-gray-100 text-gray-700 border-gray-200">
+            Revoked
+          </Badge>
+        );
+      case 'expired':
+        return (
+          <Badge variant="outline" className="bg-red-100 text-red-700 border-red-200">
+            Expired
+          </Badge>
+        );
+    }
+  };
 
   // Open create dialog
   const handleCreate = () => {
@@ -313,10 +472,16 @@ export function UserManagementPage() {
             Manage dashboard users and their permissions
           </p>
         </div>
-        <Button onClick={handleCreate}>
-          <UserPlus className="w-4 h-4 mr-2" />
-          Add User
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={handleInvite}>
+            <Mail className="w-4 h-4 mr-2" />
+            Invite User
+          </Button>
+          <Button onClick={handleCreate}>
+            <UserPlus className="w-4 h-4 mr-2" />
+            Add User
+          </Button>
+        </div>
       </div>
 
       {/* Users Table */}
@@ -400,6 +565,80 @@ export function UserManagementPage() {
                         >
                           <Trash2 className="w-4 h-4 text-red-600" />
                         </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Pending Invitations */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Pending Invitations</CardTitle>
+          <CardDescription>
+            Email invitations sent to new team members
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isLoadingInvites ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+            </div>
+          ) : invites.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              No invitations sent yet.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Expires</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {invites.map((invite) => (
+                  <TableRow key={invite.id}>
+                    <TableCell className="font-medium">{invite.email}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="capitalize">
+                        <Shield className="w-3 h-3 mr-1" />
+                        {ROLES[invite.role as keyof typeof ROLES] || invite.role}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{getInviteStatusBadge(invite.status)}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {formatDate(invite.expires_at)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        {invite.status === 'pending' && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="Resend invite"
+                              onClick={() => handleResendInvite(invite)}
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="Revoke invite"
+                              onClick={() => handleRevokeInvite(invite)}
+                            >
+                              <Trash2 className="w-4 h-4 text-red-600" />
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -539,6 +778,87 @@ export function UserManagementPage() {
                 </>
               ) : (
                 <>{editingUser ? 'Update' : 'Create'}</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Invite User Dialog */}
+      <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Invite a Team Member</DialogTitle>
+            <DialogDescription>
+              Send an email invitation. They will be prompted to sign in and join your workspace.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="invite-email">Email address</Label>
+              <Input
+                id="invite-email"
+                type="email"
+                value={inviteFormData.email}
+                onChange={(e) =>
+                  setInviteFormData({ ...inviteFormData, email: e.target.value })
+                }
+                placeholder="colleague@example.com"
+                disabled={isSendingInvite}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="invite-role">Role</Label>
+              <Select
+                value={inviteFormData.role}
+                onValueChange={(value) =>
+                  setInviteFormData({ ...inviteFormData, role: value as keyof typeof ROLES })
+                }
+                disabled={isSendingInvite}
+              >
+                <SelectTrigger id="invite-role">
+                  <SelectValue placeholder="Select role" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(ROLES).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      <div>
+                        <div className="font-medium">{label}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {ROLE_DESCRIPTIONS[value as keyof typeof ROLES]}
+                        </div>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setInviteDialogOpen(false)}
+              disabled={isSendingInvite}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSendInvite}
+              disabled={isSendingInvite || !inviteFormData.email}
+            >
+              {isSendingInvite ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <Mail className="mr-2 h-4 w-4" />
+                  Send Invitation
+                </>
               )}
             </Button>
           </DialogFooter>

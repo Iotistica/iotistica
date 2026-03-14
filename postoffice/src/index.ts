@@ -26,12 +26,13 @@ export class PostOffice {
     private baseUrl = 'http://localhost'
   ) {
     this.mailDefaults = { 
-      from: config.from || '"Iotistic Platform" <donotreply@iotistic.ca>' 
+      from: config.from || '"Iotistica Platform" <donotreply@iotistic.ca>' 
     };
     
     // Register built-in templates
     this.registerTemplate('VerifyEmail', templates.VerifyEmail);
     this.registerTemplate('UserSuspended', templates.UserSuspended);
+    this.registerTemplate('InviteUser', templates.InviteUser);
     
     // Initialize if configured
     if (this.isConfigured()) {

@@ -51,7 +51,7 @@ export const auth0Config = {
  * - Callback URL for redirect after login
  * - Scope for ID token + user info
  */
-export function getAuth0LoginUrl(): string {
+export function getAuth0LoginUrl(connection?: string): string {
   if (!AUTH0_DOMAIN || !AUTH0_CLIENT_ID) {
     throw new Error('Auth0 not configured - check VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID');
   }
@@ -61,8 +61,7 @@ export function getAuth0LoginUrl(): string {
     redirect_uri: AUTH0_CALLBACK_URL,
     response_type: 'code',
     scope: 'openid profile email',
-    // Force login screen only (no signup tab) - new signups go through provisioning API
-    screen_hint: 'login',
+    ...(connection && { connection }),
   });
 
   return `https://${AUTH0_DOMAIN}/authorize?${params.toString()}`;

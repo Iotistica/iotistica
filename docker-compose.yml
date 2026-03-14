@@ -152,6 +152,8 @@ services:
             - TAILSCALE_ENABLED=false
             - MQTT_MONITOR_URL=${MQTT_MONITOR_URL:-http://mqtt-monitor:3500}
             - POSTOFFICE_URL=${POSTOFFICE_URL:-http://postoffice:3300}
+            - PROVISIONING_API_URL=${PROVISIONING_API_URL:-http://host.docker.internal:3100}
+            - INTERNAL_AUTH_TOKEN=${INTERNAL_AUTH_TOKEN}
             # Virtual Agent K8s Configuration (local Docker Desktop)
             - KUBECONFIG=/home/appuser/.kube/config
             - VIRTUAL_AGENT_NAMESPACE=${VIRTUAL_AGENT_NAMESPACE:-virtual-agents}
@@ -218,30 +220,6 @@ services:
             start_period: 40s
         networks:
             - iotistica-net
-
-    # ollama:
-    #     image: ollama/ollama:latest
-    #     container_name: iotistic-ollama
-    #     restart: unless-stopped
-    #     ports:
-    #         - "${OLLAMA_PORT_EXT:-11434}:11434"
-    #     volumes:
-    #         - ollama-data:/root/.ollama
-    #     environment:
-    #         - OLLAMA_HOST=0.0.0.0
-    #     healthcheck:
-    #         test: ["CMD", "ollama", "list"]
-    #         interval: 30s
-    #         timeout: 10s
-    #         retries: 3
-    #         start_period: 60s
-    #     networks:
-    #         - iotistica-net
-    #     logging:
-    #         driver: "json-file"
-    #         options:
-    #             max-size: "10m"
-    #             max-file: "3"
 
     mosquitto:
         image: iegomez/mosquitto-go-auth
@@ -515,9 +493,9 @@ services:
             - PORT=3300
             - HOST=0.0.0.0
             - EMAIL_ENABLED=${EMAIL_ENABLED:-true}
-            - EMAIL_FROM=${EMAIL_FROM:-"Iotistic Platform <noreply@iotistic.ca>"}
+            - EMAIL_FROM=${EMAIL_FROM:-"Iotistica Platform <noreply@iotistica.com>"}
             - EMAIL_DEBUG=${EMAIL_DEBUG:-false}
-            - BASE_URL=${BASE_URL:-https://iotistic.ca}
+            - BASE_URL=${BASE_URL:-https://iotistica.com}
             - SMTP_HOST=${SMTP_HOST}
             - SMTP_PORT=${SMTP_PORT:-587}
             - SMTP_SECURE=${SMTP_SECURE:-false}
@@ -526,13 +504,6 @@ services:
             - REDIS_HOST=${REDIS_HOST:-redis}
             - REDIS_PORT=${REDIS_PORT:-6379}
             - REDIS_PASSWORD=${REDIS_PASSWORD}
-            # TigerData Cloud TimescaleDB
-            - DB_HOST=${DB_HOST:-bg4k3yxway.pcwz234dvp.tsdb.cloud.timescale.com}
-            - DB_PORT=${DB_PORT:-30692}
-            - DB_NAME=${DB_NAME:-tsdb}
-            - DB_USER=${DB_USER:-tsdbadmin}
-            - DB_PASSWORD=${DB_PASSWORD:-w2qm8tm693xd3b9v}
-            - DB_SSL=true
             - LOG_LEVEL=${POSTOFFICE_LOG_LEVEL:-info}
         depends_on:
             redis:

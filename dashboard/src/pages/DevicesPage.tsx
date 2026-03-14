@@ -939,10 +939,10 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
         {/* Tabs for Devices and Profiles */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-transparent w-fit h-auto p-0 rounded-none justify-start gap-12 border-0">
+          <TabsList className="bg-transparent w-fit h-auto p-0 rounded-none justify-start gap-20 border-0">
             <TabsTrigger 
               value="devices"
-              className="!flex-none !border-0 bg-transparent rounded-none hover:bg-transparent px-4 pb-3 text-base"
+              className="!flex-none !border-0 bg-transparent rounded-none hover:bg-transparent px-0 pb-2 text-2xl"
               style={
                 activeTab === 'devices'
                   ? {
@@ -954,10 +954,9 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                       textDecorationColor: 'hsl(var(--foreground))',
                     }
                   : {
-                      color: 'hsl(var(--muted-foreground))',
+                      color: 'hsl(var(--foreground))',
                       fontWeight: 400,
                       textDecoration: 'none',
-                      opacity: 0.8,
                     }
               }
             >
@@ -965,7 +964,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             </TabsTrigger>
             <TabsTrigger 
               value="profiles"
-              className="!flex-none !border-0 bg-transparent rounded-none hover:bg-transparent px-4 pb-3 text-base"
+              className="!flex-none !border-0 bg-transparent rounded-none hover:bg-transparent px-0 pb-2 text-2xl"
               style={
                 activeTab === 'profiles'
                   ? {
@@ -977,10 +976,9 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                       textDecorationColor: 'hsl(var(--foreground))',
                     }
                   : {
-                      color: 'hsl(var(--muted-foreground))',
+                      color: 'hsl(var(--foreground))',
                       fontWeight: 400,
                       textDecoration: 'none',
-                      opacity: 0.8,
                     }
               }
             >

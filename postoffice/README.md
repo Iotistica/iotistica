@@ -26,6 +26,7 @@ Standalone queue-based email delivery service for the Iotistic IoT platform. Han
   - Database audit logging
   - Email delivery statistics
   - Real-time job status tracking
+  - Optional Postgres-free mode (`EMAIL_LOG_BACKEND=none`)
 
 - **REST API**
   - Send individual emails
@@ -142,6 +143,16 @@ npm start
 | `REDIS_PORT` | Redis port | `6379` | No |
 | `REDIS_PASSWORD` | Redis password | - | No |
 
+#### Email Log Backend
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `EMAIL_LOG_BACKEND` | Email log persistence backend (`postgres` or `none`) | `none` | No |
+
+When `EMAIL_LOG_BACKEND=none`, PostOffice runs without any PostgreSQL connection.
+Email sending, queueing, retries, and Bull Board remain available.
+`/api/email/logs*` endpoints return `503` because persistent audit logs are disabled.
+
 #### Database Configuration
 
 | Variable | Description | Default | Required |
@@ -152,6 +163,8 @@ npm start
 | `DB_USER` | Database user | `postgres` | No |
 | `DB_PASSWORD` | Database password | `postgres` | Yes |
 | `LOG_LEVEL` | Logging level | `info` | No |
+
+These DB variables are only required when `EMAIL_LOG_BACKEND=postgres`.
 
 ## API Reference
 

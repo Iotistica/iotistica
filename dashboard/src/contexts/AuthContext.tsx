@@ -15,6 +15,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (accessToken: string, refreshToken: string, user: User) => void;
+  loginWithAuth0Credentials: (email: string, password: string) => Promise<void>;
   logout: () => void;
   refreshToken: () => Promise<boolean>;
 }
@@ -161,6 +162,78 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(userData);
   };
 
+  const loginWithAuth0Credentials = async (email: string, password: string): Promise<void> => {
+    const auth0Domain = import.meta.env.VITE_AUTH0_DOMAIN;
+    const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID;
+    const audience = import.meta.env.VITE_AUTH0_AUDIENCE;
+
+    if (!auth0Domain || !clientId) {
+      throw new Error('Auth0 configuration missing');
+    }
+
+    // Use Resource Owner Password Grant to get tokens from Auth0
+    const response = await fetch(`https://${auth0Domain}/oauth/token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        client_id: clientId,
+        username: email,
+        password,
+        audience,
+        grant_type: 'http://auth0.com/oauth/grant-type/password-realm',
+        realm: 'Username-Password-Authentication',
+        scope: 'openid profile email offline_access',
+      }),
+    });
+
+    let data: any = null;
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error('Failed to parse Auth0 response');
+    }
+
+    if (!response.ok) {
+      throw new Error(data?.error_description || data?.error || 'Authentication failed');
+    }
+
+    if (!data?.access_token) {
+      throw new Error('No access token returned from Auth0');
+    }
+
+    // Fetch user info from Auth0
+    const userInfoResponse = await fetch(`https://${auth0Domain}/userinfo`, {
+      headers: {
+        Authorization: `Bearer ${data.access_token}`,
+      },
+    });
+
+    let userInfo: any = null;
+    try {
+      userInfo = await userInfoResponse.json();
+    } catch {
+      throw new Error('Failed to fetch user info');
+    }
+
+    if (!userInfoResponse.ok) {
+      throw new Error('Failed to fetch user information from Auth0');
+    }
+
+    // Create local user object from Auth0 info
+    const user: User = {
+      id: 0,
+      username: userInfo.email || userInfo.sub,
+      email: userInfo.email,
+      name: userInfo.name,
+      role: 'user',
+      isActive: true,
+    };
+
+    login(data.access_token, data.refresh_token || '', user);
+  };
+
   const logout = async () => {
     const accessToken = localStorage.getItem('accessToken');
     const refreshTokenValue = localStorage.getItem('refreshToken');
@@ -247,6 +320,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         isLoading,
         login,
+        loginWithAuth0Credentials,
         logout,
         refreshToken,
       }}

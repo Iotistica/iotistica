@@ -12,8 +12,6 @@ const bullAdapter_1 = require("@bull-board/api/bullAdapter");
 const express_2 = require("@bull-board/express");
 const index_1 = require("./index");
 const logger_1 = __importDefault(require("./utils/logger"));
-const db_1 = require("./db");
-const email_logger_1 = require("./email-logger");
 const app = (0, express_1.default)();
 const PORT = parseInt(process.env.PORT || '3300');
 const HOST = process.env.HOST || '0.0.0.0';
@@ -21,7 +19,7 @@ app.use((0, cors_1.default)());
 app.use(express_1.default.json());
 const emailConfig = {
     enabled: process.env.EMAIL_ENABLED !== 'false',
-    from: process.env.EMAIL_FROM || '"Iotistic Platform" <noreply@iotistic.cloud>',
+    from: process.env.EMAIL_FROM || '"Iotistica Platform" <noreply@iotistica.com>',
     debug: process.env.EMAIL_DEBUG === 'true',
 };
 if (process.env.SMTP_HOST) {
@@ -42,7 +40,7 @@ else if (process.env.AWS_SES_REGION) {
         fromArn: process.env.AWS_SES_FROM_ARN,
     };
 }
-const baseUrl = process.env.BASE_URL || 'https://iotistic.ca';
+const baseUrl = process.env.BASE_URL || 'https://iotistica.com';
 const postOffice = new index_1.PostOffice(emailConfig, logger_1.default, baseUrl);
 const redisConfig = {
     host: process.env.REDIS_HOST || 'redis',
@@ -71,7 +69,6 @@ emailQueue.process(async (job) => {
     });
     try {
         await postOffice.send(user, templateName, context);
-        await (0, email_logger_1.logEmailSent)(String(job.id));
         logger_1.default.info(`Email sent successfully`, {
             jobId: job.id,
             template: templateName,
@@ -79,7 +76,6 @@ emailQueue.process(async (job) => {
         });
     }
     catch (error) {
-        await (0, email_logger_1.logEmailFailed)(String(job.id), error.message);
         logger_1.default.error(`Failed to send email`, {
             jobId: job.id,
             template: templateName,
@@ -150,13 +146,6 @@ app.post('/api/email/send', async (req, res) => {
             user,
             templateName,
             context: context || {},
-        });
-        await (0, email_logger_1.logEmailQueued)({
-            jobId: String(job.id),
-            recipientEmail: user.email,
-            recipientName: user.name,
-            templateName,
-            metadata: context,
         });
         res.json({
             message: 'Email queued successfully',
@@ -229,60 +218,6 @@ app.post('/api/email/retry/:jobId', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
-app.get('/api/email/logs', async (req, res) => {
-    try {
-        const limit = parseInt(req.query.limit) || 100;
-        const logs = await (0, email_logger_1.getRecentEmailLogs)(limit);
-        res.json({
-            count: logs.length,
-            logs,
-        });
-    }
-    catch (error) {
-        logger_1.default.error('Failed to get email logs', { error: error.message });
-        res.status(500).json({ error: error.message });
-    }
-});
-app.get('/api/email/logs/:jobId', async (req, res) => {
-    try {
-        const { jobId } = req.params;
-        const log = await (0, email_logger_1.getEmailLog)(jobId);
-        if (!log) {
-            return res.status(404).json({ error: 'Email log not found' });
-        }
-        res.json(log);
-    }
-    catch (error) {
-        logger_1.default.error('Failed to get email log', { error: error.message });
-        res.status(500).json({ error: error.message });
-    }
-});
-app.get('/api/email/logs/recipient/:email', async (req, res) => {
-    try {
-        const { email } = req.params;
-        const limit = parseInt(req.query.limit) || 50;
-        const logs = await (0, email_logger_1.getEmailLogsByRecipient)(email, limit);
-        res.json({
-            count: logs.length,
-            recipient: email,
-            logs,
-        });
-    }
-    catch (error) {
-        logger_1.default.error('Failed to get email logs by recipient', { error: error.message });
-        res.status(500).json({ error: error.message });
-    }
-});
-app.get('/api/email/logs/stats', async (req, res) => {
-    try {
-        const stats = await (0, email_logger_1.getEmailStats)();
-        res.json(stats);
-    }
-    catch (error) {
-        logger_1.default.error('Failed to get email stats', { error: error.message });
-        res.status(500).json({ error: error.message });
-    }
-});
 app.get('/', (req, res) => {
     res.json({
         service: 'iotistic-postoffice',
@@ -295,10 +230,6 @@ app.get('/', (req, res) => {
             stats: '/api/email/stats',
             failed: '/api/email/failed',
             retry: 'POST /api/email/retry/:jobId',
-            logs: '/api/email/logs',
-            logsByJobId: '/api/email/logs/:jobId',
-            logsByRecipient: '/api/email/logs/recipient/:email',
-            logsStats: '/api/email/logs/stats',
             queueUI: '/admin/queues',
         },
     });
@@ -339,14 +270,6 @@ let server;
 async function startServer() {
     try {
         logger_1.default.info('Starting PostOffice service...');
-        (0, db_1.initializeDatabase)();
-        const dbConnected = await (0, db_1.testConnection)();
-        if (dbConnected) {
-            logger_1.default.info('Database connection successful');
-        }
-        else {
-            logger_1.default.warn('Database connection failed - email logging will be unavailable');
-        }
         const redisClient = new ioredis_1.default(redisConfig);
         await redisClient.ping();
         redisClient.disconnect();

@@ -80,7 +80,10 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   };
 
   const connectWebSocket = (skipAutoConnect = false) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    // Prevent duplicate connections: bail out if already CONNECTING or OPEN
+    if (wsRef.current &&
+        (wsRef.current.readyState === WebSocket.CONNECTING ||
+         wsRef.current.readyState === WebSocket.OPEN)) {
       return;
     }
     
@@ -155,6 +158,14 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         xtermRef.current.writeln('\r\n\x1b[31m✗ Connection lost\x1b[0m');
       }
       isDisconnectingRef.current = false;
+        // Discard any input that was buffered but never sent (WS was not OPEN when
+        // flush timer fired). Keeping stale input would prepend it to the next
+        // keystroke on reconnect, making one character appear twice.
+        if (flushTimerRef.current) {
+          clearTimeout(flushTimerRef.current);
+          flushTimerRef.current = null;
+        }
+        inputBufferRef.current = '';
     };
   };
 
@@ -773,7 +784,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       // Connect WebSocket (socket's onopen will handle reconnection)
       connectWebSocket(true); // Pass true to skip auto-connect logic
     }
-  }, [deviceUuid, user]);
+    }, [deviceUuid, user?.id]);
 
   return (
     <div className="flex-1 bg-background overflow-auto">

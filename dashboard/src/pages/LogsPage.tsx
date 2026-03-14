@@ -7,7 +7,7 @@
  * - Log level (ERROR, WARN, INFO)
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -300,10 +300,10 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
   };
 
   const downloadLogs = () => {
-    const logText = logs.map(log => 
+    const logText = sortedFilteredLogs.map(log =>
       `[${formatTimestamp(log.timestamp)}] [${log.service_name}] ${log.message}`
     ).join('\n');
-    
+
     const blob = new Blob([logText], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -333,22 +333,34 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
     return `${dateStr} ${time}.${ms}`;
   };
 
-  // Filter logs by date if date filters are set
-  const filteredLogs = logs.filter(log => {
-    if (dateFrom) {
-      const logDate = new Date(log.timestamp);
-      // Parse dateFrom as UTC midnight to match log timestamps
-      const fromDate = new Date(dateFrom + 'T00:00:00.000Z');
-      if (logDate < fromDate) return false;
-    }
-    if (dateTo) {
-      const logDate = new Date(log.timestamp);
-      // Parse dateTo as UTC end-of-day to match log timestamps
-      const toDate = new Date(dateTo + 'T23:59:59.999Z');
-      if (logDate > toDate) return false;
-    }
-    return true;
-  });
+  // Filter and sort logs chronologically for deterministic rendering.
+  const sortedFilteredLogs = useMemo(() => {
+    return logs
+      .filter((log) => {
+        if (dateFrom) {
+          const logDate = new Date(log.timestamp);
+          // Parse dateFrom as UTC midnight to match log timestamps
+          const fromDate = new Date(dateFrom + 'T00:00:00.000Z');
+          if (logDate < fromDate) return false;
+        }
+        if (dateTo) {
+          const logDate = new Date(log.timestamp);
+          // Parse dateTo as UTC end-of-day to match log timestamps
+          const toDate = new Date(dateTo + 'T23:59:59.999Z');
+          if (logDate > toDate) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const timeDiff = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+        if (timeDiff !== 0) return timeDiff;
+
+        // Stable secondary ordering for identical timestamps.
+        const aId = a.id ?? 0;
+        const bId = b.id ?? 0;
+        return aId - bId;
+      });
+  }, [logs, dateFrom, dateTo]);
 
 
   return (
@@ -440,7 +452,7 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
                   variant="outline"
                   size="sm"
                   onClick={downloadLogs}
-                  disabled={filteredLogs.length === 0}
+                  disabled={sortedFilteredLogs.length === 0}
                 >
                   <Download className="h-4 w-4" />
                 </Button>
@@ -535,7 +547,7 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
 
           {/* Log Count Badge */}
           <Badge className="bg-blue-600 dark:bg-blue-900 text-white dark:text-blue-100 border border-blue-700 dark:border-blue-800 font-medium">
-            {filteredLogs.length} lines {mode === 'live' ? '(last 500)' : ''}
+            {sortedFilteredLogs.length} lines {mode === 'live' ? '(last 500)' : ''}
           </Badge>
         </div>
       </CardHeader>
@@ -551,13 +563,13 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
             minHeight: '400px',
           }}
         >
-          {filteredLogs.length === 0 && !isLoading && (
+          {sortedFilteredLogs.length === 0 && !isLoading && (
             <div className="text-gray-500 text-center py-8">
               No logs available
             </div>
           )}
           
-          {filteredLogs.map((log, index) => {
+          {sortedFilteredLogs.map((log, index) => {
             const isActualError = /\[error\]|\[crit\]|\[alert\]|\[emerg\]|ERROR|FATAL|CRITICAL/i.test(log.message) || 
                                   log.level?.toLowerCase() === 'error';
             const isWarning = /\[warn\]|WARNING/i.test(log.message) || 
@@ -604,7 +616,7 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
             );
           })}
           
-          {isLoading && filteredLogs.length === 0 && (
+          {isLoading && sortedFilteredLogs.length === 0 && (
             <div className="text-gray-500 text-center py-8">
               Loading logs...
             </div>

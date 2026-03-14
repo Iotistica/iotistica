@@ -323,12 +323,16 @@ export function generateAccessToken(user: {
   username: string;
   email: string;
   role: string;
+  auth0Sub?: string;
+  customerId?: string;
 }): string {
   const payload: JWTPayload = {
     userId: user.id,
     username: user.username,
     email: user.email,
     role: user.role,
+    auth0Sub: user.auth0Sub,
+    customerId: user.customerId,
     type: 'access'
   };
 
@@ -347,12 +351,16 @@ export function generateRefreshToken(user: {
   username: string;
   email: string;
   role: string;
+  auth0Sub?: string;
+  customerId?: string;
 }): string {
   const payload: JWTPayload = {
     userId: user.id,
     username: user.username,
     email: user.email,
     role: user.role,
+    auth0Sub: user.auth0Sub,
+    customerId: user.customerId,
     type: 'refresh'
   };
 
