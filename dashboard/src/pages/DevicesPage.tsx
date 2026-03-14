@@ -262,15 +262,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
       const getSensorIdentity = (sensor: any) => {
         const explicitId = sensor?.uuid || sensor?.configId || sensor?.id;
-        if (explicitId) {
-          return String(explicitId);
-        }
-
-        // Fallback identity for pending vs deployed reconciliation when IDs differ.
-        // Example: validateOnly/pending may have a temp ID while deployed has DB UUID.
-        const protocol = String(sensor?.protocol || '').trim().toLowerCase();
-        const name = String(sensor?.name || '').trim().toLowerCase();
-        return `${protocol}:${name}`;
+        return explicitId ? String(explicitId) : '';
       };
 
       const getSensorLogicalKey = (sensor: any) => {
@@ -278,16 +270,32 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         const name = String(sensor?.name || '').trim().toLowerCase();
         return `${protocol}:${name}`;
       };
-      const hasPendingChanges = (pendingSensor: any, deployedSensor: any) => {
+
+      const getPendingDiffReasons = (pendingSensor: any, deployedSensor: any): string[] => {
         const pendingEnabled = pendingSensor.enabled !== undefined ? pendingSensor.enabled : true;
         const deployedEnabled = deployedSensor.enabled !== undefined ? deployedSensor.enabled : true;
+        const pendingDataPoints = pendingSensor.dataPoints ?? pendingSensor.data_points;
+        const deployedDataPoints = deployedSensor.dataPoints ?? deployedSensor.data_points;
+        const reasons: string[] = [];
 
-        return pendingSensor.name !== deployedSensor.name ||
-          pendingSensor.protocol !== deployedSensor.protocol ||
-          pendingEnabled !== deployedEnabled ||
-          (pendingSensor.pollInterval ?? null) !== (deployedSensor.pollInterval ?? null) ||
-          JSON.stringify(pendingSensor.connection || {}) !== JSON.stringify(deployedSensor.connection || {}) ||
-          JSON.stringify(pendingSensor.dataPoints || []) !== JSON.stringify(deployedSensor.dataPoints || []);
+        if (pendingSensor.name !== deployedSensor.name) reasons.push('name_mismatch');
+        if (pendingSensor.protocol !== deployedSensor.protocol) reasons.push('protocol_mismatch');
+        if (pendingEnabled !== deployedEnabled) reasons.push('enabled_mismatch');
+        if ((pendingSensor.pollInterval ?? null) !== (deployedSensor.pollInterval ?? null)) reasons.push('poll_interval_mismatch');
+        if (JSON.stringify(pendingSensor.connection || {}) !== JSON.stringify(deployedSensor.connection || {})) reasons.push('connection_mismatch');
+        // Only compare data points when pending payload explicitly includes them.
+        // Some target-state payloads omit data points for unchanged endpoints.
+        if (pendingDataPoints !== undefined && pendingDataPoints !== null) {
+          if (JSON.stringify(pendingDataPoints || []) !== JSON.stringify(deployedDataPoints || [])) {
+            reasons.push('data_points_mismatch');
+          }
+        }
+
+        return reasons;
+      };
+
+      const hasPendingChanges = (pendingSensor: any, deployedSensor: any) => {
+        return getPendingDiffReasons(pendingSensor, deployedSensor).length > 0;
       };
       
       
@@ -352,7 +360,8 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
       const pendingSensors = pendingEndpoints
         .filter((s: any) => {
-          const matchingDevice = devices.find((d: any) => getSensorIdentity(d) === getSensorIdentity(s));
+          const pendingIdentity = getSensorIdentity(s);
+          const matchingDevice = devices.find((d: any) => getSensorIdentity(d) === pendingIdentity);
 
           if (!matchingDevice) {
             return true;
@@ -376,7 +385,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             protocol: s.protocol,
             connected: false,
             connection: s.connection, // Include connection config
-            dataPoints: s.dataPoints, // Include data points
+            dataPoints: s.dataPoints || s.data_points, // Include data points (camelCase/snake_case)
             pollInterval: s.pollInterval,
             deploymentStatus: s.deploymentStatus || 'draft',
             lastDeployedAt: null,

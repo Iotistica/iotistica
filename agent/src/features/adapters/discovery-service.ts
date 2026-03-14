@@ -131,6 +131,18 @@ export class DiscoveryService extends EventEmitter {
   // Map: endpointUrl → discovered device with data_points
   private discoveredDevicesCache: Map<string, DiscoveredDevice> = new Map();
 
+  // Track whether a discovery run is currently in progress
+  private discoveryRunning: boolean = false;
+
+  /**
+   * Returns true if a discovery run is currently in progress.
+   * Used by the adapter reload logic to defer reloads until discovery writes
+   * data_points to the database, avoiding the empty-dataPoints race condition.
+   */
+  public isDiscoveryRunning(): boolean {
+    return this.discoveryRunning;
+  }
+
   /**
    * Create discovery service
    * 
@@ -282,6 +294,17 @@ export class DiscoveryService extends EventEmitter {
   async runDiscovery(options: DiscoveryOptions): Promise<DiscoveredDevice[]> {
     const { trigger, validate = false, forceRun = false, protocols } = options;
     const traceId = crypto.randomUUID();
+
+    this.discoveryRunning = true;
+    try {
+      return await this._runDiscovery(options, traceId);
+    } finally {
+      this.discoveryRunning = false;
+    }
+  }
+
+  private async _runDiscovery(options: DiscoveryOptions, traceId: string): Promise<DiscoveredDevice[]> {
+    const { trigger, validate = false, forceRun = false, protocols } = options;
 
     this.logger?.infoSync('Discovery runDiscovery called', {
       component: LogComponents.discovery,

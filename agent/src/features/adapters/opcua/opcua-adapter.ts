@@ -1368,6 +1368,9 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
     // If subscription is active, data comes via events - skip polling
     if (sessionWrapper.subscription && device.connection.useSubscription) {
       this.logger.debug(`Subscription active for ${deviceName} - skipping poll`);
+      // Keep runtime health fresh in subscription mode. Without this, lastSeen and
+      // communicationQuality stay stale even when monitored item updates are flowing.
+      this.recordPollResult(deviceName, true, 0, 0);
       return [];
     }
 
@@ -1391,6 +1394,8 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       attributeId: AttributeIds.Value,
     }));
 
+    const readStartedAt = Date.now();
+
     // Read all nodes with automatic retry for transient errors
     const dataValues: DataValue[] = await this.lock(deviceName, () => 
       this.readWithRetry(session, nodesToRead)
@@ -1399,6 +1404,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
     // Convert to SensorDataPoint format
     const results: SensorDataPoint[] = [];
     const timestamp = new Date().toISOString();
+    let goodValueCount = 0;
 
     for (let i = 0; i < validDataPoints.length; i++) {
       const dp = validDataPoints[i];
@@ -1459,7 +1465,12 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
         quality: 'GOOD' as const,
         nodeType: 'metric',
       });
+
+      goodValueCount++;
     }
+
+    // Mark poll success so endpoint health reports lastSeen/connected/quality correctly.
+    this.recordPollResult(deviceName, goodValueCount > 0, Date.now() - readStartedAt, goodValueCount);
 
     return results;
   }

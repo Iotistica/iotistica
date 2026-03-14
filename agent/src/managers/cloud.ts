@@ -1426,9 +1426,6 @@ export class CloudSync extends EventEmitter {
 				...optimizationDetails,
 				transport,
 				reportKeys: Object.keys(reportToSend[deviceInfo.uuid] || {}),
-				// Count of endpoints included in THIS payload under config.endpoints.
-				// This can be 0 when config is unchanged and omitted for bandwidth optimization.
-				endpointCount: reportToSend[deviceInfo.uuid]?.config?.endpoints?.length || 0,
 				// Count of endpoints with runtime health included in this report.
 				endpointHealthCount,
 				// Extra diagnostics to avoid ambiguity between config payload and runtime health inventory.

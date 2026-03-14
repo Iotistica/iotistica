@@ -269,25 +269,25 @@ services:
         networks:
             - iotistica-net
 
-    emqx:
-        image: emqx/emqx:latest
-        container_name: iotistic-emqx
-        restart: unless-stopped
-        ports:
-            - "${EMQX_MQTT_PORT_EXT:-1884}:1883"   # EMQX MQTT
-            - "${EMQX_WS_PORT_EXT:-8084}:8083"     # EMQX WebSocket
-            - "${EMQX_DASHBOARD_PORT_EXT:-18084}:18083"  # EMQX Dashboard
-        environment:
-            - EMQX_DASHBOARD__DEFAULT_USERNAME=${EMQX_DASHBOARD_USER:-admin}
-            - EMQX_DASHBOARD__DEFAULT_PASSWORD=${EMQX_DASHBOARD_PASSWORD:-public}
-        volumes:
-            - ./emqx/emqx.conf:/opt/emqx/etc/emqx.conf:ro
-            - emqx-data:/opt/emqx/data
-        depends_on:
-            api:
-                condition: service_healthy
-        networks:
-            - iotistica-net
+    # emqx:
+    #     image: emqx/emqx:latest
+    #     container_name: iotistic-emqx
+    #     restart: unless-stopped
+    #     ports:
+    #         - "${EMQX_MQTT_PORT_EXT:-1884}:1883"   # EMQX MQTT
+    #         - "${EMQX_WS_PORT_EXT:-8084}:8083"     # EMQX WebSocket
+    #         - "${EMQX_DASHBOARD_PORT_EXT:-18084}:18083"  # EMQX Dashboard
+    #     environment:
+    #         - EMQX_DASHBOARD__DEFAULT_USERNAME=${EMQX_DASHBOARD_USER:-admin}
+    #         - EMQX_DASHBOARD__DEFAULT_PASSWORD=${EMQX_DASHBOARD_PASSWORD:-public}
+    #     volumes:
+    #         - ./emqx/emqx.conf:/opt/emqx/etc/emqx.conf:ro
+    #         - emqx-data:/opt/emqx/data
+    #     depends_on:
+    #         api:
+    #             condition: service_healthy
+    #     networks:
+    #         - iotistica-net
     
 
     # VPN Services - Commented out until TypeScript code is complete
@@ -370,7 +370,7 @@ services:
         restart: unless-stopped
         command: sh -c "python web_gui.py & python opcua_simulator.py"
         environment:
-            - PROFILE=${OPCUA_PROFILE:-testfactory}
+            - PROFILE=${OPCUA_PROFILE:-factory}
             - API_URL=http://api:3002
             - API_KEY=${OPCUA_API_KEY}  # Required: API key from api_keys table
             - WEB_PORT=5002

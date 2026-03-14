@@ -444,12 +444,11 @@ export class FeatureInitializer {
     // 2. ConfigManager after direct-connection endpoints (slaveId only) are added
     this.features.discoveryService.on('discovery-complete', async (data: any) => {
 
-      // Reload protocol adapters and Sensor Publish for manual/scheduled discovery
-      // For config-change triggers, wait for reconciliation-complete instead to avoid race conditions
-      // - first_boot: Initial discovery scan
-      // - manual: User-triggered discovery
-      // - config-change: Skip here, reload after reconciliation completes
-      const shouldReload = data.trigger !== 'config-change' && data.savedCount > 0;
+      // Reload whenever discovery actually wrote data to the database.
+      // For config-change: reconciliation-complete fires first (before discovery finishes),
+      // so adapters get started with empty data_points. discovery-complete fires AFTER
+      // discovery writes the real data_points — this is the only correct moment to reload.
+      const shouldReload = data.savedCount > 0;
       
       if (shouldReload) {
         try {
@@ -513,9 +512,20 @@ export class FeatureInitializer {
       note: 'Sensor Publish will reload automatically when discovery finds new enabled endpoints'
     });
 
-    // Listen for reconciliation-complete to reload after config changes (avoids race with discovery)
+    // Listen for reconciliation-complete to reload after config changes.
+    // IMPORTANT: If discovery is currently running (e.g., a new OPC-UA device was just added),
+    // we must NOT reload here — the DB still has empty data_points at this point.
+    // discovery-complete will fire once discovery writes the real data_points and will
+    // handle the reload at that point.
     if (this.context.stateReconciler) {
       this.context.stateReconciler.on('reconciliation-complete', async () => {
+        if (this.features.discoveryService?.isDiscoveryRunning()) {
+          logger.infoSync('Skipping adapter reload on reconciliation-complete — discovery in progress; will reload on discovery-complete', {
+            component: LogComponents.agent
+          });
+          return;
+        }
+
         try {
           logger.infoSync('Reloading protocol adapters after reconciliation complete', {
             component: LogComponents.agent,
