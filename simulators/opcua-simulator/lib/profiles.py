@@ -1,5 +1,5 @@
 """
-Sensor profile loading from JSON configuration files and API
+Device profile loading from JSON configuration files and API
 """
 import json
 import logging
@@ -10,16 +10,16 @@ from typing import List, Dict, Any, Optional
 logger = logging.getLogger(__name__)
 
 
-class SensorProfile:
-    """Defines a collection of sensor groups loaded from JSON"""
+class DeviceProfile:
+    """Defines a collection of device groups loaded from JSON"""
     
-    def __init__(self, name: str, description: str, sensors: List[Dict[str, Any]]):
+    def __init__(self, name: str, description: str, devices: List[Dict[str, Any]]):
         self.name = name
         self.description = description
-        self.sensors = sensors
+        self.devices = devices
     
     @classmethod
-    def from_json(cls, filepath: Path) -> 'SensorProfile':
+    def from_json(cls, filepath: Path) -> 'DeviceProfile':
         """Load profile from JSON file"""
         try:
             with open(filepath, 'r') as f:
@@ -28,22 +28,42 @@ class SensorProfile:
             # Validate required fields
             if 'name' not in data:
                 raise ValueError(f"Profile missing 'name' field: {filepath}")
-            if 'sensors' not in data:
-                raise ValueError(f"Profile missing 'sensors' field: {filepath}")
+            if 'devices' not in data:
+                raise ValueError(f"Profile missing 'devices' field: {filepath}")
             
-            # Validate each sensor group
-            for sensor_group in data['sensors']:
+            # Validate each device group
+            for device_group in data['devices']:
                 required = {'folder', 'prefix', 'model', 'count'}
-                missing = required - set(sensor_group.keys())
+                missing = required - set(device_group.keys())
                 if missing:
-                    raise ValueError(f"Sensor group missing fields {missing}: {sensor_group}")
+                    raise ValueError(f"Device group missing fields {missing}: {device_group}")
+
+                # Enforce strict stateful behavior config schema.
+                config = device_group.get('config')
+                if not isinstance(config, dict):
+                    raise ValueError(f"Device group config must be an object: {device_group}")
+
+                active_state = config.get('active_state')
+                states = config.get('states')
+                if not isinstance(active_state, str) or not active_state.strip():
+                    raise ValueError(
+                        f"Device group config requires non-empty 'active_state': {device_group}"
+                    )
+                if not isinstance(states, dict) or not states:
+                    raise ValueError(
+                        f"Device group config requires non-empty 'states' object: {device_group}"
+                    )
+                if active_state not in states:
+                    raise ValueError(
+                        f"active_state '{active_state}' not found in states: {device_group}"
+                    )
             
             logger.info(f"Loaded profile '{data['name']}' from {filepath.name}")
             
             return cls(
                 name=data['name'],
                 description=data.get('description', ''),
-                sensors=data['sensors']
+                devices=data['devices']
             )
             
         except json.JSONDecodeError as e:
@@ -69,14 +89,14 @@ def _get_profiles_dir() -> Path:
     raise FileNotFoundError(f"Profiles directory not found. Expected at: {lib_dir.parent / 'profiles'}")
 
 
-def load_all_profiles() -> Dict[str, SensorProfile]:
+def load_all_profiles() -> Dict[str, DeviceProfile]:
     """Load all JSON profiles from profiles directory"""
     profiles = {}
     profiles_dir = _get_profiles_dir()
     
     for json_file in profiles_dir.glob('*.json'):
         try:
-            profile = SensorProfile.from_json(json_file)
+            profile = DeviceProfile.from_json(json_file)
             # Use filename without .json as key (e.g., factory.json -> factory)
             profile_key = json_file.stem.lower()
             profiles[profile_key] = profile
@@ -99,7 +119,7 @@ except Exception as e:
     PROFILES = {}
 
 
-def get_profile(name: str) -> SensorProfile:
+def get_profile(name: str) -> DeviceProfile:
     """Get profile by name (case-insensitive)"""
     name = name.lower()
     if name not in PROFILES:
@@ -113,7 +133,7 @@ def list_profiles() -> List[str]:
     return list(PROFILES.keys())
 
 
-def load_profile_from_api(profile_name: str, api_url: str) -> SensorProfile:
+def load_profile_from_api(profile_name: str, api_url: str) -> DeviceProfile:
     """Load profile from API endpoint
     
     API returns format:
@@ -166,28 +186,28 @@ def load_profile_from_api(profile_name: str, api_url: str) -> SensorProfile:
                     available = ', '.join(all_profiles.keys())
                     raise ValueError(f"Profile '{profile_name}' not found in API. Available: {available}")
                 
-                # Extract sensors from dataPoints field
-                sensors = profile_data.get('dataPoints', [])
-                if not sensors:
-                    raise ValueError(f"Profile '{profile_name}' has no sensors/dataPoints")
+                # Extract devices from dataPoints field
+                devices = profile_data.get('dataPoints', [])
+                if not devices:
+                    raise ValueError(f"Profile '{profile_name}' has no devices/dataPoints")
                 
                 # Extract description from metadata
                 metadata = profile_data.get('metadata', {})
                 description = metadata.get('description', '')
                 
-                # Validate sensor groups
-                for sensor_group in sensors:
+                # Validate device groups
+                for device_group in devices:
                     required = {'folder', 'prefix', 'model', 'count'}
-                    missing = required - set(sensor_group.keys())
+                    missing = required - set(device_group.keys())
                     if missing:
-                        raise ValueError(f"Sensor group missing fields {missing}: {sensor_group}")
+                        raise ValueError(f"Device group missing fields {missing}: {device_group}")
                 
-                logger.info(f"Loaded profile '{profile_name}' from API ({len(sensors)} sensor groups)")
+                logger.info(f"Loaded profile '{profile_name}' from API ({len(devices)} device groups)")
                 
-                return SensorProfile(
+                return DeviceProfile(
                     name=profile_name,
                     description=description,
-                    sensors=sensors
+                    devices=devices
                 )
                 
         except urllib.error.URLError as e:
@@ -200,7 +220,7 @@ def load_profile_from_api(profile_name: str, api_url: str) -> SensorProfile:
             raise ValueError(f"Failed to load profile from API: {e}")
 
 
-def get_profile_with_api_fallback(name: str, api_url: Optional[str] = None) -> SensorProfile:
+def get_profile_with_api_fallback(name: str, api_url: Optional[str] = None) -> DeviceProfile:
     """Get profile - try API first if available, fallback to local JSON
     
     Args:
@@ -208,7 +228,7 @@ def get_profile_with_api_fallback(name: str, api_url: Optional[str] = None) -> S
         api_url: API base URL (e.g., 'http://api:3002'). If None, uses OPCUA_API_URL env var.
     
     Returns:
-        SensorProfile instance
+        DeviceProfile instance
     """
     # Determine API URL
     if api_url is None:

@@ -329,6 +329,11 @@ export class SensorsFeature extends BaseFeature {
         this.logger.error(`OPC-UA device error [${deviceName}]: ${error.message}`);
       });
 
+      opcuaAdapter.on('rediscovery-needed', (data: { deviceName: string; endpointUrl: string }) => {
+        this.logger.warn(`OPC-UA adapter requesting rediscovery for ${data.deviceName} (high NodeID failure rate, endpointUrl: ${data.endpointUrl})`);
+        this.emit('rediscovery-needed', data);
+      });
+
       // Start adapter
       await opcuaAdapter.start();
       

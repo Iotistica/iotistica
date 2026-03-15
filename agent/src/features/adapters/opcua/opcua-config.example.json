@@ -6,7 +6,7 @@
       "enabled": true,
       "pollInterval": 5000,
       "connection": {
-        "endpointUrl": "opc.tcp://192.168.1.100:4840",
+        "endpointUrl": "opc.tcp://10.0.0.60:4840",
         "username": "admin",
         "password": "password",
         "securityMode": "None",

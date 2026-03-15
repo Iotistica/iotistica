@@ -39,7 +39,7 @@ export const OPCUAConfigForm: React.FC<OPCUAConfigFormProps> = ({
       enabled: true,
       pollInterval: 1000,
       connection: {
-        endpointUrl: 'opc.tcp://192.168.1.100:4840',
+        endpointUrl: 'opc.tcp://10.0.0.60:4840',
         securityMode: 'None',
         securityPolicy: 'None',
         connectionTimeout: 10000,
@@ -118,7 +118,7 @@ export const OPCUAConfigForm: React.FC<OPCUAConfigFormProps> = ({
           <Input
             id="endpointUrl"
             {...register('connection.endpointUrl', { required: 'Endpoint URL is required' })}
-            placeholder="opc.tcp://192.168.1.100:4840"
+            placeholder="opc.tcp://10.0.0.60:4840"
           />
           {errors.connection?.endpointUrl && (
             <p className="text-sm text-red-500">{errors.connection.endpointUrl.message}</p>

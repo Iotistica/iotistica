@@ -1,7 +1,7 @@
 {
   "name": "Workshop",
   "description": "Small workshop with basic environmental and equipment monitoring",
-  "sensors": [
+  "devices": [
     {
       "folder": "Environment",
       "prefix": "Room",
@@ -9,12 +9,33 @@
       "count": 3,
       "unit": "°C",
       "config": {
-        "base": 22.0,
-        "variation": 2.0,
-        "noise": 0.3,
-        "period": 60.0,
-        "min_value": 10.0,
-        "max_value": 35.0
+        "active_state": "normal",
+        "states": {
+          "normal": {
+            "base": 22.0,
+            "period": 60.0,
+            "variation": 2.0,
+            "max_value": 35.0,
+            "noise": 0.3,
+            "min_value": 10.0
+          },
+          "under_load": {
+            "base": 26.4,
+            "period": 42.0,
+            "variation": 3.2,
+            "max_value": 38.5,
+            "noise": 0.45,
+            "min_value": 10.0
+          },
+          "maintenance": {
+            "base": 18.7,
+            "period": 84.0,
+            "variation": 0.8,
+            "max_value": 33.25,
+            "noise": 0.15,
+            "min_value": 10.0
+          }
+        }
       }
     },
     {
@@ -24,13 +45,36 @@
       "count": 2,
       "unit": "mm/s",
       "config": {
-        "base": 15.0,
-        "variation": 8.0,
-        "noise": 0.5,
-        "period": 10.0,
-        "spike_probability": 0.02,
-        "min_value": 0.0,
-        "max_value": 50.0
+        "active_state": "normal",
+        "states": {
+          "normal": {
+            "base": 15.0,
+            "noise": 0.5,
+            "variation": 8.0,
+            "period": 10.0,
+            "spike_probability": 0.02,
+            "max_value": 50.0,
+            "min_value": 0.0
+          },
+          "under_load": {
+            "base": 18.0,
+            "noise": 0.75,
+            "variation": 12.8,
+            "period": 7.0,
+            "spike_probability": 0.04,
+            "max_value": 55.0,
+            "min_value": 0.0
+          },
+          "maintenance": {
+            "base": 12.75,
+            "noise": 0.25,
+            "variation": 3.2,
+            "period": 14.0,
+            "spike_probability": 0.006,
+            "max_value": 47.5,
+            "min_value": 0.0
+          }
+        }
       }
     },
     {
@@ -40,12 +84,33 @@
       "count": 2,
       "unit": "W",
       "config": {
-        "base": 1500.0,
-        "variation": 500.0,
-        "noise": 50.0,
-        "period": 30.0,
-        "min_value": 0.0,
-        "max_value": 3000.0
+        "active_state": "normal",
+        "states": {
+          "normal": {
+            "base": 1500.0,
+            "period": 30.0,
+            "variation": 500.0,
+            "max_value": 3000.0,
+            "noise": 50.0,
+            "min_value": 0.0
+          },
+          "under_load": {
+            "base": 1800.0,
+            "period": 21.0,
+            "variation": 800.0,
+            "max_value": 3300.0,
+            "noise": 75.0,
+            "min_value": 0.0
+          },
+          "maintenance": {
+            "base": 1275.0,
+            "period": 42.0,
+            "variation": 200.0,
+            "max_value": 2850.0,
+            "noise": 25.0,
+            "min_value": 0.0
+          }
+        }
       }
     }
   ]

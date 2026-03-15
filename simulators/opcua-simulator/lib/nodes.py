@@ -4,9 +4,9 @@ OPC UA node creation and management
 import logging
 from typing import Dict, List
 from asyncua import Server, ua
-from .types import Sensor
+from .types import Device
 from .models import get_model
-from .profiles import SensorProfile
+from .profiles import DeviceProfile
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +16,8 @@ class NodeManager:
     
     def __init__(self, server: Server):
         self.server = server
-        self.sensors: List[Sensor] = []
-        self._sensors_by_key: Dict[str, Sensor] = {}
+        self.devices: List[Device] = []
+        self._devices_by_key: Dict[str, Device] = {}
         
     async def create_example_node(self):
         """Create simple test variable with string NodeID"""
@@ -40,10 +40,10 @@ class NodeManager:
         except Exception as e:
             logger.debug(f"Could not set description: {e}")
         
-        # Create sensor object for example node
-        example_sensor = Sensor(
+        # Create device object for example node
+        example_device = Device(
             node=my_variable,
-            sensor_type='example',
+            device_type='example',
             model_type='oscillating',
             index=0,
             name='MyVariable',
@@ -51,13 +51,13 @@ class NodeManager:
             unit=''
         )
         
-        self.sensors.append(example_sensor)
-        self._sensors_by_key['example'] = example_sensor
+        self.devices.append(example_device)
+        self._devices_by_key['example'] = example_device
         
         logger.info("Created example node: ns=2;s=MyVariable")
         
-    async def create_from_profile(self, profile: SensorProfile):
-        """Create nodes from sensor profile definition"""
+    async def create_from_profile(self, profile: DeviceProfile):
+        """Create nodes from device profile definition"""
         objects = self.server.nodes.objects
         
         # Create main folder (check if exists first)
@@ -73,14 +73,14 @@ class NodeManager:
         folders_created = {}
         total_nodes = 0
         
-        for sensor_group in profile.sensors:
-            folder_name = sensor_group['folder']
-            model_type = sensor_group['model']
-            prefix = sensor_group['prefix']
-            count = sensor_group['count']
-            unit = sensor_group.get('unit', '')
+        for device_group in profile.devices:
+            folder_name = device_group['folder']
+            model_type = device_group['model']
+            prefix = device_group['prefix']
+            count = device_group['count']
+            unit = device_group.get('unit', '')
             
-            # Build folder hierarchy (supports: folder -> subfolder -> zone -> sensors)
+            # Build folder hierarchy (supports: folder -> subfolder -> zone -> devices)
             current_folder = main_folder
             folder_path = []
             
@@ -103,8 +103,8 @@ class NodeManager:
             folder_path.append(folder_name)
             
             # Level 2: Subfolder (optional)
-            if 'subfolder' in sensor_group:
-                subfolder_name = sensor_group['subfolder']
+            if 'subfolder' in device_group:
+                subfolder_name = device_group['subfolder']
                 subfolder_key = f"{folder_name}/{subfolder_name}"
                 
                 if subfolder_key not in folders_created:
@@ -124,8 +124,8 @@ class NodeManager:
                 folder_path.append(subfolder_name)
             
             # Level 3: Zone (optional)
-            if 'zone' in sensor_group:
-                zone_name = sensor_group['zone']
+            if 'zone' in device_group:
+                zone_name = device_group['zone']
                 zone_key = f"{'/'.join(folder_path)}/{zone_name}"
                 
                 if zone_key not in folders_created:
@@ -144,20 +144,20 @@ class NodeManager:
                 current_folder = zone_folder
                 folder_path.append(zone_name)
             
-            # Get sensor config for this group (may override model defaults)
-            sensor_config = sensor_group.get('config', {})
+            # Get device config for this group (may override model defaults)
+            device_config = device_group.get('config', {})
             
             # Get model instance to extract default min/max
-            model = get_model(model_type, sensor_config)
+            model = get_model(model_type, device_config)
             
             # Extract min/max from config or model
-            min_value = sensor_config.get('min_value', getattr(model, 'min_value', None))
-            max_value = sensor_config.get('max_value', getattr(model, 'max_value', None))
+            min_value = device_config.get('min_value', getattr(model, 'min_value', None))
+            max_value = device_config.get('max_value', getattr(model, 'max_value', None))
             
-            # Create sensor nodes in the deepest folder
+            # Create device nodes in the deepest folder
             for i in range(count):
                 node_name = f"{prefix}{i+1}"
-                # Create string-based NodeID: ns=2;s=Production/Sensor1
+                # Create string-based NodeID: ns=2;s=Production/Device1
                 # This format is required for agent validation
                 node_id_string = f"{folder_path[-1]}/{node_name}"
                 node_id = ua.NodeId(node_id_string, 2)
@@ -176,17 +176,17 @@ class NodeManager:
                 # Set Description attribute with unit information (if available)
                 try:
                     if unit:
-                        description = f"{sensor_group.get('description', model_type.replace('_', ' ').title())} in {unit}"
+                        description = f"{device_group.get('description', model_type.replace('_', ' ').title())} in {unit}"
                     else:
-                        description = sensor_group.get('description', model_type.replace('_', ' ').title())
+                        description = device_group.get('description', model_type.replace('_', ' ').title())
                     await node.write_attribute(ua.AttributeIds.Description, ua.DataValue(ua.LocalizedText(description)))
                 except Exception as e:
                     logger.debug(f"Could not set description for {node_name}: {e}")
                 
-                # Create structured sensor object
-                sensor = Sensor(
+                # Create structured device object
+                device = Device(
                     node=node,
-                    sensor_type=model_type,
+                    device_type=model_type,
                     model_type=model_type,
                     index=i,
                     name=node_name,
@@ -194,24 +194,24 @@ class NodeManager:
                     unit=unit,
                     min_value=min_value,
                     max_value=max_value,
-                    config=sensor_config
+                    config=device_config
                 )
                 
-                self.sensors.append(sensor)
-                self._sensors_by_key[sensor.key] = sensor
+                self.devices.append(device)
+                self._devices_by_key[device.key] = device
                 total_nodes += 1
         
-        logger.info(f"Created {total_nodes} sensor nodes from profile '{profile.name}'")
+        logger.info(f"Created {total_nodes} device nodes from profile '{profile.name}'")
         return total_nodes
     
-    def get_sensor(self, key: str) -> Sensor:
-        """Get sensor by key"""
-        return self._sensors_by_key.get(key)
+    def get_device(self, key: str) -> Device:
+        """Get device by key"""
+        return self._devices_by_key.get(key)
     
-    def get_all_sensors(self) -> List[Sensor]:
-        """Get all managed sensors"""
-        return self.sensors
+    def get_all_devices(self) -> List[Device]:
+        """Get all managed devices"""
+        return self.devices
     
-    def get_sensor_count(self) -> int:
-        """Get total number of managed sensors"""
-        return len(self.sensors)
+    def get_device_count(self) -> int:
+        """Get total number of managed devices"""
+        return len(self.devices)

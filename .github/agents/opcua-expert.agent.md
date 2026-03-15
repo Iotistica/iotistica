@@ -67,7 +67,7 @@ opcua: {
   enabled: true,
   discoveryUrls: [
     "opc.tcp://10.0.0.60:4840",     // Server 1
-    "opc.tcp://192.168.1.100:4840", // Server 2
+    "opc.tcp://10.0.0.60:4840", // Server 2
     "opc.tcp://plc-1.local:4840"    // Server 3
   ],
   bufferCapacity: 1024 * 1024 // 1MB for discovery

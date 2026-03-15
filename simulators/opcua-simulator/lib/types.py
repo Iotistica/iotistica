@@ -6,33 +6,33 @@ from typing import Any, Optional
 
 
 @dataclass
-class Sensor:
+class Device:
     """
-    Structured sensor metadata - eliminates fragile string parsing
+    Structured device metadata - eliminates fragile string parsing
     
     Replaces this fragile pattern:
         parts = key.rsplit('_', 1)
-        sensor_type = parts[0]
+        device_type = parts[0]
         index = int(parts[1])
     
     With this clean pattern:
-        for sensor in self.sensors:
-            value = sensor.model.generate(elapsed, sensor.index)
-            await sensor.node.write_value(value)
+        for device in self.devices:
+            value = device.model.generate(elapsed, device.index)
+            await device.node.write_value(value)
     """
     node: Any                        # ua.Node - using Any to avoid circular import
-    sensor_type: str                 # "temperature", "pressure", etc.
-    model_type: str                  # Same as sensor_type (for clarity)
-    index: int                       # 0, 1, 2, etc. (sensor instance number)
-    name: str                        # "Sensor_1", "Motor_3", etc.
+    device_type: str                 # "temperature", "pressure", etc.
+    model_type: str                  # Same as device_type (for clarity)
+    index: int                       # 0, 1, 2, etc. (device instance number)
+    name: str                        # "Device_1", "Motor_3", etc.
     folder: str                      # "Temperature", "Vibration", etc.
     unit: str = ""                   # "°C", "mbar", "L/min", etc.
     min_value: Optional[float] = None  # Minimum value constraint
     max_value: Optional[float] = None  # Maximum value constraint
-    config: dict = None              # Sensor-specific config from profile JSON
+    config: dict = None              # Device-specific config from profile JSON
     model: Any = None                # Cached model instance (set by ValueUpdater)
     
     @property
     def key(self) -> str:
-        """Unique key for this sensor"""
-        return f"{self.sensor_type}_{self.index}"
+        """Unique key for this device"""
+        return f"{self.device_type}_{self.index}"

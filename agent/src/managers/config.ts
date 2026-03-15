@@ -224,10 +224,20 @@ export class ConfigManager extends EventEmitter {
 	public async getCurrentConfig(): Promise<DeviceConfig> {
 		// Get all sensors from database (includes discovered devices)
 		const allEndpoints = await DeviceEndpointModel.getAll();
+		const validEndpoints = allEndpoints.filter(endpoint => !!endpoint.uuid);
+
+		if (validEndpoints.length !== allEndpoints.length) {
+			this.logger?.warnSync('Ignoring endpoints without UUID in current config projection', {
+				component: LogComponents.configManager,
+				operation: 'getCurrentConfig',
+				invalidCount: allEndpoints.length - validEndpoints.length,
+				totalCount: allEndpoints.length
+			});
+		}
 		
 		// Convert to ProtocolAdapterDevice format
-		const endpointsConfig: ProtocolAdapterDevice[] = allEndpoints.map(endpoint => ({
-			id: endpoint.uuid || endpoint.name,  // Use UUID as id, fallback to name
+		const endpointsConfig: ProtocolAdapterDevice[] = validEndpoints.map(endpoint => ({
+			id: endpoint.uuid!, // UUID is the canonical identifier
 			name: endpoint.name,
 			protocol: endpoint.protocol,
 			connectionString: JSON.stringify(endpoint.connection), // Serialize connection object
@@ -616,6 +626,11 @@ export class ConfigManager extends EventEmitter {
 			// Sync endpoints to SQLite using UUID-based operations
 			// This replaces the separate ProtocolAdaptersHandler logic
 			await this.syncDevicesToDatabase();
+
+			// Refresh in-memory current endpoints from canonical database state.
+			// This prevents stale snapshot IDs (legacy name-based ids) from bypassing strict UUID reconciliation.
+			const dbCurrentConfig = await this.getCurrentConfig();
+			this.currentConfig.endpoints = dbCurrentConfig.endpoints || [];
 			
 			// Calculate steps for sensor reconciliation
 			const steps = this.calculateSteps();
@@ -716,6 +731,20 @@ export class ConfigManager extends EventEmitter {
 		try {
 			// Get current devices from SQLite to detect deletions
 			const currentDevices = await DeviceEndpointModel.getAll();
+
+			// Enforce canonical identity: endpoints must have UUID.
+			// Rows without UUID cannot participate in strict target-state reconciliation.
+			for (const currentDevice of currentDevices) {
+				if (!currentDevice.uuid) {
+					await DeviceEndpointModel.delete(currentDevice.name);
+					this.logger?.warnSync('Removed invalid endpoint from database (missing UUID)', {
+						component: LogComponents.configManager,
+						operation: 'syncEndpointsToDatabase',
+						deviceName: currentDevice.name,
+						protocol: currentDevice.protocol,
+					});
+				}
+			}
 			
 			this.logger?.debugSync('=== CURRENT ENDPOINTS IN DB (BEFORE SYNC) ===', {
 				component: LogComponents.configManager,
@@ -1355,29 +1384,34 @@ if (existing) {
 			deviceId,
 		});
 
-		// Find device name from current config
 		const device = this.currentConfig.endpoints?.find(d => d.id === deviceId);
+
+		if (!device) {
+			throw new Error(`Endpoint not found in current config for deviceId=${deviceId}`);
+		}
 		
 		// Remove device from SQLite sensors table
-		if (device) {
-			try {
-				const { DeviceEndpointModel: DeviceSensorModel } = await import('../db/models/endpoint.model.js');
-				await DeviceSensorModel.delete(device.name);
-				
-				this.logger?.infoSync('Device removed from sensors table', {
-					component: LogComponents.configManager,
-					operation: 'unregisterDevice',
-					deviceName: device.name,
-				});
-			} catch (error) {
-				this.logger?.errorSync('Failed to remove device from sensors table', 
-					error instanceof Error ? error : new Error(String(error)), {
-					component: LogComponents.configManager,
-					operation: 'unregisterDevice',
-					deviceName: device.name,
-				});
-				throw error;
+		try {
+			const { DeviceEndpointModel: DeviceSensorModel } = await import('../db/models/endpoint.model.js');
+			const deleted = await DeviceSensorModel.deleteByUuid(deviceId);
+
+			if (!deleted) {
+				throw new Error(`Failed to delete endpoint row by uuid=${deviceId}`);
 			}
+			
+			this.logger?.infoSync('Device removed from sensors table', {
+				component: LogComponents.configManager,
+				operation: 'unregisterDevice',
+				deviceName: device.name,
+			});
+		} catch (error) {
+			this.logger?.errorSync('Failed to remove device from sensors table', 
+				error instanceof Error ? error : new Error(String(error)), {
+				component: LogComponents.configManager,
+				operation: 'unregisterDevice',
+				deviceName: device.name,
+			});
+			throw error;
 		}
 
 		// Update current config

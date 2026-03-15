@@ -1,7 +1,7 @@
 {
   "name": "Test",
-  "description": "Minimal profile for testing with 2 sensor types",
-  "sensors": [
+  "description": "Minimal profile for testing with 2 device types",
+  "devices": [
     {
       "folder": "Temperature",
       "prefix": "Test_Temp",
@@ -9,12 +9,33 @@
       "count": 2,
       "unit": "°C",
       "config": {
-        "base": 22.0,
-        "variation": 3.0,
-        "noise": 0.2,
-        "period": 20.0,
-        "min_value": -50.0,
-        "max_value": 150.0
+        "active_state": "normal",
+        "states": {
+          "normal": {
+            "base": 22.0,
+            "period": 20.0,
+            "variation": 3.0,
+            "max_value": 150.0,
+            "noise": 0.2,
+            "min_value": -50.0
+          },
+          "under_load": {
+            "base": 26.4,
+            "period": 14.0,
+            "variation": 4.8,
+            "max_value": 165.0,
+            "noise": 0.3,
+            "min_value": -50.0
+          },
+          "maintenance": {
+            "base": 18.7,
+            "period": 28.0,
+            "variation": 1.2,
+            "max_value": 142.5,
+            "noise": 0.1,
+            "min_value": -50.0
+          }
+        }
       }
     },
     {
@@ -24,12 +45,33 @@
       "count": 2,
       "unit": "mbar",
       "config": {
-        "base": 1013.0,
-        "variation": 10.0,
-        "noise": 1.0,
-        "period": 30.0,
-        "min_value": 0.0,
-        "max_value": 2000.0
+        "active_state": "normal",
+        "states": {
+          "normal": {
+            "base": 1013.0,
+            "period": 30.0,
+            "variation": 10.0,
+            "max_value": 2000.0,
+            "noise": 1.0,
+            "min_value": 0.0
+          },
+          "under_load": {
+            "base": 1215.6,
+            "period": 21.0,
+            "variation": 16.0,
+            "max_value": 2200.0,
+            "noise": 1.5,
+            "min_value": 0.0
+          },
+          "maintenance": {
+            "base": 861.05,
+            "period": 42.0,
+            "variation": 4.0,
+            "max_value": 1900.0,
+            "noise": 0.5,
+            "min_value": 0.0
+          }
+        }
       }
     }
   ]

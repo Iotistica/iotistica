@@ -2,7 +2,7 @@
 
 ## Overview
 
-Profiles define sensor configurations for the OPC UA simulator. Each profile is a JSON file that specifies which sensors to simulate, their behavior, and organization.
+Profiles define device configurations for the OPC UA simulator. Each profile is a JSON file that specifies which devices to simulate, their behavior, and their tree organization.
 
 ## Profile Structure
 
@@ -10,11 +10,11 @@ Profiles define sensor configurations for the OPC UA simulator. Each profile is 
 {
   "name": "Profile Name",
   "description": "Description of this profile",
-  "sensors": [
+  "devices": [
     {
       "folder": "Folder name in OPC UA tree",
       "prefix": "Node name prefix",
-      "model": "Sensor model type",
+      "model": "Device model type",
       "count": 5,
       "unit": "Unit of measurement",
       "config": {
@@ -30,195 +30,37 @@ Profiles define sensor configurations for the OPC UA simulator. Each profile is 
 }
 ```
 
-## Available Sensor Models
+## Available Device Models
 
-### temperature
-Simulates temperature sensors with sinusoidal variation
-- **Config**: base, variation, noise, period, min_value, max_value
-- **Typical base**: 25°C
-- **Typical variation**: ±5°C
-- **Typical period**: 30s
+- `temperature`
+- `pressure`
+- `flow`
+- `level`
+- `vibration`
+- `power`
+- `oscillating`
 
-### pressure
-Simulates pressure sensors
-- **Config**: base, variation, noise, period, min_value, max_value
-- **Typical base**: 1100 mbar
-- **Typical variation**: ±50 mbar
-- **Typical period**: 45s
+Each model accepts a `config` override object. If omitted, model defaults are used.
 
-### flow
-Simulates flow rate sensors
-- **Config**: base, variation, noise, period, min_value, max_value
-- **Typical base**: 50 L/min
-- **Typical variation**: ±30 L/min
-- **Typical period**: 20s
-
-### level
-Simulates level/tank sensors
-- **Config**: base, variation, noise, period, min_value, max_value
-- **Typical base**: 500 mm
-- **Typical variation**: ±200 mm
-- **Typical period**: 40s
-
-### vibration
-Simulates vibration sensors with occasional spikes
-- **Config**: base, variation, noise, period, spike_probability, min_value, max_value
-- **Typical base**: 20 mm/s
-- **Typical variation**: ±15 mm/s
-- **spike_probability**: 0.05 (5% chance of spike)
-
-### power
-Simulates power consumption sensors
-- **Config**: base, variation, noise, period, min_value, max_value
-- **Typical base**: 5000 W
-- **Typical variation**: ±2000 W
-- **Typical period**: 25s
-
-### oscillating
-Simple oscillating test sensor
-- **Config**: base, variation, noise, period
-- **No min/max constraints**
-
-## Creating Custom Profiles
-
-### Example: Small Workshop
-
-Create `workshop.json`:
-
-```json
-{
-  "name": "Workshop",
-  "description": "Small workshop with basic monitoring",
-  "sensors": [
-    {
-      "folder": "Environment",
-      "prefix": "Room",
-      "model": "temperature",
-      "count": 3,
-      "unit": "°C",
-      "config": {
-        "base": 22.0,
-        "variation": 2.0,
-        "noise": 0.3,
-        "period": 60.0,
-        "min_value": 10.0,
-        "max_value": 35.0
-      }
-    },
-    {
-      "folder": "Equipment",
-      "prefix": "Machine",
-      "model": "vibration",
-      "count": 2,
-      "unit": "mm/s",
-      "config": {
-        "base": 15.0,
-        "variation": 8.0,
-        "noise": 0.5,
-        "period": 10.0,
-        "spike_probability": 0.02,
-        "min_value": 0.0,
-        "max_value": 50.0
-      }
-    }
-  ]
-}
-```
-
-### Example: Customer-Specific Factory
-
-Create `customer-acme.json`:
-
-```json
-{
-  "name": "ACME Factory",
-  "description": "ACME Corp production line monitoring",
-  "sensors": [
-    {
-      "folder": "ProductionLine1",
-      "prefix": "Zone",
-      "model": "temperature",
-      "count": 8,
-      "unit": "°C",
-      "config": {
-        "base": 80.0,
-        "variation": 10.0,
-        "noise": 1.0,
-        "period": 30.0,
-        "min_value": 0.0,
-        "max_value": 200.0
-      }
-    },
-    {
-      "folder": "ProductionLine1",
-      "prefix": "Conveyor",
-      "model": "power",
-      "count": 4,
-      "unit": "W",
-      "config": {
-        "base": 3000.0,
-        "variation": 1000.0,
-        "noise": 100.0,
-        "period": 20.0,
-        "min_value": 0.0,
-        "max_value": 8000.0
-      }
-    }
-  ]
-}
-```
-
-## Using Custom Profiles
-
-### Command Line
-```bash
-python opcua_simulator.py custom-profile-name
-```
-
-### Docker Compose
-```yaml
-services:
-  opcua-simulator:
-    # ... other config
-    command: python opcua_simulator.py customer-acme
-    volumes:
-      - ./profiles:/app/profiles:ro  # Mount custom profiles
-```
-
-## Profile Validation
+## Validation Rules
 
 Profiles are validated on load:
-- ✅ Required fields: name, sensors
-- ✅ Each sensor must have: folder, prefix, model, count
-- ✅ Model must exist in MODEL_REGISTRY
-- ✅ Config parameters validated per model type
-- ❌ Invalid profiles will show clear error messages
+
+- Required fields: `name`, `devices`
+- Each device group requires: `folder`, `prefix`, `model`, `count`
+- `model` must exist in `MODEL_REGISTRY`
 
 ## Built-in Profiles
 
-### factory.json
-Standard industrial factory with 6 sensor types, 25 total sensors
+- `factory.json`: standard industrial profile
+- `test.json`: minimal testing profile
+- `workshop.json`: small workshop profile
+- `smart-building.json`: multi-zone building profile
 
-### test.json
-Minimal testing profile with 2 sensor types, 4 total sensors
+## Usage
 
-## Version Control
-
-Store customer profiles in version control:
+```bash
+python opcua_simulator.py factory
+python opcua_simulator.py test
+python opcua_simulator.py workshop
 ```
-profiles/
-├── factory.json          # Default
-├── test.json             # Testing
-├── customer-acme.json    # Customer-specific
-├── customer-beta.json
-└── workshop.json         # Custom scenarios
-```
-
-## Benefits
-
-- ✅ **No code changes** required for new configurations
-- ✅ **Customer-specific** simulations without branching
-- ✅ **Version controlled** configurations
-- ✅ **Easy testing** of different scenarios
-- ✅ **Non-developers** can create profiles
-- ✅ **Aligns** with Modbus simulator approach

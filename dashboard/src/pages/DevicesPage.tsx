@@ -65,7 +65,7 @@ interface Sensor {
   connected?: boolean;
   dataPoints?: ModbusDataPoint[] | OPCUADataPoint[]; // Protocol-specific data points
   // Deployment tracking fields
-  deploymentStatus?: 'pending' | 'deployed' | 'deploying' | 'failed' | 'draft' | 'pending_deletion';
+  deploymentStatus?: 'pending' | 'deployed' | 'deploying' | 'failed' | 'draft' | 'pending_deletion' | 'deleted';
   lastDeployedAt?: string | null;
   deploymentError?: string | null;
   deploymentAttempts?: number;
@@ -558,11 +558,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       return;
     }
 
-    // Physical devices use soft delete
+    // Physical devices use soft delete and rely on reconciliation for permanent removal
     try {
       
-      // Call DELETE /api/v1/devices/:uuid/sensors/:name API endpoint
-      // This performs a SOFT DELETE - marks for deletion, waits for agent confirmation
+      // Call DELETE /api/v1/devices/:uuid/sensors/:name
+      // Soft delete marks pending_deletion and waits for agent reconciliation.
       const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors/${encodeURIComponent(deviceName)}`), {
         method: 'DELETE',
         headers: {
@@ -575,10 +575,10 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         throw new Error(errorData.error || `Failed to delete sensor: ${response.status}`);
       }
 
-      // Refresh sensor list to show pending_deletion status
+      // Refresh sensor list to show pending deletion state
       await fetchSensors();
 
-      toast.success(`Sensor "${deviceName}" marked for deletion - Click Sync to confirm on agent`);
+      toast.success(`Sensor "${deviceName}" marked for deletion - pending agent reconciliation`);
     } catch (error: any) {
       toast.error(`Failed to delete sensor: ${error.message}`);
       throw error;
@@ -875,6 +875,10 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     // Pending deletion (marked for deletion, waiting for agent to confirm)
     if (deploymentStatus === 'pending_deletion') {
       return <Badge className="bg-gray-500 dark:bg-gray-600 text-white border border-gray-600 dark:border-gray-500">Pending Deletion</Badge>;
+    }
+
+    if (deploymentStatus === 'deleted') {
+      return <Badge className="bg-slate-500 dark:bg-slate-600 text-white border border-slate-600 dark:border-slate-500">Deleted</Badge>;
     }
 
     

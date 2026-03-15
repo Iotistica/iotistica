@@ -116,27 +116,27 @@
             opacity: 0.5;
             cursor: not-allowed;
         }
-        .sensor-list {
+        .device-list {
             max-height: 500px;
             overflow-y: auto;
         }
-        .sensor-item {
+        .device-item {
             padding: 10px;
             border-left: 3px solid #667eea;
             background: #f8f9fa;
             margin-bottom: 8px;
             border-radius: 3px;
         }
-        .sensor-name {
+        .device-name {
             font-weight: 600;
             color: #333;
         }
-        .sensor-path {
+        .device-path {
             font-size: 12px;
             color: #666;
             margin-top: 3px;
         }
-        .sensor-type {
+        .device-type {
             display: inline-block;
             padding: 2px 8px;
             background: #e3e8ff;
@@ -163,13 +163,90 @@
             border: 1px solid #f5c6cb;
         }
         .hidden { display: none; }
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+        .form-grid .full-width {
+            grid-column: 1 / -1;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+            font-family: inherit;
+        }
+        input:hover, textarea:hover { border-color: #667eea; }
+        input:focus, textarea:focus { outline: none; border-color: #667eea; }
+        textarea {
+            resize: vertical;
+            min-height: 92px;
+        }
+        .toolbar-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .toolbar-row button {
+            width: auto;
+            flex: 1;
+        }
+        .secondary-btn {
+            background: #6b7280;
+        }
+        .danger-btn {
+            background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+        }
+        .group-item {
+            padding: 12px;
+            border-left: 3px solid #6366f1;
+            background: #f8f9fa;
+            margin-bottom: 8px;
+            border-radius: 4px;
+        }
+        .group-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: center;
+        }
+        .group-title {
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+        .group-meta {
+            font-size: 12px;
+            color: #666;
+            margin-top: 6px;
+            line-height: 1.4;
+        }
+        .group-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .group-actions button {
+            width: auto;
+            padding: 8px 10px;
+            font-size: 12px;
+        }
+        .compact-btn {
+            background: #4f46e5;
+        }
+        .small-danger-btn {
+            background: #dc2626;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>🏭 OPC UA Simulator Control Panel</h1>
-            <p class="subtitle">Manage profiles and monitor sensor nodes in real-time</p>
+            <p class="subtitle">Manage profiles and monitor device nodes in real-time</p>
         </div>
 
         <div id="alert" class="alert hidden"></div>
@@ -188,8 +265,8 @@
                         <span class="status-value" id="currentProfile">-</span>
                     </div>
                     <div class="status-item">
-                        <span class="status-label">Total Sensors:</span>
-                        <span class="status-value" id="sensorCount">-</span>
+                        <span class="status-label">Total Devices:</span>
+                        <span class="status-value" id="deviceCount">-</span>
                     </div>
                     <div class="status-item">
                         <span class="status-label">Endpoint:</span>
@@ -209,19 +286,182 @@
                     ℹ️ Changing profile will hot-reload the OPC UA server without container restart
                 </p>
             </div>
+
+            <!-- Add Device Card -->
+            <div class="card">
+                <h2>➕ Add Device Group</h2>
+                <p id="addSchemaHint" style="margin-bottom: 12px; color: #555; font-size: 13px;">
+                    Loading profile schema...
+                </p>
+                <div class="form-grid">
+                    <input id="addFolder" placeholder="Folder (e.g. Temperature)" />
+                    <input id="addPrefix" placeholder="Prefix (e.g. Sensor)" />
+
+                    <select id="addModel">
+                        <option value="temperature">temperature</option>
+                        <option value="pressure">pressure</option>
+                        <option value="flow">flow</option>
+                        <option value="level">level</option>
+                        <option value="vibration">vibration</option>
+                        <option value="power">power</option>
+                        <option value="oscillating">oscillating</option>
+                    </select>
+                    <input id="addCount" type="number" min="1" step="1" value="1" placeholder="Count" />
+
+                    <input id="addUnit" placeholder="Unit (optional, e.g. °C)" />
+                    <input id="addSubfolder" placeholder="Subfolder (optional)" />
+
+                    <input id="addZone" class="full-width" placeholder="Zone (optional)" />
+
+                    <textarea id="addConfig" class="full-width" placeholder='Config JSON (optional), e.g. {"base":25,"variation":5}'></textarea>
+
+                    <button id="addDeviceBtn" class="full-width" onclick="addDeviceGroup()">Add Device Group</button>
+                    <button id="cancelEditBtn" class="full-width secondary-btn hidden" onclick="cancelEditGroup()">Cancel Edit</button>
+                </div>
+                <p style="margin-top: 12px; color: #666; font-size: 13px;">
+                    ℹ️ Adds a device group to the active local profile JSON and triggers simulator reload
+                </p>
+            </div>
         </div>
 
-        <!-- Sensors Card -->
+        <!-- Device Groups Management Card -->
         <div class="card">
-            <h2>📡 Active Sensors <span id="sensorListCount" style="color: #667eea;"></span></h2>
-            <div id="sensorList" class="sensor-list">
-                <p style="color: #666;">Loading sensors...</p>
+            <h2>🛠️ Manage Device Groups <span id="groupListCount" style="color: #667eea;"></span></h2>
+            <div id="groupList" class="device-list">
+                <p style="color: #666;">Loading device groups...</p>
+            </div>
+        </div>
+
+        <!-- Devices Card -->
+        <div class="card">
+            <h2>📡 Active Devices <span id="deviceListCount" style="color: #667eea;"></span></h2>
+            <div id="deviceList" class="device-list">
+                <p style="color: #666;">Loading devices...</p>
             </div>
         </div>
     </div>
 
     <script>
         let currentStatus = null;
+        let editingGroupIndex = null;
+        let currentSchema = null;
+
+        function setElementVisibility(id, visible) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.style.display = visible ? '' : 'none';
+        }
+
+        function escapeHtml(value) {
+            return String(value)
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#39;');
+        }
+
+        function renderGroupStateControls(group) {
+            const config = group && typeof group.config === 'object' && group.config !== null
+                ? group.config
+                : null;
+            const activeState = config && typeof config.active_state === 'string'
+                ? config.active_state
+                : '';
+            const statesObj = config && typeof config.states === 'object' && config.states !== null
+                ? config.states
+                : null;
+            const states = statesObj ? Object.keys(statesObj) : [];
+
+            if (states.length === 0) {
+                return `<div class="group-meta" style="margin-top: 8px;">active state: ${escapeHtml(activeState || '-')} | no states configured</div>`;
+            }
+
+            const options = states
+                .map(state => `<option value="${escapeHtml(state)}" ${state === activeState ? 'selected' : ''}>${escapeHtml(state)}</option>`)
+                .join('');
+
+            return `
+                <div class="group-meta" style="margin-top: 8px;">active state: <strong>${escapeHtml(activeState || '-')}</strong></div>
+                <div class="toolbar-row" style="margin-top: 8px;">
+                    <select id="stateSelect-${group.index}" style="margin-bottom: 0;">
+                        ${options}
+                    </select>
+                    <button class="compact-btn" onclick="changeGroupState(${group.index})">Apply State</button>
+                </div>
+            `;
+        }
+
+        function applySchemaToForm(schema) {
+            currentSchema = schema;
+
+            const schemaHint = document.getElementById('addSchemaHint');
+            const modelSelect = document.getElementById('addModel');
+            const configInput = document.getElementById('addConfig');
+            const addButton = document.getElementById('addDeviceBtn');
+
+            const optional = new Set((schema.optionalFields || []).map(s => String(s).toLowerCase()));
+            const showSubfolder = optional.has('subfolder') || !!schema.sampleGroup?.subfolder;
+            const showZone = optional.has('zone') || !!schema.sampleGroup?.zone;
+
+            setElementVisibility('addSubfolder', showSubfolder);
+            setElementVisibility('addZone', showZone);
+
+            const models = Array.isArray(schema.models) && schema.models.length > 0
+                ? schema.models
+                : ['temperature', 'pressure', 'flow', 'level', 'vibration', 'power', 'oscillating'];
+            modelSelect.innerHTML = models
+                .map(model => `<option value="${model}">${model}</option>`)
+                .join('');
+
+            const sampleModel = schema.sampleGroup?.model;
+            if (sampleModel && models.includes(sampleModel)) {
+                modelSelect.value = sampleModel;
+            }
+
+            if (Array.isArray(schema.configKeys) && schema.configKeys.length > 0) {
+                const stateNames = Array.isArray(schema.stateNames) && schema.stateNames.length > 0
+                    ? schema.stateNames.join(', ')
+                    : 'normal';
+                configInput.placeholder = `Config JSON (required): {"active_state":"normal","states":{"normal":{...}}} • states seen: ${stateNames} • keys: ${schema.configKeys.join(', ')}`;
+            } else {
+                configInput.placeholder = 'Config JSON (required), e.g. {"active_state":"normal","states":{"normal":{"base":25,"variation":5,"noise":0.5,"period":30,"min_value":-50,"max_value":150}}}';
+            }
+
+            const optionalText = (schema.optionalFields && schema.optionalFields.length > 0)
+                ? schema.optionalFields.join(', ')
+                : 'none';
+            const editableText = schema.editable
+                ? 'editable (local profile)'
+                : 'read-only for add/edit/remove (API-backed profile)';
+
+            schemaHint.textContent = `Profile '${schema.profile}' schema: required [folder, prefix, model, count], optional [${optionalText}] • ${editableText}`;
+
+            if (!schema.editable && editingGroupIndex === null) {
+                addButton.disabled = true;
+                addButton.textContent = 'Add Device Group (Disabled)';
+            } else if (editingGroupIndex === null) {
+                addButton.disabled = false;
+                addButton.textContent = 'Add Device Group';
+            }
+        }
+
+        async function loadProfileSchema(profileName) {
+            try {
+                const query = profileName ? `?profile=${encodeURIComponent(profileName)}` : '';
+                const response = await fetch(`/api/device-groups/schema${query}`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    document.getElementById('addSchemaHint').textContent = data.error || 'Failed to load profile schema';
+                    return;
+                }
+
+                applySchemaToForm(data);
+            } catch (error) {
+                document.getElementById('addSchemaHint').textContent = 'Failed to load profile schema';
+            }
+        }
 
         // Load initial status
         async function loadStatus() {
@@ -232,7 +472,7 @@
 
                 document.getElementById('status').textContent = data.status.toUpperCase();
                 document.getElementById('currentProfile').textContent = data.current_profile;
-                document.getElementById('sensorCount').textContent = data.sensor_count;
+                document.getElementById('deviceCount').textContent = data.device_count;
                 document.getElementById('endpoint').textContent = data.endpoint;
             } catch (error) {
                 console.error('Failed to load status:', error);
@@ -241,57 +481,226 @@
         }
 
         // Load available profiles
-        async function loadProfiles() {
+        async function loadProfiles(preferredProfile = null) {
             try {
                 const response = await fetch('/api/profiles');
                 const data = await response.json();
 
                 const select = document.getElementById('profileSelect');
                 select.innerHTML = '<option value="">-- Select Profile --</option>';
+                const targetProfile = preferredProfile || currentStatus?.current_profile || null;
                 
                 data.profiles.forEach(profile => {
                     const option = document.createElement('option');
                     option.value = profile.name;
-                    option.textContent = `${profile.name} (${profile.sensor_count} sensors)`;
-                    if (currentStatus && profile.name === currentStatus.current_profile) {
+                    option.textContent = `${profile.name} (${profile.device_count} devices)`;
+                    if (targetProfile && profile.name === targetProfile) {
                         option.textContent += ' ✓ Current';
                         option.selected = true;
                     }
                     select.appendChild(option);
                 });
+
+                if (select.value) {
+                    await loadProfileSchema(select.value);
+                }
             } catch (error) {
                 console.error('Failed to load profiles:', error);
                 showAlert('Failed to load profiles list', 'error');
             }
         }
 
-        // Load sensors
-        async function loadSensors() {
+        // Load devices
+        async function loadDevices() {
             try {
-                const response = await fetch('/api/sensors');
+                const response = await fetch('/api/devices');
                 const data = await response.json();
 
-                const container = document.getElementById('sensorList');
-                document.getElementById('sensorListCount').textContent = `(${data.count})`;
+                const container = document.getElementById('deviceList');
+                document.getElementById('deviceListCount').textContent = `(${data.count})`;
 
-                if (data.sensors.length === 0) {
-                    container.innerHTML = '<p style="color: #666;">No sensors configured</p>';
+                if (data.devices.length === 0) {
+                    container.innerHTML = '<p style="color: #666;">No devices configured</p>';
                     return;
                 }
 
-                container.innerHTML = data.sensors.map(sensor => `
-                    <div class="sensor-item">
-                        <div class="sensor-name">
-                            ${sensor.name}
-                            <span class="sensor-type">${sensor.type}</span>
-                            ${sensor.unit ? `<span style="color: #999; font-size: 12px; margin-left: 5px;">${sensor.unit}</span>` : ''}
+                container.innerHTML = data.devices.map(device => `
+                    <div class="device-item">
+                        <div class="device-name">
+                            ${device.name}
+                            <span class="device-type">${device.type}</span>
+                            ${device.unit ? `<span style="color: #999; font-size: 12px; margin-left: 5px;">${device.unit}</span>` : ''}
                         </div>
-                        <div class="sensor-path">📁 ${sensor.path}</div>
+                        <div class="device-path">📁 ${device.path}</div>
                     </div>
                 `).join('');
             } catch (error) {
-                console.error('Failed to load sensors:', error);
-                showAlert('Failed to load sensors list', 'error');
+                console.error('Failed to load devices:', error);
+                showAlert('Failed to load devices list', 'error');
+            }
+        }
+
+        // Load device groups for profile management
+        async function loadDeviceGroups() {
+            try {
+                const response = await fetch('/api/device-groups');
+                const data = await response.json();
+
+                const container = document.getElementById('groupList');
+                const countLabel = document.getElementById('groupListCount');
+                countLabel.textContent = `(${data.count || 0})`;
+
+                if (!response.ok) {
+                    container.innerHTML = `<p style="color: #b91c1c;">${data.error || 'Failed to load groups'}</p>`;
+                    return;
+                }
+
+                if (!data.groups || data.groups.length === 0) {
+                    container.innerHTML = '<p style="color: #666;">No device groups configured</p>';
+                    return;
+                }
+
+                container.innerHTML = data.groups.map(group => `
+                    <div class="group-item">
+                        <div class="group-header">
+                            <div class="group-title">#${group.index} ${group.folder}/${group.prefix} (${group.count})</div>
+                            <div class="group-actions">
+                                <button class="compact-btn" onclick="startEditGroup(${group.index})">Edit</button>
+                                <button class="small-danger-btn" onclick="removeGroup(${group.index})">Remove</button>
+                            </div>
+                        </div>
+                        <div class="group-meta">
+                            model: ${group.model} | unit: ${group.unit || '-'} | subfolder: ${group.subfolder || '-'} | zone: ${group.zone || '-'}
+                        </div>
+                        ${renderGroupStateControls(group)}
+                    </div>
+                `).join('');
+            } catch (error) {
+                const container = document.getElementById('groupList');
+                container.innerHTML = '<p style="color: #b91c1c;">Failed to load device groups</p>';
+            }
+        }
+
+        async function changeGroupState(groupIndex) {
+            if (currentSchema && !currentSchema.editable) {
+                showAlert('Selected profile is not locally editable from this UI', 'error');
+                return;
+            }
+
+            const select = document.getElementById(`stateSelect-${groupIndex}`);
+            if (!select) {
+                showAlert(`State selector not found for group #${groupIndex}`, 'error');
+                return;
+            }
+
+            const activeState = select.value;
+            if (!activeState) {
+                showAlert('Please select a state', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/device-groups/${groupIndex}/state`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ active_state: activeState })
+                });
+
+                const data = await response.json();
+                if (!response.ok) {
+                    showAlert(data.error || 'Failed to change state', 'error');
+                    return;
+                }
+
+                showAlert(`✓ Group #${groupIndex} state set to '${activeState}'. Simulator reloading...`, 'success');
+                setTimeout(() => {
+                    loadStatus();
+                    loadDevices();
+                    loadDeviceGroups();
+                }, 1500);
+            } catch (error) {
+                showAlert('Network error: ' + error.message, 'error');
+            }
+        }
+
+        async function startEditGroup(groupIndex) {
+            try {
+                const response = await fetch('/api/device-groups');
+                const data = await response.json();
+
+                if (!response.ok || !data.groups || !Array.isArray(data.groups)) {
+                    showAlert(data.error || 'Failed to load group for editing', 'error');
+                    return;
+                }
+
+                const group = data.groups.find(g => g.index === groupIndex);
+                if (!group) {
+                    showAlert(`Group ${groupIndex} not found`, 'error');
+                    return;
+                }
+
+                editingGroupIndex = groupIndex;
+                document.getElementById('addFolder').value = group.folder || '';
+                document.getElementById('addPrefix').value = group.prefix || '';
+                document.getElementById('addModel').value = group.model || 'temperature';
+                document.getElementById('addCount').value = group.count || 1;
+                document.getElementById('addUnit').value = group.unit || '';
+                document.getElementById('addSubfolder').value = group.subfolder || '';
+                document.getElementById('addZone').value = group.zone || '';
+                document.getElementById('addConfig').value = group.config && Object.keys(group.config).length > 0
+                    ? JSON.stringify(group.config, null, 2)
+                    : '';
+
+                document.getElementById('addDeviceBtn').textContent = `Save Group #${groupIndex}`;
+                document.getElementById('cancelEditBtn').classList.remove('hidden');
+                showAlert(`Editing device group #${groupIndex}`, 'success');
+            } catch (error) {
+                showAlert('Failed to enter edit mode: ' + error.message, 'error');
+            }
+        }
+
+        function cancelEditGroup() {
+            editingGroupIndex = null;
+            document.getElementById('addDeviceBtn').textContent = 'Add Device Group';
+            document.getElementById('cancelEditBtn').classList.add('hidden');
+            document.getElementById('addFolder').value = '';
+            document.getElementById('addPrefix').value = '';
+            document.getElementById('addModel').value = 'temperature';
+            document.getElementById('addCount').value = '1';
+            document.getElementById('addUnit').value = '';
+            document.getElementById('addSubfolder').value = '';
+            document.getElementById('addZone').value = '';
+            document.getElementById('addConfig').value = '';
+        }
+
+        async function removeGroup(groupIndex) {
+            const confirmed = confirm(`Remove device group #${groupIndex}? This updates the active profile and reloads the simulator.`);
+            if (!confirmed) return;
+
+            try {
+                const response = await fetch(`/api/device-groups/${groupIndex}`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    showAlert(data.error || 'Failed to remove group', 'error');
+                    return;
+                }
+
+                showAlert('✓ Device group removed. Simulator reloading...', 'success');
+                if (editingGroupIndex === groupIndex) {
+                    cancelEditGroup();
+                }
+
+                setTimeout(() => {
+                    loadStatus();
+                    loadProfiles();
+                    loadDevices();
+                    loadDeviceGroups();
+                }, 2000);
+            } catch (error) {
+                showAlert('Network error: ' + error.message, 'error');
             }
         }
 
@@ -325,10 +734,12 @@
 
                 if (response.ok) {
                     showAlert(`✓ Profile changed to "${profile}". Server reloading...`, 'success');
-                    setTimeout(() => {
-                        loadStatus();
-                        loadProfiles();
-                        loadSensors();
+                    setTimeout(async () => {
+                        await loadStatus();
+                        await loadProfiles(profile);
+                        await loadDevices();
+                        await loadDeviceGroups();
+                        await loadProfileSchema(profile);
                     }, 2000);
                 } else {
                     showAlert(data.error || 'Failed to change profile', 'error');
@@ -339,6 +750,104 @@
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Switch Profile';
+            }
+        }
+
+        // Add device group to active profile
+        async function addDeviceGroup() {
+            if (currentSchema && !currentSchema.editable) {
+                showAlert('Selected profile is not locally editable from this UI', 'error');
+                return;
+            }
+
+            const folder = document.getElementById('addFolder').value.trim();
+            const prefix = document.getElementById('addPrefix').value.trim();
+            const model = document.getElementById('addModel').value;
+            const countRaw = document.getElementById('addCount').value;
+            const unit = document.getElementById('addUnit').value.trim();
+            const subfolder = document.getElementById('addSubfolder').value.trim();
+            const zone = document.getElementById('addZone').value.trim();
+            const configRaw = document.getElementById('addConfig').value.trim();
+
+            const count = Number.parseInt(countRaw, 10);
+            if (!folder || !prefix || !Number.isInteger(count) || count <= 0) {
+                showAlert('Folder, Prefix, and a positive integer Count are required', 'error');
+                return;
+            }
+
+            let config = {};
+            if (configRaw) {
+                try {
+                    config = JSON.parse(configRaw);
+                    if (typeof config !== 'object' || Array.isArray(config) || config === null) {
+                        throw new Error('Config must be a JSON object');
+                    }
+                } catch (error) {
+                    showAlert('Invalid Config JSON: ' + error.message, 'error');
+                    return;
+                }
+            }
+
+            const payload = {
+                folder,
+                prefix,
+                model,
+                count,
+                unit,
+                subfolder,
+                zone,
+                config
+            };
+
+            const btn = document.getElementById('addDeviceBtn');
+            btn.disabled = true;
+            btn.textContent = editingGroupIndex === null ? 'Adding...' : `Saving #${editingGroupIndex}...`;
+
+            try {
+                const isEdit = editingGroupIndex !== null;
+                const endpoint = isEdit ? `/api/device-groups/${editingGroupIndex}` : '/api/devices';
+                const method = isEdit ? 'PUT' : 'POST';
+
+                const response = await fetch(endpoint, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+                if (!response.ok) {
+                    showAlert(data.error || 'Failed to add device group', 'error');
+                    return;
+                }
+
+                showAlert(
+                    isEdit
+                        ? '✓ Device group updated. Simulator reloading...'
+                        : '✓ Device group added. Simulator reloading...',
+                    'success'
+                );
+
+                if (isEdit) {
+                    cancelEditGroup();
+                } else {
+                    document.getElementById('addUnit').value = '';
+                    document.getElementById('addSubfolder').value = '';
+                    document.getElementById('addZone').value = '';
+                    document.getElementById('addConfig').value = '';
+                }
+
+                setTimeout(() => {
+                    loadStatus();
+                    loadProfiles();
+                    loadDevices();
+                    loadDeviceGroups();
+                    loadProfileSchema();
+                }, 2000);
+            } catch (error) {
+                showAlert('Network error: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = editingGroupIndex === null ? 'Add Device Group' : `Save Group #${editingGroupIndex}`;
             }
         }
 
@@ -355,7 +864,16 @@
         async function init() {
             await loadStatus();
             await loadProfiles();
-            await loadSensors();
+            await loadDevices();
+            await loadDeviceGroups();
+            await loadProfileSchema();
+
+            const profileSelect = document.getElementById('profileSelect');
+            profileSelect.addEventListener('change', async () => {
+                if (profileSelect.value) {
+                    await loadProfileSchema(profileSelect.value);
+                }
+            });
         }
 
         init();

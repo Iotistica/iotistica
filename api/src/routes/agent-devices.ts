@@ -267,22 +267,26 @@ router.put('/devices/:uuid/sensors/:name', jwtAuth, async (req, res) => {
  * Delete sensor
  * DELETE /api/v1/devices/:uuid/sensors/:name
  * 
- * Dual-write: table + config (sync service handles both)
+ * Query Parameters:
+ * - hard=true: Hard delete immediately (remove from target state config + device_sensors)
+ * - hard=false (default): Soft delete (mark pending_deletion, wait for agent reconciliation)
  */
 router.delete('/devices/:uuid/sensors/:name', jwtAuth, async (req, res) => {
   try {
     const { uuid, name } = req.params;
+    const hardDelete = req.query.hard === 'true';
 
-    // Delete sensor using sync service (handles dual-write)
-    const result = await deviceSensorSync.deleteEndpoint(
-      uuid,
-      name,
-      (req as any).user?.username || (req as any).user?.email || 'dashboard'
-    );
+    const actor = (req as any).user?.username || (req as any).user?.email || 'dashboard';
+    const result = hardDelete
+      ? await deviceSensorSync.hardDeleteEndpoint(uuid, name, actor)
+      : await deviceSensorSync.deleteEndpoint(uuid, name, actor);
 
     res.json({
       status: 'ok',
-      message: 'Sensor deleted',
+      mode: hardDelete ? 'hard' : 'soft',
+      message: hardDelete
+        ? 'Sensor hard deleted (removed from target state and database)'
+        : 'Sensor marked for deletion (pending agent reconciliation)',
       version: result.version
     });
   } catch (error: any) {

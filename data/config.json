@@ -1,0 +1,87 @@
+{
+    "id": "090485E1F2D8E5B2",
+    "idh": "94E84872637D8CA1",
+    "td": 134180098550608192,
+    "server": {
+        "port": 4840,
+        "hostName": "",
+        "endpointUrlPath": "",
+        "acceptAnyCertificate": false,
+        "enableNoneSecureEndpoint": false,
+        "receiveBufferSize": 1048576,
+        "sendBufferSize": 1048576
+    },
+    "modbus": {
+        "devices": [
+            {
+                "unitId": 1,
+                "name": "Modbus Device",
+                "browseName": "",
+                "description": "",
+                "type": "TCP",
+                "hostName": "127.0.0.1",
+                "port": 502,
+                "serialMode": "RS232",
+                "serialDeviceName": "/dev/ttyS0",
+                "serialBaudRate": 9600,
+                "serialDataBits": 8,
+                "serialParity": "N",
+                "serialStopBits": 1,
+                "inputCoils": {
+                    "name": "Input Coils",
+                    "browseName": "inputCoils",
+                    "variables": [
+                        {
+                            "name": "IC1",
+                            "dataType": "Boolean",
+                            "offset": 0,
+                            "index": 0,
+                            "arrayLength": -1
+                        }
+                    ]
+                },
+                "outputCoils": {
+                    "name": "Output Coils",
+                    "browseName": "outputCoils",
+                    "variables": [
+                        {
+                            "name": "OC1",
+                            "dataType": "Boolean",
+                            "offset": 0,
+                            "index": 0,
+                            "arrayLength": -1
+                        }
+                    ]
+                },
+                "inputRegisters": {
+                    "name": "Input Registers",
+                    "browseName": "inputRegisters",
+                    "variables": [
+                        {
+                            "name": "IR1",
+                            "dataType": "UInt16",
+                            "offset": 0,
+                            "index": 0,
+                            "arrayLength": -1,
+                            "swapBytes": false
+                        }
+                    ]
+                },
+                "holdingRegisters": {
+                    "name": "Holding Register",
+                    "browseName": "holdingResisters",
+                    "variables": [
+                        {
+                            "name": "HR1",
+                            "dataType": "UInt16",
+                            "offset": 0,
+                            "index": 0,
+                            "arrayLength": -1,
+                            "swapBytes": false
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+}

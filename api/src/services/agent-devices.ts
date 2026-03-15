@@ -691,8 +691,8 @@ export class DeviceSensorSyncService {
    * Called when agent reports its actual running configuration
    * This closes the Event Sourcing loop: config → agent → current state → table
    * 
-   * CRITICAL: Also handles cleanup of devices marked pending_deletion:
-   * - If device is pending_deletion and NOT in agent's current state → hard delete
+  * CRITICAL: Also handles finalization of devices marked pending_deletion:
+  * - If device is pending_deletion and NOT in agent's current state → mark deployment_status='deleted'
    */
   async syncCurrentStateToTable(deviceUuid: string, currentState: any): Promise<void> {
     logger.info(`Reconciling current state from agent for device ${deviceUuid.substring(0, 8)}...`);
@@ -712,8 +712,7 @@ export class DeviceSensorSyncService {
       }
 
       if (agentEndpoints.length === 0) {
-        logger.info(`Agent reports 0 endpoints - skipping reconciliation (device may not have discovered anything yet)`);
-        return;
+        logger.info(`Agent reports 0 endpoints - continuing reconciliation to finalize pending deletions`);
       }
 
       // Convert agent format (ProtocolAdapterDevice) to API format (SensorDeviceConfig)
@@ -736,9 +735,9 @@ export class DeviceSensorSyncService {
       // Sync table to match agent's reality (not desired state!)
       await this.syncConfigToTable(deviceUuid, runningEndpoints, currentVersion, 'agent-reconciliation');
 
-      // CRITICAL: Check for devices pending deletion that agent has stopped
-      // If device is pending_deletion and NOT in agent's current state → hard delete
-      const agentEndpointNames = new Set(runningEndpoints.map(e => e.name));
+      // CRITICAL: Check for devices pending deletion that agent has stopped.
+      // Finalize delete when pending_deletion endpoint is missing from agent current state.
+      const agentEndpointByName = new Map(runningEndpoints.map(e => [e.name, e]));
       
       const pendingDeletionResult = await query(
         `SELECT uuid, name FROM device_sensors 
@@ -747,11 +746,14 @@ export class DeviceSensorSyncService {
       );
 
       for (const row of pendingDeletionResult.rows) {
-        if (!agentEndpointNames.has(row.name)) {
-          logger.info(`Device "${row.name}" is pending_deletion and NOT in agent's state → hard deleting`);
-          await this.hardDeleteEndpoint(deviceUuid, row.uuid, 'agent-reconciliation');
+        const agentEndpoint = agentEndpointByName.get(row.name);
+        const isMissingFromAgentState = !agentEndpoint;
+
+        if (isMissingFromAgentState) {
+          logger.info(`Device "${row.name}" is pending_deletion and missing from agent state → marking deleted`);
+          await this.markEndpointDeleted(deviceUuid, row.uuid, 'agent-reconciliation');
         } else {
-          logger.warn(`Device "${row.name}" is pending_deletion but STILL in agent's state - agent hasn't stopped it yet`);
+          logger.warn(`Device "${row.name}" is pending_deletion but still present in agent state - waiting for removal`);
         }
       }
 
@@ -1002,7 +1004,7 @@ export class DeviceSensorSyncService {
                health_status, health_connected, health_last_poll, health_error_count,
                health_last_error, health_updated_at
         FROM device_sensors 
-        WHERE device_uuid = $1
+        WHERE device_uuid = $1 AND deployment_status != 'deleted'
       `;
       const params: any[] = [deviceUuid];
 
@@ -1331,12 +1333,12 @@ export class DeviceSensorSyncService {
    * Delete sensor device (SOFT DELETE PATTERN - Reconciliation Required)
    * NOTE: sensorIdentifier can be either UUID (preferred) or name (backward compatibility)
    * 
-   * CRITICAL: This is a SOFT DELETE that requires agent reconciliation:
-   * 1. Mark sensor with deployment_status='pending_deletion' in database
-   * 2. Keep in config.endpoints but marked for deletion
-   * 3. Agent sees it in target state and stops polling it
-   * 4. Agent reports it stopped in current state
-   * 5. Hard delete happens later when agent confirms (via reconciliation or separate cleanup job)
+  * CRITICAL: This is a SOFT DELETE that requires agent reconciliation:
+  * 1. Mark sensor with deployment_status='pending_deletion' in database
+  * 2. Remove sensor from target state config.endpoints
+  * 3. Agent applies target state and removes the endpoint
+  * 4. Agent reports current state without the endpoint
+  * 5. Reconciliation marks deployment_status='deleted' (record retained in DB)
    */
   async deleteEndpoint(
     deviceUuid: string,
@@ -1369,15 +1371,42 @@ export class DeviceSensorSyncService {
         [deviceUuid, sensorIdentifier]
       );
 
-      // 3. Update target state version (triggers deployment)
+      // 3. Remove endpoint from target state so agent removes it on next sync.
+      const stateResult = await query(
+        'SELECT apps, config, version FROM device_target_state WHERE device_uuid = $1',
+        [deviceUuid]
+      );
+
+      if (stateResult.rows.length === 0) {
+        throw new Error('Device not found');
+      }
+
+      const state = stateResult.rows[0];
+      const apps = typeof state.apps === 'string' ? JSON.parse(state.apps) : state.apps;
+      const config = typeof state.config === 'string' ? JSON.parse(state.config) : state.config;
+      const existingDevices: EndpointDeviceConfig[] = config.endpoints || [];
+      const originalCount = existingDevices.length;
+      config.endpoints = existingDevices.filter((endpoint: EndpointDeviceConfig) => (
+        endpoint.uuid !== sensorIdentifier && endpoint.name !== sensorIdentifier
+      ));
+      const matchedInTarget = config.endpoints.length < originalCount;
+
+      if (!matchedInTarget) {
+        logger.warn(
+          `Sensor "${sensorToDelete.name}" was marked pending_deletion in table but not found in target state endpoints`
+        );
+      }
+
       const updateResult = await query(
         `UPDATE device_target_state SET
+           apps = $1,
+           config = $2,
            version = version + 1,
            updated_at = NOW(),
            needs_deployment = true
-         WHERE device_uuid = $1
+         WHERE device_uuid = $3
          RETURNING version`,
-        [deviceUuid]
+        [JSON.stringify(apps), JSON.stringify(config), deviceUuid]
       );
 
       const newVersion = updateResult.rows[0].version;
@@ -1405,6 +1434,45 @@ export class DeviceSensorSyncService {
       logger.error('Error marking sensor for deletion:', error);
       throw error;
     }
+  }
+
+  /**
+   * Mark endpoint as deleted after agent confirmation (keeps DB record for audit/history)
+   */
+  async markEndpointDeleted(
+    deviceUuid: string,
+    sensorIdentifier: string,
+    userId?: string
+  ): Promise<void> {
+    const result = await query(
+      `UPDATE device_sensors
+       SET deployment_status = 'deleted',
+           enabled = false,
+           updated_by = $3,
+           updated_at = NOW()
+       WHERE device_uuid = $1 AND (uuid::text = $2 OR name = $2)
+       RETURNING uuid, name`,
+      [deviceUuid, sensorIdentifier, userId || 'system']
+    );
+
+    if (result.rows.length === 0) {
+      logger.warn(`markEndpointDeleted: endpoint not found for identifier ${sensorIdentifier}`);
+      return;
+    }
+
+    const row = result.rows[0];
+
+    await eventPublisher.publish(
+      'device_sensor.deleted',
+      'agent',
+      deviceUuid,
+      {
+        sensor_name: row.name,
+        sensor_uuid: row.uuid
+      }
+    );
+
+    logger.info(`Marked sensor "${row.name}" as deleted (kept in database)`);
   }
 
   /**
@@ -1451,7 +1519,8 @@ export class DeviceSensorSyncService {
            apps = $1,
            config = $2,
            version = version + 1,
-           updated_at = NOW()
+           updated_at = NOW(),
+           needs_deployment = true
          WHERE device_uuid = $3
          RETURNING version`,
         [JSON.stringify(apps), JSON.stringify(config), deviceUuid]
@@ -1461,7 +1530,7 @@ export class DeviceSensorSyncService {
 
       // 5. Hard delete from database
       await query(
-        'DELETE FROM device_sensors WHERE device_uuid = $1 AND (uuid = $2 OR name = $2)',
+        'DELETE FROM device_sensors WHERE device_uuid = $1 AND (uuid::text = $2 OR name = $2)',
         [deviceUuid, sensorIdentifier]
       );
 

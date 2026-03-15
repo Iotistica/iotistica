@@ -1,7 +1,7 @@
 {
   "name": "SmartBuilding",
   "description": "Multi-story commercial building with HVAC, lighting, and energy monitoring across zones",
-  "sensors": [
+  "devices": [
     {
       "folder": "Building_A",
       "subfolder": "Floor_1",
@@ -11,12 +11,33 @@
       "count": 3,
       "unit": "°C",
       "config": {
-        "base": 21.5,
-        "variation": 2.0,
-        "noise": 0.3,
-        "period": 60.0,
-        "min_value": 18.0,
-        "max_value": 26.0
+        "active_state": "normal",
+        "states": {
+          "normal": {
+            "base": 21.5,
+            "period": 60.0,
+            "variation": 2.0,
+            "max_value": 26.0,
+            "noise": 0.3,
+            "min_value": 18.0
+          },
+          "under_load": {
+            "base": 25.8,
+            "period": 42.0,
+            "variation": 3.2,
+            "max_value": 28.6,
+            "noise": 0.45,
+            "min_value": 18.0
+          },
+          "maintenance": {
+            "base": 18.275,
+            "period": 84.0,
+            "variation": 0.8,
+            "max_value": 24.7,
+            "noise": 0.15,
+            "min_value": 18.0
+          }
+        }
       }
     },
     {
@@ -28,12 +49,33 @@
       "count": 2,
       "unit": "ppm",
       "config": {
-        "base": 450.0,
-        "variation": 100.0,
-        "noise": 15.0,
-        "period": 45.0,
-        "min_value": 300.0,
-        "max_value": 1000.0
+        "active_state": "normal",
+        "states": {
+          "normal": {
+            "base": 450.0,
+            "period": 45.0,
+            "variation": 100.0,
+            "max_value": 1000.0,
+            "noise": 15.0,
+            "min_value": 300.0
+          },
+          "under_load": {
+            "base": 540.0,
+            "period": 31.5,
+            "variation": 160.0,
+            "max_value": 1100.0,
+            "noise": 22.5,
+            "min_value": 300.0
+          },
+          "maintenance": {
+            "base": 382.5,
+            "period": 63.0,
+            "variation": 40.0,
+            "max_value": 950.0,
+            "noise": 7.5,
+            "min_value": 300.0
+          }
+        }
       }
     },
     {
@@ -45,12 +87,33 @@
       "count": 3,
       "unit": "°C",
       "config": {
-        "base": 22.0,
-        "variation": 1.8,
-        "noise": 0.3,
-        "period": 60.0,
-        "min_value": 18.0,
-        "max_value": 26.0
+        "active_state": "normal",
+        "states": {
+          "normal": {
+            "base": 22.0,
+            "period": 60.0,
+            "variation": 1.8,
+            "max_value": 26.0,
+            "noise": 0.3,
+            "min_value": 18.0
+          },
+          "under_load": {
+            "base": 26.4,
+            "period": 42.0,
+            "variation": 2.88,
+            "max_value": 28.6,
+            "noise": 0.45,
+            "min_value": 18.0
+          },
+          "maintenance": {
+            "base": 18.7,
+            "period": 84.0,
+            "variation": 0.72,
+            "max_value": 24.7,
+            "noise": 0.15,
+            "min_value": 18.0
+          }
+        }
       }
     },
     {
@@ -62,12 +125,33 @@
       "count": 2,
       "unit": "persons",
       "config": {
-        "base": 8.0,
-        "variation": 6.0,
-        "noise": 1.0,
-        "period": 120.0,
-        "min_value": 0.0,
-        "max_value": 20.0
+        "active_state": "normal",
+        "states": {
+          "normal": {
+            "base": 8.0,
+            "period": 120.0,
+            "variation": 6.0,
+            "max_value": 20.0,
+            "noise": 1.0,
+            "min_value": 0.0
+          },
+          "under_load": {
+            "base": 9.6,
+            "period": 84.0,
+            "variation": 9.6,
+            "max_value": 22.0,
+            "noise": 1.5,
+            "min_value": 0.0
+          },
+          "maintenance": {
+            "base": 6.8,
+            "period": 168.0,
+            "variation": 2.4,
+            "max_value": 19.0,
+            "noise": 0.5,
+            "min_value": 0.0
+          }
+        }
       }
     },
     {
@@ -79,12 +163,33 @@
       "count": 3,
       "unit": "lux",
       "config": {
-        "base": 450.0,
-        "variation": 100.0,
-        "noise": 20.0,
-        "period": 90.0,
-        "min_value": 0.0,
-        "max_value": 800.0
+        "active_state": "normal",
+        "states": {
+          "normal": {
+            "base": 450.0,
+            "period": 90.0,
+            "variation": 100.0,
+            "max_value": 800.0,
+            "noise": 20.0,
+            "min_value": 0.0
+          },
+          "under_load": {
+            "base": 540.0,
+            "period": 63.0,
+            "variation": 160.0,
+            "max_value": 880.0,
+            "noise": 30.0,
+            "min_value": 0.0
+          },
+          "maintenance": {
+            "base": 382.5,
+            "period": 126.0,
+            "variation": 40.0,
+            "max_value": 760.0,
+            "noise": 10.0,
+            "min_value": 0.0
+          }
+        }
       }
     },
     {
@@ -96,12 +201,33 @@
       "count": 4,
       "unit": "kW",
       "config": {
-        "base": 8.5,
-        "variation": 4.0,
-        "noise": 0.5,
-        "period": 180.0,
-        "min_value": 0.0,
-        "max_value": 12.0
+        "active_state": "normal",
+        "states": {
+          "normal": {
+            "base": 8.5,
+            "period": 180.0,
+            "variation": 4.0,
+            "max_value": 12.0,
+            "noise": 0.5,
+            "min_value": 0.0
+          },
+          "under_load": {
+            "base": 10.2,
+            "period": 126.0,
+            "variation": 6.4,
+            "max_value": 13.2,
+            "noise": 0.75,
+            "min_value": 0.0
+          },
+          "maintenance": {
+            "base": 7.225,
+            "period": 252.0,
+            "variation": 1.6,
+            "max_value": 11.4,
+            "noise": 0.25,
+            "min_value": 0.0
+          }
+        }
       }
     },
     {
@@ -113,12 +239,33 @@
       "count": 2,
       "unit": "mm/s",
       "config": {
-        "base": 2.5,
-        "variation": 1.2,
-        "noise": 0.3,
-        "period": 30.0,
-        "min_value": 0.0,
-        "max_value": 10.0
+        "active_state": "normal",
+        "states": {
+          "normal": {
+            "base": 2.5,
+            "period": 30.0,
+            "variation": 1.2,
+            "max_value": 10.0,
+            "noise": 0.3,
+            "min_value": 0.0
+          },
+          "under_load": {
+            "base": 3.0,
+            "period": 21.0,
+            "variation": 1.92,
+            "max_value": 11.0,
+            "noise": 0.45,
+            "min_value": 0.0
+          },
+          "maintenance": {
+            "base": 2.125,
+            "period": 42.0,
+            "variation": 0.48,
+            "max_value": 9.5,
+            "noise": 0.15,
+            "min_value": 0.0
+          }
+        }
       }
     },
     {
@@ -130,12 +277,33 @@
       "count": 2,
       "unit": "L/min",
       "config": {
-        "base": 350.0,
-        "variation": 80.0,
-        "noise": 15.0,
-        "period": 45.0,
-        "min_value": 200.0,
-        "max_value": 500.0
+        "active_state": "normal",
+        "states": {
+          "normal": {
+            "base": 350.0,
+            "period": 45.0,
+            "variation": 80.0,
+            "max_value": 500.0,
+            "noise": 15.0,
+            "min_value": 200.0
+          },
+          "under_load": {
+            "base": 420.0,
+            "period": 31.5,
+            "variation": 128.0,
+            "max_value": 550.0,
+            "noise": 22.5,
+            "min_value": 200.0
+          },
+          "maintenance": {
+            "base": 297.5,
+            "period": 63.0,
+            "variation": 32.0,
+            "max_value": 475.0,
+            "noise": 7.5,
+            "min_value": 200.0
+          }
+        }
       }
     },
     {
@@ -147,12 +315,33 @@
       "count": 2,
       "unit": "count",
       "config": {
-        "base": 35.0,
-        "variation": 15.0,
-        "noise": 2.0,
-        "period": 300.0,
-        "min_value": 0.0,
-        "max_value": 80.0
+        "active_state": "normal",
+        "states": {
+          "normal": {
+            "base": 35.0,
+            "period": 300.0,
+            "variation": 15.0,
+            "max_value": 80.0,
+            "noise": 2.0,
+            "min_value": 0.0
+          },
+          "under_load": {
+            "base": 42.0,
+            "period": 210.0,
+            "variation": 24.0,
+            "max_value": 88.0,
+            "noise": 3.0,
+            "min_value": 0.0
+          },
+          "maintenance": {
+            "base": 29.75,
+            "period": 420.0,
+            "variation": 6.0,
+            "max_value": 76.0,
+            "noise": 1.0,
+            "min_value": 0.0
+          }
+        }
       }
     },
     {
@@ -164,12 +353,33 @@
       "count": 1,
       "unit": "ppm CO",
       "config": {
-        "base": 15.0,
-        "variation": 8.0,
-        "noise": 2.0,
-        "period": 60.0,
-        "min_value": 0.0,
-        "max_value": 35.0
+        "active_state": "normal",
+        "states": {
+          "normal": {
+            "base": 15.0,
+            "period": 60.0,
+            "variation": 8.0,
+            "max_value": 35.0,
+            "noise": 2.0,
+            "min_value": 0.0
+          },
+          "under_load": {
+            "base": 18.0,
+            "period": 42.0,
+            "variation": 12.8,
+            "max_value": 38.5,
+            "noise": 3.0,
+            "min_value": 0.0
+          },
+          "maintenance": {
+            "base": 12.75,
+            "period": 84.0,
+            "variation": 3.2,
+            "max_value": 33.25,
+            "noise": 1.0,
+            "min_value": 0.0
+          }
+        }
       }
     }
   ]

@@ -1744,7 +1744,7 @@ API Handler
 ```json
 {
   "connection": {
-    "endpointUrl": "opc.tcp://192.168.1.100:4840",
+    "endpointUrl": "opc.tcp://10.0.0.60:4840",
     "useSubscription": true,           // Enable subscription streaming
     "publishingInterval": 1000,         // How often to publish batches (ms)
     "samplingInterval": 500             // How often to sample values (ms)
@@ -1768,7 +1768,7 @@ API Handler
   "enabled": true,
   "protocol": "opcua",
   "connection": {
-    "endpointUrl": "opc.tcp://192.168.1.100:4840",
+    "endpointUrl": "opc.tcp://10.0.0.60:4840",
     "username": "admin",
     "password": "password",
     "securityMode": "None",
@@ -1884,7 +1884,7 @@ VALUES (
   'plc-001',
   'opcua',
   true,
-  '{"endpointUrl": "opc.tcp://192.168.1.100:4840", ...}'::jsonb,
+  '{"endpointUrl": "opc.tcp://10.0.0.60:4840", ...}'::jsonb,
   '[{"name": "temperature", "nodeId": "ns=2;s=Temperature", ...}]'::jsonb,
   5000
 );

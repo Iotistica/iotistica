@@ -9,7 +9,7 @@ from asyncua import Server, ua
 from .nodes import NodeManager
 from .updater import ValueUpdater
 from .profiles import get_profile_with_api_fallback
-from .types import Sensor
+from .types import Device
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ class OPCUASimulator:
         self.server = None
         self.node_manager = None
         self.updater = None
-        self.sensors: List[Sensor] = []
+        self.devices: List[Device] = []
     
     async def init_server(self):
         """Initialize OPC UA server"""
@@ -55,8 +55,8 @@ class OPCUASimulator:
         profile = get_profile_with_api_fallback(self.profile_name)
         await self.node_manager.create_from_profile(profile)
         
-        # Get all created sensors
-        self.sensors = self.node_manager.get_all_sensors()
+        # Get all created devices
+        self.devices = self.node_manager.get_all_devices()
         
         # Create metadata nodes for agent discovery
         await self._create_metadata_nodes(profile)
@@ -66,24 +66,24 @@ class OPCUASimulator:
     def log_node_structure(self):
         """Log available nodes for user reference"""
         logger.info("=" * 60)
-        logger.info("Created sensor nodes:")
+        logger.info("Created device nodes:")
         logger.info("=" * 60)
         
         current_folder = None
-        for sensor in self.sensors:
-            if sensor.folder != current_folder:
-                current_folder = sensor.folder
-                logger.info(f"\n{sensor.folder}:")
+        for device in self.devices:
+            if device.folder != current_folder:
+                current_folder = device.folder
+                logger.info(f"\n{device.folder}:")
             
-            unit_str = f" ({sensor.unit})" if sensor.unit else ""
+            unit_str = f" ({device.unit})" if device.unit else ""
             range_str = ""
-            if sensor.min_value is not None and sensor.max_value is not None:
-                range_str = f" [{sensor.min_value}-{sensor.max_value}]"
+            if device.min_value is not None and device.max_value is not None:
+                range_str = f" [{device.min_value}-{device.max_value}]"
             
-            logger.info(f"  - {sensor.name}: {sensor.sensor_type}{unit_str}{range_str}")
+            logger.info(f"  - {device.name}: {device.device_type}{unit_str}{range_str}")
         
         logger.info("\n" + "=" * 60)
-        logger.info(f"Total sensors: {len(self.sensors)}")
+        logger.info(f"Total devices: {len(self.devices)}")
         logger.info("=" * 60)
     
     async def _create_metadata_nodes(self, profile):
@@ -100,17 +100,17 @@ class OPCUASimulator:
         profile_desc = await info_folder.add_variable(2, "ProfileDescription", profile.description)
         await profile_desc.set_writable(False)
         
-        sensor_count = await info_folder.add_variable(2, "SensorCount", len(self.sensors))
-        await sensor_count.set_writable(False)
+        device_count = await info_folder.add_variable(2, "DeviceCount", len(self.devices))
+        await device_count.set_writable(False)
         
-        # Sensor type summary (count by type)
-        sensor_types = {}
-        for sensor in self.sensors:
-            sensor_types[sensor.sensor_type] = sensor_types.get(sensor.sensor_type, 0) + 1
+        # Device type summary (count by type)
+        device_types = {}
+        for device in self.devices:
+            device_types[device.device_type] = device_types.get(device.device_type, 0) + 1
         
-        sensor_summary = ", ".join([f"{count} {stype}" for stype, count in sensor_types.items()])
-        sensor_types_node = await info_folder.add_variable(2, "SensorTypes", sensor_summary)
-        await sensor_types_node.set_writable(False)
+        device_summary = ", ".join([f"{count} {dtype}" for dtype, count in device_types.items()])
+        device_types_node = await info_folder.add_variable(2, "DeviceTypes", device_summary)
+        await device_types_node.set_writable(False)
         
         logger.info(f"Created metadata nodes in ServerInfo folder")
     
@@ -123,8 +123,8 @@ class OPCUASimulator:
             logger.info("OPC UA Server started")
             self.log_node_structure()
             
-            # Start value updater with sensor list
-            self.updater = ValueUpdater(self.sensors, self.update_interval)
+            # Start value updater with device list
+            self.updater = ValueUpdater(self.devices, self.update_interval)
             await self.updater.start()
 
 

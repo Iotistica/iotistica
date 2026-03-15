@@ -36,7 +36,7 @@ export type OPCUASecurityPolicy = z.infer<typeof OPCUASecurityPolicySchema>;
  * Stored in the 'connection' JSONB field in the sensors table
  */
 export const OPCUAConnectionSchema = z.object({
-  /** OPC-UA endpoint URL (e.g., opc.tcp://192.168.1.100:4840) */
+  /** OPC-UA endpoint URL (e.g., opc.tcp://10.0.0.60:4840) */
   endpointUrl: z.string().url(),
   
   /** Username for authentication (optional) */

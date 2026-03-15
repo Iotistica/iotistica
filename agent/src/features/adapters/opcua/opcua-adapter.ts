@@ -20,7 +20,7 @@
  *   "enabled": true,
  *   "pollInterval": 5000,
  *   "connection": {
- *     "endpointUrl": "opc.tcp://192.168.1.100:4840",
+ *     "endpointUrl": "opc.tcp://10.0.0.60:4840",
  *     "username": "admin",
  *     "password": "password",
  *     "securityMode": "None",
@@ -123,6 +123,10 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
   // Read retry settings
   private readonly MAX_READ_RETRIES = 3;     // Retry reads up to 3 times
   private readonly READ_RETRY_DELAY = 100;   // 100ms between retries
+
+  // Rediscovery throttle: only emit 'rediscovery-needed' once per device per cooldown period
+  private readonly REDISCOVERY_COOLDOWN_MS = 30000; // 30 seconds
+  private lastRediscoveryNeeded: Map<string, number> = new Map();
 
   /**
    * Creates a new OPC-UA adapter instance
@@ -1039,6 +1043,33 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
           totalCount: device.dataPoints.length,
           invalidNodes: invalidNodeIds
         });
+      }
+
+      // Detect OPC-UA server profile change: if ≥80% of configured nodes fail, the server
+      // likely switched to a different profile (e.g., OPC-UA simulator hot-reload).
+      // Emit 'rediscovery-needed' so the agent can re-browse the server and update the DB.
+      // Throttled per device to avoid flooding discovery when the server is restarting.
+      const totalConfigured = device.dataPoints.length;
+      if (totalConfigured > 0 && invalidNodeIds.length / totalConfigured >= 0.8) {
+        const now = Date.now();
+        const lastEmitted = this.lastRediscoveryNeeded.get(device.name) ?? 0;
+        if (now - lastEmitted >= this.REDISCOVERY_COOLDOWN_MS) {
+          this.lastRediscoveryNeeded.set(device.name, now);
+          const failurePct = Math.round((invalidNodeIds.length / totalConfigured) * 100);
+          this.logger.warn(
+            `High NodeID failure rate (${failurePct}% of ${totalConfigured} nodes invalid) - OPC-UA server may have a different profile. Requesting rediscovery.`,
+            {
+              deviceName: device.name,
+              endpointUrl: device.connection.endpointUrl,
+              invalidCount: invalidNodeIds.length,
+              totalCount: totalConfigured
+            }
+          );
+          this.emit('rediscovery-needed', {
+            deviceName: device.name,
+            endpointUrl: device.connection.endpointUrl
+          });
+        }
       }
 
       // Log classification summary

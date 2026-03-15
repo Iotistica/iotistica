@@ -194,8 +194,19 @@ export class FeatureInitializer {
 
       // Get all enabled protocols
       const allDevices = await DeviceEndpointModel.getAll();
+      const validDevices = allDevices.filter((s: any) => !!s.uuid);
+      const invalidDevices = allDevices.length - validDevices.length;
+
+      if (invalidDevices > 0) {
+        logger.warnSync('Ignoring endpoints without UUID during Device Publish initialization', {
+          component: LogComponents.agent,
+          invalidCount: invalidDevices,
+          totalCount: allDevices.length
+        });
+      }
+
       const enabledDevices = new Set(
-        allDevices.filter((s: any) => s.enabled).map((s: any) => s.protocol)
+        validDevices.filter((s: any) => s.enabled).map((s: any) => s.protocol)
       );
 
       if (enabledDevices.size === 0) {
@@ -307,7 +318,9 @@ export class FeatureInitializer {
       
       for (const protocol of ['modbus', 'opcua', 'snmp', 'can', 'mqtt']) {
         const devices = await DeviceEndpointModel.getEnabled(protocol);
-        if (devices.length > 0) {
+        const validDevices = devices.filter((d: any) => !!d.uuid);
+
+        if (validDevices.length > 0) {
           enabledProtocols.push(protocol);
           // Enable the protocol adapter since we have enabled endpoints
           if (!devicesConfig[protocol]) {
@@ -315,6 +328,12 @@ export class FeatureInitializer {
           } else {
             devicesConfig[protocol].enabled = true;
           }
+        } else if (devices.length > 0) {
+          logger.warnSync('Ignoring enabled endpoints without UUID for protocol startup', {
+            component: LogComponents.agent,
+            protocol,
+            invalidCount: devices.length
+          });
         }
       }
       
@@ -339,6 +358,40 @@ export class FeatureInitializer {
       // Make sensors feature available to device API
       const { setSensorsFeature } = await import('../api/actions.js');
       setSensorsFeature(this.features.sensors);
+
+      // Wire up rediscovery-needed listener on each new SensorsFeature instance.
+      // When the OPC-UA server switches profiles (e.g., simulator hot-reload), all stored
+      // NodeIDs become invalid. The adapter detects the high failure rate and emits this
+      // event so we can re-browse the server and update the database with fresh nodes.
+      // Calling runDiscovery() directly bypasses pre-discovery, so sensorPublish keeps running.
+      // If savedCount > 0, discovery-complete fires and handles the full adapter reload.
+      // If savedCount = 0 (server still mid-reload), the adapter retries via its own backoff
+      // and will re-emit rediscovery-needed after the 30-second cooldown.
+      if (this.features.discoveryService) {
+        this.features.sensors.on('rediscovery-needed', async (data: { deviceName: string; endpointUrl: string }) => {
+          logger.warnSync('OPC-UA adapter detected stale NodeIDs - triggering targeted rediscovery', {
+            component: LogComponents.agent,
+            deviceName: data.deviceName,
+            endpointUrl: data.endpointUrl,
+            note: 'Server may have switched profiles; will re-browse after brief stabilization delay'
+          });
+          try {
+            // Short delay to let the server finish reloading after a profile switch
+            await new Promise<void>(resolve => setTimeout(resolve, 3000));
+            await this.features.discoveryService!.runDiscovery({
+              trigger: 'manual',
+              protocols: ['opcua'],
+              validate: true,
+              forceRun: true
+            });
+          } catch (error) {
+            logger.errorSync('Rediscovery triggered by OPC-UA adapter failed', error as Error, {
+              component: LogComponents.agent,
+              deviceName: data.deviceName
+            });
+          }
+        });
+      }
 
       logger.debugSync('Protocol Adapters initialized (database-driven)', {
         component: LogComponents.agent,

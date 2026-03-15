@@ -270,7 +270,7 @@ export function getDefaultConnection(protocol: 'modbus' | 'opcua'): ModbusConnec
     };
   } else {
     return {
-      endpointUrl: 'opc.tcp://192.168.1.100:4840',
+      endpointUrl: 'opc.tcp://10.0.0.60:4840',
       securityMode: 'None',
       securityPolicy: 'None',
       connectionTimeout: 10000,
