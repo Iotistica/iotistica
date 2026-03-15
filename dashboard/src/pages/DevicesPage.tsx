@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -63,7 +63,9 @@ interface Sensor {
   type?: 'pipeline' | 'device' | 'virtual'; // pipeline = sensor publish, device = protocol adapter, virtual = simulator
   protocol?: string;
   connected?: boolean;
+  connection?: Record<string, any>;
   dataPoints?: ModbusDataPoint[] | OPCUADataPoint[]; // Protocol-specific data points
+  pollInterval?: number | null; // Poll interval in milliseconds
   // Deployment tracking fields
   deploymentStatus?: 'pending' | 'deployed' | 'deploying' | 'failed' | 'draft' | 'pending_deletion' | 'deleted';
   lastDeployedAt?: string | null;
@@ -77,6 +79,7 @@ interface Sensor {
     errorCount: number;
     lastError: string | null;
     updatedAt: string | null;
+    lastTelemetryAt: string | null;
   } | null;
   // Virtual device fields
   isVirtual?: boolean;
@@ -318,7 +321,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           state: isConnected ? 'CONNECTED' : 'DISCONNECTED',
           healthy: health ? (health.status === 'healthy' || health.connected) : d.connected,
           messagesPublished: 0, // Protocol adapters don't track messages
-          lastActivity: health?.updatedAt || null,
+          lastActivity: health?.lastTelemetryAt || null,
           lastError: health?.lastError || d.lastError,
           configured: true,
           enabled: d.enabled !== undefined ? d.enabled : true, // Default to enabled
@@ -345,7 +348,8 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             lastPoll: health.lastPoll,
             errorCount: health.errorCount,
             lastError: health.lastError,
-            updatedAt: health.updatedAt
+            updatedAt: health.updatedAt,
+            lastTelemetryAt: health.lastTelemetryAt
           } : null,
         };
       });
@@ -847,6 +851,26 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
    */
   const getStatusBadge = (sensor: Sensor) => {
     const deploymentStatus = sensor.deploymentStatus;
+
+    const lastPollMs = sensor.health?.lastPoll ? new Date(sensor.health.lastPoll).getTime() : null;
+    const lastTelemetryMs = sensor.health?.lastTelemetryAt ? new Date(sensor.health.lastTelemetryAt).getTime() : null;
+    const pollIntervalMs = sensor.pollInterval && sensor.pollInterval > 0 ? sensor.pollInterval : null;
+
+    // Mark as no data when polling has happened but telemetry is missing or too far behind polls.
+    // Uses both last poll and last telemetry timestamps so connected adapters still surface stale data.
+    const isNoData = (() => {
+      if (sensor.type !== 'device' || !sensor.enabled || !lastPollMs) {
+        return false;
+      }
+
+      if (!lastTelemetryMs) {
+        return true;
+      }
+
+      const telemetryLagMs = lastPollMs - lastTelemetryMs;
+      const lagThresholdMs = pollIntervalMs ? pollIntervalMs * 2 : 5 * 60 * 1000;
+      return telemetryLagMs > lagThresholdMs;
+    })();
     
     // 1. Deployment lifecycle states (require user action - highest priority)
     
@@ -892,6 +916,10 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     if (sensor.lastError || (sensor.health && sensor.health.errorCount > 0)) {
       return <Badge className="bg-red-500 dark:bg-red-600 text-white border border-red-600 dark:border-red-500 font-semibold">Error</Badge>;
     }
+
+    if (isNoData) {
+      return <Badge className="bg-amber-500 dark:bg-amber-600 text-white border border-amber-600 dark:border-amber-500 font-semibold">No Data</Badge>;
+    }
     
     // Active (healthy and connected) - Same for all device types
     if (sensor.state === 'CONNECTED' && sensor.healthy) {
@@ -905,6 +933,61 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     
     // Fallback
     return <Badge variant="outline" className="bg-muted text-muted-foreground border-border">Unknown</Badge>;
+  };
+
+  const getEndpointUrl = (sensor: Sensor): string | null => {
+    const connection = sensor.connection;
+    if (!connection || typeof connection !== 'object') {
+      return null;
+    }
+
+    const protocol = String(sensor.protocol || '').toLowerCase();
+
+    if (protocol === 'opcua' && typeof connection.endpointUrl === 'string' && connection.endpointUrl.trim().length > 0) {
+      return connection.endpointUrl.trim();
+    }
+
+    if (protocol === 'modbus') {
+      if (connection.type === 'tcp' && typeof connection.host === 'string' && connection.host.trim().length > 0) {
+        return `modbus-tcp://${connection.host.trim()}${connection.port ? `:${connection.port}` : ''}`;
+      }
+
+      if (connection.type === 'rtu' && typeof connection.serialPort === 'string' && connection.serialPort.trim().length > 0) {
+        return `serial://${connection.serialPort.trim()}`;
+      }
+    }
+
+    if (protocol === 'mqtt') {
+      if (typeof connection.topic === 'string' && connection.topic.trim().length > 0) {
+        return connection.topic.trim();
+      }
+
+      if (Array.isArray(connection.topics) && connection.topics.length > 0) {
+        return connection.topics.filter((topic: unknown) => typeof topic === 'string' && topic.trim().length > 0).join(', ');
+      }
+    }
+
+    const directUrl = connection.url || connection.endpoint || connection.uri || connection.brokerUrl;
+    if (typeof directUrl === 'string' && directUrl.trim().length > 0) {
+      return directUrl.trim();
+    }
+
+    const host = connection.host || connection.hostname || connection.server;
+    if (!host || typeof host !== 'string') {
+      return null;
+    }
+
+    const scheme = String(connection.protocol || sensor.protocol || 'tcp').toLowerCase();
+    const hasPort = connection.port !== undefined && connection.port !== null && connection.port !== '';
+    const base = `${scheme}://${host}${hasPort ? `:${connection.port}` : ''}`;
+
+    const pathOrTopic = connection.path || connection.topic;
+    if (typeof pathOrTopic === 'string' && pathOrTopic.trim().length > 0) {
+      const suffix = pathOrTopic.startsWith('/') ? pathOrTopic : `/${pathOrTopic}`;
+      return `${base}${suffix}`;
+    }
+
+    return base;
   };
 
   if (loading) {
@@ -952,6 +1035,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
         {/* Tabs for Devices and Profiles */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          {/*
           <TabsList className="bg-transparent w-fit h-auto p-0 rounded-none justify-start gap-20 border-0">
             <TabsTrigger 
               value="devices"
@@ -998,6 +1082,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
               Profiles
             </TabsTrigger>
           </TabsList>
+          */}
 
           {/* Devices Tab */}
           <TabsContent value="devices" className="space-y-6">
@@ -1197,7 +1282,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         {/* Sensors List */}
         <Card>
           <CardHeader>
-            <CardTitle>Configured Devices</CardTitle>
+            
             <CardDescription>
               {sensors.length === 0 
                 ? 'No devices configured yet.' 
@@ -1227,120 +1312,123 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                
               </div>
             ) : (
-              <div className="space-y-3">
-                {sensors
-                  .filter(sensor => selectedProtocol.length === 0 || selectedProtocol.includes(sensor.protocol || ''))
-                  .filter(sensor => selectedType.length === 0 || selectedType.includes(sensor.type || ''))
-                  .filter(sensor => {
-                    if (selectedStatus.length === 0) return true;
-                    if (selectedStatus.includes('healthy') && sensor.healthy) return true;
-                    if (selectedStatus.includes('unhealthy') && !sensor.healthy && sensor.state !== 'PENDING') return true;
-                    return selectedStatus.includes(sensor.state);
-                  })
-                  .map((sensor) => (
-                  <div key={sensor.name}>
-                    {/* Sensor Row */}
-                    <div
-                      className="flex items-center justify-between p-4 border border-border rounded-lg hover:border-muted-foreground/20 transition-colors"
-                    >
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h3 className="text-lg font-semibold text-foreground">{sensor.name}</h3>
-                          {getStatusBadge(sensor)}
-                          {(sensor.type === 'virtual' || sensor.isVirtual) && (
-                            <Badge className="bg-purple-600 dark:bg-purple-700 text-white border border-purple-700 dark:border-purple-600 text-xs font-semibold">
-                              Virtual
-                            </Badge>
-                          )}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Status</th>
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Name</th>
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Protocol</th>
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Poll Interval</th>
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Endpoint</th>
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Last Activity</th>
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Last Poll</th>
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Last Deployed</th>
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Errors</th>
+                      <th className="py-3 px-4 font-semibold text-sm text-foreground text-left">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sensors
+                      .filter(sensor => selectedProtocol.length === 0 || selectedProtocol.includes(sensor.protocol || ''))
+                      .filter(sensor => selectedType.length === 0 || selectedType.includes(sensor.type || ''))
+                      .filter(sensor => {
+                        if (selectedStatus.length === 0) return true;
+                        if (selectedStatus.includes('healthy') && sensor.healthy) return true;
+                        if (selectedStatus.includes('unhealthy') && !sensor.healthy && sensor.state !== 'PENDING') return true;
+                        return selectedStatus.includes(sensor.state);
+                      })
+                      .map((sensor) => (
+                      <tr key={sensor.name} className="border-b border-border last:border-0 hover:bg-muted">
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2">
+                            {getStatusBadge(sensor)}
+                            {(sensor.type === 'virtual' || sensor.isVirtual) && (
+                              <Badge className="bg-purple-600 dark:bg-purple-700 text-white border border-purple-700 dark:border-purple-600 text-xs font-semibold">
+                                Virtual
+                              </Badge>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 font-medium text-foreground">
+                          <div>
+                            {sensor.name}
+                            {sensor.lastError && sensor.state !== 'PENDING' && (
+                              <div className="text-xs text-red-600 mt-0.5 max-w-[200px] truncate" title={sensor.lastError}>
+                                {sensor.lastError}
+                              </div>
+                            )}
+                            {sensor.deploymentError && (
+                              <div className="text-xs text-red-600 mt-0.5 max-w-[200px] truncate" title={sensor.deploymentError}>
+                                {sensor.deploymentError}
+                              </div>
+                            )}
+                            {sensor.state === 'PENDING' && (
+                              <div className="text-xs text-yellow-600 mt-0.5">Waiting for agent...</div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
                           {sensor.protocol && (
                             <Badge variant="outline" className="text-xs">
                               {sensor.protocol.toUpperCase()}
                             </Badge>
                           )}
-                          {sensor.dataPoints && sensor.dataPoints.length > 0 && (
-                            <Badge variant="secondary" className="text-xs">
-                              {sensor.dataPoints.length} data point{sensor.dataPoints.length !== 1 ? 's' : ''}
-                            </Badge>
-                          )}
-                        </div>
-                      
-                        <div className="flex flex-wrap gap-6 text-sm text-muted-foreground">
-                          {sensor.type === 'pipeline' && (
-                            <div>
-                              <span className="font-medium">Messages Published:</span>{' '}
-                              {sensor.messagesPublished.toLocaleString()}
-                            </div>
-                          )}
-                          <div>
-                            <span className="font-medium">Last Activity:</span>{' '}
-                            {sensor.lastActivity 
-                              ? new Date(sensor.lastActivity).toLocaleString()
-                              : 'Never'}
-                          </div>
-                          {sensor.health && sensor.health.errorCount > 0 && (
-                            <div>
-                              <span className="font-medium">Error Count:</span>{' '}
-                              <span className="text-red-600 font-semibold">{sensor.health.errorCount}</span>
-                            </div>
-                          )}
-                          {sensor.type === 'device' && sensor.lastDeployedAt && (
-                            <div>
-                              <span className="font-medium">Last Deployed:</span>{' '}
-                              {new Date(sensor.lastDeployedAt).toLocaleString()}
-                            </div>
-                          )}
-                          {sensor.type === 'device' && sensor.deploymentAttempts !== undefined && sensor.deploymentAttempts > 1 && (
-                            <div>
-                              <span className="font-medium">Deploy Attempts:</span>{' '}
-                              {sensor.deploymentAttempts}
-                            </div>
-                          )}
-                        </div>
-
-                        {sensor.lastError && sensor.state !== 'PENDING' && (
-                          <div className="mt-2 text-sm text-red-600">
-                            <span className="font-medium">Error:</span> {sensor.lastError}
-                          </div>
-                        )}
-
-                        {sensor.deploymentError && (
-                          <div className="mt-2 text-sm text-red-600">
-                            <span className="font-medium">Deployment Error:</span> {sensor.deploymentError}
-                          </div>
-                        )}
-                        
-                        {sensor.state === 'PENDING' && (
-                          <div className="mt-2 text-sm text-yellow-600">
-                            <span className="font-medium">Status:</span> Waiting for agent to initialize sensor...
-                          </div>
-                        )}
-                      </div>
-                      
-                      {/* Action Buttons */}
-                      <div className="flex items-center gap-3 ml-4">
-                        {/* Edit Button */}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedSensor(sensor);
-                            setDetailsDialogOpen(true);
-                          }}
-                        >
-                          <Pencil className="h-4 w-4 mr-2" />
-                          Edit
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                        </td>
+                        <td className="py-3 px-4 text-muted-foreground">
+                          {sensor.pollInterval
+                            ? sensor.pollInterval >= 60000
+                              ? `${sensor.pollInterval / 60000}m`
+                              : `${sensor.pollInterval / 1000}s`
+                            : '—'}
+                        </td>
+                        <td className="py-3 px-4 text-muted-foreground">
+                          <span className="block max-w-[320px] truncate" title={getEndpointUrl(sensor) || undefined}>
+                            {getEndpointUrl(sensor) || '—'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-muted-foreground">
+                          {sensor.lastActivity ? new Date(sensor.lastActivity).toLocaleString() : '—'}
+                        </td>
+                        <td className="py-3 px-4 text-muted-foreground">
+                          {sensor.type === 'device' && sensor.health?.lastPoll
+                            ? new Date(sensor.health.lastPoll).toLocaleString()
+                            : '—'}
+                        </td>
+                        <td className="py-3 px-4 text-muted-foreground">
+                          {sensor.type === 'device' && sensor.lastDeployedAt
+                            ? new Date(sensor.lastDeployedAt).toLocaleString()
+                            : '—'}
+                        </td>
+                        <td className="py-3 px-4">
+                          {sensor.health && sensor.health.errorCount > 0
+                            ? <span className="text-red-600 font-semibold">{sensor.health.errorCount}</span>
+                            : <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className="py-3 px-4">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedSensor(sensor);
+                              setDetailsDialogOpen(true);
+                            }}
+                          >
+                            <Pencil className="h-4 w-4 mr-2" />
+                            Edit
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </CardContent>
         </Card>
           </TabsContent>
 
-          {/* Profiles Tab */}
+          {false && (
           <TabsContent value="profiles" className="space-y-6">
             {/* Protocol Filter with Add Profile Button */}
             <div className="flex items-center justify-between gap-4">
@@ -1466,6 +1554,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
               </CardContent>
             </Card>
           </TabsContent>
+          )}
         </Tabs>
 
         {/* Add Sensor Dialog */}

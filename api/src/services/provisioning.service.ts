@@ -132,6 +132,19 @@ export class ProvisioningService {
     // Rate limiting check (database-backed)
     await checkProvisioningRateLimit(ipAddress!);
 
+    // PoP is mandatory for all agents.
+    if (!devicePublicKey) {
+      await logProvisioningAttempt(
+        ipAddress!,
+        uuid,
+        null,
+        false,
+        'Device registration rejected: devicePublicKey is required',
+        userAgent
+      );
+      throw new Error('devicePublicKey is required for provisioning');
+    }
+
     // ============================================================
     // VIRTUAL AGENT PATH (Server-side provisioning key generation)
     // ============================================================
@@ -143,53 +156,28 @@ export class ProvisioningService {
         hasFleetUuid: !!data.fleet_uuid
       });
 
-      // 1. Resolve fleet: use provided fleet_uuid or auto-create/find "Virtual Agents" fleet
-      const { v4: uuidv4 } = require('uuid');
+      // 1. Resolve fleet: virtual agents must provide fleet_uuid
       let virtualFleetUuid: string;
       
-      if (data.fleet_uuid) {
-        // Validate the provided fleet exists
-        const fleetCheck = await query(
-          `SELECT fleet_uuid, fleet_name FROM fleets WHERE fleet_uuid = $1`,
-          [data.fleet_uuid]
-        );
-        
-        if (fleetCheck.rows.length === 0) {
-          throw new Error(`Fleet not found: ${data.fleet_uuid}`);
-        }
-        
-        virtualFleetUuid = fleetCheck.rows[0].fleet_uuid;
-        logger.info('Using provided fleet for virtual agent', {
-          fleet_uuid: virtualFleetUuid,
-          fleet_name: fleetCheck.rows[0].fleet_name
-        });
-      } else {
-        // Fall back to auto-create/find "Virtual Agents" fleet
-        const virtualFleetCheck = await query(
-          `SELECT fleet_uuid FROM fleets WHERE fleet_name = $1`,
-          ['Virtual Agents']
-        );
-        
-        if (virtualFleetCheck.rows.length === 0) {
-          // Create virtual-agents fleet
-          virtualFleetUuid = uuidv4();
-          await query(
-            `INSERT INTO fleets (fleet_uuid, fleet_name, customer_id, fleet_type, description, status, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-            [
-              virtualFleetUuid,
-              'Virtual Agents',
-              '00000000-0000-0000-0000-000000000001',
-              'virtual',
-              'Auto-created fleet for virtual agents',
-              'active'
-            ]
-          );
-          logger.info('Created virtual-agents fleet', { fleet_uuid: virtualFleetUuid });
-        } else {
-          virtualFleetUuid = virtualFleetCheck.rows[0].fleet_uuid;
-        }
+      if (!data.fleet_uuid) {
+        throw new Error('fleet_uuid is required for virtual agent registration');
       }
+
+      // Validate the provided fleet exists
+      const fleetCheck = await query(
+        `SELECT fleet_uuid, fleet_name FROM fleets WHERE fleet_uuid = $1`,
+        [data.fleet_uuid]
+      );
+      
+      if (fleetCheck.rows.length === 0) {
+        throw new Error(`Fleet not found: ${data.fleet_uuid}`);
+      }
+
+      virtualFleetUuid = fleetCheck.rows[0].fleet_uuid;
+      logger.info('Using provided fleet for virtual agent', {
+        fleet_uuid: virtualFleetUuid,
+        fleet_name: fleetCheck.rows[0].fleet_name
+      });
       
       // 2. Generate provisioning key server-side
       const provisioningKeyResult = await createProvisioningKey(
@@ -204,9 +192,7 @@ export class ProvisioningService {
       const provisioningKeyId = provisioningKeyResult.id;
 
       logger.info('Provisioning key generated for virtual agent', {
-        deviceUuid: uuid.substring(0, 8) + '...',
-        provisioningKeyId,
-        fleetUuid: virtualFleetUuid
+        provisioningKeyId
       });
 
       // 2. Hash device API key
@@ -220,7 +206,7 @@ export class ProvisioningService {
         device_name: deviceName,
         device_type: 'virtual',
         device_api_key_hash: hashedApiKey,
-        fleet_uuid: virtualFleetUuid, // Assign to fleet (provided or auto-created "Virtual Agents")
+        fleet_uuid: virtualFleetUuid, // Assign to fleet (provided or existing "Virtual Agents")
         provisioned_by_key_id: provisioningKeyId,
         mac_address: macAddress || null,
         os_version: osVersion || null,
@@ -248,13 +234,6 @@ export class ProvisioningService {
       await this.createDefaultTargetState(uuid, agentVersion, provisioningKeyId);
 
       // Log deployment start (Event Sourcing)
-      const { logAuditEvent, AuditEventType, AuditSeverity } = await import('../utils/audit-logger.js');
-      const { EventPublisher } = await import('../services/event-sourcing.js');
-      
-      const eventPublisher = new EventPublisher('device_provisioning', undefined, {
-        type: 'system',
-        id: 'provisioning_service'
-      });
       
       await eventPublisher.publish(
         'device.deployment.started',
@@ -469,10 +448,8 @@ export class ProvisioningService {
         provisioning_state: 'registered'
       };
       
-      if (devicePublicKey) {
-        deviceData.device_public_key = devicePublicKey;
-        deviceData.pop_verified = false;
-      }
+      deviceData.device_public_key = devicePublicKey;
+      deviceData.pop_verified = false;
       
       const device = await DeviceModel.upsert(uuid, deviceData);
       
@@ -486,13 +463,11 @@ export class ProvisioningService {
       await this.createDefaultTargetState(uuid, agentVersion, keyRecord.id);
       await logProvisioningAttempt(ipAddress!, uuid, keyRecord.id, true, null, userAgent);
       
-      // Generate PoP challenge if public key was provided
+      // Generate PoP challenge (mandatory PoP path)
       let challenge: string | undefined;
-      if (devicePublicKey) {
-        challenge = crypto.randomBytes(32).toString('base64url');
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-        await DeviceModel.storeChallenge(uuid, challenge, expiresAt);
-      }
+      challenge = crypto.randomBytes(32).toString('base64url');
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+      await DeviceModel.storeChallenge(uuid, challenge, expiresAt);
       
       // Use same response builder as physical agents
       return this.buildProvisioningResponse(
@@ -618,20 +593,13 @@ export class ProvisioningService {
       provisioning_state: 'registered'
     };
 
-    if (devicePublicKey) {
-      logger.info('Device registration includes public key for PoP', {
-        deviceUuid: uuid.substring(0, 8) + '...',
-        deviceName,
-        publicKeyLength: devicePublicKey.length
-      });
-      deviceData.device_public_key = devicePublicKey;
-      deviceData.pop_verified = false;
-    } else {
-      logger.warn('⚠️ Device registered without public key - using LEGACY authentication', {
-        deviceUuid: uuid.substring(0, 8) + '...',
-        deviceName
-      });
-    }
+    logger.info('Device registration includes public key for PoP', {
+      deviceUuid: uuid.substring(0, 8) + '...',
+      deviceName,
+      publicKeyLength: devicePublicKey.length
+    });
+    deviceData.device_public_key = devicePublicKey;
+    deviceData.pop_verified = false;
 
     const device = await DeviceModel.upsert(uuid, deviceData);
     
@@ -646,7 +614,7 @@ export class ProvisioningService {
 
     // Increment provisioning key usage for new physical devices
     if (!existingDevice || !existingDevice.provisioned_by_key_id) {
-      incrementProvisioningKeyUsage(keyRecord.id).catch(err => console.error('Failed to increment provisioning key usage', err));
+      await incrementProvisioningKeyUsage(keyRecord.id);
     }
 
     // fire and forget
@@ -690,30 +658,24 @@ export class ProvisioningService {
         userAgent
    ).catch(err => logger.error('Failed to log successful provisioning', err));
 
-    // Generate PoP challenge if public key was provided
+    // Generate PoP challenge (mandatory PoP path)
     let challenge: string | undefined;
-    if (devicePublicKey) {
-      challenge = crypto.randomBytes(32).toString('base64url');
-      const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
-      
-      logger.info('Generating PoP challenge for device', {
-        deviceUuid: uuid.substring(0, 8) + '...',
-        challengeLength: challenge.length,
-        expiresAt: expiresAt.toISOString(),
-        expiresInSeconds: 300
-      });
-      
-      await DeviceModel.storeChallenge(uuid, challenge, expiresAt);
-      
-      logger.info('PoP challenge stored in database', {
-        deviceUuid: uuid.substring(0, 8) + '...',
-        expiresAt: expiresAt.toISOString()
-      });
-    } else {
-      logger.info('No PoP challenge generated (no public key provided)', {
-        deviceUuid: uuid.substring(0, 8) + '...'
-      });
-    }
+    challenge = crypto.randomBytes(32).toString('base64url');
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    
+    logger.info('Generating PoP challenge for device', {
+      deviceUuid: uuid.substring(0, 8) + '...',
+      challengeLength: challenge.length,
+      expiresAt: expiresAt.toISOString(),
+      expiresInSeconds: 300
+    });
+    
+    await DeviceModel.storeChallenge(uuid, challenge, expiresAt);
+    
+    logger.info('PoP challenge stored in database', {
+      deviceUuid: uuid.substring(0, 8) + '...',
+      expiresAt: expiresAt.toISOString()
+    });
 
     // Build and return provisioning response
     return this.buildProvisioningResponse(

@@ -345,6 +345,7 @@ router.get('/devices/:uuid/device-health', jwtAuth, async (req, res) => {
         ds.health_error_count,
         ds.health_last_error,
         ds.health_updated_at,
+        ds.last_telemetry_at,
         ds.location
       FROM device_sensors ds
       WHERE ${whereClause}
@@ -367,6 +368,7 @@ router.get('/devices/:uuid/device-health', jwtAuth, async (req, res) => {
       errorCount: row.health_error_count ?? 0,
       lastError: row.health_last_error || null,
       lastSeen: row.health_updated_at || null,
+      lastTelemetryAt: row.last_telemetry_at || null,
       location: row.location || null
     }));
 

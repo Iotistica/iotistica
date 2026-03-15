@@ -1002,7 +1002,7 @@ export class DeviceSensorSyncService {
                deployment_status, last_deployed_at, deployment_error, deployment_attempts,
                config_id, created_at, updated_at, created_by, updated_by,
                health_status, health_connected, health_last_poll, health_error_count,
-               health_last_error, health_updated_at
+               health_last_error, health_updated_at, last_telemetry_at
         FROM device_sensors 
         WHERE device_uuid = $1 AND deployment_status != 'deleted'
       `;
@@ -1061,7 +1061,8 @@ export class DeviceSensorSyncService {
             lastPoll: row.health_last_poll,
             errorCount: row.health_error_count,
             lastError: row.health_last_error,
-            updatedAt: row.health_updated_at
+            updatedAt: row.health_updated_at,
+            lastTelemetryAt: row.last_telemetry_at
           } : null
         };
       });

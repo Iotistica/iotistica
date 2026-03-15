@@ -528,21 +528,20 @@ export class ConfigManager extends EventEmitter {
 	/**
 	 * Normalize device property names (camelCase → snake_case)
 	 * Handles both API and SQLite conventions
-	 * CRITICAL: Cloud API sends 'id' field, we map it to 'uuid' for database
+	 * CRITICAL: UUID is the canonical endpoint identifier.
 	 */
 	public normalizeDevice(device: ProtocolAdapterDevice): any {
 		const deviceAny = device as any;
 		
-		// Cloud API uses 'id', database uses 'uuid' - map between them
-		const uuid = device.uuid || deviceAny.id;
+		const uuid = device.uuid;
 		
 		if (!uuid) {
-			this.logger?.warnSync('Device missing both uuid and id fields', {
+			this.logger?.warnSync('Device missing uuid field', {
 				component: LogComponents.configManager,
 				operation: 'normalizeDevice',
 				deviceName: device.name,
 				deviceProtocol: device.protocol,
-				reason: 'This should not happen - check cloud API response'
+				reason: 'UUID is required for endpoint reconciliation'
 			});
 		}
 		
@@ -734,16 +733,13 @@ export class ConfigManager extends EventEmitter {
 
 			// Enforce canonical identity: endpoints must have UUID.
 			// Rows without UUID cannot participate in strict target-state reconciliation.
-			for (const currentDevice of currentDevices) {
-				if (!currentDevice.uuid) {
-					await DeviceEndpointModel.delete(currentDevice.name);
-					this.logger?.warnSync('Removed invalid endpoint from database (missing UUID)', {
-						component: LogComponents.configManager,
-						operation: 'syncEndpointsToDatabase',
-						deviceName: currentDevice.name,
-						protocol: currentDevice.protocol,
-					});
-				}
+			const removedInvalidCount = await db('endpoints').whereNull('uuid').delete();
+			if (removedInvalidCount > 0) {
+				this.logger?.warnSync('Removed invalid endpoints from database (missing UUID)', {
+					component: LogComponents.configManager,
+					operation: 'syncEndpointsToDatabase',
+					removedCount: removedInvalidCount,
+				});
 			}
 			
 			this.logger?.debugSync('=== CURRENT ENDPOINTS IN DB (BEFORE SYNC) ===', {
@@ -758,10 +754,9 @@ export class ConfigManager extends EventEmitter {
 				}))
 			});
 			
-		// CRITICAL: Cloud API sends 'id' field, not 'uuid'
-		// Use d.id || d.uuid to match what normalizeDevice() does
+		// UUID is the canonical endpoint identifier.
 		const targetDeviceUuids = new Set(
-			devices.map((d: any) => d.id || d.uuid).filter(Boolean)
+			devices.map((d: any) => d.uuid).filter(Boolean)
 	);
 		
 		// For each device in target state
@@ -801,12 +796,20 @@ export class ConfigManager extends EventEmitter {
 	// Normalize property names from cloud API (camelCase) to SQLite (snake_case)
 	const normalizedDevice = this.normalizeDevice(device as ProtocolAdapterDevice);
 
-	// Use UUID for lookup if available, fallback to name for legacy devices
+	// UUID-only lookup
 	let existing: any = null;
 	try {
-		existing = normalizedDevice.uuid 
-			? await DeviceEndpointModel.getByUuid(normalizedDevice.uuid)
-			: await DeviceEndpointModel.getByName(normalizedDevice.name);
+		if (!normalizedDevice.uuid) {
+			this.logger?.warnSync('Skipping endpoint without UUID during sync', {
+				component: LogComponents.configManager,
+				operation: 'syncEndpointsToDatabase',
+				deviceName: normalizedDevice.name,
+				protocol: normalizedDevice.protocol,
+			});
+			continue;
+		}
+
+		existing = await DeviceEndpointModel.getByUuid(normalizedDevice.uuid);
 	} catch (lookupError) {
 		this.logger?.warnSync('Failed to lookup existing device, treating as new', {
 			component: LogComponents.configManager,
@@ -839,7 +842,7 @@ export class ConfigManager extends EventEmitter {
 		if (shouldPreserveDataPoints) {
 			this.logger?.debugSync('✅ PRESERVING discovered data_points (UPDATE path)', {
 				component: LogComponents.configManager,
-				deviceUuid: normalizedDevice.uuid || existing.uuid,
+				deviceUuid: normalizedDevice.uuid,
 				deviceName: normalizedDevice.name,
 				existingDataPointsCount: existing.data_points?.length || 0,
 				targetDataPointsCount: normalizedDevice.data_points?.length || 0,
@@ -849,7 +852,7 @@ export class ConfigManager extends EventEmitter {
 					} else {
 						this.logger?.infoSync('Will use target state data_points (UPDATE path)', {
 							component: LogComponents.configManager,
-							deviceUuid: normalizedDevice.uuid || existing.uuid,
+							deviceUuid: normalizedDevice.uuid,
 							deviceName: normalizedDevice.name,
 							existingDataPointsCount: existing.data_points?.length || 0,
 							targetDataPointsCount: normalizedDevice.data_points?.length || 0,
@@ -857,13 +860,10 @@ export class ConfigManager extends EventEmitter {
 						});
 					}
 					
-					await DeviceEndpointModel.updateByUuid(
-						normalizedDevice.uuid || existing.uuid!,
-						normalizedDevice
-					);
+					await DeviceEndpointModel.updateByUuid(normalizedDevice.uuid, normalizedDevice);
 					this.logger?.infoSync('Updated endpoint in database', {
 						component: LogComponents.configManager,
-						deviceUuid: normalizedDevice.uuid || existing.uuid,
+						deviceUuid: normalizedDevice.uuid,
 						deviceName: normalizedDevice.name,
 						protocol: normalizedDevice.protocol,
 						dataPointsCount: normalizedDevice.data_points?.length || 0
@@ -930,28 +930,13 @@ export class ConfigManager extends EventEmitter {
 						});
 					}
 					
-					// Log full structure before INSERT to debug data_points issue
-				this.logger?.debugSync('=== ABOUT TO INSERT INTO DB ===', {
-						operation: 'syncEndpointsToDatabase - CREATE',
-						deviceUuid: normalizedDevice.uuid,
-						deviceName: normalizedDevice.name,
-						protocol: normalizedDevice.protocol,
-						dataPointsCount: normalizedDevice.data_points?.length || 0,
-						firstDataPoint: normalizedDevice.data_points?.[0] || null,
-						allDataPoints: normalizedDevice.data_points || []
-					});
 					
 					await DeviceEndpointModel.create(normalizedDevice);
 					
 					// CRITICAL: Verify what was actually saved to DB
-					// Use uuid if available, fallback to name for devices without uuid
 					let verifyInsert: any = null;
 					try {
-						if (normalizedDevice.uuid) {
-							verifyInsert = await DeviceEndpointModel.getByUuid(normalizedDevice.uuid);
-						} else {
-							verifyInsert = await DeviceEndpointModel.getByName(normalizedDevice.name);
-						}
+						verifyInsert = await DeviceEndpointModel.getByUuid(normalizedDevice.uuid);
 					} catch (verifyError) {
 						this.logger?.warnSync('Failed to verify inserted endpoint', {
 							component: LogComponents.configManager,
@@ -969,7 +954,7 @@ export class ConfigManager extends EventEmitter {
 						dataPointsCount: normalizedDevice.data_points?.length || 0,
 						dbDataPointsCount: verifyInsert?.data_points?.length || 0,
 						dbFirstDataPoint: verifyInsert?.data_points?.[0] || null,
-						verificationMethod: normalizedDevice.uuid ? 'by-uuid' : 'by-name'
+						verificationMethod: 'by-uuid'
 					});
 				}
 			}
@@ -1034,7 +1019,7 @@ export class ConfigManager extends EventEmitter {
 		
 		// CRITICAL: Filter out discovery targets (devices with slaveRange)
 		// Discovery targets should never be in reconciliation steps - they're config-only
-		const targetDevices = allTargetDevices.filter((device: any) => {
+		const filteredTargetDevices = allTargetDevices.filter((device: any) => {
 			// Parse connection (same logic as syncEndpointsToDatabase and getDiscoveryTargets)
 			let connection: any = device.connection;
 			if (!connection && device.connectionString) {
@@ -1059,6 +1044,27 @@ export class ConfigManager extends EventEmitter {
 			
 			return true; // Include in targetDevices
 		});
+
+		// Canonicalize target IDs: cloud may send uuid without id.
+		const targetDevices = filteredTargetDevices
+			.map((device: any) => {
+				const canonicalId = device.uuid;
+				if (!canonicalId) {
+					this.logger?.warnSync('Skipping target endpoint without uuid', {
+						component: LogComponents.configManager,
+						operation: 'calculateSteps',
+						deviceName: device.name,
+						protocol: device.protocol,
+					});
+					return null;
+				}
+
+				return {
+					...device,
+					id: canonicalId,
+				};
+			})
+			.filter((device: any) => device !== null);
 		
 		this.logger?.debugSync('Calculating reconciliation steps', {
 			component: LogComponents.configManager,
@@ -1248,6 +1254,10 @@ export class ConfigManager extends EventEmitter {
 	 * Update a protocol adapter device
 	 */
 	private async updateEndpoint(device: ProtocolAdapterDevice): Promise<void> {
+		if (!device.id) {
+			throw new Error(`updateDevice requires UUID id for device ${device.name}`);
+		}
+
 		this.logger?.infoSync('Updating protocol adapter device', {
 			component: LogComponents.configManager,
 			operation: 'updateDevice',
@@ -1289,7 +1299,7 @@ export class ConfigManager extends EventEmitter {
 			}
 			
 		// Get existing device first to check for data_points preservation
-		const existing = await DeviceSensorModel.getByName(device.name);
+		const existing = await DeviceSensorModel.getByUuid(device.id);
 		
 		// Prepare data_points with preservation logic
 		let dataPoints = (device as any).dataPoints || (device as any).registers || [];
@@ -1318,8 +1328,8 @@ const normalizedDevice = {
 };
 
 if (existing) {
-    // Device exists - update it
-    await DeviceSensorModel.update(device.name, normalizedDevice);
+	// Device exists - update it
+	await DeviceSensorModel.updateByUuid(device.id, normalizedDevice);
     
     this.logger?.infoSync('Device updated in sensors table', {
         component: LogComponents.configManager,
@@ -1329,6 +1339,7 @@ if (existing) {
 } else {
 				// Device doesn't exist - create it (upsert behavior)
 				await DeviceSensorModel.create({
+					uuid: device.id,
 					name: device.name,
 					...normalizedDevice
 				});
@@ -1522,13 +1533,14 @@ if (existing) {
 		removed: any[];
 		modified: any[];
 	} {
-		const oldMap = new Map(oldEndpoints.map(e => [e.uuid || e.id, e]));
-		const newMap = new Map(newEndpoints.map(e => [e.uuid || e.id, e]));
+		const oldMap = new Map(oldEndpoints.filter(e => e.uuid).map(e => [e.uuid, e]));
+		const newMap = new Map(newEndpoints.filter(e => e.uuid).map(e => [e.uuid, e]));
 
-		const added = newEndpoints.filter(e => !oldMap.has(e.uuid || e.id));
-		const removed = oldEndpoints.filter(e => !newMap.has(e.uuid || e.id));
+		const added = newEndpoints.filter(e => e.uuid && !oldMap.has(e.uuid));
+		const removed = oldEndpoints.filter(e => e.uuid && !newMap.has(e.uuid));
 		const modified = newEndpoints.filter(e => {
-			const oldEndpoint = oldMap.get(e.uuid || e.id);
+			if (!e.uuid) return false;
+			const oldEndpoint = oldMap.get(e.uuid);
 			return oldEndpoint && !_.isEqual(oldEndpoint, e);
 		});
 

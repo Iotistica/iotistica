@@ -46,6 +46,9 @@ export interface TimeSeriesQuery {
 export class ReadingsService {
   private lastRefreshTime: number = 0;
   private readonly REFRESH_THROTTLE_MS = 60000; // Max once per minute
+  private readonly COLUMNS_PER_INSERT_ROW = 12;
+  private readonly MAX_BIND_PARAMS_PER_QUERY = 60000; // Keep below PostgreSQL protocol/driver limits
+  private readonly MAX_ROWS_PER_BULK_INSERT = Math.max(1, Math.floor(this.MAX_BIND_PARAMS_PER_QUERY / this.COLUMNS_PER_INSERT_ROW));
 
   /**
    * Refresh materialized views (throttled)
@@ -97,64 +100,70 @@ export class ReadingsService {
   async bulkInsert(readings: ReadingInsert[]): Promise<number> {
     if (readings.length === 0) return 0;
 
-    const values: any[] = [];
-    const placeholders: string[] = [];
-    let paramIndex = 1;
+    let insertedTotal = 0;
 
-    readings.forEach((reading, i) => {
-      const {
-        device_uuid,
-        metric_name,
-        value,
-        quality = 'good',
-        unit = null,
-        protocol,
-        extra = {},
-        time = new Date(),
-        anomaly_score,
-        anomaly_threshold,
-        baseline_samples,
-        detection_methods
-      } = reading;
+    for (let i = 0; i < readings.length; i += this.MAX_ROWS_PER_BULK_INSERT) {
+      const batch = readings.slice(i, i + this.MAX_ROWS_PER_BULK_INSERT);
+      const values: any[] = [];
+      const placeholders: string[] = [];
+      let paramIndex = 1;
 
-      placeholders.push(
-        `($${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++})`
+      batch.forEach((reading) => {
+        const {
+          device_uuid,
+          metric_name,
+          value,
+          quality = 'good',
+          unit = null,
+          protocol,
+          extra = {},
+          time = new Date(),
+          anomaly_score,
+          anomaly_threshold,
+          baseline_samples,
+          detection_methods
+        } = reading;
+
+        placeholders.push(
+          `($${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++})`
+        );
+
+        values.push(
+          time,
+          device_uuid,
+          metric_name,
+          value,
+          quality,
+          unit,
+          protocol,
+          JSON.stringify(extra),
+          anomaly_score !== undefined ? anomaly_score : null,
+          anomaly_threshold !== undefined ? anomaly_threshold : null,
+          baseline_samples !== undefined ? baseline_samples : null,
+          detection_methods !== undefined ? JSON.stringify(detection_methods) : null
+        );
+      });
+
+      const result = await query(
+        `INSERT INTO readings (time, device_uuid, metric_name, value, quality, unit, protocol, extra, anomaly_score, anomaly_threshold, baseline_samples, detection_methods)
+         VALUES ${placeholders.join(', ')}
+         ON CONFLICT (device_uuid, metric_name, time) DO NOTHING`,
+        values
       );
 
-      values.push(
-        time, 
-        device_uuid, 
-        metric_name, 
-        value, 
-        quality, 
-        unit, 
-        protocol, 
-        JSON.stringify(extra),
-        anomaly_score !== undefined ? anomaly_score : null,
-        anomaly_threshold !== undefined ? anomaly_threshold : null,
-        baseline_samples !== undefined ? baseline_samples : null,
-        detection_methods !== undefined ? JSON.stringify(detection_methods) : null
-      );
-    });
-
-    const result = await query(
-      `INSERT INTO readings (time, device_uuid, metric_name, value, quality, unit, protocol, extra, anomaly_score, anomaly_threshold, baseline_samples, detection_methods)
-       VALUES ${placeholders.join(', ')}
-       ON CONFLICT (device_uuid, metric_name, time) DO NOTHING
-       RETURNING *`,
-      values
-    );
+      insertedTotal += result.rowCount || 0;
+    }
 
     // Refresh metric catalog if readings contain deviceName (new devices detected)
     const hasDeviceNames = readings.some(r => r.extra?.deviceName);
-    if (hasDeviceNames && result.rows.length > 0) {
+    if (hasDeviceNames && insertedTotal > 0) {
       // Fire-and-forget (don't block on refresh)
       this.refreshMetricCatalog().catch(err => 
         logger.error('Background metric catalog refresh failed:', err)
       );
     }
 
-    return result.rows.length;
+    return insertedTotal;
   }
 
   /**

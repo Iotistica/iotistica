@@ -21,6 +21,7 @@ import { HttpClient, FetchHttpClient } from '../lib/http-client';
 import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import * as path from 'path';
+import * as readline from 'readline';
 
 /**
  * Summary of dropped logs for analysis
@@ -60,7 +61,7 @@ interface DroppedLogSummary {
 	/** Estimated bytes dropped */
 	estimatedBytes: number;
 	/** Reason for dropping */
-	reason: 'network_failure' | 'buffer_overflow' | 'retry_exhausted';
+	reason: 'network_failure' | 'buffer_overflow' | 'retry_exhausted' | 'storage_budget';
 }
 
 /**
@@ -81,6 +82,8 @@ interface CloudLogBackendConfig {
 	// Disk-backed spool configuration (survives restarts/power loss)
 	spoolPath?: string; // Path to spool directory (e.g., /var/lib/agent/log-spool)
 	maxSpoolSizeMb?: number; // Max spool file size before rotation (default: 50MB)
+	maxTotalSpoolSizeMb?: number; // Max total size across all spool segment files (default: 200MB)
+	maxLogStorageMb?: number; // Hard cap across RAM+disk logging data (default: 256MB)
 	// Sampling configuration (reduce log volume)
 	samplingRates?: {
 		error?: number;   // Default: 1.0 (100% - all errors)
@@ -98,13 +101,14 @@ interface LogBatch {
 	logs: LogMessage[];       // Log messages in this batch
 	createdAt: number;        // When batch was created
 	attempts: number;         // Number of send attempts
+	approxBytes?: number;     // Approximate serialized size for budget accounting
 }
 
 /**
  * ACK cursor state (tracks what's been successfully sent)
  */
 interface AckCursor {
-	ackedBatchIds: string[];  // Batch IDs confirmed by server
+	lastAckBatchId?: string;  // Highest monotonic batch ID confirmed by server
 	lastAckTime: number;      // Last successful ACK timestamp
 }
 
@@ -150,9 +154,20 @@ export class CloudLogBackend implements LogBackend {
 	private spoolFilePath?: string;
 	private spoolCursorPath?: string;  // ACK cursor file (tracks successful sends)
 	private maxSpoolSize: number = 50 * 1024 * 1024; // 50MB default
+	private maxTotalSpoolSize: number = 200 * 1024 * 1024; // 200MB default
+	private maxLogStorageSize: number = 256 * 1024 * 1024; // 256MB default (RAM+disk)
+	private spoolWriteChunks: string[] = [];
+	private spoolWriteBufferBytes: number = 0;
+	private spoolWriteTimer?: NodeJS.Timeout;
+	private spoolWriteFlushPromise?: Promise<void>;
+	private spoolActiveBytes: number = 0;
+	private spoolActiveSizeKnown: boolean = false;
+	private readonly SPOOL_WRITE_FLUSH_MS = 1000; // 1s write coalescing window
+	private readonly SPOOL_WRITE_FLUSH_BYTES = 64 * 1024; // 64KB threshold
 	
 	/** Batch tracking for ACK-based durability */
 	private pendingBatches: Map<string, LogBatch> = new Map(); // batchId -> batch
+	private pendingBatchesBytes: number = 0;
 	private nextBatchId: number = 0; // Monotonic counter for batch IDs
 	
 	/** Circular buffer of dropped log summaries (for later analysis) */
@@ -195,6 +210,8 @@ export class CloudLogBackend implements LogBackend {
 		maxReconnectInterval: config.maxReconnectInterval ?? 300000, // 5min
 		spoolPath: config.spoolPath ?? '', // Empty string if not provided
 		maxSpoolSizeMb: config.maxSpoolSizeMb ?? 50,
+		maxTotalSpoolSizeMb: config.maxTotalSpoolSizeMb ?? 200,
+		maxLogStorageMb: config.maxLogStorageMb ?? 256,
 		samplingRates: config.samplingRates ?? { debug: 0.05, info: 1, warn: 1, error: 1 }, // All info/warn/error, sample 5% debug
 	};		
 		// Initialize disk-backed spool (if configured)
@@ -203,6 +220,7 @@ export class CloudLogBackend implements LogBackend {
 			this.spoolFilePath = path.join(this.spoolPath, 'buffer.ndjson');
 			this.spoolCursorPath = path.join(this.spoolPath, 'cursor.json');
 			this.maxSpoolSize = this.config.maxSpoolSizeMb * 1024 * 1024;
+			this.maxTotalSpoolSize = this.config.maxTotalSpoolSizeMb * 1024 * 1024;
 			
 			// Note: Spool directory creation deferred to initialize() to avoid blocking constructor
 		}
@@ -291,6 +309,7 @@ export class CloudLogBackend implements LogBackend {
 		// Replay spooled logs from previous session (if spool exists)
 		if (this.spoolPath) {
 			await this.replaySpooledLogs();
+			await this.enforceSpoolTotalSizeCap();
 		}
 		
 		// Start streaming
@@ -337,27 +356,15 @@ export class CloudLogBackend implements LogBackend {
 				process.stderr.write('[CloudLog] Offline buffer cap reached – dropping info/debug logs\n');
 				this.lastWarningLog = now;
 			}
-			
-			const level = logMessage.level ?? this.detectLogLevel(logMessage);
-			
-			// Always keep errors (critical signals)
-			if (level === 'error') {
-				// Allow errors through
-			}
-			// Keep warnings at reduced rate (50%)
-			else if (level === 'warn') {
-				if (!this.deterministicSample(logMessage, 0.5)) {
-					return; // Drop 50% of warnings
-				}
-			}
-			// Drop everything else immediately (info/debug)
-			else {
+
+			// Keep critical logs under pressure: warn/error + agent/system/manager logs.
+			if (!this.isCriticalLog(logMessage)) {
 				return;
 			}
 		}
 		
-		// Calculate log size and add to buffer
-		const logSize = JSON.stringify(logMessage).length + 1; // +1 for newline
+		// Hot path: use lightweight size estimate (avoid JSON.stringify per log).
+		const logSize = this.estimateLogSize(logMessage);
 		this.buffer.push(logMessage);
 		this.bufferBytes += logSize;
 		
@@ -479,6 +486,7 @@ export class CloudLogBackend implements LogBackend {
 		
 		// Flush remaining logs
 		await this.flush();
+		await this.flushSpoolWriteBuffer();
 		
 		// Stop streaming
 		this.isStreaming = false;
@@ -494,6 +502,10 @@ export class CloudLogBackend implements LogBackend {
 		}
 		if (this.reconnectTimer) {
 			clearTimeout(this.reconnectTimer);
+		}
+		if (this.spoolWriteTimer) {
+			clearTimeout(this.spoolWriteTimer);
+			this.spoolWriteTimer = undefined;
 		}
 		
 		// this.logger?.infoSync - REMOVED to prevent infinite recursion
@@ -539,16 +551,30 @@ export class CloudLogBackend implements LogBackend {
 			const timeSinceOpen = now - this.circuitBreakerOpenedAt;
 			
 			if (timeSinceOpen < this.CIRCUIT_BREAKER_RESET_MS) {
-				// Circuit still open - drop buffered logs to prevent memory growth
+				// Circuit still open - shed non-critical buffered logs only.
 				if (this.buffer.length > 0) {
-					// Create summary before dropping
-					const summary = this.createDroppedLogSummary(this.buffer, 'network_failure');
-					this.storeDroppedLogSummary(summary);
-					this.totalLogsDropped += this.buffer.length;
-					
-					// Clear buffer to prevent churn loop
-					this.buffer = [];
+					const kept: LogMessage[] = [];
+					const dropped: LogMessage[] = [];
+
+					for (const log of this.buffer) {
+						if (this.isCriticalLog(log)) {
+							kept.push(log);
+						} else {
+							dropped.push(log);
+						}
+					}
+
+					if (dropped.length > 0) {
+						const summary = this.createDroppedLogSummary(dropped, 'network_failure');
+						this.storeDroppedLogSummary(summary);
+						this.totalLogsDropped += dropped.length;
+					}
+
+					this.buffer = kept;
 					this.bufferBytes = 0;
+					for (const log of kept) {
+						this.bufferBytes += this.estimateLogSize(log);
+					}
 				}
 				return;
 			} else {
@@ -826,6 +852,10 @@ export class CloudLogBackend implements LogBackend {
 	 * Based on log level and configured sampling rates
 	 */
 	private shouldSample(logMessage: LogMessage): boolean {
+		if (this.isCriticalLog(logMessage)) {
+			return true;
+		}
+
 		// Detect log level from message content
 		const level = this.detectLogLevel(logMessage);
 		
@@ -834,7 +864,7 @@ export class CloudLogBackend implements LogBackend {
 		if (this.circuitBreakerOpen) {
 			switch (level) {
 				case 'error': return true;                                      // 100% - critical signals
-				case 'warn':  return this.deterministicSample(logMessage, 0.5); // 50% - reduce noise
+				case 'warn':  return true;                                      // 100% - keep warnings during outage
 				case 'info':  return this.deterministicSample(logMessage, 0.1); // 10% - heavy sampling
 				case 'debug': return false;                                     // 0% - drop entirely
 			}
@@ -888,6 +918,22 @@ export class CloudLogBackend implements LogBackend {
 		}
 		return Math.abs(hash);
 	}
+
+	/**
+	 * Fast approximate serialized size for buffer accounting.
+	 * Avoids JSON.stringify in the hot path while staying close enough
+	 * for flush threshold decisions.
+	 */
+	private estimateLogSize(logMessage: LogMessage): number {
+		const messageLen = logMessage.message ? logMessage.message.length : 0;
+		const serviceLen = logMessage.serviceName ? logMessage.serviceName.length : 0;
+		const levelLen = logMessage.level ? logMessage.level.length : 0;
+
+		// Approximate fixed JSON envelope + scalar fields + newline.
+		// Keep this conservative to avoid underestimating and overfilling buffer.
+		const fixedOverhead = 220;
+		return fixedOverhead + messageLen + serviceLen + levelLen;
+	}
 	
 	/**
 	 * Detect log level from message content
@@ -920,6 +966,28 @@ export class CloudLogBackend implements LogBackend {
 		
 		// Default to info
 		return 'info';
+	}
+
+	/**
+	 * Critical logs are never dropped by circuit-breaker shedding.
+	 */
+	private isCriticalLog(logMessage: LogMessage): boolean {
+		const level = logMessage.level ?? this.detectLogLevel(logMessage);
+		if (level === 'error' || level === 'warn') {
+			return true;
+		}
+
+		const serviceName = (logMessage.serviceName || '').toLowerCase();
+		if (serviceName === 'agent') {
+			return true;
+		}
+
+		if (logMessage.isSystem) {
+			return true;
+		}
+
+		const sourceType = logMessage.source?.type;
+		return sourceType === 'system' || sourceType === 'manager';
 	}
 	
 	/**
@@ -1076,17 +1144,90 @@ export class CloudLogBackend implements LogBackend {
 			const batchLines = batches
 				.map(batch => JSON.stringify(batch))
 				.join('\n') + '\n';
-			
-			// Append to spool file (async, non-blocking)
-			await fsp.appendFile(this.spoolFilePath, batchLines, 'utf8');
-			
-			// Check spool file size and rotate if needed
-			const stats = await fsp.stat(this.spoolFilePath);
-			if (stats.size > this.maxSpoolSize) {
-				await this.rotateSpool();
+
+			// Queue writes in-memory to reduce flash wear from frequent tiny appends.
+			this.spoolWriteChunks.push(batchLines);
+			this.spoolWriteBufferBytes += Buffer.byteLength(batchLines, 'utf8');
+
+			if (this.spoolWriteBufferBytes >= this.SPOOL_WRITE_FLUSH_BYTES) {
+				await this.flushSpoolWriteBuffer();
+			} else if (!this.spoolWriteTimer) {
+				this.spoolWriteTimer = setTimeout(() => {
+					this.spoolWriteTimer = undefined;
+					void this.flushSpoolWriteBuffer();
+				}, this.SPOOL_WRITE_FLUSH_MS);
 			}
 		} catch (error) {
 			console.error(`[CloudLog] Failed to write to spool: ${error}`);
+		}
+	}
+
+	/**
+	 * Flush queued spool writes to disk in one append operation.
+	 */
+	private async flushSpoolWriteBuffer(): Promise<void> {
+		if (!this.spoolFilePath) return;
+
+		if (this.spoolWriteFlushPromise) {
+			await this.spoolWriteFlushPromise;
+			return;
+		}
+
+		if (this.spoolWriteBufferBytes === 0) {
+			if (this.spoolWriteTimer) {
+				clearTimeout(this.spoolWriteTimer);
+				this.spoolWriteTimer = undefined;
+			}
+			return;
+		}
+
+		if (this.spoolWriteTimer) {
+			clearTimeout(this.spoolWriteTimer);
+			this.spoolWriteTimer = undefined;
+		}
+
+		const payload = this.spoolWriteChunks.join('');
+		const payloadBytes = this.spoolWriteBufferBytes;
+
+		// Reset queue before I/O so producers can continue buffering.
+		this.spoolWriteChunks = [];
+		this.spoolWriteBufferBytes = 0;
+
+		this.spoolWriteFlushPromise = (async () => {
+			try {
+				if (!this.spoolActiveSizeKnown) {
+					try {
+						const stats = await fsp.stat(this.spoolFilePath!);
+						this.spoolActiveBytes = stats.size;
+					} catch (error) {
+						if ((error as any).code !== 'ENOENT') {
+							throw error;
+						}
+						this.spoolActiveBytes = 0;
+					}
+					this.spoolActiveSizeKnown = true;
+				}
+
+				await fsp.appendFile(this.spoolFilePath!, payload, 'utf8');
+				this.spoolActiveBytes += payloadBytes;
+
+				if (this.spoolActiveBytes > this.maxSpoolSize) {
+					await this.rotateSpool();
+				}
+
+				await this.enforceSpoolTotalSizeCap();
+			} catch (error) {
+				// Re-queue payload on failure to avoid data loss.
+				this.spoolWriteChunks.unshift(payload);
+				this.spoolWriteBufferBytes += payloadBytes;
+				console.error(`[CloudLog] Failed to flush spool write buffer: ${error}`);
+			}
+		})();
+
+		try {
+			await this.spoolWriteFlushPromise;
+		} finally {
+			this.spoolWriteFlushPromise = undefined;
 		}
 	}
 	
@@ -1099,8 +1240,16 @@ export class CloudLogBackend implements LogBackend {
 		if (!this.spoolFilePath) return;
 		
 		try {
-			await fsp.unlink(this.spoolFilePath);
-			console.log('[CloudLog] Spool cleared after successful upload');
+			await this.flushSpoolWriteBuffer();
+			const spoolFiles = await this.getSpoolFiles();
+			for (const file of spoolFiles) {
+				await fsp.unlink(file);
+			}
+			this.spoolActiveBytes = 0;
+			this.spoolActiveSizeKnown = true;
+			console.log('[CloudLog] Spool cleared after successful upload', {
+				filesRemoved: spoolFiles.length
+			});
 		} catch (error) {
 			// Ignore ENOENT (file already deleted)
 			if ((error as any).code !== 'ENOENT') {
@@ -1110,25 +1259,21 @@ export class CloudLogBackend implements LogBackend {
 	}
 	
 	/**
-	 * Rotate spool file when it exceeds max size
-	 * Simply clears the spool - logs are already in pendingBatches for retry
-	 * 
-	 * RATIONALE: Reading 50MB+ files into memory is expensive and risky.
-	 * Better to let pendingBatches handle retry logic and just clear the spool.
-	 * After restart, replaySpooledLogs() will reload any un-ACKed batches anyway.
-	 * This is just a safety valve to prevent unbounded disk growth during runtime.
+	 * Rotate spool file when it exceeds max size.
+	 *
+	 * DURABILITY: Never delete unsent data during rotation.
+	 * We rename the active spool to a timestamped segment and continue writing to a new active file.
 	 */
 	private async rotateSpool(): Promise<void> {
 		if (!this.spoolFilePath) return;
 		
 		try {
-			process.stderr.write(`[CloudLog] Spool file exceeds ${this.maxSpoolSize / 1024 / 1024}MB, clearing (logs already in retry queue)\n`);
+			const rotatedPath = `${this.spoolFilePath}.${Date.now()}`;
+			await fsp.rename(this.spoolFilePath, rotatedPath);
+			this.spoolActiveBytes = 0;
+			this.spoolActiveSizeKnown = true;
 			
-			// Simply clear the spool - batches are already in pendingBatches for retry
-			// If we crashed, pendingBatches are lost anyway, so complex rotation doesn't help
-			await fsp.unlink(this.spoolFilePath);
-			
-			console.log('[CloudLog] Spool cleared to prevent disk overflow');
+			process.stderr.write(`[CloudLog] Spool rotated to preserve unsent data: ${path.basename(rotatedPath)}\n`);
 		} catch (error) {
 			// Ignore ENOENT (already deleted)
 			if ((error as any).code !== 'ENOENT') {
@@ -1147,45 +1292,42 @@ export class CloudLogBackend implements LogBackend {
 		if (!this.spoolFilePath) return;
 		
 		try {
-			// Check if file exists (async)
-			await fsp.access(this.spoolFilePath, fs.constants.F_OK);
-		} catch {
-			return; // File doesn't exist
-		}
-		
-		try {
-			const content = await fsp.readFile(this.spoolFilePath, 'utf8');
-			const lines = content.split('\n').filter(line => line.trim());
+			await this.flushSpoolWriteBuffer();
+			// Load ACK cursor (skip already-sent batches)
+			const ackCursor = await this.loadAckCursor();
+			const spoolFiles = await this.getSpoolFiles();
 			
-			if (lines.length === 0) {
+			if (spoolFiles.length === 0) {
 				return;
 			}
 			
-			// Load ACK cursor (skip already-sent batches)
-			const ackedBatchIds = new Set(await this.loadAckCursor());
-			
-			console.log(`[CloudLog] Replaying spooled batches (ACKed: ${ackedBatchIds.size})`);
+			console.log(`[CloudLog] Replaying spooled batches`, {
+				spoolFiles: spoolFiles.map(file => path.basename(file)),
+				lastAckBatchId: ackCursor.lastAckBatchId || 'none'
+			});
 			
 			let replayedCount = 0;
 			let skippedCount = 0;
 			
-			// Parse batches and restore to pendingBatches (skip ACKed)
-			for (const line of lines) {
-				try {
-					const batch: LogBatch = JSON.parse(line);
-					
-					// Skip already-ACKed batches (idempotency)
-					if (ackedBatchIds.has(batch.batchId)) {
-						skippedCount++;
-						continue;
+			for (const spoolFile of spoolFiles) {
+				// Parse batches and restore to pendingBatches (skip ACKed)
+				for await (const line of this.streamSpoolLines(spoolFile)) {
+					try {
+						const batch: LogBatch = JSON.parse(line);
+						
+						// Skip already-ACKed batches (idempotency)
+						if (this.isBatchAcked(batch.batchId, ackCursor)) {
+							skippedCount++;
+							continue;
+						}
+						
+						// Restore batch to pending (will retry on next flush)
+						this.pendingBatches.set(batch.batchId, batch);
+						replayedCount++;
+					} catch (parseError) {
+						// Skip corrupted batch entries
+						process.stderr.write(`[CloudLog] Skipping corrupted spool entry from ${path.basename(spoolFile)}: ${parseError}\n`);
 					}
-					
-					// Restore batch to pending (will retry on next flush)
-					this.pendingBatches.set(batch.batchId, batch);
-					replayedCount++;
-				} catch (parseError) {
-					// Skip corrupted batch entries
-					process.stderr.write(`[CloudLog] Skipping corrupted spool entry: ${parseError}\n`);
 				}
 			}
 			
@@ -1197,6 +1339,111 @@ export class CloudLogBackend implements LogBackend {
 			}
 		} catch (error) {
 			console.error(`[CloudLog] Failed to replay spooled logs: ${error}`);
+		}
+	}
+
+	/**
+	 * Stream spool file as non-empty JSONL lines.
+	 * Prevents loading large spool segments fully into memory.
+	 */
+	private async *streamSpoolLines(spoolFile: string): AsyncGenerator<string> {
+		const stream = fs.createReadStream(spoolFile, { encoding: 'utf8' });
+		const rl = readline.createInterface({
+			input: stream,
+			crlfDelay: Infinity
+		});
+
+		try {
+			for await (const line of rl) {
+				const trimmed = line.trim();
+				if (trimmed.length === 0) {
+					continue;
+				}
+				yield trimmed;
+			}
+		} finally {
+			rl.close();
+			stream.destroy();
+		}
+	}
+
+	/**
+	 * Enforce total spool disk cap across active + rotated segment files.
+	 * Drops oldest data first to protect edge devices from disk exhaustion.
+	 */
+	private async enforceSpoolTotalSizeCap(): Promise<void> {
+		if (!this.spoolFilePath) return;
+
+		const spoolFiles = await this.getSpoolFiles();
+		if (spoolFiles.length === 0) return;
+
+		const fileInfos: Array<{ file: string; size: number; isActive: boolean }> = [];
+		let totalBytes = 0;
+
+		for (const file of spoolFiles) {
+			try {
+				const stats = await fsp.stat(file);
+				const size = stats.size;
+				fileInfos.push({ file, size, isActive: file === this.spoolFilePath });
+				totalBytes += size;
+			} catch {
+				// Ignore race with concurrent delete/rotate.
+			}
+		}
+
+		if (totalBytes <= this.maxTotalSpoolSize) {
+			return;
+		}
+
+		let bytesToDrop = totalBytes - this.maxTotalSpoolSize;
+		let droppedBytes = 0;
+
+		// Drop oldest rotated segments first.
+		for (const info of fileInfos) {
+			if (bytesToDrop <= 0) break;
+			if (info.isActive) continue;
+
+			try {
+				await fsp.unlink(info.file);
+				bytesToDrop -= info.size;
+				droppedBytes += info.size;
+			} catch {
+				// Ignore race with concurrent prune/clear.
+			}
+		}
+
+		// If still above cap, trim oldest lines from active spool.
+		if (bytesToDrop > 0) {
+			try {
+				const activeContent = await fsp.readFile(this.spoolFilePath, 'utf8');
+				const lines = activeContent.split('\n').filter(line => line.trim());
+
+				if (lines.length > 0) {
+					let removeUntil = 0;
+					let removedBytes = 0;
+
+					while (removeUntil < lines.length && removedBytes < bytesToDrop) {
+						removedBytes += Buffer.byteLength(lines[removeUntil] + '\n', 'utf8');
+						removeUntil++;
+					}
+
+					const remaining = lines.slice(removeUntil);
+					const tmpPath = this.spoolFilePath + '.tmp';
+					const out = remaining.length > 0 ? remaining.join('\n') + '\n' : '';
+					await fsp.writeFile(tmpPath, out, 'utf8');
+					await fsp.rename(tmpPath, this.spoolFilePath);
+
+					droppedBytes += removedBytes;
+					this.spoolActiveBytes = Buffer.byteLength(out, 'utf8');
+					this.spoolActiveSizeKnown = true;
+				}
+			} catch (error) {
+				console.error(`[CloudLog] Failed trimming active spool for cap enforcement: ${error}`);
+			}
+		}
+
+		if (droppedBytes > 0) {
+			process.stderr.write(`[CloudLog] Total spool cap enforced: dropped ~${Math.round(droppedBytes / 1024)}KB oldest data\n`);
 		}
 	}
 	
@@ -1221,7 +1468,7 @@ export class CloudLogBackend implements LogBackend {
 		
 		try {
 			// Load existing cursor (async)
-			let cursor: AckCursor = { ackedBatchIds: [], lastAckTime: 0 };
+			let cursor: AckCursor = { lastAckTime: 0 };
 			try {
 				const content = await fsp.readFile(this.spoolCursorPath, 'utf8');
 				cursor = JSON.parse(content);
@@ -1229,14 +1476,11 @@ export class CloudLogBackend implements LogBackend {
 				// File doesn't exist yet, use defaults
 			}
 			
-			// Add new batch ID
-			cursor.ackedBatchIds.push(batchId);
-			cursor.lastAckTime = Date.now();
-			
-			// Keep only last 1000 ACKed batch IDs (prevent unbounded growth)
-			if (cursor.ackedBatchIds.length > 1000) {
-				cursor.ackedBatchIds = cursor.ackedBatchIds.slice(-1000);
+			// Track only highest ACKed batch ID (monotonic)
+			if (!cursor.lastAckBatchId || this.compareBatchIds(batchId, cursor.lastAckBatchId) > 0) {
+				cursor.lastAckBatchId = batchId;
 			}
+			cursor.lastAckTime = Date.now();
 			
 			// Write atomically (tmp file + rename, async)
 			const tmpPath = this.spoolCursorPath + '.tmp';
@@ -1249,24 +1493,63 @@ export class CloudLogBackend implements LogBackend {
 	
 	/**
 	 * Load ACK cursor from disk
-	 * Returns list of batch IDs that have been successfully sent
+	 * Returns last ACK cursor (highest batch ID that has been successfully sent)
 	 * 
 	 * ASYNC: Non-blocking read prevents startup delays
 	 */
-	private async loadAckCursor(): Promise<string[]> {
-		if (!this.spoolCursorPath) return [];
+	private async loadAckCursor(): Promise<AckCursor> {
+		if (!this.spoolCursorPath) return { lastAckTime: 0 };
 		
 		try {
 			const content = await fsp.readFile(this.spoolCursorPath, 'utf8');
 			const cursor: AckCursor = JSON.parse(content);
-			return cursor.ackedBatchIds || [];
+			return {
+				lastAckBatchId: cursor.lastAckBatchId,
+				lastAckTime: cursor.lastAckTime || 0
+			};
 		} catch (error) {
 			// File doesn't exist or parse error
 			if ((error as any).code !== 'ENOENT') {
 				console.error(`[CloudLog] Failed to load ACK cursor: ${error}`);
 			}
-			return [];
+			return { lastAckTime: 0 };
 		}
+	}
+
+	/**
+	 * Compare monotonic batch IDs.
+	 * Format: {deviceUuid}-{timestamp}-{counter}
+	 */
+	private compareBatchIds(a: string, b: string): number {
+		const parse = (id: string): { timestamp: number; counter: number } | null => {
+			const match = id.match(/-(\d+)-(\d+)$/);
+			if (!match) return null;
+			return {
+				timestamp: Number(match[1]),
+				counter: Number(match[2])
+			};
+		};
+
+		const pa = parse(a);
+		const pb = parse(b);
+
+		if (!pa || !pb) {
+			return a.localeCompare(b);
+		}
+
+		if (pa.timestamp !== pb.timestamp) {
+			return pa.timestamp - pb.timestamp;
+		}
+
+		return pa.counter - pb.counter;
+	}
+
+	/**
+	 * Determine if a batch is already ACKed based on monotonic cursor.
+	 */
+	private isBatchAcked(batchId: string, cursor: AckCursor): boolean {
+		if (!cursor.lastAckBatchId) return false;
+		return this.compareBatchIds(batchId, cursor.lastAckBatchId) <= 0;
 	}
 	
 	/**
@@ -1279,53 +1562,103 @@ export class CloudLogBackend implements LogBackend {
 		if (!this.spoolFilePath || !this.spoolCursorPath) return;
 		
 		try {
+			await this.flushSpoolWriteBuffer();
 			// Load ACK cursor
-			const ackedBatchIds = new Set(await this.loadAckCursor());
+			const ackCursor = await this.loadAckCursor();
 			
-			if (ackedBatchIds.size === 0) {
+			if (!ackCursor.lastAckBatchId) {
 				return; // No ACKs to prune
 			}
-			
-			// Read spool file (async)
-			try {
-				await fsp.access(this.spoolFilePath, fs.constants.F_OK);
-			} catch {
-				return; // File doesn't exist
+
+			const spoolFiles = await this.getSpoolFiles();
+			if (spoolFiles.length === 0) {
+				return;
 			}
-			
-			const content = await fsp.readFile(this.spoolFilePath, 'utf8');
-			const lines = content.split('\n').filter(line => line.trim());
-			
-			// Filter out ACKed batches
-			const remainingLines: string[] = [];
-			let prunedCount = 0;
-			
-			for (const line of lines) {
-				try {
-					const batch: LogBatch = JSON.parse(line);
-					if (ackedBatchIds.has(batch.batchId)) {
-						prunedCount++;
-					} else {
+
+			let totalPrunedCount = 0;
+			let totalRemainingCount = 0;
+
+			for (const spoolFile of spoolFiles) {
+				const content = await fsp.readFile(spoolFile, 'utf8');
+				const lines = content.split('\n').filter(line => line.trim());
+				
+				// Filter out ACKed batches
+				const remainingLines: string[] = [];
+				let prunedCount = 0;
+				
+				for (const line of lines) {
+					try {
+						const batch: LogBatch = JSON.parse(line);
+						if (this.isBatchAcked(batch.batchId, ackCursor)) {
+							prunedCount++;
+						} else {
+							remainingLines.push(line);
+						}
+					} catch (parseError) {
+						// Keep corrupted lines (will be handled later)
 						remainingLines.push(line);
 					}
-				} catch (parseError) {
-					// Keep corrupted lines (will be handled later)
-					remainingLines.push(line);
 				}
+
+				totalPrunedCount += prunedCount;
+				totalRemainingCount += remainingLines.length;
+
+				if (prunedCount === 0) {
+					continue;
+				}
+
+				if (remainingLines.length === 0) {
+					// Safe to remove only when all lines in this segment were ACKed
+					await fsp.unlink(spoolFile);
+					continue;
+				}
+
+				// Write atomically (tmp file + rename, async)
+				const tmpPath = spoolFile + '.tmp';
+				await fsp.writeFile(tmpPath, remainingLines.join('\n') + '\n', 'utf8');
+				await fsp.rename(tmpPath, spoolFile);
 			}
-			
-			if (prunedCount === 0) {
-				return; // Nothing to prune
+
+			if (totalPrunedCount > 0) {
+				console.log(`[CloudLog] Pruned ${totalPrunedCount} ACKed batches from spool segments (${totalRemainingCount} remaining)`);
 			}
-			
-			// Write atomically (tmp file + rename, async)
-			const tmpPath = this.spoolFilePath + '.tmp';
-			await fsp.writeFile(tmpPath, remainingLines.join('\n') + '\n', 'utf8');
-			await fsp.rename(tmpPath, this.spoolFilePath);
-			
-			console.log(`[CloudLog] Pruned ${prunedCount} ACKed batches from spool (${remainingLines.length} remaining)`);
+
+			// Active spool size may have changed after prune/rewrite.
+			this.spoolActiveSizeKnown = false;
 		} catch (error) {
 			console.error(`[CloudLog] Failed to prune spool: ${error}`);
+		}
+	}
+
+	/**
+	 * Get all spool segment files (active + rotated).
+	 * Sorted oldest -> newest for stable replay behavior.
+	 */
+	private async getSpoolFiles(): Promise<string[]> {
+		if (!this.spoolPath || !this.spoolFilePath) {
+			return [];
+		}
+
+		const baseName = path.basename(this.spoolFilePath);
+
+		try {
+			const entries = await fsp.readdir(this.spoolPath);
+			const files = entries.filter(name => name === baseName || name.startsWith(baseName + '.'));
+
+			const rotated = files
+				.filter(name => name !== baseName)
+				.sort((a, b) => {
+					const aTs = Number(a.slice((baseName + '.').length)) || 0;
+					const bTs = Number(b.slice((baseName + '.').length)) || 0;
+					return aTs - bTs;
+				})
+				.map(name => path.join(this.spoolPath!, name));
+
+			const active = files.includes(baseName) ? [path.join(this.spoolPath!, baseName)] : [];
+
+			return [...rotated, ...active];
+		} catch {
+			return [];
 		}
 	}
 }

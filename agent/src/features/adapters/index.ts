@@ -64,6 +64,31 @@ export class SensorsFeature extends BaseFeature {
   private adapters: Map<string, any> = new Map(); // Generic adapter storage
   private socketServers: Map<string, SocketServer> = new Map();
 
+  private enrichWithEndpointUuid(
+    dataPoints: SensorDataPoint[],
+    endpointUuidByName: Map<string, string>
+  ): SensorDataPoint[] {
+    if (endpointUuidByName.size === 0 || dataPoints.length === 0) {
+      return dataPoints;
+    }
+
+    return dataPoints.map((point) => {
+      if (point.device_uuid) {
+        return point;
+      }
+
+      const endpointUuid = endpointUuidByName.get(point.deviceName);
+      if (!endpointUuid) {
+        return point;
+      }
+
+      return {
+        ...point,
+        device_uuid: endpointUuid,
+      };
+    });
+  }
+
   constructor(
     config: SensorConfig,
     agentLogger: AgentLogger,
@@ -156,6 +181,7 @@ export class SensorsFeature extends BaseFeature {
         // Create config even if no devices (adapter can discover devices)
         modbusConfig = {
           devices: dbDevices.map(d => ({
+            uuid: d.uuid,
             name: d.name,
             enabled: d.enabled,
             slaveId: d.connection.slaveId || 1,
@@ -192,6 +218,18 @@ export class SensorsFeature extends BaseFeature {
         };
       }
 
+      const modbusEndpointUuidByName = new Map<string, string>();
+      modbusConfig.devices.forEach((device: any) => {
+        const endpointUuid =
+          (typeof device.uuid === 'string' && device.uuid.trim()) ||
+          (typeof device.metadata?.uuid === 'string' && device.metadata.uuid.trim()) ||
+          (typeof device.metadata?.device_uuid === 'string' && device.metadata.device_uuid.trim());
+
+        if (endpointUuid && typeof device.name === 'string') {
+          modbusEndpointUuidByName.set(device.name, endpointUuid);
+        }
+      });
+
       // Load output config from database
       const dbOutput = await EndpointOutputModel.getOutput('modbus');
       if (!dbOutput) {
@@ -224,7 +262,7 @@ export class SensorsFeature extends BaseFeature {
 
       modbusAdapter.on('data', (dataPoints: SensorDataPoint[]) => {
         // Route data from adapter to socket server
-        modbusSocket.sendData(dataPoints);
+        modbusSocket.sendData(this.enrichWithEndpointUuid(dataPoints, modbusEndpointUuidByName));
       });
 
       modbusAdapter.on('device-connected', (deviceName: string) => {
@@ -267,6 +305,7 @@ export class SensorsFeature extends BaseFeature {
         
         // Create config even if no devices (adapter can discover devices)
         opcuaDevices = dbDevices.map(d => ({
+          uuid: d.uuid,
           name: d.name,
           protocol: 'opcua',
           enabled: d.enabled,
@@ -281,6 +320,18 @@ export class SensorsFeature extends BaseFeature {
           metadata: d.metadata || {}
         }));
       }
+
+      const opcuaEndpointUuidByName = new Map<string, string>();
+      opcuaDevices.forEach((device: any) => {
+        const endpointUuid =
+          (typeof device.uuid === 'string' && device.uuid.trim()) ||
+          (typeof device.metadata?.uuid === 'string' && device.metadata.uuid.trim()) ||
+          (typeof device.metadata?.device_uuid === 'string' && device.metadata.device_uuid.trim());
+
+        if (endpointUuid && typeof device.name === 'string') {
+          opcuaEndpointUuidByName.set(device.name, endpointUuid);
+        }
+      });
 
       // Load output config from database
       const dbOutput = await EndpointOutputModel.getOutput('opcua');
@@ -314,7 +365,7 @@ export class SensorsFeature extends BaseFeature {
 
       opcuaAdapter.on('data', (dataPoints: SensorDataPoint[]) => {
         // Route data from adapter to socket server
-        opcuaSocket.sendData(dataPoints);
+        opcuaSocket.sendData(this.enrichWithEndpointUuid(dataPoints, opcuaEndpointUuidByName));
       });
 
       opcuaAdapter.on('device-connected', (deviceName: string) => {
@@ -379,6 +430,7 @@ export class SensorsFeature extends BaseFeature {
     
       // Map database devices to SNMPDeviceConfig format
       const snmpDevices = dbDevices.map(d => ({
+        uuid: d.uuid,
         name: d.name,
         protocol: 'snmp' as const,
         enabled: d.enabled,
@@ -395,6 +447,18 @@ export class SensorsFeature extends BaseFeature {
         metadata: d.metadata || {}
       }));
 
+      const snmpEndpointUuidByName = new Map<string, string>();
+      snmpDevices.forEach((device: any) => {
+        const endpointUuid =
+          (typeof device.uuid === 'string' && device.uuid.trim()) ||
+          (typeof device.metadata?.uuid === 'string' && device.metadata.uuid.trim()) ||
+          (typeof device.metadata?.device_uuid === 'string' && device.metadata.device_uuid.trim());
+
+        if (endpointUuid && typeof device.name === 'string') {
+          snmpEndpointUuidByName.set(device.name, endpointUuid);
+        }
+      });
+
       // Create SNMP adapter (socket-agnostic)
       const snmpAdapter = new SNMPAdapter(snmpDevices, this.logger);
       this.adapters.set('snmp', snmpAdapter);
@@ -406,7 +470,7 @@ export class SensorsFeature extends BaseFeature {
 
       snmpAdapter.on('data', (dataPoints: SensorDataPoint[]) => {
         // Route data from adapter to socket server
-        snmpSocket.sendData(dataPoints);
+        snmpSocket.sendData(this.enrichWithEndpointUuid(dataPoints, snmpEndpointUuidByName));
       });
 
       snmpAdapter.on('device-connected', (deviceName: string) => {
@@ -488,6 +552,7 @@ export class SensorsFeature extends BaseFeature {
             maxAttempts: 10
           },
           devices: dbDevices.map(d => ({
+            uuid: d.uuid,
             name: d.name,
             enabled: d.enabled,
             topic: d.connection.topic || d.name,
@@ -516,6 +581,18 @@ export class SensorsFeature extends BaseFeature {
           }
         };
       }
+
+      const mqttEndpointUuidByName = new Map<string, string>();
+      mqttConfig.devices.forEach((device: any) => {
+        const endpointUuid =
+          (typeof device.uuid === 'string' && device.uuid.trim()) ||
+          (typeof device.metadata?.uuid === 'string' && device.metadata.uuid.trim()) ||
+          (typeof device.metadata?.device_uuid === 'string' && device.metadata.device_uuid.trim());
+
+        if (endpointUuid && typeof device.name === 'string') {
+          mqttEndpointUuidByName.set(device.name, endpointUuid);
+        }
+      });
 
       // Load output config from database
       const dbOutput = await EndpointOutputModel.getOutput('mqtt');
@@ -546,7 +623,7 @@ export class SensorsFeature extends BaseFeature {
 
       mqttAdapter.on('data', (dataPoints: SensorDataPoint[]) => {
         // Route data from adapter to socket server
-        mqttSocket.sendData(dataPoints);
+        mqttSocket.sendData(this.enrichWithEndpointUuid(dataPoints, mqttEndpointUuidByName));
       });
 
       mqttAdapter.on('device-connected', (deviceName: string) => {
@@ -733,6 +810,7 @@ export class SensorsFeature extends BaseFeature {
           enabled: true,
           port: (this.config.bacnet as any)?.port || 47809,
           devices: dbDevices.map(d => ({
+            uuid: d.uuid,
             name: d.name,
             enabled: d.enabled,
             ipAddress: d.connection.ipAddress || d.connection.host,
@@ -757,6 +835,18 @@ export class SensorsFeature extends BaseFeature {
           maxConcurrentDevices: (this.config.bacnet as any)?.maxConcurrentDevices || 10,
         };
       }
+
+      const bacnetEndpointUuidByName = new Map<string, string>();
+      bacnetConfig.devices.forEach((device: any) => {
+        const endpointUuid =
+          (typeof device.uuid === 'string' && device.uuid.trim()) ||
+          (typeof device.metadata?.uuid === 'string' && device.metadata.uuid.trim()) ||
+          (typeof device.metadata?.device_uuid === 'string' && device.metadata.device_uuid.trim());
+
+        if (endpointUuid && typeof device.name === 'string') {
+          bacnetEndpointUuidByName.set(device.name, endpointUuid);
+        }
+      });
 
       // Load output config from database
       const dbOutput = await EndpointOutputModel.getOutput('bacnet');
@@ -787,7 +877,7 @@ export class SensorsFeature extends BaseFeature {
 
       bacnetAdapter.on('data', (dataPoints: SensorDataPoint[]) => {
         // Route data from adapter to socket server
-        bacnetSocket.sendData(dataPoints);
+        bacnetSocket.sendData(this.enrichWithEndpointUuid(dataPoints, bacnetEndpointUuidByName));
       });
 
       bacnetAdapter.on('device-connected', (deviceName: string) => {

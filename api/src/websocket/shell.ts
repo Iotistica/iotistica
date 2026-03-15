@@ -212,15 +212,18 @@ export class ShellHandler {
   /**
    * Forward a shell command to a device via MQTT.
    */
-  async handleShellCommand(deviceUuid: string, data: any): Promise<void> {
+  async handleShellCommand(deviceUuid: string, data: any): Promise<'sent' | 'queued-offline' | 'unavailable' | 'failed'> {
     if (!this.mqttManager) {
       logger.error('🐚 [SHELL] ❌ MQTT Manager not set - cannot send shell command');
-      return;
+      return 'unavailable';
     }
 
     try {
       const tenantId = getTenantId();
       const topic = mqttDeviceTopic(tenantId, deviceUuid, 'agent', 'shell');
+      const mqttConnected = typeof this.mqttManager.isConnected === 'function'
+        ? this.mqttManager.isConnected()
+        : false;
 
       const signedCommand = this.signShellCommand(data, deviceUuid);
       const payload = JSON.stringify(signedCommand);
@@ -235,8 +238,10 @@ export class ShellHandler {
 
       await this.mqttManager.publish(topic, payload, 1);
       logger.debug('SHELL: Command published to MQTT successfully');
+      return mqttConnected ? 'sent' : 'queued-offline';
     } catch (error) {
       logger.error('🐚 [SHELL] ❌ Failed to send shell command:', error);
+      return 'failed';
     }
   }
 
@@ -336,13 +341,25 @@ export class ShellHandler {
 
       const session = await sessionManager.createSession(deviceUuid, userId);
 
-      await this.handleShellCommand(deviceUuid, {
+      const dispatch = await this.handleShellCommand(deviceUuid, {
         action: 'start',
         sessionId: session.sessionId,
       });
 
       await sessionManager.markStartCommandSent(session.sessionId);
       logger.debug('SHELL: Waiting for agent response for session');
+
+      if (dispatch !== 'sent') {
+        const statusMessage = dispatch === 'queued-offline'
+          ? 'MQTT is offline. Shell start command queued; waiting for broker reconnection.'
+          : 'Unable to reach MQTT transport. Shell may not start until connectivity is restored.';
+
+        this.deps.send(client.ws, {
+          type: 'session-status',
+          sessionId: session.sessionId,
+          data: { status: 'starting', message: statusMessage },
+        });
+      }
 
       this.deps.send(client.ws, {
         type: 'session-created',
@@ -397,11 +414,23 @@ export class ShellHandler {
 
       if (client.deviceUuid && result.needsPtyRestart) {
         logger.debug('SHELL: Restarting PTY');
-        await this.handleShellCommand(client.deviceUuid, {
+        const dispatch = await this.handleShellCommand(client.deviceUuid, {
           action: 'start',
           sessionId,
         });
         logger.debug('SHELL: PTY start command sent');
+
+        if (dispatch !== 'sent') {
+          const statusMessage = dispatch === 'queued-offline'
+            ? 'MQTT is offline. PTY restart command queued; waiting for broker reconnection.'
+            : 'Unable to reach MQTT transport. PTY restart may fail until connectivity is restored.';
+
+          this.deps.send(client.ws, {
+            type: 'session-status',
+            sessionId,
+            data: { status: 'starting', message: statusMessage },
+          });
+        }
       } else {
         logger.debug('SHELL: PTY already running, skipping start command');
       }

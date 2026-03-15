@@ -39,11 +39,13 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   const inputBufferRef = useRef<string>(''); // Buffer for keystroke batching
   const flushTimerRef = useRef<NodeJS.Timeout | null>(null); // Timer for flushing batched keystrokes
   const reconnectSessionIdRef = useRef<string | null>(null); // Session to reconnect to when socket opens
+  const lastSessionStatusRef = useRef<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [ptyRestarted, setPtyRestarted] = useState(false);
+  const [sessionStatusMessage, setSessionStatusMessage] = useState<string | null>(null);
   const [fontSize, setFontSize] = useState<number>(() => {
     const saved = localStorage.getItem('terminal-font-size');
     return saved ? parseInt(saved, 10) : 14;
@@ -275,7 +277,16 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         listSessions();
         break;
       case 'session-status':
-        // Session status updates - not displayed in UI anymore
+        if (message.data?.message) {
+          const statusText = String(message.data.message);
+          setSessionStatusMessage(statusText);
+
+          if (xtermRef.current && lastSessionStatusRef.current !== statusText) {
+            xtermRef.current.writeln(`\r\n\x1b[33m! ${statusText}\x1b[0m`);
+          }
+
+          lastSessionStatusRef.current = statusText;
+        }
         break;
 
       case 'all-sessions-cleared':
@@ -346,6 +357,8 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           if (xtermRef.current) {
             xtermRef.current.write(message.data.output);
           }
+          setSessionStatusMessage(null);
+          lastSessionStatusRef.current = null;
           if (ptyRestarted) {
             setPtyRestarted(false);
           }
@@ -987,6 +1000,11 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           </CardHeader>
 
           <CardContent className="flex-1 overflow-hidden p-6 flex flex-col">
+            {sessionStatusMessage && (
+              <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                {sessionStatusMessage}
+              </div>
+            )}
             {/* Terminal area */}
             <div className="flex-1 overflow-hidden">
             

@@ -51,7 +51,17 @@ export async function query<T = any>(
     const duration = Date.now() - start;
     return result;
   } catch (error) {
-    logger.error('Query error', { text, error });
+    const maxQueryPreview = 1000;
+    const textPreview = text.length > maxQueryPreview
+      ? `${text.slice(0, maxQueryPreview)}... [truncated ${text.length - maxQueryPreview} chars]`
+      : text;
+
+    logger.error('Query error', {
+      text: textPreview,
+      textLength: text.length,
+      paramsCount: Array.isArray(params) ? params.length : 0,
+      error
+    });
     throw error;
   }
 }

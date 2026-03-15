@@ -16,6 +16,7 @@
 import Redis from 'ioredis';
 import { logger } from '../utils/logger';
 import { ReadingsService, ReadingInsert } from './readings.service';
+import { query } from '../db/connection';
 import { promisify } from 'util';
 import { brotliDecompress, gunzip, inflate } from 'zlib';
 import * as fs from 'fs';
@@ -177,6 +178,10 @@ interface SensorDataEntry {
   timestamp: string;
   data: any;
   metadata?: Record<string, any>;
+}
+
+interface EndpointIdentity {
+  endpointUuid?: string;
 }
 
 interface CompressedSensorEntry {
@@ -1302,6 +1307,100 @@ class RedisDeviceQueue {
   }
 
   /**
+   * Extract endpoint UUID (NOT agent UUID) from reading payload/metadata.
+   *
+   * NOTE:
+   * - readings.device_uuid column is legacy and currently stores agent UUID.
+   * - readings.extra.endpoint_uuid stores endpoint UUID from target-state endpoints.
+   */
+  private extractEndpointIdentity(reading: any, entry: SensorDataEntry): EndpointIdentity {
+    const pick = (...values: any[]): string | undefined => {
+      for (const value of values) {
+        if (typeof value !== 'string') continue;
+        const trimmed = value.trim();
+        if (trimmed.length > 0) return trimmed;
+      }
+      return undefined;
+    };
+
+    const endpointUuid = pick(
+      reading?.device_uuid,
+      reading?.deviceUuid,
+      reading?.endpoint_uuid,
+      reading?.endpointUuid,
+      reading?.connectionUuid,
+      reading?.uuid,
+      entry?.metadata?.device_uuid,
+      entry?.metadata?.deviceUuid,
+      entry?.metadata?.endpoint_uuid,
+      entry?.metadata?.endpointUuid,
+      entry?.metadata?.connectionUuid
+    );
+
+    return { endpointUuid };
+  }
+
+  private static readonly EXTRA_EXCLUDED_KEYS = new Set<string>([
+    'value',
+    'rawValue',
+    'quality',
+    'unit',
+    'timestamp',
+    'metric',
+    'deviceName',
+    'nodeName',
+    'readings',
+    'device_uuid',
+    'deviceUuid',
+    'endpoint_uuid',
+    'endpointUuid',
+    'connectionUuid',
+    'uuid',
+    'anomaly_score',
+    'anomaly_threshold',
+    'baseline_samples',
+    'detection_methods'
+  ]);
+
+  private shouldCopyExtraField(key: string): boolean {
+    return !RedisDeviceQueue.EXTRA_EXCLUDED_KEYS.has(key);
+  }
+
+  private buildExtraPayload(
+    payload: any,
+    entry: SensorDataEntry,
+    ingestedAt: Date,
+    identityContext?: Record<string, any>
+  ): Record<string, any> {
+    const extra: Record<string, any> = {
+      ingested_at: ingestedAt.toISOString()
+    };
+
+    if (payload?.deviceName) {
+      extra.deviceName = payload.deviceName;
+    }
+
+    if (payload && typeof payload === 'object') {
+      for (const [key, value] of Object.entries(payload)) {
+        if (this.shouldCopyExtraField(key)) {
+          extra[key] = value;
+        }
+      }
+    }
+
+    const { endpointUuid } = this.extractEndpointIdentity(
+      { ...(identityContext || {}), ...(payload || {}) },
+      entry
+    );
+
+    if (endpointUuid) {
+      extra.endpoint_uuid = endpointUuid;
+    }
+
+    return extra;
+  }
+
+  /**
    * Normalize a single reading into ReadingInsert format
    * Handles value conversion, quality normalization, anomaly field extraction
    */
@@ -1310,7 +1409,8 @@ class RedisDeviceQueue {
     entry: SensorDataEntry,
     protocol: string,
     ingestedAt: Date,
-    messageTimestamp?: string
+    messageTimestamp?: string,
+    messageContext?: Record<string, any>
   ): ReadingInsert | null {
     // Skip metadata nodes (server info, diagnostics)
     if (reading.nodeType === 'metadata') {
@@ -1322,31 +1422,13 @@ class RedisDeviceQueue {
       return null;
     }
 
-    const extra: Record<string, any> = {};
-
-    // Add server ingestion timestamp (trust boundary for clock drift detection)
-    extra.ingested_at = ingestedAt.toISOString();
-
-    // Add device name if present
-    if (reading.deviceName) {
-      extra.deviceName = reading.deviceName;
-    }
+    const extra = this.buildExtraPayload(reading, entry, ingestedAt, messageContext);
 
     // Extract anomaly fields (if present from edge AI)
     const anomaly_score = typeof reading.anomaly_score === 'number' ? reading.anomaly_score : undefined;
     const anomaly_threshold = typeof reading.anomaly_threshold === 'number' ? reading.anomaly_threshold : undefined;
     const baseline_samples = typeof reading.baseline_samples === 'number' ? reading.baseline_samples : undefined;
     const detection_methods = reading.detection_methods || undefined;
-
-    // Add any additional fields to extra (excluding anomaly fields now in dedicated columns)
-    const excludedFields = ['value', 'quality', 'unit', 'timestamp', 'metric', 'deviceName', 'nodeName',
-      'anomaly_score', 'anomaly_threshold', 'baseline_samples', 'detection_methods'];
-    
-    Object.entries(reading).forEach(([key, val]) => {
-      if (!excludedFields.includes(key)) {
-        extra[key] = val;
-      }
-    });
 
     // Handle value: numbers go in value column, non-numeric go in extra
     const numericValue = typeof reading.value === 'number' ? reading.value : null;
@@ -1390,7 +1472,7 @@ class RedisDeviceQueue {
       entry.data.messages.forEach((message: any) => {
         if (message.readings && Array.isArray(message.readings)) {
           message.readings.forEach((reading: any) => {
-            const normalized = this.normalizeReading(reading, entry, protocol, ingestedAt, message.timestamp);
+            const normalized = this.normalizeReading(reading, entry, protocol, ingestedAt, message.timestamp, message);
             if (normalized) readings.push(normalized);
           });
         }
@@ -1414,19 +1496,7 @@ class RedisDeviceQueue {
 
     const quality = this.normalizeQuality(entry.data?.quality);
 
-    const extra: Record<string, any> = {};
-    
-    // Add server ingestion timestamp (trust boundary for clock drift detection)
-    extra.ingested_at = ingestedAt.toISOString();
-    
-    if (entry.data && typeof entry.data === 'object') {
-      // Copy all fields except value, quality, unit (already in dedicated columns)
-      Object.entries(entry.data).forEach(([key, val]) => {
-        if (!['value', 'rawValue', 'quality', 'unit', 'timestamp', 'readings'].includes(key)) {
-          extra[key] = val;
-        }
-      });
-    }
+    const extra = this.buildExtraPayload(entry.data, entry, ingestedAt);
 
     // Add metadata if present
     if (entry.metadata && Object.keys(entry.metadata).length > 0) {
@@ -1473,7 +1543,23 @@ class RedisDeviceQueue {
       const insertedCount = await this.readingsService.bulkInsert(readings);
       
       logger.debug(`Inserted ${insertedCount} readings to database (chunk ${Math.floor(i / chunkSize) + 1})`);
+
+      // Stamp last_telemetry_at on device_sensors using endpoint_uuid from extra.
+      // Decouples "data is flowing" from MQTT heartbeat / connectivity events.
+      await this.updateLastTelemetryAt(readings, ingestedAt);
     }
+  }
+
+  private async updateLastTelemetryAt(readings: ReadingInsert[], ingestedAt: Date): Promise<void> {
+    const endpointUuids = [...new Set(readings.map(r => r.extra!.endpoint_uuid as string))];
+    const placeholders = endpointUuids.map((_, i) => `$${i + 2}::uuid`).join(', ');
+
+    await query(
+      `UPDATE device_sensors
+       SET last_telemetry_at = $1::timestamptz
+       WHERE uuid IN (${placeholders})`,
+      [ingestedAt.toISOString(), ...endpointUuids]
+    );
   }
 
   /**

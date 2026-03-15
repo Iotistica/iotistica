@@ -203,11 +203,13 @@ export class MqttManager extends EventEmitter {
   private reconnectCount: number = 0;
   private reconnectAttempts: number = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private fatalRecoveryTimer: NodeJS.Timeout | null = null;
   private lastErrorLog: number = 0;
   private errorLogThrottle: number = 30000; // Log errors max once per 30 seconds
   private readonly BASE_RECONNECT_DELAY_MS = 1000; // 1 second
   private readonly MAX_RECONNECT_DELAY_MS = 8000; // 8 seconds max
-  private readonly MAX_RECONNECT_ATTEMPTS = 20; // Max reconnect attempts before fatal
+  private readonly MAX_RECONNECT_ATTEMPTS = parseInt(process.env.MQTT_MAX_RECONNECT_ATTEMPTS || '20', 10); // Set to 0 for unlimited retries
+  private readonly FATAL_RECOVERY_COOLDOWN_MS = parseInt(process.env.MQTT_FATAL_RECOVERY_COOLDOWN_MS || '60000', 10); // Auto-reset reconnect loop after fatal
   private fatalReconnectErrorEmitted = false; // Track if fatal error already emitted
   
   // Health monitoring
@@ -579,6 +581,11 @@ export class MqttManager extends EventEmitter {
       this.reconnectTimer = null;
     }
 
+    if (this.fatalRecoveryTimer) {
+      clearTimeout(this.fatalRecoveryTimer);
+      this.fatalRecoveryTimer = null;
+    }
+
     if (!this.client) {
       return;
     }
@@ -609,8 +616,10 @@ export class MqttManager extends EventEmitter {
       this.reconnectTimer = null;
     }
 
-    // Check if max retry limit reached
-    if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
+    const hasMaxReconnectLimit = this.MAX_RECONNECT_ATTEMPTS > 0;
+
+    // Check if max retry limit reached (0 means unlimited retries)
+    if (hasMaxReconnectLimit && this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
       // Emit fatal event for upstream monitoring (only once)
       if (!this.fatalReconnectErrorEmitted) {
         this.fatalReconnectErrorEmitted = true;
@@ -636,7 +645,22 @@ export class MqttManager extends EventEmitter {
         });
       }
       
-      // Stop scheduling further reconnects (requires manual restart or intervention)
+      // Enter cooldown and auto-reset retry state instead of permanent deadlock.
+      if (!this.fatalRecoveryTimer) {
+        logger.warn('MQTT reconnect entered fatal cooldown; auto recovery scheduled', {
+          cooldownMs: this.FATAL_RECOVERY_COOLDOWN_MS,
+          attempts: this.reconnectAttempts,
+          maxAttempts: this.MAX_RECONNECT_ATTEMPTS,
+          brokerUrl: this.config.brokerUrl
+        });
+
+        this.fatalRecoveryTimer = setTimeout(() => {
+          this.fatalRecoveryTimer = null;
+          this.resetReconnectState();
+        }, this.FATAL_RECOVERY_COOLDOWN_MS);
+      }
+
+      // Pause retry scheduling during cooldown window.
       this.reconnecting = false;
       return;
     }
@@ -1456,6 +1480,10 @@ export class MqttManager extends EventEmitter {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
+    }
+    if (this.fatalRecoveryTimer) {
+      clearTimeout(this.fatalRecoveryTimer);
+      this.fatalRecoveryTimer = null;
     }
     await this.disconnect();
     this.removeAllListeners();

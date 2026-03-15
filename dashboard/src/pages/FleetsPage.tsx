@@ -271,79 +271,92 @@ export function FleetsPage() {
                 No fleets match the selected filters.
               </div>
             ) : (
-              <div className="space-y-3">
-                {filteredFleets.map((fleet) => (
-                  <div
-                    key={fleet.fleet_id}
-                    className="flex items-center justify-between p-4 border border-border rounded-lg hover:border-muted-foreground/20 transition-colors cursor-pointer"
-                    onClick={() => navigateToFleet(fleet.fleet_uuid || fleet.fleet_id)}
-                  >
-                    <div key="content" className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="text-lg font-semibold text-foreground">{fleet.fleet_name}</h3>
-                        <Badge key="type" variant={fleet.fleet_type === 'virtual' ? 'default' : 'secondary'}>
-                          {fleet.fleet_type}
-                        </Badge>
-                        <Badge key="status" variant={fleet.status === 'active' ? 'default' : 'secondary'}>
-                          {fleet.status}
-                        </Badge>
-                        <Badge key="environment" variant="outline" className="text-xs">
-                          {fleet.environment}
-                        </Badge>
-                      </div>
-
-                      <div className="flex flex-wrap gap-6 text-sm text-muted-foreground">
-                        <div key="devices">
-                          <span className="font-medium">Devices:</span>{' '}
-                          {fleet.device_count} ({fleet.online_count} online)
-                        </div>
-                        {fleet.location && (
-                          <div key="location">
-                            <span className="font-medium">Location:</span>{' '}
-                            {fleet.location}
-                          </div>
-                        )}
-                        {fleet.billing_enabled && (
-                          <div key="cost">
-                            <span className="font-medium">Cost:</span>{' '}
-                            ${fleet.current_cost}
-                            {fleet.budget_limit && ` / $${fleet.budget_limit}`}
-                          </div>
-                        )}
-                        <div key="created">
-                          <span className="font-medium">Created:</span>{' '}
-                          {new Date(fleet.created_at).toLocaleDateString()}
-                        </div>
-                        {fleet.fleet_uuid && (
-                          <div key="uuid">
-                            <span className="font-medium">UUID:</span>{' '}
-                            <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono cursor-pointer hover:bg-muted/80" title="Click to copy" onClick={(e) => {
-                              e.stopPropagation();
-                              navigator.clipboard.writeText(fleet.fleet_uuid!);
-                              toast.success('Fleet UUID copied to clipboard');
-                            }}>
-                              {fleet.fleet_uuid.substring(0, 8)}...
-                            </code>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div key="actions" className="flex items-center gap-2 ml-4">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleEdit(fleet);
-                        }}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Status</th>
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Name</th>
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Type</th>
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Environment</th>
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Devices</th>
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Location</th>
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Cost</th>
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Created</th>
+                      <th className="py-3 px-4 font-semibold text-sm text-foreground text-left">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredFleets.map((fleet) => (
+                      <tr
+                        key={fleet.fleet_id}
+                        className="border-b border-border last:border-0 hover:bg-muted cursor-pointer"
+                        onClick={() => navigateToFleet(fleet.fleet_uuid || fleet.fleet_id)}
                       >
-                        <Pencil className="h-4 w-4 mr-2" />
-                        Edit
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                        <td className="py-3 px-4">
+                          <Badge variant={fleet.status === 'active' ? 'default' : 'secondary'}>
+                            {fleet.status}
+                          </Badge>
+                        </td>
+                        <td className="py-3 px-4 font-medium text-foreground">
+                          <div className="flex items-center gap-2">
+                            <span>{fleet.fleet_name}</span>
+                            {fleet.fleet_uuid && (
+                              <span
+                                className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono cursor-pointer hover:bg-muted/80"
+                                title="Click to copy fleet UUID"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigator.clipboard.writeText(fleet.fleet_uuid!);
+                                  toast.success('Fleet UUID copied to clipboard');
+                                }}
+                              >
+                                {fleet.fleet_uuid.substring(0, 8)}...
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <Badge variant={fleet.fleet_type === 'virtual' ? 'default' : 'secondary'}>
+                            {fleet.fleet_type}
+                          </Badge>
+                        </td>
+                        <td className="py-3 px-4">
+                          <Badge variant="outline" className="text-xs">
+                            {fleet.environment}
+                          </Badge>
+                        </td>
+                        <td className="py-3 px-4 text-muted-foreground">
+                          {fleet.device_count} ({fleet.online_count} online)
+                        </td>
+                        <td className="py-3 px-4 text-muted-foreground">
+                          {fleet.location || '—'}
+                        </td>
+                        <td className="py-3 px-4 text-muted-foreground">
+                          {fleet.billing_enabled
+                            ? `$${fleet.current_cost}${fleet.budget_limit ? ` / $${fleet.budget_limit}` : ''}`
+                            : '—'}
+                        </td>
+                        <td className="py-3 px-4 text-muted-foreground">
+                          {new Date(fleet.created_at).toLocaleDateString()}
+                        </td>
+                        <td className="py-3 px-4">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleEdit(fleet);
+                            }}
+                          >
+                            <Pencil className="h-4 w-4 mr-2" />
+                            Edit
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </CardContent>

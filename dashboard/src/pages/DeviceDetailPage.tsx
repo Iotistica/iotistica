@@ -16,7 +16,7 @@ interface DeviceDetail {
   protocol: string;
   status: string;
   connected: boolean;
-  lastPoll: string | null;
+  lastTelemetryAt: string | null;
   errorCount: number;
   lastError: string | null;
   lastSeen: string;
@@ -64,7 +64,7 @@ export const DeviceDetailPage: React.FC<DeviceDetailPageProps> = ({
             protocol: currentSensor.protocol,
             status: currentSensor.status,
             connected: currentSensor.connected,
-            lastPoll: currentSensor.lastPoll,
+            lastTelemetryAt: currentSensor.lastTelemetryAt,
             errorCount: currentSensor.errorCount,
             lastError: currentSensor.lastError,
             lastSeen: currentSensor.lastSeen,
@@ -171,9 +171,9 @@ export const DeviceDetailPage: React.FC<DeviceDetailPageProps> = ({
               <p className="text-2xl font-bold text-destructive">{sensor.errorCount}</p>
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Last Poll</p>
+              <p className="text-sm text-muted-foreground">Last Activity</p>
               <p className="text-sm font-medium">
-                {sensor.lastPoll ? new Date(sensor.lastPoll).toLocaleString() : 'Never'}
+                {sensor.lastTelemetryAt ? new Date(sensor.lastTelemetryAt).toLocaleString() : 'Never'}
               </p>
             </div>
             <div>
