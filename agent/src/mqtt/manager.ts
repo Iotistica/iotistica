@@ -219,6 +219,7 @@ export class MqttManager extends EventEmitter {
   private client: MqttClient | null = null;
   private connected = false;
   private subscriptionHandlers: SubscriptionHandler[] = [];
+  private subscribedTopics = new Set<string>(); // Tracks topics actually subscribed with the broker
   private connectionPromise: Promise<void> | null = null;
   private debug = false;
   private logger?: AgentLogger;
@@ -456,6 +457,9 @@ export class MqttManager extends EventEmitter {
         
         this.connectionPromise = null;
         
+        // Resubscribe to all previously registered topics (new client session starts clean)
+        this.resubscribeAll();
+        
         // Drain pending publishes
         this.drainPendingPublishes();
         
@@ -688,7 +692,27 @@ export class MqttManager extends EventEmitter {
       await this.connect(this.lastBrokerUrl, this.lastOptions);
     }
 
+    // Register handler and topic BEFORE the broker subscribe call so that
+    // resubscribeAll() picks them up if a reconnect fires concurrently.
+    if (handler) {
+      this.subscriptionHandlers.push({
+        pattern: topic,
+        handler
+      });
+    }
+    this.subscribedTopics.add(topic);
+
     return new Promise((resolve, reject) => {
+      const rollback = () => {
+        if (handler) {
+          this.subscriptionHandlers = this.subscriptionHandlers.filter(h => h.handler !== handler);
+        }
+        // Only remove from set if no other handler still references this topic
+        if (!this.subscriptionHandlers.some(h => h.pattern === topic)) {
+          this.subscribedTopics.delete(topic);
+        }
+      };
+
       this.client!.subscribe(topic, options || {}, (error, granted) => {
         if (error) {
           const errorMsg = `Subscribe error: ${error.message || 'Unspecified error'}`;
@@ -699,6 +723,7 @@ export class MqttManager extends EventEmitter {
             errorCode: (error as any).code,
             granted
           });
+          rollback();
           reject(new Error(errorMsg));
         } else if (!granted || granted.length === 0) {
           const errorMsg = `Subscribe failed: No subscription granted for topic: ${topic}`;
@@ -708,6 +733,7 @@ export class MqttManager extends EventEmitter {
             topic,
             granted
           });
+          rollback();
           reject(new Error(errorMsg));
         } else if (granted[0].qos === 128) {
           // QoS 128 means subscription failed (rejected by broker)
@@ -718,15 +744,9 @@ export class MqttManager extends EventEmitter {
             topic,
             granted
           });
+          rollback();
           reject(new Error(errorMsg));
         } else {
-          // Register handler for message routing
-          if (handler) {
-            this.subscriptionHandlers.push({
-              pattern: topic,
-              handler
-            });
-          }
           this.debugLog(`Subscribed to topic: ${topic} (QoS=${granted[0].qos})`);
           resolve();
         }
@@ -747,10 +767,11 @@ export class MqttManager extends EventEmitter {
         if (error) {
           reject(error);
         } else {
-          // Remove all handlers for this pattern
+          // Remove all handlers and the tracked topic for this pattern
           this.subscriptionHandlers = this.subscriptionHandlers.filter(
             h => h.pattern !== topic
           );
+          this.subscribedTopics.delete(topic);
           this.debugLog(`Unsubscribed from topic: ${topic}`);
           resolve();
         }
@@ -778,6 +799,7 @@ export class MqttManager extends EventEmitter {
       this.client!.end(false, {}, () => {
         this.connected = false;
         this.subscriptionHandlers = [];
+        this.subscribedTopics.clear();
         this.debugLog('Disconnected from MQTT broker');
         resolve();
       });
@@ -854,6 +876,45 @@ export class MqttManager extends EventEmitter {
    * - MIN_RECONNECT_INTERVAL: Prevents rapid-fire reconnects in pathological cases
    *   (e.g., flapping network + slow DNS → repeated forced teardowns)
    */
+  /**
+   * Resubscribe all registered handlers after a reconnect.
+   * Each reconnect creates a new MQTT client/session, so the broker has no
+   * record of previous subscriptions — we must re-issue them explicitly.
+   */
+  private resubscribeAll(): void {
+    if (this.subscribedTopics.size === 0) {
+      return;
+    }
+
+    const topics = [...this.subscribedTopics];
+    this.logger?.infoSync(`Resubscribing to ${topics.length} topic(s) after reconnect`, {
+      component: LogComponents.mqtt,
+      topics
+    });
+
+    for (const topic of topics) {
+      this.client!.subscribe(topic, { qos: 1 }, (error, granted) => {
+        if (error) {
+          this.logger?.errorSync(`Resubscribe failed for topic: ${topic}`, error, {
+            component: LogComponents.mqtt,
+            topic
+          });
+        } else if (!granted || granted.length === 0 || granted[0].qos === 128) {
+          this.logger?.errorSync(`Resubscribe rejected by broker for topic: ${topic}`, undefined, {
+            component: LogComponents.mqtt,
+            topic,
+            granted
+          });
+        } else {
+          this.logger?.infoSync(`Resubscribed to topic: ${topic} (QoS=${granted[0].qos})`, {
+            component: LogComponents.mqtt,
+            topic
+          });
+        }
+      });
+    }
+  }
+
   private scheduleReconnect(brokerUrl: string, options?: IClientOptions): void {
     // Guard 1: Prevent overlapping reconnection chains
     if (this.isReconnecting) {

@@ -199,11 +199,6 @@ export class ShellHandler {
    * Initialize shell handler - subscribe to shell commands
    */
   async initialize(): Promise<void> {
-    this.logger.infoSync('Shell handler initializing', {
-      component: LogComponents.shell,
-      commandTopic: this.commandTopic,
-      outputTopic: this.outputTopic,
-    });
 
     // Subscribe to shell command topic
     await this.mqtt.subscribe(

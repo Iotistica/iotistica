@@ -444,6 +444,21 @@ export class ShellHandler {
         },
       });
 
+      if (result.status !== 'active') {
+        const statusMessage = result.status === 'agent-timeout'
+          ? 'Shell start timed out. No shell response was received from the agent.'
+          : 'Connecting to agent...';
+
+        this.deps.send(client.ws, {
+          type: 'session-status',
+          sessionId,
+          data: {
+            status: result.status,
+            message: statusMessage,
+          },
+        });
+      }
+
       logger.debug('SHELL: Client attached to session');
     } catch (error: any) {
       logger.error('🐚 [SESSION] Failed to attach session:', error);

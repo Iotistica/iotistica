@@ -146,7 +146,7 @@ export class SessionManager {
    * Security: validates user ownership
    * Returns: { buffer, needsPtyRestart } - buffer chunks and flag indicating if PTY needs restart
    */
-  async attachSession(sessionId: string, ws: WebSocket, userId?: string): Promise<{ buffer: string[], needsPtyRestart: boolean }> {
+  async attachSession(sessionId: string, ws: WebSocket, userId?: string): Promise<{ buffer: string[], needsPtyRestart: boolean, status: SessionInfo['status'] }> {
     logger.info(`🔄 [SESSION] Preparing to attach to session ${sessionId.substring(0, 8)}... - detaching from any existing sessions first`);
     
     // Detach from any existing sessions first to prevent multi-attach
@@ -224,8 +224,9 @@ export class SessionManager {
     // Add client to attached set
     session.attachedClients.add(ws);
 
-    // Update status to active if not already
-    if (session.info.status !== 'active') {
+    // Only mark active once PTY is actually confirmed active.
+    // Keeping 'starting' here allows health checks to detect agent timeout correctly.
+    if (session.devicePtyActive && session.info.status !== 'active') {
       await this.updateSessionStatus(sessionId, 'active');
     }
 
@@ -238,6 +239,7 @@ export class SessionManager {
     return {
       buffer: this.getReplayChunks(session),
       needsPtyRestart,
+      status: session.info.status,
     };
   }
 
@@ -576,6 +578,13 @@ export class SessionManager {
       if (active && !session.ptyStartedAt) {
         session.ptyStartedAt = new Date();
         logger.info(`🐚 [SESSION] PTY started for session ${sessionId.substring(0, 8)}...`);
+
+        if (session.info.status !== 'active') {
+          void this.updateSessionStatus(sessionId, 'active').catch(err => {
+            logger.error(`🐚 [SESSION] Failed to mark session active: ${err.message}`);
+          });
+          this.notifyStatusChange(sessionId, 'active', 'Shell connected.');
+        }
       } else if (!active) {
         logger.warn(`🐚 [SESSION] PTY stopped for session ${sessionId.substring(0, 8)}...`);
       }
@@ -842,7 +851,7 @@ export class SessionManager {
           this.notifyStatusChange(
             sessionId,
             'agent-timeout',
-            'Agent not responding. Check if agent is online and connected.'
+            'Shell start timed out. No shell response was received from the agent.'
           );
         }
       }

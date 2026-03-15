@@ -45,7 +45,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [ptyRestarted, setPtyRestarted] = useState(false);
-  const [sessionStatusMessage, setSessionStatusMessage] = useState<string | null>(null);
   const [fontSize, setFontSize] = useState<number>(() => {
     const saved = localStorage.getItem('terminal-font-size');
     return saved ? parseInt(saved, 10) : 14;
@@ -278,14 +277,17 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         break;
       case 'session-status':
         if (message.data?.message) {
+          const status = String(message.data?.status || '').toLowerCase();
           const statusText = String(message.data.message);
-          setSessionStatusMessage(statusText);
+          const isImportantStatus =
+            status === 'agent-timeout' ||
+            /offline|timed out|unable|failed|error/i.test(statusText);
 
-          if (xtermRef.current && lastSessionStatusRef.current !== statusText) {
-            xtermRef.current.writeln(`\r\n\x1b[33m! ${statusText}\x1b[0m`);
+          if (isImportantStatus && xtermRef.current && lastSessionStatusRef.current !== statusText) {
+            xtermRef.current.writeln(`\r\n\x1b[33m${statusText}\x1b[0m`);
           }
 
-          lastSessionStatusRef.current = statusText;
+          lastSessionStatusRef.current = isImportantStatus ? statusText : null;
         }
         break;
 
@@ -355,9 +357,20 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       case 'shell-output':
         if (message.data?.output && (message.sessionId === currentSessionIdRef.current || !message.sessionId)) {
           if (xtermRef.current) {
-            xtermRef.current.write(message.data.output);
+            const output = String(message.data.output);
+            const hasHardClearSequence =
+              output.includes('\x1b[2J') ||
+              output.includes('\x1b[3J') ||
+              output.includes('\x1bc');
+
+            xtermRef.current.write(output);
+
+            // Call clear() AFTER write() so that any scrollback xterm creates
+            // while processing the erase sequences is itself wiped.
+            if (hasHardClearSequence) {
+              xtermRef.current.clear();
+            }
           }
-          setSessionStatusMessage(null);
           lastSessionStatusRef.current = null;
           if (ptyRestarted) {
             setPtyRestarted(false);
@@ -369,7 +382,17 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         // Legacy shell output format (type: 'shell', data: { output: '...' })
         if (message.data?.output) {
           if (xtermRef.current) {
-            xtermRef.current.write(message.data.output);
+            const output = String(message.data.output);
+            const hasHardClearSequence =
+              output.includes('\x1b[2J') ||
+              output.includes('\x1b[3J') ||
+              output.includes('\x1bc');
+
+            xtermRef.current.write(output);
+
+            if (hasHardClearSequence) {
+              xtermRef.current.clear();
+            }
           }
           // Clear PTY restart warning on first output
           if (ptyRestarted) {
@@ -1000,11 +1023,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           </CardHeader>
 
           <CardContent className="flex-1 overflow-hidden p-6 flex flex-col">
-            {sessionStatusMessage && (
-              <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                {sessionStatusMessage}
-              </div>
-            )}
             {/* Terminal area */}
             <div className="flex-1 overflow-hidden">
             
