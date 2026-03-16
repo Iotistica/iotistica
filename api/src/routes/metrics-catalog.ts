@@ -45,18 +45,24 @@ router.get('/devices', jwtAuth, async (req, res) => {
     const validatedProtocol = protocolSchema.parse(protocol);
     const validatedAgentUuid = uuidSchema.parse(agentUuid);
     
-    // Group by device_name to get unique devices across all agents
+    // Group by device_name to get unique devices across all agents while preserving
+    // exact source references for widget configs that need stable IDs.
     let sql = `
       WITH unnested AS (
         SELECT 
-          device_name,
-          protocol,
-          last_seen,
-          agent_uuid,
-          agent_name,
-          overall_quality_percentage,
-          unnest(available_metrics) as metric_name
-        FROM endpoint_devices
+          ed.device_name,
+          ed.protocol,
+          ed.last_seen,
+          ed.agent_uuid,
+          ed.agent_name,
+          ed.overall_quality_percentage,
+          ds.uuid::text AS endpoint_uuid,
+          unnest(ed.available_metrics) as metric_name
+        FROM endpoint_devices ed
+        LEFT JOIN device_sensors ds
+          ON ds.device_uuid = ed.agent_uuid
+         AND ds.name = ed.device_name
+         AND ds.deployment_status != 'deleted'
         WHERE 1=1
     `;
     
@@ -86,7 +92,15 @@ router.get('/devices', jwtAuth, async (req, res) => {
         AVG(overall_quality_percentage) as overall_quality_percentage,
         COUNT(DISTINCT agent_uuid) as agent_count,
         array_agg(DISTINCT agent_uuid::text) as agent_uuids,
-        array_agg(DISTINCT agent_name ORDER BY agent_name) as agent_names
+        array_agg(DISTINCT agent_name ORDER BY agent_name) as agent_names,
+        COALESCE(
+          jsonb_agg(DISTINCT jsonb_build_object(
+            'deviceUuid', agent_uuid::text,
+            'endpointUuid', endpoint_uuid,
+            'agentName', agent_name
+          )) FILTER (WHERE agent_uuid IS NOT NULL AND endpoint_uuid IS NOT NULL),
+          '[]'::jsonb
+        ) as source_refs
       FROM unnested
       GROUP BY device_name, protocol
       ORDER BY last_seen DESC

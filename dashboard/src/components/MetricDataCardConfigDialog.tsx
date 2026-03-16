@@ -44,6 +44,12 @@ interface MetricDataCardConfigDialogProps {
   initialConfig?: MetricDataCardConfig;
 }
 
+interface MetricSourceRef {
+  deviceUuid: string;
+  endpointUuid: string;
+  agentName?: string;
+}
+
 interface EndpointDevice {
   device_name: string;
   protocol: string;
@@ -54,6 +60,7 @@ interface EndpointDevice {
   agent_count: number;
   agent_uuids: string[];
   agent_names: string[];
+  source_refs?: MetricSourceRef[];
 }
 
 export function MetricDataCardConfigDialog({
@@ -65,6 +72,11 @@ export function MetricDataCardConfigDialog({
   const [devices, setDevices] = useState<EndpointDevice[]>([]);
   const [deviceOpen, setDeviceOpen] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<string>(initialConfig?.deviceName || '');
+  const [selectedSourceKey, setSelectedSourceKey] = useState<string>(
+    initialConfig?.deviceUuid && initialConfig?.endpointUuid
+      ? `${initialConfig.deviceUuid}:${initialConfig.endpointUuid}`
+      : ''
+  );
   const [selectedMetric, setSelectedMetric] = useState<string>(initialConfig?.metricName || '');
   const [chartType, setChartType] = useState<'line' | 'area' | 'bar'>(initialConfig?.chartType || 'line');
   const [timeRange, setTimeRange] = useState<'1m' | '1h' | '6h' | '12h' | '24h' | '7d' | '30d'>(initialConfig?.timeRange || '1h');
@@ -74,13 +86,27 @@ export function MetricDataCardConfigDialog({
   const [availableMetrics, setAvailableMetrics] = useState<string[]>([]);
   const [thresholds, setThresholds] = useState<ThresholdLine[]>(initialConfig?.thresholds || []);
   const [showThresholds, setShowThresholds] = useState<boolean>((initialConfig?.thresholds?.length || 0) > 0);
+  const [enableAlert, setEnableAlert] = useState<boolean>(initialConfig?.alertEnabled ?? false);
+  const [alertMin, setAlertMin] = useState<string>(
+    initialConfig?.alertMin !== undefined ? String(initialConfig.alertMin) : ''
+  );
+  const [alertMax, setAlertMax] = useState<string>(
+    initialConfig?.alertMax !== undefined ? String(initialConfig.alertMax) : ''
+  );
   const [showStats, setShowStats] = useState<boolean>(initialConfig?.showStats ?? true);
   const [registeredDevices, setRegisteredDevices] = useState<Map<string, { isOnline: boolean }>>(new Map());
+
+  const getSourceKey = (sourceRef: MetricSourceRef) => `${sourceRef.deviceUuid}:${sourceRef.endpointUuid}`;
 
   // Update form fields when initialConfig changes (for editing existing widgets)
   useEffect(() => {
     if (open && initialConfig) {
       setSelectedDevice(initialConfig.deviceName || '');
+      setSelectedSourceKey(
+        initialConfig.deviceUuid && initialConfig.endpointUuid
+          ? `${initialConfig.deviceUuid}:${initialConfig.endpointUuid}`
+          : ''
+      );
       setSelectedMetric(initialConfig.metricName || '');
       setChartType(initialConfig.chartType || 'line');
       setTimeRange(initialConfig.timeRange || '1h');
@@ -88,10 +114,14 @@ export function MetricDataCardConfigDialog({
       setColor(initialConfig.color || '#3b82f6');
       setThresholds(initialConfig.thresholds || []);
       setShowThresholds(initialConfig.thresholdsEnabled ?? ((initialConfig.thresholds?.length || 0) > 0));
+      setEnableAlert(initialConfig.alertEnabled ?? false);
+      setAlertMin(initialConfig.alertMin !== undefined ? String(initialConfig.alertMin) : '');
+      setAlertMax(initialConfig.alertMax !== undefined ? String(initialConfig.alertMax) : '');
       setShowStats(initialConfig.showStats ?? true);
     } else if (open && !initialConfig) {
       // Reset form for new widget
       setSelectedDevice('');
+      setSelectedSourceKey('');
       setSelectedMetric('');
       setChartType('line');
       setTimeRange('1h');
@@ -99,6 +129,9 @@ export function MetricDataCardConfigDialog({
       setColor('#3b82f6');
       setThresholds([]);
       setShowThresholds(false);
+      setEnableAlert(false);
+      setAlertMin('');
+      setAlertMax('');
       setShowStats(false);
     }
   }, [open, initialConfig]);
@@ -114,9 +147,55 @@ export function MetricDataCardConfigDialog({
       const device = devices.find(d => d.device_name === selectedDevice);
       if (device) {
         setAvailableMetrics(device.available_metrics);
+        const sourceRefs = Array.isArray(device.source_refs) ? device.source_refs : [];
+        if (sourceRefs.length === 1) {
+          setSelectedSourceKey(getSourceKey(sourceRefs[0]));
+          return;
+        }
+
+        const currentSourceStillValid = sourceRefs.some(sourceRef => getSourceKey(sourceRef) === selectedSourceKey);
+        if (!currentSourceStillValid) {
+          const matchesInitialConfig =
+            initialConfig?.deviceName === selectedDevice &&
+            initialConfig?.deviceUuid &&
+            initialConfig?.endpointUuid
+              ? sourceRefs.some(
+                  sourceRef =>
+                    sourceRef.deviceUuid === initialConfig.deviceUuid &&
+                    sourceRef.endpointUuid === initialConfig.endpointUuid
+                )
+              : false;
+
+          setSelectedSourceKey(
+            matchesInitialConfig && initialConfig?.deviceUuid && initialConfig?.endpointUuid
+              ? `${initialConfig.deviceUuid}:${initialConfig.endpointUuid}`
+              : ''
+          );
+        }
       }
     }
-  }, [selectedDevice, devices]);
+  }, [selectedDevice, devices, selectedSourceKey, initialConfig]);
+
+  const selectedDeviceData = devices.find(d => d.device_name === selectedDevice);
+  const selectedDeviceSources = Array.isArray(selectedDeviceData?.source_refs)
+    ? selectedDeviceData.source_refs.filter(sourceRef => sourceRef.deviceUuid && sourceRef.endpointUuid)
+    : [];
+  const selectedSourceRef = selectedDeviceSources.find(sourceRef => getSourceKey(sourceRef) === selectedSourceKey);
+  const requiresExactSourceSelection = selectedDeviceSources.length > 1;
+  const canSave = Boolean(
+    selectedDevice &&
+    selectedMetric &&
+    selectedSourceRef?.deviceUuid &&
+    selectedSourceRef?.endpointUuid
+  );
+  const parsedAlertMin = alertMin.trim() === '' ? undefined : Number(alertMin);
+  const parsedAlertMax = alertMax.trim() === '' ? undefined : Number(alertMax);
+  const hasValidAlertRange =
+    parsedAlertMin !== undefined &&
+    parsedAlertMax !== undefined &&
+    Number.isFinite(parsedAlertMin) &&
+    Number.isFinite(parsedAlertMax);
+  const canSaveWithAlert = canSave && (!enableAlert || hasValidAlertRange);
 
   const fetchDevices = async () => {
     try {
@@ -163,16 +242,19 @@ export function MetricDataCardConfigDialog({
   };
 
   const handleSave = () => {
-    if (!selectedDevice || !selectedMetric) {
+    if (!selectedDevice || !selectedMetric || !selectedSourceRef) {
       return;
     }
 
-    const selectedDeviceData = devices.find(d => d.device_name === selectedDevice);
-    const agentName = selectedDeviceData?.agent_names?.[0] || undefined;
+    if (enableAlert && !hasValidAlertRange) {
+      return;
+    }
 
     const config: MetricDataCardConfig = {
       widgetId: initialConfig?.widgetId || `metric-${Date.now()}`,
-      agentName,
+      agentName: selectedSourceRef.agentName,
+      deviceUuid: selectedSourceRef.deviceUuid,
+      endpointUuid: selectedSourceRef.endpointUuid,
       deviceName: selectedDevice,
       metricName: selectedMetric,
       chartType,
@@ -180,6 +262,9 @@ export function MetricDataCardConfigDialog({
       color,
       title: title || undefined,
       showStats,
+      alertEnabled: enableAlert,
+      alertMin: enableAlert && hasValidAlertRange ? parsedAlertMin : undefined,
+      alertMax: enableAlert && hasValidAlertRange ? parsedAlertMax : undefined,
       thresholds: thresholds.length > 0 ? thresholds : undefined,
       thresholdsEnabled: showThresholds,
     };
@@ -302,6 +387,44 @@ export function MetricDataCardConfigDialog({
                 )}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="metric-source">Exact Source</Label>
+            {selectedDeviceSources.length === 0 ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                No exact source mapping is available for this device yet.
+              </div>
+            ) : selectedDeviceSources.length === 1 && selectedSourceRef ? (
+              <div className="rounded-md border px-3 py-2 text-sm">
+                <div className="font-medium">{selectedSourceRef.agentName || 'Source agent'}</div>
+                <div className="text-muted-foreground">
+                  Device UUID: {selectedSourceRef.deviceUuid}
+                </div>
+              </div>
+            ) : (
+              <Select value={selectedSourceKey} onValueChange={setSelectedSourceKey}>
+                <SelectTrigger id="metric-source">
+                  <SelectValue placeholder="Select exact source" />
+                </SelectTrigger>
+                <SelectContent>
+                  {selectedDeviceSources.map((sourceRef) => {
+                    const deviceInfo = registeredDevices.get(sourceRef.deviceUuid);
+                    const isOnline = Boolean(deviceInfo?.isOnline);
+                    return (
+                      <SelectItem key={getSourceKey(sourceRef)} value={getSourceKey(sourceRef)}>
+                        {sourceRef.agentName || sourceRef.deviceUuid} {isOnline ? '• online' : '• offline'}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            )}
+            {requiresExactSourceSelection && !selectedSourceRef && (
+              <p className="text-xs text-muted-foreground">
+                Select the exact source so the widget can store stable UUIDs.
+              </p>
+            )}
           </div>
 
           <div className="grid gap-2">
@@ -506,6 +629,57 @@ export function MetricDataCardConfigDialog({
               </div>
             )}
           </div>
+
+          {/* Alert Section */}
+          <div className="grid gap-2 pt-2">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="enable-alert"
+                checked={enableAlert}
+                onCheckedChange={(checked) => setEnableAlert(checked === true)}
+              />
+              <Label htmlFor="enable-alert" className="cursor-pointer">
+                Add Alert (Expected Range)
+              </Label>
+            </div>
+
+            {enableAlert && (
+              <div className="space-y-2 rounded-lg border p-3 bg-muted/20">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label htmlFor="alert-min" className="text-xs">Minimum</Label>
+                    <Input
+                      id="alert-min"
+                      type="number"
+                      step="any"
+                      value={alertMin}
+                      onChange={(e) => setAlertMin(e.target.value)}
+                      className="h-8"
+                      placeholder="e.g. 20"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="alert-max" className="text-xs">Maximum</Label>
+                    <Input
+                      id="alert-max"
+                      type="number"
+                      step="any"
+                      value={alertMax}
+                      onChange={(e) => setAlertMax(e.target.value)}
+                      className="h-8"
+                      placeholder="e.g. 80"
+                    />
+                  </div>
+                </div>
+
+                {!hasValidAlertRange && (
+                  <p className="text-xs text-amber-700">
+                    Enter both minimum and maximum values to enable alert syncing.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         <DialogFooter>
@@ -514,7 +688,7 @@ export function MetricDataCardConfigDialog({
           </Button>
           <Button 
             onClick={handleSave}
-            disabled={!selectedDevice || !selectedMetric}
+            disabled={!canSaveWithAlert}
           >
             Save Widget
           </Button>

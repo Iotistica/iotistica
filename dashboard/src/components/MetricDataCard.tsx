@@ -30,6 +30,11 @@ export interface MetricDataCardConfig {
   widgetId: string;
   title?: string;
   agentName?: string;
+  deviceUuid?: string;
+  endpointUuid?: string;
+  alertEnabled?: boolean;
+  alertMin?: number;
+  alertMax?: number;
   deviceName: string;
   metricName: string;
   chartType: 'line' | 'area' | 'bar';

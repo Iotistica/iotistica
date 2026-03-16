@@ -69,6 +69,7 @@ import MetricValueCard, { type MetricValueCardConfig } from '../components/Metri
 import MetricValueCardConfigDialog from '../components/MetricValueCardConfigDialog';
 import { TableDataCard, type TableDataCardConfig } from '../components/TableDataCard';
 import { TableDataCardConfigDialog } from '../components/TableDataCardConfigDialog';
+import { useDeviceState } from '../contexts/DeviceStateContext';
 import { Table } from 'lucide-react';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
@@ -175,6 +176,42 @@ interface GlobalDashboardPageProps {
   onDeviceSelect: (device: Device) => void;
 }
 
+interface AnomalyMetricConfig {
+  name: string;
+  enabled: boolean;
+  methods: string[];
+  threshold: number;
+  windowSize: number;
+  expectedRange?: [number, number];
+}
+
+function getFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function getExpectedRangeFromMetricConfig(config: MetricDataCardConfig): [number, number] | undefined {
+  if (config.alertEnabled) {
+    const min = getFiniteNumber(config.alertMin);
+    const max = getFiniteNumber(config.alertMax);
+    if (min !== undefined && max !== undefined) {
+      return min <= max ? [min, max] : [max, min];
+    }
+    return undefined;
+  }
+
+  if (!config.thresholdsEnabled || !Array.isArray(config.thresholds) || config.thresholds.length === 0) {
+    return undefined;
+  }
+
+  const values = config.thresholds
+    .map(threshold => getFiniteNumber(threshold.value))
+    .filter((value): value is number => value !== undefined);
+
+  if (values.length === 0) return undefined;
+
+  return [Math.min(...values), Math.max(...values)];
+}
+
 export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboardPageProps) {
   // Sanitize widgets to ensure all layout properties are valid numbers
   const sanitizeWidgets = (widgets: any[]): DashboardWidget[] => {
@@ -227,6 +264,55 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     const saved = localStorage.getItem('dashboard-kiosk-mode');
     return saved === 'true';
   });
+  const { getPendingConfig, updatePendingConfig } = useDeviceState();
+
+  const syncMetricAnomalyFromWidgetConfig = (config: MetricDataCardConfig) => {
+    const deviceUuid = config.deviceUuid;
+    const endpointUuid = config.endpointUuid;
+    const metricName = config.metricName?.trim();
+
+    if (!deviceUuid || !endpointUuid || !metricName) {
+      return;
+    }
+
+    const qualifiedMetricName = `${endpointUuid}_${metricName}`;
+    const pendingConfig = getPendingConfig(deviceUuid);
+    const existingMetrics: AnomalyMetricConfig[] = Array.isArray(pendingConfig?.anomalyDetection?.metrics)
+      ? pendingConfig.anomalyDetection.metrics
+      : [];
+    const expectedRange = getExpectedRangeFromMetricConfig(config);
+    const existingMetric = existingMetrics.find(metric => metric?.name === qualifiedMetricName);
+
+    if (!expectedRange) {
+      if (!existingMetric) {
+        return;
+      }
+
+      const updatedMetrics = existingMetrics.filter(metric => metric?.name !== qualifiedMetricName);
+      updatePendingConfig(deviceUuid, 'anomalyDetection.metrics', updatedMetrics);
+      return;
+    }
+
+    const upsertedMetric: AnomalyMetricConfig = {
+      name: qualifiedMetricName,
+      enabled: existingMetric?.enabled ?? true,
+      methods: Array.isArray(existingMetric?.methods) && existingMetric.methods.length > 0
+        ? existingMetric.methods
+        : ['iqr', 'zscore'],
+      threshold: getFiniteNumber(existingMetric?.threshold) ?? 3.0,
+      windowSize: getFiniteNumber(existingMetric?.windowSize) ?? 120,
+      expectedRange,
+    };
+
+    const updatedMetrics = existingMetric
+      ? existingMetrics.map(metric => (metric?.name === qualifiedMetricName ? upsertedMetric : metric))
+      : [...existingMetrics, upsertedMetric];
+
+    updatePendingConfig(deviceUuid, 'anomalyDetection.metrics', updatedMetrics);
+    if (!pendingConfig?.features?.enableAnomalyDetection) {
+      updatePendingConfig(deviceUuid, 'features.enableAnomalyDetection', true);
+    }
+  };
 
   const toggleKioskMode = () => {
     const newKioskMode = !isKioskMode;
@@ -816,6 +902,8 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       };
       setWidgets([...widgets, newWidget]);
     }
+
+    syncMetricAnomalyFromWidgetConfig(config);
 
     setHasUnsavedChanges(true);
     setConfiguringWidgetId(null);
