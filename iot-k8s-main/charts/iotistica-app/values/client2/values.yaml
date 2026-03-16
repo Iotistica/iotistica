@@ -116,7 +116,6 @@ api:
     DB_POOL_SIZE: "200"  # Increased for large fleet deployments (100+ agents)
     DB_SSL: "true"
     DB_SSL_REJECT_UNAUTHORIZED: "false"
-    DB_SKIP_MIGRATIONS: "true" # Database schema pre-initialized by provisioning service
     MQTT_PERSIST_TO_DB: "true"
     MQTT_DB_SYNC_INTERVAL: "10000"
     MQTT_MONITOR_ENABLED: "true"
@@ -180,21 +179,6 @@ dashboard:
   # For production with ingress:
   #   - Set to your API ingress URL
   apiUrl: ""  # Empty = auto-detect from browser
-  
-  # Auth0 Configuration (set per-customer/environment)
-  auth0:
-    domain: "dev-hmwhgxw10boqpmrw.us.auth0.com"  # Auth0 tenant domain
-    clientId: "Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR"  # Auth0 Application ID
-    audience: "https://api.iotistica.com"  # Auth0 API Identifier
-    callbackUrl: "http://localhost:8080/auth/callback"  # Redirect URI after login
-    showSocialLogin: "false"  # Show social login options
-  
-  # Provisioning API URL (billing service for Auth0 token exchange)
-  provisioningApiUrl: "http://localhost:3100"
-  
-  # Website URL (for signup completion)
-  websiteUrl: "http://localhost:3000"
-  
   resources:
     requests:
       cpu: 100m
@@ -210,10 +194,11 @@ mqttMonitor:
   enabled: true
   image:
     repository: iotistic/mqtt-monitor
-    tag: latest
+    tag: v0.0.19
     pullPolicy: IfNotPresent
   replicas: 1
   port: 3500
+  serviceType: ClusterIP
   resources:
     requests:
       cpu: 100m
@@ -224,51 +209,23 @@ mqttMonitor:
   env:
     NODE_ENV: development
     LOG_LEVEL: info
+    DB_SSL: "true"
+    MQTT_TLS_REJECT_UNAUTHORIZED: "false"
     DB_POOL_SIZE: "10"
     MQTT_PERSIST_DB: "true"
     MQTT_DB_SYNC_INTERVAL: "30000"
     MQTT_METRICS_UPDATE_INTERVAL: "5000"
     MQTT_TOPIC_TREE_UPDATE_INTERVAL: "5000"
+    MQTT_MAX_PAYLOAD_BYTES: "65536"
+  createOnePasswordItems: false
+  sql:
+    SecretName: "sql-credentials-client2"
   # MQTT credentials (should match mosquitto credentials)
   # SECURITY: For production, reference the same secret as API service
   # See api.mqtt configuration above for security options
   mqtt:
     # Reference existing Kubernetes secret (recommended for production)
-    existingSecret: "mqtt-credentials-client2"
-
-# Node-RED - Visual flow automation
-nodered:
-  enabled: true
-  image:
-    repository: iotistic/nodered
-    tag: latest
-    pullPolicy: IfNotPresent
-  replicas: 1
-  port: 1880
-  serviceType: ClusterIP
-  # External URL for Node-RED (used for Auth0 callback and bridge token redirect)
-  baseUrl: "https://nodered2.iotistica.com"
-  tlsCommonName: nodered2.iotistica.com
-  # Storage token for API authentication (flows stored in API database)
-  storageToken:
-    secretName: "api-jwt-client2"
-    secretKey: "token"
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
-  env:
-    TZ: "UTC"
-    NODE_RED_ENABLE_SAFE_MODE: "false"
-    NODE_RED_ENABLE_PROJECTS: "false"
-  # Ingress configuration
-  ingress:
-    enabled: true
-    gatewayName: "iotistica-gateway"
-    gatewayNamespace: "envoy-gateway-system"
+    SecretName: "mqtt-credentials-client2"
 
 # Housekeeper service - Database maintenance and cleanup
 housekeeper:

@@ -42,8 +42,7 @@ spec:
               value: {{ .Values.worker.env.CLIENT_BASE_DOMAIN | quote }}
             - name: BASE_URL
               value: "http://{{ include "provisioning.fullname" . }}-api:{{ .Values.api.port }}"
-
-            # JWT
+              # JWT
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -53,7 +52,6 @@ spec:
               value: "15m"
             - name: JWT_REFRESH_TOKEN_EXPIRY
               value: "7d"
-            
             # Database (PostgreSQL)
             - name: DB_HOST
               value: {{ include "provisioning.fullname" . }}-postgres
@@ -77,7 +75,6 @@ spec:
               value: "false"
             - name: DB_SSL_REJECT_UNAUTHORIZED
               value: "false"
-            
             # Redis
             - name: REDIS_HOST
               valueFrom:
@@ -85,15 +82,10 @@ spec:
                   name: redis-credentials-master
                   key: host
             - name: REDIS_PORT
-              {{- if .Values.redis.tls }}
-              # Azure Redis with TLS requires port 6380, not 6379
-              value: "6380"
-              {{- else }}
               valueFrom:
                 secretKeyRef:
                   name: redis-credentials-master
-                  key: port_ext
-              {{- end }}
+                  key: port
             - name: REDIS_DB
               value: "0"
             - name: REDIS_PASSWORD
@@ -195,7 +187,7 @@ spec:
             - name: ARGOCD_NAMESPACE
               value: "argocd"
             - name: ARGOCD_MAX_RETRIES
-              value: "10"
+              value: "20"
             - name: ARGOCD_RETRY_DELAY
               value: "5000"
             - name: SKIP_ARGOCD_STATUS_CHECK
@@ -229,7 +221,7 @@ spec:
             - name: PROVISIONING_PG_SSL_REJECT_UNAUTHORIZED
               value: {{ .Values.postgresProvisioning.sslRejectUnauthorized | quote }}
             - name: PROVISIONING_PG_TEMPLATE_DB
-              value: {{ .Values.postgresProvisioning.templateDatabase | default "template_iotistica" | quote }}
+              value: {{ .Values.postgresProvisioning.templateDatabase | quote }}
           
           volumeMounts:
             - name: license-keys

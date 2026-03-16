@@ -92,12 +92,12 @@ spec:
         - ingress-nginx
     validate:
       message: >
-        Namespaces MUST follow pattern 'fleet-*' or 'customer-*' or 'billing' or 'demo' or 'iotistica-*' or 'client-*' or 'provisioning'.
+        Namespaces MUST follow pattern 'fleet-*' or 'customer-*' or 'billing' or 'demo' or 'iotistica-*' or 'client-*'.
         System/cluster namespaces are managed by admins only.
         Invalid name: {{ request.object.metadata.name }}
       pattern:
         metadata:
-          name: "fleet-*|customer-*|billing|demo|iotistica-*|client-*|provisioning"
+          name: "fleet-*|customer-*|billing|demo|iotistica-*|client-*|provisioning|"
 
 ---
 # ============================================================================

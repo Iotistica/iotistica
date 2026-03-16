@@ -1,0 +1,19 @@
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: provisioning-db-credentials-cnpg
+  namespace: iotistica-cnpg-cl01
+spec:
+  itemPath: "vaults/iotistica/items/provisioning-db-credentials-cnpg"
+type: kubernetes.io/basic-auth
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: billing
+  namespace: iotistica-cnpg-cl01 # Ensure this matches your cluster's namespace
+spec:
+  name: billing # The actual database name in PostgreSQL
+  owner: billing # The owner role (e.g., 'billing' is the default application user)
+  cluster:
+    name: iotistica-cnpg-cl01 # The name of your existing CloudNativePG Cluster resource

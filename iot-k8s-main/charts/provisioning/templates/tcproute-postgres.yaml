@@ -1,0 +1,38 @@
+{{- if and .Values.postgres.enabled ((.Values.postgres.ingress).enabled) }}
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TCPRoute
+metadata:
+  name: {{ include "provisioning.fullname" . }}-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "provisioning.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  parentRefs:
+    - name: {{ .Values.postgres.ingress.gateway }}
+      namespace: {{ .Values.postgres.ingress.gatewayNamespace }}
+      sectionName: postgres
+  rules:
+    - backendRefs:
+        - name: {{ include "provisioning.fullname" . }}-postgres
+          port: 5432
+{{- end }}
+
+# apiVersion: gateway.envoyproxy.io/v1alpha1
+# kind: SecurityPolicy
+# metadata:
+#   name: authorization-client-ip-tcp-postgres
+# spec:
+#   targetRefs:
+#     - group: gateway.networking.k8s.io
+#       kind: TCPRoute
+#       name: {{ include "provisioning.fullname" . }}-postgres
+#       namespace: {{ .Release.Namespace }}
+#   authorization:
+#     defaultAction: Deny
+#     rules:
+#       - action: Allow
+#         principal:
+#           clientCIDRs:
+#             - 0.0.0.0/32
+#             - 203.0.113.10/32

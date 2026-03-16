@@ -396,7 +396,7 @@ metadata:
   name: sql-credentials-tsdb
   namespace: tsdb
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/sql-credentials-tsdb"
+  itemPath: "vaults/iotistica/items/sql-credentials-tsdb"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
@@ -404,7 +404,7 @@ metadata:
   name: mqtt-credentials-tsdb
   namespace: tsdb
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/mqtt-credentials-tsdb"
+  itemPath: "vaults/iotistica/items/mqtt-credentials-tsdb"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
@@ -412,7 +412,7 @@ metadata:
   name: redis-credentials-tsdb
   namespace: tsdb
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/redis-credentials-tsdb"
+  itemPath: "vaults/iotistica/items/redis-credentials-tsdb"
 ```
 
 **Secret Structure** (created by 1Password Operator):

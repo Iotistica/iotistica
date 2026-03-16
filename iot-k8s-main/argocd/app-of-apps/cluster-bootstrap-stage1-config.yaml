@@ -1,0 +1,17 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cluster-bootstrap-stage1-config
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Iotistica/iot-k8s.git
+    targetRevision: main
+    path: argocd/applications/cluster-bootstrap-stage1-config  # folder containing child apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: iotistica-argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

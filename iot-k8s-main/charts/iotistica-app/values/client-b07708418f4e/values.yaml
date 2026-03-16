@@ -1,0 +1,309 @@
+global:
+  namespace: client-b07708418f4e
+redis:
+  enabled: false
+  tls: false
+  cluster: false
+mosquitto:
+  enabled: true
+  image:
+    repository: iegomez/mosquitto-go-auth
+    tag: 3.0.0-mosquitto_2.0.18
+    pullPolicy: IfNotPresent
+  serviceType: ClusterIP
+  ports:
+    mqtt: 1883
+    mqtts: 8883
+    websocket: 9001
+  tlsSecret: mosquitto-tls
+  tlsCertName: mosquitto-tls
+  tlsIssuer: letsencrypt-production
+  tlsCommonName: mqtt-client-b07708418f4e.iotistica.com
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  auth:
+    allowAnonymous: false
+    hasher: bcrypt
+    hasherCost: 10
+    logLevel: info
+  persistence:
+    enabled: true
+mqttBroker:
+  protocol: mqtt
+  host: client-b07708418f4e-iotistic-mosquitto.client-b07708418f4e.svc.cluster.local
+  port: 1883
+  useTls: false
+  verifyCertificate: false
+api:
+  enabled: true
+  image:
+    repository: iotistic/api
+    tag: v0.0.19
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 3002
+  serviceType: ClusterIP
+  tlsCommonName: api-client-b07708418f4e.iotistica.com
+  cloudApiUrl: http://client-b07708418f4e-iotistic-api.client-b07708418f4e.svc.cluster.local:3002
+  corsOrigins: https://client-b07708418f4e.iotistica.com
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  autoscaling:
+    enabled: false
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  env:
+    NODE_ENV: production
+    LOG_LEVEL: info
+    DB_POOL_SIZE: '20'
+    DB_SSL: 'false'
+    DB_SSL_REJECT_UNAUTHORIZED: 'false'
+    DB_SKIP_MIGRATIONS: 'true'
+    AI_PROVIDER: openai
+    OPENAI_BASE_URL: https://iotistic-openai-7307.openai.azure.com
+    OPENAI_MODEL: gpt-4o-mini
+    AZURE_OPENAI_API_VERSION: 2024-08-01-preview
+    MQTT_PERSIST_TO_DB: 'true'
+    MQTT_DB_SYNC_INTERVAL: '10000'
+    MQTT_MONITOR_ENABLED: 'true'
+    LOG_COMPRESSION: 'true'
+    VPN_ENABLED: 'false'
+    FORCE_COLOR: '1'
+    VIRTUAL_AGENT_CPU_REQUEST: 50m
+    JWT_ACCESS_TOKEN_EXPIRY: 15m
+    JWT_REFRESH_TOKEN_EXPIRY: 7d
+  sql:
+    SecretName: sql-credentials-client-b07708418f4e
+  mqtt:
+    SecretName: mqtt-credentials-client-b07708418f4e
+  redis:
+    SecretName: redis-credentials-master
+    cluster: false
+    tls: false
+  openai:
+    SecretName: openai-credentials-master
+  jwt:
+    SecretName: api-jwt-client-b07708418f4e
+  license:
+    SecretName: api-license-credentials-client-b07708418f4e
+  publicKey:
+    SecretName: api-license-public-key-master
+  monitoring:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+    relabelings: []
+dashboard:
+  enabled: true
+  image:
+    repository: iotistic/dashboard
+    tag: v0.0.19
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 80
+  serviceType: ClusterIP
+  tlsCommonName: client-b07708418f4e.iotistica.com
+  apiUrl: https://api-client-b07708418f4e.iotistica.com
+  auth0:
+    domain: auth.iotistica.com
+    clientId: Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR
+    audience: https://api.iotistica.com
+    callbackUrl: https://client-b07708418f4e.iotistica.com/auth/callback
+    showSocialLogin: 'true'
+  provisioningApiUrl: https://api.iotistica.com/provisioning
+  websiteUrl: https://iotistica.com
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  env:
+    NODE_ENV: production
+mqttMonitor:
+  enabled: true
+  image:
+    repository: iotistic/mqtt-monitor
+    tag: v0.0.19
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 3500
+  serviceType: ClusterIP
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  env:
+    NODE_ENV: development
+    LOG_LEVEL: info
+    DB_SSL: 'true'
+    MQTT_TLS_REJECT_UNAUTHORIZED: 'false'
+    DB_POOL_SIZE: '10'
+    MQTT_PERSIST_DB: 'true'
+    MQTT_DB_SYNC_INTERVAL: '30000'
+    MQTT_METRICS_UPDATE_INTERVAL: '5000'
+    MQTT_TOPIC_TREE_UPDATE_INTERVAL: '5000'
+    MQTT_MAX_PAYLOAD_BYTES: '65536'
+  createOnePasswordItems: false
+  sql:
+    SecretName: sql-credentials-client-b07708418f4e
+  mqtt:
+    SecretName: mqtt-credentials-client-b07708418f4e
+nodered:
+  enabled: true
+  image:
+    repository: iotistic/nodered
+    tag: v0.0.19
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 1880
+  serviceType: ClusterIP
+  baseUrl: https://nr-b07708418f4e.iotistica.com
+  storageToken:
+    secretName: api-jwt-client-b07708418f4e
+    secretKey: token
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  env:
+    TZ: UTC
+    NODE_RED_ENABLE_SAFE_MODE: 'false'
+    NODE_RED_ENABLE_PROJECTS: 'false'
+    NODE_RED_ENABLE_UI_AUTH: "true"
+  auth0:
+    domain: auth.iotistica.com
+    audience: https://api.iotistica.com
+    issuer: https://auth.iotistica.com/
+  ingress:
+    enabled: true
+    gatewayName: iotistica-gateway
+    gatewayNamespace: envoy-gateway-system
+housekeeper:
+  enabled: true
+  image:
+    repository: iotistic/housekeeper
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 3400
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  env:
+    NODE_ENV: development
+    LOG_LEVEL: info
+    DB_POOL_MAX: '10'
+    DB_IDLE_TIMEOUT: '30000'
+    DB_CONNECT_TIMEOUT: '10000'
+  tasks:
+    vacuum:
+      enabled: true
+      schedule: 0 2 * * *
+    partitionMaintenance:
+      enabled: true
+      schedule: 0 3 * * *
+    logCleanup:
+      enabled: true
+      schedule: 0 4 * * *
+      retentionDays: 30
+postoffice:
+  enabled: true
+  image:
+    repository: iotistic/postoffice
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 3600
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  env:
+    NODE_ENV: development
+    REDIS_DB: '2'
+  email:
+    transport: smtp
+    from: noreply@iotistica.com
+    fromName: Iotistica Platform
+    smtp:
+      host: smtp.gmail.com
+      port: '587'
+      secure: 'false'
+      existingSecret: ''
+      username: ''
+      password: ''
+    ses:
+      region: us-east-1
+      existingSecret: ''
+      accessKeyId: ''
+      secretAccessKey: ''
+  queue:
+    concurrency: '5'
+    maxRetry: '3'
+    retryDelay: '60000'
+  bullBoard:
+    enabled: true
+    path: /admin/queues
+ingress:
+  enabled: false
+  className: nginx
+  host: iotistic.local
+  tls:
+    enabled: false
+networkPolicy:
+  enabled: false
+resourceQuota:
+  enabled: false
+fleetNamespaces:
+  enabled: true
+  namespaces:
+    - name: test
+      maxAgents: 2
+      maxDevices: 32
+      fleetType: virtual
+      quotaPolicy: strict
+      cpuRequest: 600m
+      cpuLimit: 2000m
+      memoryRequest: 960Mi
+      memoryLimit: 4096Mi
+      networkPolicy:
+        enabled: true
+    - name: pool-01
+      maxAgents: 2
+      maxDevices: 32
+      fleetType: virtual
+      quotaPolicy: strict
+      cpuRequest: 600m
+      cpuLimit: 2000m
+      memoryRequest: 960Mi
+      memoryLimit: 4096Mi
+      networkPolicy:
+        enabled: true

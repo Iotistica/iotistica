@@ -1,0 +1,30 @@
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: iotistica-cnpg-cl01-azure-backup
+  namespace: iotistica-cnpg-cl01
+spec:
+  itemPath: "vaults/iotistica/items/iotistica-cnpg-cl01-azure-backup"
+type: kubernetes.io/opaque
+# ---
+# apiVersion: postgresql.cnpg.io/v1
+# kind: ScheduledBackup
+# metadata:
+#   name: iotistica-cnpg-cl01-daily-backup
+#   namespace: iotistica-cnpg-cl01
+# spec:
+#   # Cron schedule (daily at midnight)
+#   schedule: "0 0 * * *"
+
+#   # Target cluster
+#   cluster:
+#     name: iotistica-cnpg-cl01
+
+#   # Backup ownership (for garbage collection)
+#   backupOwnerReference: cluster
+
+#   # Suspend schedule
+#   suspend: false
+
+#   # Run immediately on creation
+#   immediate: false

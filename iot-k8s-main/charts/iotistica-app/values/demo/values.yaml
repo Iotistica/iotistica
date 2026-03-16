@@ -61,7 +61,7 @@ api:
   enabled: true
   image:
     repository: iotistic/api
-    tag: v0.0.4
+    tag: v0.0.10-rc.2
     pullPolicy: IfNotPresent # Use local images only (prevents pulling from registry)
   replicas: 1 # Single replica for now
   port: 3002
@@ -91,7 +91,7 @@ api:
     DB_POOL_SIZE: "20" # Increased for large fleet deployments (100+ agents)
     DB_SSL: "true"
     DB_SSL_REJECT_UNAUTHORIZED: "false"
-    DB_SKIP_MIGRATIONS: "true" # Database schema pre-initialized by provisioning service
+    AI_PROVIDER: "openai"
     OPENAI_BASE_URL: "https://iotistic-openai-7307.openai.azure.com"
     OPENAI_MODEL: "gpt-4o-mini"
     AZURE_OPENAI_API_VERSION: "2024-08-01-preview"
@@ -134,8 +134,9 @@ api:
     SecretName: "api-jwt-demo"
   # License configuration (optional)
   license:
-    key: ""
-    publicKey: ""
+    SecretName: "api-license-credentials-demo"
+  publicKey:
+    SecretName: "api-license-public-key-master"
   # Prometheus metrics monitoring
   monitoring:
     enabled: true # Enable ServiceMonitor for Prometheus scraping
@@ -148,7 +149,7 @@ dashboard:
   enabled: true
   image:
     repository: iotistic/dashboard
-    tag: v0.0.4
+    tag: v0.0.10-rc.2
     pullPolicy: IfNotPresent # Use local images only (prevents pulling from registry)
   replicas: 1
   port: 80
@@ -168,21 +169,6 @@ dashboard:
   # For production with ingress:
   #   - Set to your API ingress URL
   apiUrl: "https://api.iotistica.com"
-  
-  # Auth0 Configuration (set per-customer/environment)
-  auth0:
-    domain: "dev-hmwhgxw10boqpmrw.us.auth0.com"  # Auth0 tenant domain
-    clientId: "Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR"  # Auth0 Application ID
-    audience: "https://api.iotistica.com"  # Auth0 API Identifier
-    callbackUrl: "https://demo.iotistica.com/auth/callback"  # Redirect URI after login
-    showSocialLogin: "false"  # Show social login options
-  
-  # Provisioning API URL (billing service for Auth0 token exchange)
-  provisioningApiUrl: "https://api.iotistica.com/provisioning"
-  
-  # Website URL (for signup completion)
-  websiteUrl: "https://iotistic.cloud"
-  
   resources:
     requests:
       cpu: 100m
@@ -197,10 +183,11 @@ mqttMonitor:
   enabled: true
   image:
     repository: iotistic/mqtt-monitor
-    tag: latest
+    tag: v0.0.10-rc.2
     pullPolicy: IfNotPresent
   replicas: 1
   port: 3500
+  serviceType: ClusterIP
   resources:
     requests:
       cpu: 100m
@@ -211,50 +198,23 @@ mqttMonitor:
   env:
     NODE_ENV: development
     LOG_LEVEL: info
+    DB_SSL: "true"
+    MQTT_TLS_REJECT_UNAUTHORIZED: "false"
     DB_POOL_SIZE: "10"
     MQTT_PERSIST_DB: "true"
     MQTT_DB_SYNC_INTERVAL: "30000"
     MQTT_METRICS_UPDATE_INTERVAL: "5000"
     MQTT_TOPIC_TREE_UPDATE_INTERVAL: "5000"
+    MQTT_MAX_PAYLOAD_BYTES: "65536"
+  createOnePasswordItems: false
+  sql:
+    SecretName: "sql-credentials-demo"
   # MQTT credentials (should match mosquitto credentials)
   # SECURITY: For production, reference the same secret as API service
   # See api.mqtt configuration above for security options
   mqtt:
     # Reference existing Kubernetes secret (recommended for production)
-    existingSecret: "mqtt-credentials-demo"
-# Node-RED - Visual flow automation
-nodered:
-  enabled: true
-  image:
-    repository: iotistic/nodered
-    tag: latest
-    pullPolicy: IfNotPresent
-  replicas: 1
-  port: 1880
-  serviceType: ClusterIP
-  # External URL for Node-RED (used for Auth0 callback and bridge token redirect)
-  baseUrl: "https://nodered.iotistica.com"
-  tlsCommonName: nodered.iotistica.com
-  # Storage token for API authentication (flows stored in API database)
-  storageToken:
-    secretName: "api-jwt-demo"
-    secretKey: "token"
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
-  env:
-    TZ: "UTC"
-    NODE_RED_ENABLE_SAFE_MODE: "false"
-    NODE_RED_ENABLE_PROJECTS: "false"
-  # Ingress configuration
-  ingress:
-    enabled: true
-    gatewayName: "iotistica-gateway"
-    gatewayNamespace: "envoy-gateway-system"
+    SecretName: "mqtt-credentials-demo"
 # Housekeeper service - Database maintenance and cleanup
 housekeeper:
   enabled: true

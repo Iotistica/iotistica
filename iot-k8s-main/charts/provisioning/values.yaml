@@ -9,7 +9,7 @@ api:
   image:
     repository: iotistic/provisioning-api
     tag: latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   replicas: 1
   port: 3100
   serviceType: ClusterIP
@@ -24,10 +24,11 @@ api:
     NODE_ENV: production
     BASE_DOMAIN: api.iotistica.com
     CLIENT_BASE_DOMAIN: iotistica.com
-    WEBSITE_URL: https://iotistica.com
+    WEBSITE_URL: https://www.iotistica.com
+    AUTH0_SIGNUP_CALLBACK_URL: https://www.iotistica.com/auth-callback.html
     DEFAULT_TRIAL_DAYS: "14"
     GITOPS_ENABLED: "true"
-    GITOPS_REPO_URL: https://github.com/Iotistica/iot-k8s.git
+    GITOPS_REPO_URL: https://github.com/Iotistica/iot-k8s-main
     GITOPS_BRANCH: main
     GITOPS_AUTHOR_NAME: Iotistica Provisioning Bot
     GITOPS_AUTHOR_EMAIL: info@iotistica.com
@@ -42,7 +43,7 @@ worker:
   image:
     repository: iotistic/provisioning-worker
     tag: latest
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   replicas: 1
   concurrency: 3
   retryAttempts: 3
@@ -68,12 +69,12 @@ worker:
     SIMULATE_ONEPASSWORD: "false"
     SKIP_ARGOCD_STATUS_CHECK: "false"
 
-# PostgreSQL (custom deployment using official postgres:15-alpine)
+# PostgreSQL (custom deployment using TimescaleDB PG16 image)
 postgres:
   enabled: true
   image:
-    repository: postgres
-    tag: "15-alpine"
+    repository: timescale/timescaledb
+    tag: "latest-pg16"
   database: billing
   storage:
     size: 10Gi
@@ -99,50 +100,25 @@ postgres:
 # Redis connection settings (credentials from redis-credentials-master secret)
 redis:
   tls: false      # Azure Redis requires TLS for external connections
-  cluster: true  # Set to true if using Redis Cluster mode
+  cluster: false  # Set to true if using Redis Cluster mode
 
 # PostgreSQL Provisioning - shared server where per-client databases are created.
 # Admin credentials are pulled from the 1Password item:
-#   vaults/IOT-CLIENTS/items/provisioning-pg-admin-credentials
+#   vaults/iotistica/items/provisioning-pg-admin-credentials
 #   Required keys: username, password
 #
-# SECURITY REQUIREMENT - Admin User Privileges (Principle of Least Privilege):
-# ============================================================================
-# The provisioning admin role MUST have:
-#   ✓ CREATEDB privilege (can create new databases)
-#   ✓ CREATEROLE privilege (can create and manage roles)
-#   ✗ NOT superuser privilege (no unrestricted system access)
-#
-# Recommended provisioning user setup (as PostgreSQL superuser):
-#   CREATE ROLE provisioner WITH LOGIN PASSWORD 'secure-password';
-#   ALTER ROLE provisioner CREATEDB CREATEROLE;
-#
-# To verify the provisioning user has correct privileges:
-#   SELECT usecreatedb, usecreaterole, usesuper FROM pg_user WHERE usename='provisioner';
-#   Expected output: (t, t, f) meaning (true, true, false)
-#
-# Why NOT superuser?
-#   - Violates principle of least privilege
-#   - Limits damage if credentials are compromised
-#   - Still allows database and role creation
-#   - Prevents dangerous operations like DROP DATABASE, ALTER SYSTEM
-#
-# The Provisioning Service will log warnings during initialization if:
-#   - Admin user lacks CREATEDB privilege
-#   - Admin user lacks CREATEROLE privilege  
-#   - Admin user has superuser privileges
-#
-# This chart's postgres-init job (see postgresProvisioning.initJob below)
-# will create the necessary admin role with correct privileges.
+# The admin role (iotistica_provisioning) must have CREATEDB and CREATEROLE
+# privileges.  It is created automatically by this chart's postgres-init job
+# (see postgresProvisioning.initJob below).
 postgresProvisioning:
   # Database provider: 'postgres' (self-hosted) or 'tigerdata' (Timescale Cloud)
   provider: "postgres"
-  # Hostname of the shared PostgreSQL server (the iotistic chart postgres service)
+  # Hostname of the shared PostgreSQL server (provisioning-postgres service in same namespace)
   host: "provisioning-postgres.provisioning.svc.cluster.local"
   port: 5432
-  adminDatabase: "postgres"
+  adminDatabase: "billing"
   ssl: false
-  sslRejectUnauthorized: true
+  sslRejectUnauthorized: false
   # Template database cloned for every new client (created once by the provisioning
   # API on first startup when DB_PROVIDER=postgres and this value is non-empty)
   templateDatabase: "template_iotistica"

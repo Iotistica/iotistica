@@ -449,7 +449,7 @@ services:
             - PORT=3500
             - HOST=0.0.0.0
             - LOG_LEVEL=${MQTT_MONITOR_LOG_LEVEL:-info}
-            # TigerData Cloud TimescaleDB
+       
             - DB_HOST=${DB_HOST:-bg4k3yxway.pcwz234dvp.tsdb.cloud.timescale.com}
             - DB_PORT=${DB_PORT:-30692}
             - DB_NAME=${DB_NAME:-tsdb}

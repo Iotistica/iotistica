@@ -12,9 +12,3 @@ keywords:
   - gitops
 maintainers:
   - name: Iotistic Team
-
-dependencies:
-  - name: redis
-    version: "~19.0.0"
-    repository: https://charts.bitnami.com/bitnami
-    condition: redis.enabled

@@ -24,7 +24,7 @@ metadata:
   name: provisioning-db-credentials
   namespace: {{ .Release.Namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/provisioning-db-credentials"
+  itemPath: "vaults/iotistica/items/provisioning-db-credentials"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
@@ -32,7 +32,7 @@ metadata:
   name: redis-credentials-master
   namespace: {{ .Release.Namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/redis-credentials-master"
+  itemPath: "vaults/iotistica/items/redis-credentials-master"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
@@ -40,7 +40,7 @@ metadata:
   name: provisioning-stripe-credentials
   namespace: {{ .Release.Namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/provisioning-stripe-credentials"
+  itemPath: "vaults/iotistica/items/provisioning-stripe-credentials"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
@@ -48,7 +48,7 @@ metadata:
   name: provisioning-auth0-credentials
   namespace: {{ .Release.Namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/provisioning-auth0-credentials"
+  itemPath: "vaults/iotistica/items/provisioning-auth0-credentials"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
@@ -56,7 +56,7 @@ metadata:
   name: provisioning-tigerdata-credentials
   namespace: {{ .Release.Namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/provisioning-tigerdata-credentials"
+  itemPath: "vaults/iotistica/items/provisioning-tigerdata-credentials"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
@@ -64,7 +64,7 @@ metadata:
   name: provisioning-onepassword-credentials
   namespace: {{ .Release.Namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/provisioning-onepassword-credentials"
+  itemPath: "vaults/iotistica/items/provisioning-onepassword-credentials"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
@@ -72,7 +72,7 @@ metadata:
   name: provisioning-gitops-credentials
   namespace: {{ .Release.Namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/provisioning-gitops-credentials"
+  itemPath: "vaults/iotistica/items/provisioning-gitops-credentials"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
@@ -80,7 +80,7 @@ metadata:
   name: provisioning-argocd-credentials
   namespace: {{ .Release.Namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/provisioning-argocd-credentials"
+  itemPath: "vaults/iotistica/items/provisioning-argocd-credentials"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
@@ -88,7 +88,7 @@ metadata:
   name: api-license-public-key-master
   namespace: {{ .Release.Namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/api-license-public-key-master"
+  itemPath: "vaults/iotistica/items/api-license-public-key-master"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
@@ -96,7 +96,7 @@ metadata:
   name: provisioning-license-private-key
   namespace: {{ .Release.Namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/provisioning-license-private-key"
+  itemPath: "vaults/iotistica/items/provisioning-license-private-key"
 ---
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
@@ -104,27 +104,31 @@ metadata:
   name: provisioning-jwt-secret
   namespace: {{ .Release.Namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/provisioning-jwt-secret"
+  itemPath: "vaults/iotistica/items/provisioning-jwt-secret"
 ---
-# Provisioning Database Admin User Credentials
-# 
-# SECURITY REQUIREMENT: This user must have CREATEDB and CREATEROLE privileges
-# but must NOT be a superuser (principle of least privilege).
-#
-# Recommended setup (as superuser):
-#   CREATE ROLE provisioner WITH LOGIN PASSWORD '...';
-#   ALTER ROLE provisioner CREATEDB CREATEROLE;
-#
-# The provisioning service will log warnings if the user lacks required privileges
-# or has superuser privileges when service starts.
-#
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata:
   name: provisioning-pg-admin-credentials
   namespace: {{ .Release.Namespace }}
 spec:
-  itemPath: "vaults/IOT-CLIENTS/items/provisioning-pg-admin-credentials"
+  itemPath: "vaults/iotistica/items/provisioning-pg-admin-credentials"
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: internal-auth-token-master
+  namespace: {{ .Release.Namespace }}
+spec:
+  itemPath: "vaults/iotistica/items/internal-auth-token-master"
+---
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: provisioning-admin-api-token
+  namespace: {{ .Release.Namespace }}
+spec:
+  itemPath: "vaults/iotistica/items/provisioning-admin-api-token"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -203,23 +207,19 @@ spec:
               value: "false"
             - name: DB_SSL_REJECT_UNAUTHORIZED
               value: "false"
-            
             # Redis
             - name: REDIS_HOST
               valueFrom:
                 secretKeyRef:
                   name: redis-credentials-master
                   key: host
+                  
             - name: REDIS_PORT
-              {{- if .Values.redis.tls }}
-              # Azure Redis with TLS requires port 6380, not 6379
-              value: "6380"
-              {{- else }}
               valueFrom:
                 secretKeyRef:
                   name: redis-credentials-master
-                  key: port_ext
-              {{- end }}
+                  key: port
+              
             - name: REDIS_DB
               value: "0"
             - name: REDIS_PASSWORD
@@ -287,10 +287,10 @@ spec:
                 secretKeyRef:
                   name: provisioning-auth0-credentials
                   key: audience
-            - name: AUTH0_SIGNUP_CALLBACK_URL
-              value: "{{ .Values.api.env.WEBSITE_URL }}/auth-callback.html"
             - name: AUTH0_REDIRECT_URI
-              value: "https://{{ .Values.ingress.hostname }}/provisioning/api/auth/callback-auth0"
+              value: "{{ .Values.api.env.WEBSITE_URL }}/auth-callback.html"
+            - name: AUTH0_SIGNUP_CALLBACK_URL
+              value: {{ .Values.api.env.AUTH0_SIGNUP_CALLBACK_URL | quote }}
             
             # JWT
             - name: JWT_SECRET
@@ -416,11 +416,24 @@ spec:
                   name: provisioning-pg-admin-credentials
                   key: password
             - name: PROVISIONING_PG_SSL
-              value: {{ .Values.postgresProvisioning.ssl | quote }}
+              value: {{ .Values.postgresProvisioning.ssl  | quote }}
             - name: PROVISIONING_PG_SSL_REJECT_UNAUTHORIZED
               value: {{ .Values.postgresProvisioning.sslRejectUnauthorized | quote }}
             - name: PROVISIONING_PG_TEMPLATE_DB
-              value: {{ .Values.postgresProvisioning.templateDatabase | default "template_iotistica" | quote }}
+              value: {{ .Values.postgresProvisioning.templateDatabase | quote }}
+
+            - name: INTERNAL_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: internal-auth-token-master
+                  key: token
+            
+            # Admin credentials
+            - name: ADMIN_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: provisioning-admin-api-token
+                  key: token
           
           volumeMounts:
             - name: license-keys

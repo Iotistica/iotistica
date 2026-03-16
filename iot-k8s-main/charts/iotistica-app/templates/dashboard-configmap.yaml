@@ -34,7 +34,7 @@ data:
       VITE_API_URL: '{{ .Values.dashboard.apiUrl }}',
       
       // Auth0 Configuration (set per-customer)
-      {{- if hasKey .Values.dashboard "auth0" }}
+      {{- if and .Values.dashboard.auth0 .Values.dashboard.auth0.domain }}
       VITE_AUTH0_DOMAIN: '{{ .Values.dashboard.auth0.domain }}',
       VITE_AUTH0_CLIENT_ID: '{{ .Values.dashboard.auth0.clientId }}',
       VITE_AUTH0_AUDIENCE: '{{ .Values.dashboard.auth0.audience }}',

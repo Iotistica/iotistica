@@ -218,6 +218,7 @@ spec:
   parentRefs:
     - name: iotistica-gateway
       namespace: envoy-gateway-system
+      sectionName: mqtt
   rules:
     - backendRefs:
         - group: ""

@@ -1,56 +1,24 @@
+# Default values for iotistic integration stack
+# This is a YAML-formatted file for development and testing
+
+# Global configuration
 global:
-  namespace: client-673e90cc0797
+  namespace: iotistic
+
+# Redis cache
 redis:
-  enabled: false
-  tls: false
-  cluster: false
-mosquitto:
   enabled: true
   image:
-    repository: iegomez/mosquitto-go-auth
-    tag: 3.0.0-mosquitto_2.0.18
-    pullPolicy: IfNotPresent
-  serviceType: ClusterIP
-  ports:
-    mqtt: 1883
-    mqtts: 8883
-    websocket: 9001
-  tlsSecret: mosquitto-tls
-  tlsCertName: mosquitto-tls
-  tlsIssuer: letsencrypt-production
-  tlsCommonName: mqtt-client-673e90cc0797.iotistica.com
-  resources:
-    requests:
-      cpu: 100m
-      memory: 64Mi
-    limits:
-      cpu: 200m
-      memory: 128Mi
-  auth:
-    allowAnonymous: false
-    hasher: bcrypt
-    hasherCost: 10
-    logLevel: info
+    repository: redis
+    tag: "7-alpine"
+  port: 6379
+  maxMemory: 512mb
+  maxMemoryPolicy: allkeys-lru  # CRITICAL: Evict streams before OOM kill
   persistence:
     enabled: true
-mqttBroker:
-  protocol: mqtt
-  host: client-673e90cc0797-iotistic-mosquitto.client-673e90cc0797.svc.cluster.local
-  port: 1883
-  useTls: false
-  verifyCertificate: false
-api:
-  enabled: true
-  image:
-    repository: iotistic/api
-    tag: v0.0.19-rc.21
-    pullPolicy: IfNotPresent
-  replicas: 1
-  port: 3002
-  serviceType: ClusterIP
-  tlsCommonName: api-client-673e90cc0797.iotistica.com
-  cloudApiUrl: http://client-673e90cc0797-iotistic-api.client-673e90cc0797.svc.cluster.local:3002
-  corsOrigins: https://client-673e90cc0797.iotistica.com
+  storage:
+    size: 5Gi
+    storageClass: "longhorn"
   resources:
     requests:
       cpu: 100m
@@ -58,73 +26,159 @@ api:
     limits:
       cpu: 500m
       memory: 1Gi
+
+# Mosquitto MQTT broker
+mosquitto:
+  enabled: true
+  image:
+    repository: iegomez/mosquitto-go-auth
+    tag: "3.0.0-mosquitto_2.0.18"  # Pinned to stable version
+    pullPolicy: IfNotPresent  # Don't pull on every deployment
+  # Service type: LoadBalancer (cloud) or NodePort (local dev)
+  # LoadBalancer will automatically get external IP from cloud provider
+  # NodePort requires manual externalHost configuration
+  serviceType: ClusterIP
+  ports:
+    mqtt: 1883
+    mqtts: 8883
+    websocket: 9001
+  # External host for device connections
+  # - If serviceType is LoadBalancer: leave empty, will use LoadBalancer external IP
+  # - If serviceType is NodePort: set to your K8s node IP (e.g., "10.27.27.160")
+  # - If empty with NodePort: falls back to internal service name (devices won't connect)
+  # TLS configuration
+  tlsSecret: mosquitto-tls         # Secret created by cert-manager
+  tlsCertName: mosquitto-client1
+  tlsIssuer: selfsigned-issuer
+  tlsCommonName: mqtt1.iotistica.com
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  # Authentication configuration
+  auth:
+    allowAnonymous: false
+    hasher: bcrypt
+    hasherCost: 10
+    logLevel: info
+  # Persistence for message queues
+  persistence:
+    enabled: true
+
+# MQTT Broker Configuration
+# Choose between local (self-hosted Mosquitto) or cloud (HiveMQ, AWS IoT Core)
+mqttBroker:
+
+  protocol: mqtt
+#  host: "mqtt2.iotistica.com"
+  host: "client1-release-iotistic-mosquitto"
+  port: 1883
+  useTls: false
+  verifyCertificate: false
+
+# API service
+api:
+  enabled: true
+  image:
+    repository: iotistic/api
+    tag: latest
+    pullPolicy: Always  # Use local images only (prevents pulling from registry)
+  replicas: 1  # Single replica for now
+  port: 3002
+  serviceType: ClusterIP
+  tlsSecret: api-tls         # Secret created by cert-manager
+  tlsCertName: api-client1
+  tlsIssuer: selfsigned-issuer
+  tlsCommonName: api1.iotistica.com
+  # CORS configuration for cross-origin requests from dashboard
+  # Use wildcard pattern like "http://*:30000" to allow any IP on NodePort 30000
+  corsOrigins: "http://localhost:5173,http://localhost:3001,http://localhost:3000,http://*:30000"
+  resources:
+    requests:
+      cpu: 500m        # Increased for fleet load
+      memory: 512Mi    # Increased for connection pool
+    limits:
+      cpu: 1000m       # Increased for fleet load
+      memory: 1Gi      # Increased for connection pool (200 connections)
+  # Horizontal Pod Autoscaling for dynamic fleet scaling
   autoscaling:
-    enabled: false
-    minReplicas: 3
-    maxReplicas: 10
+    enabled: false     # Disabled for now
+    minReplicas: 3     # Minimum pods for large fleet (100+ agents)
+    maxReplicas: 10    # Scale up to 10 pods under heavy load
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 80
   env:
-    NODE_ENV: production
+    NODE_ENV: development
     LOG_LEVEL: info
-    DB_POOL_SIZE: '20'
-    DB_SSL: 'false'
-    DB_SSL_REJECT_UNAUTHORIZED: 'false'
-    DB_SKIP_MIGRATIONS: 'true'
-    AI_PROVIDER: openai
-    OPENAI_BASE_URL: https://iotistic-openai-7307.openai.azure.com
-    OPENAI_MODEL: gpt-4o-mini
-    AZURE_OPENAI_API_VERSION: 2024-08-01-preview
-    MQTT_PERSIST_TO_DB: 'true'
-    MQTT_DB_SYNC_INTERVAL: '10000'
-    MQTT_MONITOR_ENABLED: 'true'
-    LOG_COMPRESSION: 'true'
-    VPN_ENABLED: 'false'
-    FORCE_COLOR: '1'
-    VIRTUAL_AGENT_CPU_REQUEST: 50m
-    JWT_ACCESS_TOKEN_EXPIRY: 15m
-    JWT_REFRESH_TOKEN_EXPIRY: 7d
+    DB_POOL_SIZE: "200"  # Increased for large fleet deployments (100+ agents)
+    DB_SSL: "true"
+    DB_SSL_REJECT_UNAUTHORIZED: "false"
+    MQTT_PERSIST_TO_DB: "true"
+    MQTT_DB_SYNC_INTERVAL: "10000"
+    MQTT_MONITOR_ENABLED: "true"
+    LOG_COMPRESSION: "true"
+    VPN_ENABLED: "false"
+    FORCE_COLOR: "1"
+  # MQTT credentials
+  # SECURITY: For production, use Kubernetes Secrets instead of hardcoding here
+  # Option 1 (Recommended): Create secret manually:
+  #   kubectl create secret generic iotistic-mqtt-credentials \
+  #     --from-literal=username=admin \
+  #     --from-literal=password='your-secure-password' \
+  #     -n iotistic-nodeport
+  #   Then set mqtt.existingSecret=iotistic-mqtt-credentials
+  #
+  # Option 2: Use separate values-secret.yaml (add to .gitignore):
+  #   helm install -f values.yaml -f values-secret.yaml
+  #
+  # Option 3: Pass via --set flag:
+  #   helm install --set mqtt.username=admin --set mqtt.password=secret
   sql:
-    SecretName: sql-credentials-client-673e90cc0797
+    # Reference existing Kubernetes secret (recommended for production)
+    SecretName: "sql-credentials-client1"
   mqtt:
-    SecretName: mqtt-credentials-client-673e90cc0797
-  redis:
-    SecretName: redis-credentials-master
-    cluster: false
-    tls: false
-  openai:
-    SecretName: openai-credentials-master
-  jwt:
-    SecretName: api-jwt-client-673e90cc0797
+    # Reference existing Kubernetes secret (recommended for production)
+    SecretName: "mqtt-credentials-client1"
+  # License configuration (optional)
   license:
-    SecretName: api-license-credentials-client-673e90cc0797
-  publicKey:
-    SecretName: api-license-public-key-master
+    publicKey: ""
+    key: ""
+  # Prometheus metrics monitoring
   monitoring:
-    enabled: true
-    interval: 30s
+    enabled: true  # Enable ServiceMonitor for Prometheus scraping
+    interval: 30s  # How often Prometheus scrapes metrics
     scrapeTimeout: 10s
-    labels: {}
-    relabelings: []
+    labels: {}  # Additional labels for ServiceMonitor (match your Prometheus selector)
+    relabelings: []  # Optional metric relabeling
+  
+# Dashboard UI
 dashboard:
   enabled: true
   image:
     repository: iotistic/dashboard
-    tag: v0.0.19-rc.21
-    pullPolicy: IfNotPresent
+    tag: latest
+    pullPolicy: IfNotPresent  # Use local images only (prevents pulling from registry)
   replicas: 1
   port: 80
   serviceType: ClusterIP
-  tlsCommonName: client-673e90cc0797.iotistica.com
-  apiUrl: https://api-client-673e90cc0797.iotistica.com
-  auth0:
-    domain: dev-hmwhgxw10boqpmrw.us.auth0.com
-    clientId: Q3DgGlIAoTgIhhXC7AhtJPR1ByiLXCkR
-    audience: https://api.iotistica.com
-    callbackUrl: https://client-673e90cc0797.iotistica.com/auth/callback
-    showSocialLogin: 'true'
-  provisioningApiUrl: https://api.iotistica.com/provisioning
-  websiteUrl: https://iotistica.com
+#  nodePort: 30000
+  tlsCommonName: dash1.iotistica.com
+  # API URL for browser access
+  # Options:
+  # 1. Use node IP with NodePort: "http://<NODE_IP>:30002" (replace <NODE_IP> with your K8s node IP)
+  # 2. Use service name for internal access: "http://iotistic-api:3002" (works only from within cluster)
+  # 3. Use empty string "" to auto-detect from browser (uses window.location.host with API port)
+  # 4. Use ingress hostname: "https://api.iotistic.local" (requires ingress configuration)
+  #
+  # For local K8s (minikube, kind, k3d):
+  #   - Get node IP: kubectl get nodes -o wide
+  #   - Set to: "http://<NODE_IP>:30002"
+  # For production with ingress:
+  #   - Set to your API ingress URL
+  apiUrl: ""  # Empty = auto-detect from browser
   resources:
     requests:
       cpu: 100m
@@ -133,15 +187,18 @@ dashboard:
       cpu: 200m
       memory: 256Mi
   env:
-    NODE_ENV: production
+    NODE_ENV: development
+
+# MQTT Monitor service
 mqttMonitor:
   enabled: true
   image:
     repository: iotistic/mqtt-monitor
-    tag: latest
+    tag: v0.0.19
     pullPolicy: IfNotPresent
   replicas: 1
   port: 3500
+  serviceType: ClusterIP
   resources:
     requests:
       cpu: 100m
@@ -152,43 +209,25 @@ mqttMonitor:
   env:
     NODE_ENV: development
     LOG_LEVEL: info
-    DB_POOL_SIZE: '10'
-    MQTT_PERSIST_DB: 'true'
-    MQTT_DB_SYNC_INTERVAL: '30000'
-    MQTT_METRICS_UPDATE_INTERVAL: '5000'
-    MQTT_TOPIC_TREE_UPDATE_INTERVAL: '5000'
+    DB_SSL: "true"
+    MQTT_TLS_REJECT_UNAUTHORIZED: "false"
+    DB_POOL_SIZE: "10"
+    MQTT_PERSIST_DB: "true"
+    MQTT_DB_SYNC_INTERVAL: "30000"
+    MQTT_METRICS_UPDATE_INTERVAL: "5000"
+    MQTT_TOPIC_TREE_UPDATE_INTERVAL: "5000"
+    MQTT_MAX_PAYLOAD_BYTES: "65536"
+  createOnePasswordItems: false
+  sql:
+    SecretName: "sql-credentials-client1"
+  # MQTT credentials (should match mosquitto credentials)
+  # SECURITY: For production, reference the same secret as API service
+  # See api.mqtt configuration above for security options
   mqtt:
-    existingSecret: mqtt-credentials-client-673e90cc0797
-nodered:
-  enabled: true
-  image:
-    repository: iotistic/nodered
-    tag: v0.0.19-rc.21
-    pullPolicy: IfNotPresent
-  replicas: 1
-  port: 1880
-  serviceType: ClusterIP
-  baseUrl: https://nr-673e90cc0797.iotistica.com
-  storageToken:
-    secretName: nodered-jwt-client-673e90cc0797
-    secretKey: token
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
-  env:
-    TZ: UTC
-    NODE_RED_ENABLE_SAFE_MODE: 'false'
-    NODE_RED_ENABLE_PROJECTS: 'false'
-    NODE_RED_FRAME_ANCESTORS: "'self' https://*.iotistica.com https://*.iotistic.ca"
-    NODE_RED_FONT_SRC: "'self' data: https:"
-  ingress:
-    enabled: true
-    gatewayName: iotistica-gateway
-    gatewayNamespace: envoy-gateway-system
+    # Reference existing Kubernetes secret (recommended for production)
+    SecretName: "mqtt-credentials-client1"
+
+# Housekeeper service - Database maintenance and cleanup
 housekeeper:
   enabled: true
   image:
@@ -207,20 +246,26 @@ housekeeper:
   env:
     NODE_ENV: development
     LOG_LEVEL: info
-    DB_POOL_MAX: '10'
-    DB_IDLE_TIMEOUT: '30000'
-    DB_CONNECT_TIMEOUT: '10000'
+    DB_POOL_MAX: "10"
+    DB_IDLE_TIMEOUT: "30000"
+    DB_CONNECT_TIMEOUT: "10000"
+  # Scheduled task configuration
   tasks:
+    # Database VACUUM - reclaim storage and update statistics
     vacuum:
       enabled: true
-      schedule: 0 2 * * *
+      schedule: "0 2 * * *"  # Daily at 2 AM
+    # Partition maintenance - create/drop partitions for time-series data
     partitionMaintenance:
       enabled: true
-      schedule: 0 3 * * *
+      schedule: "0 3 * * *"  # Daily at 3 AM
+    # Log cleanup - delete old logs based on retention policy
     logCleanup:
       enabled: true
-      schedule: 0 4 * * *
+      schedule: "0 4 * * *"  # Daily at 4 AM
       retentionDays: 30
+
+# Postoffice service - Email delivery service
 postoffice:
   enabled: true
   image:
@@ -238,62 +283,50 @@ postoffice:
       memory: 512Mi
   env:
     NODE_ENV: development
-    REDIS_DB: '2'
+    REDIS_DB: "2"  # Use separate Redis DB for email queue
+  # Email configuration
   email:
-    transport: smtp
-    from: noreply@iotistica.com
-    fromName: Iotistica Platform
+    transport: smtp  # Options: smtp, ses
+    from: "noreply@iotistic.com"
+    fromName: "Iotistic Platform"
+    # SMTP configuration (if transport=smtp)
     smtp:
-      host: smtp.gmail.com
-      port: '587'
-      secure: 'false'
-      existingSecret: ''
-      username: ''
-      password: ''
+      host: "smtp.gmail.com"
+      port: "587"
+      secure: "false"  # Use TLS
+      # Credentials should be stored in Kubernetes Secret
+      existingSecret: ""  # Leave empty to use values below (not recommended for production)
+      username: ""
+      password: ""
+    # AWS SES configuration (if transport=ses)
     ses:
-      region: us-east-1
-      existingSecret: ''
-      accessKeyId: ''
-      secretAccessKey: ''
+      region: "us-east-1"
+      # Credentials should be stored in Kubernetes Secret
+      existingSecret: ""  # Leave empty to use values below (not recommended for production)
+      accessKeyId: ""
+      secretAccessKey: ""
+  # Queue configuration
   queue:
-    concurrency: '5'
-    maxRetry: '3'
-    retryDelay: '60000'
+    concurrency: "5"  # Number of concurrent email processing jobs
+    maxRetry: "3"     # Maximum retry attempts for failed emails
+    retryDelay: "60000"  # Delay between retries (ms)
+  # Bull Board UI (queue monitoring)
   bullBoard:
     enabled: true
-    path: /admin/queues
+    path: "/admin/queues"
+
+# Ingress configuration (optional for local dev)
 ingress:
   enabled: false
   className: nginx
   host: iotistic.local
   tls:
     enabled: false
+
+# Network policies
 networkPolicy:
-  enabled: false
+  enabled: false  # Disabled for easier local development
+
+# Resource quotas
 resourceQuota:
-  enabled: false
-fleetNamespaces:
-  enabled: true
-  namespaces:
-    - name: test
-      maxAgents: 2
-      maxDevices: 32
-      fleetType: virtual
-      quotaPolicy: strict
-      cpuRequest: 600m
-      cpuLimit: 2000m
-      memoryRequest: 960Mi
-      memoryLimit: 4096Mi
-      networkPolicy:
-        enabled: true
-    - name: pool-01
-      maxAgents: 2
-      maxDevices: 32
-      fleetType: virtual
-      quotaPolicy: strict
-      cpuRequest: 600m
-      cpuLimit: 2000m
-      memoryRequest: 960Mi
-      memoryLimit: 4096Mi
-      networkPolicy:
-        enabled: true
+  enabled: false  # Disabled for local development

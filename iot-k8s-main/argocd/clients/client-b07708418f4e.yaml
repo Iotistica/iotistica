@@ -1,10 +1,10 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: client-408c05d9b63c
+  name: client-b07708418f4e
 spec:
   destination:
-    namespace: client-408c05d9b63c
+    namespace: client-b07708418f4e
     server: https://kubernetes.default.svc
   source:
     path: charts/iotistica-app
@@ -12,7 +12,7 @@ spec:
     targetRevision: main
     helm:
       valueFiles:
-        - values/client-408c05d9b63c/values.yaml
+        - values/client-b07708418f4e/values.yaml
   sources: []
   project: default
   syncPolicy:
