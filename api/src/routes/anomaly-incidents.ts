@@ -20,6 +20,7 @@ interface IncidentFilters {
   severity?: 'info' | 'warning' | 'critical';
   deviceName?: string;
   deviceType?: string;
+  deviceState?: 'running' | 'idle' | 'fault' | 'unknown';
   metric?: string;
   startTime?: number;
   endTime?: number;
@@ -106,13 +107,14 @@ async function resolveDisplayFields(params: {
  */
 router.get('/anomaly-incidents', async (req, res) => {
   try {
-    const { status, severity, deviceName, deviceType, metric, startTime, endTime, limit = 50, offset = 0 } = req.query;
+    const { status, severity, deviceName, deviceType, deviceState, metric, startTime, endTime, limit = 50, offset = 0 } = req.query;
 
     const filters: IncidentFilters = {
       status: status as 'open' | 'active' | 'resolved' | undefined,
       severity: severity as 'info' | 'warning' | 'critical' | undefined,
       deviceName: deviceName as string | undefined,
       deviceType: deviceType as string | undefined,
+      deviceState: deviceState as 'running' | 'idle' | 'fault' | 'unknown' | undefined,
       metric: metric as string | undefined,
       startTime: startTime ? parseInt(startTime as string) : undefined,
       endTime: endTime ? parseInt(endTime as string) : undefined,
@@ -142,6 +144,17 @@ router.get('/anomaly-incidents', async (req, res) => {
     if (filters.deviceType) {
       whereConditions.push(`ai.device_type = $${queryParams.length + 1}`);
       queryParams.push(filters.deviceType);
+    }
+
+    if (filters.deviceState) {
+      whereConditions.push(`COALESCE((
+        SELECT ae.baseline->>'deviceState'
+        FROM anomaly_events ae
+        WHERE ae.fingerprint = ai.fingerprint
+        ORDER BY ae.timestamp_ms DESC
+        LIMIT 1
+      ), 'unknown') = $${queryParams.length + 1}`);
+      queryParams.push(filters.deviceState);
     }
 
     if (filters.metric) {
@@ -176,6 +189,13 @@ router.get('/anomaly-incidents', async (req, res) => {
         ai.fingerprint,
         ai.device_name,
         ai.device_type,
+        COALESCE((
+          SELECT ae.baseline->>'deviceState'
+          FROM anomaly_events ae
+          WHERE ae.fingerprint = ai.fingerprint
+          ORDER BY ae.timestamp_ms DESC
+          LIMIT 1
+        ), 'unknown') AS device_state,
         ai.metric,
         ai.severity,
         ai.affected_devices,
@@ -219,6 +239,7 @@ router.get('/anomaly-incidents', async (req, res) => {
         fingerprint: inc.fingerprint,
         device_name: display.deviceName,
         device_type: inc.device_type,
+        device_state: inc.device_state || 'unknown',
         metric: display.metric,
         severity: inc.severity,
         affected_devices: inc.affected_devices || [],
@@ -363,6 +384,13 @@ router.get('/anomaly-incidents/:incidentId', async (req, res) => {
         fingerprint,
         device_name,
         device_type,
+        COALESCE((
+          SELECT ae.baseline->>'deviceState'
+          FROM anomaly_events ae
+          WHERE ae.fingerprint = anomaly_incidents.fingerprint
+          ORDER BY ae.timestamp_ms DESC
+          LIMIT 1
+        ), 'unknown') AS device_state,
         metric,
         severity,
         affected_devices,
@@ -466,6 +494,7 @@ router.get('/anomaly-incidents/:incidentId', async (req, res) => {
         agent_uuid: e.agent_uuid,
         device_name: eventDisplay.deviceName,
         device_type: e.device_type,
+        device_state: (e.baseline && typeof e.baseline === 'object' && e.baseline.deviceState) ? e.baseline.deviceState : 'unknown',
         metric: eventDisplay.metric,
         timestamp_ms: parseInt(e.timestamp_ms),
         observed_value: parseFloat(e.observed_value),
@@ -487,6 +516,7 @@ router.get('/anomaly-incidents/:incidentId', async (req, res) => {
         device_name: incidentDisplay.deviceName,
         device_uuid: deviceUuid,
         device_type: incident.device_type,
+        device_state: incident.device_state || 'unknown',
         metric: incidentDisplay.metric,
         severity: incident.severity,
         affected_devices: incident.affected_devices || [],

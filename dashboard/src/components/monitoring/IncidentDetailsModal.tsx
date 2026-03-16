@@ -14,6 +14,7 @@ interface AnomalyEvent {
   agent_uuid: string;
   device_name: string;
   device_type: string;
+  device_state?: 'running' | 'idle' | 'fault' | 'unknown';
   metric: string;
   timestamp_ms: number;
   observed_value: number;
@@ -31,6 +32,7 @@ interface Incident {
   device_name: string;
   device_uuid?: string;
   device_type: string;
+  device_state?: 'running' | 'idle' | 'fault' | 'unknown';
   metric: string;
   severity: 'info' | 'warning' | 'critical';
   first_seen: number | null;
@@ -261,6 +263,7 @@ export function IncidentDetailsModal({
               <SeverityBadge severity={incident.severity} />
               <DialogTitle>{incident.device_name}</DialogTitle>
               <Badge variant="outline">{incident.device_type}</Badge>
+              <Badge variant="secondary">{incident.device_state || 'unknown'}</Badge>
             </div>
             <StatusBadge status={incident.status} />
           </div>
@@ -387,6 +390,7 @@ export function IncidentDetailsModal({
                           <TableHead>Time</TableHead>
                           <TableHead>Value</TableHead>
                           <TableHead>Expected</TableHead>
+                          <TableHead>State</TableHead>
                           <TableHead>Deviation</TableHead>
                           <TableHead>Score</TableHead>
                           <TableHead>Confidence</TableHead>
@@ -403,6 +407,11 @@ export function IncidentDetailsModal({
                                 </TableCell>
                                 <TableCell className="text-xs text-gray-600">
                                   [{event.expected_range[0]}, {event.expected_range[1]}]
+                                </TableCell>
+                                <TableCell className="text-xs">
+                                  <Badge variant="outline" className="text-xs">
+                                    {event.device_state || 'unknown'}
+                                  </Badge>
                                 </TableCell>
                                 <TableCell className="text-xs">
                                   {event.deviation.toFixed(2)}σ

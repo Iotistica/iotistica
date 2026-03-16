@@ -5,8 +5,24 @@
  * Manages anomaly alerts with deduplication and rate limiting
  */
 
-import crypto from 'crypto';
 import type { AnomalyAlert, AlertManager as IAlertManager, AnomalySeverity } from './types';
+
+function hash16(input: string): string {
+	let h1 = 0xdeadbeef ^ input.length;
+	let h2 = 0x41c6ce57 ^ input.length;
+
+	for (let i = 0; i < input.length; i++) {
+		const ch = input.charCodeAt(i);
+		h1 = Math.imul(h1 ^ ch, 2654435761);
+		h2 = Math.imul(h2 ^ ch, 1597334677);
+	}
+
+	h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+	h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+
+	const hex = ((h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0'));
+	return hex.slice(0, 16);
+}
 
 export class AlertManager implements IAlertManager {
 	private alerts: Map<string, AnomalyAlert> = new Map();
@@ -133,11 +149,11 @@ export class AlertManager implements IAlertManager {
 	
 	/**
 	 * Calculate fingerprint for deduplication
-	 * Hash of: metric + method + severity
+	 * Hash of: metric + state + method + severity
 	 */
 	private calculateFingerprint(alert: AnomalyAlert): string {
-		const data = `${alert.metric}:${alert.detectionMethod}:${alert.severity}`;
-		return crypto.createHash('sha256').update(data).digest('hex').slice(0, 16);
+		const data = `${alert.metric}:${alert.deviceState || 'unknown'}:${alert.detectionMethod}:${alert.severity}`;
+		return hash16(data);
 	}
 	
 	/**

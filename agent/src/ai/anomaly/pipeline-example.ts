@@ -10,6 +10,10 @@ import { createTemporalConfirmation } from './temporal-confirmation';
 import { createBuffer, addValue } from './buffer';
 import type { MetricConfig, AnomalySeverity } from './types';
 
+declare const console: {
+	log: (...args: any[]) => void;
+};
+
 /**
  * Complete anomaly detection pipeline
  */

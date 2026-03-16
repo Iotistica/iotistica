@@ -21,6 +21,7 @@ export interface AnomalyEvent {
 	agentUuid: string;          // Edge gateway UUID (infrastructure tracking)
 	deviceName: string;         // Monitored device name (e.g., 'COMAP-Main-Controller')
 	deviceType: 'modbus' | 'opcua' | 'bacnet' | 'mqtt' | 'system'; // Protocol/source type
+	deviceState?: 'running' | 'idle' | 'fault' | 'unknown'; // Canonical operational state
 	metric: string;
 	timestampMs: number;
 	windowStartMs: number;
@@ -256,7 +257,10 @@ export class AnomalyEventHandler {
 				event.consecutiveCount,
 				event.eventCount,
 				JSON.stringify(event.triggeredBy),
-				JSON.stringify(event.baseline),
+				JSON.stringify({
+					...event.baseline,
+					deviceState: event.deviceState || 'unknown',
+				}),
 				JSON.stringify(event.expectedRange),
 				deviation,
 				event.cooldownSec,
@@ -497,6 +501,7 @@ export class AnomalyEventHandler {
 		logger.warn('🚨 ANOMALY ALERT', {
 			incidentId: incident.incidentId,
 			metric: incident.metric,
+			deviceState: event.deviceState || 'unknown',
 			severity: incident.severity,
 			affectedDevices: incident.affectedDevices,
 			maxAnomalyScore: incident.maxAnomalyScore,
@@ -522,7 +527,7 @@ export class AnomalyEventHandler {
 				incident.metric,
 				JSON.stringify(incident.affectedDevices),
 				incident.maxAnomalyScore,
-				`Anomaly detected: ${incident.metric} on ${incident.affectedDevices.length} device(s). Score: ${incident.maxAnomalyScore.toFixed(3)}`,
+				`Anomaly detected: ${incident.metric} in state ${event.deviceState || 'unknown'} on ${incident.affectedDevices.length} device(s). Score: ${incident.maxAnomalyScore.toFixed(3)}`,
 			]
 		);
 	}

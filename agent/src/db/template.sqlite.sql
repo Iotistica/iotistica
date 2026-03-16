@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS "anomaly_baselines" (
 	"metric"	varchar(255) NOT NULL,
 	"profile"	varchar(100),
 	"time_slot"	integer NOT NULL DEFAULT '-1',
+	"device_state"	varchar(20) NOT NULL DEFAULT 'unknown',
 	"mean"	float,
 	"median"	float,
 	"std_dev"	float,
@@ -272,7 +273,14 @@ CREATE INDEX IF NOT EXISTS "anomaly_alerts_timestamp_index" ON "anomaly_alerts" 
 CREATE UNIQUE INDEX IF NOT EXISTS "anomaly_baselines_new_metric_profile_time_slot_unique" ON "anomaly_baselines" (
 	"metric",
 	"profile",
-	"time_slot"
+	"time_slot",
+	"device_state"
+);
+CREATE INDEX IF NOT EXISTS "idx_anomaly_baselines_lookup" ON "anomaly_baselines" (
+	"metric",
+	"time_slot",
+	"device_state",
+	"calculated_at"
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "device_uuid_unique" ON "device" (
 	"uuid"

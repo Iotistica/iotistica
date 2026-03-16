@@ -7,6 +7,7 @@ import * as msgpack from 'msgpack-lite';
 import { createJsonPayload, createMsgpackPayload, serializePayload, logCompressionStats, MqttManager } from '../../mqtt/manager.js';
 import { deviceTopic } from '../../mqtt/topics.js';
 import type { AnomalyDetectionService } from '../../ai/anomaly/index.js';
+import { extractRawDeviceState, normalizeDeviceState } from '../../ai/anomaly/device-state.js';
 import { getCpuUsage } from '../../system/metrics.js';
 import {
   SensorConfig,
@@ -379,6 +380,8 @@ export class PublishManager extends EventEmitter {
   ): void {
     if (!anomalyService) return;
 
+    const payloadRawState = extractRawDeviceState(data);
+
     // Prevent infinite recursion
     const MAX_DEPTH = 3;
     if (depth > MAX_DEPTH) {
@@ -430,6 +433,7 @@ export class PublishManager extends EventEmitter {
       anomalyService.processDataPoint({
         source: 'endpoint',
         protocol: this.protocol as any, // Protocol type (modbus, opcua, bacnet, mqtt)
+        rawDeviceState: payloadRawState,
         metric: fullMetricName,
         value: data,
         unit: this.inferUnit(metricName),
@@ -468,6 +472,8 @@ export class PublishManager extends EventEmitter {
           
           anomalyService.processDataPoint({
             source: 'endpoint',
+            protocol: this.protocol as any,
+            rawDeviceState: data.deviceState ?? data.state ?? data.status ?? payloadRawState,
             metric: fullMetricName,
             value: value,
             unit: data.unit || this.inferUnit(fieldName),
@@ -517,6 +523,7 @@ export class PublishManager extends EventEmitter {
               anomalyService.processDataPoint({
                 source: 'endpoint',
                 protocol: this.protocol as any, // Protocol type (modbus, opcua, bacnet, mqtt)
+                rawDeviceState: reading.deviceState ?? reading.state ?? reading.status ?? payloadRawState,
                 metric: fullMetricName,
                 value: value,
                 unit: this.inferUnit(fieldName),
@@ -562,6 +569,7 @@ export class PublishManager extends EventEmitter {
           anomalyService.processDataPoint({
             source: 'sensor',
             protocol: this.protocol as any, // Protocol type (modbus, opcua, bacnet, mqtt)
+            rawDeviceState: payloadRawState,
             metric: fullMetricName,
             value: value,
             unit: this.inferUnit(key),
@@ -899,6 +907,13 @@ export class PublishManager extends EventEmitter {
             if (typeof reading === 'object' && reading !== null) {
               const deviceName = reading.deviceName || sensorName;
               const fieldName = reading.registerName || reading.metric;
+              const rawState = reading.deviceState ?? reading.state ?? reading.status ?? extractRawDeviceState(data);
+              const normalizedState = normalizeDeviceState(this.protocol as any, rawState);
+
+              reading.device_state = normalizedState;
+              if (rawState !== undefined) {
+                reading.raw_device_state = rawState;
+              }
               
               // Get anomaly score and metadata for this metric
               if (fieldName) {
@@ -940,6 +955,12 @@ export class PublishManager extends EventEmitter {
           const deviceName = data.deviceName;
           const fieldName = data.registerName || data.metric;
           const metricName = `${this.deviceUuid}_${deviceName}_${fieldName}`;
+          const rawState = data.deviceState ?? data.state ?? data.status ?? extractRawDeviceState(data);
+          const normalizedState = normalizeDeviceState(this.protocol as any, rawState);
+          data.device_state = normalizedState;
+          if (rawState !== undefined) {
+            data.raw_device_state = rawState;
+          }
           const score = anomalyService.getAnomalyScore(metricName);
           const metadata = anomalyService.getAnomalyMetadata(metricName);
           

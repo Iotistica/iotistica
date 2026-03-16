@@ -11,11 +11,18 @@
 export type Protocol = 'modbus' | 'opcua' | 'bacnet' | 'mqtt' | 'system';
 
 /**
+ * Canonical device operational states used across all protocols
+ */
+export type CanonicalDeviceState = 'running' | 'idle' | 'fault' | 'unknown';
+
+/**
  * Unified data point for all monitored values
  */
 export interface DataPoint {
 	source: 'sensor' | 'system' | 'container' | 'endpoint';
 	protocol?: Protocol;      // Protocol/source type (modbus, opcua, system, etc.)
+	deviceState?: CanonicalDeviceState; // Normalized operational state
+	rawDeviceState?: unknown; // Protocol-specific raw state value (optional)
 	metric: string;           // e.g., 'temperature', 'cpu_usage', 'memory_percent'
 	value: number;
 	unit: string;
@@ -87,6 +94,7 @@ export interface AnomalyEvent {
 	agentUuid: string;               // Edge gateway/agent UUID (infrastructure tracking)
 	deviceName: string;              // Monitored device name (e.g., 'COMAP-Main-Controller', 'Agent System')
 	deviceType: Protocol;            // Protocol/source type (modbus, opcua, system, etc.)
+	deviceState: CanonicalDeviceState; // Canonical operational state during detection
 	metric: string;
 	timestampMs: number;             // When the anomalous measurement occurred (explicit units)
 	windowStartMs: number;           // Start of statistical window used for detection
@@ -115,6 +123,7 @@ export interface AnomalyEvent {
 export interface AnomalyAlert {
 	id: string;                      // Unique alert ID
 	severity: AnomalySeverity;
+	deviceState?: CanonicalDeviceState; // Canonical operational state during detection
 	metric: string;
 	value: number;
 	expectedRange: [number, number]; // [min, max]
@@ -226,6 +235,10 @@ export interface AnomalyConfig {
 	};
 	predictions?: {
 		cadence?: PredictionCadenceConfig;
+	};
+	correlation?: {
+		enabled?: boolean;
+		requireSameState?: boolean;
 	};
 	warmupPeriodMs?: number;          // Suppress alerts during agent initialization (default: 900000 = 15 min)
 }

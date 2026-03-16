@@ -883,6 +883,7 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 					anomalyService.processDataPoint({
 						source: 'system',
 						protocol: 'system', // Agent system metrics
+						deviceState: 'running',
 						metric: item.metric,
 						value: item.value,
 						unit: item.unit,

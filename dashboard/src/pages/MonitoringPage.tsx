@@ -21,6 +21,7 @@ interface AnomalyEvent {
   agent_uuid: string;
   device_name: string;
   device_type: string;
+  device_state?: 'running' | 'idle' | 'fault' | 'unknown';
   metric: string;
   timestamp_ms: number;
   observed_value: number;
@@ -50,6 +51,7 @@ interface Incident {
   device_name: string;
   device_uuid?: string;
   device_type: string;
+  device_state?: 'running' | 'idle' | 'fault' | 'unknown';
   metric: string;
   severity: 'info' | 'warning' | 'critical';
   affected_devices: string[];
@@ -99,6 +101,7 @@ export function AlertsPage({ initialDeviceUuid }: AlertsPageProps) {
   const [severityFilter, setSeverityFilter] = useState('all');
   const [deviceFilter, setDeviceFilter] = useState('all');
   const [deviceTypeFilter, setDeviceTypeFilter] = useState('all');
+  const [deviceStateFilter, setDeviceStateFilter] = useState('all');
   const [metricFilter, setMetricFilter] = useState('');
   const [offset, setOffset] = useState(0);
   const [limit] = useState(50);
@@ -185,6 +188,7 @@ export function AlertsPage({ initialDeviceUuid }: AlertsPageProps) {
       if (severityFilter !== 'all') params.append('severity', severityFilter);
       if (deviceFilter !== 'all') params.append('deviceName', deviceFilter);
       if (deviceTypeFilter !== 'all') params.append('deviceType', deviceTypeFilter);
+      if (deviceStateFilter !== 'all') params.append('deviceState', deviceStateFilter);
       if (metricFilter) params.append('metric', metricFilter);
 
       const response = await fetch(`${API_BASE}/anomaly-incidents?${params}`, {
@@ -326,6 +330,7 @@ export function AlertsPage({ initialDeviceUuid }: AlertsPageProps) {
     setSeverityFilter('all');
     setDeviceFilter('all');
     setDeviceTypeFilter('all');
+    setDeviceStateFilter('all');
     setMetricFilter('');
     setOffset(0);
     await fetchIncidents(0);
@@ -473,6 +478,22 @@ export function AlertsPage({ initialDeviceUuid }: AlertsPageProps) {
         </div>
 
         <div>
+          <Label className="text-sm font-medium">Device State</Label>
+          <Select value={deviceStateFilter} onValueChange={setDeviceStateFilter}>
+            <SelectTrigger className="w-48 mt-1">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All States</SelectItem>
+              <SelectItem value="running">Running</SelectItem>
+              <SelectItem value="idle">Idle</SelectItem>
+              <SelectItem value="fault">Fault</SelectItem>
+              <SelectItem value="unknown">Unknown</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div>
           <Label className="text-sm font-medium">Metric</Label>
           <Input
             placeholder="Filter metric..."
@@ -527,6 +548,7 @@ export function AlertsPage({ initialDeviceUuid }: AlertsPageProps) {
                       <TableHead className="w-28">Severity</TableHead>
                       <TableHead>Device Name</TableHead>
                       <TableHead className="w-36">Type</TableHead>
+                      <TableHead className="w-28">State</TableHead>
                       <TableHead>Metric</TableHead>
                       <TableHead className="w-28">Status</TableHead>
                       <TableHead className="w-36">Last Seen</TableHead>
@@ -545,6 +567,11 @@ export function AlertsPage({ initialDeviceUuid }: AlertsPageProps) {
                         <TableCell className="py-5">
                           <Badge variant="outline" className="text-xs">
                             {incident.device_type}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="py-5">
+                          <Badge variant="secondary" className="text-xs">
+                            {incident.device_state || 'unknown'}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-sm py-5">{incident.metric}</TableCell>
