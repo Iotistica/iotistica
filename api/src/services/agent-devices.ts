@@ -730,7 +730,7 @@ export class DeviceSensorSyncService {
    * This closes the Event Sourcing loop: config → agent → current state → table
    * 
   * CRITICAL: Also handles finalization of devices marked pending_deletion:
-  * - If device is pending_deletion and NOT in agent's current state → mark deployment_status='deleted'
+  * - If device is pending_deletion and NOT in agent's current state → remove the row from device_sensors
    */
   async syncCurrentStateToTable(deviceUuid: string, currentState: any): Promise<void> {
     logger.info(`Reconciling current state from agent for device ${deviceUuid.substring(0, 8)}...`);
@@ -788,7 +788,7 @@ export class DeviceSensorSyncService {
         const isMissingFromAgentState = !agentEndpoint;
 
         if (isMissingFromAgentState) {
-          logger.info(`Device "${row.name}" is pending_deletion and missing from agent state → marking deleted`);
+          logger.info(`Device "${row.name}" is pending_deletion and missing from agent state → removing device_sensors row`);
           await this.markEndpointDeleted(deviceUuid, row.uuid, 'agent-reconciliation');
         } else {
           logger.warn(`Device "${row.name}" is pending_deletion but still present in agent state - waiting for removal`);
@@ -1486,7 +1486,8 @@ export class DeviceSensorSyncService {
   }
 
   /**
-   * Mark endpoint as deleted after agent confirmation (keeps DB record for audit/history)
+   * Finalize endpoint deletion after agent confirmation.
+   * The source-of-truth row must be removed once the agent reports the endpoint is gone.
    */
   async markEndpointDeleted(
     deviceUuid: string,
@@ -1494,14 +1495,10 @@ export class DeviceSensorSyncService {
     userId?: string
   ): Promise<void> {
     const result = await query(
-      `UPDATE device_sensors
-       SET deployment_status = 'deleted',
-           enabled = false,
-           updated_by = $3,
-           updated_at = NOW()
+      `DELETE FROM device_sensors
        WHERE device_uuid = $1 AND (uuid::text = $2 OR name = $2)
        RETURNING uuid, name`,
-      [deviceUuid, sensorIdentifier, userId || 'system']
+      [deviceUuid, sensorIdentifier]
     );
 
     if (result.rows.length === 0) {
@@ -1517,11 +1514,12 @@ export class DeviceSensorSyncService {
       deviceUuid,
       {
         sensor_name: row.name,
-        sensor_uuid: row.uuid
+        sensor_uuid: row.uuid,
+        deleted_by: userId || 'system'
       }
     );
 
-    logger.info(`Marked sensor "${row.name}" as deleted (kept in database)`);
+    logger.info(`Deleted sensor "${row.name}" from device_sensors after agent confirmation`);
   }
 
   /**

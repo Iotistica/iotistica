@@ -1373,7 +1373,7 @@ export default function App() {
                 <NodeRedPage />
               )}
               {currentView === 'monitoring' && (
-                <AlertsPage />
+                <AlertsPage initialDeviceUuid={selectedDevice?.deviceUuid} />
               )}
             </>
           ) : isLoadingDevices ? (

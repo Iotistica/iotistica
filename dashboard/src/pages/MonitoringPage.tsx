@@ -14,6 +14,7 @@ import { SeverityBadge, StatusBadge, ScoreBadge } from '@/components/alerts';
 import { AnomalyMetricsTable } from '@/components/monitoring/AnomalyMetricsTable';
 import { IncidentDetailsModal } from '@/components/monitoring/IncidentDetailsModal';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDeviceState } from '@/contexts/DeviceStateContext';
 
 interface AnomalyEvent {
   msg_id: string;
@@ -82,8 +83,13 @@ interface IncidentDetails extends Incident {
 
 const API_BASE = '/api/v1';
 
-export function AlertsPage() {
+interface AlertsPageProps {
+  initialDeviceUuid?: string;
+}
+
+export function AlertsPage({ initialDeviceUuid }: AlertsPageProps) {
   const { user, isAuthenticated } = useAuth();
+  const { getPendingConfig, getTargetConfig } = useDeviceState();
   
   // State
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -115,6 +121,15 @@ export function AlertsPage() {
 
   // Device list for filters
   const [devices, setDevices] = useState<{ name: string; type: string }[]>([]);
+
+  const pendingConfig = initialDeviceUuid ? getPendingConfig(initialDeviceUuid) : undefined;
+  const targetConfig = initialDeviceUuid ? getTargetConfig(initialDeviceUuid) : undefined;
+  const configuredEndpoints = Array.isArray(pendingConfig?.endpoints)
+    ? pendingConfig.endpoints
+    : Array.isArray(targetConfig?.endpoints)
+      ? targetConfig.endpoints
+      : [];
+  const canConfigureAnomalyDetection = Boolean(initialDeviceUuid && configuredEndpoints.length > 0);
 
   /**
    * Fetch statistics
@@ -476,17 +491,19 @@ export function AlertsPage() {
           </Button>
         </div>
         
-        <div className="ml-auto pt-6">
-          <Button 
-            onClick={() => setConfigDialogOpen(true)} 
-            variant="outline" 
-            size="sm"
-            className="gap-2"
-          >
-            <Settings className="h-4 w-4" />
-            Configure Anomaly Detection
-          </Button>
-        </div>
+        {canConfigureAnomalyDetection && (
+          <div className="ml-auto pt-6">
+            <Button 
+              onClick={() => setConfigDialogOpen(true)} 
+              variant="outline" 
+              size="sm"
+              className="gap-2"
+            >
+              <Settings className="h-4 w-4" />
+              Configure Anomaly Detection
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Incidents Table */}
@@ -668,6 +685,7 @@ export function AlertsPage() {
       <AnomalyMetricsTable
         open={configDialogOpen}
         onOpenChange={setConfigDialogOpen}
+        initialDeviceUuid={initialDeviceUuid}
       />
     </div>
   );

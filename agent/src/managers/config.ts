@@ -1467,12 +1467,28 @@ if (existing) {
 			if (!deleted) {
 				throw new Error(`Failed to delete endpoint row by uuid=${deviceId}`);
 			}
+
+			const remainingEndpoint = await DeviceSensorModel.getByUuid(deviceId);
+			const verifiedDeleted = !remainingEndpoint;
 			
 			this.logger?.infoSync('Device removed from sensors table', {
 				component: LogComponents.configManager,
 				operation: 'unregisterDevice',
+				deviceUuid: deviceId,
 				deviceName: device.name,
+				verifiedDeleted,
+				remainingEndpointName: remainingEndpoint?.name,
 			});
+
+			if (!verifiedDeleted) {
+				this.logger?.warnSync('Endpoint row still exists after delete attempt', {
+					component: LogComponents.configManager,
+					operation: 'unregisterDevice',
+					deviceUuid: deviceId,
+					deviceName: device.name,
+					remainingEndpoint,
+				});
+			}
 		} catch (error) {
 			this.logger?.errorSync('Failed to remove device from sensors table', 
 				error instanceof Error ? error : new Error(String(error)), {

@@ -932,6 +932,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       return <Badge className="bg-green-500 dark:bg-green-600 text-white border border-green-600 dark:border-green-500 font-semibold">Active</Badge>;
     }
     
+    // Connecting (deployed and enabled but never polled yet - agent still initializing)
+    if (!sensor.health?.lastPoll) {
+      return <Badge className="bg-blue-500 dark:bg-blue-600 text-white border border-blue-600 dark:border-blue-500 font-semibold">Connecting</Badge>;
+    }
+
     // Offline (not healthy or not connected, but enabled)
     if (!sensor.healthy || sensor.state === 'DISCONNECTED') {
       return <Badge className="bg-orange-500 dark:bg-orange-600 text-white border border-orange-600 dark:border-orange-500 font-semibold">Offline</Badge>;
@@ -1269,10 +1274,12 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           )}
           
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setAnomalyConfigOpen(true)}>
-              <Settings className="w-4 h-4 mr-2" />
-              Configure Anomaly Detection
-            </Button>
+            {sensors.length > 0 && getPendingConfig(deviceUuid)?.features?.enableAnomalyDetection && (
+              <Button variant="outline" onClick={() => setAnomalyConfigOpen(true)}>
+                <Settings className="w-4 h-4 mr-2" />
+                Configure Anomaly Detection
+              </Button>
+            )}
             {deviceType !== 'virtual' && (
               <Button onClick={() => setAddSensorDialogOpen(true)}>
                 <Plus className="w-4 h-4 mr-2" />
@@ -1398,7 +1405,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                           </span>
                         </td>
                         <td className="py-3 px-4 text-muted-foreground">
-                          {sensor.lastActivity ? new Date(sensor.lastActivity).toLocaleString() : '—'}
+                          {sensor.health?.lastPoll && sensor.lastActivity ? new Date(sensor.lastActivity).toLocaleString() : '—'}
                         </td>
                         <td className="py-3 px-4 text-muted-foreground">
                           {sensor.type === 'device' && sensor.health?.lastPoll

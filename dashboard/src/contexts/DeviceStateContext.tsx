@@ -53,6 +53,7 @@ interface DeviceConfig {
     enableShadow?: boolean;
     enableCloudJobs?: boolean;
     enableMetricsExport?: boolean;
+    enableAnomalyDetection?: boolean;
   };
   settings?: {
     metricsIntervalMs?: number;
