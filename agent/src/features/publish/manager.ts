@@ -6,8 +6,8 @@ import { getHeapStatistics } from 'v8';
 import * as msgpack from 'msgpack-lite';
 import { createJsonPayload, createMsgpackPayload, serializePayload, logCompressionStats, MqttManager } from '../../mqtt/manager.js';
 import { deviceTopic } from '../../mqtt/topics.js';
-import type { AnomalyDetectionService } from '../../ai/anomaly/index.js';
-import { extractRawDeviceState, normalizeDeviceState } from '../../ai/anomaly/device-state.js';
+import type { AnomalyDetectionService } from '../../anomaly/index.js';
+import { extractRawDeviceState, normalizeDeviceState } from '../../anomaly/device-state.js';
 import { getCpuUsage } from '../../system/metrics.js';
 import {
   SensorConfig,

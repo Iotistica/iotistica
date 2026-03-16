@@ -20,7 +20,7 @@ import { EventEmitter } from 'events';
 import type { StateManager, DeviceState } from './state';
 import type { DeviceManager } from '.';
 import * as systemMetrics from '../system/metrics';
-import { ConnectionMonitor } from '../network/connection-monitor';
+import { ConnectionMonitor } from '../health/connection-monitor';
 import { OfflineQueue } from '../logging/offline-queue';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
@@ -1809,3 +1809,4 @@ export class CloudSync extends EventEmitter {
 		return diff;
 	}
 }
+

@@ -7,7 +7,7 @@
 
 import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
-import type { AnomalyDetectionService } from '../../ai/anomaly';
+import type { AnomalyDetectionService } from '../../anomaly';
 import type { MqttManager } from '../../mqtt/manager';
 import { createJsonPayload } from '../../mqtt/manager';
 import type {

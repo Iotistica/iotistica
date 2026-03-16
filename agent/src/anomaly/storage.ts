@@ -7,8 +7,8 @@
  */
 
 type Knex = any;
-import type { AgentLogger } from '../../logging/agent-logger';
-import { LogComponents } from '../../logging/types';
+import type { AgentLogger } from '../logging/agent-logger';
+import { LogComponents } from '../logging/types';
 import type { AnomalyAlert, CanonicalDeviceState, StatisticalBuffer } from './types';
 import { getMedian, getMAD } from './buffer';
 

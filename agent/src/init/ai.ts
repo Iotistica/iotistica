@@ -1,5 +1,5 @@
 import { LogComponents } from '../logging/types.js';
-import { loadConfigFromTargetState } from '../ai/anomaly/utils.js';
+import { loadConfigFromTargetState } from '../anomaly/utils.js';
 import { MqttManager } from '../mqtt/manager.js';
 import type { AgentInitContext } from './context.js';
 
@@ -47,7 +47,7 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 			defaults: config.defaults,
 		});
 
-		const { AnomalyDetectionService } = await import('../ai/anomaly/index.js');
+		const { AnomalyDetectionService } = await import('../anomaly/index.js');
 		ctx.anomalyService = new AnomalyDetectionService(
 			config,
 			dbInstance,

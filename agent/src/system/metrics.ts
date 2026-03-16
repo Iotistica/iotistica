@@ -12,7 +12,7 @@ import systeminformation from 'systeminformation';
 import { exec as execCallback } from 'child_process';
 import { promisify } from 'util';
 import os from 'os';
-import type { AnomalyDetectionService } from '../ai/anomaly';
+import type { AnomalyDetectionService } from '../anomaly';
 
 const exec = promisify(execCallback);
 

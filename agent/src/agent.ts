@@ -27,7 +27,7 @@ import {
   startMemoryLeakSimulation,
   stopMemoryLeakSimulation
 } from "./system/memory.js";
-import { AnomalyDetectionService } from "./ai/anomaly/index.js";
+import { AnomalyDetectionService } from "./anomaly/index.js";
 import { SimulationOrchestrator} from "./simulation/index.js";
 import { DiscoveryService } from "./features/adapters/discovery-service.js";
 import { FeatureInitializer } from "./init/features.js";

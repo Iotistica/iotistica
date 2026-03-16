@@ -7,7 +7,7 @@ import ContainerManager from '../docker/container-manager';
 import type { DeviceManager } from '../managers';
 import type { CloudSync } from '../managers/cloud';
 import type { AgentLogger } from '../logging/agent-logger';
-import type { AnomalyDetectionService } from '../ai/anomaly';
+import type { AnomalyDetectionService } from '../anomaly';
 import type { SimulationOrchestrator } from '../simulation';
 import type { SensorsFeature } from '../features/adapters';
 import { LogComponents } from '../logging/types';

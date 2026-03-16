@@ -6,11 +6,11 @@
  */
 
 type Knex = any;
-import type { AgentLogger } from '../../logging/agent-logger';
-import { LogComponents } from '../../logging/types';
-import type { MqttManager } from '../../mqtt/manager';
-import { createJsonPayload } from '../../mqtt/manager';
-import { deviceTopic } from '../../mqtt/topics.js';
+import type { AgentLogger } from '../logging/agent-logger';
+import { LogComponents } from '../logging/types';
+import type { MqttManager } from '../mqtt/manager';
+import { createJsonPayload } from '../mqtt/manager';
+import { deviceTopic } from '../mqtt/topics.js';
 import type {
 	DataPoint,
 	AnomalyConfig,
