@@ -718,7 +718,18 @@ export class ConfigManager extends EventEmitter {
 
 	/**
 	 * Sync endpoints to SQLite database using UUID-based operations
-	 * Integrated from ProtocolAdaptersHandler for unified config management
+	 * Integrated from ProtocolAdaptersHandler for unified config management.
+	 *
+	 * IMPORTANT:
+	 * This phase only upserts target endpoints into the local DB.
+	 * It must NOT delete endpoints that disappeared from target state, because
+	 * unregisterDevice reconciliation steps are responsible for the full cleanup:
+	 * - remove endpoint row from local DB
+	 * - update currentConfig snapshot
+	 * - drive adapter / publish reload after reconciliation-complete
+	 *
+	 * If we delete rows here first, calculateSteps() can miss removals entirely and
+	 * runtime teardown never runs.
 	 */
 	private async syncDevicesToDatabase(): Promise<void> {
 		const devices = this.targetConfig.endpoints || [];
@@ -960,17 +971,21 @@ export class ConfigManager extends EventEmitter {
 				}
 			}
 
-			// Delete devices that are no longer in target state (by UUID)
-			for (const currentDevice of currentDevices) {
-				if (currentDevice.uuid && !targetDeviceUuids.has(currentDevice.uuid)) {
-					await DeviceEndpointModel.deleteByUuid(currentDevice.uuid);
-					this.logger?.infoSync('Removed endpoint from database', {
-						component: LogComponents.configManager,
-						deviceUuid: currentDevice.uuid,
-						deviceName: currentDevice.name,
-						protocol: currentDevice.protocol
-					});
-				}
+			const pendingRemovalDevices = currentDevices.filter(
+				(currentDevice) => currentDevice.uuid && !targetDeviceUuids.has(currentDevice.uuid)
+			);
+
+			if (pendingRemovalDevices.length > 0) {
+				this.logger?.infoSync('Endpoints missing from target state will be removed during unregister reconciliation', {
+					component: LogComponents.configManager,
+					operation: 'syncEndpointsToDatabase',
+					removedCount: pendingRemovalDevices.length,
+					removedDevices: pendingRemovalDevices.map((device) => ({
+						uuid: device.uuid,
+						name: device.name,
+						protocol: device.protocol,
+					})),
+				});
 			}
 
 			await this.syncMqttAuthToDatabase(devices);
@@ -1077,8 +1092,12 @@ export class ConfigManager extends EventEmitter {
 		});
 		
 		// Build maps for easier comparison
-		const targetMap = new Map(targetDevices.map(d => [d.id, d]));
-		const currentMap = new Map(currentDevices.map(d => [d.id, d]));
+		const targetMap = new Map(targetDevices.map(d => [d.id || (d as any).uuid, d]));
+		const currentMap = new Map(
+			currentDevices
+				.map((d: any) => [d.id || d.uuid, d] as const)
+				.filter(([id]) => !!id)
+		);
 
 		// Devices to add (in target but not in current)
 		for (const device of targetDevices) {
@@ -1099,29 +1118,41 @@ export class ConfigManager extends EventEmitter {
 
 		// Devices to remove (in current but not in target)
 		for (const device of currentDevices) {
-			if (!targetMap.has(device.id)) {
+			const currentDeviceId = (device as any).id || (device as any).uuid;
+			if (!currentDeviceId) {
+				this.logger?.warnSync('Current endpoint snapshot missing id/uuid during reconciliation', {
+					component: LogComponents.configManager,
+					operation: 'calculateSteps',
+					deviceName: (device as any).name,
+					protocol: (device as any).protocol,
+				});
+				continue;
+			}
+
+			if (!targetMap.has(currentDeviceId)) {
 				this.logger?.debugSync('Device needs to be unregistered', {
 					component: LogComponents.configManager,
 					operation: 'calculateSteps',
-					deviceId: device.id,
+					deviceId: currentDeviceId,
 					deviceName: device.name,
 				});
 				
 				steps.push({
 					action: 'unregisterDevice',
-					deviceId: device.id,
+					deviceId: currentDeviceId,
 				});
 			}
 		}
 
 		// Devices to update (config changed)
 		for (const targetDevice of targetDevices) {
-			const currentDevice = currentMap.get(targetDevice.id);
+			const targetDeviceId = targetDevice.id || (targetDevice as any).uuid;
+			const currentDevice = currentMap.get(targetDeviceId);
 			if (currentDevice && !_.isEqual(targetDevice, currentDevice)) {
 				this.logger?.debugSync('Device needs to be updated', {
 					component: LogComponents.configManager,
 					operation: 'calculateSteps',
-					deviceId: targetDevice.id,
+					deviceId: targetDeviceId,
 					deviceName: targetDevice.name,
 				});
 				
@@ -1396,10 +1427,36 @@ if (existing) {
 			deviceId,
 		});
 
-		const device = this.currentConfig.endpoints?.find(d => d.id === deviceId);
+		let device = this.currentConfig.endpoints?.find((d: any) => d.id === deviceId || d.uuid === deviceId);
 
 		if (!device) {
-			throw new Error(`Endpoint not found in current config for deviceId=${deviceId}`);
+			try {
+				const existingEndpoint = await DeviceEndpointModel.getByUuid(deviceId);
+				if (existingEndpoint) {
+					device = {
+						id: existingEndpoint.uuid,
+						uuid: existingEndpoint.uuid,
+						name: existingEndpoint.name,
+						protocol: existingEndpoint.protocol,
+						enabled: Boolean(existingEndpoint.enabled),
+						pollInterval: existingEndpoint.poll_interval,
+						metadata: existingEndpoint.metadata,
+						dataPoints: existingEndpoint.data_points,
+						connectionString: JSON.stringify(existingEndpoint.connection),
+					} as any;
+				}
+			} catch (lookupError) {
+				this.logger?.warnSync('Failed to load endpoint from DB during unregister fallback', {
+					component: LogComponents.configManager,
+					operation: 'unregisterDevice',
+					deviceId,
+					error: lookupError instanceof Error ? lookupError.message : String(lookupError),
+				});
+			}
+		}
+
+		if (!device) {
+			throw new Error(`Endpoint not found in current config or DB for deviceId=${deviceId}`);
 		}
 		
 		// Remove device from SQLite sensors table
@@ -1429,7 +1486,7 @@ if (existing) {
 		// Update current config
 		if (this.currentConfig.endpoints) {
 			this.currentConfig.endpoints = 
-				this.currentConfig.endpoints.filter(d => d.id !== deviceId);
+				this.currentConfig.endpoints.filter((d: any) => d.id !== deviceId && d.uuid !== deviceId);
 		}
 
 		// Persist current config to database

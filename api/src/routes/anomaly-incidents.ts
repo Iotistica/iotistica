@@ -27,6 +27,67 @@ interface IncidentFilters {
   offset: number;
 }
 
+const ENDPOINT_METRIC_REGEX = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_(.+)$/i;
+
+async function resolveEndpointDisplayName(
+  agentUuid: string | undefined,
+  endpointUuid: string,
+  cache: Map<string, string>
+): Promise<string | undefined> {
+  if (!agentUuid) return undefined;
+
+  const cacheKey = `${agentUuid}:${endpointUuid}`;
+  if (cache.has(cacheKey)) {
+    const cached = cache.get(cacheKey);
+    return cached || undefined;
+  }
+
+  const result = await query(
+    `SELECT name
+     FROM device_sensors
+     WHERE device_uuid = $1 AND uuid::text = $2 AND deployment_status != 'deleted'
+     ORDER BY updated_at DESC
+     LIMIT 1`,
+    [agentUuid, endpointUuid]
+  );
+
+  const endpointName = result.rows[0]?.name || '';
+  cache.set(cacheKey, endpointName);
+  return endpointName || undefined;
+}
+
+async function resolveDisplayFields(params: {
+  deviceType: string;
+  deviceName: string;
+  metric: string;
+  affectedAgents?: string[];
+  agentUuid?: string;
+  cache: Map<string, string>;
+}): Promise<{ deviceName: string; metric: string }> {
+  const { deviceType, deviceName, metric, affectedAgents, agentUuid, cache } = params;
+
+  if (deviceType === 'system') {
+    return { deviceName, metric };
+  }
+
+  const match = metric.match(ENDPOINT_METRIC_REGEX);
+  if (!match) {
+    return { deviceName, metric }; 
+  }
+
+  const [, endpointUuid, metricSuffix] = match;
+  const resolvedEndpointName = await resolveEndpointDisplayName(
+    agentUuid || affectedAgents?.find((value) => typeof value === 'string' && value.length > 0),
+    endpointUuid,
+    cache
+  );
+
+  return {
+    deviceName: resolvedEndpointName || deviceName,
+    metric: metricSuffix,
+  };
+}
+
 /**
  * GET /api/v1/anomaly-incidents
  *
@@ -142,15 +203,23 @@ router.get('/anomaly-incidents', async (req, res) => {
 
     const incidentsResult = await query(incidentsQuery, queryParams);
     const incidents = incidentsResult.rows;
+    const endpointNameCache = new Map<string, string>();
 
-    res.json({
-      success: true,
-      incidents: incidents.map((inc: any) => ({
+    const mappedIncidents = await Promise.all(incidents.map(async (inc: any) => {
+      const display = await resolveDisplayFields({
+        deviceType: inc.device_type,
+        deviceName: inc.device_name,
+        metric: inc.metric,
+        affectedAgents: inc.affected_agents || [],
+        cache: endpointNameCache,
+      });
+
+      return {
         incident_id: inc.incident_id,
         fingerprint: inc.fingerprint,
-        device_name: inc.device_name,
+        device_name: display.deviceName,
         device_type: inc.device_type,
-        metric: inc.metric,
+        metric: display.metric,
         severity: inc.severity,
         affected_devices: inc.affected_devices || [],
         affected_agents: inc.affected_agents || [],
@@ -165,7 +234,12 @@ router.get('/anomaly-incidents', async (req, res) => {
         resolution_notes: inc.resolution_notes,
         created_at: inc.created_at,
         updated_at: inc.updated_at,
-      })),
+      };
+    }));
+
+    res.json({
+      success: true,
+      incidents: mappedIncidents,
       total,
       hasMore: (filters.offset + filters.limit) < total,
     });
@@ -362,6 +436,7 @@ router.get('/anomaly-incidents/:incidentId', async (req, res) => {
 
     const alertsResult = await query(alertsQuery, [incidentId]);
     const alerts = alertsResult.rows;
+    const endpointNameCache = new Map<string, string>();
 
     // Extract device_uuid from affected_agents (first one if available)
     const affectedAgents = incident.affected_agents || [];
@@ -369,15 +444,50 @@ router.get('/anomaly-incidents/:incidentId', async (req, res) => {
       ? affectedAgents[0] 
       : null;
 
+    const incidentDisplay = await resolveDisplayFields({
+      deviceType: incident.device_type,
+      deviceName: incident.device_name,
+      metric: incident.metric,
+      affectedAgents,
+      cache: endpointNameCache,
+    });
+
+    const mappedEvents = await Promise.all(events.map(async (e: any) => {
+      const eventDisplay = await resolveDisplayFields({
+        deviceType: e.device_type,
+        deviceName: e.device_name,
+        metric: e.metric,
+        agentUuid: e.agent_uuid,
+        cache: endpointNameCache,
+      });
+
+      return {
+        msg_id: e.msg_id,
+        agent_uuid: e.agent_uuid,
+        device_name: eventDisplay.deviceName,
+        device_type: e.device_type,
+        metric: eventDisplay.metric,
+        timestamp_ms: parseInt(e.timestamp_ms),
+        observed_value: parseFloat(e.observed_value),
+        baseline: e.baseline,
+        anomaly_score: parseFloat(e.anomaly_score),
+        confidence: parseFloat(e.confidence),
+        severity: e.severity,
+        deviation: parseFloat(e.deviation),
+        triggered_by: e.triggered_by,
+        expected_range: e.expected_range,
+      };
+    }));
+
     res.json({
       success: true,
       incident: {
         incident_id: incident.incident_id,
         fingerprint: incident.fingerprint,
-        device_name: incident.device_name,
+        device_name: incidentDisplay.deviceName,
         device_uuid: deviceUuid,
         device_type: incident.device_type,
-        metric: incident.metric,
+        metric: incidentDisplay.metric,
         severity: incident.severity,
         affected_devices: incident.affected_devices || [],
         affected_agents: incident.affected_agents || [],
@@ -393,22 +503,7 @@ router.get('/anomaly-incidents/:incidentId', async (req, res) => {
         created_at: incident.created_at,
         updated_at: incident.updated_at,
       },
-      events: events.map((e: any) => ({
-        msg_id: e.msg_id,
-        agent_uuid: e.agent_uuid,
-        device_name: e.device_name,
-        device_type: e.device_type,
-        metric: e.metric,
-        timestamp_ms: parseInt(e.timestamp_ms),
-        observed_value: parseFloat(e.observed_value),
-        baseline: e.baseline,
-        anomaly_score: parseFloat(e.anomaly_score),
-        confidence: parseFloat(e.confidence),
-        severity: e.severity,
-        deviation: parseFloat(e.deviation),
-        triggered_by: e.triggered_by,
-        expected_range: e.expected_range,
-      })),
+      events: mappedEvents,
       alerts: alerts.map((a: any) => ({
         alert_id: a.alert_id,
         severity: a.severity,
