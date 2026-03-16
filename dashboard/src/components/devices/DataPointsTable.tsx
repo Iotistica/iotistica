@@ -381,7 +381,7 @@ export const DataPointsTable: React.FC<DataPointsTableProps> = ({
             </div>
 
             {/* Unit, Scale, Offset */}
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
               <div className="space-y-2">
                 <Label htmlFor="dp-unit">Unit</Label>
                 <Input
@@ -470,11 +470,8 @@ export const DataPointsTable: React.FC<DataPointsTableProps> = ({
                         htmlFor="anomaly-enabled"
                         className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
                       >
-                        Enable anomaly detection for this data point
+                        Enable
                       </Label>
-                      <p className="text-sm text-muted-foreground">
-                        Monitor this metric for unusual patterns and alert on anomalies
-                      </p>
                     </div>
                   </div>
 
@@ -621,7 +618,7 @@ export const DataPointsTable: React.FC<DataPointsTableProps> = ({
               </div>
             </Tabs>
 
-            <DialogFooter className="mt-4 pt-4 border-t">
+            <DialogFooter className="mt-6 pt-4">
               <Button
                 type="button"
                 variant="outline"

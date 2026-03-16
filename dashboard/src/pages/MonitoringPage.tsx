@@ -507,43 +507,45 @@ export function AlertsPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-20">Severity</TableHead>
+                      <TableHead className="w-28">Severity</TableHead>
                       <TableHead>Device Name</TableHead>
-                      <TableHead className="w-32">Type</TableHead>
+                      <TableHead className="w-36">Type</TableHead>
                       <TableHead>Metric</TableHead>
-                      <TableHead className="w-24">Status</TableHead>
-                      <TableHead className="w-32">Last Seen</TableHead>
-                      <TableHead className="w-24">Score</TableHead>
-                      <TableHead className="w-16">Events</TableHead>
-                      <TableHead className="w-40">Actions</TableHead>
+                      <TableHead className="w-28">Status</TableHead>
+                      <TableHead className="w-36">Last Seen</TableHead>
+                      <TableHead className="w-28">Score</TableHead>
+                      <TableHead className="w-20 text-center">Events</TableHead>
+                      <TableHead className="w-48">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {incidents.map((incident) => (
                       <TableRow key={incident.incident_id}>
-                        <TableCell className="py-4">
+                        <TableCell className="py-5">
                           <SeverityBadge severity={incident.severity} />
                         </TableCell>
-                        <TableCell className="font-medium py-4">{incident.device_name}</TableCell>
-                        <TableCell className="py-4">
+                        <TableCell className="font-medium py-5">{incident.device_name}</TableCell>
+                        <TableCell className="py-5">
                           <Badge variant="outline" className="text-xs">
                             {incident.device_type}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-sm py-4">{incident.metric}</TableCell>
-                        <TableCell className="py-4">
+                        <TableCell className="text-sm py-5">{incident.metric}</TableCell>
+                        <TableCell className="py-5">
                           <StatusBadge status={incident.status} />
                         </TableCell>
-                        <TableCell className="text-xs py-4">{formatTime(incident.last_seen)}</TableCell>
-                        <TableCell className="py-4">
+                        <TableCell className="text-xs py-5">{formatTime(incident.last_seen)}</TableCell>
+                        <TableCell className="py-5">
                           <ScoreBadge score={incident.max_anomaly_score} />
                         </TableCell>
-                        <TableCell className="text-center py-4">{incident.event_count}</TableCell>
-                        <TableCell className="py-4">
-                          <div className="flex gap-2">
+                        <TableCell className="text-center py-5">{incident.event_count}</TableCell>
+                        <TableCell className="py-0" style={{ paddingTop: '24px', paddingBottom: '24px' }}>
+                          <div className="flex items-center gap-2 w-fit">
                             <Button
                               size="sm"
+                              className="h-8"
                               variant="outline"
+                              style={{ border: '1px solid rgba(255,255,255,0.3)' }}
                               onClick={() => openDetailsModal(incident.incident_id)}
                             >
                               Details
@@ -551,6 +553,7 @@ export function AlertsPage() {
                             {incident.status !== 'resolved' && (
                               <Button
                                 size="sm"
+                                className="h-8"
                                 variant="default"
                                 onClick={() => openResolveDialog(incident.incident_id)}
                               >

@@ -56,6 +56,8 @@ export class AnomalyDetectionService {
 	}>();
 	// Profile tracking: Map metric prefix to profile (e.g., 'modbus_slave_1' → 'Generic')
 	private metricProfiles = new Map<string, string>();
+	// Throttle repetitive logs for metrics that are fed but not configured.
+	private unconfiguredMetricLogCounts = new Map<string, number>();
 	// Startup timestamp for warm-up period (prevents false positives on new agents)
 	private startupTimestamp: number = Date.now();
 	private warmupPeriodMs: number;
@@ -139,6 +141,26 @@ export class AnomalyDetectionService {
 		
 		const metricConfig = this.getMetricConfig(dataPoint.metric);
 		if (!metricConfig || !metricConfig.enabled) {
+			const missingCount = (this.unconfiguredMetricLogCounts.get(dataPoint.metric) || 0) + 1;
+			this.unconfiguredMetricLogCounts.set(dataPoint.metric, missingCount);
+
+			if (missingCount <= 3 || missingCount % 50 === 0) {
+				const sampleConfiguredMetrics = this.config.metrics
+					.filter(m => m.enabled)
+					.slice(0, 12)
+					.map(m => m.name);
+
+				this.logger?.debugSync('[ANOMALY] Ignoring datapoint - metric not configured', {
+					component: LogComponents.metrics,
+					metric: dataPoint.metric,
+					source: dataPoint.source,
+					quality: dataPoint.quality,
+					seenCount: missingCount,
+					totalConfiguredMetrics: this.config.metrics.filter(m => m.enabled).length,
+					sampleConfiguredMetrics,
+				});
+			}
+
 			return; // Metric not configured for anomaly detection
 		}
 		
@@ -955,6 +977,21 @@ export class AnomalyDetectionService {
 	 */
 	updateConfig(config: Partial<AnomalyConfig>): void {
 		this.config = { ...this.config, ...config };
+
+		// Remove in-memory state for metrics no longer present in configuration.
+		// This avoids stale buffers/scores after dashboard metric deletions.
+		const configuredMetricNames = new Set((this.config.metrics || []).map(m => m.name));
+		let prunedMetrics = 0;
+		for (const metricName of Array.from(this.buffers.keys())) {
+			if (!configuredMetricNames.has(metricName)) {
+				this.buffers.delete(metricName);
+				this.anomalyScores.delete(metricName);
+				this.anomalyMetadata.delete(metricName);
+				this.predictionCadenceState.delete(metricName);
+				this.unconfiguredMetricLogCounts.delete(metricName);
+				prunedMetrics++;
+			}
+		}
 		
 		// Update storage retention if changed (default to 30 if not specified)
 		if (this.storage && config.storage?.retention !== undefined) {
@@ -970,6 +1007,7 @@ export class AnomalyDetectionService {
 		
 		this.logger?.infoSync('Anomaly detection configuration updated', {
 			component: LogComponents.metrics,
+			prunedMetrics,
 		});
 	}
 	

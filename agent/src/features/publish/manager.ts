@@ -345,11 +345,24 @@ export class PublishManager extends EventEmitter {
     this.batchVisited = new WeakSet();
     this.batchProcessedMetrics.clear();
 
+    this.logger?.debug(`[ANOMALY_FEED] Extracting endpoint metrics`, {
+      endpoint: sensorName,
+      messageCount: messages.length,
+      protocol: this.protocol,
+    });
+
     for (const data of messages) {
       // Messages are already parsed objects (no JSON.parse needed)
       // Extract all numeric fields and feed to anomaly detection
       this.extractNumericFields(data, sensorName, timestampMs);
     }
+
+    this.logger?.debug(`[ANOMALY_FEED] Endpoint extraction complete`, {
+      endpoint: sensorName,
+      messageCount: messages.length,
+      extractedMetricCount: this.batchProcessedMetrics.size,
+      sampleMetrics: Array.from(this.batchProcessedMetrics).slice(0, 10),
+    });
   }
 
   /**
@@ -380,10 +393,33 @@ export class PublishManager extends EventEmitter {
       this.batchVisited.add(data);
     }
 
+    const toFiniteNumber = (value: any): number | undefined => {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+      }
+
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return undefined;
+
+        const parsed = Number(trimmed);
+        if (Number.isFinite(parsed)) {
+          return parsed;
+        }
+      }
+
+      return undefined;
+    };
+
+    const buildEndpointMetricName = (endpointIdentifier: string | undefined, fieldName: string): string => {
+      const identifier = (endpointIdentifier || sensorName || 'unknown').trim();
+      return `${identifier}_${fieldName}`;
+    };
+
     if (typeof data === 'number') {
       // Direct numeric value
       const metricName = prefix || 'value';
-      const fullMetricName = `${this.deviceUuid}_${sensorName}_${metricName}`;
+      const fullMetricName = buildEndpointMetricName(undefined, metricName);
       
       // Skip if already processed (use batch-level Set)
       if (this.batchProcessedMetrics.has(fullMetricName)) {
@@ -415,13 +451,14 @@ export class PublishManager extends EventEmitter {
         data.value !== undefined
       ) {
         const deviceName = data.deviceName;
+        const endpointUuid = data.device_uuid || data.deviceUuid;
         const fieldName = data.metric || data.name;
-        const value = data.value;
+        const value = toFiniteNumber(data.value);
         const quality = data.quality || 'GOOD';
         
         // Feed if numeric value
-        if (typeof value === 'number') {
-          const fullMetricName = `${this.deviceUuid}_${deviceName}_${fieldName}`;
+        if (value !== undefined) {
+          const fullMetricName = buildEndpointMetricName(endpointUuid || deviceName, fieldName);
           
           // Skip if already processed (use batch-level Set)
           if (this.batchProcessedMetrics.has(fullMetricName)) {
@@ -431,7 +468,7 @@ export class PublishManager extends EventEmitter {
           
           anomalyService.processDataPoint({
             source: 'endpoint',
-            metric: `${this.deviceUuid}_${deviceName}_${fieldName}`,
+            metric: fullMetricName,
             value: value,
             unit: data.unit || this.inferUnit(fieldName),
             timestamp: timestampMs,
@@ -443,6 +480,14 @@ export class PublishManager extends EventEmitter {
               fieldName,
             },
           });
+        } else {
+          this.logger?.debug(`[ANOMALY_FEED] Skipping non-numeric reading`, {
+            endpoint: sensorName,
+            deviceName,
+            fieldName,
+            rawType: typeof data.value,
+            rawValue: data.value,
+          });
         }
         return; // Don't recurse further into reading object
       }
@@ -453,14 +498,15 @@ export class PublishManager extends EventEmitter {
         for (const reading of data) {
           if (typeof reading === 'object' && reading !== null) {
             const deviceName = reading.deviceName || sensorName;
+            const endpointUuid = reading.device_uuid || reading.deviceUuid;
             // Support metric field (standard) or name field (legacy OPC-UA)
             const fieldName = reading.metric || reading.name;
-            const value = reading.value;
+            const value = toFiniteNumber(reading.value);
             const quality = reading.quality || 'GOOD';
             
             // Feed if we have both fieldName and numeric value
-            if (fieldName && typeof value === 'number') {
-              const fullMetricName = `${this.deviceUuid}_${deviceName}_${fieldName}`;
+            if (fieldName && value !== undefined) {
+              const fullMetricName = buildEndpointMetricName(endpointUuid || deviceName, fieldName);
               
               // Skip if already processed (use batch-level Set)
               if (this.batchProcessedMetrics.has(fullMetricName)) {
@@ -471,7 +517,7 @@ export class PublishManager extends EventEmitter {
               anomalyService.processDataPoint({
                 source: 'endpoint',
                 protocol: this.protocol as any, // Protocol type (modbus, opcua, bacnet, mqtt)
-                metric: `${this.deviceUuid}_${deviceName}_${fieldName}`,
+                metric: fullMetricName,
                 value: value,
                 unit: this.inferUnit(fieldName),
                 timestamp: timestampMs,
@@ -482,6 +528,14 @@ export class PublishManager extends EventEmitter {
                   deviceName,
                   fieldName,
                 },
+              });
+            } else if (fieldName) {
+              this.logger?.debug(`[ANOMALY_FEED] Skipping non-numeric array reading`, {
+                endpoint: sensorName,
+                deviceName,
+                fieldName,
+                rawType: typeof reading.value,
+                rawValue: reading.value,
               });
             }
           }
@@ -494,7 +548,10 @@ export class PublishManager extends EventEmitter {
         if (typeof value === 'number') {
           // Feed numeric field
           const metricName = prefix ? `${prefix}_${key}` : key;
-          const fullMetricName = `${this.deviceUuid}_${sensorName}_${metricName}`;
+          const endpointUuid = (typeof data.device_uuid === 'string' && data.device_uuid) ||
+            (typeof data.deviceUuid === 'string' && data.deviceUuid) ||
+            undefined;
+          const fullMetricName = buildEndpointMetricName(endpointUuid, metricName);
           
           // Skip if already processed (use batch-level Set)
           if (this.batchProcessedMetrics.has(fullMetricName)) {
@@ -505,7 +562,7 @@ export class PublishManager extends EventEmitter {
           anomalyService.processDataPoint({
             source: 'sensor',
             protocol: this.protocol as any, // Protocol type (modbus, opcua, bacnet, mqtt)
-            metric: `${this.deviceUuid}_${sensorName}_${metricName}`,
+            metric: fullMetricName,
             value: value,
             unit: this.inferUnit(key),
             timestamp: timestampMs,

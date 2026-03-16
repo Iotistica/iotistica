@@ -201,7 +201,7 @@ export const OPCUAConfigForm: React.FC<OPCUAConfigFormProps> = ({
         )}
 
         {/* Timeout Settings */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
           <div className="space-y-2">
             <Label htmlFor="connectionTimeout">Connection Timeout (ms)</Label>
             <Input
@@ -234,30 +234,26 @@ export const OPCUAConfigForm: React.FC<OPCUAConfigFormProps> = ({
         </div>
       </div>
 
-      {/* Subscription Settings */}
       <div className="space-y-4 p-4 border border-border rounded-lg">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">Subscription Settings</h3>
-          <Controller
-            name="connection.useSubscription"
-            control={control}
-            render={({ field }) => (
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="useSubscription"
-                  checked={field.value}
-                  onCheckedChange={field.onChange}
-                />
-                <Label htmlFor="useSubscription" className="font-normal cursor-pointer">
-                  Use Subscription
-                </Label>
-              </div>
-            )}
-          />
-        </div>
+        <Controller
+          name="connection.useSubscription"
+          control={control}
+          render={({ field }) => (
+            <div className="flex items-center" style={{ columnGap: '12px' }}>
+              <Checkbox
+                id="useSubscription"
+                checked={field.value}
+                onCheckedChange={field.onChange}
+              />
+              <Label htmlFor="useSubscription" className="font-normal cursor-pointer">
+                Use Subscription
+              </Label>
+            </div>
+          )}
+        />
 
         {watch('connection.useSubscription') && (
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
             <div className="space-y-2">
               <Label htmlFor="publishingInterval">Publishing Interval (ms)</Label>
               <Input
@@ -295,39 +291,40 @@ export const OPCUAConfigForm: React.FC<OPCUAConfigFormProps> = ({
       <div className="space-y-4 p-4 border border-border rounded-lg">
         <h3 className="text-sm font-semibold">Common Settings</h3>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="opcua-pollInterval">Poll Interval (ms)</Label>
-            <Input
-              id="opcua-pollInterval"
-              type="number"
-              {...register('pollInterval', { valueAsNumber: true })}
-              placeholder="1000"
-            />
-            <p className="text-xs text-muted-foreground">
-              How often to read node values (100-30000ms)
-            </p>
-          </div>
-
-          <div className="flex items-center space-x-2 pt-6">
-            <Controller
-              name="enabled"
-              control={control}
-              render={({ field }) => (
-                <>
-                  <Checkbox
-                    id="opcua-enabled"
-                    checked={field.value}
-                    onCheckedChange={field.onChange}
-                  />
-                  <Label htmlFor="opcua-enabled" className="font-normal cursor-pointer">
-                    Enabled
-                  </Label>
-                </>
-              )}
-            />
-          </div>
+        <div className="space-y-2" style={{ maxWidth: '180px' }}>
+          <Label htmlFor="opcua-pollInterval">Poll Interval (ms)</Label>
+          <Input
+            id="opcua-pollInterval"
+            type="number"
+            {...register('pollInterval', { valueAsNumber: true })}
+            placeholder="1000"
+          />
+          <p className="text-xs text-muted-foreground">
+            How often to read node values (100-30000ms)
+          </p>
         </div>
+      </div>
+
+      <div
+        className="flex items-center"
+        style={{ columnGap: '12px', paddingTop: '10px', paddingBottom: '20px' }}
+      >
+        <Controller
+          name="enabled"
+          control={control}
+          render={({ field }) => (
+            <>
+              <Checkbox
+                id="opcua-enabled"
+                checked={field.value}
+                onCheckedChange={field.onChange}
+              />
+              <Label htmlFor="opcua-enabled" className="font-normal cursor-pointer">
+                Enabled
+              </Label>
+            </>
+          )}
+        />
       </div>
     </div>
   );

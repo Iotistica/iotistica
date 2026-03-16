@@ -44,7 +44,7 @@ export interface AnomalyDetectionConfig {
   enabled: boolean;        // Global anomaly detection enable/disable toggle
   defaults: AnomalyDetectionDefaults;  // Shared default settings
   alerts: AnomalyAlerts;
-  systemMetrics: AnomalyMetric[];  // System/agent health metrics (cpu, memory, temp)
+  metrics: AnomalyMetric[];  // System/agent health metrics (cpu, memory, temp)
   storage: AnomalyStorage;
   sensitivity: number;
   warmupPeriodMs: number;  // Suppress alerts during agent initialization (default: 900000 = 15 min)

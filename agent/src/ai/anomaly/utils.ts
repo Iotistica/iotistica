@@ -9,8 +9,8 @@ import type { AnomalyConfig, MetricConfig, DataPoint, DetectionMethod } from './
 
 /**
  * Load configuration from cloud target state (preferred) or environment variables (fallback)
- * 
- * Two-level schema: defaults + systemMetrics + per-datapoint configs
+ *
+ * Single-list schema: defaults + metrics
  */
 export function loadConfigFromTargetState(targetStateConfig?: any): AnomalyConfig {
 	if (!targetStateConfig?.anomalyDetection) {
@@ -18,9 +18,16 @@ export function loadConfigFromTargetState(targetStateConfig?: any): AnomalyConfi
 	}
 	
 	const rawConfig = targetStateConfig.anomalyDetection;
-	
-	// Build unified metrics array from systemMetrics
-	const unifiedMetrics: MetricConfig[] = rawConfig.systemMetrics || [];
+
+	const configuredMetrics: MetricConfig[] = Array.isArray(rawConfig.metrics)
+		? rawConfig.metrics
+		: [];
+	const legacySystemMetrics: MetricConfig[] = Array.isArray(rawConfig.systemMetrics)
+		? rawConfig.systemMetrics
+		: [];
+	const unifiedMetrics: MetricConfig[] = configuredMetrics.length > 0
+		? configuredMetrics
+		: legacySystemMetrics;
 	
 	const config: AnomalyConfig = {
 		enabled: rawConfig.enabled !== undefined ? rawConfig.enabled : true,
@@ -30,9 +37,9 @@ export function loadConfigFromTargetState(targetStateConfig?: any): AnomalyConfi
 			windowSize: 120,
 			minSamples: 5
 		},
-		systemMetrics: rawConfig.systemMetrics || [],
+		systemMetrics: legacySystemMetrics,
 		sensitivity: rawConfig.sensitivity || 5,
-		metrics: unifiedMetrics,  // Unified array for processing
+		metrics: unifiedMetrics,
 		alerts: {
 			// Defaults first, then override with any provided values
 			mqtt: true,

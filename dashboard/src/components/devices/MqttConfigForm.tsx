@@ -2,7 +2,6 @@ import React, { useEffect } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Checkbox } from '@/components/ui/checkbox';
 import type { MQTTDeviceConfig } from '@/schemas/sensor-schemas';
 
 interface MqttConfigFormProps {
@@ -101,27 +100,12 @@ export const MqttConfigForm: React.FC<MqttConfigFormProps> = ({
                 const n = Number(e.target.value);
                 field.onChange(Number.isFinite(n) ? Math.max(0, Math.min(2, n)) : 1);
               }}
+              style={{ maxWidth: '90px' }}
             />
           )}
         />
       </div>
 
-      <Controller
-        name="enabled"
-        control={control}
-        render={({ field }) => (
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="mqtt-enabled"
-              checked={field.value}
-              onCheckedChange={(checked: boolean | 'indeterminate') => field.onChange(Boolean(checked))}
-            />
-            <Label htmlFor="mqtt-enabled" className="font-normal cursor-pointer">
-              Enabled
-            </Label>
-          </div>
-        )}
-      />
     </div>
   );
 };

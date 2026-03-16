@@ -123,6 +123,35 @@ async function applyPendingMqttAuth(config: any): Promise<any> {
   return nextConfig;
 }
 
+function sanitizeAnomalyExpectedRanges(config: any): any {
+  if (!config || typeof config !== 'object') {
+    return config;
+  }
+
+  const nextConfig = JSON.parse(JSON.stringify(config));
+  const metrics = nextConfig?.anomalyDetection?.metrics;
+  if (!Array.isArray(metrics)) {
+    return nextConfig;
+  }
+
+  for (const metric of metrics) {
+    if (!metric || !Array.isArray(metric.expectedRange) || metric.expectedRange.length !== 2) {
+      continue;
+    }
+
+    const [min, max] = metric.expectedRange;
+    const validMin = typeof min === 'number' && Number.isFinite(min);
+    const validMax = typeof max === 'number' && Number.isFinite(max);
+
+    // Keep expectedRange only when both bounds are finite numbers.
+    if (!validMin || !validMax) {
+      delete metric.expectedRange;
+    }
+  }
+
+  return nextConfig;
+}
+
 // ============================================================================
 // Device State Endpoints (Device-Side - Used by devices themselves)
 // ============================================================================
@@ -356,6 +385,7 @@ router.post('/devices/:uuid/target-state', deviceAuth, validateTargetStateConfig
     }
 
     config = await applyPendingMqttAuth(config || {});
+    config = sanitizeAnomalyExpectedRanges(config);
 
     // 🎯 RESOLVE IMAGE DIGESTS
     // Convert all :latest and floating tags to @sha256:... digests
@@ -469,6 +499,7 @@ router.put('/devices/:uuid/target-state', validateTargetStateConfigMiddleware, a
     }
 
     config = await applyPendingMqttAuth(config || {});
+    config = sanitizeAnomalyExpectedRanges(config);
 
     // 🎯 RESOLVE IMAGE DIGESTS
     // Convert all :latest and floating tags to @sha256:... digests

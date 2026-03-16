@@ -75,8 +75,7 @@ export class DeviceEndpointModel {
     }
     
     try {
-      // Debug: Log the query being attempted
-      console.log('[DEBUG] Attempting getByUuid query', { uuid, table: this.table });
+  
       
       const device = await models(this.table)
         .where('uuid', uuid)

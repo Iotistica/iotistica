@@ -610,10 +610,11 @@ export class ConfigManager extends EventEmitter {
 				});
 			}
 			
-			// Emit anomaly config change event if anomaly config changed
-			const oldAnomalyConfig = otherCurrentFields.anomaly;
-			const newAnomalyConfig = otherTargetFields.anomaly;
-			if (oldAnomalyConfig && newAnomalyConfig && !_.isEqual(oldAnomalyConfig, newAnomalyConfig)) {
+			// Emit anomaly config change event if anomaly config changed.
+			// Primary key is anomalyDetection; anomaly is legacy compatibility.
+			const oldAnomalyConfig = otherCurrentFields.anomalyDetection ?? otherCurrentFields.anomaly;
+			const newAnomalyConfig = otherTargetFields.anomalyDetection ?? otherTargetFields.anomaly;
+			if (newAnomalyConfig && !_.isEqual(oldAnomalyConfig, newAnomalyConfig)) {
 				this.emit('anomaly-config-changed', { old: oldAnomalyConfig, new: newAnomalyConfig });
 				
 				this.logger?.infoSync('Anomaly configuration changed', {

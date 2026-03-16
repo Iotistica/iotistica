@@ -198,17 +198,15 @@ export interface AnomalyDefaults {
 
 /**
  * Anomaly detection configuration
- * Supports two-level hierarchy:
- * 1. Global defaults (shared settings)
- * 2. System metrics (cpu, memory, temp)
- * 3. Per-datapoint configs (in endpoint.dataPoints[].anomalyDetection)
+ * Primary schema: defaults + metrics (single list).
+ * Legacy compatibility: systemMetrics may still be present in older target states.
  */
 export interface AnomalyConfig {
 	enabled?: boolean;               // Global anomaly detection toggle (default: true)
 	defaults?: AnomalyDefaults;      // Shared default settings (NEW)
-	systemMetrics?: MetricConfig[];  // System/agent health metrics (cpu, memory, temp)
+	systemMetrics?: MetricConfig[];  // Legacy key (deprecated, use metrics)
 	sensitivity: number;             // 1-10 (higher = more sensitive)
-	metrics: MetricConfig[];         // Unified metrics array (backward compat + merged runtime)
+	metrics: MetricConfig[];         // Unified metric list for anomaly processing
 	alerts: {
 		mqtt: boolean;
 		cloud: boolean;

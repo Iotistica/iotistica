@@ -81,6 +81,44 @@ export class DeviceSensorSyncService {
   private readonly REFRESH_THROTTLE_MS = 60000; // Max once per minute
 
   /**
+   * Remove anomaly metrics bound to an endpoint that is being deleted.
+   * Supports canonical endpointUuid_metric names and legacy endpoint-name prefixes.
+   */
+  private pruneAnomalyMetricsForEndpoint(config: any, endpoint?: { uuid?: string; name?: string }): number {
+    if (!config?.anomalyDetection || !Array.isArray(config.anomalyDetection.metrics) || !endpoint) {
+      return 0;
+    }
+
+    const endpointUuid = (endpoint.uuid || '').trim();
+    const endpointName = (endpoint.name || '').trim();
+    const metrics: AnomalyMetric[] = config.anomalyDetection.metrics;
+
+    const filtered = metrics.filter((metric) => {
+      const metricName = (metric?.name || '').trim();
+      if (!metricName) return true;
+
+      // Canonical naming: endpointUuid_metricName
+      if (endpointUuid && metricName.startsWith(`${endpointUuid}_`)) {
+        return false;
+      }
+
+      // Legacy naming compatibility: endpointName_metricName
+      if (endpointName && metricName.startsWith(`${endpointName}_`)) {
+        return false;
+      }
+
+      return true;
+    });
+
+    const removed = metrics.length - filtered.length;
+    if (removed > 0) {
+      config.anomalyDetection.metrics = filtered;
+    }
+
+    return removed;
+  }
+
+  /**
    * Refresh materialized views (throttled)
    * Called after device sensors are synced
    */
@@ -1392,6 +1430,16 @@ export class DeviceSensorSyncService {
       ));
       const matchedInTarget = config.endpoints.length < originalCount;
 
+      const removedAnomalyMetrics = this.pruneAnomalyMetricsForEndpoint(config, {
+        uuid: sensorToDelete.uuid,
+        name: sensorToDelete.name,
+      });
+      if (removedAnomalyMetrics > 0) {
+        logger.info(
+          `Pruned ${removedAnomalyMetrics} anomaly metric(s) for deleted endpoint "${sensorToDelete.name}"`
+        );
+      }
+
       if (!matchedInTarget) {
         logger.warn(
           `Sensor "${sensorToDelete.name}" was marked pending_deletion in table but not found in target state endpoints`
@@ -1513,6 +1561,16 @@ export class DeviceSensorSyncService {
         d.uuid !== sensorIdentifier && d.name !== sensorIdentifier
       );
       config.endpoints = existingDevices;
+
+      const removedAnomalyMetrics = this.pruneAnomalyMetricsForEndpoint(config, {
+        uuid: sensorToDelete?.uuid,
+        name: sensorToDelete?.name,
+      });
+      if (removedAnomalyMetrics > 0) {
+        logger.info(
+          `Pruned ${removedAnomalyMetrics} anomaly metric(s) for hard-deleted endpoint "${sensorToDelete?.name || sensorIdentifier}"`
+        );
+      }
 
       // 4. Save updated target state
       const updateResult = await query(

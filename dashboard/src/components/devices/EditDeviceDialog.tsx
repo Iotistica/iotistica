@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Checkbox } from '@/components/ui/checkbox';
 import { AlertCircle, Trash2, ChevronsUpDown, Check } from 'lucide-react';
 import {
   Command,
@@ -257,8 +258,8 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
     if (!device) return false;
     
     if (device.protocol === 'modbus') {
-      // Modbus requires at least one register mapping
-      return modbusFormValid && modbusDataPoints.length > 0;
+      // Match Add dialog behavior: profile-based configs may not have explicit points at edit time
+      return modbusFormValid;
     } else if (device.protocol === 'opcua') {
       // OPC UA uses auto-discovery, nodes are optional
       return opcuaFormValid;
@@ -275,120 +276,139 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
   return (
     <>
       <Dialog open={open} onOpenChange={handleClose}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle>Edit Device: {device.name}</DialogTitle>
+        <DialogContent
+          className="!p-0 overflow-hidden flex flex-col"
+          style={{ width: '66vh', maxWidth: '66vh', height: '66vh', maxHeight: '66vh' }}
+        >
+          <DialogHeader className="px-6 py-4">
+            <DialogTitle>Edit Device</DialogTitle>
             <DialogDescription>
-              Update configuration for this {device.protocol?.toUpperCase()} device
+              Update configuration for {device.name}
             </DialogDescription>
           </DialogHeader>
 
-          {error && (
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
+          <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-6">
+            {error && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
 
-          {/* Location field - common for all protocols */}
-          <div className="space-y-2 px-1">
-            <Label>Location (optional)</Label>
-            <Popover open={locationOpen} onOpenChange={setLocationOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={locationOpen}
-                  className="w-full justify-between font-normal"
-                >
-                  {location || "Select or enter location..."}
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-full p-0" align="start">
-                <Command>
-                  <CommandInput 
-                    placeholder="Search or type new location..." 
-                    value={location}
-                    onValueChange={setLocation}
-                  />
-                  <CommandList>
-                    <CommandEmpty>Type to add a new location</CommandEmpty>
-                    <CommandGroup>
-                      {locations.map((loc) => (
-                        <CommandItem
-                          key={loc}
-                          value={loc}
-                          onSelect={(currentValue) => {
-                            setLocation(currentValue);
-                            setLocationOpen(false);
-                          }}
-                        >
-                          <Check
-                            className={cn(
-                              "mr-2 h-4 w-4",
-                              location === loc ? "opacity-100" : "opacity-0"
-                            )}
-                          />
-                          {loc}
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-            <p className="text-xs text-muted-foreground">
-              Specify the physical location
-            </p>
+            {/* Location field - common for all protocols */}
+            <div className="space-y-2 px-1">
+              <Label>Location (optional)</Label>
+              <Popover open={locationOpen} onOpenChange={setLocationOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={locationOpen}
+                    className="w-full justify-between font-normal"
+                  >
+                    {location || "Select or enter location..."}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-full p-0" align="start">
+                  <Command>
+                    <CommandInput 
+                      placeholder="Search or type new location..." 
+                      value={location}
+                      onValueChange={setLocation}
+                    />
+                    <CommandList>
+                      <CommandEmpty>Type to add a new location</CommandEmpty>
+                      <CommandGroup>
+                        {locations.map((loc) => (
+                          <CommandItem
+                            key={loc}
+                            value={loc}
+                            onSelect={(currentValue) => {
+                              setLocation(currentValue);
+                              setLocationOpen(false);
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                location === loc ? "opacity-100" : "opacity-0"
+                              )}
+                            />
+                            {loc}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            {device.protocol === 'modbus' && (
+              <div className="space-y-6">
+                <ModbusConfigForm 
+                  value={modbusConfig || undefined}
+                  onChange={setModbusConfig}
+                  onValidationChange={setModbusFormValid}
+                />
+
+                {/* Data Points Table - Commented out to reduce confusion, users should work with profiles only
+                <DataPointsTable
+                  value={modbusDataPoints}
+                  onChange={setModbusDataPoints}
+                />
+                */}
+              </div>
+            )}
+
+            {device.protocol === 'opcua' && (
+              <div className="space-y-6">
+                <OPCUAConfigForm 
+                  value={opcuaConfig || undefined}
+                  onChange={setOpcuaConfig}
+                  onValidationChange={setOpcuaFormValid}
+                />
+
+                {/* OPC-UA Data Points Table - Commented out to reduce confusion, users should work with profiles only
+                <OPCUADataPointsTable
+                  dataPoints={opcuaDataPoints}
+                  onChange={setOpcuaDataPoints}
+                />
+                */}
+              </div>
+            )}
+
+            {device.protocol === 'mqtt' && (
+              <div className="space-y-6">
+                <MqttConfigForm
+                  value={mqttConfig || undefined}
+                  onChange={setMqttConfig}
+                  onValidationChange={setMqttFormValid}
+                  readOnlyTopic={device.connection?.topic}
+                />
+              </div>
+            )}
           </div>
 
-          {device.protocol === 'modbus' && (
-            <div className="flex-1 overflow-y-auto space-y-6 mt-4">
-              <ModbusConfigForm 
-                value={modbusConfig || undefined}
-                onChange={setModbusConfig}
-                onValidationChange={setModbusFormValid}
-              />
-
-              {/* Data Points Table - Commented out to reduce confusion, users should work with profiles only
-              <DataPointsTable
-                value={modbusDataPoints}
-                onChange={setModbusDataPoints}
-              />
-              */}
-            </div>
-          )}
-
-          {device.protocol === 'opcua' && (
-            <div className="flex-1 overflow-y-auto space-y-6 mt-4">
-              <OPCUAConfigForm 
-                value={opcuaConfig || undefined}
-                onChange={setOpcuaConfig}
-                onValidationChange={setOpcuaFormValid}
-              />
-
-              {/* OPC-UA Data Points Table - Commented out to reduce confusion, users should work with profiles only
-              <OPCUADataPointsTable
-                dataPoints={opcuaDataPoints}
-                onChange={setOpcuaDataPoints}
-              />
-              */}
-            </div>
-          )}
-
           {device.protocol === 'mqtt' && (
-            <div className="flex-1 overflow-y-auto space-y-6 mt-4">
-              <MqttConfigForm
-                value={mqttConfig || undefined}
-                onChange={setMqttConfig}
-                onValidationChange={setMqttFormValid}
-                readOnlyTopic={device.connection?.topic}
+            <div
+              className="flex items-center px-6"
+              style={{ columnGap: '12px', paddingTop: '10px', paddingBottom: '10px' }}
+            >
+              <Checkbox
+                id="edit-mqtt-enabled"
+                checked={mqttConfig?.enabled ?? true}
+                onCheckedChange={(checked) => {
+                  if (mqttConfig) setMqttConfig({ ...mqttConfig, enabled: Boolean(checked) });
+                }}
               />
+              <Label htmlFor="edit-mqtt-enabled" className="font-normal cursor-pointer">
+                Enabled
+              </Label>
             </div>
           )}
-
-          <DialogFooter className="flex justify-between items-center">
+          <DialogFooter className="px-6 py-4 flex justify-between items-center">
             {onDeleteDevice ? (
               <Button 
                 variant="destructive" 

@@ -11,7 +11,6 @@ import { UsagePage } from "./pages/UsagePage";
 import { NodeRedPage } from "./pages/NodeRedPage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { SecurityPage } from "./pages/SecurityPage";
-import { Toaster } from "./components/ui/sonner";
 import { Sheet, SheetContent } from "./components/ui/sheet";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
@@ -1055,21 +1054,21 @@ export default function App() {
     }
 
     setIsDeploying(true);
+    const toastId = toast.loading("Deploying changes...");
     try {
       if (hasUnsavedChanges) {
-        toast.info("Saving changes...");
+        toast.loading("Saving changes...", { id: toastId });
         try {
           await saveTargetState(selectedDevice.deviceUuid);
-          toast.success("Changes saved");
+          toast.loading("Deploying changes...", { id: toastId });
         } catch (saveError: any) {
           console.error("Save error:", saveError);
-          toast.error(`Failed to save changes: ${saveError.message || 'Unknown error'}`);
+          toast.error(`Failed to save changes: ${saveError.message || 'Unknown error'}`, { id: toastId });
           setIsDeploying(false); // Clear on error so user can retry
           throw saveError;
         }
       }
 
-      const toastId = toast.loading("Deploying changes...");
       try {
         await syncTargetState(selectedDevice.deviceUuid, 'dashboard');
         window.dispatchEvent(new CustomEvent('deployment-started', { detail: { deviceUuid: selectedDevice.deviceUuid } }));
@@ -1151,7 +1150,6 @@ export default function App() {
     return (
       <>
         <LoginPage />
-        <Toaster />
       </>
     );
   }
@@ -1867,8 +1865,6 @@ export default function App() {
         device={editingDevice}
         onSave={handleSaveDevice}
       />
-
-      <Toaster />
     </div>
   );
 }

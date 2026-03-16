@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Activity, Pencil, Plus, FileText } from 'lucide-react';
+import { Activity, Pencil, Plus, FileText, Settings } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { AddSensorDialog } from '@/components/devices/AddDeviceDialog';
 import { EditSensorDialog } from '@/components/devices/EditDeviceDialog';
 import { EditProfileDialog } from '@/components/devices/EditProfileDialog';
+import { AnomalyMetricsTable } from '@/components/monitoring/AnomalyMetricsTable';
 import { SensorSummaryCards } from '@/components/devices/DeviceSummaryCards';
 import { toast } from 'sonner';
 import { buildApiUrl } from '@/config/api';
@@ -111,6 +112,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [addSensorDialogOpen, setAddSensorDialogOpen] = useState(false);
+  const [anomalyConfigOpen, setAnomalyConfigOpen] = useState(false);
   const [selectedSensor, setSelectedSensor] = useState<Sensor | null>(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   
@@ -868,7 +870,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       }
 
       const telemetryLagMs = lastPollMs - lastTelemetryMs;
-      const lagThresholdMs = pollIntervalMs ? pollIntervalMs * 2 : 5 * 60 * 1000;
+      // Allow 5 missed poll cycles, with a minimum floor of 2 minutes, to avoid
+      // flipping to No Data due to minor network/processing delays.
+      const lagThresholdMs = pollIntervalMs
+        ? Math.max(pollIntervalMs * 5, 2 * 60 * 1000)
+        : 5 * 60 * 1000;
       return telemetryLagMs > lagThresholdMs;
     })();
     
@@ -1263,6 +1269,10 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           )}
           
           <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setAnomalyConfigOpen(true)}>
+              <Settings className="w-4 h-4 mr-2" />
+              Configure Anomaly Detection
+            </Button>
             {deviceType !== 'virtual' && (
               <Button onClick={() => setAddSensorDialogOpen(true)}>
                 <Plus className="w-4 h-4 mr-2" />
@@ -1686,6 +1696,13 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Anomaly Detection Configuration */}
+        <AnomalyMetricsTable
+          open={anomalyConfigOpen}
+          onOpenChange={setAnomalyConfigOpen}
+          initialDeviceUuid={deviceUuid}
+        />
 
         {/* Add/Edit Profile Dialog - Separate Component */}
         <EditProfileDialog

@@ -38,6 +38,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   const isNewSessionRef = useRef<boolean>(false);
   const inputBufferRef = useRef<string>(''); // Buffer for keystroke batching
   const flushTimerRef = useRef<NodeJS.Timeout | null>(null); // Timer for flushing batched keystrokes
+  const noOutputTimerRef = useRef<NodeJS.Timeout | null>(null); // Fires if no shell output arrives after session attach
   const reconnectSessionIdRef = useRef<string | null>(null); // Session to reconnect to when socket opens
   const lastSessionStatusRef = useRef<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -198,6 +199,16 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         
         // Save session state immediately when attached
         saveSessionState(deviceUuid, message.sessionId, sessions);
+
+        // Start a watchdog: if no shell output arrives within 8 s the agent/MQTT is likely unreachable.
+        if (noOutputTimerRef.current) clearTimeout(noOutputTimerRef.current);
+        noOutputTimerRef.current = setTimeout(() => {
+          noOutputTimerRef.current = null;
+          if (xtermRef.current && currentSessionIdRef.current) {
+            xtermRef.current.writeln('\r\n\x1b[33mAgent not responding. Check if agent is online and connected.\x1b[0m');
+            terminateSession();
+          }
+        }, 8000);
         
         // Check for PTY restart (nested under data)
         const ptyWasRestarted = message.data?.ptyRestarted || message.ptyRestarted;
@@ -356,6 +367,11 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
       case 'shell-output':
         if (message.data?.output && (message.sessionId === currentSessionIdRef.current || !message.sessionId)) {
+          // First output received — cancel the MQTT watchdog timer.
+          if (noOutputTimerRef.current) {
+            clearTimeout(noOutputTimerRef.current);
+            noOutputTimerRef.current = null;
+          }
           if (xtermRef.current) {
             const output = String(message.data.output);
             const hasHardClearSequence =
@@ -661,6 +677,11 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     
     term.open(terminalRef.current);
     fitAddon.fit();
+
+    // Show a brief welcome hint when no session is active yet.
+    term.writeln('\x1b[36mRemote Access Terminal\x1b[0m');
+    term.writeln('\x1b[90mPress Connect to start a remote shell session.\x1b[0m');
+    term.writeln('');
     
     // Focus terminal immediately after opening
     term.focus();

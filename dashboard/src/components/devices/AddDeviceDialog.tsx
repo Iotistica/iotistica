@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Checkbox } from '@/components/ui/checkbox';
 import { AlertCircle, ChevronsUpDown, Check } from 'lucide-react';
 import {
   Command,
@@ -410,6 +411,23 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
           )}
         </div>
 
+        {selectedProtocol === 'mqtt' && (
+          <div
+            className="flex items-center px-6"
+            style={{ columnGap: '12px', paddingTop: '10px', paddingBottom: '10px' }}
+          >
+            <Checkbox
+              id="add-mqtt-enabled"
+              checked={mqttConfig?.enabled ?? true}
+              onCheckedChange={(checked) => {
+                if (mqttConfig) setMqttConfig({ ...mqttConfig, enabled: Boolean(checked) });
+              }}
+            />
+            <Label htmlFor="add-mqtt-enabled" className="font-normal cursor-pointer">
+              Enabled
+            </Label>
+          </div>
+        )}
         <DialogFooter className="px-6 py-4">
           <Button variant="outline" onClick={handleClose} disabled={loading}>
             Cancel

@@ -45,7 +45,6 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<string>('');
   const [loadingProfiles, setLoadingProfiles] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const {
     register,
@@ -354,7 +353,7 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
                 }}
               />
               <Label htmlFor="tcp-useSlaveRange" className="text-xs cursor-pointer">
-                Discovery Target (scan slave range)
+                Scan slave range
               </Label>
             </div>
             {watch('connection.slaveRange') && (
@@ -385,6 +384,42 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
                 </div>
               </div>
             )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 pt-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="timeout" className="text-xs">Timeout</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="timeout"
+                  type="number"
+                  {...register('connection.timeout', { valueAsNumber: true })}
+                  placeholder="5000"
+                  className="h-9"
+                />
+                <span className="text-xs text-muted-foreground">ms</span>
+              </div>
+              {errors.connection?.timeout && (
+                <p className="text-xs text-red-500">{errors.connection.timeout.message}</p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="pollInterval" className="text-xs">Poll Interval</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="pollInterval"
+                  type="number"
+                  {...register('pollInterval', { valueAsNumber: true })}
+                  placeholder="5000"
+                  className="h-9"
+                />
+                <span className="text-xs text-muted-foreground">ms</span>
+              </div>
+              {errors.pollInterval && (
+                <p className="text-xs text-red-500">{errors.pollInterval.message}</p>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -514,7 +549,7 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
                   }}
                 />
                 <Label htmlFor="rtu-useSlaveRange" className="cursor-pointer">
-                  Use as Discovery Target (scan slave range)
+                  Scan slave range
                 </Label>
               </div>
               {watch('connection.slaveRange') && (
@@ -548,84 +583,34 @@ export const ModbusConfigForm: React.FC<ModbusConfigFormProps> = ({
                 </div>
               )}
               <p className="text-xs text-muted-foreground">
-                Discovery targets scan a range of slave IDs to find devices
+                Scans a range of slave IDs to find devices
               </p>
             </div>
           </div>
         </div>
       )}
 
-      {/* Status Toggle - Compact */}
-      <div className="flex items-center justify-between p-3 border border-border rounded-lg">
-        <div className="flex items-center gap-1.5">
-          <Controller
-            name="enabled"
-            control={control}
-            render={({ field }) => (
+      <div
+        className="flex items-center"
+        style={{ columnGap: '12px', paddingTop: '10px', paddingBottom: '20px' }}
+      >
+        <Controller
+          name="enabled"
+          control={control}
+          render={({ field }) => (
+            <>
               <Checkbox
                 id="enabled"
                 checked={field.value}
                 onCheckedChange={field.onChange}
               />
-            )}
-          />
-          <Label htmlFor="enabled" className="font-normal cursor-pointer text-sm">
-            Device Enabled
-          </Label>
-        </div>
-        
-        {/* Advanced Settings Toggle */}
-        <button
-          type="button"
-          onClick={() => setShowAdvanced(!showAdvanced)}
-          className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
-        >
-          Advanced {showAdvanced ? '▼' : '▶'}
-        </button>
+              <Label htmlFor="enabled" className="font-normal cursor-pointer text-sm">
+                Enabled
+              </Label>
+            </>
+          )}
+        />
       </div>
-
-      {/* Advanced Settings - Collapsible */}
-      {showAdvanced && (
-        <div className="space-y-3 p-3 border border-border rounded-lg bg-muted/30">
-          <h3 className="text-xs font-semibold text-muted-foreground">Advanced Settings</h3>
-          
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="timeout" className="text-xs">Timeout</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="timeout"
-                  type="number"
-                  {...register('connection.timeout', { valueAsNumber: true })}
-                  placeholder="5000"
-                  className="h-9"
-                />
-                <span className="text-xs text-muted-foreground">ms</span>
-              </div>
-              {errors.connection?.timeout && (
-                <p className="text-xs text-red-500">{errors.connection.timeout.message}</p>
-              )}
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="pollInterval" className="text-xs">Poll Interval</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="pollInterval"
-                  type="number"
-                  {...register('pollInterval', { valueAsNumber: true })}
-                  placeholder="5000"
-                  className="h-9"
-                />
-                <span className="text-xs text-muted-foreground">ms</span>
-              </div>
-              {errors.pollInterval && (
-                <p className="text-xs text-red-500">{errors.pollInterval.message}</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

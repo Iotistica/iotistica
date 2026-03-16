@@ -13,6 +13,7 @@ import { MetricsHistoryProvider } from "./contexts/MetricsHistoryContext";
 import { MqttProvider } from "./contexts/MqttContext";
 import { SystemMetricsProvider } from "./contexts/SystemMetricsContext";
 import { FleetProvider } from "./contexts/FleetContext";
+import { Toaster } from "./components/ui/sonner";
 
 createRoot(document.getElementById("root")!).render(
   <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
@@ -31,6 +32,7 @@ createRoot(document.getElementById("root")!).render(
                     <Route path="/fleets/:fleetId" element={<App />} />
                     <Route path="*" element={<App />} />
                   </Routes>
+                  <Toaster />
                 </BrowserRouter>
               </MqttProvider>
             </SystemMetricsProvider>

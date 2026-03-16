@@ -129,7 +129,7 @@ export function generateDefaultTargetStateConfig(
         maxQueueSize: 1000,   // Max alerts in agent memory queue
         minConfidence: 0.7,   // Minimum confidence threshold to generate alerts (0-1)
       },
-      systemMetrics: [
+      metrics: [
         {
           name: 'cpu_usage',
           enabled: true,
