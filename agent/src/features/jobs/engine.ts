@@ -11,8 +11,8 @@ import {
   ActionHandlerInput,
   ActionCommandInput
 } from './types';
-import type { AgentLogger } from '../../../logging/agent-logger';
-import { LogComponents } from '../../../logging/types';
+import type { AgentLogger } from '../../logging/agent-logger';
+import { LogComponents } from '../../logging/types';
 
 /**
  * JobEngine - Manages execution of job actions and commands
