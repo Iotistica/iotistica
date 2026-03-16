@@ -3,7 +3,7 @@ import { DeviceSidebar, Device } from "./components/AgentSidebar";
 import { AddEditDeviceDialog } from "./components/AddEditAgentDialog";
 import { useWebSocketConnection, useWebSocket } from "./hooks/useWebSocket";
 import type { NetworkInterfaceData } from "./services/websocket";
-import { SystemMetrics } from "./components/SystemMetrics";
+import { SystemMetrics } from "./components/Overview";
 import { MqttPage } from "./pages/MqttPage";
 import { JobsPage } from "./pages/JobsPage";
 import { ApplicationsPage } from "./pages/ApplicationsPage";
@@ -14,7 +14,7 @@ import { SecurityPage } from "./pages/SecurityPage";
 import { Sheet, SheetContent } from "./components/ui/sheet";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
-import { Menu, Activity, BarChart3, Radio, CalendarClock, Package, Shield, FileText, Terminal, Layers, Plus, Home, Bell, HelpCircle, AlertOctagon } from "lucide-react";
+import { Menu, Activity, BarChart3, Radio, Package, Shield, FileText, Terminal, Layers, Plus, Home, Bell, HelpCircle, AlertOctagon } from "lucide-react";
 import { buildApiUrl } from "./config/api";
 import { SensorHealthDashboard } from "./pages/DeviceHealthDashboard";
 import { SensorsPage } from "./pages/DevicesPage";
@@ -55,7 +55,7 @@ export default function App() {
   const { fetchDeviceState } = useDeviceState();
   
   // Auth context
-  const { user, isAuthenticated, isLoading: isAuthLoading, login, logout } = useAuth();
+  const { user, isAuthenticated, isLoading: isAuthLoading, logout } = useAuth();
   
   // Fleet context - for auto-assigning devices to selected fleet
   const { selectedFleetId, setSelectedFleetId } = useFleet();
@@ -70,6 +70,13 @@ export default function App() {
     'metrics',
     'devices',
     'endpoints',
+    'logs',
+    'remote-access',
+    'settings',
+    'tags',
+    'usage',
+    'analytics',
+    'maintenance',
     'mqtt',
     'jobs',
     'applications',
@@ -92,6 +99,9 @@ export default function App() {
     'endpoints',
     'jobs',
     'applications',
+    'usage',
+    'analytics',
+    'maintenance',
     'logs',
     'remote-access',
     'settings',
@@ -217,10 +227,6 @@ export default function App() {
         
         // Only update fleet if URL fleet ID actually changed (not just device poll)
         if (lastUrlFleetIdRef.current !== currentPath.fleetId) {
-          console.log('[URL SYNC] URL fleet ID changed:', { 
-            from: lastUrlFleetIdRef.current, 
-            to: currentPath.fleetId
-          });
           lastUrlFleetIdRef.current = currentPath.fleetId;
           // Use fleet UUID directly from URL (don't convert to ID) - sidebar expects UUID
           const fleetUuid = currentPath.fleetId || device.fleet_uuid || '';
@@ -234,10 +240,7 @@ export default function App() {
       
       // Only update fleet if URL fleet ID actually changed
       if (lastUrlFleetIdRef.current !== currentPath.fleetId) {
-        console.log('[URL SYNC] URL fleet ID changed (fleet view):', { 
-          from: lastUrlFleetIdRef.current, 
-          to: currentPath.fleetId
-        });
+    
         lastUrlFleetIdRef.current = currentPath.fleetId;
         // Use fleet UUID directly from URL (don't convert to ID) - sidebar expects UUID
         setSelectedFleetId(currentPath.fleetId);
@@ -254,7 +257,6 @@ export default function App() {
       // Don't clear fleet selection when going to global view - preserve for restoration
       // when user returns via Home button
       if (lastUrlFleetIdRef.current !== undefined) {
-        console.log('[URL SYNC] Switched to global view, preserving fleet selection');
         lastUrlFleetIdRef.current = undefined;
         // REMOVED: setSelectedFleetId(''); - Keep fleet filter when going to global views
       }
@@ -335,10 +337,6 @@ export default function App() {
   }, [selectedFleetId, devices, selectedDeviceId, selectedDevice]); // Only depend on fleet changes
 
   const handleGlobalViewChange = useCallback((view: View) => {
-    console.log('[handleGlobalViewChange] Called with view:', view);
-    console.log('[handleGlobalViewChange] lastViewedAgent:', lastViewedAgent);
-    console.log('[handleGlobalViewChange] devices.length:', devices.length);
-    console.log('[handleGlobalViewChange] selectedFleetId:', selectedFleetId);
     
     if (view === 'home') {
       // Try to restore last viewed agent first
@@ -1545,7 +1543,7 @@ export default function App() {
               className="text-sm"
             >
               <BarChart3 className="w-4 h-4 mr-2" />
-              System
+              Overview
             </Button>
             <Button
               variant={currentView === 'devices' ? 'default' : 'ghost'}

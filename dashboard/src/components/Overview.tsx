@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Cpu, HardDrive, MemoryStick, Network, RefreshCw, AlertTriangle, AlertOctagon, Activity, Bell, Info, CheckCircle, XCircle } from "lucide-react";
+import { Cpu, HardDrive, MemoryStick, Network, RefreshCw, AlertTriangle, Bell, Info, XCircle } from "lucide-react";
 import { Card } from "./ui/card";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useSystemMetrics } from "@/contexts/SystemMetricsContext";
@@ -121,24 +121,17 @@ export function SystemMetrics({
       return;
     }
     
-    console.log('[SystemMetrics] Restoration check:', {
+    console.log('[Overview] Restoration check:', {
       deviceUuid: device.deviceUuid.substring(0, 8) + '...',
       persistedCount: persistedHistory.length,
       hasPersistedData: persistedHistory.length > 0
     });
     
     if (persistedHistory.length > 0) {
-      console.log('[SystemMetrics] Restoring from persisted history:', persistedHistory.length, 'points');
-      
+     
       // Filter persisted data to only include points from the last 30 minutes
       const thirtyMinutesAgo = Date.now() - (30 * 60 * 1000);
       const filteredHistory = persistedHistory.filter(point => point.timestamp >= thirtyMinutesAgo);
-      
-      console.log('[SystemMetrics] Filtered to last 30 minutes:', {
-        total: persistedHistory.length,
-        filtered: filteredHistory.length,
-        removed: persistedHistory.length - filteredHistory.length
-      });
       
       const cpu: Array<{ time: string; value: number }> = [];
       const memory: Array<{ time: string; used: number }> = [];
@@ -150,17 +143,12 @@ export function SystemMetrics({
         network.push({ time: point.time, download: point.networkRxMbps, upload: point.networkTxMbps });
       });
       
-      console.log('[SystemMetrics] Setting restored state:', {
-        cpuPoints: cpu.length,
-        memoryPoints: memory.length,
-        networkPoints: network.length
-      });
       
       setCpuHistory(cpu);
       setMemoryHistory(memory);
       setNetworkHistory(network);
     } else {
-      console.log('[SystemMetrics] No persisted data to restore');
+      console.log('[Overview] No persisted data to restore');
     }
     
     // Mark this device as restored to prevent re-running
@@ -345,7 +333,7 @@ export function SystemMetrics({
       );
 
       if (!response.ok) {
-        console.warn('[SystemMetrics] System info fetch failed:', response.status, response.statusText);
+        console.warn('[Overview] System info fetch failed:', response.status, response.statusText);
         return;
       }
 
@@ -362,7 +350,7 @@ export function SystemMetrics({
         macAddress: systemInfo.macAddress || systemInfo.mac_address || deviceInfo.mac_address || ''
       });
     } catch (error) {
-      console.warn('[SystemMetrics] Error fetching system info:', error);
+      console.warn('[Overview] Error fetching system info:', error);
     }
   }, [device.deviceUuid, handleSystemInfo]);
 
@@ -393,7 +381,7 @@ export function SystemMetrics({
       );
       
       if (!response.ok) {
-        console.error('[SystemMetrics] Processes fetch failed:', response.status, response.statusText);
+        console.error('[Overview] Processes fetch failed:', response.status, response.statusText);
         setProcessesLoading(false);
         return;
       }
@@ -404,7 +392,7 @@ export function SystemMetrics({
         setProcessesLoading(false);
       }
     } catch (error) {
-      console.error('[SystemMetrics] Error fetching processes:', error);
+      console.error('[Overview] Error fetching processes:', error);
       setProcessesLoading(false);
     }
   }, [device.deviceUuid]);
@@ -423,7 +411,7 @@ export function SystemMetrics({
   const fetchHistoricalData = useCallback(async (period: string) => {
     // Don't fetch data for offline devices
     if (device.status === 'offline') {
-      console.log('[SystemMetrics] Skipping metrics fetch - device is offline');
+      console.log('[Overview] Skipping metrics fetch - device is offline');
       setCpuHistory([]);
       setMemoryHistory([]);
       setNetworkHistory([]);
@@ -442,12 +430,12 @@ export function SystemMetrics({
         }
       );
       if (!response.ok) {
-        console.error('[SystemMetrics] Metrics fetch failed:', response.status, response.statusText);
+        console.error('[Overview] Metrics fetch failed:', response.status, response.statusText);
         return;
       }
       
       const data = await response.json();
-      console.log('[SystemMetrics] Fetched metrics:', { period, count: data.metrics?.length, data });
+      console.log('[Overview] Fetched metrics:', { period, count: data.metrics?.length, data });
       
       const cpu: Array<{ time: string; value: number }> = [];
       const memory: Array<{ time: string; used: number }> = [];
@@ -458,7 +446,7 @@ export function SystemMetrics({
         const firstTime = new Date(data.metrics[0].recorded_at);
         const lastTime = new Date(data.metrics[data.metrics.length - 1].recorded_at);
         const spanMinutes = (lastTime.getTime() - firstTime.getTime()) / 60000;
-        console.log('[SystemMetrics] Data time range:', {
+        console.log('[Overview] Data time range:', {
           first: firstTime.toISOString(),
           last: lastTime.toISOString(),
           spanMinutes: Math.round(spanMinutes),
@@ -545,7 +533,7 @@ export function SystemMetrics({
       );
 
       if (!response.ok) {
-        console.warn('[SystemMetrics] Incidents fetch failed:', response.status, response.statusText);
+        console.warn('[Overview] Incidents fetch failed:', response.status, response.statusText);
         setIncidents([]);
         return;
       }
@@ -558,7 +546,7 @@ export function SystemMetrics({
         setIncidents([]);
       }
     } catch (error) {
-      console.error('[SystemMetrics] Failed to fetch incidents:', error);
+      console.error('[Overview] Failed to fetch incidents:', error);
       setIncidents([]);
     } finally {
       setIncidentsLoading(false);
@@ -592,7 +580,7 @@ export function SystemMetrics({
   // Fetch historical data with HTTP polling (replaces WebSocket approach)
   // Polls at configured interval for all time periods (30min, 6h, 12h, 24h)
   useEffect(() => {
-    console.log('[SystemMetrics] Setting up HTTP polling for period:', timePeriod, 'interval:', refreshInterval, 's');
+    console.log('[Overview] Setting up HTTP polling for period:', timePeriod, 'interval:', refreshInterval, 's');
     
     // Initial fetch
     fetchHistoricalData(timePeriod);
@@ -600,12 +588,12 @@ export function SystemMetrics({
     // Set up polling if interval > 0
     if (refreshInterval > 0) {
       const interval = setInterval(() => {
-        console.log('[SystemMetrics] Polling fetch triggered');
+        console.log('[Overview] Polling fetch triggered');
         fetchHistoricalData(timePeriod);
       }, refreshInterval * 1000);
       
       return () => {
-        console.log('[SystemMetrics] Clearing polling interval');
+        console.log('[Overview] Clearing polling interval');
         clearInterval(interval);
       };
     }
@@ -624,7 +612,7 @@ export function SystemMetrics({
                           prevDeviceUuidRef.current !== device.deviceUuid;
     
     if (deviceChanged) {
-      console.log('[SystemMetrics] Device changed:', {
+      console.log('[Overview] Device changed:', {
         from: prevDeviceUuidRef.current?.substring(0, 8) + '...',
         to: device.deviceUuid.substring(0, 8) + '...',
         name: device.name,
@@ -645,7 +633,7 @@ export function SystemMetrics({
       setMemoryHistory([]);
       setNetworkHistory([]);
     } else if (prevDeviceUuidRef.current === null) {
-      console.log('[SystemMetrics] Initial mount for device:', {
+      console.log('[Overview] Initial mount for device:', {
         uuid: device.deviceUuid.substring(0, 8) + '...',
         name: device.name,
         status: device.status
