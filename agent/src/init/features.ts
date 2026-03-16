@@ -9,7 +9,7 @@ import type { AgentLogger } from '../logging/agent-logger';
 import type { DeviceInfo } from '../managers/types.js';
 import type { AgentInitContext } from './context.js';
 import { LogComponents } from '../logging/types';
-import { JobsFeature } from '../features/jobs/src/monitor.js';
+import { JobsFeature } from '../features/jobs/monitor.js';
 import { DiscoveryService } from '../features/adapters/discovery-service.js';
 
 import { SensorPublishFeature } from '../features/publish/index.js';
