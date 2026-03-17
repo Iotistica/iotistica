@@ -20,6 +20,7 @@ COPY package*.json ./
 RUN npm ci && \
     npm cache clean --force
 
+
 # Copy TypeScript config and source code
 COPY tsconfig*.json ./
 COPY src ./src

@@ -28,8 +28,8 @@ import {
 import { logger } from '../utils/logger';
 import deviceAuth, { deviceAuthFromBody } from '../middleware/device-auth';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
-import { redisLogQueue } from '../services/redis-log-queue';
-import { redisSensorQueue } from '../services/redis-device-queue';
+import { redisLogQueue } from '../services/logs-queue/redis-log-queue';
+import { redisSensorQueue } from '../services/device-queue';
 
 
 export const router = express.Router();

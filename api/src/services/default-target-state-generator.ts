@@ -75,33 +75,6 @@ interface LicenseData {
   };
 }
 
-interface SimulatorOptions {
-  deploymentType?: 'k8s-fleet' | 'edge-device' | 'standalone';
-  simulatorConfig?: {
-    modbus?: {
-      count: number;
-      startPort: number;
-      host: string;
-      profile?: string;
-    };
-    opcua?: {
-      count: number;
-      startPort: number;
-      host: string;
-    };
-    snmp?: {
-      ipRanges: string[];
-    };
-    bacnet?: {
-      discoveryTargets?: string[];  // Unicast discovery targets (recommended for containers)
-      broadcastAddress?: string;    // Legacy broadcast mode
-      port?: number;
-      timeout?: number;
-    };
-  };
-}
-
-
 /**
  * Generate default target state config
  * 

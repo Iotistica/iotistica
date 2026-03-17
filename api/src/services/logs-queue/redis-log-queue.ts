@@ -14,16 +14,16 @@
  */
 
 import Redis from 'ioredis';
-import { DeviceLogsModel } from '../db/models';
-import { logger } from '../utils/logger';
-import { query } from '../db/connection';
-import { getRedisIngestion, getRedisConsumer } from '../redis/client-factory';
+import { DeviceLogsModel } from '../../db/models';
+import { logger } from '../../utils/logger';
+import { query } from '../../db/connection';
+import { getRedisIngestion, getRedisConsumer } from '../../redis/client-factory';
 import {
   deviceLogsStreamKey,
   getTenantId,
   consumerGroupName,
   consumerName as makeConsumerName,
-} from '../redis/tenant-keys';
+} from '../../redis/tenant-keys';
 
 interface LogEntry {
   deviceUuid: string;
@@ -694,7 +694,7 @@ class RedisLogQueue {
     const { Readable } = await import('stream');
 
     // Get raw connection from pool
-    const poolWrapper = await import('../db/connection');
+    const poolWrapper = await import('../../db/connection');
     const pool = poolWrapper.default.pool as any; // Access underlying pg.Pool
     const client = await pool.connect();
 

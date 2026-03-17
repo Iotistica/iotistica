@@ -649,7 +649,7 @@ async function startServer() {
 
   // Start Redis log queue worker for batch processing
   try {
-    const { redisLogQueue } = await import('./services/redis-log-queue');
+    const { redisLogQueue } = await import('./services/logs-queue/redis-log-queue');
     await redisLogQueue.startWorker();
     logger.info('Redis log queue worker started');
   } catch (error) {
@@ -660,7 +660,7 @@ async function startServer() {
 
   // Start Redis sensor queue worker for batch processing
   try {
-    const { redisSensorQueue } = await import('./services/redis-device-queue');
+    const { redisSensorQueue } = await import('./services/device-queue');
     await redisSensorQueue.startWorker();
     logger.info('Redis sensor queue worker started');
   } catch (error) {
@@ -930,7 +930,7 @@ async function startServer() {
     
     // Stop Redis log queue worker (graceful shutdown with final batch processing)
     try {
-      const { redisLogQueue } = await import('./services/redis-log-queue');
+      const { redisLogQueue } = await import('./services/logs-queue/redis-log-queue');
       await redisLogQueue.stopWorker();
       logger.info('Redis log queue worker stopped');
     } catch (error) {
@@ -939,7 +939,7 @@ async function startServer() {
     
     // Stop Redis sensor queue worker (graceful shutdown with final batch processing)
     try {
-      const { redisSensorQueue } = await import('./services/redis-device-queue');
+      const { redisSensorQueue } = await import('./services/device-queue');
       await redisSensorQueue.stopWorker();
       logger.info('Redis sensor queue worker stopped');
     } catch (error) {
