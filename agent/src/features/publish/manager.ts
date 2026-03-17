@@ -419,11 +419,41 @@ export class PublishManager extends EventEmitter {
       return `${identifier}_${fieldName}`;
     };
 
+    const resolveExplicitDeviceId = (...candidates: any[]): string | undefined => {
+      for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim()) {
+          return candidate.trim();
+        }
+
+        if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+          return String(candidate);
+        }
+      }
+
+      return undefined;
+    };
+
+    const logMissingExplicitDeviceId = (details: Record<string, unknown>): void => {
+      this.logger?.warn('[ANOMALY_FEED] No explicit deviceId in payload; using fallback identity', {
+        endpoint: sensorName,
+        protocol: this.protocol,
+        ...details,
+      });
+    };
+
     if (typeof data === 'number') {
       // Direct numeric value
       const metricName = prefix || 'value';
       const fullMetricName = buildEndpointMetricName(undefined, metricName);
-      
+      const endpointId = sensorName;
+      const fallbackDeviceId = endpointId ? `endpoint:${endpointId}` : undefined;
+
+      logMissingExplicitDeviceId({
+        metricName: fullMetricName,
+        fallbackDeviceId,
+        reason: 'direct_numeric_payload',
+      });
+
       // Skip if already processed (use batch-level Set)
       if (this.batchProcessedMetrics.has(fullMetricName)) {
         return;
@@ -439,9 +469,10 @@ export class PublishManager extends EventEmitter {
         unit: this.inferUnit(metricName),
         timestamp: timestampMs,
         quality: 'GOOD',
-        deviceId: this.deviceUuid,
+        deviceId: fallbackDeviceId,
         tags: {
           sensorName,
+          endpointId,
           field: metricName,
         },
       });
@@ -455,14 +486,28 @@ export class PublishManager extends EventEmitter {
         data.value !== undefined
       ) {
         const deviceName = data.deviceName;
-        const endpointUuid = data.device_uuid || data.deviceUuid;
+        const payloadDeviceId = data.deviceId || data.device_id;
+        const resolvedDeviceId = resolveExplicitDeviceId(payloadDeviceId);
+        const payloadDeviceUuid = data.device_uuid || data.deviceUuid;
         const fieldName = data.metric || data.name;
         const value = toFiniteNumber(data.value);
         const quality = data.quality || 'GOOD';
         
         // Feed if numeric value
         if (value !== undefined) {
-          const fullMetricName = buildEndpointMetricName(endpointUuid || deviceName, fieldName);
+          const endpointId = sensorName;
+          const effectiveDeviceId = resolvedDeviceId || (endpointId ? `endpoint:${endpointId}` : undefined);
+
+          if (!resolvedDeviceId) {
+            logMissingExplicitDeviceId({
+              metricName: fieldName,
+              deviceName,
+              fallbackDeviceId: effectiveDeviceId,
+              reason: 'reading_object_missing_device_id',
+            });
+          }
+
+          const fullMetricName = buildEndpointMetricName(payloadDeviceUuid || deviceName, fieldName);
           
           // Skip if already processed (use batch-level Set)
           if (this.batchProcessedMetrics.has(fullMetricName)) {
@@ -479,9 +524,11 @@ export class PublishManager extends EventEmitter {
             unit: data.unit || this.inferUnit(fieldName),
             timestamp: timestampMs,
             quality: quality === 'GOOD' || quality === 'Good' ? 'GOOD' : 'BAD',
-            deviceId: this.deviceUuid,
+            deviceId: effectiveDeviceId,
             tags: {
               sensorName,
+              endpointId,
+              ...(payloadDeviceUuid && { deviceUuid: payloadDeviceUuid }),
               deviceName,
               fieldName,
             },
@@ -504,7 +551,9 @@ export class PublishManager extends EventEmitter {
         for (const reading of data) {
           if (typeof reading === 'object' && reading !== null) {
             const deviceName = reading.deviceName || sensorName;
-            const endpointUuid = reading.device_uuid || reading.deviceUuid;
+            const payloadDeviceId = reading.deviceId || reading.device_id;
+            const resolvedDeviceId = resolveExplicitDeviceId(payloadDeviceId);
+            const payloadDeviceUuid = reading.device_uuid || reading.deviceUuid;
             // Support metric field (standard) or name field (legacy OPC-UA)
             const fieldName = reading.metric || reading.name;
             const value = toFiniteNumber(reading.value);
@@ -512,7 +561,19 @@ export class PublishManager extends EventEmitter {
             
             // Feed if we have both fieldName and numeric value
             if (fieldName && value !== undefined) {
-              const fullMetricName = buildEndpointMetricName(endpointUuid || deviceName, fieldName);
+              const endpointId = sensorName;
+              const effectiveDeviceId = resolvedDeviceId || (endpointId ? `endpoint:${endpointId}` : undefined);
+
+              if (!resolvedDeviceId) {
+                logMissingExplicitDeviceId({
+                  metricName: fieldName,
+                  deviceName,
+                  fallbackDeviceId: effectiveDeviceId,
+                  reason: 'readings_array_missing_device_id',
+                });
+              }
+
+              const fullMetricName = buildEndpointMetricName(payloadDeviceUuid || deviceName, fieldName);
               
               // Skip if already processed (use batch-level Set)
               if (this.batchProcessedMetrics.has(fullMetricName)) {
@@ -529,9 +590,11 @@ export class PublishManager extends EventEmitter {
                 unit: this.inferUnit(fieldName),
                 timestamp: timestampMs,
                 quality: quality === 'GOOD' || quality === 'Good' ? 'GOOD' : 'BAD',
-                deviceId: this.deviceUuid,
+                deviceId: effectiveDeviceId,
                 tags: {
                   sensorName,
+                  endpointId,
+                  ...(payloadDeviceUuid && { deviceUuid: payloadDeviceUuid }),
                   deviceName,
                   fieldName,
                 },
@@ -555,10 +618,25 @@ export class PublishManager extends EventEmitter {
         if (typeof value === 'number') {
           // Feed numeric field
           const metricName = prefix ? `${prefix}_${key}` : key;
-          const endpointUuid = (typeof data.device_uuid === 'string' && data.device_uuid) ||
+          const payloadDeviceId = (typeof data.deviceId === 'string' && data.deviceId) ||
+            (typeof data.device_id === 'string' && data.device_id) ||
+            undefined;
+          const resolvedDeviceId = resolveExplicitDeviceId(payloadDeviceId);
+          const payloadDeviceUuid = (typeof data.device_uuid === 'string' && data.device_uuid) ||
             (typeof data.deviceUuid === 'string' && data.deviceUuid) ||
             undefined;
-          const fullMetricName = buildEndpointMetricName(endpointUuid, metricName);
+          const endpointId = sensorName;
+          const effectiveDeviceId = resolvedDeviceId || (endpointId ? `endpoint:${endpointId}` : undefined);
+          const fullMetricName = buildEndpointMetricName(payloadDeviceUuid, metricName);
+
+          if (!resolvedDeviceId) {
+            logMissingExplicitDeviceId({
+              metricName: fullMetricName,
+              field: metricName,
+              fallbackDeviceId: effectiveDeviceId,
+              reason: 'nested_numeric_missing_device_id',
+            });
+          }
           
           // Skip if already processed (use batch-level Set)
           if (this.batchProcessedMetrics.has(fullMetricName)) {
@@ -575,9 +653,11 @@ export class PublishManager extends EventEmitter {
             unit: this.inferUnit(key),
             timestamp: timestampMs,
             quality: 'GOOD',
-            deviceId: this.deviceUuid,
+            deviceId: effectiveDeviceId,
             tags: {
               sensorName,
+              endpointId,
+              ...(payloadDeviceUuid && { deviceUuid: payloadDeviceUuid }),
               field: metricName,
             },
           });

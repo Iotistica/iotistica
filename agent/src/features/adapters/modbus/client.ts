@@ -33,6 +33,8 @@ export class ModbusClient {
   
   // Precomputed batches (computed once, reused every poll)
   private precomputedBatches: Map<number, any[][]> = new Map();
+
+  private readonly stableDeviceId: string;
   
   // Exponential backoff for reconnection attempts
   private currentRetryDelay: number;
@@ -54,6 +56,7 @@ export class ModbusClient {
     this.logger = logger;
     this.client = new ModbusRTU();
     this.currentRetryDelay = this.MIN_RETRY_DELAY;
+    this.stableDeviceId = this.buildStableDeviceId();
     
     // Initialize gap tolerance (configurable per device, default: 2)
     this.GAP_TOLERANCE = (device as any).gapTolerance ?? 2;
@@ -66,6 +69,20 @@ export class ModbusClient {
     
     // Precompute register batches (do this once, reuse every poll)
     this.precomputeBatches();
+  }
+
+  private buildStableDeviceId(): string {
+    const slaveId = this.device.slaveId;
+    const connection = this.device.connection;
+
+    if (connection.type === ModbusConnectionType.TCP) {
+      const host = connection.host || 'unknown-host';
+      const port = connection.port || 502;
+      return `modbus:tcp:${host}:${port}:slave:${slaveId}`;
+    }
+
+    const serialPort = connection.serialPort || 'unknown-port';
+    return `modbus:serial:${serialPort}:slave:${slaveId}`;
   }
   
   /**
@@ -396,6 +413,7 @@ export class ModbusClient {
             
             dataPoints.push({
               deviceName: this.device.name,
+              deviceId: this.stableDeviceId,
               metric: register.name,
               value: value,
               unit: register.unit || '',
@@ -427,6 +445,7 @@ export class ModbusClient {
             for (const result of batchResults) {
               dataPoints.push({
                 deviceName: this.device.name,
+                deviceId: this.stableDeviceId,
                 metric: result.register.name,
                 value: result.value,
                 unit: result.register.unit || '',
@@ -705,6 +724,7 @@ export class ModbusClient {
         
         return [{
           deviceName: this.device.name,
+          deviceId: this.stableDeviceId,
           metric: register.name,
           value: value,
           unit: register.unit || '',
@@ -727,6 +747,7 @@ export class ModbusClient {
       
       return batchResults.map(result => ({
         deviceName: this.device.name,
+        deviceId: this.stableDeviceId,
         metric: result.register.name,
         value: result.value,
         unit: result.register.unit || '',
@@ -857,6 +878,7 @@ export class ModbusClient {
     
     return {
       deviceName: this.device.name,
+      deviceId: this.stableDeviceId,
       metric: register.name,
       value: null,
       unit: register.unit || '',
@@ -967,6 +989,7 @@ export class ModbusClient {
     const timestamp = new Date().toISOString();
     return this.device.registers.map(register => ({
       deviceName: this.device.name,
+      deviceId: this.stableDeviceId,
       metric: register.name,
       value: null,
       unit: register.unit || '',

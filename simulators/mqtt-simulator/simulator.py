@@ -162,6 +162,8 @@ class MqttSimulator:
 
         payload = {
             self.timestamp_field: timestamp_value,
+            "deviceId": self.device_id,
+            "device_id": self.device_id,
         }
 
         for pub in publishers:
@@ -173,6 +175,8 @@ class MqttSimulator:
         for pub in self.publishers:
             value = pub.next_value(now)
             payload = pub.build_payload(value)
+            payload["deviceId"] = self.device_id
+            payload["device_id"] = self.device_id
             msg = json.dumps(payload, separators=(",", ":"))
             info = self.client.publish(pub.topic, msg, qos=pub.qos, retain=pub.retain)
             if info.rc != mqtt.MQTT_ERR_SUCCESS:

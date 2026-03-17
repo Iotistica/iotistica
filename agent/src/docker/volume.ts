@@ -9,8 +9,8 @@ import * as logger from '../logging';
 import * as ComposeUtils from './utils';
 
 import type {
-	Volume as VolumeIface,
-	VolumeConfig,
+	DockerVolume as VolumeIface,
+	DockerVolumeConfig as VolumeConfig,
 	ComposeVolumeConfig,
 	LabelObject,
 } from './types';

@@ -128,6 +128,32 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
   private readonly REDISCOVERY_COOLDOWN_MS = 30000; // 30 seconds
   private lastRediscoveryNeeded: Map<string, number> = new Map();
 
+  private extractNodeScope(nodeId: string): string {
+    const stringNodeMatch = nodeId.match(/^ns=(\d+);s=(.+)$/);
+    if (stringNodeMatch) {
+      const namespace = stringNodeMatch[1];
+      const identifier = stringNodeMatch[2].trim();
+      const segments = identifier.split(/[\\/.]/).filter(Boolean);
+      const scope = segments.length > 1 ? segments.slice(0, -1).join('/') : identifier;
+      return `ns${namespace}:s:${scope}`;
+    }
+
+    const numericNodeMatch = nodeId.match(/^ns=(\d+);i=(\d+)$/);
+    if (numericNodeMatch) {
+      return `ns${numericNodeMatch[1]}:i:${numericNodeMatch[2]}`;
+    }
+
+    return nodeId.replace(/\s+/g, '_');
+  }
+
+  private buildStableNodeDeviceId(device: OPCUADeviceConfig, dataPoint: OPCUADataPoint): string {
+    const endpointKey = device.connection.endpointUrl
+      .replace(/^opc\.tcp:\/\//i, '')
+      .toLowerCase();
+    const nodeScope = this.extractNodeScope(dataPoint.nodeId);
+    return `opcua:${endpointKey}:${nodeScope}`;
+  }
+
   /**
    * Creates a new OPC-UA adapter instance
    * 
@@ -519,6 +545,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
             const dataPoint: SensorDataPoint = {
               timestamp: new Date().toISOString(),
               deviceName,
+              deviceId: this.buildStableNodeDeviceId(device, dp),
               metric: dp.name,
               value: dataValue.value?.value ?? null,
               unit: dp.unit || '',
@@ -1464,6 +1491,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
         results.push({
           timestamp,
           deviceName,
+          deviceId: this.buildStableNodeDeviceId(device, dp),
           metric: dp.name,
           value: null,
           unit: dp.unit || '',
@@ -1490,6 +1518,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       results.push({
         timestamp,
         deviceName,
+        deviceId: this.buildStableNodeDeviceId(device, dp),
         metric: dp.name,
         value,
         unit: dp.unit || '',

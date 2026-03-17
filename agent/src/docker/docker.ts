@@ -8,7 +8,7 @@
 
 import { Readable } from 'stream';
 import { BaseOrchestratorDriver } from './types';
-import ContainerManager from '../docker/container-manager';
+import ContainerManager from './container-manager';
 import type {
 	TargetState,
 	CurrentState,

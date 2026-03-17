@@ -592,6 +592,7 @@ export class MqttAdapter extends EventEmitter {
     rawValue: any,
     unit: string,
     type: string | undefined,
+    deviceId: string | undefined,
     topic: string,
     now: string,
     retain: boolean
@@ -600,6 +601,7 @@ export class MqttAdapter extends EventEmitter {
 
     return {
       deviceName: device.name,
+      ...(deviceId && { deviceId }),
       metric: metric || topic,
       value,
       unit,
@@ -607,6 +609,24 @@ export class MqttAdapter extends EventEmitter {
       quality: retain ? 'UNCERTAIN' : 'GOOD',
       ...(retain && { qualityCode: 'RETAINED_MESSAGE' })
     };
+  }
+
+  private resolveMessageDeviceId(device: MqttDevice, parsed: unknown): string | undefined {
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const candidate = (parsed as any).deviceId ?? (parsed as any).device_id;
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+      if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+        return String(candidate);
+      }
+    }
+
+    if (typeof device.deviceId === 'string' && device.deviceId.trim()) {
+      return device.deviceId.trim();
+    }
+
+    return undefined;
   }
 
   /**
@@ -654,6 +674,7 @@ export class MqttAdapter extends EventEmitter {
       const payloadTimestamp = timestampPath && typeof parsed === 'object' && parsed !== null
         ? this.resolveTimestamp(this.getFieldFast(parsed, timestampPath), now)
         : now;
+      const resolvedDeviceId = this.resolveMessageDeviceId(device, parsed);
       const points: SensorDataPoint[] = [];
 
       const compiledDeviceMetrics = this.compiledMetrics.get(device.name);
@@ -678,6 +699,7 @@ export class MqttAdapter extends EventEmitter {
                 rawValue,
                 metricConfig.unit || '',
                 metricConfig.type,
+                resolvedDeviceId,
                 topic,
                 payloadTimestamp,
                 retain
@@ -713,6 +735,7 @@ export class MqttAdapter extends EventEmitter {
               rawValue,
               '',
               undefined,
+              resolvedDeviceId,
               topic,
               payloadTimestamp,
               retain
@@ -740,6 +763,7 @@ export class MqttAdapter extends EventEmitter {
           singleSource,
           device.unit || '',
           device.dataType,
+          resolvedDeviceId,
           topic,
           payloadTimestamp,
           retain

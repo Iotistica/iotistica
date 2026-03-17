@@ -21,7 +21,7 @@ import type {
 	ConfigStep,
 	ConfigReconciliationResult,
 	ProtocolAdapterDevice,
-} from '../drivers/types.js';
+} from '../docker/types.js';
 
 // ==================== CONFIG TYPES ====================
 

@@ -27,7 +27,7 @@ import type Docker from 'dockerode';
 import { DockerManager } from './docker-manager';
 import { RetryManager } from './retry-manager';
 import { HealthCheckManager } from './health-check-manager';
-import { HealthProbe } from './types/health-check';
+import { ContainerHealthProbe as HealthProbe } from './types';
 import * as db from '../db/connection';
 import type { ContainerLogMonitor } from '../logging/docker-monitor';
 import type { AgentLogger } from '../logging/agent-logger';

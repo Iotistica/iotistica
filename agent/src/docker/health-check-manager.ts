@@ -12,13 +12,13 @@ import { EventEmitter } from 'events';
 import Docker from 'dockerode';
 import { HealthCheckExecutor } from './health-check-executor';
 import {
-  HealthProbe,
+  ContainerHealthProbe as HealthProbe,
   ProbeState,
   ProbeType,
   ContainerHealth,
   HealthStatus,
   HealthCheckResult,
-} from './types/health-check';
+} from './types';
 
 export interface HealthCheckConfig {
   containerId: string;

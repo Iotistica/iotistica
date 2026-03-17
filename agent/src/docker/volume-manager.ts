@@ -6,7 +6,7 @@ import { isNotFoundError, InternalInconsistencyError } from '../lib/errors';
 import { docker } from '../lib/docker-utils';
 import * as logger from '../logging';
 import { ResourceRecreationAttemptError } from './errors';
-import type { VolumeConfig } from './types';
+import type { DockerVolumeConfig as VolumeConfig } from './types';
 import { Volume } from './volume';
 
 /**

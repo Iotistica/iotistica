@@ -225,8 +225,9 @@ export interface AnomalyConfig {
 	};
 	storage?: {
 		retention: number;       // Days to retain anomaly history
-		dbPath?: string;  // Optional - db connection takes precedence
-		minSamples?: number; // Minimum samples required before saving baseline (default: 5)
+		dbPath?: string;         // Optional - db connection takes precedence
+		minSamples?: number;     // Minimum samples required before saving baseline (default: 5)
+		baselineMaxAgeDays?: number; // Max age in days before a loaded baseline is discarded (default: 7)
 	};
 	ml?: {
 		enabled: boolean;

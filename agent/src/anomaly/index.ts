@@ -27,7 +27,7 @@ import { getDetector } from './detectors';
 import { AlertManager } from './alert-manager';
 import { LINEAR_PREDICTOR_LOOKBACK, LinearPredictor, MIN_TIME_TO_THRESHOLD_CONFIDENCE, recordForecastResult, shouldPublishForecast, shouldRunForecast } from './forecaster';
 import type { ForecastCadenceConfig, ForecastCadenceState, Prediction } from './forecaster';
-import { AnomalyStorageService } from './storage';
+import { AnomalyStorageService, type AnomalyBaselineRecord } from './storage';
 import { getTimeSlot, getMinimumSamplesForSeasonalBaseline } from './seasonality';
 import { normalizeDeviceState } from './device-state';
 
@@ -138,7 +138,9 @@ export class AnomalyDetectionService {
 		if (!this.enabled) return;
 
 		const normalizedState = this.resolveDeviceState(dataPoint);
+		const normalizedDeviceId = this.resolveDeviceId(dataPoint);
 		dataPoint.deviceState = normalizedState;
+		dataPoint.deviceId = normalizedDeviceId;
 		
 		// Skip BAD quality data
 		if (dataPoint.quality === 'BAD') {
@@ -185,7 +187,7 @@ export class AnomalyDetectionService {
 		});
 		
 		// Get or create buffer
-		const bufferKey = this.getBufferKey(dataPoint.metric, normalizedState);
+		const bufferKey = this.getBufferKey(dataPoint.metric, normalizedState, normalizedDeviceId);
 		let buffer = this.buffers.get(bufferKey);
 		if (!buffer) {
 			buffer = createBuffer(metricConfig.windowSize);
@@ -308,7 +310,12 @@ export class AnomalyDetectionService {
 				warmupMs: this.warmupPeriodMs,
 			});
 			// Still update buffers and calculate scores for learning, just don't alert
-			this.anomalyScores.set(dataPoint.metric, 0.0);
+			const warmupKey = this.getBufferKey(
+				dataPoint.metric,
+				this.resolveDeviceState(dataPoint),
+				this.resolveDeviceId(dataPoint)
+			);
+			this.anomalyScores.set(warmupKey, 0.0);
 			return;
 		}
 		
@@ -323,6 +330,7 @@ export class AnomalyDetectionService {
 		// If you need scenario isolation, clear anomaly_baselines table when changing scenarios
 		let dbBaseline: any = null;
 		const deviceState = this.resolveDeviceState(dataPoint);
+		const deviceId = this.resolveDeviceId(dataPoint);
 		if (this.storage) {
 			try {
 				dbBaseline = await this.storage.getLatestBaseline(
@@ -330,7 +338,8 @@ export class AnomalyDetectionService {
 					timeSlot,
 					minimumSamples,
 					null, // Profile filter disabled - baselines shared across scenarios
-					deviceState
+					deviceState,
+					deviceId
 				);
 				if (dbBaseline) {
 					this.logger?.debugSync('[ANOMALY] Loaded baseline from database', {
@@ -353,6 +362,18 @@ export class AnomalyDetectionService {
 					seasonalityPattern,
 				});
 			}
+		}
+
+		// Validate baseline before using it for detection.
+		// Protects against stale data, state mismatches, metric identity drift, and insufficient samples.
+		if (dbBaseline && !this.isBaselineValid(dbBaseline, dataPoint, metricConfig, timeSlot, minimumSamples)) {
+			this.logger?.debugSync('[ANOMALY] Baseline failed validation -- falling back to buffer stats', {
+				component: LogComponents.metrics,
+				metric: dataPoint.metric,
+				deviceState,
+				timeSlot,
+			});
+			dbBaseline = null;
 		}
 		
 		// Build list of methods to run
@@ -426,7 +447,7 @@ export class AnomalyDetectionService {
 		}
 		
 		// Cache the anomaly score for this metric (0.0-1.0 range)
-		this.anomalyScores.set(this.getBufferKey(dataPoint.metric, deviceState), maxConfidence);
+		this.anomalyScores.set(this.getBufferKey(dataPoint.metric, deviceState, deviceId), maxConfidence);
 		
 		this.logger?.debugSync('[ANOMALY] Detection complete', {
 			component: LogComponents.metrics,
@@ -437,7 +458,7 @@ export class AnomalyDetectionService {
 		});
 		
 		// Cache metadata for ML training and debugging
-		this.anomalyMetadata.set(this.getBufferKey(dataPoint.metric, deviceState), {
+		this.anomalyMetadata.set(this.getBufferKey(dataPoint.metric, deviceState, deviceId), {
 			threshold: metricConfig.minConfidence || this.config.alerts.minConfidence || 0.7,
 			methods: methodsToRun,
 			samples: buffer.size
@@ -1167,15 +1188,16 @@ export class AnomalyDetectionService {
 		const savePromises: Promise<void>[] = [];
 		
 		for (const [bufferKey, buffer] of this.buffers.entries()) {
-			const { metricName, deviceState } = this.parseBufferKey(bufferKey);
+			const { metricName, deviceState, deviceId } = this.parseBufferKey(bufferKey);
 			if (buffer.size >= minSamples) {
 				const profile = this.getProfileForMetric(metricName);
 				savePromises.push(
-					this.storage.storeBaseline(metricName, buffer, now, -1, profile, deviceState).catch(error => {
+					this.storage.storeBaseline(metricName, buffer, now, -1, profile, deviceState, deviceId).catch(error => {
 						this.logger?.errorSync('Failed to save baseline', error as Error, {
 							component: LogComponents.metrics,
 							metric: metricName,
 							deviceState,
+							deviceId,
 							profile,
 						});
 					})
@@ -1186,6 +1208,7 @@ export class AnomalyDetectionService {
 					component: LogComponents.metrics,
 					metric: metricName,
 					deviceState,
+					deviceId,
 					bufferSize: buffer.size,
 					required: minSamples,
 				});
@@ -1300,21 +1323,130 @@ export class AnomalyDetectionService {
 		return null; // System metric or no profile mapping
 	}
 
-	private getBufferKey(metricName: string, deviceState: CanonicalDeviceState): string {
-		return `${metricName}::${deviceState}`;
-	}
-
-	private parseBufferKey(bufferKey: string): { metricName: string; deviceState: CanonicalDeviceState } {
-		const separatorIndex = bufferKey.lastIndexOf('::');
-		if (separatorIndex === -1) {
-			return { metricName: bufferKey, deviceState: 'unknown' };
+	/**
+	 * Validate a baseline loaded from storage before using it for anomaly detection.
+	 *
+	 * Checks (all must pass):
+	 *   1. metric        — must match the current data point metric
+	 *   2. device_state  — must match the resolved device state
+	 *   3. sample_count  — must meet the minimum samples requirement
+	 *   4. calculated_at — must not exceed max age (default: 7 days, configurable via storage.baselineMaxAgeDays)
+	 *   5. profile       — must match current profile when both sides are non-null
+	 *   6. time_slot     — must match current time slot when seasonality is active
+	 *
+	 * Returns false if any check fails; the caller should set dbBaseline = null and rely on buffer stats.
+	 */
+	private isBaselineValid(
+		baseline: AnomalyBaselineRecord,
+		dataPoint: DataPoint,
+		config: MetricConfig,
+		timeSlot: number,
+		minimumSamples: number
+	): boolean {
+		// 1. Metric identity
+		if (baseline.metric !== dataPoint.metric) {
+			this.logger?.warnSync('[ANOMALY] Baseline metric mismatch — discarding', {
+				component: LogComponents.metrics,
+				baselineMetric: baseline.metric,
+				currentMetric: dataPoint.metric,
+			});
+			return false;
 		}
 
-		const metricName = bufferKey.slice(0, separatorIndex);
-		const state = bufferKey.slice(separatorIndex + 2) as CanonicalDeviceState;
+		// 2. Device state
+		const currentState = this.resolveDeviceState(dataPoint);
+		if (baseline.device_state !== currentState) {
+			this.logger?.debugSync('[ANOMALY] Baseline device_state mismatch — discarding', {
+				component: LogComponents.metrics,
+				metric: dataPoint.metric,
+				baselineState: baseline.device_state,
+				currentState,
+			});
+			return false;
+		}
+
+		// 3. Minimum samples
+		if (baseline.sample_count < minimumSamples) {
+			this.logger?.debugSync('[ANOMALY] Baseline sample_count below minimum — discarding', {
+				component: LogComponents.metrics,
+				metric: dataPoint.metric,
+				baselineSamples: baseline.sample_count,
+				minimumSamples,
+			});
+			return false;
+		}
+
+		// 4. Baseline age
+		const maxAgeDays = this.config.storage?.baselineMaxAgeDays ?? 7;
+		const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+		const ageMs = Date.now() - baseline.calculated_at;
+		if (ageMs > maxAgeMs) {
+			this.logger?.warnSync('[ANOMALY] Baseline is stale — discarding', {
+				component: LogComponents.metrics,
+				metric: dataPoint.metric,
+				ageHours: Math.round(ageMs / 3600000),
+				maxAgeDays,
+			});
+			return false;
+		}
+
+		// 5. Profile — only reject when both sides explicitly specify a profile and they differ
+		const currentProfile = this.getProfileForMetric(dataPoint.metric);
+		if (currentProfile !== null && baseline.profile !== null && baseline.profile !== currentProfile) {
+			this.logger?.debugSync('[ANOMALY] Baseline profile mismatch — discarding', {
+				component: LogComponents.metrics,
+				metric: dataPoint.metric,
+				baselineProfile: baseline.profile,
+				currentProfile,
+			});
+			return false;
+		}
+
+		// 6. Time slot — only check when seasonality is active and the baseline is not an overall (-1) slot
+		const seasonality = config.seasonality || 'none';
+		if (seasonality !== 'none' && baseline.time_slot !== -1 && baseline.time_slot !== timeSlot) {
+			this.logger?.debugSync('[ANOMALY] Baseline time_slot mismatch — discarding', {
+				component: LogComponents.metrics,
+				metric: dataPoint.metric,
+				baselineTimeSlot: baseline.time_slot,
+				currentTimeSlot: timeSlot,
+				seasonality,
+			});
+			return false;
+		}
+
+		return true;
+	}
+
+	private getBufferKey(metricName: string, deviceState: CanonicalDeviceState, deviceId: string): string {
+		return `${deviceId}::${deviceState}::${metricName}`;
+	}
+
+	private parseBufferKey(bufferKey: string): { metricName: string; deviceState: CanonicalDeviceState; deviceId: string } {
+		const lastSeparator = bufferKey.lastIndexOf('::');
+		if (lastSeparator === -1) {
+			return { metricName: bufferKey, deviceState: 'unknown', deviceId: 'unknown' };
+		}
+
+		const secondLastSeparator = bufferKey.lastIndexOf('::', lastSeparator - 1);
+		if (secondLastSeparator === -1) {
+			// Legacy key format: metric::state
+			const metricName = bufferKey.slice(0, lastSeparator);
+			const state = bufferKey.slice(lastSeparator + 2) as CanonicalDeviceState;
+			return {
+				metricName,
+				deviceState: state || 'unknown',
+				deviceId: 'unknown',
+			};
+		}
+
+		const deviceId = bufferKey.slice(0, secondLastSeparator) || 'unknown';
+		const state = bufferKey.slice(secondLastSeparator + 2, lastSeparator) as CanonicalDeviceState;
+		const metricName = bufferKey.slice(lastSeparator + 2);
 		return {
 			metricName,
 			deviceState: state || 'unknown',
+			deviceId,
 		};
 	}
 
@@ -1322,5 +1454,28 @@ export class AnomalyDetectionService {
 		const protocol = dataPoint.protocol || this.deviceType || 'system';
 		const candidate = dataPoint.deviceState ?? dataPoint.rawDeviceState ?? dataPoint.tags?.deviceState ?? dataPoint.tags?.state;
 		return normalizeDeviceState(protocol, candidate);
+	}
+
+	private resolveDeviceId(dataPoint: DataPoint): string {
+		const candidate =
+			dataPoint.deviceId ??
+			dataPoint.tags?.deviceId ??
+			dataPoint.tags?.endpointId ??
+			dataPoint.tags?.containerId ??
+			dataPoint.tags?.deviceUuid;
+
+		if (typeof candidate === 'string' && candidate.trim().length > 0) {
+			return candidate.trim();
+		}
+
+		if (dataPoint.source === 'system') {
+			return 'system-endpoint';
+		}
+
+		if (dataPoint.source === 'container') {
+			return 'unknown-container';
+		}
+
+		return 'unknown-device';
 	}
 }

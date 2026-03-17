@@ -14,7 +14,7 @@ import {
   HttpHealthCheck,
   TcpHealthCheck,
   ExecHealthCheck,
-} from './types/health-check';
+} from './types';
 
 export class HealthCheckExecutor {
   private docker: Docker;

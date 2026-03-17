@@ -38,6 +38,7 @@ export interface AnomalyAlertRecord {
 export interface AnomalyBaselineRecord {
 	id?: number;
 	metric: string;
+	device_id: string;
 	profile: string | null; // Profile config identifier (e.g., 'Generic', 'COMAP')
 	time_slot: number; // -1 for overall, 0-1 for day/night, 0-23 for hourly, 0-167 for weekly
 	device_state: CanonicalDeviceState;
@@ -166,7 +167,8 @@ export class AnomalyStorageService {
 		calculatedAt: number,
 		timeSlot: number = -1, // -1 = overall baseline (default)
 		profile: string | null = null, // Profile identifier (null for system metrics)
-		deviceState: CanonicalDeviceState = 'unknown'
+		deviceState: CanonicalDeviceState = 'unknown',
+		deviceId: string = 'unknown-device'
 	): Promise<void> {
 		try {
 			// Calculate percentiles for IQR
@@ -179,6 +181,7 @@ export class AnomalyStorageService {
 
 			const record: AnomalyBaselineRecord = {
 				metric,
+				device_id: deviceId,
 				profile,
 				time_slot: timeSlot,
 				device_state: deviceState,
@@ -200,6 +203,7 @@ export class AnomalyStorageService {
 			this.logger?.debugSync('Inserting baseline record', {
 				component: LogComponents.metrics,
 				metric,
+				device_id: deviceId,
 				device_state: deviceState,
 				sample_count: buffer.size,
 				mean: record.mean,
@@ -211,18 +215,24 @@ export class AnomalyStorageService {
 		try {
 			await this.db('anomaly_baselines')
 				.insert(record)
-				.onConflict(['metric', 'profile', 'time_slot', 'device_state'])
+				.onConflict(['metric', 'profile', 'time_slot', 'device_state', 'device_id'])
 				.merge();
 		} catch (insertError: any) {
-			if (insertError?.message?.includes('no such column: device_state') || insertError?.message?.includes('has no column named device_state')) {
-				this.logger?.debugSync('Storing baseline without device_state (legacy schema)', {
+			if (
+				insertError?.message?.includes('no such column: device_state') ||
+				insertError?.message?.includes('has no column named device_state') ||
+				insertError?.message?.includes('no such column: device_id') ||
+				insertError?.message?.includes('has no column named device_id')
+			) {
+				this.logger?.debugSync('Storing baseline without device_state/device_id (legacy schema)', {
 					component: LogComponents.metrics,
 					metric,
+					device_id: deviceId,
 					device_state: deviceState,
 					note: 'Run migration 20260316000000_add_anomaly_baseline_device_state.js to enable state-aware baselines',
 				});
 
-				const { device_state, ...legacyRecord } = record;
+				const { device_state, device_id, ...legacyRecord } = record;
 				await this.db('anomaly_baselines')
 					.insert(legacyRecord)
 					.onConflict(['metric', 'profile', 'time_slot'])
@@ -235,6 +245,7 @@ export class AnomalyStorageService {
 		this.logger?.errorSync('Failed to store anomaly baseline', error as Error, {
 			component: LogComponents.metrics,
 			metric,
+			device_id: deviceId,
 			device_state: deviceState,
 			error: error instanceof Error ? error.message : String(error),
 			stack: error instanceof Error ? error.stack : undefined,
@@ -352,32 +363,53 @@ export class AnomalyStorageService {
 		timeSlot: number = -1,
 		minimumSamples: number = 10,
 		profile: string | null = null, // Filter by profile (null for system metrics)
-		deviceState: CanonicalDeviceState = 'unknown'
+		deviceState: CanonicalDeviceState = 'unknown',
+		deviceId: string = 'unknown-device'
 	): Promise<AnomalyBaselineRecord | null> {
+		const deviceCandidates = [deviceId];
+		if (deviceId !== 'unknown-device') {
+			deviceCandidates.push('unknown-device');
+		}
+
 		// Try to get seasonal baseline first
 		if (timeSlot !== -1) {
 			try {
-				const query = this.db('anomaly_baselines')
-					.where({ metric, time_slot: timeSlot, device_state: deviceState });
-				
-				// Add profile filter if provided
-				if (profile !== null) {
-					query.where({ profile });
-				}
-				
-				let seasonalBaseline = await query
-					.orderBy('calculated_at', 'desc')
-					.first();
-
-				if (!seasonalBaseline && deviceState !== 'unknown') {
-					const unknownQuery = this.db('anomaly_baselines')
-						.where({ metric, time_slot: timeSlot, device_state: 'unknown' });
+				let seasonalBaseline: AnomalyBaselineRecord | null = null;
+				for (const candidateDeviceId of deviceCandidates) {
+					const query = this.db('anomaly_baselines')
+						.where({
+							metric,
+							time_slot: timeSlot,
+							device_state: deviceState,
+							device_id: candidateDeviceId,
+						});
 					if (profile !== null) {
-						unknownQuery.where({ profile });
+						query.where({ profile });
 					}
-					seasonalBaseline = await unknownQuery
+
+					seasonalBaseline = await query
 						.orderBy('calculated_at', 'desc')
 						.first();
+
+					if (!seasonalBaseline && deviceState !== 'unknown') {
+						const unknownStateQuery = this.db('anomaly_baselines')
+							.where({
+								metric,
+								time_slot: timeSlot,
+								device_state: 'unknown',
+								device_id: candidateDeviceId,
+							});
+						if (profile !== null) {
+							unknownStateQuery.where({ profile });
+						}
+						seasonalBaseline = await unknownStateQuery
+							.orderBy('calculated_at', 'desc')
+							.first();
+					}
+
+					if (seasonalBaseline) {
+						break;
+					}
 				}
 				
 				// Use seasonal baseline if it has enough samples
@@ -403,11 +435,15 @@ export class AnomalyStorageService {
 						note: 'Run migration 002_add_seasonality_support.sql to enable seasonality',
 					});
 					// Fall through to overall baseline query without time_slot
-				} else if (seasonalError?.message?.includes('no such column: device_state')) {
-					this.logger?.debugSync('State-aware baselines not supported (device_state column missing), using legacy baseline', {
+				} else if (
+					seasonalError?.message?.includes('no such column: device_state') ||
+					seasonalError?.message?.includes('no such column: device_id')
+				) {
+					this.logger?.debugSync('State/device-aware baselines not supported (device_state/device_id column missing), using legacy baseline', {
 						component: LogComponents.metrics,
 						metric,
 						deviceState,
+						deviceId,
 						note: 'Run migration 20260316000000_add_anomaly_baseline_device_state.js to enable state-aware baselines',
 					});
 				} else {
@@ -418,33 +454,52 @@ export class AnomalyStorageService {
 		
 		// Get overall baseline (time_slot = -1) or legacy baseline (no time_slot)
 		try {
-			const query = this.db('anomaly_baselines')
-					.where({ metric, time_slot: -1, device_state: deviceState });
-			
-			// Add profile filter if provided
-			if (profile !== null) {
-				query.where({ profile });
-			}
-			
-			let baseline = await query
-				.orderBy('calculated_at', 'desc')
-				.first();
+			for (const candidateDeviceId of deviceCandidates) {
+				const query = this.db('anomaly_baselines')
+					.where({
+						metric,
+						time_slot: -1,
+						device_state: deviceState,
+						device_id: candidateDeviceId,
+					});
 
-			if (!baseline && deviceState !== 'unknown') {
-				const unknownQuery = this.db('anomaly_baselines')
-					.where({ metric, time_slot: -1, device_state: 'unknown' });
 				if (profile !== null) {
-					unknownQuery.where({ profile });
+					query.where({ profile });
 				}
-				baseline = await unknownQuery
+
+				let baseline = await query
 					.orderBy('calculated_at', 'desc')
 					.first();
+
+				if (!baseline && deviceState !== 'unknown') {
+					const unknownStateQuery = this.db('anomaly_baselines')
+						.where({
+							metric,
+							time_slot: -1,
+							device_state: 'unknown',
+							device_id: candidateDeviceId,
+						});
+					if (profile !== null) {
+						unknownStateQuery.where({ profile });
+					}
+					baseline = await unknownStateQuery
+						.orderBy('calculated_at', 'desc')
+						.first();
+				}
+
+				if (baseline) {
+					return baseline;
+				}
 			}
 
-			return baseline || null;
+			return null;
 		} catch (overallError: any) {
 			// Backward compatibility: if time_slot column doesn't exist, query without it
-			if (overallError?.message?.includes('no such column: time_slot') || overallError?.message?.includes('no such column: device_state')) {
+			if (
+				overallError?.message?.includes('no such column: time_slot') ||
+				overallError?.message?.includes('no such column: device_state') ||
+				overallError?.message?.includes('no such column: device_id')
+			) {
 				const legacyBaseline = await this.db('anomaly_baselines')
 					.where({ metric })
 					.orderBy('calculated_at', 'desc')

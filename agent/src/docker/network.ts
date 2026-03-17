@@ -7,9 +7,9 @@ import * as ComposeUtils from './utils';
 
 import type {
 	ComposeNetworkConfig,
-	NetworkConfig,
-	NetworkInspectInfo,
-	Network as NetworkIface,
+	DockerNetworkConfig as NetworkConfig,
+	DockerNetworkInspectInfo as NetworkInspectInfo,
+	DockerNetwork as NetworkIface,
 } from './types';
 
 import { InvalidNetworkNameError } from './errors';

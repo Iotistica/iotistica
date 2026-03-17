@@ -884,6 +884,7 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 						source: 'system',
 						protocol: 'system', // Agent system metrics
 						deviceState: 'running',
+						deviceId: 'system-endpoint',
 						metric: item.metric,
 						value: item.value,
 						unit: item.unit,
