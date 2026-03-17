@@ -20,13 +20,13 @@ export interface Reading {
 }
 
 export interface ReadingInsert {
-  device_uuid: string;
+  device_uuid: string;  // AGENT/infrastructure UUID
   metric_name: string;
   value: number | null;
   quality?: string;
   unit?: string;
   protocol: string;
-  extra?: Record<string, any>;
+  extra?: ReadingExtra;  // endpoint_uuid, device_uuid (asset), device_name, protocol metadata
   time?: Date;
   anomaly_score?: number;
   anomaly_threshold?: number;
@@ -34,8 +34,18 @@ export interface ReadingInsert {
   detection_methods?: any;
 }
 
+export interface ReadingExtra {
+  endpoint_uuid?: string;      // Endpoint/sensor UUID (connection point)
+  device_uuid?: string;        // Stable device/asset UUID (business entity)
+  device_name?: string;        // Device/asset name
+  ingested_at?: string;        // ISO timestamp when ingested
+  [key: string]: any;          // Protocol-specific metadata (slave_id, location, scale, etc)
+}
+
 export interface TimeSeriesQuery {
-  device_uuid?: string;
+  device_uuid?: string;      // Agent UUID (infrastructure entity)
+  endpoint_uuid?: string;    // Endpoint UUID (connection point)
+  asset_uuid?: string;       // Asset UUID (business entity, stored in extra.device_uuid)
   metric_name?: string;
   protocol?: string;
   start_time?: Date;

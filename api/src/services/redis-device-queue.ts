@@ -180,8 +180,10 @@ interface SensorDataEntry {
   metadata?: Record<string, any>;
 }
 
-interface EndpointIdentity {
-  endpointUuid?: string;
+interface DeviceIdentity {
+  endpointUuid?: string;  // Endpoint/sensor UUID
+  deviceUuid?: string;    // Stable device/asset UUID
+  deviceName?: string;    // Device/asset name
 }
 
 interface CompressedSensorEntry {
@@ -1307,13 +1309,18 @@ class RedisDeviceQueue {
   }
 
   /**
-   * Extract endpoint UUID (NOT agent UUID) from reading payload/metadata.
+   * Extract device and endpoint identity from reading payload/metadata.
+   *
+   * Returns:
+   * - endpointUuid: Endpoint/sensor UUID (connection point to target system)
+   * - deviceUuid: Stable device/asset UUID (business entity for asset tracking)
+   * - deviceName: Human-readable device/asset name
    *
    * NOTE:
-   * - readings.device_uuid column is legacy and currently stores agent UUID.
-   * - readings.extra.endpoint_uuid stores endpoint UUID from target-state endpoints.
+   * - readings.device_uuid column stores AGENT UUID (infrastructure)
+   * - readings.extra stores endpoint_uuid, device_uuid, device_name (business identity)
    */
-  private extractEndpointIdentity(reading: any, entry: SensorDataEntry): EndpointIdentity {
+  private extractDeviceIdentity(reading: any, entry: SensorDataEntry): DeviceIdentity {
     const pick = (...values: any[]): string | undefined => {
       for (const value of values) {
         if (typeof value !== 'string') continue;
@@ -1323,21 +1330,34 @@ class RedisDeviceQueue {
       return undefined;
     };
 
+    // Endpoint UUID: Connection to target system (Modbus slave, OPC-UA server, MQTT endpoint)
     const endpointUuid = pick(
-      reading?.device_uuid,
-      reading?.deviceUuid,
       reading?.endpoint_uuid,
       reading?.endpointUuid,
       reading?.connectionUuid,
-      reading?.uuid,
-      entry?.metadata?.device_uuid,
-      entry?.metadata?.deviceUuid,
+      reading?.connection_uuid,
       entry?.metadata?.endpoint_uuid,
       entry?.metadata?.endpointUuid,
       entry?.metadata?.connectionUuid
     );
 
-    return { endpointUuid };
+    // Device UUID: Stable asset identifier (persists even if connection changes)
+    const deviceUuid = pick(
+      reading?.device_uuid,
+      reading?.deviceUuid,
+      entry?.metadata?.device_uuid,
+      entry?.metadata?.deviceUuid
+    );
+
+    // Device Name: Human-readable asset identifier
+    const deviceName = pick(
+      reading?.device_name,
+      reading?.deviceName,
+      entry?.metadata?.device_name,
+      entry?.metadata?.deviceName
+    );
+
+    return { endpointUuid, deviceUuid, deviceName };
   }
 
   private static readonly EXTRA_EXCLUDED_KEYS = new Set<string>([
@@ -1348,12 +1368,14 @@ class RedisDeviceQueue {
     'timestamp',
     'metric',
     'deviceName',
+    'device_name',
     'nodeName',
     'readings',
     'device_uuid',
     'deviceUuid',
     'endpoint_uuid',
     'endpointUuid',
+    'connection_uuid',
     'connectionUuid',
     'uuid',
     'anomaly_score',
@@ -1376,25 +1398,30 @@ class RedisDeviceQueue {
       ingested_at: ingestedAt.toISOString()
     };
 
-    if (payload?.deviceName) {
-      extra.deviceName = payload.deviceName;
+    // Extract device and endpoint identity
+    const { endpointUuid, deviceUuid, deviceName } = this.extractDeviceIdentity(
+      { ...(identityContext || {}), ...(payload || {}) },
+      entry
+    );
+
+    // Store identity fields explicitly
+    if (endpointUuid) {
+      extra.endpoint_uuid = endpointUuid;
+    }
+    if (deviceUuid) {
+      extra.device_uuid = deviceUuid;
+    }
+    if (deviceName) {
+      extra.device_name = deviceName;
     }
 
+    // Copy protocol-specific metadata (excluding identity fields)
     if (payload && typeof payload === 'object') {
       for (const [key, value] of Object.entries(payload)) {
         if (this.shouldCopyExtraField(key)) {
           extra[key] = value;
         }
       }
-    }
-
-    const { endpointUuid } = this.extractEndpointIdentity(
-      { ...(identityContext || {}), ...(payload || {}) },
-      entry
-    );
-
-    if (endpointUuid) {
-      extra.endpoint_uuid = endpointUuid;
     }
 
     return extra;
@@ -1551,7 +1578,13 @@ class RedisDeviceQueue {
   }
 
   private async updateLastTelemetryAt(readings: ReadingInsert[], ingestedAt: Date): Promise<void> {
-    const endpointUuids = [...new Set(readings.map(r => r.extra!.endpoint_uuid as string))];
+    const endpointUuids = [...new Set(readings
+      .map(r => r.extra?.endpoint_uuid as string)
+      .filter((uuid): uuid is string => Boolean(uuid)))];
+    if (endpointUuids.length === 0) {
+      return; // No endpoints to update
+    }
+
     const placeholders = endpointUuids.map((_, i) => `$${i + 2}::uuid`).join(', ');
 
     await query(
